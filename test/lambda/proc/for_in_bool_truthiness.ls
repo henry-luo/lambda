@@ -49,7 +49,7 @@ pn main() {
 
     // group-by keys and join sources bind through the same path
     print([for (b in [true, false, false] group by (if (b) "yes" else "no") as k into g)
-        [g.k, len(content(g))]])
+        [k, len(g)]])
     print("\n")
     print([for (a in xs, b in xs on a == b) (if (a) "A" else "a") ++ (if (b) "B" else "b")])
     print([for (a in xs, b? in [false] on a == b) (if (a) "A" else "a") ++ (if (b) "B" else "b")])

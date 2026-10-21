@@ -220,6 +220,9 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_HEADERS_CONSTRUCTOR = JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE +
         JS_CLASS__COUNT,
     JS_REALM_SLOT_RESPONSE_CONSTRUCTOR,
+    JS_REALM_SLOT_GENERATOR_FUNCTION_CONSTRUCTOR,
+    JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_CONSTRUCTOR,
+    JS_REALM_SLOT_ASYNC_FUNCTION_CONSTRUCTOR,
     JS_REALM_SLOT_COUNT,
 };
 
@@ -390,6 +393,11 @@ struct JsGlobalBinding {
     uint32_t module_state_id = UINT32_MAX;
     JsGlobalBindingKind kind = JS_GLOBAL_BINDING_LEXICAL;
     bool immutable = false;
+    // borrowed durable storage; its Runtime unit or rooted interpreter environment owns the range.
+    Item* storage_slots = NULL;
+    uint32_t storage_count = 0;
+    uint32_t storage_index = 0;
+    bool storage_cell = false;
 };
 
 enum JsGlobalEnvironmentSlot : int {
@@ -410,8 +418,10 @@ struct JsGlobalEnvironment {
     uint64_t lexical_epoch = 0;
     uint64_t module_epoch = 0;
     bool window_event_intercept_enabled = false;
+    HashMap* binding_index = NULL; // derived row indices; keys and values remain in roots/storage
 };
 
+JsGlobalEnvironment* js_global_environment_current(void);
 bool js_global_environment_init(JsGlobalEnvironment* environment,
     Context* owner);
 void js_global_environment_destroy(JsGlobalEnvironment* environment);
@@ -431,6 +441,13 @@ void js_global_environment_set_binding_value(JsGlobalEnvironment* environment,
 bool js_global_environment_upsert(JsGlobalEnvironment* environment,
     JsGlobalBindingKind kind, Item key, Item value, bool immutable,
     int module_index, uint32_t module_state_id);
+bool js_global_environment_link_storage(JsGlobalEnvironment* environment,
+    Item key, bool immutable, Item* slots, uint32_t count, uint32_t index, bool cell);
+Item js_global_environment_read_binding(JsGlobalEnvironment* environment,
+    const JsGlobalBinding* binding, Item fallback);
+void js_global_environment_write_binding(JsGlobalEnvironment* environment,
+    JsGlobalBinding* binding, Item value);
+void js_global_environment_remove_storage_bindings(JsGlobalEnvironment* environment);
 void js_global_environment_clear_bindings(JsGlobalEnvironment* environment);
 void js_global_environment_remove_kind(JsGlobalEnvironment* environment,
     JsGlobalBindingKind kind);

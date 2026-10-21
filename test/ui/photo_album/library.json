@@ -1,0 +1,321 @@
+{
+  "name": "Photo album library: date sections, selection, search, albums and favorites",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    }
+  ],
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#title"
+      },
+      "equals": "Library"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "24 photos"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#grid .grid-header').length===5 && document.querySelectorAll('#grid .tile').length<24 && document.querySelectorAll('#grid .tile').length>12"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#grid .grid-header h2')).map(e=>e.textContent).join(',')==='2023,2022,2021,2020,2019'"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('port');p.scrollTop=100000;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('port').scrollTop>500 && !!document.getElementById('tile-1') && !document.getElementById('tile-20')"
+    },
+    {
+      "type": "assert_script",
+      "js": "/^20(19|20)$/.test(document.getElementById('sticky').textContent) && document.getElementById('sticky').style.display!=='none'"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('port');p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_script",
+      "js": "!!document.getElementById('tile-20')"
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.querySelector('.banner')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-3"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-selected",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tile-3"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "24 photos · 1 selected"
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-selected",
+      "equals": "24"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-selected",
+      "equals": "0"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#search"
+      },
+      "text": "snow",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#title"
+      },
+      "equals": "Search: “snow”"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "6 photos"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-mode",
+      "equals": "search"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#search"
+      },
+      "text": "frozen",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#grid .tile')).map(t=>t.getAttribute('data-id')).sort().join(',')==='20,8'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#search"
+      },
+      "text": "zebra",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#empty h2"
+      },
+      "equals": "No matching photos"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#search"
+      },
+      "text": "",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "24 photos"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-albums"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-mode",
+      "equals": "albums"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cards .album-card').length===4 && document.getElementById('cards').style.display!=='none'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cards [data-album='weather']"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#title"
+      },
+      "equals": "Fog, snow and ice"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "6 photos"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-album-weather"
+      },
+      "attribute": "aria-current",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-12"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "f"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#favorite-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tile-12"
+      },
+      "attribute": "data-favorite",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-favorites"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "1 photo"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-12"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#favorite-selected"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#empty h2"
+      },
+      "equals": "No favorites yet"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-library"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "24 photos"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/photo_album/library.png"
+    }
+  ]
+}

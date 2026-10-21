@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D2.4.3, D8.2.3: proven Number arithmetic remains native F64; a partial value retains ToPrimitive and string concatenation.",
+  "description": "D2.4.3, D8.2.3: proven Number arithmetic remains native F64; a partial value retains ToPrimitive and string concatenation. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
       "expect": [
         "dadd",
-        "\tlt\t",
+        "\tdlt\t",
         "deq"
       ],
       "forbid": [
@@ -17,7 +17,7 @@
     {
       "in_func": "mvp_lmd_f3",
       "expect": [
-        "call\tmvp_lmd_to_primitive",
+        "call\tmvp_lmd_number_to_string",
         "call\tmvp_lmd_string_concat"
       ]
     }

@@ -18,6 +18,7 @@
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "mvp-lmd/mvp_lmd_runtime.h"
+#include "mvp-lmd/mvp_lmd_dynamic.h"
 #include "../core/well_known_lambda_names.h"
 #include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
@@ -128,6 +129,31 @@ const char* js_regexp_legacy_name(int index) {
     static const char* names[] = {"input", "$_", "lastMatch", "$&", "lastParen", "$+",
         "leftContext", "$`", "rightContext", "$'", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"};
     return index >= 0 && index < (int)(sizeof(names) / sizeof(*names)) ? names[index] : NULL;
+}
+Item js_regexp_install_legacy_properties(Item constructor) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, constructor), getter(roots, ItemNull), key(roots, ItemNull);
+    for (int i = 0; js_regexp_legacy_name(i); i++) {
+        Item* environment = js_alloc_env1(owner.get());
+        if (!environment) return ItemError;
+        getter.set(js_new_native_payload_function(
+            [](Item callee, Item receiver, Item*, int, uint64_t*) -> Item {
+                JsFunction* function = (JsFunction*)callee.function;
+                if (receiver.item != function->env[0].item)
+                    return js_throw_type_error("RegExp legacy getter called on incompatible receiver");
+                const char* name = js_regexp_legacy_name((int)js_fn_native(function)->target.bits);
+                Item value = ItemEmptyString;
+                js_regexp_legacy_get(&js_regexp_last_match, name, strlen(name), &value);
+                return value;
+            }, i, 0, environment, 1));
+        if (item_is_error(getter.get())) return getter.get();
+        key.set(js_name_item(js_regexp_legacy_name(i)));
+        js_set_function_name(getter.get(), key.get());
+        // real descriptors keep Get, reflection and deletion consistent across execution entries.
+        js_install_native_accessor(owner.get(), key.get(), getter.get(), ItemNull, JSPD_NON_ENUMERABLE);
+    }
+    return ItemNull;
 }
 bool js_regexp_legacy_get(JsRegexpLastMatch* state, const char* name, int length, Item* out) {
     if (length == 2 && name[0] == '$' &&
@@ -740,7 +766,7 @@ static void js_array_note_stored_value(Array* arr, Item value) {
     }
 }
 
-static void js_array_store_owned(Array* arr, int64_t index, Item value) {
+void js_array_store_owned(Array* arr, int64_t index, Item value) {
     if (!arr || index < 0) return;
     js_array_note_stored_value(arr, value);
     if (arr->items && arr->extra == 0 && index < js_array_dense_capacity(arr)) {
@@ -795,8 +821,15 @@ JS_FORWARD_STATIC_ITEM(js_function_prototype_call_target, (), make_js_undefined,
 extern "C" Item js_vm_swap_global_this(Item next_global);
 static Item js_262_eval_script(Item code);
 
-static JsGlobalEnvironment* js_global_environment_current(void) {
-    return js_active_runtime_state ? js_runtime_state.global_environment : NULL;
+JsGlobalEnvironment* js_global_environment_current(void) {
+    if (!js_active_runtime_state) return NULL;
+    if (js_runtime_state.formal_mir_owner) {
+        MvpLmdLibraryState* library = mvp_lmd_program_library();
+        JsGlobalEnvironment* shared = library && library->intrinsics_ready
+            ? mvp_lmd_dynamic_global_environment(library->object.program, false) : NULL;
+        if (shared) return shared;
+    }
+    return js_runtime_state.global_environment;
 }
 
 static void js_global_var_binding_refresh(void) {
@@ -5509,11 +5542,6 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 return js_get_key_core(object_root.get(), key_root.get(),
                     receiver_root.get());
             }
-            // shared state is selected by the constructor's owning realm.
-            Item legacy;
-            if (js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP &&
-                    js_regexp_legacy_get(&js_regexp_last_match, str_key->chars, str_key->len, &legacy))
-                return legacy;
             // v83: __proto__ for function objects → return Function.prototype
             if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                 return js_get_prototype_of(object);
@@ -9892,11 +9920,6 @@ JS_CONSOLE_SPAN_ADAPTER(js_console_debug_span, js_console_debug_multi)
 
 extern "C" Item js_get_iterator_proto();
 static bool js_iterator_state_ensure_roots(void);
-static Item js_get_array_iterator_proto();
-static Item js_get_string_iterator_proto();
-static Item js_get_map_iterator_proto();
-static Item js_get_set_iterator_proto();
-static Item js_get_regexp_string_iterator_proto();
 extern "C" bool js_is_async_generator(Item obj);
 extern "C" Item js_ordinary_has_instance(Item, Item);
 
@@ -13120,166 +13143,71 @@ Item js_intrinsic_css_register_property_body(Item callee, Item this_value, Item*
 #undef JS_RUNTIME_THIS_BODY
 #undef JS_RUNTIME_NOARG_BODY
 
-enum JsRegExpIntrinsicOp {
-    JS_REGEXP_INTRINSIC_EXEC,
-    JS_REGEXP_INTRINSIC_TEST,
-    JS_REGEXP_INTRINSIC_TO_STRING,
-    JS_REGEXP_INTRINSIC_SYMBOL_MATCH,
-    JS_REGEXP_INTRINSIC_SYMBOL_REPLACE,
-    JS_REGEXP_INTRINSIC_SYMBOL_SEARCH,
-    JS_REGEXP_INTRINSIC_SYMBOL_SPLIT,
-    JS_REGEXP_INTRINSIC_SYMBOL_MATCHALL,
-    JS_REGEXP_INTRINSIC_MATCHALL_ITER_NEXT,
-    JS_REGEXP_INTRINSIC_COMPILE,
-    JS_REGEXP_INTRINSIC_GET_SOURCE,
-    JS_REGEXP_INTRINSIC_GET_FLAGS,
-    JS_REGEXP_INTRINSIC_GET_GLOBAL,
-    JS_REGEXP_INTRINSIC_GET_IGNORECASE,
-    JS_REGEXP_INTRINSIC_GET_MULTILINE,
-    JS_REGEXP_INTRINSIC_GET_DOTALL,
-    JS_REGEXP_INTRINSIC_GET_UNICODE,
-    JS_REGEXP_INTRINSIC_GET_UNICODE_SETS,
-    JS_REGEXP_INTRINSIC_GET_STICKY,
-    JS_REGEXP_INTRINSIC_GET_HASINDICES,
-};
 
-static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
-        Item this_val, Item* args, int arg_count) {
-    Item undef = make_js_undefined();
-    Item arg0 = arg_count > 0 && args ? args[0] : undef;
-    switch (operation) {
-    // v46: RegExp prototype methods
-    case JS_REGEXP_INTRINSIC_EXEC:
-        return js_regex_exec(this_val, arg_count > 0 ? arg0 : make_js_undefined());
-    case JS_REGEXP_INTRINSIC_TEST:
-        return js_regexp_protocol_with_ops(JS_BUILTIN_REGEXP_TEST, this_val, args, arg_count, NULL);
-    case JS_REGEXP_INTRINSIC_TO_STRING:
-        return js_regexp_protocol_with_ops(JS_BUILTIN_REGEXP_TO_STRING, this_val, args, arg_count, NULL);
 
-    // v83: RegExp Symbol methods
-    case JS_REGEXP_INTRINSIC_SYMBOL_MATCH:
-        return js_regexp_symbol_match(this_val, arg0);
-    case JS_REGEXP_INTRINSIC_SYMBOL_REPLACE:
-        return js_regexp_symbol_replace(this_val, arg0, (arg_count >= 2) ? args[1] : make_js_undefined());
-    case JS_REGEXP_INTRINSIC_SYMBOL_SEARCH:
-        return js_regexp_symbol_search(this_val, arg0);
-    case JS_REGEXP_INTRINSIC_SYMBOL_SPLIT:
-        return js_regexp_symbol_split(this_val, arg0, (arg_count >= 2) ? args[1] : make_js_undefined());
-
-    case JS_REGEXP_INTRINSIC_SYMBOL_MATCHALL:
-        return js_regexp_match_all_with_ops(this_val, arg0, NULL, NULL);
-    case JS_REGEXP_INTRINSIC_MATCHALL_ITER_NEXT:
-        return js_regexp_match_all_next_with_ops(this_val, NULL, NULL);
-
-    // Annex B: RegExp.prototype.compile(pattern, flags)
-    case JS_REGEXP_INTRINSIC_COMPILE:
-        return js_regexp_compile_with_ops(this_val, arg0,
-            arg_count >= 2 ? args[1] : make_js_undefined(), NULL);
-
-    // v89: RegExp prototype accessor getters
-    case JS_REGEXP_INTRINSIC_GET_SOURCE:
-    case JS_REGEXP_INTRINSIC_GET_FLAGS:
-    case JS_REGEXP_INTRINSIC_GET_GLOBAL:
-    case JS_REGEXP_INTRINSIC_GET_IGNORECASE:
-    case JS_REGEXP_INTRINSIC_GET_MULTILINE:
-    case JS_REGEXP_INTRINSIC_GET_DOTALL:
-    case JS_REGEXP_INTRINSIC_GET_UNICODE:
-    case JS_REGEXP_INTRINSIC_GET_UNICODE_SETS:
-    case JS_REGEXP_INTRINSIC_GET_STICKY:
-    case JS_REGEXP_INTRINSIC_GET_HASINDICES: {
-        if (operation == JS_REGEXP_INTRINSIC_GET_FLAGS)
-            return js_regexp_protocol_with_ops(JS_BUILTIN_REGEXP_GET_FLAGS, this_val, NULL, 0, NULL);
-        if (get_type_id(this_val) != LMD_TYPE_MAP)
-            return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
-        // For source and individual flag getters, check this is a regexp. The
-        // intrinsic prototype is an ordinary object without RegExp internal
-        // slots, so identity—not a live RegExp brand—selects its specified
-        // source/undefined fallback.
-        if (js_class_id(this_val) != JS_CLASS_REGEXP) {
-            Item regexp_proto = js_get_regexp_prototype();
-            if (this_val.item == regexp_proto.item) {
-                if (operation == JS_REGEXP_INTRINSIC_GET_SOURCE) return js_name_item("(?:)", 4);
-                return make_js_undefined();
-            }
-            return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
-        }
-        if (operation == JS_REGEXP_INTRINSIC_GET_SOURCE) {
-            bool own = false;
-            Item src = js_map_shape_lookup(this_val.map, "source", 6, &own);
-            return own ? src : js_name_item("(?:)", 4);
-        }
-        // Boolean flag getters - read from own data properties, except /d which
-        // is stored only in the internal regex data slot.
-        {
-            const char* prop = NULL;
-            int prop_len = 0;
-            switch (operation) {
-                case JS_REGEXP_INTRINSIC_GET_GLOBAL:     prop = "global";     prop_len = 6; break;
-                case JS_REGEXP_INTRINSIC_GET_IGNORECASE: prop = "ignoreCase"; prop_len = 10; break;
-                case JS_REGEXP_INTRINSIC_GET_MULTILINE:  prop = "multiline";  prop_len = 9; break;
-                case JS_REGEXP_INTRINSIC_GET_DOTALL:     prop = "dotAll";     prop_len = 6; break;
-                case JS_REGEXP_INTRINSIC_GET_UNICODE:    prop = "unicode";    prop_len = 7; break;
-                case JS_REGEXP_INTRINSIC_GET_UNICODE_SETS: prop = "unicodeSets"; prop_len = 11; break;
-                case JS_REGEXP_INTRINSIC_GET_STICKY:     prop = "sticky";     prop_len = 6; break;
-                case JS_REGEXP_INTRINSIC_GET_HASINDICES:
-                    return (Item){.item = b2it(js_regex_internal_has_indices(this_val) ? BOOL_TRUE : BOOL_FALSE)};
-                default: return make_js_undefined();
-            }
-            bool own = false;
-            Item val = js_map_shape_lookup(this_val.map, prop, prop_len, &own);
-            return own ? val : (Item){.item = b2it(BOOL_FALSE)};
-        }
+// callable entries select their semantic kernel directly; only carrier checks remain shared.
+static Item js_regexp_intrinsic_getter(Item receiver, int operation, const char* property, int length) {
+    Item compiled;
+    if (mvp_lmd_regexp_intrinsic(receiver, make_js_undefined(), operation, &compiled)) return compiled;
+    if (get_type_id(receiver) != LMD_TYPE_MAP)
+        return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
+    bool source = operation == JS_BUILTIN_REGEXP_GET_SOURCE;
+    if (js_class_id(receiver) != JS_CLASS_REGEXP) {
+        // the intrinsic prototype has no RegExp slots, but has specified getter defaults.
+        if (receiver.item == js_get_regexp_prototype().item)
+            return source ? js_name_item("(?:)", 4) : make_js_undefined();
+        return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
     }
-
-    default:
-        return make_js_undefined();
-    }
+    if (operation == JS_BUILTIN_REGEXP_GET_HASINDICES)
+        return (Item){.item = b2it(js_regex_internal_has_indices(receiver) ? BOOL_TRUE : BOOL_FALSE)};
+    bool own = false;
+    Item value = js_map_shape_lookup(receiver.map, property, length, &own);
+    return own ? value : source ? js_name_item("(?:)", 4) : (Item){.item = b2it(BOOL_FALSE)};
 }
 
-#define JS_REGEXP_INTRINSIC_BODY(body_name, operation) \
+JS_INTRINSIC_ARG1_BODY(js_intrinsic_regexp_exec_body, js_regex_exec(this_value, arg0))
+JS_INTRINSIC_BODY(js_intrinsic_regexp_test_body,
+    js_regexp_protocol_with_ops(JS_BUILTIN_REGEXP_TEST, this_value, args, argc, NULL))
+JS_INTRINSIC_BODY(js_intrinsic_regexp_to_string_body,
+    js_regexp_protocol_with_ops(JS_BUILTIN_REGEXP_TO_STRING, this_value, args, argc, NULL))
+JS_INTRINSIC_ARG1_BODY(js_intrinsic_regexp_symbol_match_body, js_regexp_symbol_match(this_value, arg0))
+JS_INTRINSIC_ARG2_BODY(js_intrinsic_regexp_symbol_replace_body, js_regexp_symbol_replace(this_value, arg0, arg1))
+JS_INTRINSIC_ARG1_BODY(js_intrinsic_regexp_symbol_search_body, js_regexp_symbol_search(this_value, arg0))
+JS_INTRINSIC_ARG2_BODY(js_intrinsic_regexp_symbol_split_body, js_regexp_symbol_split(this_value, arg0, arg1))
+JS_INTRINSIC_ARG1_BODY(js_intrinsic_regexp_symbol_matchall_body,
+    js_regexp_match_all_with_ops(this_value, arg0, NULL, NULL))
+
+Item js_intrinsic_regexp_matchall_iter_next_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    Item compiled;
+    if (mvp_lmd_regexp_intrinsic(this_value, make_js_undefined(),
+            JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT, &compiled)) return compiled;
+    return js_regexp_match_all_next_with_ops(this_value, NULL, NULL);
+}
+Item js_intrinsic_regexp_compile_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    Item pattern = js_intrinsic_arg(args, argc, 0), flags = js_intrinsic_arg(args, argc, 1);
+    Item compiled;
+    // compile retains both operands and the receiver's existing constructor policy.
+    if (mvp_lmd_regexp_intrinsic(this_value, pattern, JS_BUILTIN_REGEXP_COMPILE, &compiled, flags))
+        return compiled;
+    return js_regexp_compile_with_ops(this_value, pattern, flags, NULL);
+}
+JS_INTRINSIC_BODY(js_intrinsic_regexp_get_flags_body,
+    js_regexp_protocol_with_ops(JS_BUILTIN_REGEXP_GET_FLAGS, this_value, NULL, 0, NULL))
+#define JS_REGEXP_GETTER_BODY(body_name, operation, property) \
     JS_INTRINSIC_BODY(body_name, \
-        js_intrinsic_regexp_operation(operation, this_value, args, argc))
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_exec_body,
-    JS_REGEXP_INTRINSIC_EXEC)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_test_body,
-    JS_REGEXP_INTRINSIC_TEST)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_to_string_body,
-    JS_REGEXP_INTRINSIC_TO_STRING)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_symbol_match_body,
-    JS_REGEXP_INTRINSIC_SYMBOL_MATCH)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_symbol_replace_body,
-    JS_REGEXP_INTRINSIC_SYMBOL_REPLACE)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_symbol_search_body,
-    JS_REGEXP_INTRINSIC_SYMBOL_SEARCH)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_symbol_split_body,
-    JS_REGEXP_INTRINSIC_SYMBOL_SPLIT)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_symbol_matchall_body,
-    JS_REGEXP_INTRINSIC_SYMBOL_MATCHALL)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_matchall_iter_next_body,
-    JS_REGEXP_INTRINSIC_MATCHALL_ITER_NEXT)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_compile_body,
-    JS_REGEXP_INTRINSIC_COMPILE)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_source_body,
-    JS_REGEXP_INTRINSIC_GET_SOURCE)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_flags_body,
-    JS_REGEXP_INTRINSIC_GET_FLAGS)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_global_body,
-    JS_REGEXP_INTRINSIC_GET_GLOBAL)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_ignorecase_body,
-    JS_REGEXP_INTRINSIC_GET_IGNORECASE)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_multiline_body,
-    JS_REGEXP_INTRINSIC_GET_MULTILINE)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_dotall_body,
-    JS_REGEXP_INTRINSIC_GET_DOTALL)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_unicode_body,
-    JS_REGEXP_INTRINSIC_GET_UNICODE)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_unicode_sets_body,
-    JS_REGEXP_INTRINSIC_GET_UNICODE_SETS)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_sticky_body,
-    JS_REGEXP_INTRINSIC_GET_STICKY)
-JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_hasindices_body,
-    JS_REGEXP_INTRINSIC_GET_HASINDICES)
-#undef JS_REGEXP_INTRINSIC_BODY
+        js_regexp_intrinsic_getter(this_value, operation, property, sizeof(property) - 1))
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_source_body, JS_BUILTIN_REGEXP_GET_SOURCE, "source")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_global_body, JS_BUILTIN_REGEXP_GET_GLOBAL, "global")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_ignorecase_body, JS_BUILTIN_REGEXP_GET_IGNORECASE, "ignoreCase")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_multiline_body, JS_BUILTIN_REGEXP_GET_MULTILINE, "multiline")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_dotall_body, JS_BUILTIN_REGEXP_GET_DOTALL, "dotAll")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_unicode_body, JS_BUILTIN_REGEXP_GET_UNICODE, "unicode")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_unicode_sets_body, JS_BUILTIN_REGEXP_GET_UNICODE_SETS, "unicodeSets")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_sticky_body, JS_BUILTIN_REGEXP_GET_STICKY, "sticky")
+JS_REGEXP_GETTER_BODY(js_intrinsic_regexp_get_hasindices_body, JS_BUILTIN_REGEXP_GET_HASINDICES, "hasIndices")
+#undef JS_REGEXP_GETTER_BODY
 
 Item js_intrinsic_262_detach_arraybuffer_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
@@ -18255,6 +18183,8 @@ static Item js_regex_read_lastindex(Item regex, Item li_key, int* start_pos) {
 }
 
 extern "C" Item js_regex_test(Item regex, Item str) {
+    Item compiled;
+    if (mvp_lmd_regexp_intrinsic(regex, str, JS_BUILTIN_REGEXP_TEST, &compiled)) return compiled;
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
     TypeId tid = get_type_id(str);
@@ -18465,6 +18395,8 @@ static Item js_regex_attach_indices(Item result, JsRegexData* rd,
 }
 
 extern "C" Item js_regex_exec(Item regex, Item str) {
+    Item compiled;
+    if (mvp_lmd_regexp_intrinsic(regex, str, JS_BUILTIN_REGEXP_EXEC, &compiled)) return compiled;
     RootFrame roots(7);
     Rooted<Item> regex_root(roots, regex);
     Rooted<Item> str_root(roots, str);
@@ -18706,22 +18638,12 @@ static const JsRegExpOps js_regexp_default_ops = {
     [](Item object, Item string, bool test) { return test ? js_regex_test(object, string) : js_regex_exec(object, string); },
     []() { return js_intrinsic_binding_get(JS_BUILTIN_OWNER_REGEXP_PROTOTYPE_METHOD, "exec", 4); },
     [](Item object, int operation) {
-        // source and individual flag getters keep the retained carrier's internal-slot policy.
-        switch (operation) {
-#define JS_REGEXP_GET_CASE(name) case JS_BUILTIN_REGEXP_GET_##name: \
-            return js_intrinsic_regexp_operation(JS_REGEXP_INTRINSIC_GET_##name, object, NULL, 0)
-            JS_REGEXP_GET_CASE(SOURCE);
-            JS_REGEXP_GET_CASE(GLOBAL);
-            JS_REGEXP_GET_CASE(IGNORECASE);
-            JS_REGEXP_GET_CASE(MULTILINE);
-            JS_REGEXP_GET_CASE(DOTALL);
-            JS_REGEXP_GET_CASE(UNICODE);
-            JS_REGEXP_GET_CASE(UNICODE_SETS);
-            JS_REGEXP_GET_CASE(STICKY);
-            JS_REGEXP_GET_CASE(HASINDICES);
-#undef JS_REGEXP_GET_CASE
-            default: return js_throw_type_error("Invalid RegExp getter");
-        }
+        // use the catalog's executable getter instead of a second operation dispatcher.
+        if (operation < JS_BUILTIN_REGEXP_GET_SOURCE || operation > JS_BUILTIN_REGEXP_GET_HASINDICES ||
+                operation == JS_BUILTIN_REGEXP_GET_FLAGS)
+            return js_throw_type_error("Invalid RegExp getter");
+        const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(operation);
+        return target->call_body(make_js_undefined(), object, NULL, 0, NULL);
     },
     js_array_new, js_array_push, js_throw_type_error,
     [](Item object, Item string, bool* admitted) {
@@ -25526,6 +25448,12 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 JS_FORWARD_STATIC_EXPRESSION(bool, js_namespace_cache_is_empty, (Item value),
     value.item == 0 || value.item == ITEM_NULL)
 
+static Item js_intrinsic_namespace_value(const char* name, size_t length, Item (*build)()) {
+    // native host clients borrow the active realm's immutable namespace identity.
+    Item shared = mvp_lmd_realm_intrinsic(name, length);
+    return get_type_id(shared) == LMD_TYPE_MAP ? shared : build();
+}
+
 void js_reset_math_object() {
     js_math_object = (Item){.item = ITEM_NULL};
 }
@@ -25578,14 +25506,14 @@ static Item js_get_math_object() {
 }
 
 // v18n: externally callable for transpiler to resolve bare `Math` identifier
-JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
+JS_FORWARD_ITEM(js_get_math_object_value, (void), js_intrinsic_namespace_value, ("Math", 4, js_get_math_object))
 
 // v18n: JSON and console as global objects for bare identifier resolution
 #define js_json_object (*js_realm_slot(&js_runtime_state.realm_slots, \
     JS_REALM_SLOT_JSON_OBJECT))
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
-extern "C" Item js_get_json_object_value() {
+static Item js_get_json_object() {
     if (js_namespace_cache_is_empty(js_json_object)) {
         // JSON inherits from Object.prototype per ES spec
         js_realm_intrinsic_slots_ensure_roots();
@@ -25597,6 +25525,7 @@ extern "C" Item js_get_json_object_value() {
     }
     return js_json_object;
 }
+JS_FORWARD_ITEM(js_get_json_object_value, (void), js_intrinsic_namespace_value, ("JSON", 4, js_get_json_object))
 
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
@@ -26086,27 +26015,10 @@ extern "C" Item js_get_intl_object_value() {
     JS_REALM_SLOT_CONSOLE_OBJECT))
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
-extern "C" Item js_get_console_object_value() {
+static Item js_get_console_object() {
     if (js_namespace_cache_is_empty(js_console_object)) {
         js_realm_intrinsic_slots_ensure_roots();
         js_console_object = js_object_create(ItemNull);
-
-        // Populate console methods as function objects
-        extern Item js_console_error(Item);
-        extern Item js_console_warn(Item);
-        extern Item js_console_debug(Item);
-        extern Item js_console_count_fn(Item);
-        extern Item js_console_countReset_fn(Item);
-        extern Item js_console_time_fn(Item);
-        extern Item js_console_timeEnd_fn(Item);
-        extern Item js_console_timeLog_fn(Item);
-        extern Item js_console_clear_fn(void);
-        extern Item js_console_group_fn(Item);
-        extern Item js_console_groupEnd_fn(void);
-        extern Item js_console_trace_fn(Item);
-        extern Item js_console_dir_fn(Item);
-        extern Item js_console_table_fn(Item);
-        extern Item js_console_assert_fn(Item, Item);
 
 #define JS_CONSOLE_SPAN_METHODS(M) \
         M("log", js_console_log_span) M("warn", js_console_warn_span) \
@@ -26138,6 +26050,7 @@ extern "C" Item js_get_console_object_value() {
     }
     return js_console_object;
 }
+JS_FORWARD_ITEM(js_get_console_object_value, (void), js_intrinsic_namespace_value, ("console", 7, js_get_console_object))
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
 #define js_262_object (*js_realm_slot(&js_runtime_state.realm_slots, \
@@ -26571,7 +26484,7 @@ extern "C" Item js_get_262_object_value() {
     JS_REALM_SLOT_REFLECT_OBJECT))
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
-extern "C" Item js_get_reflect_object_value() {
+static Item js_get_reflect_object() {
     if (js_namespace_cache_is_empty(js_reflect_object)) {
         // Reflect inherits from Object.prototype per ES spec
         js_realm_intrinsic_slots_ensure_roots();
@@ -26584,13 +26497,14 @@ extern "C" Item js_get_reflect_object_value() {
     }
     return js_reflect_object;
 }
+JS_FORWARD_ITEM(js_get_reflect_object_value, (void), js_intrinsic_namespace_value, ("Reflect", 7, js_get_reflect_object))
 
 // Atomics namespace object
 #define js_atomics_object (*js_realm_slot(&js_runtime_state.realm_slots, \
     JS_REALM_SLOT_ATOMICS_OBJECT))
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
-extern "C" Item js_get_atomics_object_value() {
+static Item js_get_atomics_object() {
     if (js_namespace_cache_is_empty(js_atomics_object)) {
         if (!js_atomics_runtime_state_ensure()) return ItemError;
         // spec: Atomics [[Prototype]] = %ObjectPrototype%
@@ -26602,6 +26516,7 @@ extern "C" Item js_get_atomics_object_value() {
     }
     return js_atomics_object;
 }
+JS_FORWARD_ITEM(js_get_atomics_object_value, (void), js_intrinsic_namespace_value, ("Atomics", 7, js_get_atomics_object))
 
 typedef Item (*JsMathItemUnaryFn)(Item);
 typedef double (*JsMathDoubleUnaryFn)(double);
@@ -27693,6 +27608,9 @@ static Item js_get_async_iterator_proto() {
 
 // Returns the shared depth-2 prototype (%AsyncGeneratorPrototype%) with Symbol.toStringTag.
 extern "C" Item js_get_generator_shared_proto(bool is_async) {
+    Item shared = mvp_lmd_suspended_intrinsic(is_async ? LMD_DYNAMIC_ASYNC_GENERATOR
+        : LMD_DYNAMIC_GENERATOR, LMD_SUSPENDED_INSTANCE_PROTOTYPE);
+    if (shared.item != ITEM_NULL) return shared;
     if (!js_iterator_state_ensure_roots()) return ItemNull;
     Item* cache = is_async ? &js_async_generator_proto_depth2_cache : &js_generator_proto_depth2_cache;
     if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
@@ -28002,8 +27920,21 @@ static Item js_generator_resume_after_delegate_error(Item generator, JsGenerator
     return js_generator_next(generator, js_gen_throw_signal(caught_value));
 }
 
+static bool js_generator_resume_mvp(JsGenerator* state, Item generator, Item input,
+        int operation, Item* result) {
+    if (!state || state->is_async || state->ast_host || get_type_id(state->ast_function) != LMD_TYPE_FUNC ||
+            !function_has_abi(state->ast_function.function, FN_ENTRY_ABI_MVP_LMD)) return false;
+    auto* program = ((MvpLmdCallable*)state->ast_function.function)->program;
+    // shared prototype methods resume the receiver's activation and retain its error realm.
+    MvpLmdRealmScope realm(program);
+    *result = realm.complete(mvp_lmd_generator_resume(program, generator, input, operation));
+    return true;
+}
+
 extern "C" Item js_generator_next(Item generator, Item input) {
     JsGenerator* gen = js_get_generator(generator);
+    Item mvp_result;
+    if (js_generator_resume_mvp(gen, generator, input, 0, &mvp_result)) return mvp_result;
     if (gen && gen->is_async) return js_async_generator_request(generator, 0, input);
     if (!gen) {
         log_error("generator_next: invalid generator object");
@@ -28140,6 +28071,8 @@ static Item js_generator_delegate_abrupt_call(Item generator, JsGenerator* gen,
 
 extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
+    Item mvp_result;
+    if (js_generator_resume_mvp(gen, generator, value, 1, &mvp_result)) return mvp_result;
     if (gen && gen->is_async) return js_async_generator_request(generator, 1, value);
     if (gen) {
         if (!js_runtime_owner_is_current(gen->runtime_context,
@@ -28201,6 +28134,8 @@ extern "C" Item js_generator_return(Item generator, Item value) {
 
 extern "C" Item js_generator_throw(Item generator, Item error) {
     JsGenerator* gen = js_get_generator(generator);
+    Item mvp_result;
+    if (js_generator_resume_mvp(gen, generator, error, 2, &mvp_result)) return mvp_result;
     if (gen && gen->is_async) return js_async_generator_request(generator, 2, error);
     if (gen) {
         if (!js_runtime_owner_is_current(gen->runtime_context,
@@ -28259,9 +28194,10 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
     return js_throw_value(error);
 }
 
-// v15: Check if an object carries the generator native state.
-JS_FORWARD_RETURN(bool, js_is_generator, (Item obj), js_object_has_class,
-    (obj, JS_CLASS_GENERATOR))
+extern "C" bool js_is_generator(Item obj) {
+    // both execution tiers use this carrier; nominal class metadata is optional.
+    return js_get_generator(obj) != NULL;
+}
 
 extern "C" bool js_is_async_generator(Item obj) {
     JsGenerator* gen = js_get_generator(obj);
@@ -28542,7 +28478,7 @@ static Item js_make_iterator_proto(Item* cache, JsBuiltinOwner next_owner,
 
 extern "C" Item js_get_iterator_proto() {
     MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
-    if (library && library->iterator_base_values &&
+    if (library && library->intrinsics_ready && !library->native_callable_values && library->iterator_base_values &&
             get_type_id(library->iterator_base_values[1]) == LMD_TYPE_MAP) return library->iterator_base_values[1];
     if (!js_iterator_state_ensure_roots()) return ItemNull;
     if (js_iterator_proto_cache.item != 0 &&
@@ -28565,7 +28501,9 @@ extern "C" Item js_get_iterator_proto() {
 // %IteratorPrototype%; only the cache slot, the builtin owner and the
 // @@toStringTag spelling differ between them.
 #define JS_DEFINE_ITERATOR_PROTO(fn_name, cache, owner, tag) \
-    static Item fn_name() { \
+    Item fn_name() { \
+        /* borrowing an initialized family must preserve guest changes to its parent */ \
+        if (cache.item && get_type_id(cache) == LMD_TYPE_MAP) return cache; \
         Item proto = js_make_iterator_proto(&cache, owner, tag, \
             (int)sizeof(tag) - 1); \
         js_set_prototype(proto, js_get_iterator_proto()); \
@@ -29906,7 +29844,8 @@ static Item js_promise_make_type_error(const char* message, int len) {
 }
 
 static Item js_promise_make_resolving_state(JsPromise* p) {
-    JS_ROOTS(roots, state, js_new_object(), promise_root, js_promise_to_item(p));
+    // internal slots must not invoke setters installed on the shared Object.prototype.
+    JS_ROOTS(roots, state, js_object_create(ItemNull), promise_root, js_promise_to_item(p));
     // The state is fresh and otherwise unreachable while its two properties
     // allocate names/storage; publish it until the bound functions take ownership.
     js_set_key_cstr(state.get(), "promise", promise_root.get());
@@ -30615,7 +30554,8 @@ static Item js_promise_new_capability(Item constructor, Item* out_resolve, Item*
         promise_root, ItemNull,
         resolve_root, ItemNull,
         reject_root, ItemNull);
-    holder_root.set(js_new_object());
+    // NewPromiseCapability's private record has no guest prototype chain.
+    holder_root.set(js_object_create(ItemNull));
     js_set_key_cstr(holder_root.get(), "resolve", make_js_undefined());
     js_set_key_cstr(holder_root.get(), "reject", make_js_undefined());
     capture_base_root.set(js_new_native_function(js_promise_capability_executor));
@@ -31031,7 +30971,8 @@ extern "C" Item js_await_sync(Item value) {
     }
     if (!promise) return ItemError;
 
-    marker_root.set(js_new_object());
+    // await completion storage must ignore guest `value`/`done` properties.
+    marker_root.set(js_object_create(ItemNull));
     base_root.set(js_new_native_function(js_await_sync_mark));
     Item fulfilled_args[2] = {marker_root.get(), (Item){.item = ITEM_TRUE}};
     Item rejected_args[2] = {marker_root.get(), (Item){.item = ITEM_FALSE}};
@@ -31604,7 +31545,8 @@ static Item js_promise_make_combinator_counter(int remaining,
                                                int values_length,
                                                Item* values_out,
                                                Item* called_out) {
-    JS_ROOTS(roots, counter_root, js_new_object(), values_root, ItemNull, called_root, ItemNull);
+    // the counter is private even though its results array escapes to guest code.
+    JS_ROOTS(roots, counter_root, js_object_create(ItemNull), values_root, ItemNull, called_root, ItemNull);
     js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining)});
     // combinator values escape to guest code and belong to the active intrinsic realm.
     const JsPromiseHostOps* ops = js_promise_host_ops();

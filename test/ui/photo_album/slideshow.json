@@ -1,0 +1,313 @@
+{
+  "name": "Photo album slideshow: a 20-photo selection is saved as .slides and presented with notes and credits",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    }
+  ],
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-20"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-15"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-10"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tile-5"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "24 photos · 20 selected"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#selection-slideshow"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-sheet",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#show-count"
+      },
+      "equals": "20 photos"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#show-name"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#show-name"
+      },
+      "equals": "Library selection"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#show-name"
+      },
+      "text": "Fixture trip",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#show-theme"
+      },
+      "value": "postcard"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#show-transition"
+      },
+      "value": "push"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#show-status"
+      },
+      "equals": "Saved as slideshows/fixture-trip.slides. Open it with lambda view."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-show",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-sheet",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#show-title"
+      },
+      "equals": "Fixture trip"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#show-saved"
+      },
+      "equals": "Saved as slideshows/fixture-trip.slides"
+    },
+    {
+      "type": "assert_script",
+      "js": "/^1 \\/ 18$/.test(document.querySelector('#album-show .slide-status').textContent)"
+    },
+    {
+      "type": "assert_script",
+      "js": "!!document.querySelector('#album-show [data-slide-active] [data-slide-object]') && document.querySelectorAll('#album-show img').length>=1"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#album-show img')).every(i=>/^file:.*\\/fixture\\/photos\\//.test(i.getAttribute('src')))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#album-show [data-slide-command='next']"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 900
+    },
+    {
+      "type": "assert_script",
+      "js": "/^2 \\/ 18$/.test(document.querySelector('#album-show .slide-status').textContent)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#album-show [data-slide-tool='console']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "const n=document.querySelector('#album-show .slide-notes').textContent;/Lambda test fixture/.test(n) && /CC0 1\\.0/.test(n)"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/photo_album/slideshow.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-show",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.querySelector('#album-show .slide-canvas')"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#port"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#tile-10"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#viewer-slideshow"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-viewer",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#show-count"
+      },
+      "equals": "22 photos"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#show-name"
+      },
+      "equals": "Dune crest"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-sheet",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slideshow"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#show-count"
+      },
+      "equals": "24 photos"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-cancel"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#album"
+      },
+      "attribute": "data-sheet",
+      "equals": "false"
+    }
+  ]
+}

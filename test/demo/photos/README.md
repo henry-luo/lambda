@@ -30,11 +30,15 @@ Paths resolve from the launch directory; bundled assets resolve from the entry.
 - Drag to move the chosen layer/group, or use X/Y fields and arrow keys.
   Shift+arrows moves ten pixels. Escape cancels a drag. V selects Move, H selects
   Hand; Fit, 100% and zoom buttons control the retained canvas.
-- Apply baked exposure, monochrome and sharpening to the active pixel layer.
+- Add reversible exposure, monochrome and sharpening effects to the active layer.
   Resize image samples or change canvas bounds; flattening is explicit.
 - Undo/redo through buttons or Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z. A completed drag
   records one edit. Camera and layer selection do not dirty image content.
-- Save the qualified layered PSD profile, or export the composite as PNG.
+- Save editable `.photos` projects or the qualified layered PSD profile. Export
+  PNG or JPEG with independent output dimensions and an optional aspect lock.
+  PNG can preserve transparency or flatten over an opaque background; JPEG
+  requires that background and exposes quality from 0 to 100. Export keeps the
+  document, saved checkpoint and history unchanged.
   Save/reopen preserves supported hierarchy, names, masks, offsets and current
   pixels. Writes publish atomically. Failed reads/writes retain the active edits.
 - New/Open/Close protect unsaved edits with Save/Discard/Cancel. File dialogs
@@ -46,6 +50,13 @@ Paths resolve from the launch directory; bundled assets resolve from the entry.
   replace/add/subtract/intersect, invert or feather them, convert them to masks,
   or crop the canvas to their bounds. Selection edits have history without
   marking image pixels unsaved. Ctrl/Cmd+A selects all; Ctrl/Cmd+D deselects.
+- Crop (C) draws a bounded canvas rectangle without changing pixels. Apply crop
+  (or Enter while the stage has focus) commits one edit; Cancel/Escape discards
+  the draft. Undo restores the canvas, layer offsets and saved coverage channels.
+- Align selected layer roots to the canvas or their combined bounds in the lower
+  Align & distribute dock. Distribute three or more roots with equal horizontal
+  or vertical gaps. Locked roots reject the entire edit; selected parents and
+  children move once. Placement rounds to whole pixels.
 - Bucket (F), Gradient (G) and Eyedropper (I) share foreground/background colors.
   Gradients support linear and radial ramps. Painting, filling and baked
   adjustments honor selection coverage and the current pixel/mask target.
@@ -53,11 +64,9 @@ Paths resolve from the launch directory; bundled assets resolve from the entry.
   and V pastes a new layer with its document-space origin. The current clipboard
   is internal to the document session. X without a modifier swaps colors.
 
-Use the dock scrollbar to reach image sizing and history on shorter windows.
-The current workspace has one document and a fixed tool rail/dock; the richer
-responsive dock and multiple document tabs remain later work. Native file
-pickers, blend modes, affine transforms,
-retained effects, text/shapes and rich-project persistence are not delivered yet.
+Use the dock scrollbar to reach the lower controls on shorter windows. The
+workspace supports independent document tabs, a fixed tool rail and a scrolling
+dock. Native file pickers and configurable docks remain outstanding.
 Imported unsupported visual content fails strict opening instead of disappearing.
 Masks/groups use the current shared package's qualified PSD subset; inverted/group
 mask writing is not yet available. Unlock layers before PSD saving because the

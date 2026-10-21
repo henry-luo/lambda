@@ -3,6 +3,7 @@ import img: lambda.image
 import editor: lambda.editor.raster
 import project: lambda.image.project
 import actions: lambda.editor.raster.actions
+import exports: .export
 
 pub pn open_document(path) any^ { return editor.open_session(if (ends_with(lower(path),".photos")) project.read(path)^ else img.read(path)^)^ }
 pub pn place(st,path) any^ {
@@ -11,9 +12,13 @@ pub pn place(st,path) any^ {
     let raster = img.render_frame(image)^;
     return editor.exec(st,{id:"layer.insert",raster:raster,name:split(path,"/")[last],position:[0,0]})^
 }
-pub pn write_document(st,path,format) any^ {
+pub pn write_document(st,path,format,options={}) any^ {
     if (not (path is string) or path == "" or
-        not ends_with(lower(path),"." ++ format)) raise error("Photos: choose a ." ++ format ++ " destination")
+        not (ends_with(lower(path),"." ++ format) or (format in ["jpeg","jpg"] and
+            (ends_with(lower(path),".jpg") or ends_with(lower(path),".jpeg")))))
+        raise error("Photos: choose a ." ++ format ++ " destination")
+    if (not (format in ["png","jpeg","jpg","psd","photos"])) raise error("Photos: unsupported document format")
+    if (format in ["photos","psd"]) { let checked = img.checked_options(options,[])^ }
     if (format == "photos") {
         project.write(st.doc,path)^
         return {snapshot:st.doc,report:{preserved:["pixels","layers","masks","effects","transforms","locks","artwork","fonts","styles","channels"],omitted:[]}}
@@ -21,10 +26,13 @@ pub pn write_document(st,path,format) any^ {
     if (format == "psd" and any([for (row in editor.layers(st.doc)) row.node.locked == true]))
         raise error("Photos: unlock layers before saving this PSD profile; lock persistence is not supported yet")
     let snapshot = st.doc
-    let encoded = img.encode_report(snapshot,{format:symbol(format)})^
+    let prepared = if (format == "psd") null else exports.prepare(snapshot,format,options)^
+    let encoded = img.encode_report(if (prepared == null) snapshot else prepared.image,
+        {format:if (prepared == null) 'psd' else symbol(prepared.settings.format),
+            *:if (prepared != null and prepared.settings.format == "jpeg") ({quality:prepared.settings.quality}) else ({})})^
     // output's atomic publication protects an existing file when acquisition or writing fails.
     output(encoded.bytes,path,{atomic:true})^
-    return {snapshot:snapshot,report:encoded.report}
+    return {snapshot:snapshot,report:{*:encoded.report,*:if (prepared == null) ({}) else ({export:prepared.settings})}}
 }
 
 pub pn read_action(path) any^ {

@@ -5712,8 +5712,11 @@ static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_
     while (expr && expr->node_type == AST_NODE_PRIMARY) {
         expr = ((AstPrimaryNode*)expr)->expr;
     }
+    // FC5/S14.1.3: a hash join executes only equality conjunctions; anything
+    // else is a compile error, never a silent O(n*m) loop or an empty result.
     if (!expr || expr->node_type != AST_NODE_BINARY) {
-        log_error("Error: join 'on' must be an equality or 'and' of equalities");
+        record_semantic_error_span(tp, on_expr->source_span, ERR_FOR_CLAUSE,
+            "join `on` must be an equality or an `and` of equalities; put other conditions in `where`");
         return;
     }
 
@@ -5724,14 +5727,16 @@ static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_
         return;
     }
     if (bin->op != OPERATOR_EQ) {
-        log_error("Error: join 'on' only supports equality conditions; put non-equi filters in 'where'");
+        record_semantic_error_span(tp, expr->source_span, ERR_FOR_CLAUSE,
+            "join `on` supports only equality tests; put other conditions in `where`");
         return;
     }
 
     bool left_new = join_expr_mentions_name(bin->left, loop->name);
     bool right_new = join_expr_mentions_name(bin->right, loop->name);
     if (left_new == right_new) {
-        log_error("Error: each join equality must reference the new source '%.*s' on exactly one side",
+        record_semantic_error_span(tp, expr->source_span, ERR_FOR_CLAUSE,
+            "each join equality must mention the new source '%.*s' on exactly one side",
             (int)loop->name->len, loop->name->chars);
         return;
     }
@@ -7396,6 +7401,7 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
         break;
     }
     case AST_NODE_GROUP_KEY:
+        ((AstGroupKey*)node)->entry = direct_bind_entry(bind, ((AstGroupKey*)node)->entry);
         direct_bind_rewrite_node(bind, ((AstGroupKey*)node)->expr, node);
         break;
     case AST_NODE_JOIN_KEY: {
@@ -16605,6 +16611,65 @@ static void resolve_for(Transpiler* tp, AstForNode* loop) {
     lambda_ast_mark_loop_snapshots(loop);
 }
 
+// S14.1.2v2: row clauses (`let`, `where`) precede `group by` and group
+// clauses (`order by`, `limit`, `offset`) follow it, each at most once. The
+// parser accepts any order, and evaluation is phase-fixed, so a misplaced or
+// repeated clause used to run in the wrong phase or replace its twin silently.
+static const char* for_part_misplacement(const AstForNode* loop, uint8_t kind) {
+    switch (kind) {
+    case FOR_PART_LET:
+        return loop->group ? "`let` after `group by` is not supported; compute group values in the body" : NULL;
+    case FOR_PART_WHERE:
+        if (loop->group) return "`where` after `group by` would filter groups, which is not supported; filter the result with `|:`";
+        return loop->where ? "repeated `where`; combine the conditions with `and`" : NULL;
+    case FOR_PART_GROUP:
+        if (loop->group) return "repeated `group by`; list several keys in one clause";
+        return loop->order || loop->limit || loop->offset
+            ? "`order by`, `limit` and `offset` go after `group by`, where they apply to groups" : NULL;
+    case FOR_PART_ORDER: {
+        int count = 0;
+        for (AstNode* spec = loop->order; spec; spec = spec->next) count++;
+        return count >= 63 ? "`order by` takes at most 63 keys" : NULL;  // desc_mask bits
+    }
+    case FOR_PART_LIMIT:
+    case FOR_PART_LIMIT_LAST:
+        return loop->limit ? "repeated `limit`" : NULL;
+    case FOR_PART_OFFSET:
+        return loop->offset ? "repeated `offset`" : NULL;
+    }
+    return NULL;
+}
+
+// S14.1.1v2: after grouping, each key binds its value under its name and
+// `into` binds the members array. FC9: the names must be distinct.
+static void register_for_group_bindings(Transpiler* tp, AstGroupClause* group) {
+    for (AstGroupKey* key = group->keys; key; key = (AstGroupKey*)key->next) {
+        if (!key->alias) continue;  // E239 already reported by FC9 inference
+        bool duplicate = same_name_string(key->alias, group->name);
+        for (AstGroupKey* prior = group->keys; prior != key && !duplicate;
+                prior = (AstGroupKey*)prior->next) {
+            duplicate = prior->alias && same_name_string(prior->alias, key->alias);
+        }
+        if (duplicate) {
+            record_semantic_error_span(tp, key->source_span, ERR_DUPLICATE_DEFINITION,
+                "group key name '%.*s' is already used in this `group by`; name the key with `as`",
+                (int)key->alias->len, key->alias->chars);
+            continue;
+        }
+        AstDeclaratorNode* bound = build_declarator_from_name(tp, key->source_span, key->alias);
+        bound->type = &TYPE_ANY;
+        lambda_ast_register_name(tp, (AstNode*)bound);
+        key->entry = lookup_name_in_current_scope(tp, key->alias);
+    }
+    AstDeclaratorNode* grouped = build_declarator_from_name(tp, group->source_span, group->name);
+    grouped->type = (Type*)&TYPE_ARRAY;
+    lambda_ast_register_name(tp, (AstNode*)grouped);
+    // The aggregate scope is entered before `into` is registered; retain its
+    // NameEntry so T0 can publish each group without re-looking the binding up
+    // in the closed row scope.
+    group->entry = lookup_name_in_current_scope(tp, group->name);
+}
+
 // One `for` header clause, in source order. A clause joins its loop only once
 // it has resolved, as the loop saw its clauses arrive while the header parsed.
 static void resolve_for_part(LambdaResolver* r, AstForNode* loop,
@@ -16612,6 +16677,10 @@ static void resolve_for_part(LambdaResolver* r, AstForNode* loop,
     Transpiler* tp = r->tp;
     AstNode* node = part->node;
     resolve_walk(r, node);
+    if (const char* misplaced = for_part_misplacement(loop, part->kind)) {
+        record_semantic_error_span(tp, node->source_span, ERR_FOR_CLAUSE, "%s", misplaced);
+        return;
+    }
     switch (part->kind) {
     case FOR_PART_BINDING:
         direct_append_clause(&loop->loop, node);
@@ -16627,14 +16696,7 @@ static void resolve_for_part(LambdaResolver* r, AstForNode* loop,
         AstGroupClause* group = (AstGroupClause*)node;
         loop->group = group;
         enter_for_group_scope(tp, loop);
-        AstDeclaratorNode* grouped = build_declarator_from_name(tp,
-            group->source_span, group->name);
-        grouped->type = &TYPE_ELMT;
-        lambda_ast_register_name(tp, (AstNode*)grouped);
-        // The aggregate scope is entered before `into` is registered; retain
-        // its NameEntry so T0 can publish the materialized group without
-        // re-looking the binding up in the closed row scope.
-        group->entry = lookup_name_in_current_scope(tp, group->name);
+        register_for_group_bindings(tp, group);
         break;
     }
     case FOR_PART_ORDER:
@@ -16896,6 +16958,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_walk(r, key->expr);
         resolve_diagnostics(r, node);
         if (!key->alias) key->alias = infer_group_key_alias(tp, key->expr);
+        // FC9: only a trailing field access names itself; no generated names
+        if (!key->alias) {
+            record_semantic_error_span(tp, node->source_span, ERR_FOR_CLAUSE,
+                "group key needs a name: write `as NAME` (only a trailing field access such as `x.region` names itself)");
+        }
         break;
     }
     case LSF_GROUP_CLAUSE:

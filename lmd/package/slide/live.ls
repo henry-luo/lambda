@@ -19,7 +19,8 @@ fn tree(plan, options) {
     let key = instance(options);
     // focus eligibility reads HTML attributes as text, including tabindex.
     <div class: "slide-player", id: key, tabindex: "0", role: "region", ["aria-label"]: plan.title,
-        style: if (c.value(options.fit_viewport, false)) "" else "width:" ++ c.px(c.value(options.width, plan.width)) ++ ";",
+        style: (if (c.value(options.fit_viewport, false)) "" else "width:" ++ c.px(c.value(options.width, plan.width)) ++ ";") ++
+            html.ui_style(plan),
         *[<div class: "slide-workspace", *[
             <div class: "slide-audience", *[html.stage(plan, {slide: 0, cue: -1, time_ms: 0.0}, options),
                 <div class: "slide-blackout", ["data-slide-tool"]: "blackout", ["aria-hidden"]: "true">,

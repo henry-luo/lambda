@@ -11,8 +11,8 @@ handoff
 **Companions**: [JS_Runtime_Redesign.md](JS_Runtime_Redesign.md) (JR1, JR4,
 JR6), [JS_Runtime_Name.md](JS_Runtime_Name.md) (RN1–RN16),
 [JS_Runtime_Callable.md](JS_Runtime_Callable.md) (JC1–JC12),
-[JS_Tune5_Property.md](JS_Tune5_Property.md) (the eight-operation property
-kernel), and [JS_Tune6_Object.md](JS_Tune6_Object.md) (implementation plan)
+and [JS_Tune_History.md](JS_Tune_History.md) §4.1 (B5, the eight-operation
+property kernel; B6, the implementation record)
 
 Decisions introduced here use **JOP#** ledger IDs. Formal rulings are cited
 first whenever they cover the point. The design applies **D1.2–D1.3**,
@@ -809,7 +809,7 @@ and `JsPropertyOps` signatures contain no IC/feedback parameter.
 > ICs this seam was to hand over were deleted on 2026-08-15
 > (`../Lambda_Design_JS_IC_Retire.md`). The consumer of these seams is now
 > compile-predicted shape specialization (IC_Retire Tier A, IR10–IR15;
-> `JS_Tune10_Fast_Paths.md`), which needs the same stable kernel seams and no
+> `JS_Tune_History.md` §4.3), which needs the same stable kernel seams and no
 > mutable state. Text below kept for the seam definitions.
 
 JR8 replaces outer IC structs with per-function feedback slots. It consumes

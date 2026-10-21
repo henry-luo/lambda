@@ -1,0 +1,20 @@
+// S2.4.7, PTH85: a query step on a path is a reference until `#` and never
+// crosses the file boundary by itself; a step applied to a file match does
+let d = \.test.input.wild_tree
+"lazy: a query on a path is a path"; [d?path, type(d.?int)]
+"identity: same spelling, other type, other closure"; [d?int == \.test.input.wild_tree?int, d?int == d?string, d?int == d.?int]
+"directory ?path: proper closure, nothing read"; [*d?path#]
+"directory .?path: inclusive closure"; [*d.?path#]
+"directory ?int: no path value is an int"; [*d?int#]
+"**?int: every file beneath"; [*d.**?int#]
+"**.?string: every file beneath"; [*d.**.?string#]
+"?path.**: every kept file entered"; [*d?path.**#]
+".?path.**: base included"; [*d.?path.**#]
+"*?int: only the files directly in d"; [*d.*?int#]
+"file ?int"; [*\.test.input.wild_tree.'a.json'?int#]
+"file .?int"; [*\.test.input.wild_tree.sub.'b.json'.?int#]
+"after #: the query tests path values"; [*d.**#?int]
+"after #: .?path keeps the path values themselves"; [*d.*#.?path]
+"a held path takes wildcard steps"; [d.*, d.**]
+"for and len see what # yields"; [[for (x in d?path) x], len(\.test.input.wild_tree.**?int)]
+"a wildcard with steps after it iterates its matches"; [for (x in \.test.input.wild_tree.*.name) x]

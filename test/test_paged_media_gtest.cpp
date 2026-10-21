@@ -515,6 +515,8 @@ TEST(ResourceAdmissionTest, ASharedWarmImageCacheCannotBypassTheSelectedDocument
 }
 
 class SecondaryViewTest : public ::testing::Test {
+    inline static UiContext suite_ui{};
+    inline static int suite_ui_ready = -1;
 protected:
     Pool* input_pool = nullptr;
     Input* input = nullptr;
@@ -559,12 +561,16 @@ protected:
 
 public:
     // the page flow runs through the browsing engine, which needs a host: one
-    // headless UI context serves every fixture of the binary
+    // headless UI context serves this suite, including its PDF package loader.
     static UiContext* shared_ui() {
-        static UiContext ui;
-        static int ready = -1;
-        if (ready < 0) ready = ui_context_init(&ui, true, 1.0f) == 0;
-        return ready > 0 ? &ui : nullptr;
+        if (suite_ui_ready < 0) suite_ui_ready = ui_context_init(&suite_ui, true, 1.0f) == 0;
+        return suite_ui_ready > 0 ? &suite_ui : nullptr;
+    }
+
+    static void TearDownTestSuite() {
+        // release the loader's evaluator before another suite creates its own context.
+        if (suite_ui_ready > 0) ui_context_cleanup(&suite_ui);
+        suite_ui_ready = -1;
     }
 
     ViewTree* secondary(ViewPresentation presentation = VIEW_PRESENTATION_PAGED) {

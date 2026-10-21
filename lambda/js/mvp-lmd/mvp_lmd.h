@@ -39,6 +39,7 @@ struct MvpLmdOptions {
     const MvpLmdCode* cached_code = NULL;
     bool native_harness = false; // harnessless Test262 batches use the shared callable helpers
     bool typescript = false;    // parser profile and the existing TS type() intrinsic
+    bool terminal_script = false; // host promises no later Script entry into this realm
 };
 MvpLmdExecution* mvp_lmd_execute_with_options(const char* source, size_t length,
     double* execution_ms, const MvpLmdHost* host, const MvpLmdOptions* options);
@@ -48,7 +49,8 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
     const MvpLmdCode* cached_code = NULL, bool typescript = false,
     bool native_harness = false);
 
-// the execution owns its AST, MIR, heap and result until destroy (D5.3).
+// standalone callers receive an ordinary Runtime owner; destroy retires its
+// heap before the execution's AST/MIR metadata (D5.3, D5.4.1).
 // optional timing covers only the generated entry, excluding compile/setup and result publication.
 MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* execution_ms = NULL,
     const MvpLmdHost* host = NULL);

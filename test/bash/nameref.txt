@@ -1,8 +1,0 @@
-42
-100
-world
-deep
-deeper
-unset
-from function
-10

@@ -4374,7 +4374,8 @@
           {
             "source": "test/test_paged_media_gtest.cpp",
             "additional_sources": [
-              "lib/test_font_path_gtest.cpp"
+              "lib/test_font_path_gtest.cpp",
+              "test/test_radiant_pdf_walk_gtest.cpp"
             ],
             "name": "Paged Media Tests",
             "dependencies": [
@@ -6484,7 +6485,7 @@
           },
           {
             "source": "test/test_lambda_errors_gtest.cpp",
-            "name": "Lambda Error System Tests",
+            "name": "Lambda Runtime Unit Tests",
             "additional_sources": [
               "test/test_pdf_builder_gtest.cpp",
               "test/test_binary_schema_gtest.cpp"
@@ -6493,7 +6494,7 @@
               "lambda-rt",
               "radiant"
             ],
-            "binary": "test_lambda_errors_gtest.exe",
+            "binary": "test_lambda_runtime_gtest.exe",
             "libraries": [
               "gtest",
               "gtest_main"

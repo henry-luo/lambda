@@ -5723,6 +5723,41 @@ TEST(PaintOwnership, NestedFramesKeepIndependentPayloadArenasAndReuseOuterCapaci
     render_export_session_end(&session); rdt_engine_term();
 }
 
+TEST(PaintOwnership, FreshFrameScopesReuseGradientAndDashValuesWithoutRecopyingThem) {
+    rdt_engine_init(0);
+    RenderExportSession session = {};
+    ASSERT_TRUE(render_export_session_begin_source(&session, "<html><body></body></html>", 40, 30, false));
+    UiContext* ui = session.ui_context; ViewTree* tree = ui->document->view_tree;
+    ASSERT_EQ(ui->surface->width, 40); ASSERT_EQ(ui->surface->height, 30);
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 4, 4, 24, 20, 0, 0);
+    RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 0, 255, 255}};
+    float dashes[] = {2, 3};
+    uint32_t expected[40 * 30];
+    for (unsigned repeat = 0; repeat < 4; repeat++) {
+        memset(ui->surface->pixels, 0, ui->surface->pitch * ui->surface->height);
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        RenderFrameScope frame(&context, ui, tree, &profiler);
+        dl_fill_linear_gradient(frame.list(), path, 4, 4, 28, 4, stops, 2,
+            RDT_FILL_WINDING, nullptr, nullptr);
+        dl_stroke_path(frame.list(), path, Color{0xff000000u}, 2, RDT_CAP_BUTT,
+            RDT_JOIN_MITER, dashes, 2, 0, nullptr);
+        dl_replay(frame.list(), &context.vec, ui->surface, &context.block.clip,
+            &context.scratch, 1, nullptr);
+        if (!repeat) {
+            EXPECT_GT(counters.payload_copy_bytes, 0u);
+            memcpy(expected, ui->surface->pixels, sizeof(expected));
+            EXPECT_NE(expected[10 * 40 + 10], 0u);
+        } else {
+            EXPECT_EQ(counters.payload_copy_bytes, 0u);
+            EXPECT_EQ(counters.shared_array_reuses, 2u);
+            EXPECT_EQ(memcmp(expected, ui->surface->pixels, sizeof(expected)), 0);
+        }
+    }
+    rdt_path_free(path); render_export_session_end(&session); rdt_engine_term();
+}
+
 TEST(PaintOwnership, FullFrameAdmissionReclaimsUnusedCaptureCapacity) {
     rdt_engine_init(0);
     RenderExportSession session = {};
@@ -6108,6 +6143,535 @@ TEST(PaintOwnership, ReferencedSubtreesMatchFlatReplayAcrossClipsEffectsTilesAnd
     dl_destroy(&flat); dl_destroy(&referenced); pool_destroy(pool); rdt_engine_term();
 }
 
+static void record_translated_vector_test_scene(DisplayList* list, float dx, float dy,
+    ImageSurface* image, RdtPicture* picture) {
+    int root = dl_begin_element(list, 8400, dx, dy, 32, 32);
+    RdtMatrix placement = rdt_matrix_translate(dx, dy);
+    RdtMatrix local = {1, 0.125f, 1, -0.125f, 1, 2, 0, 0, 1};
+    RdtMatrix transform = rdt_matrix_multiply(&placement, &local);
+    RdtMatrix gradient = {1, 0.25f, 1, 0.125f, 0.75f, 2, 0, 0, 1};
+    RdtPath* clip = rdt_path_new(); RdtPath* path = rdt_path_new();
+    ASSERT_NE(clip, nullptr); ASSERT_NE(path, nullptr);
+    const RdtMatrix* simple_placement = dx == 0 && dy == 0 ? nullptr : &placement;
+    rdt_path_add_circle(clip, 16, 16, 15, 13); dl_push_clip(list, clip, simple_placement);
+    dl_fill_rect(list, dx + 1, dy + 2, 15, 9, Color{0xff2030e0u});
+    dl_fill_rounded_rect(list, dx + 6, dy + 5, 23, 24, 3, 4, Color{0x90803020u});
+    int child = dl_begin_element(list, 8401, dx + 2, dy + 3, 28, 26);
+    rdt_path_add_rect(path, 2, 3, 14, 10, 2, 1);
+    dl_fill_path(list, path, Color{0xa0e03020u}, RDT_FILL_WINDING, simple_placement);
+    float dashes[] = {3, 2, 1, 2};
+    dl_stroke_path(list, path, Color{0xff20a030u}, 2, RDT_CAP_ROUND, RDT_JOIN_ROUND,
+        dashes, 4, 0.5f, &transform);
+    RdtGradientStop stops[] = {{0, 255, 0, 0, 255}, {1, 0, 128, 255, 192}};
+    dl_fill_linear_gradient(list, path, 2, 3, 16, 13, stops, 2, RDT_FILL_EVEN_ODD,
+        &transform, &gradient);
+    rdt_path_free(path); path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_circle(path, 21, 20, 8, 9);
+    dl_fill_radial_gradient(list, path, 21, 20, 9, stops, 2, RDT_FILL_WINDING,
+        &transform, &gradient);
+    dl_draw_image(list, (const uint32_t*)image->pixels, 2, 2, image->pitch / 4,
+        3, 18, 9, 10, 200, &transform, image, image->generation);
+    dl_draw_picture(list, rdt_picture_dup(picture), 190, &transform);
+    dl_end_element(list, child); dl_pop_clip(list); dl_end_element(list, root);
+    rdt_path_free(path); rdt_path_free(clip);
+}
+
+TEST(PaintOwnership, TranslatedVectorFragmentsMatchIndependentPlacementsAfterSourceRetirement) {
+    rdt_engine_init(0);
+    Pool* pool = pool_create(); ASSERT_NE(pool, nullptr);
+    ImageSurface* image = image_surface_create(2, 2); ASSERT_NE(image, nullptr);
+    uint32_t colors[] = {0xff0000ffu, 0xff00ff00u, 0xffff0000u, 0xff00ffffu};
+    memcpy(image->pixels, colors, sizeof(colors)); image_surface_snapshot_publish(image);
+    Tvg_Paint shape = tvg_shape_new(); ASSERT_NE(shape, nullptr);
+    ASSERT_EQ(tvg_shape_append_rect(shape, 18, 4, 8, 7, 1, 1, true), TVG_RESULT_SUCCESS);
+    ASSERT_EQ(tvg_shape_set_fill_color(shape, 230, 40, 10, 210), TVG_RESULT_SUCCESS);
+    RdtPicture* picture = rdt_picture_take_tvg_paint(shape, 32, 32); ASSERT_NE(picture, nullptr);
+    DisplayList source, flat, placed, canonical;
+    ASSERT_NO_FATAL_FAILURE(record_translated_vector_test_scene(&source, 0, 0, image, picture));
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const auto* fragment = retained_dl_cache_get(cache, 8400); ASSERT_NE(fragment, nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&canonical, fragment));
+    // the caller's clip remains in world coordinates while each referenced local clip moves.
+    RdtPath* outer = rdt_path_new(); ASSERT_NE(outer, nullptr);
+    rdt_path_add_rect(outer, 8, 6, 58, 60, 0, 0);
+    dl_push_clip(&flat, outer, nullptr); dl_push_clip(&placed, outer, nullptr); rdt_path_free(outer);
+    const float placements[][2] = {{4, 3}, {35.5f, 8.25f}, {15, 38}};
+    for (const auto& offset : placements)
+        ASSERT_NO_FATAL_FAILURE(record_translated_vector_test_scene(&flat, offset[0], offset[1], image, picture));
+    {
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        for (const auto& offset : placements)
+            ASSERT_TRUE(retained_dl_append_fragment_translated(&placed, fragment, offset[0], offset[1]));
+        EXPECT_EQ(counters.command_copy_bytes, 0u); EXPECT_EQ(counters.payload_copy_bytes, 0u);
+        EXPECT_EQ(counters.path_clones, 0u); EXPECT_GT(counters.placement_command_copy_bytes, 0u);
+    }
+    dl_pop_clip(&flat); dl_pop_clip(&placed);
+    EXPECT_EQ(placed.size(), 5u); EXPECT_TRUE(dl_validate(&placed, nullptr));
+    DisplayListCursor original(&canonical), positioned(&placed);
+    ASSERT_NE(positioned.next(), nullptr); // enclosing world clip precedes the placement.
+    while (const DisplayItem* before = original.next()) {
+        const DisplayItem* after = positioned.next(); ASSERT_NE(after, nullptr);
+        EXPECT_EQ(before->op, after->op);
+        switch (before->op) {
+            case DL_FILL_PATH: EXPECT_EQ(before->fill_path.path.get(), after->fill_path.path.get()); break;
+            case DL_STROKE_PATH:
+                EXPECT_EQ(before->stroke_path.path.get(), after->stroke_path.path.get());
+                EXPECT_EQ(before->stroke_path.dash_array.get(), after->stroke_path.dash_array.get()); break;
+            case DL_FILL_LINEAR_GRADIENT:
+                EXPECT_EQ(before->fill_linear_gradient.stops.get(), after->fill_linear_gradient.stops.get()); break;
+            case DL_FILL_RADIAL_GRADIENT:
+                EXPECT_EQ(before->fill_radial_gradient.stops.get(), after->fill_radial_gradient.stops.get()); break;
+            case DL_DRAW_IMAGE: EXPECT_EQ(before->draw_image.snapshot_lease.get(), after->draw_image.snapshot_lease.get()); break;
+            case DL_DRAW_PICTURE: EXPECT_EQ(before->draw_picture.picture.get(), after->draw_picture.picture.get()); break;
+            default: break;
+        }
+    }
+    dl_destroy(&canonical);
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+    image_surface_snapshot_release(image); rdt_picture_free(picture);
+    auto replay = [](DisplayList* list, uint32_t* pixels, unsigned mode) {
+        for (size_t i = 0; i < 80 * 80; i++) pixels[i] = 0xffd0c0b0u;
+        ImageSurface surface = {}; surface.pixels = pixels; surface.width = surface.height = 80; surface.pitch = 80 * 4;
+        ScratchArena scratch = {}; RdtVector vector = {};
+        rdt_vector_init(&vector, pixels, 80, 80, 80);
+        Bound viewport = {0, 0, 80, 80};
+        DirtyRect rect = {}; rect.x = 10; rect.y = 12; rect.width = 44; rect.height = 40;
+        DirtyTracker dirty = {}; dirty.dirty_list = &rect;
+        if (mode == 1) dl_replay_tile(list, &vector, &surface, &scratch, 5, 7, 80, 80, 1);
+        else dl_replay(list, &vector, &surface, &viewport, &scratch, 1, mode == 2 ? &dirty : nullptr);
+        rdt_vector_destroy(&vector); scratch_release(&scratch);
+    };
+    for (unsigned mode = 0; mode < 3; mode++) for (unsigned repeat = 0; repeat < 2; repeat++) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(repeat);
+        uint32_t expected[80 * 80], actual[80 * 80];
+        replay(&flat, expected, mode); replay(&placed, actual, mode);
+        EXPECT_EQ(memcmp(actual, expected, sizeof(actual)), 0);
+        size_t painted = 0;
+        for (uint32_t pixel : actual) painted += pixel != 0xffd0c0b0u;
+        EXPECT_GT(painted, 100u);
+    }
+    dl_destroy(&flat); dl_destroy(&placed); pool_destroy(pool); rdt_engine_term();
+}
+
+class SvgLayerScrollTest : public ::testing::Test {
+protected:
+    RenderExportSession session = {};
+    UiContext* ui = nullptr;
+    DomElement* svg = nullptr;
+    RenderPipelineMetrics counters;
+    size_t layer_images = 0;
+
+    void SetUp() override { rdt_engine_init(0); }
+    void TearDown() override { render_export_session_end(&session); rdt_engine_term(); }
+
+    void open(const char* source) {
+        ASSERT_TRUE(render_export_session_begin_source(&session, source, 160, 120, false));
+        ui = session.ui_context;
+        svg = dom_find_element_by_id(ui->document->root, "scene");
+        ASSERT_NE(svg, nullptr);
+    }
+
+    void paint(float x = 0, float y = 0, const RdtMatrix* matrix = nullptr, const Bound* clip = nullptr) {
+        counters = {};
+        RenderPipelineMetricsScope probe(&counters);
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+        memset(ui->surface->pixels, 255, ui->surface->pitch * ui->surface->height);
+        context.transform = matrix ? *matrix : rdt_matrix_translate(x, y);
+        context.has_transform = matrix || x != 0 || y != 0;
+        if (clip) context.block.clip = *clip;
+        render_inline_svg(&context, lam::view_require_block(svg));
+        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+        ASSERT_TRUE(dl_validate(frame.list(), nullptr));
+        layer_images = 0;
+        DisplayListCursor cursor(frame.list());
+        while (const DisplayItem* item = cursor.next())
+            if (item->op == DL_DRAW_IMAGE) layer_images++;
+        dl_replay(frame.list(), &context.vec, ui->surface, &context.block.clip, &context.scratch, 1, nullptr);
+    }
+
+    void warm() {
+        ASSERT_NO_FATAL_FAILURE(paint());
+        ASSERT_NO_FATAL_FAILURE(paint());
+        ASSERT_EQ(counters.layer_recordings, 1u);
+        ASSERT_NO_FATAL_FAILURE(paint());
+        ASSERT_EQ(counters.layer_recordings, 0u);
+    }
+
+    void scroll(const char* id, float y) {
+        DomElement* element = dom_find_element_by_id(ui->document->root, id);
+        ASSERT_NE(element, nullptr);
+        ViewBlock* block = lam::view_require_block(element);
+        ASSERT_NE(block->scroller, nullptr);
+        ASSERT_NE(block->scroller->pane, nullptr);
+        ASSERT_GE(block->scroller->pane->v_max_scroll, y);
+        scroll_state_set_position_for_view(ui->document->state, block, block->scroller->pane, 0, y, false);
+    }
+};
+
+TEST_F(SvgLayerScrollTest, UnrelatedScrollingKeepsTheRasterAndMovesItsPlacement) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='60' height='40' style='display:block'>"
+        "<rect width='40' height='30' fill='red'/></svg>"
+        "<div id='scroll' style='height:20px;overflow:auto'><div style='height:200px'></div></div>"
+        "</body></html>"));
+    ASSERT_NO_FATAL_FAILURE(warm());
+    for (unsigned step = 1; step <= 3; step++) {
+        ASSERT_NO_FATAL_FAILURE(scroll("scroll", (float)step * 10));
+        ASSERT_NO_FATAL_FAILURE(paint(50, 50));
+        EXPECT_EQ(counters.layer_recordings, 0u);
+        EXPECT_EQ(counters.layer_passes, 0u);
+        EXPECT_EQ(layer_images, 1u);
+        test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 255, 255);
+        test_radiant_expect_surface_pixel(ui->surface, 60, 60, 255, 0, 0);
+    }
+}
+
+TEST_F(SvgLayerScrollTest, HoverStillInvalidatesAfterScrollIndependentReuse) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><head><style>#ink:hover{fill:blue}</style></head><body style='margin:0'>"
+        "<svg id='scene' width='60' height='40' style='display:block'>"
+        "<rect id='ink' width='40' height='30' fill='red'/></svg>"
+        "<div id='scroll' style='height:20px;overflow:auto'><div style='height:200px'></div></div>"
+        "</body></html>"));
+    ASSERT_NO_FATAL_FAILURE(warm());
+    ASSERT_NO_FATAL_FAILURE(scroll("scroll", 10));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 0u);
+    EXPECT_EQ(layer_images, 1u);
+    DomElement* ink = dom_find_element_by_id(ui->document->root, "ink"); ASSERT_NE(ink, nullptr);
+    doc_state_set_hover_target(ui->document->state, ink);
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(layer_images, 0u);
+    radiant_recascade_document(ui->document);
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 0u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+}
+
+TEST_F(SvgLayerScrollTest, ViewportSynchronizationPreservesSelectorStateAndTheRaster) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='60' height='40' style='display:block'>"
+        "<rect width='40' height='30' fill='red'/></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(warm());
+    DocState* state = ui->document->state;
+    uint64_t selectors = doc_state_selector_version(state);
+    for (unsigned step = 1; step <= 3; step++) {
+        uint64_t content = doc_state_content_version(state);
+        float offset = (float)step * 10;
+        doc_state_sync_viewport_scroll(state, ui->document, 0, offset);
+        EXPECT_EQ(doc_state_content_version(state), content + 1);
+        EXPECT_EQ(doc_state_selector_version(state), selectors);
+        doc_state_sync_viewport_scroll(state, ui->document, 0, offset);
+        EXPECT_EQ(doc_state_content_version(state), content + 1);
+        EXPECT_EQ(doc_state_selector_version(state), selectors);
+        ASSERT_NO_FATAL_FAILURE(paint(50, 50));
+        EXPECT_EQ(layer_images, 1u);
+        EXPECT_EQ(counters.layer_recordings, 0u);
+        test_radiant_expect_surface_pixel(ui->surface, 60, 60, 255, 0, 0);
+    }
+}
+
+TEST_F(SvgLayerScrollTest, ForeignHtmlScrollingChangesPixelsAndRestartsCapture) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='60' height='40' style='display:block'>"
+        "<foreignObject width='60' height='40'><div xmlns='http://www.w3.org/1999/xhtml' id='scroll' "
+        "style='width:60px;height:40px;overflow:auto'><div style='height:40px;background:red'></div>"
+        "<div style='height:80px;background:blue'></div></div></foreignObject></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(warm());
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(scroll("scroll", 40));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+}
+
+TEST_F(SvgLayerScrollTest, ForeignHtmlOutsideTheRootKeepsConservativeScrollInvalidation) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='60' height='40' style='display:block'>"
+        "<rect width='40' height='30' fill='red'/></svg><svg width='60' height='40'>"
+        "<foreignObject width='60' height='40'><div xmlns='http://www.w3.org/1999/xhtml' id='scroll' "
+        "style='width:60px;height:40px;overflow:auto'><div style='height:200px'></div></div>"
+        "</foreignObject></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(warm());
+    ASSERT_NO_FATAL_FAILURE(scroll("scroll", 10));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+}
+
+TEST_F(SvgLayerScrollTest, AddingAndRemovingForeignHtmlRefreshesTheScrollDependency) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='60' height='40' style='display:block'>"
+        "<rect width='40' height='30' fill='red'/></svg><svg id='other' width='60' height='40'></svg>"
+        "<div id='scroll' style='height:20px;overflow:auto'><div style='height:200px'></div></div>"
+        "</body></html>"));
+    ASSERT_NO_FATAL_FAILURE(warm());
+    DomElement* other = dom_find_element_by_id(ui->document->root, "other"); ASSERT_NE(other, nullptr);
+    MarkBuilder builder(ui->document->input);
+    Element* source = builder.element("foreignObject").final().element;
+    DomElement* foreign = DomElement::create(ui->document, "foreignObject", source); ASSERT_NE(foreign, nullptr);
+    ASSERT_TRUE(other->append_child(foreign));
+    ASSERT_TRUE(dom_element_is_svg(foreign));
+    dom_notify_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, foreign, other, nullptr, nullptr);
+    ASSERT_NO_FATAL_FAILURE(warm());
+    ASSERT_NO_FATAL_FAILURE(scroll("scroll", 10));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 1u);
+    ASSERT_TRUE(other->remove_child(foreign));
+    dom_notify_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, foreign, other, nullptr, nullptr);
+    ASSERT_NO_FATAL_FAILURE(warm());
+    ASSERT_NO_FATAL_FAILURE(scroll("scroll", 20));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint());
+    EXPECT_EQ(counters.layer_recordings, 0u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+}
+
+class SvgVectorCacheTest : public SvgLayerScrollTest {
+    char* previous_mode = nullptr;
+protected:
+    void SetUp() override {
+        SvgLayerScrollTest::SetUp();
+        const char* mode = getenv("RADIANT_SVG_VECTOR_CACHE");
+        if (mode) previous_mode = mem_strdup(mode, MEM_CAT_RENDER);
+        setenv("RADIANT_SVG_VECTOR_CACHE", "on", 1);
+    }
+    void TearDown() override {
+        SvgLayerScrollTest::TearDown();
+        if (previous_mode) setenv("RADIANT_SVG_VECTOR_CACHE", previous_mode, 1);
+        else unsetenv("RADIANT_SVG_VECTOR_CACHE");
+        mem_free(previous_mode);
+    }
+    void expect_uncached_parity(float x = 0, float y = 0,
+        const RdtMatrix* matrix = nullptr, const Bound* clip = nullptr) {
+        uint32_t expected[160 * 120];
+        ASSERT_EQ((size_t)ui->surface->pitch * (size_t)ui->surface->height, sizeof(expected));
+        memcpy(expected, ui->surface->pixels, sizeof(expected));
+        setenv("RADIANT_SVG_VECTOR_CACHE", "off", 1);
+        ASSERT_NO_FATAL_FAILURE(paint(x, y, matrix, clip));
+        EXPECT_EQ(counters.svg_vector_hits, 0u);
+        EXPECT_EQ(memcmp(expected, ui->surface->pixels, sizeof(expected)), 0);
+        setenv("RADIANT_SVG_VECTOR_CACHE", "on", 1);
+    }
+};
+
+TEST_F(SvgVectorCacheTest, ReusesMovedOverflowInkWithTheCurrentCallerClip) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='20' height='20' "
+        "style='display:block;overflow:visible'><rect x='15' width='30' height='20' fill='red'/></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 35, 10, 255, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(paint(40.25f, 30.5f));
+    EXPECT_EQ(counters.svg_vector_recordings, 0u); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    EXPECT_EQ(counters.command_copy_bytes, 0u); EXPECT_EQ(counters.payload_copy_bytes, 0u);
+    test_radiant_expect_surface_pixel(ui->surface, 75, 40, 255, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(40.25f, 30.5f));
+    Bound clip = {0, 0, 65, 120};
+    ASSERT_NO_FATAL_FAILURE(paint(40, 30, nullptr, &clip)); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 60, 40, 255, 0, 0);
+    test_radiant_expect_surface_pixel(ui->surface, 70, 40, 255, 255, 255);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(40, 30, nullptr, &clip));
+}
+
+TEST_F(SvgVectorCacheTest, LocalAndCrossRootResourceMutationsRebuildVectorCommands) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg width='0' height='0' style='display:block'><defs><linearGradient id='ramp'>"
+        "<stop id='stop' stop-color='red'/></linearGradient></defs></svg>"
+        "<svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<rect id='ink' width='40' height='30' fill='url(#ramp)'/></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+    DomElement* stop = dom_find_element_by_id(ui->document->root, "stop"); ASSERT_NE(stop, nullptr);
+    ASSERT_TRUE(stop->set_attribute("stop-color", "blue"));
+    dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, stop, stop->parent, "stop-color", "red");
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 0, 0, 255);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    DomElement* ink = dom_find_element_by_id(ui->document->root, "ink"); ASSERT_NE(ink, nullptr);
+    ASSERT_TRUE(ink->set_attribute("fill", "red"));
+    dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, ink, ink->parent, "fill", "url(#ramp)");
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 0u);
+    test_radiant_expect_surface_pixel(ui->surface, 10, 10, 255, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity());
+}
+
+TEST_F(SvgVectorCacheTest, ScrollKeepsVectorPaintButSelectorStateRebuildsIt) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><head><style>#ink:hover{fill:blue}</style></head><body style='margin:0'>"
+        "<svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<rect id='ink' width='40' height='30' fill='red'/></svg>"
+        "<div id='scroll' style='height:20px;overflow:auto'><div style='height:200px'></div></div></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(scroll("scroll", 10));
+    ASSERT_NO_FATAL_FAILURE(paint(50, 50)); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    DomElement* ink = dom_find_element_by_id(ui->document->root, "ink"); ASSERT_NE(ink, nullptr);
+    doc_state_set_hover_target(ui->document->state, ink); radiant_recascade_document(ui->document);
+    ASSERT_NO_FATAL_FAILURE(paint(50, 50)); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 60, 60, 0, 0, 255);
+    ASSERT_NO_FATAL_FAILURE(paint(50, 50)); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(50, 50));
+}
+
+TEST_F(SvgVectorCacheTest, LinearTransformAndUsedViewportChangesRebuildVectorPaint) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' "
+        "style='display:block;overflow:visible'><rect width='100%' height='100%' fill='red'/></svg></body></html>"));
+    RdtMatrix matrix = {1, .25f, 10, .125f, 1, 5, 0, 0, 1};
+    ASSERT_NO_FATAL_FAILURE(paint(0, 0, &matrix));
+    matrix.e13 += 15; matrix.e23 += 10;
+    ASSERT_NO_FATAL_FAILURE(paint(0, 0, &matrix)); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    matrix.e11 = 2;
+    ASSERT_NO_FATAL_FAILURE(paint(0, 0, &matrix)); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    ASSERT_NO_FATAL_FAILURE(paint(0, 0, &matrix)); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    lam::view_require_block(svg)->width += 10;
+    ASSERT_NO_FATAL_FAILURE(paint(0, 0, &matrix)); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    ASSERT_NO_FATAL_FAILURE(paint(0, 0, &matrix)); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(0, 0, &matrix));
+}
+
+TEST_F(SvgVectorCacheTest, RasterizedEffectsKeepDirectRecording) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<g opacity='.5'><rect width='40' height='30' fill='red'/><rect x='10' width='20' height='30' fill='blue'/></g>"
+        "</svg></body></html>"));
+    for (unsigned step = 0; step < 3; step++) {
+        ASSERT_NO_FATAL_FAILURE(paint((float)step * 10, 0));
+        EXPECT_EQ(counters.svg_vector_recordings, 1u); EXPECT_EQ(counters.svg_vector_hits, 0u);
+    }
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(20, 0));
+}
+
+TEST_F(SvgVectorCacheTest, HostForeignHtmlKeepsConservativeRecording) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<rect width='40' height='30' fill='red'/></svg><svg width='0' height='0'>"
+        "<foreignObject width='10' height='10'><div xmlns='http://www.w3.org/1999/xhtml'>x</div></foreignObject></svg>"
+        "</body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint(20, 20));
+    EXPECT_EQ(counters.svg_vector_recordings, 1u); EXPECT_EQ(counters.svg_vector_hits, 0u);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity(20, 20));
+}
+
+TEST_F(SvgVectorCacheTest, PublishedFrameOutlivesVectorRegistryAndDocument) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<rect x='15' width='40' height='30' fill='red'/></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint(20, 20));
+    ASSERT_EQ(counters.svg_vector_hits, 1u);
+    DisplayList pinned;
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+        context.has_transform = true; context.transform = rdt_matrix_translate(20, 20);
+        render_inline_svg(&context, lam::view_require_block(svg));
+        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+        ASSERT_TRUE(dl_copy_range(&pinned, frame.list(), 0, frame.list()->item_count() - 1));
+    }
+    render_export_session_end(&session); ui = nullptr; svg = nullptr;
+    ASSERT_TRUE(dl_validate(&pinned, nullptr));
+    ImageSurface* surface = image_surface_create(160, 120); ASSERT_NE(surface, nullptr);
+    memset(surface->pixels, 255, surface->pitch * surface->height);
+    RdtVector vector = {}; rdt_vector_init(&vector, (uint32_t*)surface->pixels, 160, 120, surface->pitch / 4);
+    ScratchArena scratch = {}; Bound viewport = {0, 0, 160, 120};
+    dl_replay(&pinned, &vector, surface, &viewport, &scratch, 1, nullptr);
+    test_radiant_expect_surface_pixel(surface, 60, 30, 255, 0, 0);
+    rdt_vector_destroy(&vector); scratch_release(&scratch); image_surface_destroy(surface); dl_destroy(&pinned);
+}
+
+TEST_F(SvgVectorCacheTest, HtmlCaptureSharesWarmSvgCommandsAcrossBothCacheTeardowns) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<defs><linearGradient id='g'><stop stop-color='blue'/><stop offset='1' stop-color='green'/></linearGradient></defs>"
+        "<rect x='15' width='90' height='30' fill='red'/><path d='M5 40h90v20H5z' fill='url(#g)'/>"
+        "</svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    DisplayList assembled;
+    uint32_t expected[160 * 120];
+    Pool* owner_pool = pool_create(); ASSERT_NE(owner_pool, nullptr);
+    auto* consumer = retained_dl_cache_create(owner_pool); ASSERT_NE(consumer, nullptr);
+    {
+        RenderProfiler profiler = {}; RasterRenderContext context;
+        RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
+        int begin = dl_begin_element(frame.list(), 49010, 0, 0, 160, 120);
+        context.block.clip = {0, 0, 70, 120};
+        render_inline_svg(&context, lam::view_require_block(svg));
+        PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
+        dl_end_element(frame.list(), begin);
+        memset(ui->surface->pixels, 255, sizeof(expected));
+        Bound viewport = {0, 0, 160, 120};
+        dl_replay(frame.list(), &context.vec, ui->surface, &viewport, &context.scratch, 1, nullptr);
+        test_radiant_expect_surface_pixel(ui->surface, 60, 10, 255, 0, 0);
+        test_radiant_expect_surface_pixel(ui->surface, 80, 10, 255, 255, 255);
+        memcpy(expected, ui->surface->pixels, sizeof(expected));
+        counters = {}; RenderPipelineMetricsScope probe(&counters);
+        DisplayResourceSummary* resources = nullptr;
+        ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, frame.list(), frame.list()->item_count(), &resources, &assembled));
+        EXPECT_EQ(counters.retained_foreign_chunks, 1u);
+        EXPECT_TRUE(dl_resources_current(&assembled, 0, 0));
+        dl_resource_summary_destroy(resources);
+    }
+    retained_dl_cache_destroy(consumer); pool_destroy(owner_pool);
+    render_export_session_end(&session); ui = nullptr; svg = nullptr;
+    ASSERT_TRUE(dl_validate(&assembled, nullptr));
+    ImageSurface* surface = image_surface_create(160, 120); ASSERT_NE(surface, nullptr);
+    memset(surface->pixels, 255, sizeof(expected));
+    RdtVector vector = {}; rdt_vector_init(&vector, (uint32_t*)surface->pixels, 160, 120, surface->pitch / 4);
+    ScratchArena scratch = {}; Bound viewport = {0, 0, 160, 120};
+    dl_replay(&assembled, &vector, surface, &viewport, &scratch, 1, nullptr);
+    EXPECT_EQ(memcmp(expected, surface->pixels, sizeof(expected)), 0);
+    rdt_vector_destroy(&vector); scratch_release(&scratch); image_surface_destroy(surface); dl_destroy(&assembled);
+}
+
+TEST_F(SvgVectorCacheTest, FontAndImageEpochsInvalidateOtherwiseStablePaint) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='40' height='30' style='display:block;overflow:visible'>"
+        "<rect width='40' height='30' fill='red'/></svg></body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    font_context_reset_glyph_caches(ui->font_ctx);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    ImageSurface* image = image_surface_create(2, 2); ASSERT_NE(image, nullptr);
+    ASSERT_EQ(image_cache_adopt(ui, "vector-epoch-test", image), image);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    image_surface_bump_generation(image);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity());
+}
+
+TEST_F(SvgVectorCacheTest, AnimationSamplingRebuildsWithoutChangingBaseAttributes) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><svg id='scene' width='60' height='30' style='display:block;overflow:visible'>"
+        "<rect width='20' height='20' fill='red'><animate attributeName='x' from='0' to='30' dur='2s' fill='freeze'/>"
+        "</rect></svg></body></html>"));
+    svg_animation_pause(svg, true); svg_animation_set_time(svg, 0);
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    svg_animation_set_time(svg, 1);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_recordings, 1u);
+    test_radiant_expect_surface_pixel(ui->surface, 5, 10, 255, 255, 255);
+    test_radiant_expect_surface_pixel(ui->surface, 25, 10, 255, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(paint()); EXPECT_EQ(counters.svg_vector_hits, 1u);
+    ASSERT_NO_FATAL_FAILURE(expect_uncached_parity());
+}
+
 TEST(PaintOwnership, ForeignHtmlCaptureRestartsPaintingInsideForegroundSvg) {
     rdt_engine_init(0);
     RenderExportSession session = {};
@@ -6147,31 +6711,37 @@ TEST(PaintOwnership, SvgPhasesKeepForeignHtmlInsideItsSubscene) {
     DomElement* node = dom_find_element_by_id(ui->document->root, "scene"); ASSERT_NE(node, nullptr);
     ASSERT_TRUE(radiant_stack_is_context(node));
     ASSERT_TRUE(node->is_block());
-    const struct { RadiantPaintPhase phase; bool host_schedule, blue_boundary, red_content; } visits[] = {
-        {RADIANT_PAINT_BLOCK_BACKGROUNDS, true, false, false},
-        {RADIANT_PAINT_FOREGROUND, true, true, true},
-        {RADIANT_PAINT_BLOCK_BACKGROUNDS, false, true, false}
+    struct PhaseProbe {
+        RadiantPaintPhase phase;
+        bool parent_stack;
+        uint8_t outside[3], inside[3];
     };
-    for (const auto& visit : visits) {
-        SCOPED_TRACE(visit.host_schedule);
-        SCOPED_TRACE(visit.phase);
+    const PhaseProbe probes[] = {
+        {RADIANT_PAINT_BLOCK_BACKGROUNDS, false, {0, 0, 255}, {0, 0, 255}},
+        {RADIANT_PAINT_FOREGROUND, false, {255, 255, 255}, {255, 0, 0}},
+        {RADIANT_PAINT_BLOCK_BACKGROUNDS, true, {255, 255, 255}, {255, 255, 255}},
+        {RADIANT_PAINT_FOREGROUND, true, {0, 0, 255}, {255, 0, 0}}
+    };
+    for (const PhaseProbe& probe : probes) {
+        SCOPED_TRACE(static_cast<unsigned>(probe.phase));
+        SCOPED_TRACE(probe.parent_stack);
         RenderProfiler profiler = {}; RasterRenderContext context;
         RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
-        context.paint_phase = visit.phase;
+        context.paint_phase = probe.phase;
         for (size_t i = 0; i < (size_t)ui->surface->width * ui->surface->height; i++)
             ((uint32_t*)ui->surface->pixels)[i] = 0xffffffffu;
-        // the host schedules a complete SVG atom; direct producer visits still honor partial phases.
-        if (visit.host_schedule) render_children(&context, static_cast<View*>(node));
-        else render_block_view(&context, lam::view_require_block(node));
+        // SVG 2 §3.4.1 makes the outer SVG atomic to its parent; its producer still owns partial phases.
+        if (probe.parent_stack) render_children(&context, static_cast<View*>(node));
+        else if (probe.phase == RADIANT_PAINT_BLOCK_BACKGROUNDS)
+            render_block_view(&context, lam::view_require_block(node));
+        else render_inline_svg(&context, lam::view_require_block(node));
         PaintRecordTarget target = rc_record_target(&context); paint_record_lower_pending(&target);
         ASSERT_TRUE(dl_validate(frame.list(), nullptr));
         dl_replay(frame.list(), &context.vec, ui->surface, &context.block.clip, &context.scratch, 1, nullptr);
         test_radiant_expect_surface_pixel(ui->surface, 40, 45,
-            visit.blue_boundary ? 0 : 255, visit.blue_boundary ? 0 : 255, 255);
-        if (!visit.red_content) {
-            test_radiant_expect_surface_pixel(ui->surface, 80, 45,
-                visit.blue_boundary ? 0 : 255, visit.blue_boundary ? 0 : 255, 255);
-        } else test_radiant_expect_surface_pixel(ui->surface, 80, 45, 255, 0, 0);
+            probe.outside[0], probe.outside[1], probe.outside[2]);
+        test_radiant_expect_surface_pixel(ui->surface, 80, 45,
+            probe.inside[0], probe.inside[1], probe.inside[2]);
     }
     render_export_session_end(&session); rdt_engine_term();
 }

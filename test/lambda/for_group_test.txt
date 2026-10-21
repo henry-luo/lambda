@@ -18,7 +18,7 @@
     n: 1
   }, {
     value: null,
-    n: 0
+    n: 2
   }]
 {
   year: 2024,
@@ -33,17 +33,33 @@
 {
   length: 1,
   n: 1,
-  first: "a"
+  members: ["a"]
 }
 {
   length: 2,
-  n: 1,
-  first: "bbcc"
+  n: 2,
+  members: ["bb", "cc"]
 }
 {
   length: 3,
   n: 1,
-  first: "ddd"
+  members: ["ddd"]
 }
+[{
+    word: "be",
+    freq: 2
+  }, {
+    word: "to",
+    freq: 2
+  }, {
+    word: "not",
+    freq: 1
+  }, {
+    word: "or",
+    freq: 1
+  }]
+[[3, 3], [1]]
+[array, array]
+[5, 4]
 [error, error]
 "All for group clause tests completed!"

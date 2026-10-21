@@ -1,0 +1,14 @@
+{
+  "name":"Native select caption and arrow follow ancestor transforms",
+  "html":"test/ui/test_form_transform.html",
+  "viewport":{"width":640,"height":400},
+  "events":[
+    {"type":"advance_time","ms":20},
+    {"type":"assert_pixel","target":{"selector":"#translated","offset_x":130,"offset_y":16},"max_r":100,"max_g":100,"max_b":100},
+    {"type":"assert_pixel","target":{"selector":"#translated","offset_x":6,"offset_y":12},"max_r":200,"max_g":200,"max_b":200},
+    {"type":"assert_pixel","target":{"selector":"#rotated","offset_x":16,"offset_y":130},"max_r":100,"max_g":100,"max_b":100},
+    {"type":"assert_pixel","target":{"selector":"#rotated","offset_x":20,"offset_y":6},"max_r":200,"max_g":200,"max_b":200},
+    {"type":"assert_pixel","target":{"selector":"#translated-check","offset_x":5,"offset_y":5},"max_r":80,"min_g":130,"max_b":140},
+    {"type":"assert_pixel","target":{"selector":"#translated-radio","offset_x":10,"offset_y":10},"max_r":80,"min_g":130,"max_b":140}
+  ]
+}

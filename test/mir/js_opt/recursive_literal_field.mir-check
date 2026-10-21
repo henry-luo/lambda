@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v25, D8.2.4-D8.2.6, D5.3/D5.4: formal MIR physical contract for RecursiveLiteralReturnShapeUsesGuardedMapSlots. The original JS operations and output/differential assertions remain in test_js_opt_gtest.cpp; retired LJS runtime counter expectations are replaced by exact source-scope lowering checks.",
+  "description": "D8.1.3v27, D8.2.4-D8.2.6, D5.3/D5.4: formal MIR physical contract for RecursiveLiteralReturnShapeUsesGuardedMapSlots. The original JS operations and output/differential assertions remain in test_js_opt_gtest.cpp; retired LJS runtime counter expectations are replaced by exact source-scope lowering checks. The terminal CLI plan keeps closed binding facts; counts cover that default entry.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",
@@ -10,7 +10,7 @@
       ],
       "count": {
         "call\tmvp_lmd_object_new": 1,
-        "call\tmvp_lmd_primitive_to_number": 2,
+        "call\tmvp_lmd_primitive_to_number": 8,
         "call\tmvp_lmd_throw": 1
       }
     },
@@ -22,9 +22,9 @@
       "count": {
         "dsub\t": 2,
         "call\tmvp_lmd_object_new": 2,
-        "call\tmap_shape_set": 2,
-        "call\tmvp_lmd_to_primitive": 2,
-        "call\tmvp_lmd_primitive_to_number": 3
+        "call\tmap_shape_set": 0,
+        "call\tmvp_lmd_to_primitive": 0,
+        "call\tmvp_lmd_primitive_to_number": 0
       }
     },
     {
@@ -33,10 +33,10 @@
         "ret\t"
       ],
       "count": {
-        "dadd\t": 2,
+        "dadd\t": 6,
         "call\tmap_shape_field_to_item": 3,
         "call\tmvp_lmd_to_primitive": 2,
-        "call\tmvp_lmd_primitive_to_number": 2,
+        "call\tmvp_lmd_primitive_to_number": 3,
         "call\tmvp_lmd_class_property": 3,
         "call\tmvp_lmd_string_concat": 2
       }

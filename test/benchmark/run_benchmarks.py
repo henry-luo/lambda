@@ -663,9 +663,8 @@ def lambda_run_cmd(script_path, tier):
     return f"{prefix}{LAMBDA_EXE} run {script_path}"
 
 
-# LambdaJS follows the same two-set split as MIR. D8.1.3v19 made an unset
-# JS_EXEC_BACKEND select AST-first AUTO, so set 1 pins the whole-module MIR
-# lane (the historical LambdaJS series) and set 2 times the shipped AUTO default.
+# LambdaJS set 1 pins MIR; set 2 times the configured default end to end.
+# D8.1.3v27 makes MVP MIR the unset default; explicit AST/AUTO overrides remain.
 def lambdajs_run_cmd(script_path, backend):
     # JS_EXECUTION_BACKEND is the pre-2026-10-03 name, still read by archived binaries
     prefix = (f"JS_EXEC_BACKEND={backend} JS_EXECUTION_BACKEND={backend} "
@@ -679,7 +678,7 @@ def time_lambdajs(results, row, suite, name, script_path, num_runs, timeout_s):
         lambdajs_run_cmd(script_path, "mir"), num_runs, timeout_s)
     record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail)
     print(f" {fmt_ms(e if e is not None else w)}")
-    print(f"  LJS auto ", end="", flush=True)
+    print(f"  LJS default ", end="", flush=True)
     aw, ae, aok, astatus, adetail = time_run_benchmark(
         lambdajs_run_cmd(script_path, None), num_runs, timeout_s)
     record_time_result(results, row, suite, name, "lambdajs_e2e",

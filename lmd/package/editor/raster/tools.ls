@@ -7,7 +7,7 @@ pub let catalog = [
     {id:"lasso",label:"Lasso",key:"l",icon:"⌁"},{id:"wand",label:"Wand",key:"w",icon:"✧"},
     {id:"brush",label:"Brush",key:"b",icon:"✎"},{id:"erase",label:"Erase",key:"e",icon:"▱"},
     {id:"bucket",label:"Fill",key:"f",icon:"▣"},{id:"gradient",label:"Gradient",key:"g",icon:"▥"},
-    {id:"transform",label:"Transform",key:"t",icon:"⤢"},
+    {id:"transform",label:"Transform",key:"t",icon:"⤢"},{id:"crop",label:"Crop",key:"c",icon:"⌗"},
     {id:"clone",label:"Clone",key:"s",icon:"♧"},{id:"heal",label:"Heal",key:"j",icon:"✚"},
     {id:"dodge",label:"Dodge",key:"d",icon:"☀"},{id:"burn",label:"Burn",key:"k",icon:"◕"},
     {id:"sponge",label:"Sponge",key:"r",icon:"▨"},{id:"blur",label:"Blur",key:"u",icon:"◉"},
@@ -28,7 +28,7 @@ pub fn configure(st,command) any^ {
         not (requested is map) or any([for (key,value in requested) not (string(key) in [for (limit in limits) limit.key])]) or
         not all([for (limit in limits) model.finite(brush[limit.key]) and brush[limit.key]>=limit.low and brush[limit.key]<=limit.high]))
         raise error("Raster: invalid tool setting")
-    else {*:st,tool:tool,brush:brush,selection_mode:mode,tolerance:tolerance,gradient_kind:gradient,
+    else {*:st,tool:tool,crop:if (tool == st.tool) st.crop else null,brush:brush,selection_mode:mode,tolerance:tolerance,gradient_kind:gradient,
         foreground:colors.parse(model.value(command.foreground,st.foreground),"raster.foreground")^,
         background:colors.parse(model.value(command.background,st.background),"raster.background")^}
 }

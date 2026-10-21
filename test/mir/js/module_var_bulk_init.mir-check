@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v25, D8.4.3v2: global declaration instantiation precedes formal entry. Emitted global operations are reads, with no legacy per-variable module-store protocol.",
+  "description": "D8.1.3v27, D8.4.3v2: global declaration instantiation precedes formal entry. Emitted global operations are reads, with no legacy per-variable module-store protocol. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",
       "count": {
-        "call\tmvp_lmd_dynamic_global_p_r6_n1_a5, mvp_lmd_dynamic_global,": 10,
-        ", 72057594037927936, 0, 0": 10
+        "call\tmvp_lmd_dynamic_global_p_r6_n1_a5, mvp_lmd_dynamic_global,": 0,
+        ", 72057594037927936, 0, 0": 0
       },
       "forbid": [
         "js_init_module_vars_undefined_bulk",

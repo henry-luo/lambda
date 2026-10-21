@@ -13,6 +13,6 @@ let customers = [
 
 [for (o in orders, c in customers on o.cust_id == c.id
       group by c.name into g)
-  {name: g.name, n: len(g)}]
+  {name: name, n: len(g)}]
 
 "All for join group clause tests completed!"

@@ -2440,7 +2440,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             apply_element_default_style(lycon, dom_elem);
             // CSS 2.1: Elements without specified styles still have computed values
             if (lycon->font.style) {
-                if (!dom_elem->font) {
+                // A scratch-lived anonymous item has no font slot of its own to
+                // allocate: it keeps inheriting the context font, which outlives
+                // the pass. A pool prop would leak per pass, and a scratch one
+                // would dangle in the text views that borrow it.
+                if (!dom_elem->font && !dom_elem->scratch_lived()) {
                     dom_elem->ensure_font(lycon);
                 }
                 if (dom_elem->font) {

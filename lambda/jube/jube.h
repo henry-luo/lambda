@@ -1201,6 +1201,11 @@ struct JubeModuleDef {
     // name exactly these drivers (D7.3.4: the descriptor is ground truth).
     const RdbDriver* const* rdb_drivers;
     int32_t rdb_driver_count;
+
+    // D8.1.3v27: no eval, source loading, or externally supplied script entry.
+    // Calling callbacks supplied by the current script is allowed. Absent/zero
+    // means unknown; older descriptors retain conservative source effects.
+    uint32_t script_source_closed;
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

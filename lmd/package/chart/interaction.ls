@@ -274,8 +274,9 @@ fn overlay(frame, definition, st) {
                 {*:value, stores: map([frame.view, {*:selected, *:map([entry.field, bounds])}])}])}})>
 }
 fn crosshairs(frame, spec) => <g class: "chart-crosshairs", 'pointer-events': "none",
-    for (item in spec._behaviors where item.type == "crosshair",
-        let value = behavior.value(spec._parameter_state,item,spec._view_path) where value.display != null) (
+    for (item in spec._behaviors,
+        let value = behavior.value(spec._parameter_state,item,spec._view_path)
+        where item.type == "crosshair" and value.display != null) (
         let inverse = if (frame.coordinate != null) spatial.invert(frame.coordinate, value.display) else null,
         let x = if (inverse is array) inverse[0] * frame.width else value.display[0],
         let y = if (inverse is array) (1.0 - inverse[1]) * frame.height else value.display[1],

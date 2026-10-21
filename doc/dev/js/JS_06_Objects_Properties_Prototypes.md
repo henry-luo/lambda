@@ -193,7 +193,7 @@ sanctioned design is a **compile-predicted** shape — immutable metadata derive
 from the constructor's `this.x = …` prefix and from each object-literal site —
 allocated with reserved slots so constructor stores are existing-slot writes,
 guarded inline at the access site, with the shared kernel on a miss. See
-`vibe/jube/JS_Tune10_Fast_Paths.md` T10-2/T10-3.
+`vibe/jube/JS_Tune_History.md` §4.3 T10-2/T10-3.
 
 What the retired mechanism did, for reference: `js_set_class_ctor_shape_metadata`
 recorded the constructor field layout in the callable class carrier without

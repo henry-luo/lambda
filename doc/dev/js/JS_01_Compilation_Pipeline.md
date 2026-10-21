@@ -1,9 +1,9 @@
 # LambdaJS — Compilation Pipeline
 
-> **Last verified against tree:** 2026-10-18 (interpreter alignment; qualification is recorded separately).
+> **Last verified against tree:** 2026-10-20 (integration in progress; qualification is recorded separately).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
-> **Authority:** D8.1.3v26, D8.2.3, D8.5.1v2 and D5.3/D5.4.
+> **Authority:** D8.1.3v27, D8.2.3, D8.5.1v2 and D5.3/D5.4.
 > **Primary sources:** `lambda/js/js_execution.cpp`, `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, `lambda/js/js_code_cache.cpp`, `lambda/js/js_source_module.cpp` and `lambda/js/js_compile_recovery.cpp`.
 
 ## 1. Engines and public entry points
@@ -13,6 +13,16 @@ MVP-Lmd is the formal JavaScript MIR compiler (**D8.1.3v25**). The legacy
 have been removed. Public `transpile_js_to_mir*` names remain host APIs;
 they select MVP for MIR execution. `transpile_js_module_to_mir` uses the same
 engine selection for modules.
+
+`lambda.exe js app.js` and `js --runtime=mvp-lmd app.js` use one option
+parser and execution entry, including explicit AST/AUTO policy. A terminal
+CLI Script preserves closed-unit planning unless its source or host dependencies
+require the complete realm. Document, module and later-Script entries still
+use broad realm admission; finer effect analysis remains in progress.
+`--timing` reports execution separately from compilation. `-p` prints the
+Script completion using MVP value formatting after the timed body.
+See the [integration record](../../../vibe/impl/JS_MVP_Integration.md)
+for the remaining work and qualification.
 
 Explicit AST and AUTO execution retain the shared interpreter. AUTO function
 and loop promotion compile through MVP. Dynamic source (`eval`, Function-family
@@ -64,6 +74,10 @@ execution and its native units through callable and heap finalization
 (**D5.3/D5.4**). Shared AST/native functions retain their own executable
 capabilities. Promoted AST definitions keep their MVP bodies in precisely
 traced code-record cells; shared compiled-call entries remain available.
+
+Standalone API clients acquire an ordinary Lambda Runtime and use the same
+context initializer and runtime cleanup. The MVP execution record no longer
+embeds an independent EvalContext. Optional JS capsules remain lazy.
 
 Parser/source recovery is implemented in `js_compile_recovery.cpp`.
 `JsCompileRecoveryState` owns interrupted frontend builders and source buffers.

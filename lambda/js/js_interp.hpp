@@ -208,9 +208,11 @@ public:
     JsInterpHostScope& operator=(const JsInterpHostScope&) = delete;
 };
 struct JsInterpEnv;
+struct JsGlobalEnvironment;
 Item js_interp_execute_host_source(const JsInterpHostOps*, const char*, size_t,
-    const char* filename, bool indirect_eval, JsInterpEnv** script_environment = NULL);
-Item js_interp_host_global_lexical(const JsInterpHostOps*, JsInterpEnv*,
+    const char* filename, bool indirect_eval, JsInterpEnv** script_environment = NULL,
+    JsGlobalEnvironment* global_environment = NULL);
+Item js_interp_host_global_lexical(const JsInterpHostOps*, JsGlobalEnvironment*,
     Item key, Item value, int operation, bool* found);
 Item js_interp_call_host_function(const JsInterpHostOps*, Item wrapper,
     JsFunction*, Item receiver, Item*, int, Item new_target);

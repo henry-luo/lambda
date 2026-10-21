@@ -19,6 +19,7 @@
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../core/print.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
@@ -116,6 +117,7 @@ extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
 extern "C" Path* path_append_op(Pool* pool, Path* base, Path* op);
 extern "C" bool path_has_wildcards(Path* path);
 extern "C" bool path_is_directory(Path* path);
+extern "C" Path* path_query(Pool* pool, Path* base, uint64_t type_item, bool self);
 extern "C" Path* path_qualify_default(Pool* pool, Path* path);
 extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
@@ -4634,11 +4636,44 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
 // yields: `null` for no match, the match itself for one, and a list for more
 // (S2.5.5v2). It is a value, never an item-position producer, so `[e?T, 9]`
 // with no match is `[null, 9]`, exactly like `[e[-1], 9]`.
+// A query step on a path keeps its type for as long as the path's pool lives.
+// A type value is pool-owned except the simple wrappers the runtime builds on
+// the GC heap (`type(x)`, contract values); those are copied into the pool, and
+// `type(x)` keeps its payload inline in the same block, so that is copied too.
+static uint64_t pin_query_type(Item type_val) {
+    Type* type = type_val.type;
+    if (!type || type->kind != TYPE_KIND_SIMPLE) return type_val.item;
+    TypeType* source = (TypeType*)type;
+    TypeType* pinned = (TypeType*)alloc_type(context->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    if (!pinned) return 0;
+    memcpy(pinned, source, sizeof(TypeType));
+    Type* inline_payload = (Type*)((uint8_t*)source + sizeof(TypeType));
+    if (source->type == inline_payload) {
+        Type* copy = (Type*)alloc_type(context->pool, inline_payload->type_id, sizeof(Type));
+        if (!copy) return 0;
+        memcpy(copy, inline_payload, sizeof(Type));
+        pinned->type = copy;
+    }
+    return (uint64_t)(uintptr_t)pinned;
+}
+
+// Printer for a path's query step (registered with the path layer): the type's
+// canonical spelling, which path equality and hashing compare.
+extern "C" void lambda_path_type_printer(uint64_t type_item, void* strbuf) {
+    print_item((StrBuf*)strbuf, (Item){.item = type_item});
+}
+
 Item fn_query(Item data, Item type_val, int direct) {
     TypeId type_tid = get_type_id(type_val);
     if (type_tid != LMD_TYPE_TYPE) {
         log_error("query: 2nd argument must be a type, got: %s", get_type_name(type_tid));
         return ItemNull;
+    }
+    // S2.4.7: on a path the query is a path step, a reference until `#`
+    if (get_type_id(data) == LMD_TYPE_PATH) {
+        uint64_t pinned = pin_query_type(type_val);
+        Path* step = pinned ? path_query(context->pool, data.path, pinned, direct != 0) : NULL;
+        return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
     }
     // use array (not list) to avoid automatic string merging. The walk can
     // allocate -- a virtual carrier's keys and values, a boxed field -- so the
@@ -4726,6 +4761,11 @@ Item fn_child_query(Item data, Item type_val) {
 // Both reuse the type-key walks with the wildcard key, so a list is stepped
 // set-at-a-time and text, a scalar to the walk, has no items.
 extern "C" Item fn_step_items(Item data) {
+    // S2.4.2v5: on a path the wildcard is a path operation, a reference until `#`
+    if (get_type_id(data) == LMD_TYPE_PATH) {
+        Path* step = path_wildcard(context->pool, data.path);
+        return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
+    }
     RootFrame roots(2);
     Rooted<Item> source(roots, data);
     Rooted<Array*> result(roots, array_plain());
@@ -4736,6 +4776,10 @@ extern "C" Item fn_step_items(Item data) {
 }
 
 extern "C" Item fn_step_closure(Item data) {
+    if (get_type_id(data) == LMD_TYPE_PATH) {
+        Path* step = path_wildcard_recursive(context->pool, data.path);
+        return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
+    }
     RootFrame roots(2);
     Rooted<Item> source(roots, data);
     Rooted<Array*> result(roots, array_plain());
@@ -5882,6 +5926,10 @@ static Item force_apply_step(Item value, Path* step) {
         return fn_step_items(value);
     case LPATH_SEG_WILDCARD_REC:
         return fn_step_closure(value);
+    // S2.4.7: inside a document a query step is the value query
+    case LPATH_SEG_QUERY:
+        return fn_query(value, (Item){.item = step->query_type},
+            (step->flags & PATH_FLAG_QUERY_SELF) ? 1 : 0);
     default:
         // A parent/root step is a path operation, not an in-document
         // navigation; it belongs to the prefix, which the walk below guarantees.
@@ -6119,7 +6167,8 @@ static bool force_wild_collect(Path* path, Array* result, struct hashmap* seen) 
     Path* wild = NULL;
     for (Path* probe = path; probe && probe->parent; probe = probe->parent) {
         LPathSegmentType type = PATH_GET_SEG_TYPE(probe);
-        if (type == LPATH_SEG_WILDCARD || type == LPATH_SEG_WILDCARD_REC) wild = probe;
+        if (type == LPATH_SEG_WILDCARD || type == LPATH_SEG_WILDCARD_REC ||
+                type == LPATH_SEG_QUERY) wild = probe;
     }
     RootFrame roots(2);
     Rooted<Item> value(roots, ItemNull);
@@ -6156,13 +6205,19 @@ static bool force_wild_collect(Path* path, Array* result, struct hashmap* seen) 
         force_wild_push(result, seen, value.get());
         return true;
     }
-    matches.set(path_resolve_for_iteration(wild));
+    Pool* pool = context->pool;
+    // S2.4.7: over a directory `?T` is the proper closure and `.?T` the
+    // inclusive one, kept where the path value is T; no file is read
+    bool query = PATH_GET_SEG_TYPE(wild) == LPATH_SEG_QUERY;
+    bool keep_base = query && (wild->flags & PATH_FLAG_QUERY_SELF);
+    Item query_type = {.item = query ? wild->query_type : 0};
+    matches.set(path_resolve_for_iteration(query ? path_wildcard_recursive(pool, prefix) : wild));
     if (matches.get().item == ItemError.item) return false;
     int64_t count = fn_len(matches.get());
-    Pool* pool = context->pool;
-    for (int64_t i = 0; i < count; i++) {
+    for (int64_t i = query && !keep_base ? 1 : 0; i < count; i++) {
         Item match = item_at(matches.get(), i);
         if (get_type_id(match) != LMD_TYPE_PATH) continue;
+        if (query && fn_is(match, query_type) != BOOL_TRUE) continue;
         if (trailing_count == 0) {
             force_wild_push_one(result, seen, match);   // a reference, nothing read
             continue;
@@ -6176,7 +6231,8 @@ static bool force_wild_collect(Path* path, Array* result, struct hashmap* seen) 
     return true;
 }
 
-static Item force_wildcard(Path* path) {
+// The matches of a wildcard or query path as one array, never collapsed.
+static Item force_wildcard_matches(Path* path) {
     RootFrame roots(1);
     Rooted<Array*> result(roots, array_plain());
     struct hashmap* seen = hashmap_new(sizeof(ForceSeenKey), 16, 0, 0,
@@ -6186,8 +6242,18 @@ static Item force_wildcard(Path* path) {
     void* entry = NULL;
     while (hashmap_iter(seen, &iter, &entry)) mem_free(((ForceSeenKey*)entry)->chars);
     hashmap_free(seen);
-    if (!ok) return ItemError;
-    return list_collapse_value({.array = result.get()});
+    return ok ? (Item){.array = result.get()} : ItemError;
+}
+
+static Item force_wildcard(Path* path) {
+    Item matches = force_wildcard_matches(path);
+    return matches.item == ItemError.item ? ItemError : list_collapse_value(matches);
+}
+
+// `for`, `len` and printing enumerate a query path, or a wildcard with steps
+// after it, through the force walk, so they see what `#` yields (S2.4.7).
+extern "C" Item lambda_path_enumerate(Path* path) {
+    return force_wildcard_matches(path);
 }
 
 Item fn_force(Item ref) {

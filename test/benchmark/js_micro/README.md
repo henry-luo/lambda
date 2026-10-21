@@ -2,8 +2,9 @@
 
 One hot loop each, `Date.now()` around the loop only. Used to isolate the
 per-operation costs analysed in
-[`vibe/jube/JS_Tune10_Fast_Paths.md`](../../../vibe/jube/JS_Tune10_Fast_Paths.md)
-§2.3 and to A/B its fixes (§8.3).
+[`vibe/jube/JS_Tune_History.md`](../../../vibe/jube/JS_Tune_History.md)
+§4.3 (Tune10) and to A/B its fixes. The full micro-benchmark tables are in
+`vibe/jube/JS_Tune10_Fast_Paths (done).md` at commit `294779edbb`.
 
 ```bash
 for f in test/benchmark/js_micro/*.js; do ./lambda.exe js "$f"; done

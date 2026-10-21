@@ -1,0 +1,382 @@
+{
+  "name": "Photo album collage: templates, swap, crop, history, styling, scrapbook, save/open and export",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {
+      "key": "PHOTO_ALBUM_DIR",
+      "value": "test/demo/photo-album/fixture"
+    }
+  ],
+  "viewport": {
+    "width": 1400,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-album-landscapes"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collage-button"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('collage').style.display!=='none' && document.querySelectorAll('#cl-canvas-host .cl-cell').length===6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-collage-template='mosaic']"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cl-undo').hasAttribute('disabled') && document.querySelectorAll('#cl-tray .cl-tray-item').length===6"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cl-canvas-host .cl-caption"
+      },
+      "equals": "Landscapes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-template='grid']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collage"
+      },
+      "attribute": "data-template",
+      "equals": "grid"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collage"
+      },
+      "attribute": "data-template",
+      "equals": "mosaic"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collage"
+      },
+      "attribute": "data-template",
+      "equals": "grid"
+    },
+    {
+      "type": "script",
+      "js": "const q=s=>document.querySelector(\"#cl-canvas-host [data-slot='\"+s+\"']\").getAttribute('title');globalThis.t0=q(0);globalThis.t3=q(3)"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='0']"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='3']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cl-ghost').style.display==='block'"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='3']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "const q=s=>document.querySelector(\"#cl-canvas-host [data-slot='\"+s+\"']\").getAttribute('title');q(0)===t3 && q(3)===t0 && document.getElementById('cl-ghost').style.display==='none'"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='1']",
+        "offset_x": 40,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='1']",
+        "offset_x": 70,
+        "offset_y": 55
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='1']",
+        "offset_x": 70,
+        "offset_y": 55
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!/object-position:50% 50%/.test(document.querySelector(\"#cl-canvas-host [data-slot='1'] img\").getAttribute('style'))"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='2']"
+      },
+      "dy": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "/scale\\(1\\.12\\)/.test(document.querySelector(\"#cl-canvas-host [data-slot='2'] img\").getAttribute('style'))"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "/scale\\(1\\)/.test(document.querySelector(\"#cl-canvas-host [data-slot='2'] img\").getAttribute('style'))"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.left1=document.querySelector(\"#cl-canvas-host [data-slot='1']\").style.left"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-gutter"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#cl-canvas-host [data-slot='1']\").style.left!==left1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-bg='charcoal']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "/#1f2124/.test(document.querySelector('#cl-canvas-host .cl-canvas').getAttribute('style'))"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cl-caption"
+      },
+      "text": "Coast walk",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cl-canvas-host .cl-caption"
+      },
+      "equals": "Coast walk"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-credits"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.querySelector('#cl-canvas-host .cl-credits')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-template='scrapbook']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cl-canvas-host .cl-print').length===6 && document.getElementById('cl-shuffle').style.display!=='none'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='4']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#cl-canvas-host [data-slot='4'] .cl-handle\").length===2"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.printLeft=document.querySelector(\"#cl-canvas-host [data-slot='4']\").style.left"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='4']",
+        "offset_x": 120,
+        "offset_y": 130
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='4']",
+        "offset_x": 160,
+        "offset_y": 150
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cl-canvas-host [data-slot='4']",
+        "offset_x": 160,
+        "offset_y": 150
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#cl-canvas-host [data-slot='4']\").style.left!==printLeft"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cl-status"
+      },
+      "equals": "Saved as collages/coast-walk.mark"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cl-saved option').length===1 && !document.getElementById('cl-open').hasAttribute('disabled')"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#cl-size"
+      },
+      "value": "1080"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-export"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cl-status"
+      },
+      "equals": "Exported collages/coast-walk.png (1080 × 1080) and its credits file"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/photo_album/collage.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-template='grid']"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-open"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collage"
+      },
+      "attribute": "data-template",
+      "equals": "scrapbook"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cl-canvas-host .cl-caption"
+      },
+      "equals": "Coast walk"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('collage').style.display==='none'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-library"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#selection-collage"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cl-canvas-host .cl-cell').length===24"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    }
+  ]
+}

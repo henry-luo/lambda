@@ -1,0 +1,48 @@
+{
+  pages: 54,
+  leaves: [29, {
+      front: "cover",
+      back: "endpaper"
+    }, {
+      front: 0,
+      back: 1
+    }, {
+      front: "endpaper",
+      back: "back-cover"
+    }],
+  kinds: ["title", "blank", "chapter", "photos", "photos", "photos", "photos", "photos", "photos", "photos", "photos", "photos"],
+  templates: ["one-landscape", "two-landscapes", "landscape-two-small", "one-landscape", "landscape-two-small", "one-landscape", "four", "landscape-portrait", "two-portraits", "one-portrait", "portrait-two-small", "four"],
+  no_adjacent_repeat: true,
+  no_repeat_across_chapters: true,
+  chapters_on_right: [true, true, true, true, true],
+  chapter_years: [[2019, 20], [2020, 20], [2021, 20], [2022, 20], [2023, 20]],
+  all_printed: true,
+  within_pages: true,
+  tilt_range: true,
+  even_pages: true,
+  first_print: [1, 0.1, 0.23, 0.8, 0.41],
+  choose: ["one-landscape", "one-portrait", "one-portrait", "one-portrait"],
+  fits: [true, false, false],
+  small: [8, ["title", "blank", "chapter", "photos", "chapter", "photos", "photos", "end"], 6],
+  spreads: [["Cover", {
+        left: null,
+        right: "cover"
+      }], ["1", {
+        left: "endpaper",
+        right: 0
+      }], ["2–3", {
+        left: 1,
+        right: 2
+      }], ["4–5", {
+        left: 3,
+        right: 4
+      }], ["Back", {
+        left: "back-cover",
+        right: null
+      }]],
+  spread_photo: [0, 0],
+  turned_for_page: [1, 2, 2, 4],
+  turn: [0, -22.5, -90, -180, -180],
+  drag: [-45, -135, -180],
+  completes: [true, false, true, false]
+}

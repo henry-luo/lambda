@@ -38,7 +38,7 @@ pub fn histogram_chart(counts) => <svg viewBox:"0 0 256 72",width:256,height:72,
 pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
     <header class:"menubar",<strong "λ Photos"> <nav 'aria-label':"Document commands", *[
         button("new","new","New"),button("open","open","Open…"),button("place","place","Place image…"),
-        button("save","save","Save project…"),button("save-psd","psd","Export PSD…"),button("export","export","Export PNG…")]> <span class:"spacer"> <span id:"document-name","Untitled"> <span id:"dirty","">>,
+        button("save","save","Save project…"),button("save-psd","psd","Export PSD…"),button("export","export","Export image…")]> <span class:"spacer"> <span id:"document-name","Untitled"> <span id:"dirty","">>,
     <nav class:"document-tabs",'aria-label':"Open documents",*[<div id:"tabs",role:"tablist">,<span class:"spacer">,
         button("new-tab","new-tab","New tab"),button("open-tab","open-tab","Open in tab…"),button("close-tab","tab-close","Close tab")]>,
     <section class:"options", *[button("undo","history.undo","Undo"),button("redo","history.redo","Redo"),
@@ -53,7 +53,11 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 title:tool.label ++ " (" ++ upper(tool.key) ++ ")",*[tool.icon,<small (tool.label)>]>]]>,
         <section id:"stage",class:"raster-stage",tabindex:"0",'aria-label':"Image workspace",
             <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition">
-                <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">>>,
+                <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">
+                <div class:"raster-crop-shade",*[for (edge in ["top","bottom","left","right"]) <div 'data-crop-shade':edge>]>
+                <div class:"raster-crop">>
+            <div id:"crop-controls",class:"crop-controls",style:"display:none", *[
+                <span "Drag to crop">,button("crop-apply","crop-apply","Apply crop"),button("crop-cancel","crop-cancel","Cancel") ]>>,
         <aside class:"dock", *[
             <section class:"properties", *[<h2 "Properties">,
                 <p id:"target-label","Select a layer">,
@@ -141,11 +145,24 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <section class:"effects-panel", *[<h2 "Editable effects">,<div id:"effects">,
                 <div class:"fields", *[for (control in effects.controls) field("effect-" ++ control.key,control.label,control.value,"number")]>,
                 <div class:"button-grid", *[button("effect-add","effect-add","Add effect"),button("effect-toggle","effect.toggle","Toggle effect"),
-                    button("effect-remove","effect.remove","Remove effect"),button("effect-up","effect-up","Move effect up"),button("effect-down","effect-down","Move effect down")]>]>]>]>,
+                    button("effect-remove","effect.remove","Remove effect"),button("effect-up","effect-up","Move effect up"),button("effect-down","effect-down","Move effect down")]>]>,
+            <section class:"arrange-panel", *[<h2 "Align & distribute">,
+                <label "Relative to" <select id:"align-relative",<option value:"canvas","Canvas"> <option value:"selection","Selected layers">>>,
+                <div class:"button-grid", *[for (mode in ["left","center","right","top","middle","bottom"])
+                    button("align-" ++ mode,"align-" ++ mode,mode),
+                    button("distribute-x","distribute-x","Equal horizontal gaps"),button("distribute-y","distribute-y","Equal vertical gaps")]>]>]>]>,
     <footer class:"statusbar",<output id:"status",role:"status",'aria-live':"polite","Opening sample…"> <span id:"dimensions","">>,
     <section id:"file-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"File operation", *[
         <h2 id:"file-title","Open image">,field("file-path","Path"),
         <p id:"file-help","PNG, JPEG and supported layered PSD files">,
+        <div id:"export-options",style:"display:none", *[
+            <div class:"fields", *[
+                <label "Format" <select id:"export-format",<option value:"png","PNG"> <option value:"jpeg","JPEG">>>,
+                <label "Aspect ratio" <select id:"export-aspect",<option value:"locked","Keep original"> <option value:"free","Free size">>>,
+                field("export-width","Width",1024,"number"),field("export-height","Height",768,"number") ]>,
+            <label id:"export-quality-row","JPEG quality (0–100)" <input id:"export-quality",type:"number",min:0,max:100,value:"90">>,
+            <label "Transparency" <select id:"export-alpha",<option value:"preserve","Preserve (PNG)"> <option value:"flatten","Flatten over background">>>,
+            <div id:"export-background-row",field("export-background","Opaque background","#ffffff")> ]>,
         <div class:"button-grid", *[button("file-cancel","file-cancel","Cancel"),button("file-confirm","file-confirm","Continue")]>]>,
     <section id:"discard-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"Unsaved changes", *[
         <h2 "Save changes first?">,<p "This document has unsaved edits.">,

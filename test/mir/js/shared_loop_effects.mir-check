@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "description": "D3.3.2v2, D8.4.3v2: formal ToInt32 uses bounded remainder and native bitwise operations; both loops retain native accumulation.",
+  "description": "D3.3.2v2, D8.4.3v2: formal ToInt32 uses bounded remainder and native bitwise operations; both loops retain native accumulation. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
       "expect": [
         "call\tfmod",
-        "\tor\t",
-        "\tdadd\t"
+        "\tors\t",
+        "\tadd\t"
       ],
       "forbid": [
         "js_double_to_int32",
@@ -18,7 +18,7 @@
       "in_func": "mvp_lmd_f2",
       "expect": [
         "call\tfmod",
-        "\tor\t",
+        "\tors\t",
         "\tdadd\t"
       ],
       "forbid": [

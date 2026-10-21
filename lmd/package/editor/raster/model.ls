@@ -10,13 +10,14 @@ pub fn value(v,fallback) => common.value(v,fallback)
 pub fn finite(v) => geometry.finite_number(v)
 pub fn composition(node) => name(node) in ['layer','stack']
 pub fn position(node) => value(node.position,[0,0])
-pub fn primary(node) => [for (child in content(node) where name(child) in ['raster','text','vector']) child][0]
+// an empty or multi-layer inspector has no single content owner.
+pub fn primary(node) => if (node == null) null else [for (child in content(node) where name(child) in ['raster','text','vector']) child][0]
 pub fn render_layers(image,nodes,width=null,height=null) any^ {
     let doc = img.document(img.stack(nodes),{width:value(width,image.width),height:value(height,image.height)})
     let scoped = img.with_children(doc,[*if (img.assets(image) == null) [] else [img.assets(image)],img.stack(nodes)])^;
     img.render_frame(scoped)^
 }
-pub fn mask(node) => [for (child in content(node) where name(child) == 'mask') child][0]
+pub fn mask(node) => if (node == null) null else [for (child in content(node) where name(child) == 'mask') child][0]
 pub fn root_path(image) => [[for (i,child in content(image) where name(child) == 'stack') i][0]]
 
 pub fn rows(node,path=[],depth=0,parent="") =>
@@ -130,6 +131,11 @@ pub fn selected_roots(st) any^ {
     // selecting a group and its child moves the child once, through its owning group.
     [for (row in chosen where not any([for (other in chosen)
         other.id != row.id and paths.path_is_prefix(other.path,row.path)])) row]
+}
+pub fn unlocked_roots(st) any^ {
+    let roots = selected_roots(st)^;
+    if (locked(st.doc,[for (row in roots) row.path],true)) raise error("Raster: target layer is locked")
+    else roots
 }
 pub fn bounds(node) {
     if (name(node) == 'stack') {

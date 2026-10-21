@@ -1,7 +1,10 @@
 # Photo Album Demo — Proposal
 
-**Status:** Proposal, 2026-10-20. M0 (corpus preparation) is implemented; see
-the [M0 checkpoint](#m0-checkpoint--2026-10-20). M1–M5 are not started. This
+**Status:** Proposal, 2026-10-20. M0 (corpus preparation), M1 (browsing and
+viewer), M2 (slideshow), M3 (collage) and M4 (album book) are implemented; see
+the [M0](#m0-checkpoint--2026-10-20), [M1](#m1-checkpoint--2026-10-20),
+[M2](#m2-checkpoint--2026-10-21), [M3](#m3-checkpoint--2026-10-21) and
+[M4](#m4-checkpoint--2026-10-21) checkpoints. M5 is not started. This
 document proposes a new demo application. It introduces no language or runtime
 rulings.
 
@@ -236,8 +239,10 @@ corpora show real tiles where files exist. Tests never depend on the download
 
 **Views.** A sidebar switches among:
 
-- **Library**: all photos in a justified grid, grouped by year, month and day,
-  with sticky group headers.
+- **Library**: all photos in a justified grid, grouped by date, with a sticky
+  label for the section under the top edge. Sections are months when a scope
+  averages at least eight photos per month, and years otherwise; the Commons
+  corpus averages under four per month, so it groups by year.
 - **Albums**: album cards with a cover photo, count and date span. Opening one
   shows its grid.
 - **Places**: photos with GPS coordinates on a map, clustered by zoom (§3.1.1).
@@ -248,10 +253,10 @@ corpora show real tiles where files exist. Tests never depend on the download
 **Justified grid.** Rows keep each photo's aspect ratio and fill the width,
 like Flickr and Google Photos. The row-packing function is pure: given aspect
 ratios, a target row height and a width, it returns rows. Only the rows in the
-viewport plus one screen of margin are mounted. Finder already derives its
-mounted window from measured CSS geometry and invalidates ordering separately
-from presentation ([Finder §3](Lambda_Demo_Finder.md)). The album uses the same
-approach and promotes the shared window calculation rather than copying it.
+viewport plus one screen of margin are mounted, keyed by row index, so a scroll
+frame only adds and removes the rows that crossed the margin. This follows
+Finder's retained-window approach ([Finder §3](Lambda_Demo_Finder.md)), with its
+own variable-height window calculation (§4.3).
 
 **Zoom levels.** Pinch, Ctrl-scroll or a slider changes the target row height
 in steps, from a dense overview at about 80 px to large tiles at about 320 px.
@@ -262,9 +267,11 @@ photos without scrolling through every row.
 
 **Selection.** Click selects, Shift extends, Cmd or Ctrl toggles, and a
 rubber-band drag selects a region, matching the Finder interaction policy.
-A selection bar offers **Collage**, **Film**, **Album book**, **Slideshow** and
-**Add to favorites**. All five entry points accept a selection, an album or the
-current search result.
+A selection bar floats over the bottom of the grid, so showing it never moves
+the photos under the pointer. M1 offers **Add to favorites**, **Select all** and
+**Clear**; **Collage**, **Film**, **Album book** and **Slideshow** join it with
+their milestones. All entry points accept a selection, an album or the current
+search result.
 
 #### 3.1.1 Places
 
@@ -276,7 +283,8 @@ view falls back to pins over a coarse bundled world outline.
 ### 3.2 Photo viewer
 
 - **Open and close.** Opening a tile animates the photo from its tile rectangle
-  to fit the window, and closing reverses it.
+  to fit the window. The animation is frame-driven from Lambda, because the
+  start box differs per photo. Closing is immediate in M1.
 - **Navigation.** Arrow keys, swipe and on-screen chevrons move through the
   current scope. The viewer prefetches the next and previous photos.
 - **Zoom.** Double-click, scroll or pinch zooms up to 1:1 on the 1280 px file,
@@ -289,9 +297,9 @@ view falls back to pins over a coarse bundled world outline.
 - **Actions.** Favorite, add to selection, and start a slideshow from this
   photo.
 
-Full-size display uses the ordinary `<img>` path. The demo does not upload
-pixels for display unless measurement shows the image cache cannot bound memory
-across 1000 photos (§5, G1).
+Full-size display uses the ordinary `<img>` path. Measurement shows the image
+cache does not bound memory across many photos (§5, G2); the fix belongs in
+Radiant's image cache, not in the demo.
 
 ### 3.3 Collage
 
@@ -316,10 +324,11 @@ The collage editor composes 2 to 30 photos.
   text.
 - Undo and redo work over the collage model's history.
 
-**Model.** A collage is plain data: canvas size, template, cells with photo id,
-normalized crop and transform, and styling. Layout is a pure function from the
-model to absolutely positioned elements. The model is saved as a `.mark` file so
-a collage can be reopened.
+**Model.** A collage is plain data: canvas aspect, template, slots with photo id,
+focal point and zoom (and a scrapbook print box once moved), styling, caption,
+credits flag and a seed. Layout is a pure function from the model to rectangles
+in export pixels. The model is saved as `<corpus>/collages/<name>.mark` and
+reopened from the editor.
 
 **Export.** Export produces a PNG or JPEG at a chosen size, from 1080 px up to
 4096 px on the long edge. An optional credits line is added at the bottom, and
@@ -327,9 +336,9 @@ a sidecar text file lists every author and license. CC BY and CC BY-SA require
 the attribution if the collage is shared. Export renders the collage as a
 standalone HTML document with `radiant.export_document(html, path, {format:"png",
 width, height, local_resources:true})`, the same in-app path the Photo Studio
-demo uses for layered exports (`test/demo/photo/mod_io.ls`). JPEG output
-re-encodes that PNG with `load` and `save`. Whether it holds up at 4096 px with
-30 local photos is checked at M3 (§5, G3).
+demo uses for layered exports (`test/demo/photo/mod_io.ls`), with `format`
+`"png"` or `"jpeg"`. The export document is the editor's canvas markup at export
+scale with full-size photos, so it matches the screen by construction.
 
 ### 3.4 Memories film
 
@@ -398,10 +407,12 @@ not repeat.
   darkens the leaf as it approaches 90° and lightens it after, which reads as
   curvature.
 - Radiant has no depth sorting for intersecting planes. The leaf never
-  intersects the page stack; instead the turning leaf's `z-index` swaps at 90°.
-- The turn is driven by the Lambda track sampler, not a CSS transition. CSS
-  transitions do not yet cover `transform` (see the transitions row in
-  [HTML_CSS_SVG_Support.md](../doc/HTML_CSS_SVG_Support.md)).
+  intersects the page stack; the turning leaf stays on top for the whole turn
+  (as built: no swap at 90° is needed, because each face hides its back).
+- The turn is sampled by the album's own frame callback, not a CSS transition.
+  CSS transitions do not yet cover `transform` (see the transitions row in
+  [HTML_CSS_SVG_Support.md](../doc/HTML_CSS_SVG_Support.md)). Progress runs on
+  frame timestamps, so headless replays are deterministic.
 
 **Interaction.**
 
@@ -417,19 +428,28 @@ not repeat.
 
 The slideshow turns a selection into a real deck for the slide package.
 
-- **Generation.** A pure function builds a `<presentation>` with one slide per
-  photo or per photo group. Layouts are full-bleed, photo with caption, two-up
-  and grid-of-four. Speaker notes carry date, place, camera and credits.
-- **Themes.** The deck uses the slide package's themes and masters: dark
-  gallery, light gallery, and a "postcard" master with a border and stamp.
+- **Generation.** A pure function builds a `<presentation>` from at most 120
+  photos: a title slide over the first photo, then full-bleed landscapes,
+  captioned portraits, paired portraits, and every sixth slide a grid of four
+  followed by a morph zoom into its first photo, and a closing credits slide.
+  Speaker notes carry date, place, camera and the photo's credit.
+- **Themes.** Dark gallery uses the slide package's `midnight` theme, light
+  gallery its `paper` theme, and postcard adds a paper frame and stamp. The
+  frame is appended to each slide rather than placed in a master, because a
+  master's objects compose beneath the slide's own and a full-bleed photo would
+  cover them.
 - **Animation.** A gallery transition preset maps to `fade`, `push`, `slide` or
   `morph`. A per-slide build reveals the caption with `fly-in` or `wipe-in`.
   Grid slides use `morph` to zoom into one photo on the next slide.
-- **Present.** The deck plays in the slide player inside the demo window, with
-  the presenter console, overview, autoplay with dwell and speed control.
-- **Save.** **Save as .slides** writes the deck with `output(deck, path,
-  'mark')` (SLD1), so `lambda view my-trip.slides` replays it outside the demo.
-  Photo paths in the saved deck are relative to the album directory.
+- **Present.** The deck plays in an embedded `lambda.slide` player inside the
+  demo window, with the presenter console, overview, autoplay with dwell and
+  speed control. A small view creates the player from its state when the album
+  asks it to load the saved file, and removes it on close: a live player
+  carries its own handlers, so it cannot be inserted later as HTML text.
+- **Save.** **Save as .slides** and **Present** both write
+  `<corpus>/slideshows/<name>.slides` with `output(deck, path, 'mark')` (SLD1),
+  so `lambda view` replays exactly what was presented. Photo paths are relative
+  to the deck file. The folder is git-ignored.
 
 ## 4. Architecture
 
@@ -460,16 +480,15 @@ acquisition stays in `pn` code (S12.4.1v3).
 
 | Module | Responsibility |
 |---|---|
-| `photo-album.ls` | Entry point and session owner; routing among views; command dispatch |
-| `mod_library.ls` | Load and validate the manifest; indexes, search and clustering (pure) |
-| `mod_grid.ls` | Justified row packing, zoom anchoring and the mounted row window (pure) |
-| `mod_thumbs.ls` | Thumbnail admission and priority; shared with Finder after promotion |
-| `mod_viewer.ls` | Viewer state transitions, prefetch, zoom and pan, info panel markup |
+| `photo-album.ls` | Entry point and session owner; routing, grid mounting, viewer state and animation, command dispatch |
+| `mod_library.ls` | Validate the manifest; ordering, albums, scopes, search and labels (pure) |
+| `mod_grid.ls` | Justified row packing, zoom anchoring, the mounted row window, hit testing and arrow navigation (pure) |
+| `mod_corpus.ls` | Thumbnail and colour building shared by `_thumbs.ls` and `_fixture.ls` |
 | `mod_collage.ls` | Collage templates, mosaic split, editing commands and history, export |
 | `mod_film.ls` | Story generation and lowering of a film to a slide deck |
 | `mod_book.ls` | Spread pagination, page-turn tracks and drag mapping |
-| `mod_deck.ls` | Slideshow deck generation, themes and saving `.slides` |
-| `mod_ui.ls` | Shared chrome: sidebar, toolbar, selection bar and dialogs |
+| `mod_ui.ls` | Markup: sidebar, toolbar, grid rows, album cards, selection bar, viewer, info, filmstrip and the slideshow sheet |
+| `mod_deck.ls` | Slideshow plan and deck generation, the postcard frame, source resolution for an embedded player, and deck file names (pure) |
 | `photo-album.css` | Visual design, the book's paper and cover textures, collage frames |
 | `_fetch.py`, `_thumbs.ls` | Corpus preparation (§2) |
 | `_score.ls` | Film soundtrack, following the cityscape `_score.ls` pattern |
@@ -479,10 +498,17 @@ The demo is registered in the demo table in `lambda/main.cpp` and listed in
 
 ### 4.3 Reuse and promotion
 
-- **Row window and thumbnail scheduler.** Finder's `mod_model.ls` window
-  calculation and `mod_thumbnails.ls` scheduler are demo-private today. If they
-  fit as-is, they move to a shared module that both demos import, and Finder is
-  switched to it in the same change. Where that module lives is open question Q3.
+- **Row window and thumbnail scheduler: not shared (M1 finding).** Finder's
+  window assumes a uniform grid of equal rows and fixed columns; the album's
+  justified rows vary in height and interleave date headers, so it is a
+  different calculation, not a copy. Finder's thumbnail scheduler is wired to
+  Finder's element ids and slot roles, and the album does not need it: tile
+  cost is in painting, not decoding, so plain `<img>` tiles on the precomputed
+  thumbnails are the right fit (§5, G1).
+- **DOM publishing helpers: shared (M1).** The write-only-on-change helpers
+  both demos used (`attr`, `text`, `style`, `show` and a plain region update)
+  now live in `test/demo/mod_publish.ls` beside `mod_resources.ls`. Finder
+  imports it, and its `mod_dom.ls` is gone. This answers Q3.
 - **Slide sampler, effects and transitions.** Used through the slide package's
   public API only. The demo adds no animation engine of its own.
 - **Image API.** `load`, `save` and `image_process` for thumbnails and export;
@@ -495,11 +521,11 @@ the milestone that first needs it, and fixed at its root if real.
 
 | ID | Question | First needed | If it is a real gap |
 |---|---|---|---|
-| G1 | Can a 1000-photo grid scroll and zoom smoothly with the thumbnail channel's 128-entry / 32 MiB cache, or with plain `<img>` thumbnails and the image cache? | M1 | Keep the precomputed 512 px thumbnails; tune or extend the cache policy in Radiant. |
-| G2 | Does Radiant bound image-cache memory when the viewer pages through hundreds of 1280 px photos? | M1 | Fix eviction in the image cache, which owns its surfaces. |
-| G3 | Does `radiant.export_document` export a 4096 px collage of 30 local photos within its limits and in acceptable time? | M3 | Fix the export path's limits or resource loading in Radiant. |
+| G1 | Can a 1000-photo grid scroll and zoom smoothly with the thumbnail channel's 128-entry / 32 MiB cache, or with plain `<img>` thumbnails and the image cache? | M1 | **Measured, partly real.** Lambda work is about 1 ms per step; Radiant paint of the image tiles dominates. Precomputed 512 px thumbnails stay. See the M1 checkpoint. |
+| G2 | Does Radiant bound image-cache memory when the viewer pages through hundreds of 1280 px photos? | M1 | **Measured, real.** The window's image cache has no budget or eviction. Needs an ownership-aware eviction design in Radiant. See the M1 checkpoint. |
+| G3 | Does `radiant.export_document` export a 4096 px collage of 30 local photos within its limits and in acceptable time? | M3 | **Resolved: no gap.** See the M3 checkpoint. |
 | G4 | Can the slide player seek continuously for a scrubber, and play a deck with its chrome hidden? | M5 | Extend the slide package's player API. |
-| G5 | Does the 3D page turn render, hit-test and update damage bounds correctly while the leaf animates? | M4 | Fix 3D paint or invalidation in Radiant. |
+| G5 | Does the 3D page turn render, hit-test and update damage bounds correctly while the leaf animates? | M4 | **Real for text, fixed.** Glyphs on a projected plane were bounded before the perspective divide and mostly dropped; fixed in `radiant/glyph_sampling.hpp`. Hit testing verified mid-turn. See the M4 checkpoint. |
 | G6 | Can `lambda.map` draw an offline basemap for the Places view? | M5 | Use the bundled world-outline fallback; a basemap is out of scope. |
 
 ## 6. Milestones and acceptance
@@ -550,7 +576,7 @@ increment.
 |---|---|---|
 | Q1 | Wikimedia Commons or Unsplash Lite as the source? | Commons, for the redistribution reason in §2.1. Unsplash Lite would be acceptable only for a private local corpus. |
 | Q2 | Commit `photos.json` (about 0.5 MB), or regenerate it on every fetch? | Commit it, so the corpus is reproducible and credits are available offline. |
-| Q3 | Where should the shared row-window and thumbnail modules live once promoted from Finder? | Decide at M1, after confirming the Finder code fits unchanged. |
+| Q3 | Where should modules shared with Finder live? | Answered at M1: `test/demo/`, beside `mod_resources.ls`. Only the DOM publishing helpers turned out to be shared (§4.3). |
 | Q4 | Should the demo ship in release packages without photos, with a fetch prompt on first open? | Yes; the empty-library state in §2.5 already covers it. |
 | Q5 | Is a 1280 px corpus enough, or should the viewer fetch 1920 px for large displays? | Start with 1280 px; revisit if 1:1 zoom looks soft on Retina displays. |
 
@@ -586,3 +612,220 @@ pinned `photos.json` and `_thumbs.ls`. Nothing is committed yet.
 - **Observation.** Files written by Lambda's atomic `output` and by `save` get
   mode 0600 rather than the usual 0644. It does not affect the demo, but it is
   worth checking in the IO layer.
+
+## M1 checkpoint — 2026-10-20
+
+M1 is implemented: `photo-album.ls`, `mod_library.ls`, `mod_grid.ls`,
+`mod_ui.ls`, `mod_corpus.ls` and `photo-album.css`, run with
+`lambda demo photo-album`. Nothing is committed yet.
+
+**Delivered.** The library timeline with date sections, a sticky section label
+and a year rail; albums as sidebar entries and cover cards; favorites; search
+over every word; tile zoom by slider, buttons, keys and Ctrl/⌘ + wheel, anchored
+on the photo under the pointer; click, toggle, range, rubber-band, select-all
+and keyboard selection; a floating selection bar; the viewer with the open
+animation, stepping, Home/End, zoom with clamped pan, info panel, filmstrip,
+favorite and prefetch; and the not-downloaded state with colour tiles and a
+banner. Closing the viewer is immediate; a closing animation is not done.
+
+**Tests.** The pure modules have goldens (`tests/album_library`,
+`tests/album_grid`), and both match on the MIR JIT too. Four headless replays in
+`test/ui/photo_album/` (91 assertions) run in the Radiant baseline's UI suite
+against the committed `fixture/` corpus and `tests/no_photos/`. The M1
+acceptance row passes: the timeline opens; zoom keeps the anchor photo in
+place; "snow" returns the six expected photos; viewer navigation, zoom and info
+work by keyboard.
+
+**Measurements.** `benchmark.py` instruments a copy of the demo and replays a
+1440 × 900 headless session over the 1000-photo corpus. The host was
+`release/lambda`, built 2026-10-19; the one-minute load was 3–4 during the runs,
+so treat the numbers as indicative. Medians of two runs:
+
+| Step | Lambda handler | Whole step | Without image files |
+|---|---|---|---|
+| Startup layout and first mount | 9–11 ms | — | 9 ms |
+| Scroll 700 px | 1.1 ms | 77–90 ms | 43 ms |
+| Tile zoom step | 7.4 ms | 84–86 ms | 60 ms |
+| Grid arrow key | under 1 ms | 57 ms | 24 ms |
+| Viewer next photo | 1.3 ms | 72–75 ms | 30 ms |
+| No-op key (replay baseline) | — | 23 ms | 5 ms |
+
+- **G1 — partly real.** Lambda work stays near 1 ms per step; the rest is
+  Radiant layout and paint, and the headless replay repaints the whole frame on
+  every event. About 50 visible image tiles add some 18 ms to every frame, even
+  a no-op one. Halving the thumbnails to 256 px changed nothing (scroll 80–84 ms),
+  so the cost is per-image paint, not decoding. Tiles that fall back to the
+  1280 px photos are clearly worse (scroll 136 ms, 560 MB peak), so the
+  precomputed 512 px thumbnails stay. Frame cost on large jumps exceeds a 16 ms
+  budget; cheaper image paint, for example cached tile rasters, belongs in Radiant.
+- **G2 — real.** Peak memory grows by about 5.3 MB for every photo the viewer
+  shows, one decoded 1280 px image each, with no plateau:
+
+  | Viewer photos shown | Peak memory |
+  |---|---|
+  | 0 | 457 MB |
+  | 100 | 1,026 MB |
+  | 300 | 2,080 MB |
+
+  The window's image cache (`UiContext::image_cache`, which owns every
+  `ImageSurface` under ruling O2) has no byte budget, entry cap or eviction.
+  Surfaces are freed only at teardown; changing an `<img>` source only drops the
+  element's borrowed pointer. Elements borrow surfaces, so eviction needs an
+  ownership-aware design rather than a demo workaround.
+
+**Findings outside the demo.**
+
+- `format(element, 'html')` wraps a fragment in a whole document; regions use
+  `format([element], 'html')`.
+- A bounding box read in the same handler as a display change reports the old
+  layout, so the grid measures its always-displayed scroll port instead.
+- A custom property set from script was not picked up by `var()` inside
+  `@keyframes` in a quick probe, so the open animation is frame-driven. The root
+  cause was not investigated.
+- Showing the selection bar above the grid moved every photo 51 px and broke
+  double-clicks at small tile sizes; the bar now floats over the grid.
+
+## M2 checkpoint — 2026-10-21
+
+M2 is implemented: `mod_deck.ls`, the slideshow sheet and show layer in
+`mod_ui.ls`, and the save, present and close commands with the `album_show`
+player view in `photo-album.ls`. Nothing is committed yet.
+
+**Delivered.** **Slideshow** opens from the selection bar (the selection in
+timeline order), the toolbar (the current scope) and the viewer (the scope from
+the current photo). The sheet takes a name, theme, transition and seconds per
+slide, and offers **Save as .slides** and **Present**. Escape closes the show
+once the player has no overview, blackout or pointer of its own to dismiss.
+
+**Acceptance.** The M2 row passes. A 20-photo selection becomes an 18-slide
+deck (`test/ui/photo_album/slideshow.json`). `tests/fixture_slideshow.slides`
+is that deck as saved beside the fixture; the deck golden asserts it equals
+fresh output, and `test/ui/photo_album/saved_deck.json` opens it as a
+standalone `.slides` document and plays the same slides. The presenter notes
+show each photo's author and license. On the real corpus, the 80-photo
+Mountains album becomes a 62-slide show.
+
+**Tests.** `tests/album_deck` (golden, interpreter and MIR JIT agree) covers the
+slide plan, layouts, transitions, morph pairs, notes, credits, missing-photo
+placeholders, file names, compilation, the Mark round trip and source
+resolution. The `photo_album` UI suite now has six replays.
+
+**Findings outside the demo.**
+
+- `viewport_size` returns null inside an embedded document by design
+  (RAD_16, implementation footnote in `Lambda_Impl_Slide_Presentation.md`), so a
+  `.slides` page in an iframe never fits its canvas. Embedding the player
+  directly avoids it; a frame-aware viewport would need a design change.
+- An embedded player resolves image sources against the host page, not the
+  deck's `base_uri`, and autostarts only from a standalone page's load event.
+  The demo resolves sources itself (`D.resolve_sources`) and requests
+  `slide_activate` after creating the player.
+- A master's objects compose beneath the slide's own objects.
+- Iterating an element with `for` yields its attribute values as well as its
+  children; `content(el)` gives only the children.
+
+## M3 checkpoint — 2026-10-21
+
+M3 is implemented: `mod_collage.ls` (model, layouts, edits, history, credits),
+`mod_collage_ui.ls` (canvas and editor markup) and `mod_collage_app.ls` (editor
+procedures and export). **Collage** opens from the toolbar (the first 30 photos
+shown) and the selection bar.
+
+**Delivered.** Six templates: grid, mosaic, magazine, scrapbook, heart and
+circle (clip-path masks over a mosaic). Four canvas shapes, spacing, corners,
+white border, four backgrounds, a caption band and a credits line. A drag inside
+a cell pans its crop, the wheel zooms it, and dragging out onto another cell or
+from the tray swaps photos. Scrapbook prints move, rotate and resize from
+handles, and **Shuffle prints** re-deals them. Undo and redo (⌘Z, ⇧⌘Z) record a
+slider or caption edit once, when it ends. **Save** and **Open** keep collages
+as `.mark` files; **Export image** writes PNG or JPEG at 1080, 2048 or 4096 px
+with a `-credits.txt` file beside it. Both folders are git-ignored.
+
+**Acceptance.** The M3 row passes. `tests/album_collage` checks that grid,
+mosaic, magazine, heart and circle cover their area exactly with no overlaps for
+2, 7 and 30 photos, that scrapbook prints stay on the canvas, and swap, crop,
+history and settings. `tests/proc/collage_export` exports a collage through
+Radiant and checks pixels: gutters show the background and each cell centre
+matches its own photo within 3 levels. `test/ui/photo_album/collage.json`
+(30 assertions) covers the editor end to end.
+
+**G3 — resolved.** A 4096 × 2731 export of 30 real photos took 2.9–3.1 s for
+the mosaic and 1.6 s for the scrapbook, with a 570 MB peak, on the 2026-10-19
+release host under a load average of 20.
+
+**Slide player theming (M2 follow-up).** The slideshow now matches the album:
+`lambda.slide` gained `--slide-ui-*` chrome tokens and a validated `ui` option
+and deck attribute ([Player chrome](../doc/Lambda_Slide.md#player-chrome)).
+Album decks carry the viewer palette, so saved decks keep it under `lambda view`.
+Default decks are unchanged pixel for pixel.
+
+**Findings outside the demo.**
+
+- In a live, inserted region, a flex container whose single nowrap text
+  overflows with `overflow: hidden` paints nothing; the same markup renders in a
+  static export. The credits line uses a plain block instead.
+- `dom.set_state(el, "value", …)` applies to text controls only: selects use
+  `set_selected_index` and ranges `set_property` and `range_value`.
+- Events dispatched from script (`dispatchEvent(new Event('input'))`) do not
+  reach Lambda `on input` handlers; replays use real key input on sliders.
+- A keyboard event targeted at `<body>` does not reach a view rooted below it,
+  so the editor layer takes focus when it opens.
+- Unsigned-byte pixel values wrap on subtraction (`226 - 227` is 255); compare
+  them as `int`s.
+
+## M4 checkpoint — 2026-10-21
+
+M4 is implemented: `mod_book.ls` (pagination, leaves, spreads and turn maths as
+pure values), `mod_book_ui.ls` (pages, leaves, spread bar and shell markup) and
+`mod_book_app.ls` (mounting, frame-driven turns, drags and jumps). **Album
+book** opens from the toolbar (the photos shown, up to 240) and the selection
+bar. Nothing is committed yet.
+
+**Delivered.**
+
+- Four cloth or leather covers with an embossed title, cream or black paper,
+  page-edge stacks that grow with the pages on each side.
+- Eight templates of one to four prints. Prints have white borders, photo
+  corners, a small hand-placed tilt and a handwritten date and album caption.
+- One chapter per year, each opening on a right-hand page; a title page, page
+  numbers and an end page that pads the count to whole leaves.
+- Page turn by arrow keys, Page Up/Down, Space, Home/End, the Previous and Next
+  buttons, a click on either page, or a drag. A drag follows the pointer and
+  release completes the turn past the vertical or falls back.
+- A spread bar of thumbnails; a jump flips the leaves in between quickly.
+- Double-clicking a print opens the viewer over the book, paging through the
+  book's photos; closing it returns to the book.
+- Leaves mount near the open spread and stay mounted; far ones are hidden.
+
+**Acceptance.** The M4 row passes. `tests/album_book` paginates 100 fixture
+photos (cycled) into 54 pages on 29 leaves and checks that no two adjacent
+pages share a template, chapters start on right-hand pages, and all 100
+entries print once, inside their pages. `test/ui/photo_album/book.json`
+(30 assertions) covers the cover, key and click turns, a mid-turn angle and hit
+test, spread jumps, mount limits, a drag that reverts and one that completes, a
+left turn, the viewer round trip, paper and cover changes and closing.
+
+**G5 — real for text, fixed at the root.** Glyphs drawn on a plane under
+`perspective` were bounded with the affine part of the matrix only, so most of a
+turning page's text was clipped away. `glyph_draw_transformed_coverage_bitmap`
+now bounds the glyph after the homogeneous divide, as its inverse sampling
+already did, and samples the clip when a glyph crosses w = 0.
+`RenderOutputParity.TextInPerspectivePlaneKeepsItsGlyphs` guards it. Image and
+box painting on the leaf were already correct, and hit testing mid-turn picks
+the turning leaf. Damage bounds were checked only through headless renders, not
+in a live window.
+
+**Findings.**
+
+- `mod_publish`'s `updates.markup` skips a region whose markup is unchanged, so
+  children mounted into it later survive a rebuild. The book clears its leaf
+  host on every rebuild.
+- Animations sampled with `clock()` follow wall time, which headless replays do
+  not advance with the document timeline. The book and the viewer's open
+  animation now use the frame event's `time_stamp`.
+- A select's choice can arrive as an `input` event; the book handles both
+  `input` and `change`.
+- Leaf transforms read back lowercased (`rotatey(...)`) from the style
+  attribute.
+- The new toolbar button narrowed the heading enough to wrap the status line;
+  the status now stays on one line and the search box shrinks first.

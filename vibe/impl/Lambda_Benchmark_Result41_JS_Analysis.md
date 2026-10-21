@@ -186,7 +186,7 @@ traversal. Do not reintroduce mutable per-site caches.
 
 Sources: [JS lowering](../../lambda/js/js_mir_expression_lowering.cpp),
 [Lambda lowering](../../lambda/runtime/transpile-mir.cpp),
-[Tune10 §12](../jube/JS_Tune10_Fast_Paths.md#12-round-5--t10-2-items-1-and-2-for-object-literals).
+[Tune10 T10-2, History §4.3](../jube/JS_Tune_History.md).
 
 ### 3. Move dense numeric indexing into generated code
 

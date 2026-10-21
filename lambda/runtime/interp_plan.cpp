@@ -1544,6 +1544,9 @@ static uint32_t plan_need(AstNode* node) {
     case AST_NODE_VAR_STAM:
     case AST_NODE_TYPE_STAM:
         return plan_need_max_siblings(((AstLetNode*)node)->declare);
+    case AST_NODE_ORDER_SPEC:
+        // a row's key, plus the tuple and part homes of a multi-key order
+        return 3 + plan_need(((AstOrderSpec*)node)->expr);
     default: {
         // Conservative for every kind not yet in the table: assume the node
         // holds one Item of its own across the widest child. Undercounting is
@@ -1955,9 +1958,13 @@ static void plan_walk(AstNode* node, void* ctx) {
         plan_assign_scope(pc, ((AstForNode*)node)->vars);
         break;
     case AST_NODE_GROUP_CLAUSE:
-        // `into` is registered in a deliberately detached post-group scope,
-        // so it is not reached by the owning for scope walk above.
+        // `into` and the key names are registered in a deliberately detached
+        // post-group scope, so the owning for scope walk above misses them.
         plan_assign_entry(pc, ((AstGroupClause*)node)->entry);
+        for (AstGroupKey* key = ((AstGroupClause*)node)->keys; key;
+                key = (AstGroupKey*)((AstNode*)key)->next) {
+            plan_assign_entry(pc, key->entry);
+        }
         break;
     case AST_NODE_LOOP:
         plan_assign_scope(pc, ((AstWhileNode*)node)->vars);

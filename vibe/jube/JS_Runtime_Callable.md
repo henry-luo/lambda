@@ -5,11 +5,11 @@
 **Status**: IMPLEMENTED — formal ruling D6.2.2v2
 
 **Tree anchor**: master `88aa5556c8` plus the Tune4 implementation worktree;
-the reproducible C0 snapshot and C8 evidence are recorded in
-`JS_Tune4_Callable.md`
+the reproducible C0 snapshot and C8 evidence are summarised in
+`JS_Tune_History.md` §4.1 (B4; full record at commit `294779edbb`)
 
 **Companions**: `JS_Runtime_Redesign.md` (JR1/JR5/JR6),
-`JS_Runtime_Name.md` (RN1–RN16), `JS_Tune2_Exception.md` (JR3.3–JR3.9),
+`JS_Runtime_Name.md` (RN1–RN16), `JS_Tune_History.md` §4.1 (B2, JR3.3–JR3.9),
 `doc/dev/js/JS_05_Functions_Closures.md`, and
 `doc/dev/js/JS_07_Classes.md`
 
@@ -755,7 +755,7 @@ are invoked.
 > Banned by **D8.4.1v2**/LC1v2. A stable-callee speed-up, if it is ever
 > justified by measurement, must be a compile-time prediction guarded inline
 > with the observable `Get -> Call` (D6.2.2v2) on a miss — never a cached
-> callee slot. See `JS_Tune10_Fast_Paths.md` T10-5.
+> callee slot. See `JS_Tune_History.md` §4.3 (T10-5).
 
 JR8 call slots cache exact function identity and, after a stable hit, may cache
 its call entry/native target. Because the baseline path already performs
@@ -1188,5 +1188,6 @@ The final structural census is zero for every retired mechanism. One named
 `js_construct_entry_legacy_class_map` bridge remains at the JR4 boundary, with
 one definition and two total references; it is deleted when JR4 moves legacy
 class-map construction onto ordinary function capabilities. Exact C0/C8 LOC,
-layout, startup, performance, conformance, GC, and embedding results are in
-`JS_Tune4_Callable.md` §14.
+layout, startup, performance, conformance, GC, and embedding results are summarised in
+`JS_Tune_History.md` §4.1 (B4); the full §14 tables are in
+`JS_Tune4_Callable (done).md` at commit `294779edbb`.

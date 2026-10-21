@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <pthread.h>
+#include <float.h>
+#include <math.h>
 
 #include "../radiant/render.hpp"
 #include "../radiant/render_metrics.hpp"
@@ -1386,6 +1388,177 @@ TEST_F(RetainedDisplayListTest, CrossCacheCaptureRehomesTheBudgetAndRepeatedRefe
     dl_destroy(&snapshot);
 }
 
+TEST_F(RetainedDisplayListTest, ForeignLeafSubscenesKeepDescriptorsAndProducerIdentityDuringParentCapture) {
+    DisplayList source, frame, assembled;
+    int begin = dl_begin_element(&source, 0, 0, 0, 128, 10);
+    for (uint32_t i = 0; i < 128; i++)
+        ASSERT_NE(retained_test_add_rect(&source, (float)i, 0, 1, 10, 0xff123456u), nullptr);
+    dl_end_element(&source, begin);
+    RetainedDisplayListCache* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    RetainedDisplayListCache* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    const auto* published = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49000);
+    ASSERT_NE(published, nullptr);
+    begin = dl_begin_element(&frame, 49000, 0, 0, 128, 10);
+    ASSERT_NE(retained_test_add_rect(&frame, 0, 0, 1, 1, 0xff000001u), nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, published));
+    const DisplayPayloadOwner* original = frame.back().draw_fragment.owner;
+    const DisplayItem* descriptors[128];
+    for (size_t i = 0; i < 128; i++) descriptors[i] = &original->commands->data()[i + 1];
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, published));
+    ASSERT_NE(retained_test_add_rect(&frame, 0, 0, 1, 1, 0xff000002u), nullptr);
+    dl_end_element(&frame, begin);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    DisplayResourceSummary* resources = nullptr;
+    ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    EXPECT_EQ(retained_dl_cache_stats(consumer).captured_commands, 4u);
+    EXPECT_EQ(counters.command_copy_bytes, 4 * sizeof(DisplayItem));
+    EXPECT_EQ(counters.retained_foreign_chunks, 2u);
+    EXPECT_EQ(retained_dl_cache_get(producer, 49000), published);
+    ASSERT_NE(retained_dl_cache_get(consumer, 49000), nullptr);
+    EXPECT_EQ(retained_dl_fragment_item_count(retained_dl_cache_get(consumer, 49000)), 264);
+    EXPECT_GE(retained_dl_cache_stats(consumer).charged_storage_bytes, 2 * original->retained_bytes);
+    counters = {};
+    retained_dl_cache_begin_frame(consumer); retained_dl_cache_capture(consumer, &assembled);
+    EXPECT_EQ(retained_dl_cache_stats(consumer).captured_commands, 0u);
+    EXPECT_EQ(counters.retained_membership_nodes, 1u);
+    EXPECT_EQ(counters.retained_foreign_chunks, 0u);
+    retained_dl_cache_set_storage_budget(consumer, 0); retained_dl_cache_begin_frame(consumer);
+    EXPECT_EQ(retained_dl_cache_get(consumer, 49000), nullptr);
+    EXPECT_EQ(retained_dl_cache_get(producer, 49000), published);
+    EXPECT_EQ(retained_dl_fragment_item_count(published), 130);
+    source.data()[1].fill_rect.color.c = 0xffabcdefu;
+    ASSERT_NE(retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49000), nullptr);
+    dl_resource_summary_destroy(resources);
+    dl_destroy(&frame); dl_destroy(&source);
+    retained_dl_cache_destroy(producer); retained_dl_cache_destroy(consumer);
+    ASSERT_TRUE(dl_validate(&assembled, nullptr));
+    DisplayListCursor cursor(&assembled);
+    size_t seen = 0;
+    while (const DisplayItem* item = cursor.next()) if (item->op == DL_FILL_RECT) {
+        if (seen == 0 || seen == 257) EXPECT_EQ(item->fill_rect.color.c, seen == 0 ? 0xff000001u : 0xff000002u);
+        else {
+            EXPECT_EQ(cursor.owner, original);
+            EXPECT_EQ(item, descriptors[(seen - 1) % 128]);
+            EXPECT_EQ(item->fill_rect.color.c, 0xff123456u);
+        }
+        seen++;
+    }
+    EXPECT_FALSE(cursor.failed); EXPECT_EQ(seen, 258u);
+    dl_destroy(&assembled);
+}
+
+TEST_F(RetainedDisplayListTest, ForeignLeafLeasesKeepBothBudgetsAndResourceDependenciesAfterEviction) {
+    ImageSurface* surface = image_surface_alloc(); ASSERT_NE(surface, nullptr);
+    surface->width = 2; surface->height = 2; surface->generation = 9;
+    DisplayList source, frame, assembled;
+    int begin = dl_begin_element(&source, 0, 0, 0, 2, 2);
+    DisplayItem* image = dl_alloc_item(&source); ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->draw_image.resource = surface->self; image->draw_image.resource_generation = surface->generation;
+    image->draw_image.src_w = image->draw_image.src_h = image->draw_image.src_stride = 2;
+    image->draw_image.dst_w = image->draw_image.dst_h = 2;
+    dl_end_element(&source, begin);
+    auto* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    const auto* leaf = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49001);
+    ASSERT_NE(leaf, nullptr);
+    size_t producer_bytes = retained_dl_cache_stats(producer).charged_storage_bytes;
+    begin = dl_begin_element(&frame, 49002, 0, 0, 2, 2);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, leaf)); dl_end_element(&frame, begin);
+    DisplayResourceSummary* resources = nullptr;
+    ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    ASSERT_NE(resources, nullptr);
+    EXPECT_GT(retained_dl_cache_stats(consumer).charged_storage_bytes, producer_bytes);
+    EXPECT_EQ(retained_dl_cache_get(consumer, 49001), nullptr);
+    EXPECT_TRUE(dl_resource_summary_current(resources, 0, 1));
+    dl_destroy(&frame); dl_destroy(&source);
+    retained_dl_cache_set_storage_budget(producer, 0); retained_dl_cache_begin_frame(producer);
+    EXPECT_EQ(retained_dl_cache_get(producer, 49001), nullptr);
+    EXPECT_EQ(retained_dl_cache_stats(producer).evictions, 1);
+    EXPECT_EQ(retained_dl_cache_stats(producer).charged_storage_bytes, producer_bytes);
+    retained_dl_cache_set_storage_budget(consumer, 0); retained_dl_cache_begin_frame(consumer);
+    EXPECT_EQ(retained_dl_cache_get(consumer, 49002), nullptr);
+    EXPECT_GT(retained_dl_cache_stats(consumer).charged_storage_bytes, producer_bytes);
+    EXPECT_TRUE(dl_resources_current(&assembled, 0, 1));
+    surface->generation++;
+    EXPECT_FALSE(dl_resource_summary_current(resources, 0, 1));
+    EXPECT_FALSE(dl_resources_current(&assembled, 0, 1));
+    free_test_surface(surface);
+    EXPECT_FALSE(dl_resources_current(&assembled, 0, 1));
+    dl_destroy(&assembled);
+    EXPECT_EQ(retained_dl_cache_stats(producer).charged_storage_bytes, 0u);
+    EXPECT_EQ(retained_dl_cache_stats(consumer).charged_storage_bytes, 0u);
+    retained_dl_cache_destroy(consumer); retained_dl_cache_destroy(producer);
+    EXPECT_FALSE(dl_resource_summary_current(resources, 0, 1));
+    dl_resource_summary_destroy(resources);
+}
+
+TEST_F(RetainedDisplayListTest, ForeignLeafAdmissionFailurePreservesSourceAndBalancesLeases) {
+    DisplayList source, frame;
+    int begin = dl_begin_element(&source, 0, 0, 0, 2, 2);
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 2, 2), nullptr); dl_end_element(&source, begin);
+    auto* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    const auto* leaf = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49003);
+    ASSERT_NE(leaf, nullptr);
+    begin = dl_begin_element(&frame, 49004, 0, 0, 2, 2);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, leaf));
+    const auto* owner = frame.back().draw_fragment.owner.get(); dl_end_element(&frame, begin);
+    int32_t original_refs = ref_count_get(&owner->refs);
+    bool failed = false, succeeded = false;
+    for (size_t fail_at = 0; fail_at < 24; fail_at++) {
+        auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+        DisplayList assembled; DisplayResourceSummary* resources = nullptr;
+        RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+        memtrack_fault_inject(fail_at);
+        bool captured = retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled);
+        memtrack_fault_clear();
+        failed |= !captured; succeeded |= captured;
+        if (captured) { EXPECT_EQ(counters.command_copy_bytes, 2 * sizeof(DisplayItem)); EXPECT_TRUE(dl_validate(&assembled, nullptr)); }
+        else { EXPECT_TRUE(assembled.empty()); EXPECT_EQ(resources, nullptr); }
+        dl_resource_summary_destroy(resources); dl_destroy(&assembled); retained_dl_cache_destroy(consumer);
+        EXPECT_EQ(ref_count_get(&owner->refs), original_refs);
+        EXPECT_EQ(retained_dl_cache_get(producer, 49003), leaf);
+        EXPECT_TRUE(dl_validate(&frame, nullptr));
+    }
+    EXPECT_TRUE(failed); EXPECT_TRUE(succeeded);
+    auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    retained_dl_cache_set_storage_budget(consumer, owner->retained_bytes);
+    DisplayList assembled; DisplayResourceSummary* resources = nullptr;
+    EXPECT_FALSE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    EXPECT_TRUE(assembled.empty()); EXPECT_EQ(resources, nullptr);
+    EXPECT_GT(retained_dl_cache_stats(consumer).budget_rejections, 0);
+    EXPECT_EQ(ref_count_get(&owner->refs), original_refs);
+    retained_dl_cache_set_storage_budget(consumer, (size_t)32 << 20);
+    ASSERT_TRUE(retained_dl_cache_capture_resources(consumer, &frame, frame.item_count(), &resources, &assembled));
+    retained_dl_cache_destroy(consumer); retained_dl_cache_destroy(producer);
+    dl_destroy(&source); dl_destroy(&frame);
+    EXPECT_TRUE(dl_validate(&assembled, nullptr)); dl_destroy(&assembled); dl_resource_summary_destroy(resources);
+}
+
+TEST_F(RetainedDisplayListTest, ForeignNestedSubscenesKeepLocalDescendantBindings) {
+    DisplayList source, frame;
+    int outer = dl_begin_element(&source, 0, 0, 0, 8, 8);
+    int inner = dl_begin_element(&source, 49005, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 8, 8), nullptr);
+    dl_end_element(&source, inner); dl_end_element(&source, outer);
+    auto* producer = retained_dl_cache_create(pool); ASSERT_NE(producer, nullptr);
+    auto* consumer = retained_dl_cache_create(pool); ASSERT_NE(consumer, nullptr);
+    const auto* leaf = retained_dl_cache_capture_fragment(producer, &source, 0, source.item_count(), 49006);
+    ASSERT_NE(leaf, nullptr);
+    outer = dl_begin_element(&frame, 49007, 0, 0, 8, 8);
+    ASSERT_TRUE(retained_dl_append_fragment(&frame, leaf)); dl_end_element(&frame, outer);
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    retained_dl_cache_capture(consumer, &frame);
+    EXPECT_EQ(counters.retained_foreign_chunks, 0u);
+    EXPECT_EQ(retained_dl_cache_stats(consumer).captured_commands, 7u);
+    ASSERT_NE(retained_dl_cache_get(consumer, 49005), nullptr);
+    DisplayList pinned;
+    ASSERT_TRUE(retained_dl_append_fragment(&pinned, retained_dl_cache_get(consumer, 49005)));
+    retained_dl_cache_destroy(consumer); retained_dl_cache_destroy(producer);
+    dl_destroy(&source); dl_destroy(&frame);
+    EXPECT_TRUE(dl_validate(&pinned, nullptr)); dl_destroy(&pinned);
+}
+
 TEST_F(RetainedDisplayListTest, WideFrameAssemblyStoresOneReferenceWithoutDescriptorCopies) {
     DisplayList source; dl_init(&source, arena);
     int root = dl_begin_element(&source, 9000, 0, 0, 100, 100);
@@ -1890,4 +2063,249 @@ TEST_F(RetainedDisplayListTest, ReplacingDescendantInvalidatesAncestorGroupBefor
     EXPECT_EQ(test_radiant_command(&current_child, 1).fill_rect.color.c, 0xff0000ffu);
     EXPECT_EQ(test_radiant_command(&new_child, 1).fill_rect.color.c, 0xffff0000u);
     dl_destroy(&old_parent); dl_destroy(&new_child); dl_destroy(&current_child);
+}
+
+TEST_F(RetainedDisplayListTest, TranslatedNestedFragmentsKeepOriginalDescriptorsAndSurviveRetirement) {
+    DisplayList source, original, placed;
+    int root = dl_begin_element(&source, 47000, 1, 2, 10, 12);
+    int child = dl_begin_element(&source, 47001, 3, 4, 5, 6);
+    ASSERT_NE(retained_test_add_rect(&source, 3, 4, 5, 6), nullptr);
+    dl_end_element(&source, child); dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const auto* fragment = retained_dl_cache_get(cache, 47000); ASSERT_NE(fragment, nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment_translated(&original, fragment, 0, 0));
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    ASSERT_TRUE(retained_dl_append_fragment_translated(&placed, fragment, 10, -2));
+    ASSERT_TRUE(retained_dl_append_fragment_translated(&placed, fragment, -4, 20));
+    EXPECT_EQ(placed.size(), 2u);
+    EXPECT_GT(placed.front().draw_fragment.owner->retained_bytes,
+        original.front().draw_fragment.owner->retained_bytes);
+    EXPECT_EQ(counters.command_copy_bytes, 0u); EXPECT_EQ(counters.payload_copy_bytes, 0u);
+    EXPECT_EQ(counters.path_clones, 0u); EXPECT_GT(counters.placement_command_copy_bytes, 0u);
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+    EXPECT_TRUE(dl_validate(&placed, nullptr));
+    DisplayListCursor canonical(&original), translated(&placed);
+    for (unsigned placement = 0; placement < 2; placement++) {
+        DisplayListCursor unshifted(&original);
+        while (const DisplayItem* before = unshifted.next()) {
+            const DisplayItem* after = translated.next(); ASSERT_NE(after, nullptr);
+            EXPECT_EQ(before, &unshifted.owner->commands->data()[unshifted.source_index]);
+            EXPECT_NE(after, &translated.owner->commands->data()[translated.source_index]);
+            EXPECT_EQ(after->op, before->op); EXPECT_EQ(translated.index, unshifted.index);
+            EXPECT_FLOAT_EQ(after->bounds[0], before->bounds[0] + (placement ? -4 : 10));
+            EXPECT_FLOAT_EQ(after->bounds[1], before->bounds[1] + (placement ? 20 : -2));
+            if (before->op == DL_FILL_RECT) {
+                EXPECT_FLOAT_EQ(after->fill_rect.x, placement ? -1 : 13);
+                EXPECT_FLOAT_EQ(after->fill_rect.y, placement ? 24 : 2);
+            }
+        }
+        EXPECT_FALSE(unshifted.failed);
+    }
+    EXPECT_EQ(translated.next(), nullptr); EXPECT_FALSE(translated.failed);
+    EXPECT_FLOAT_EQ(canonical.next()->element_marker.marker_x, 1);
+    dl_destroy(&original); dl_destroy(&placed);
+}
+
+TEST_F(RetainedDisplayListTest, TranslatedAppendRejectsUnsupportedAndNonFinitePlacementAtomically) {
+    for (bool pixel_operation : {false, true}) {
+        DisplayList source, destination;
+        int root = dl_begin_element(&source, 47100, 0, 0, 8, 8);
+        DisplayItem* item = retained_test_add_rect(&source, 1, 2, 3, 4); ASSERT_NE(item, nullptr);
+        if (pixel_operation) {
+            item->op = DL_FILL_SURFACE_RECT;
+            item->fill_surface_rect = {}; item->fill_surface_rect.w = item->fill_surface_rect.h = 3;
+        }
+        dl_end_element(&source, root);
+        RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+        retained_dl_cache_capture(cache, &source);
+        const auto* fragment = retained_dl_cache_get(cache, 47100); ASSERT_NE(fragment, nullptr);
+        ASSERT_TRUE(retained_dl_append_fragment_translated(&destination, fragment, 0, 0));
+        EXPECT_FALSE(retained_dl_append_fragment_translated(&destination, fragment, INFINITY, 0));
+        EXPECT_FALSE(retained_dl_append_fragment_translated(&destination, fragment, 0, NAN));
+        EXPECT_EQ(retained_dl_append_fragment_translated(&destination, fragment, 4, 5), !pixel_operation);
+        EXPECT_EQ(destination.size(), pixel_operation ? 1u : 2u);
+        EXPECT_TRUE(dl_validate(&destination, nullptr));
+        retained_dl_cache_destroy(cache); dl_destroy(&source); dl_destroy(&destination);
+    }
+    DisplayList huge, destination;
+    int root = dl_begin_element(&huge, 47101, FLT_MAX / 2, 0, 1, 1);
+    ASSERT_NE(retained_test_add_rect(&huge, FLT_MAX / 2, 0, 1, 1), nullptr);
+    dl_end_element(&huge, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &huge);
+    const auto* fragment = retained_dl_cache_get(cache, 47101); ASSERT_NE(fragment, nullptr);
+    EXPECT_FALSE(retained_dl_append_fragment_translated(&destination, fragment, FLT_MAX, 0));
+    EXPECT_TRUE(destination.empty());
+    retained_dl_cache_destroy(cache); dl_destroy(&huge); dl_destroy(&destination);
+}
+
+TEST_F(RetainedDisplayListTest, TranslatedAllocationFailureBalancesSourceLeaseAndPreservesPrefix) {
+    DisplayList source, pinned;
+    int root = dl_begin_element(&source, 47200, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 1, 2, 3, 4), nullptr); dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const auto* fragment = retained_dl_cache_get(cache, 47200); ASSERT_NE(fragment, nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&pinned, fragment));
+    auto* owner = pinned.front().draw_fragment.owner.get();
+    int32_t references = ref_count_get(&owner->refs);
+    bool saw_failure = false, saw_success = false;
+    for (bool with_prefix : {false, true}) for (size_t fail_at = 0; fail_at < 5; fail_at++) {
+        SCOPED_TRACE(fail_at);
+        SCOPED_TRACE(with_prefix);
+        DisplayList destination;
+        if (with_prefix) ASSERT_NE(retained_test_add_rect(&destination, 0, 0, 1, 1), nullptr);
+        memtrack_fault_inject(fail_at);
+        bool ok = retained_dl_append_fragment_translated(&destination, fragment, 2, 3);
+        memtrack_fault_clear();
+        saw_failure |= !ok; saw_success |= ok;
+        EXPECT_EQ(destination.size(), (with_prefix ? 1u : 0u) + (ok ? 1u : 0u));
+        if (with_prefix) EXPECT_EQ(destination.front().op, DL_FILL_RECT);
+        EXPECT_TRUE(dl_validate(&destination, nullptr));
+        dl_destroy(&destination); EXPECT_EQ(ref_count_get(&owner->refs), references);
+    }
+    EXPECT_TRUE(saw_failure); EXPECT_TRUE(saw_success);
+    retained_dl_cache_destroy(cache); dl_destroy(&source); dl_destroy(&pinned);
+}
+
+TEST_F(RetainedDisplayListTest, TranslatedRecaptureDoesNotRepublishUnshiftedSourceIdentity) {
+    DisplayList source, placed;
+    int root = dl_begin_element(&source, 47300, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 1, 2, 3, 4), nullptr); dl_end_element(&source, root);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    ASSERT_TRUE(retained_dl_append_fragment_translated(&placed, retained_dl_cache_get(cache, 47300), 12, 16));
+    retained_dl_cache_begin_frame(cache); retained_dl_cache_capture(cache, &placed);
+    EXPECT_EQ(retained_dl_cache_get(cache, 47300), nullptr);
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+    EXPECT_TRUE(dl_validate(&placed, nullptr));
+    DisplayListCursor cursor(&placed); ASSERT_NE(cursor.next(), nullptr);
+    EXPECT_FLOAT_EQ(cursor.item->element_marker.marker_x, 12);
+    ASSERT_NE(cursor.next(), nullptr); EXPECT_FLOAT_EQ(cursor.item->fill_rect.x, 13);
+    dl_destroy(&placed);
+}
+
+TEST_F(RetainedDisplayListTest, TranslatedCursorComposesShellsAndRejectsInvalidGraphs) {
+    DisplayList source;
+    int root = dl_begin_element(&source, 47400, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 1, 2, 3, 4), nullptr); dl_end_element(&source, root);
+    DisplayPayloadOwner leaf = {}, inner = {}, outer = {};
+    DisplayCommandSpan spans[] = {{nullptr, 0, 3}, {&leaf, 0, 0}, {&inner, 0, 0}};
+    DisplayPayloadOwner* owners[] = {&leaf, &inner, &outer};
+    for (unsigned i = 0; i < 3; i++) {
+        owners[i]->commands = lam::up(&source); owners[i]->command_count = 3;
+        owners[i]->command_spans = &spans[i]; owners[i]->span_count = 1;
+    }
+    inner.translate_x = 1; inner.translate_y = 2;
+    outer.translate_x = 3; outer.translate_y = 4;
+    EXPECT_TRUE(dl_validate_chunk(&outer, nullptr, nullptr));
+    DisplayListCursor cursor(&outer); ASSERT_NE(cursor.next(), nullptr);
+    ASSERT_NE(cursor.next(), nullptr);
+    EXPECT_FLOAT_EQ(cursor.item->fill_rect.x, 5); EXPECT_FLOAT_EQ(cursor.item->fill_rect.y, 8);
+    outer.translate_x = -1; outer.translate_y = -2;
+    DisplayListCursor cancelled(&outer); ASSERT_NE(cancelled.next(), nullptr);
+    EXPECT_EQ(cancelled.item, &source.front());
+    outer.translate_x = inner.translate_x = FLT_MAX;
+    EXPECT_FALSE(dl_validate_chunk(&outer, nullptr, nullptr));
+    outer.translate_x = 3; inner.translate_x = 1;
+    spans[1].child = &outer;
+    EXPECT_FALSE(dl_validate_chunk(&outer, nullptr, nullptr));
+    spans[1].child = &leaf; spans[0].count = 4;
+    EXPECT_FALSE(dl_validate_chunk(&outer, nullptr, nullptr));
+    DisplayPayloadOwner chain[DL_VALIDATE_ELEMENT_STACK_LIMIT] = {};
+    DisplayCommandSpan links[DL_VALIDATE_ELEMENT_STACK_LIMIT];
+    for (unsigned i = 0; i < DL_VALIDATE_ELEMENT_STACK_LIMIT; i++) {
+        chain[i].commands = lam::up(&source); chain[i].command_count = 3;
+        chain[i].command_spans = &links[i]; chain[i].span_count = 1;
+        links[i] = {i + 1 < DL_VALIDATE_ELEMENT_STACK_LIMIT ? &chain[i + 1] : nullptr, 0, 3};
+    }
+    chain[0].translate_x = 1;
+    EXPECT_TRUE(dl_validate_chunk(&chain[0], nullptr, nullptr));
+    spans[2].child = &chain[0];
+    EXPECT_FALSE(dl_validate_chunk(&outer, nullptr, nullptr));
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, KeyedSubscenesPreserveZeroMarkersAndUnrelatedPublications) {
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    DisplayList source, pinned;
+    DisplayItem* prefix = retained_test_add_rect(&source, 0, 0, 1, 1); ASSERT_NE(prefix, nullptr);
+    prefix->op = DL_FILL_SURFACE_RECT; prefix->fill_surface_rect = {};
+    int begin = dl_begin_element(&source, 0, 3, 4, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 3, 4, 8, 8), nullptr); dl_end_element(&source, begin);
+    int end = source.item_count();
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 1, 1), nullptr);
+    EXPECT_FALSE(dl_supports_vector_translation(&source));
+    EXPECT_TRUE(dl_supports_vector_translation(&source, begin, end));
+    EXPECT_FALSE(dl_supports_vector_translation(&source, source.item_count() + 1));
+    EXPECT_FALSE(dl_supports_vector_translation(&source, begin, end + 2));
+    ASSERT_NE(retained_dl_cache_capture_fragment(cache, &source, begin, end, 48000), nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment_translated(&pinned, retained_dl_cache_get(cache, 48000), 10, 20));
+    ASSERT_NE(retained_dl_cache_capture_fragment(cache, &source, begin, end, 48001), nullptr);
+    EXPECT_NE(retained_dl_cache_get(cache, 48000), nullptr);
+    EXPECT_NE(retained_dl_cache_get(cache, 48001), nullptr);
+    EXPECT_EQ(test_radiant_command(&pinned, 0).element_marker.view_id, 0u);
+    EXPECT_EQ(test_radiant_command(&pinned, 0).element_marker.matching_index, 2);
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+    EXPECT_TRUE(dl_validate(&pinned, nullptr));
+    EXPECT_FLOAT_EQ(test_radiant_command(&pinned, 1).fill_rect.x, 13);
+    dl_destroy(&pinned);
+}
+
+TEST_F(RetainedDisplayListTest, KeyedSubscenesRejectInvalidRangesAndRecoverFromPublicationFailure) {
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool); ASSERT_NE(cache, nullptr);
+    DisplayList source, pinned;
+    int begin = dl_begin_element(&source, 0, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 8, 8), nullptr); dl_end_element(&source, begin);
+    EXPECT_EQ(retained_dl_cache_capture_fragment(cache, &source, 0, 3, 0), nullptr);
+    EXPECT_EQ(retained_dl_cache_capture_fragment(cache, &source, 1, 3, 48002), nullptr);
+    EXPECT_EQ(retained_dl_cache_capture_fragment(cache, &source, 0, 2, 48002), nullptr);
+    source.front().element_marker.view_id = 48002;
+    EXPECT_EQ(retained_dl_cache_capture_fragment(cache, &source, 0, 3, 48002), nullptr);
+    source.front().element_marker.view_id = 0;
+    ASSERT_NE(retained_dl_cache_capture_fragment(cache, &source, 0, 3, 48002), nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&pinned, retained_dl_cache_get(cache, 48002)));
+    bool saw_failure = false, saw_success = false;
+    for (size_t fail_at = 0; fail_at < 20; fail_at++) {
+        memtrack_fault_inject(fail_at);
+        const auto* fragment = retained_dl_cache_capture_fragment(cache, &source, 0, 3, 48002);
+        memtrack_fault_clear();
+        saw_failure |= !fragment; saw_success |= fragment != nullptr;
+        EXPECT_TRUE(dl_validate(&pinned, nullptr));
+    }
+    EXPECT_TRUE(saw_failure); EXPECT_TRUE(saw_success);
+    ASSERT_NE(retained_dl_cache_capture_fragment(cache, &source, 0, 3, 48002), nullptr);
+    retained_dl_cache_set_storage_budget(cache, 1);
+    EXPECT_EQ(retained_dl_cache_capture_fragment(cache, &source, 0, 3, 48002), nullptr);
+    retained_dl_cache_destroy(cache); dl_destroy(&source);
+    EXPECT_TRUE(dl_validate(&pinned, nullptr)); dl_destroy(&pinned);
+}
+
+TEST_F(RetainedDisplayListTest, PublishedStoragePinsItsContextBeyondDocumentAndCacheOwners) {
+    MemContext* document = mem_context_create(nullptr, MEM_ROLE_RENDER, "test.retained.document");
+    ASSERT_NE(document, nullptr);
+    uint32_t doc_id = mem_doc_register("test:retained-reader", 0);
+    mem_context_set_doc_id(document, doc_id);
+    Pool* owner_pool = mem_pool_create(document, MEM_ROLE_RENDER, "test.retained.pool");
+    ASSERT_NE(owner_pool, nullptr);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(owner_pool); ASSERT_NE(cache, nullptr);
+    DisplayList source, pinned;
+    int root = dl_begin_element(&source, 0, 0, 0, 8, 8);
+    ASSERT_NE(retained_test_add_rect(&source, 0, 0, 8, 8), nullptr); dl_end_element(&source, root);
+    ASSERT_NE(retained_dl_cache_capture_fragment(cache, &source, 0, 3, 48003), nullptr);
+    ASSERT_TRUE(retained_dl_append_fragment(&pinned, retained_dl_cache_get(cache, 48003)));
+    retained_dl_cache_destroy(cache); mem_pool_destroy(owner_pool); mem_context_destroy(document);
+    dl_destroy(&source);
+    MemSnapshot* snapshot = mem_snapshot_capture(nullptr); ASSERT_NE(snapshot, nullptr);
+    bool found = false;
+    for (uint32_t i = 0; i < snapshot->count; i++) {
+        const MemStatSample& sample = snapshot->samples[i];
+        if (sample.doc_id == doc_id && strcmp(sample.label, "retained_dl.chunk") == 0) found = true;
+    }
+    mem_snapshot_free(snapshot); EXPECT_TRUE(found);
+    EXPECT_TRUE(dl_validate(&pinned, nullptr)); dl_destroy(&pinned);
+    snapshot = mem_snapshot_capture(nullptr); ASSERT_NE(snapshot, nullptr);
+    for (uint32_t i = 0; i < snapshot->count; i++) EXPECT_NE(snapshot->samples[i].doc_id, doc_id);
+    mem_snapshot_free(snapshot); mem_doc_retire(doc_id);
 }

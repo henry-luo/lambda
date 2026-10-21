@@ -7,11 +7,13 @@ import json
 import os
 import pathlib
 import platform
-import signal
 import subprocess
-import time
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "utils"))
+from benchmark_process import run_measured
+
 SCENARIOS = ["points", "identical", "groups", "rich", "large_years"]
 
 
@@ -46,7 +48,8 @@ def main():
     # Packages load from source at runtime, so the binary hash alone cannot identify a run.
     sources = sorted((ROOT / "lmd/package/chart").rglob("*.ls")) + [
         ROOT / "lmd/package/slide/easing.ls", ROOT / "lmd/package/slide/color.ls",
-        ROOT / "test/timeline/_benchmark.ls", pathlib.Path(__file__).resolve()]
+        ROOT / "test/timeline/_benchmark.ls", pathlib.Path(__file__).resolve(),
+        ROOT / "utils/benchmark_process.py"]
     report = {"recorded_at": stamp, "built_with": build_description,
               "git_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "binary_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
@@ -64,37 +67,14 @@ def main():
                               "\npn main() {\n let result=benchmark.run(" + str(count) + "," + json.dumps(scenario) +
                               ");\n print(\"__TIMELINE_BENCH__\\n\",format(result,'json'),\"\\n\")\n}\n")
             command = [str(executable), "run", str(driver), "--no-log"]
-            started = time.monotonic()
             with (output / f"{name}.stdout").open("w") as stdout, (output / f"{name}.stderr").open("w") as stderr:
-                process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=stdout, stderr=stderr, start_new_session=True)
-                timed_out = False
-                usage = None
-                if hasattr(os, "wait4"):
-                    # wait4 measures this child without macOS time(1)'s restricted sysctl.
-                    while True:
-                        pid, status, child_usage = os.wait4(process.pid, os.WNOHANG)
-                        if pid:
-                            process.returncode = os.waitstatus_to_exitcode(status)
-                            usage = child_usage
-                            break
-                        if time.monotonic() - started >= args.timeout:
-                            timed_out = True
-                            os.killpg(process.pid, signal.SIGKILL)
-                            _, status, usage = os.wait4(process.pid, 0)
-                            process.returncode = os.waitstatus_to_exitcode(status)
-                            break
-                        time.sleep(0.05)
-                else:
-                    try:
-                        process.wait(timeout=args.timeout)
-                    except subprocess.TimeoutExpired:
-                        timed_out = True
-                        process.kill()
-                        process.wait()
-            record = {"count": count, "scenario": scenario, "wall_s": time.monotonic() - started,
-                      "status": "timeout" if timed_out else "failed", "exit_code": process.returncode}
+                measured = run_measured(command, cwd=ROOT, env=environment, stdout=stdout,
+                                        stderr=stderr, timeout=args.timeout)
+            record = {"count": count, "scenario": scenario, "wall_s": measured["wall_seconds"],
+                      "status": "timeout" if measured["timed_out"] else "failed",
+                      "exit_code": measured["exit_code"]}
             text = (output / f"{name}.stdout").read_text()
-            if not timed_out and process.returncode == 0 and "__TIMELINE_BENCH__\n" in text:
+            if not measured["timed_out"] and measured["exit_code"] == 0 and "__TIMELINE_BENCH__\n" in text:
                 try:
                     metrics = json.loads(text.split("__TIMELINE_BENCH__\n", 1)[1])
                     work = metrics["viewport_work"]
@@ -105,8 +85,7 @@ def main():
                         record.update(status="ok", metrics=metrics)
                 except (ValueError, KeyError, TypeError):
                     pass
-            if usage is not None:
-                record["peak_rss_bytes"] = usage.ru_maxrss * (1 if platform.system() == "Darwin" else 1024)
+            record["peak_rss_bytes"] = measured["peak_rss_bytes"]
             report["results"].append(record)
             (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
             print(name, record["status"], flush=True)

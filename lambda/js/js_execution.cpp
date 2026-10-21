@@ -146,9 +146,11 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
         // executes under this scope, leaving timer APIs without a uv loop.
         js_event_loop_init();
     }
+    uint64_t execution_start = time_now_us();
     Item result = es_module
         ? js_interp_execute_es_module_script(runtime, script, result_home)
         : js_interp_execute_script(runtime, script, result_home);
+    runtime->js_execution_ms = (double)(time_now_us() - execution_start) / 1000.0;
     // This is the outer retained-AST module entry. Static imports use their
     // parent's turn, but the completed module must process its queued TLA
     // continuation before a Test262 batch returns to its async harness.
@@ -283,7 +285,7 @@ extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
 
 extern "C" bool js_prepare_eval_context(Runtime* runtime,
         bool initialize_thread, EvalContext** out_context,
-        bool* out_reusing_context) {
+        bool* out_reusing_context, bool initialize_js) {
     if (!out_context || !out_reusing_context) return false;
     EvalContext* js_context = NULL;
     bool reusing_context = context && context->heap;
@@ -309,7 +311,7 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
     context->runtime = runtime;
     // Fresh and retained clients publish one canonical resource tuple.
     runtime_context_publish_owners(runtime, context);
-    if (!js_runtime_state_init(context)) return false;
+    if (initialize_js && !js_runtime_state_init(context)) return false;
     *out_context = js_context;
     *out_reusing_context = reusing_context;
     return true;
@@ -527,12 +529,15 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         int dir_len = last_slash ? (int)(last_slash - abs_path) : 1;
         const char* dir_str = last_slash ? abs_path : ".";
 
+        size_t insert_at = js_commonjs_injection_offset(js_source, js_source_len);
+        // an EOF directive or trailing line comment needs a statement boundary
+        // before the injected declarations, just as at the original end of input.
+        const char* boundary = insert_at && !js_is_line_terminator(js_source[insert_at - 1]) ? "\n" : "";
         char commonjs_header[4096];
         int off = snprintf(commonjs_header, sizeof(commonjs_header),
-            "var __filename = \"%s\";\nvar __dirname = \"%.*s\";\n",
-            abs_path, dir_len, dir_str);
+            "%svar __filename = \"%s\";\nvar __dirname = \"%.*s\";\n",
+            boundary, abs_path, dir_len, dir_str);
         if (off < 0 || (size_t)off >= sizeof(commonjs_header)) off = 0;
-        size_t insert_at = js_commonjs_injection_offset(js_source, js_source_len);
         injected_source = mem_join3(js_source, insert_at, commonjs_header, (size_t)off,
                                     js_source + insert_at, js_source_len - insert_at,
                                     MEM_CAT_JS_RUNTIME);
@@ -712,8 +717,9 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 }
 
 Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                             const char* filename, uint64_t* result_home) {
-    return transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename, result_home);
+                             const char* filename, uint64_t* result_home, bool module) {
+    return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
+        filename, result_home, false, false, module);
 }
 
 Item transpile_js_to_mir_test262_native_len(Runtime* runtime, const char* js_source,
@@ -731,8 +737,7 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
 }
 
 Item transpile_js_module_to_mir(Runtime* runtime, const char* source, const char* filename) {
-    return transpile_js_to_mir_core_profile_len(runtime, source, strlen(source),
-        filename, NULL, false, false, true);
+    return transpile_js_to_mir_len(runtime, source, strlen(source), filename, NULL, true);
 }
 
 

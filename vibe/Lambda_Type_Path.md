@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18
 **Status:** Decided; current syntax/runtime scope implemented
-**Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29, PTH81–PTH84
+**Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29, PTH81–PTH85
 **Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3). **2026-10-20 (USER):** PTH81–PTH84 (§6.4) — a wildcard step may sit anywhere, forcing continues per match, a step applied to a file match enters the file while `**` never crosses the boundary by itself, path-domain results deduplicate, `**` is the closure of `*` and includes its base, and `#` is the line between reference and value (S2.4.6, S8.2.5, S8.2.6); implemented on both tiers the same day
 **Open issue IDs:** PTH-O1
 
@@ -585,6 +585,28 @@ depth cap; a symlinked directory is listed but not entered, as globstar does,
 so a link to an ancestor cannot recurse forever. Before this, the base was
 excluded, recursion stopped at depth 16, and `#` refused any wildcard path.
 
+**Query steps follow the wildcard rule (PTH85; S2.4.7).** `?T` and `.?T`
+are recursive like `**`, so they get the same boundary. On a path they are
+lazy path operations whose type operand joins the path's identity. Forced
+over a directory, `p?T` is the proper closure `p.*.**` and `p.?T` the
+inclusive closure `p.**`, each filtered to the path values that are `T`;
+no file is read, so `\.src?<div>#` is `null` and `\.src?path#` lists every
+path beneath `src`. Forced over a file, the query is the step that enters
+it and searches the parsed value. Applied to another step's matches, it
+enters each file match, so these cross the boundary:
+
+| Spelling | Reads | Yields |
+|---|---|---|
+| `\.src?T#` | nothing | path values beneath `src` that are `T` |
+| `\.src.**?T#`, `\.src.**.?T#` | every file beneath `src` | every `T` inside them (and matching directory paths) |
+| `\.src?T.**#`, `\.src.?T.**#` | every file the query keeps | the closure of each kept file's content |
+| `\.src.*?T#` | the files directly in `src` | every `T` inside them |
+| `\.src.**#?T` | nothing | the path values that are `T`; after `#` the query acts on values |
+
+*Why:* a bare `?T` that opened every file beneath a directory would be the
+unbounded implicit read PTH82 rules out for `**`. Spelling a step that
+produces file matches first is what makes the cost visible.
+
 ## 7. Root and parent navigation on expressions
 
 ### 7.1 Postfix root step
@@ -888,6 +910,9 @@ At minimum, implementation tests must cover:
     entering a file match while `**` alone stops at files, path-domain
     deduplication, `**` including its base, and `#` as the line between
     reference and value (§6.4).
+21. Query steps on paths (PTH85): `p?T`/`p.?T` lazy until `#`, directory
+    enumeration filtered by `T` with no file read, file matches entered,
+    and the `**?T`, `**.?T`, `?T.**`, `.?T.**` crossings.
 
 ## 13. Decision ledger
 
@@ -934,6 +959,7 @@ At minimum, implementation tests must cover:
 | **PTH82** | A step applied to a file match enters the file (PTH34 per match); `**` never crosses the file boundary by itself. A force reads exactly the files that a spelled step enters: `\.src.**#` reads nothing, `\.src.**.name#` reads every file, `\.src.**.**#` is the explicit full-content search. *(USER, 2026-10-20; S2.4.6.)* |
 | **PTH83** | A wildcard result in the path domain is a set, deduplicated by path equality in first-appearance order, so `**.**` is idempotent on the directory side; results inside a document stay runs and never deduplicate. *(USER, 2026-10-20; S2.4.6.)* |
 | **PTH84** | `#` is the line between reference and value: steps before it extend the plan and may enter files, steps after it act on values — `\.src.*#.name` reads each path's `name` property and no file; `\.src.*.name#` enters each file. *(USER, 2026-10-20; S2.4.6.)* |
+| **PTH85** | `?T` and `.?T` on a path are lazy path operations that never cross the file boundary by themselves: over a directory they are the proper and inclusive closures filtered to path values that are `T`, reading no file; over a file they enter it and query the parsed value. Applied to another step's file matches they enter those files, so `**?T`, `**.?T`, `?T.**` and `.?T.**` search file content. *(USER, 2026-10-20; S2.4.7.)* |
 
 ## 14. Open issues and non-decided options
 

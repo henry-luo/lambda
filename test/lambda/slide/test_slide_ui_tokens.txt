@@ -1,0 +1,21 @@
+{
+  tokens: 17,
+  style: "--slide-ui-accent:#0a84ff;--slide-ui-control-border:rgba(255,255,255,0.1);--slide-ui-font:-apple-system, sans-serif;",
+  none: "",
+  deck_only: {
+    accent: "#ff9500",
+    radius: "4px"
+  },
+  merged: {
+    accent: "#0a84ff",
+    radius: "4px",
+    text: "#f2f2f7"
+  },
+  plain: {},
+  player_style: "width:640px;--slide-ui-accent:#0a84ff;--slide-ui-radius:4px;",
+  page_body: "--slide-ui-accent:#ff9500;--slide-ui-radius:4px;",
+  unknown: "slide: options.ui: unsupported attribute accnt",
+  injection: "slide: options.ui: accent must be a nonempty CSS value without ; { or }",
+  empty: "slide: options.ui: font must be a nonempty CSS value without ; { or }",
+  not_map: "slide: deck.ui: expected map"
+}

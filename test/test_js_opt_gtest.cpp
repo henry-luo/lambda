@@ -1453,6 +1453,256 @@ struct MvpMirTuningCase {
 
 // keep callback-free admission cases separate: reflection would disable their numeric proofs.
 static const MvpMirTuningCase kMvpMirTuningCases[] = {
+    {"ScalarLoopBesideDynamicSource", "mvp_scalar_loop_region", R"JS(
+function sum(n) {
+    let total = 0;
+    for (let i = 0; i < n && i < 4; i++) total += i;
+    return total;
+}
+function dynamic() { return eval('40 + 2'); }
+if (dynamic() !== 42 || sum(4) !== 6 || sum(Infinity) !== 6 ||
+    sum(NaN) !== 0 || sum(-0) !== 0 || sum('3') !== 3 ||
+    sum(undefined) !== 0 || sum(null) !== 0 || sum(true) !== 0 || sum(3n) !== 3)
+    throw new Error('scalar loop result');
+let conversions = 0;
+const bound = { valueOf() { conversions++; return 3; } };
+if (sum(bound) !== 3 || conversions !== 4) throw new Error('replayed loop conversion');
+const marker = {};
+let attempts = 0, caught;
+try { sum({ valueOf() { if (++attempts === 2) throw marker; return 3; } }); }
+catch (error) { caught = error; }
+if (caught !== marker || attempts !== 2) throw new Error('loop throw');
+let typeError = false;
+try { sum(Symbol('limit')); } catch (error) { typeError = error instanceof TypeError; }
+if (!typeError) throw new Error('loop symbol conversion');
+console.log('OPT_OK');
+)JS"},
+    {"StringEqualityKernel", "mvp_string_equality", R"JS(
+function same(a, b, expected) {
+    if ((a === b) !== expected || (a == b) !== expected ||
+        (a !== b) === expected || (a != b) === expected)
+        throw new Error('string equality');
+}
+function order(a, b) {
+    return a < b && b > a && a <= b && b >= a;
+}
+function classify(value) {
+    switch (value) {
+        case '😀': return 1;
+        case 'a\0b': return 2;
+        default: return 0;
+    }
+}
+const values = ['', '', 'a', 'a', 'ab', 'a\0b', 'a\0c', 'é',
+    String.fromCharCode(233), '😀', String.fromCharCode(0xd83d, 0xde00),
+    '\ud83d', '\ude00', '😁', 'prefix', 'prefix-long'];
+const groups = [0, 0, 1, 1, 2, 3, 4, 5, 5, 6, 6, 7, 8, 9, 10, 11];
+for (let i = 0; i < values.length; i++)
+    for (let j = 0; j < values.length; j++)
+        same(values[i], values[j], groups[i] === groups[j]);
+if (!order('a', 'ab') || !order('a\0b', 'a\0c') || !order('😀', '\ue000') ||
+    classify(values[10]) !== 1 || classify(values[5]) !== 2 || classify('a') !== 0)
+    throw new Error('string ordering or switch');
+let effects = '';
+function left() { effects += 'l'; return 'a'; }
+function right() { effects += 'r'; return 'a'; }
+if (!(left() === right()) || effects !== 'lr') throw new Error('operand evaluation');
+console.log('OPT_OK');
+)JS"},
+    {"PrimitiveReceiverBesideHostImport", "mvp_primitive_receiver_host", R"JS(
+const fs = require("fs");
+function missing(value) { return value.absent; }
+function text(value) { return value.toString(); }
+function nullable(value) { return value.absent; }
+if (!fs.existsSync("test/test_js_opt_gtest.cpp") ||
+    missing("abc") !== undefined || missing(42) !== undefined || missing(true) !== undefined ||
+    text("abc") !== "abc" || text(42) !== "42" || text(false) !== "false")
+    throw new Error("primitive property changed beside native import");
+let nullError = false, undefinedError = false;
+try { nullable(null); } catch (error) { nullError = error instanceof TypeError; }
+try { nullable(undefined); } catch (error) { undefinedError = error instanceof TypeError; }
+if (!nullError || !undefinedError) throw new Error("nullish property lost its error");
+console.log("OPT_OK");
+)JS", false},
+    {"NativeCallGuard", "mvp_native_call_guard", R"JS(
+const fs = require("fs");
+let effects = "";
+function invoke(fn, path) { return fn((effects += "A", path)); }
+function guest(path) { effects += "G"; return path === "test/test_js_opt_gtest.cpp"; }
+const path = "test/test_js_opt_gtest.cpp";
+if (!invoke(fs.existsSync, path) || effects !== "A" ||
+    !invoke(guest, path) || effects !== "AAG")
+    throw new Error("native or guest call changed arguments");
+let caught = false;
+try { invoke({}, path); } catch (error) { caught = error instanceof TypeError; }
+if (!caught || effects !== "AAGA") throw new Error("invalid call skipped or replayed argument");
+const marker = { kept: 42 };
+function throwing() { effects += "T"; throw marker; }
+caught = false;
+try { invoke(throwing, path); } catch (error) { caught = error === marker; }
+if (!caught || effects !== "AAGAAT") throw new Error("call completion replayed effects");
+console.log("OPT_OK");
+)JS", false},
+    {"DeclaredFunctionGlobalRead", "mvp_declared_function_global_read", R"JS(
+function dynamicNeighbor() { return eval("1"); }
+function helper(value) { return value + 1; }
+function invoke() { return helper(41); }
+const first = invoke();
+globalThis.helper = value => value + 2;
+if (dynamicNeighbor() !== 1 || first !== 42 || invoke() !== 43 ||
+    Object.getOwnPropertyDescriptor(globalThis, "helper").configurable)
+    throw new Error("declared function read lost live object binding");
+console.log("OPT_OK");
+)JS", false},
+    {"DenseLoopBesideEval", "mvp_local_dense_loop", R"JS(
+function dynamicNeighbor() { return eval("1"); }
+function sum(hole) {
+    const values = [1, 2, 3, 4];
+    if (hole) delete values[2];
+    let total = 0;
+    for (let index = 0; index < 4; index++) {
+        total += values[0] === 1 ? 1 : 0;
+        total += values[index] === index + 1 ? 1 : 0;
+    }
+    return total;
+}
+let getterCalls = 0;
+let throwRead = false;
+const marker = new Error("read marker");
+Object.defineProperty(Array.prototype, "2", {
+    configurable: true,
+    get() { getterCalls++; if (throwRead) throw marker; return 3; }
+});
+let dense, sparse, caught = false;
+try {
+    dense = sum(false);
+    sparse = sum(true);
+    throwRead = true;
+    try { sum(true); } catch (error) { caught = error === marker; }
+} finally {
+    delete Array.prototype[2];
+}
+if (dynamicNeighbor() !== 1 || dense !== 8 || sparse !== 8 || getterCalls !== 2 || !caught)
+    throw new Error("local dense loop changed fallback effects");
+console.log("OPT_OK");
+)JS", false},
+    {"NumberComparisonCoercion", "mvp_number_comparison_coercion", R"JS(
+function compare(values, number) {
+    const value = values[0];
+    return (value < number ? 1 : 0) | (value <= number ? 2 : 0) |
+        (value > number ? 4 : 0) | (value >= number ? 8 : 0) |
+        (number < value ? 16 : 0) | (number <= value ? 32 : 0) |
+        (number > value ? 64 : 0) | (number >= value ? 128 : 0);
+}
+function check(value, expected) {
+    if (compare([value], 4) !== expected) throw new Error("numeric comparison");
+}
+check(3, 195); check("3", 195); check(4, 170); check(5, 60);
+check(null, 195); check(false, 195); check(undefined, 0); check(NaN, 0);
+check(Infinity, 60); check(-Infinity, 195);
+if (compare([], 4) !== 0 || compare([-0], 0) !== 170)
+    throw new Error("numeric comparison absence or signed zero");
+let calls = 0;
+const object = { valueOf() { calls++; return "3"; } };
+check(object, 195);
+if (calls !== 8) throw new Error("repeated conversion");
+const marker = { tag: 42 };
+let caught = false;
+try { compare([{ valueOf() { calls++; throw marker; } }], 4); }
+catch (error) { caught = error === marker; }
+if (!caught || calls !== 9) throw new Error("conversion exception");
+let symbolCalls = 0, symbolError = false;
+try { compare([{ valueOf() { symbolCalls++; return Symbol("number"); } }], 4); }
+catch (error) { symbolError = error instanceof TypeError; }
+if (!symbolError || symbolCalls !== 1) throw new Error("symbol conversion");
+let events = "";
+const observed = { get 0() {
+    events += "G";
+    return { valueOf() { events += "C"; return 3; } };
+} };
+function ordered(values) { return values[0] < (events += "R", 4); }
+function reversed(values) { return (events += "L", 4) > values[0]; }
+if (!ordered(observed) || events !== "GRC") throw new Error("operand order");
+events = "";
+if (!reversed(observed) || events !== "LGC") throw new Error("reverse operand order");
+console.log("OPT_OK");
+)JS", false},
+    {"IntegralIndexBesideEval", "mvp_local_integral_index", R"JS(
+function dynamicNeighbor() { return eval("1"); }
+function sum(limit, hole) {
+    const values = [10, 20, 30];
+    if (hole) delete values[1];
+    let index = 0, total = 0;
+    while (index < limit) {
+        total += values[index];
+        index++;
+    }
+    return total;
+}
+function fractional(half) {
+    const values = [10, 20];
+    values["0.5"] = 7;
+    let index = 0;
+    if (half) index += 0.5;
+    return values[index];
+}
+let reads = 0, conversions = 0, throwing = false, caught = false;
+const marker = new Error("index getter");
+Object.defineProperty(Array.prototype, "1", {
+    configurable: true,
+    get() { reads++; if (throwing) throw marker; return 20; }
+});
+let dense, sparse;
+try {
+    dense = sum(3, false);
+    sparse = sum({valueOf() { conversions++; return 3; }}, true);
+    throwing = true;
+    try { sum(3, true); } catch (error) { caught = error === marker; }
+} finally {
+    delete Array.prototype[1];
+}
+if (dynamicNeighbor() !== 1 || dense !== 60 || sparse !== 60 ||
+    reads !== 2 || conversions !== 4 || !caught || sum(NaN, false) !== 0 ||
+    sum(-0, false) !== 0 || fractional(false) !== 10 || fractional(true) !== 7)
+    throw new Error("local integer index lost fallback or fractional writes");
+console.log("OPT_OK");
+)JS", false},
+    {"OrderedLoopBesideEval", "mvp_local_ordered_loop", R"JS(
+function dynamicNeighbor() { return eval("1"); }
+function sum(mode, wipe) {
+    const values = [1, 2, 3];
+    let index = 0, total = 0;
+    if (mode === 1) index = void 0;
+    if (mode === 2) index = 0 / 0;
+    if (mode === 3) index = 1 / 0;
+    if (mode === 4) index = -0;
+    while (index < 3) {
+        total += values[index] === index + 1 ? index : 0;
+        if (wipe && index === 1) index = void 0;
+        total += index;
+        index++;
+    }
+    return [index, total];
+}
+function ownEval() {
+    let index = 0, total = 0;
+    while (index < 3) {
+        eval("index = undefined");
+        total += index;
+        index++;
+    }
+    return [index, total];
+}
+const normal = sum(0, false), absent = sum(1, false), nan = sum(2, false);
+const wide = sum(3, false), zero = sum(4, false), wiped = sum(0, true), evaluated = ownEval();
+if (dynamicNeighbor() !== 1 || normal[0] !== 3 || normal[1] !== 6 ||
+    absent[0] !== undefined || absent[1] !== 0 ||
+    !Number.isNaN(nan[0]) || nan[1] !== 0 || wide[0] !== Infinity || wide[1] !== 0 ||
+    zero[0] !== 3 || zero[1] !== 6 || !Number.isNaN(wiped[0]) || !Number.isNaN(wiped[1]) ||
+    !Number.isNaN(evaluated[0]) || !Number.isNaN(evaluated[1]))
+    throw new Error("local ordered loop changed Number or eval effects");
+console.log("OPT_OK");
+)JS", false},
     {"SourceConstructorLayout", "mvp_source_constructor_layout", R"JS(
 function create(a,b) { return new Record(a,b); }
 function Record(a,b) { this.a=a; this.b=b; }

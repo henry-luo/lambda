@@ -126,8 +126,8 @@ fn tag_pair(tags) => jq_alt(jq_at(tags, 0), "-") ++ "/" ++ jq_alt(jq_at(tags, 1)
 
 pn round_digest(orders_in, r) {
     let orders = [for (o in orders_in where o.status != "pending") transform_order(o)]
-    let by_region = sum([for (o in orders group by o.user.region as region into g order by g.region)
-        region_digest(g.region, content(g))])
+    let by_region = sum([for (o in orders group by o.user.region as region into g order by region)
+        region_digest(region, g)])
     let top_skus = top_skus_digest(orders)
     let running = running_last(orders)
     let csvlen = len(join([for (o in orders) string(o.id) ++ "," ++ o.user.name ++ "," ++ string(o.total)], "\n"))

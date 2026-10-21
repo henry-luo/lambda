@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3v2: native comparison/truthiness scalars add no ERROR observation; only the two Number-conversion boundaries remain fallible.",
+  "description": "D8.4.3v2: native comparison/truthiness scalars add no ERROR observation; only the two Number-conversion boundaries remain fallible. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
       "expect": [
-        "deq",
-        "dne"
+        "\teq\t",
+        "\tne\t"
       ],
       "count": {
-        "{{r}}, 27": 2
+        "{{r}}, 27": 0
       },
       "forbid": [
         "js_eq_raw",

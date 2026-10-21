@@ -177,7 +177,8 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
             : map_shape_field_to_item(properties->data, field);
     };
     Item cursor = ItemNull;
-    if (!library || !library->mutable_prototypes) {
+    if (!library || (!library->mutable_prototypes &&
+            !(library->function_prototype_observed && get_type_id(owner) == LMD_TYPE_FUNC))) {
         // closed units without reflective writers retain the declared-chain proof.
         bool statics = get_type_id(owner) == LMD_TYPE_FUNC || owner.map == mvp_lmd_class_values(cls)[2].map;
         TypeNominal* nominal = &cls->nominal;
@@ -264,20 +265,26 @@ static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId
     return false;
 }
 
-template<bool fixed, bool binding = false, int known_operation = -1>
+template<bool fixed, bool binding = false, int known_operation = -1, bool host = false>
 static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64_t operation, Item receiver) {
     // a known operation prunes unrelated gates without duplicating property semantics.
-    if constexpr (known_operation >= 0) operation = known_operation;
+    if constexpr (known_operation == LMD_PROP_SET)
+        operation = known_operation | (operation & LMD_PROP_STRICT);
+    else if constexpr (known_operation >= 0) operation = known_operation;
+    const int64_t requested_operation = binding ? LMD_PROP_GET_BINDING : operation;
+    auto host_property = [&]() {
+        return mvp_lmd_class_property(owner, name, value, requested_operation);
+    };
     auto inherited_binding = [&]() -> Item {
         RootFrame roots(3);
         if (!roots.valid()) return ItemError;
         Rooted<Item> object(roots, owner), key(roots, name), target(roots, receiver);
-        Item found = mvp_lmd_class_property_impl<fixed>(object.get(), key.get(), ItemNull,
+        Item found = mvp_lmd_class_property_impl<fixed, false, -1, host>(object.get(), key.get(), ItemNull,
             LMD_PROP_HAS, target.get());
         if (item_is_error(found)) return found;
         if (found.item == ITEM_FALSE) return mvp_lmd_fail(LMD_MVP_REFERENCE, 0);
         // a proxy Has trap can install an own property; restart Get from the original owner.
-        return mvp_lmd_class_property_impl<fixed>(object.get(), key.get(), ItemNull,
+        return mvp_lmd_class_property_impl<fixed, false, -1, host>(object.get(), key.get(), ItemNull,
             LMD_PROP_GET, target.get());
     };
     if (binding && (get_type_id(owner) != LMD_TYPE_MAP || owner.map->map_kind != MAP_KIND_PLAIN))
@@ -320,8 +327,13 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             return opcode == LMD_PROP_SET ? value : foreign;
         }
     }
-    if (get_type_id(owner) == LMD_TYPE_ARRAY)
+    if (owner_type == LMD_TYPE_ARRAY) {
+        // classify host arrays only on the existing array arm.
+        if constexpr (host) {
+            if (mvp_lmd_foreign_candidate(owner, true)) return host_property();
+        }
         return mvp_lmd_array_property(owner, name, value, operation, receiver);
+    }
     if (!fixed && get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner)) {
         int opcode = operation & ~LMD_PROP_STRICT;
         if (opcode >= LMD_PROP_KEYS && opcode <= LMD_PROP_ENTRIES)
@@ -365,17 +377,23 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     }
     bool initializing = operation == LMD_PROP_INITIALIZE;
     if (initializing) operation = LMD_PROP_SET;
-    if (get_type_id(owner) == LMD_TYPE_FUNC && !mvp_lmd_class_record(owner)) {
-        if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE || operation == LMD_PROP_HAS) {
-            MvpLmdLibraryState* library = fixed ? NULL : mvp_lmd_program_library();
-            Item method = library && library->mutable_prototypes ? Item{.item = ITEM_JS_UNDEFINED} :
-                mvp_lmd_function_method(owner, name.get_string());
-            if (method.item != ITEM_JS_UNDEFINED) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : method;
-            if (!owner.function->def && name.get_string()->len == 6 && !memcmp(name.get_string()->chars, "length", 6))
-                return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : Item{.item = i2it(owner.function->arity)};
+    if (owner_type == LMD_TYPE_FUNC) {
+        // a native callable must not enter MVP's private function storage.
+        if constexpr (host) {
+            if (mvp_lmd_foreign_candidate(owner, true)) return host_property();
         }
-        Item prepared = mvp_lmd_function_prepare(owner);
-        if (item_is_error(prepared)) return prepared;
+        if (!mvp_lmd_class_record(owner)) {
+            if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE || operation == LMD_PROP_HAS) {
+                MvpLmdLibraryState* library = fixed ? NULL : mvp_lmd_program_library();
+                Item method = library && library->mutable_prototypes ? Item{.item = ITEM_JS_UNDEFINED} :
+                    mvp_lmd_function_method(owner, name.get_string());
+                if (method.item != ITEM_JS_UNDEFINED) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : method;
+                if (!owner.function->def && name.get_string()->len == 6 && !memcmp(name.get_string()->chars, "length", 6))
+                    return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : Item{.item = i2it(owner.function->arity)};
+            }
+            Item prepared = mvp_lmd_function_prepare(owner);
+            if (item_is_error(prepared)) return prepared;
+        }
     }
     if (owner_type != LMD_TYPE_MAP) cls = mvp_lmd_class_record(owner);
     if (cls) {
@@ -472,6 +490,9 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
                     ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
         owner = Item{.map = map};
+    } else if constexpr (host) {
+        // foreign Maps and virtual carriers miss the existing nominal lookup.
+        if (mvp_lmd_foreign_candidate(owner, true)) return host_property();
     }
     if (binding) return inherited_binding();
     switch (operation) {
@@ -494,26 +515,30 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     }
 }
 
-extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation) {
+template<bool fixed, bool host = false>
+static Item mvp_lmd_class_property_dispatch(Item owner, Item name, Item value, int64_t operation) {
     if (operation == LMD_PROP_GET)
-        return mvp_lmd_class_property_impl<false, false, LMD_PROP_GET>(owner, name, value, operation, owner);
-    if (operation == LMD_PROP_HAS)
-        return mvp_lmd_class_property_impl<false, false, LMD_PROP_HAS>(owner, name, value, operation, owner);
+        return mvp_lmd_class_property_impl<fixed, false, LMD_PROP_GET, host>(owner, name, value, operation, owner);
+    if (!fixed && operation == LMD_PROP_HAS)
+        return mvp_lmd_class_property_impl<fixed, false, LMD_PROP_HAS, host>(owner, name, value, operation, owner);
     if (operation == LMD_PROP_CALLEE)
-        return mvp_lmd_class_property_impl<false, false, LMD_PROP_CALLEE>(owner, name, value, operation, owner);
+        return mvp_lmd_class_property_impl<fixed, false, LMD_PROP_CALLEE, host>(owner, name, value, operation, owner);
+    // hot writes retain strictness while pruning unrelated property operations.
+    if ((operation & ~LMD_PROP_STRICT) == LMD_PROP_SET)
+        return mvp_lmd_class_property_impl<fixed, false, LMD_PROP_SET, host>(owner, name, value, operation, owner);
     if (operation == LMD_PROP_GET_BINDING)
-        return mvp_lmd_class_property_impl<false, true>(owner, name, value, LMD_PROP_GET, owner);
-    return mvp_lmd_class_property_impl<false>(owner, name, value, operation, owner);
+        return mvp_lmd_class_property_impl<fixed, true, -1, host>(owner, name, value, LMD_PROP_GET, owner);
+    return mvp_lmd_class_property_impl<fixed, false, -1, host>(owner, name, value, operation, owner);
+}
+extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation) {
+    return mvp_lmd_class_property_dispatch<false>(owner, name, value, operation);
 }
 extern "C" Item mvp_lmd_class_property_fixed(Item owner, Item name, Item value, int64_t operation) {
     // the compiler's closed-unit proof excludes proxies and reflective mutation before selecting this import.
-    if (operation == LMD_PROP_GET)
-        return mvp_lmd_class_property_impl<true, false, LMD_PROP_GET>(owner, name, value, operation, owner);
-    if (operation == LMD_PROP_CALLEE)
-        return mvp_lmd_class_property_impl<true, false, LMD_PROP_CALLEE>(owner, name, value, operation, owner);
-    if (operation == LMD_PROP_GET_BINDING)
-        return mvp_lmd_class_property_impl<true, true>(owner, name, value, LMD_PROP_GET, owner);
-    return mvp_lmd_class_property_impl<true>(owner, name, value, operation, owner);
+    return mvp_lmd_class_property_dispatch<true>(owner, name, value, operation);
+}
+extern "C" Item mvp_lmd_class_property_host(Item owner, Item name, Item value, int64_t operation) {
+    return mvp_lmd_class_property_dispatch<true, true>(owner, name, value, operation);
 }
 extern "C" Item mvp_lmd_property_with_receiver(Item owner, Item name, Item value, int64_t operation, Item receiver) {
     if (operation == LMD_PROP_GET_BINDING)
@@ -672,12 +697,13 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         Rooted<Item> held(roots, callee), self(roots, receiver), target(roots, new_target);
         MvpLmdLibraryState* library = mvp_lmd_program_library();
         if (!library) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-        if (library->native_callable_values)
-            return mvp_lmd_dynamic_call_native(library->object.program, held.get(), self.get(),
-                arguments, (uint64_t)argc, target.get());
         held.set(mvp_lmd_dynamic_import_value(library->object.program, held.get()));
-        return item_is_error(held.get()) ? held.get() :
-            mvp_lmd_class_invoke(held.get(), self.get(), arguments, argc, target.get());
+        if (item_is_error(held.get())) return held.get();
+        // an identity-preserving native import already has its final callable ABI.
+        return function_has_abi(held.get().function, FN_ENTRY_ABI_JS_FUNCTION)
+            ? mvp_lmd_dynamic_call_native(library->object.program, held.get(), self.get(),
+                arguments, (uint64_t)argc, target.get())
+            : mvp_lmd_class_invoke(held.get(), self.get(), arguments, argc, target.get());
     }
     if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context ||
             function->runtime_context != context) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);

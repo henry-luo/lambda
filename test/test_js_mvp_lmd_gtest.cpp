@@ -4,6 +4,7 @@
 #include "lambda/js/js_transpiler.hpp"
 #include "lambda/js/js_execution_internal.hpp"
 #include "lambda/js/js_event_loop.h"
+#include "lambda/dom/dom.h"
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
 #include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
@@ -17,12 +18,24 @@
 #include "lambda/runtime/transpiler.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
 #include "lambda/runtime/lambda-root-frame.hpp"
+#include "lambda/jube/jube_registry.h"
 #include "lib/file.h"
 #include "lib/mem.h"
 #include "lib/hashmap.h"
 #include "lib/strbuf.h"
 #include <math.h>
 #include <string.h>
+
+static const char* kNamedPrimitivePropertySources[] = {
+    "'abc'.absent===undefined",
+    "(42).absent===undefined",
+    "true.absent===undefined",
+    "1n.absent===undefined",
+    "Symbol('kept').absent===undefined",
+    "true.toString()==='true'",
+    "typeof 'abc'.trim==='function'",
+    "function lookup(x){return x.absent}lookup('a')===undefined&&lookup(1)===undefined&&lookup(false)===undefined"
+};
 
 // keep MIR, ABI, storage and ownership regressions here; share feature checks
 // with the existing focused cases (vibe/impl/JS_MVP_Test_Consolidation.md).
@@ -46,7 +59,68 @@ protected:
     Item run(const char* source) {
         return transpile_js_to_mir_len(&runtime, source, strlen(source), "<formal-mir>", &result_home);
     }
+    void reset_runtime() {
+        runtime_cleanup(&runtime);
+        runtime = {};
+        result_home = 0;
+        runtime_init(&runtime);
+    }
 };
+
+TEST_F(JsFormalMir, StringEqualitySharesUtf16SemanticsAcrossEncodings) {
+    ASSERT_FALSE(item_is_error(run("true")));
+    RootFrame roots(4);
+    Rooted<Item> canonical(roots, js_make_string_len("\xf0\x9f\x98\x80", 4));
+    Rooted<Item> surrogate_pair(roots, js_make_string_len("\xed\xa0\xbd\xed\xb8\x80", 6));
+    Rooted<Item> ascii(roots, js_make_string_len("a\0b", 3));
+    Rooted<Item> prefix(roots, js_make_string_len("a", 1));
+    heap_gc_collect();
+    EXPECT_EQ(js_string_equal(canonical.get(), surrogate_pair.get()), 1);
+    EXPECT_EQ(js_string_equal(surrogate_pair.get(), canonical.get()), 1);
+    EXPECT_EQ(js_strict_equal(canonical.get(), surrogate_pair.get()).item, ITEM_TRUE);
+    EXPECT_EQ(mvp_lmd_string_compare(canonical.get(), surrogate_pair.get()), 0);
+    EXPECT_EQ(js_string_equal(ascii.get(), prefix.get()), 0);
+    EXPECT_EQ(js_string_equal(prefix.get(), ascii.get()), 0);
+    EXPECT_EQ(js_string_equal(ascii.get(), ascii.get()), 1);
+    EXPECT_EQ(js_strict_equal(ascii.get(), prefix.get()).item, ITEM_FALSE);
+}
+
+TEST_F(JsFormalMir, ScalarLoopRegionsRetainOpenScriptBindingsAndLifetime) {
+    ASSERT_FALSE(item_is_error(run(R"JS(
+        function forSum(n) {
+            let total=0; for(let i=0;i<n && i<4;i++) total+=i; return total;
+        }
+        function whileSum(n) {
+            let total=0, i=0; while(i<n && i<4) { total+=i; i++; } return total;
+        }
+        function doSum(n) {
+            let total=0, i=0; do { total+=i; i++; } while(i<n && i<4); return total;
+        }
+        function nested(n) {
+            let total=0; for(let i=0;i<n;i++) for(let j=0;j<n;j++) total+=i+j; return total;
+        }
+        function receiverSum(n) {
+            let total=0; for(let i=0;i<n;i++) total+=this; return total;
+        }
+        function dynamicNeighbor() { return eval('40+2'); }
+        let savedForSum=forSum;
+    )JS")));
+    heap_gc_collect();
+    EXPECT_EQ(run(R"JS(
+        dynamicNeighbor()===42 && forSum(4)===6 && whileSum(4)===6 && doSum(4)===6 &&
+        forSum(Infinity)===6 && whileSum(NaN)===0 && doSum(-0)===0 && nested(2)===4
+    )JS").item, ITEM_TRUE);
+    EXPECT_EQ(run(R"JS(
+        let loopConversions=0, receiverConversions=0;
+        const limit={valueOf(){loopConversions++;gc();return 3}};
+        const receiver={valueOf(){receiverConversions++;return 2}};
+        savedForSum(limit)===3 && loopConversions===4 &&
+        receiverSum.call(receiver,3)===6 && receiverConversions===3 &&
+        whileSum('3')===3 && doSum(3n)===3
+    )JS").item, ITEM_TRUE);
+    heap_gc_collect();
+    EXPECT_EQ(run("forSum=()=>99;savedForSum(4)===6 && forSum(4)===99").item, ITEM_TRUE);
+}
 
 TEST_F(JsFormalMir, PublicEntryRetainsMvpClosureAndCallerHeap) {
     Item value = run("let x={n:40}; function next(){return ++x.n} next");
@@ -111,6 +185,161 @@ TEST_F(JsFormalMir, UnresolvedGlobalAliasesRetainDynamicValues) {
     )JS");
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DynamicGlobalReadsRetainDescriptorsAndLateLexicals) {
+    Item result = run(R"JS(
+        let calls=0,trace='',present=true;
+        Object.defineProperty(globalThis,'ownProbe',{
+            configurable:true,get(){calls++;return 17}
+        });
+        function readOwn(){return ownProbe}
+        function readInherited(){return inheritedProbe}
+        let own=readOwn()===17&&calls===1;
+        Object.setPrototypeOf(globalThis,new Proxy({},{
+            has(target,key){
+                if(key!=='inheritedProbe')return false;
+                trace+='h';
+                if(present)Object.defineProperty(globalThis,key,{
+                    configurable:true,value:23
+                });
+                return present;
+            },
+            get(){trace+='g';return 99}
+        }));
+        let inherited=readInherited()===23&&trace==='h';
+        delete globalThis.inheritedProbe;present=false;trace='';
+        let missing=false;
+        try{readInherited()}catch(e){missing=e instanceof ReferenceError}
+        Object.setPrototypeOf(globalThis,Object.prototype);
+        globalThis.lateCell=3;globalThis.lateTdz=5;
+        function readLate(){return lateCell}
+        function readTdz(){return lateTdz}
+        own&&inherited&&missing&&trace==='h'&&readLate()===3&&readTdz()===5
+    )JS");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("let lateCell=7;readLate()===7&&globalThis.lateCell===3");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("let blocked=false;try{readTdz()}catch(e){blocked=e instanceof ReferenceError}"
+                 "let lateTdz=11;blocked&&readTdz()===11&&globalThis.lateTdz===5");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, DeclaredGlobalFunctionsRetainLiveObjectBindings) {
+    ASSERT_FALSE(item_is_error(run(
+        "Object.defineProperty(globalThis,'declaredProbe',{value:1,writable:true,configurable:true})")));
+    Item result = run(
+        "function declaredProbe(x){return x+1}"
+        "function readDeclared(){return declaredProbe(41)}"
+        "function writeDeclared(value){declaredProbe=value}"
+        "readDeclared()===42&&!Object.getOwnPropertyDescriptor(globalThis,'declaredProbe').configurable");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run("let declaredProbe=0");
+    ASSERT_TRUE(item_is_error(result));
+    char message[128];
+    js_error_lane_format(result, message, sizeof(message));
+    EXPECT_NE(strstr(message, "SyntaxError"), nullptr);
+    result = run("writeDeclared(x=>x+2);readDeclared()===43&&delete globalThis.declaredProbe===false");
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, CanonicalBindingIndexSurvivesGrowthRemovalAndHeapReplacement) {
+    ASSERT_FALSE(item_is_error(run("0")));
+    struct Environment {
+        JsGlobalEnvironment state = {};
+        ~Environment() { js_global_environment_destroy(&state); }
+    } owned;
+    JsGlobalEnvironment* environment = &owned.state;
+    ASSERT_TRUE(js_global_environment_init(environment, context));
+    const JsGlobalBindingKind kinds[] = {
+        JS_GLOBAL_BINDING_LEXICAL, JS_GLOBAL_BINDING_OBJECT_VAR, JS_GLOBAL_BINDING_MODULE_VAR
+    };
+    auto key = [](int index, bool pooled) {
+        char text[32];
+        int length = snprintf(text, sizeof(text), "indexProbe%d", index);
+        return Item{.item = s2it(pooled ? heap_create_name(text, length) : heap_strcpy(text, length))};
+    };
+    for (int i = 0; i < 96; i++) {
+        for (int kind = 0; kind < 3; kind++) {
+            ASSERT_TRUE(js_global_environment_upsert(environment, kinds[kind],
+                key(i, true), Item{.item = i2it(i + 100 * kind)}, false,
+                kind == 2 ? i : -1, kind == 2 ? 500 + i : UINT32_MAX));
+        }
+        if (i % 8 == 0) heap_gc_collect();
+    }
+    int original = js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key(31, true));
+    ASSERT_GE(original, 0);
+    ASSERT_TRUE(js_global_environment_upsert(environment, JS_GLOBAL_BINDING_LEXICAL,
+        key(31, false), Item{.item = i2it(999)}, false, -1, UINT32_MAX));
+    EXPECT_EQ(environment->binding_count, 288);
+    EXPECT_EQ(js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key(31, true)), original);
+    EXPECT_EQ(it2d(js_global_environment_binding_value(environment,
+        js_global_environment_binding_at(environment, original))), 999);
+    ASSERT_TRUE(js_global_environment_upsert(environment, JS_GLOBAL_BINDING_LEXICAL,
+        key(31, true), Item{.item = i2it(31)}, false, -1, UINT32_MAX));
+    auto check = [&](bool objects, bool modules) {
+        for (int i = 0; i < 96; i++) {
+            for (int kind = 0; kind < 3; kind++) {
+                // equal text in an unpooled allocation must find the rooted key.
+                int index = js_global_environment_find(environment, kinds[kind], key(i, false));
+                if ((kind == 1 && !objects) || (kind == 2 && !modules)) {
+                    EXPECT_EQ(index, -1);
+                    continue;
+                }
+                ASSERT_GE(index, 0);
+                Item value = js_global_environment_binding_value(environment,
+                    js_global_environment_binding_at(environment, index));
+                EXPECT_EQ(it2d(value), i + 100 * kind);
+            }
+        }
+    };
+    check(true, true);
+    ASSERT_NE(environment->binding_index, nullptr);
+    js_global_environment_remove_kind(environment, JS_GLOBAL_BINDING_OBJECT_VAR);
+    heap_gc_collect();
+    check(false, true);
+    js_global_environment_release_module_bindings(environment, 500);
+    check(false, false);
+    {
+        RootFrame roots(1);
+        Rooted<Item> storage(roots, Item{.item = i2it(42)});
+        Item name = js_name_item("borrowedIndex");
+        ASSERT_TRUE(js_global_environment_link_storage(environment, name, false,
+            (Item*)storage.home(), 1, 0, false));
+        int index = js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, name);
+        ASSERT_GE(index, 0);
+        EXPECT_EQ(it2d(js_global_environment_read_binding(environment,
+            js_global_environment_binding_at(environment, index), ItemNull)), 42);
+        js_global_environment_remove_storage_bindings(environment);
+        EXPECT_EQ(js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, name), -1);
+    }
+    check(false, false);
+    js_global_environment_clear_bindings(environment);
+    EXPECT_EQ(js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key(0, true)), -1);
+    ASSERT_TRUE(js_global_environment_upsert(environment, JS_GLOBAL_BINDING_LEXICAL,
+        key(0, true), Item{.item = i2it(7)}, false, -1, UINT32_MAX));
+    EXPECT_GE(js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key(0, false)), 0);
+    const char* collisions[] = {"costarring", "liquid"};
+    ASSERT_EQ(typemap_name_hash(collisions[0], strlen(collisions[0])),
+        typemap_name_hash(collisions[1], strlen(collisions[1])));
+    for (int i = 0; i < 2; i++)
+        ASSERT_TRUE(js_global_environment_upsert(environment, JS_GLOBAL_BINDING_LEXICAL,
+            js_name_item(collisions[i]), Item{.item = i2it(40 + i)}, false, -1, UINT32_MAX));
+    for (int i = 0; i < 2; i++) {
+        int index = js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL,
+            js_name_item(collisions[i]));
+        ASSERT_GE(index, 0);
+        EXPECT_EQ(it2d(js_global_environment_binding_value(environment,
+            js_global_environment_binding_at(environment, index))), 40 + i);
+    }
+    runtime_reset_heap(&runtime);
+    ASSERT_FALSE(item_is_error(run("0")));
+    EXPECT_EQ(js_global_environment_find(environment, JS_GLOBAL_BINDING_LEXICAL, key(0, true)), -1);
 }
 
 TEST_F(JsFormalMir, InvalidConstructorsEvaluateArgumentsBeforeTypeError) {
@@ -596,6 +825,8 @@ TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
 
 TEST_F(JsFormalMir, HostPerformanceAndDateShareVirtualAndFrameClocks) {
     ASSERT_FALSE(item_is_error(run("performance.timeOrigin>1e12")));
+    EXPECT_EQ(js_get_key_cstr(js_get_global_this(), "performance").item,
+        mvp_lmd_realm_intrinsic("performance", 11).item);
     double start = js_performance_monotonic_now_ms();
     js_performance_virtual_clock_set(true, start);
     Item result = run(R"JS(
@@ -696,9 +927,10 @@ TEST_F(JsFormalMir, NativeOwnKeysPreserveMvpSymbolIdentity) {
 TEST_F(JsFormalMir, NativeWindowTasksRetainTheActiveGlobalAndPayload) {
     Item value = run(R"JS(
         let messages=[];
-        window.addEventListener('message', function(event) {
+        window.addEventListener('message', function(received) {
             gc(); messages.push(this===window && event.source===window &&
-                event.data.tiny===5e-324 && event instanceof MessageEvent);
+                event.data.tiny===5e-324 && event instanceof MessageEvent &&
+                event===received && window.event===received && globalThis.event===received);
         });
         window.postMessage({tiny:5e-324},'*'); gc(); messages
     )JS");
@@ -706,6 +938,30 @@ TEST_F(JsFormalMir, NativeWindowTasksRetainTheActiveGlobalAndPayload) {
     ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
     ASSERT_EQ(value.array->length, 1);
     EXPECT_EQ(value.array->items[0].item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, PreparedWindowDispatchSharesAndRestoresTheCurrentEvent) {
+    EvalContext* owner = NULL;
+    bool reusing = false;
+    ASSERT_TRUE(js_prepare_eval_context(&runtime, true, &owner, &reusing));
+    ASSERT_TRUE(js_runtime_state_ensure_input(owner));
+    ASSERT_EQ(get_type_id(js_get_global_this()), LMD_TYPE_MAP);
+    Item value = run(R"JS(
+        let seen=[],saved={saved:true},outer=new Event('outer'),inner=new Event('inner');
+        globalThis.event=saved;
+        window.addEventListener('inner',function(received){
+            gc();seen.push(event===received&&window.event===received&&globalThis.event===received);
+        });
+        window.addEventListener('outer',function(received){
+            seen.push(event===received);
+            window.dispatchEvent(inner);
+            gc();seen.push(event===received&&window.event===outer);
+        });
+        window.dispatchEvent(outer);
+        seen.length===3&&seen.every(Boolean)&&event===saved&&globalThis.event===saved
+    )JS");
+    ASSERT_FALSE(item_is_error(value));
+    EXPECT_EQ(value.item, ITEM_TRUE);
 }
 
 TEST_F(JsFormalMir, NativeHostBasesPreserveConstructionFieldsAndLiveLinks) {
@@ -973,9 +1229,7 @@ TEST_F(JsFormalMir, ModuleCodeReuseKeepsClosuresClassesAndCachesRealmLocal) {
                 EXPECT_EQ(it2d(value), 40 + call);
             }
         }
-        runtime_cleanup(&runtime);
-        runtime = {};
-        runtime_init(&runtime);
+        reset_runtime();
     }
 }
 
@@ -1021,9 +1275,7 @@ TEST_F(JsFormalMir, CachedPreambleAndClassicsUseMvpAcrossFreshRealms) {
             ASSERT_FALSE(item_is_error(answer));
             EXPECT_EQ(it2d(answer), 44);
         }
-        runtime_cleanup(&runtime);
-        runtime = {};
-        runtime_init(&runtime);
+        reset_runtime();
     }
 }
 
@@ -1049,6 +1301,59 @@ TEST_F(JsFormalMir, PublicHostReadsTheActiveGlobalAndLexicalEnvironment) {
     EXPECT_EQ(js_global_binding_exists_after_with_lookup(key), 1);
     EXPECT_EQ(js_get_key_default(js_get_global_this(), key).item, ITEM_JS_UNDEFINED);
     EXPECT_EQ(js_get_global_property(js_name_item("absentHostName")).item, ITEM_JS_UNDEFINED);
+    EXPECT_EQ(js_global_lexical_binding_exists(key), 1);
+    EXPECT_EQ(it2d(js_global_lexical_get_or_fallback(key, ItemNull)), 41);
+    EXPECT_EQ(js_global_lexical_set_if_exists(key, Item{.item = i2it(52)}).item, ITEM_TRUE);
+    const char update[] = "lexical+=1;"
+        "globalThis.interpretedFamilies={generator:function*(){yield 42},"
+        "asyncFunction:async function(){return 42},asyncGenerator:async function*(){yield 42},"
+        "thrower:Object.getOwnPropertyDescriptor((function(){'use strict';return arguments})(),'callee').get,"
+        "regexp:/(x)/g};interpretedFamilies.regexp.test('x');lexical";
+    Item interpreted = js_interp_execute_source(&runtime, update, sizeof(update) - 1,
+        "<shared-lexical>", &result_home);
+    ASSERT_FALSE(item_is_error(interpreted));
+    EXPECT_EQ(it2d(interpreted), 53);
+    EXPECT_EQ(run("lexical===53").item, ITEM_TRUE);
+    EXPECT_EQ(run(
+        "Object.getPrototypeOf(interpretedFamilies.generator)===Object.getPrototypeOf(function*(){})&&"
+        "Object.getPrototypeOf(interpretedFamilies.asyncFunction)===Object.getPrototypeOf(async function(){})&&"
+        "Object.getPrototypeOf(interpretedFamilies.asyncGenerator)===Object.getPrototypeOf(async function*(){})&&"
+        "interpretedFamilies.generator().next().value===42&&"
+        "interpretedFamilies.asyncFunction() instanceof Promise&&"
+        "interpretedFamilies.asyncGenerator().next() instanceof Promise").item, ITEM_TRUE);
+    EXPECT_EQ(run("Object.getOwnPropertyDescriptor((function(){'use strict';return arguments})(),"
+        "'callee').get===interpretedFamilies.thrower").item, ITEM_TRUE);
+    EXPECT_EQ(run("RegExp.$1==='x'").item, ITEM_TRUE);
+    EXPECT_EQ(run("interpretedFamilies.regexp.source==='(x)'&&"
+        "interpretedFamilies.regexp.global&&new RegExp(interpretedFamilies.regexp).source==='(x)'").item, ITEM_TRUE);
+    RootFrame roots(1);
+    Rooted<Item> intrinsic(roots, run("const savedObject=Object;Object={};savedObject"));
+    ASSERT_EQ(get_type_id(intrinsic.get()), LMD_TYPE_FUNC);
+    EXPECT_EQ(js_get_constructor(js_name_item("Object")).item, intrinsic.get().item);
+    EXPECT_EQ(js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT).item,
+        js_get_key_cstr(intrinsic.get(), "prototype").item);
+    const struct { const char* name; Item (*get)(); } namespaces[] = {
+        {"Math", js_get_math_object_value}, {"JSON", js_get_json_object_value},
+        {"Reflect", js_get_reflect_object_value}, {"Atomics", js_get_atomics_object_value},
+        {"console", js_get_console_object_value}
+    };
+    for (const auto& entry : namespaces) {
+        intrinsic.set(js_get_key_cstr(js_get_global_this(), entry.name));
+        ASSERT_EQ(get_type_id(intrinsic.get()), LMD_TYPE_MAP);
+        ASSERT_FALSE(item_is_error(js_set_key_cstr(js_get_global_this(), entry.name, ItemNull)));
+        EXPECT_EQ(entry.get().item, intrinsic.get().item) << entry.name;
+    }
+    ASSERT_FALSE(item_is_error(run("Number.parseInt=null;Number.parseFloat=null")));
+    for (int i = 0; i < js_builtin_global_count(); i++) {
+        const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
+        if (spec->kind != JS_BUILTIN_GLOBAL_FUNCTION || !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
+        intrinsic.set(js_get_key_cstr(js_get_global_this(), spec->name));
+        ASSERT_EQ(get_type_id(intrinsic.get()), LMD_TYPE_FUNC) << spec->name;
+        Item id = {.item = i2it(spec->id)};
+        EXPECT_EQ(js_get_global_builtin_fn_by_id(id).item, intrinsic.get().item) << spec->name;
+        ASSERT_FALSE(item_is_error(js_set_key_cstr(js_get_global_this(), spec->name, ItemNull)));
+        EXPECT_EQ(js_get_global_builtin_fn_by_id(id).item, intrinsic.get().item) << spec->name;
+    }
 }
 
 TEST_F(JsFormalMir, NativeArrayCallablesUseThePublishedAbi) {
@@ -1079,6 +1384,16 @@ TEST_F(JsFormalMir, NativeArrayCallablesUseThePublishedAbi) {
         instance instanceof ctor&&Reflect.construct(ctor,[]) instanceof ctor;
     )JS");
     ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, NamedPrimitivePropertiesAdmitTheirRealmPrototypes) {
+    // each first entry must establish the needed intrinsic family from its own source.
+    for (const char* source : kNamedPrimitivePropertySources) {
+        Item value = run(source);
+        EXPECT_FALSE(item_is_error(value)) << source;
+        EXPECT_EQ(value.item, ITEM_TRUE) << source;
+        reset_runtime();
+    }
 }
 
 TEST_F(JsFormalMir, HostArrayCompanionPreservesPrototypeAndDescriptors) {
@@ -1215,7 +1530,7 @@ TEST_F(JsFormalMir, HostConstructorCatalogAndErrorNamesUseActiveRealm) {
     ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
-TEST_F(JsFormalMir, PreparedHostGlobalsMoveIntoTheMvpRealm) {
+TEST_F(JsFormalMir, PreparedHostGlobalsRetainCanonicalIdentity) {
     EvalContext* owner = NULL;
     bool reusing = false;
     ASSERT_TRUE(js_prepare_eval_context(&runtime, true, &owner, &reusing));
@@ -1226,14 +1541,151 @@ TEST_F(JsFormalMir, PreparedHostGlobalsMoveIntoTheMvpRealm) {
     js_set_key_cstr(original.get(), "preparedHost", function.get());
     js_set_key_cstr(original.get(), "preparedValue", Item{.item = i2it(7)});
     js_mark_non_writable(original.get(), js_name_item("preparedValue"));
-    js_runtime_state.dom.default_view = original.get();
-    Item result = run("let event=new Event('probe');gc();"
+    ASSERT_FALSE(item_is_error(dom_document_proxy_set_property(js_name_item("defaultView"), original.get())));
+    const char prefix[] = "let preparedLexical=40;const preparedConstant=2;"
+        "globalThis.readPrepared=function(){return preparedLexical};"
+        "globalThis.preparedFamilies={generator:Object.getPrototypeOf(function*(){}),"
+        "asyncFunction:Object.getPrototypeOf(async function(){}),"
+        "asyncGenerator:Object.getPrototypeOf(async function*(){}),"
+        "thrower:Object.getOwnPropertyDescriptor((function(){'use strict';return arguments})(),'callee').get,"
+        "arrayIterator:Object.getPrototypeOf([].values()),"
+        "mapIterator:Object.getPrototypeOf(new Map().entries()),"
+        "setIterator:Object.getPrototypeOf(new Set().values()),"
+        "stringIterator:Object.getPrototypeOf(''[Symbol.iterator]()),"
+        "regexpIterator:Object.getPrototypeOf('x'.matchAll(/x/g))};"
+        "globalThis.preparedIteratorParent=Object.create(Object.getPrototypeOf(preparedFamilies.regexpIterator));"
+        "Object.setPrototypeOf(preparedFamilies.regexpIterator,preparedIteratorParent);";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, prefix, sizeof(prefix) - 1,
+        "<prepared-host>", &result_home)));
+    Item result = run("var preparedVar=9;let event=new Event('probe');preparedLexical+=preparedConstant;gc();"
         "window===globalThis && self===globalThis && top===globalThis && parent===globalThis && "
         "preparedHost()===42 && preparedValue===7 && !Object.getOwnPropertyDescriptor(globalThis,'preparedValue').writable && "
-        "event.type==='probe' && typeof Object==='function'");
+        "event.type==='probe' && typeof Object==='function' && preparedVar===9 && globalThis.preparedVar===9 && "
+        "Object.getPrototypeOf({})===Object.prototype && Object.getPrototypeOf([])===Array.prototype && "
+        "Object.getPrototypeOf(function(){})===Function.prototype && Object.getPrototypeOf(/x/)===RegExp.prototype && "
+        "typeof console.assert==='function' && typeof performance.now==='function' && readPrepared()===42");
     ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
-    EXPECT_NE(original.get().item, js_get_global_this().item);
+    result = run(R"JS(
+        const generatorPrototype=preparedFamilies.generator.prototype;
+        const iterator=(function*(){try{yield 1;yield 2}finally{globalThis.preparedFinally=true}})();
+        const step=generatorPrototype.next.call(iterator);
+        const closed=generatorPrototype.return.call(iterator,5e-324);
+        const caught=(function*(){try{yield 0}catch(value){yield value}})();
+        generatorPrototype.next.call(caught);
+        const thrown=generatorPrototype.throw.call(caught,1e-323);
+        gc();
+        Object.getPrototypeOf(function*(){})===preparedFamilies.generator&&
+        Object.getPrototypeOf(async function(){})===preparedFamilies.asyncFunction&&
+        Object.getPrototypeOf(async function*(){})===preparedFamilies.asyncGenerator&&
+        (async function(){return 42})() instanceof Promise&&
+        (async function*(){yield 42})().next() instanceof Promise&&
+        Object.getOwnPropertyDescriptor((function(){'use strict';return arguments})(),'callee').get===preparedFamilies.thrower&&
+        Object.getPrototypeOf(Object.getPrototypeOf(iterator))===generatorPrototype&&
+        step.value===1&&!step.done&&closed.value===5e-324&&closed.done&&
+        preparedFinally&&thrown.value===1e-323&&!thrown.done
+    )JS");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run(R"JS(
+        class PreparedBytes extends Uint8Array {}
+        const preparedBytes=new PreparedBytes([1,2,3]);
+        const preparedCopy=preparedBytes.map(value=>value+1);
+        const preparedBuffer=new ArrayBuffer(8);
+        const preparedView=new DataView(preparedBuffer);
+        preparedView.setUint32(0,42);
+        const preparedShared=new SharedArrayBuffer(8);
+        const preparedKey={};
+        const preparedWeak=new WeakMap([[preparedKey,42]]);
+        const preparedRef=new WeakRef(preparedKey);
+        const preparedRegex=/(x)/g;
+        let preparedExecReads=0;
+        Object.defineProperty(preparedRegex,'exec',{get(){preparedExecReads++;return RegExp.prototype.exec}});
+        const preparedMatched=preparedRegex.test('x');
+        const preparedCapture=RegExp.$1;
+        const preparedMatches=Array.from('xyx'.matchAll(/x/g));
+        RegExp.prototype.compile.call(preparedRegex,'y','g');
+        gc();
+        preparedCopy instanceof PreparedBytes&&preparedCopy[2]===4&&
+        preparedBytes.subarray(1) instanceof PreparedBytes&&
+        preparedView.getUint32(0)===42&&preparedView.buffer===preparedBuffer&&
+        preparedShared.slice(0).byteLength===8&&
+        preparedWeak.get(preparedKey)===42&&preparedRef.deref()===preparedKey&&
+        preparedMatched&&preparedCapture==='x'&&preparedExecReads===1&&
+        preparedRegex.source==='y'&&preparedRegex.global&&
+        typeof Object.getOwnPropertyDescriptor(RegExp,'$1').get==='function'&&
+        preparedMatches.length===2&&preparedMatches[1].index===2&&
+        Object.getPrototypeOf(preparedFamilies.regexpIterator)===preparedIteratorParent&&
+        (function(){return Number.prototype.valueOf.call(this)===42}).call(42)
+    )JS");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run(R"JS(
+        class PreparedError extends TypeError {}
+        class PreparedNumber extends Number {}
+        const preparedError=new PreparedError('kept',{cause:42});
+        const preparedNumber=new PreparedNumber(42);
+        let preparedCaught=false;
+        try{Reflect.apply(null,null,[])}catch(error){
+            gc();preparedCaught=error instanceof TypeError&&error.name==='TypeError';
+        }
+        let preparedConversion=false;
+        try{+Symbol()}catch(error){gc();preparedConversion=error instanceof TypeError}
+        gc();
+        preparedError instanceof PreparedError&&preparedError instanceof TypeError&&
+        preparedError.message==='kept'&&preparedError.cause===42&&
+        preparedNumber instanceof PreparedNumber&&preparedNumber.valueOf()===42&&
+        preparedCaught&&preparedConversion
+    )JS");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    result = run(R"JS(
+        class PreparedDate extends Date {}
+        const preparedDate=new PreparedDate(42);
+        const preparedMap=new Map([['kept',42]]);
+        const preparedSet=new Set([42]);
+        const preparedMapIterator=preparedMap.entries();
+        const preparedSetIterator=preparedSet.values();
+        gc();
+        preparedDate instanceof PreparedDate&&preparedDate.getTime()===42&&
+        Object.getPrototypeOf([].values())===preparedFamilies.arrayIterator&&
+        Object.getPrototypeOf(preparedMapIterator)===preparedFamilies.mapIterator&&
+        Object.getPrototypeOf(preparedSetIterator)===preparedFamilies.setIterator&&
+        Object.getPrototypeOf(''[Symbol.iterator]())===preparedFamilies.stringIterator&&
+        preparedMapIterator.next().value[1]===42&&preparedSetIterator.next().value===42&&
+        Reflect.ownKeys({[Symbol.iterator]:42})[0]===Symbol.iterator
+    )JS");
+    ASSERT_FALSE(item_is_error(result)); EXPECT_EQ(result.item, ITEM_TRUE);
+    EXPECT_EQ(original.get().item, js_get_global_this().item);
     EXPECT_EQ(js_runtime_state.dom.default_view.item, js_get_global_this().item);
+    MvpLmdLibraryState* library = mvp_lmd_program_library();
+    ASSERT_NE(library, nullptr);
+    EXPECT_EQ(library->values[LMD_LIBRARY_FUNCTION].item, js_get_constructor(js_name_item("Function")).item);
+    EXPECT_EQ(library->values[LMD_LIBRARY_PROXY].item, js_get_constructor(js_name_item("Proxy")).item);
+    EXPECT_EQ(library->values[LMD_LIBRARY_JSON].item, js_get_json_object_value().item);
+    EXPECT_EQ(library->values[LMD_LIBRARY_MATH].item, js_get_math_object_value().item);
+    EXPECT_EQ(library->values[LMD_LIBRARY_REFLECT].item, js_get_reflect_object_value().item);
+    ASSERT_NE(library->atomics_value, nullptr);
+    EXPECT_EQ(library->atomics_value->item, js_get_atomics_object_value().item);
+    for (int i = 0; i < LMD_PRIMITIVE_COUNT; i++)
+        EXPECT_EQ(library->primitives[i].values[0].item,
+            js_get_constructor(js_name_item(mvp_lmd_primitive_names[i])).item);
+    for (int i = 0; i < LMD_ERROR_COUNT; i++)
+        EXPECT_EQ(library->errors[i].values[0].item,
+            js_get_constructor(js_name_item(mvp_lmd_error_names[i])).item);
+    const struct { MvpLmdClass* family; const char* name; } families[] = {
+        {&library->object, "Object"}, {&library->array, "Array"}, {&library->date, "Date"},
+        {&library->symbol, "Symbol"}, {&library->map, "Map"}, {&library->set, "Set"},
+        {library->promise, "Promise"}, {&library->regexp, "RegExp"}, {&library->buffers[0], "ArrayBuffer"},
+        {&library->buffers[1], "DataView"}, {library->shared_buffer, "SharedArrayBuffer"}
+    };
+    for (const auto& family : families) {
+        ASSERT_NE(family.family, nullptr);
+        EXPECT_EQ(family.family->values[0].item, js_get_constructor(js_name_item(family.name)).item);
+    }
+    for (int i = 0; i <= JS_TYPED_FLOAT16; i++)
+        EXPECT_EQ(library->typed_arrays[i].values[0].item,
+            js_get_constructor(js_name_item(js_typed_array_spec((JsTypedArrayType)i)->name)).item);
+    EXPECT_EQ(library->typed_arrays[JS_TYPED_FLOAT16 + 1].values[0].item, js_get_typed_array_base().item);
+    for (int i = 0; i < library->weak_class_count; i++)
+        EXPECT_EQ(library->weak_collections[i].values[0].item,
+            js_get_constructor(js_name_item(mvp_lmd_weak_families[i].name)).item);
 }
 
 TEST_F(JsFormalMir, PublicStructuredCloneUsesSharedKernelAndRealmCarriers) {
@@ -1374,8 +1826,9 @@ export const repeat=import('./formal-exports.ls').then(value=>value===ns&&value.
 
 TEST_F(JsFormalMir, WarmLambdaImportsValidateExportsBeforeEnteringTheImporter) {
     ASSERT_FALSE(item_is_error(run("globalThis.importEffects=0")));
-    RootFrame roots(2);
-    Rooted<Item> original(roots, js_load_lambda_module(&runtime, "test/js/_lambda_data_map.ls")), ns(roots, ItemNull);
+    RootFrame roots(3);
+    Rooted<Item> original(roots, js_load_lambda_module(&runtime, "test/js/_lambda_data_map.ls")),
+        ns(roots, ItemNull), value(roots, ItemNull);
     ASSERT_FALSE(item_is_error(original.get()));
     Item failed = transpile_js_module_to_mir(&runtime,
         "import {absent} from './_lambda_data_map.ls';globalThis.importEffects++;",
@@ -1385,11 +1838,18 @@ TEST_F(JsFormalMir, WarmLambdaImportsValidateExportsBeforeEnteringTheImporter) {
     ASSERT_FALSE(item_is_error(effects));
     EXPECT_EQ(it2d(effects), 0);
     ns.set(transpile_js_module_to_mir(&runtime,
-        "export {data_map as kept} from './_lambda_data_map.ls';", "test/js/formal-warm-export.mjs"));
+        "export {data_map as kept,wide_integer} from './_lambda_data_map.ls';", "test/js/formal-warm-export.mjs"));
     ASSERT_FALSE(item_is_error(ns.get()));
     Item exported = js_get_key_cstr(ns.get(), "kept");
     ASSERT_EQ(get_type_id(exported), LMD_TYPE_FUNC);
-    EXPECT_TRUE(function_has_abi(exported.function, FN_ENTRY_ABI_MVP_LMD));
+    EXPECT_EQ(exported.item, js_get_key_cstr(original.get(), "data_map").item);
+    EXPECT_TRUE(js_has_call_capability(exported));
+    heap_gc_collect();
+    value.set(js_call_function(js_get_key_cstr(ns.get(), "wide_integer"), make_js_undefined(), NULL, 0));
+    ASSERT_FALSE(item_is_error(value.get()));
+    value.set(js_to_string(value.get()));
+    ASSERT_EQ(get_type_id(value.get()), LMD_TYPE_STRING);
+    EXPECT_STREQ(value.get().get_string()->chars, "9007199254740993");
     ModuleDescriptor* descriptor = module_get_for_runtime(&runtime, "test/js/_lambda_data_map.ls");
     ASSERT_NE(descriptor, nullptr);
     EXPECT_EQ(descriptor->namespace_obj.item, original.get().item);
@@ -1792,6 +2252,10 @@ protected:
         return read_text_file(path);
     }
 };
+
+TEST_F(JsMvpLmd, NamedPrimitivePropertiesAdmitTheirRealmPrototypes) {
+    for (const char* source : kNamedPrimitivePropertySources) boolean(source);
+}
 
 TEST_F(JsMvpLmd, FullParityNativeHarnessImportsSharedCallableAssertions) {
     const char* sources[] = {R"JS(assert(/[\p{Hex}\P{Hex}]/u.test('\u{1D306}'));true)JS",
@@ -2976,6 +3440,42 @@ TEST_F(JsMvpLmd, CoreLiteralReservationCodeSize) {
     EXPECT_EQ(strstr(mir, "\timport\tmap_shape_set_text\n"), nullptr);
     mem_free(mir);
 }
+TEST_F(JsMvpLmd, UnobservedGlobalAliasesKeepClosedBindings) {
+    boolean("globalThis.unusedFirst=globalThis;globalThis['unusedSecond']=globalThis;"
+            "function fib(n){if(n<2)return n;return fib(n-1)+fib(n-2)}fib(12)===144");
+    Item global = js_get_global_this();
+    EXPECT_EQ(js_get_key_cstr(global, "unusedFirst").item, global.item);
+    EXPECT_EQ(js_get_key_cstr(global, "unusedSecond").item, global.item);
+    char* mir = dump("temp/mvp_lmd_unobserved_global_aliases.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_dynamic_global\n"), nullptr);
+    mem_free(mir);
+
+    boolean("globalThis.unusedFirst=globalThis;globalThis.unusedSecond=globalThis;"
+            "const metadata={};Object.defineProperty(metadata,'label',{value:true});"
+            "function nameOf(value){return Object.getPrototypeOf(value)?.constructor?.name}"
+            "metadata.label&&nameOf({})==='Object'&&nameOf([])==='Array'");
+    mir = dump("temp/mvp_lmd_unobserved_alias_metadata.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_dynamic_global\n"), nullptr);
+    mem_free(mir);
+
+    boolean("globalThis.alias=globalThis;let value=40;"
+            "alias.Function('return value+2')()===42");
+    boolean("globalThis.alias=globalThis;let value=40,key='Fun'+'ction';"
+            "globalThis.alias[key]('return value+2')()===42");
+    boolean("globalThis.alias=globalThis;let value=40;"
+            "Object.getOwnPropertyDescriptor(globalThis.alias,'Function').value('return value+2')()===42");
+    boolean("let calls=0;Object.defineProperty(Object.prototype,'alias',"
+            "{set(value){calls++;value.Function('calls++')()},configurable:true});"
+            "try{globalThis.alias=globalThis}finally{delete Object.prototype.alias}calls===2");
+    boolean("let value=40;function install(){globalThis.alias=globalThis}install();"
+            "alias.Function('return value+2')()===42");
+    boolean("globalThis.alias=globalThis;let value=40;"
+            "const make=Object.getOwnPropertyDescriptor(globalThis,'alias').value;"
+            "make.Function('return value+2')()===42");
+}
+
 TEST_F(JsMvpLmd, CoreGlobalBindings) {
     boolean("globalThis.coldBinding=7;coldBinding===7");
     char* mir = dump("temp/mvp_lmd_cold_global.mir");
@@ -3659,6 +4159,112 @@ TEST_F(JsMvpLmd, ArgumentsDescriptorAliasLifetime) {
         f(1);
     )JS");
 }
+TEST_F(JsMvpLmd, CanonicalHostCallsWithoutDynamicPropertyFeatures) {
+    MvpLmdHost host = {};
+    const char* sources[] = {
+        "let effects=0;function argument(){effects++;return ''}"
+        "process.stdout.write(argument());effects===1",
+        "function invoke(writer,value){return writer(value)}"
+        "invoke(process.stdout.write,'');true",
+        "const fs=require('fs');fs.existsSync('.')===true"
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        Item result = run(source, &host);
+        EXPECT_EQ(result.item, ITEM_TRUE);
+    }
+}
+
+TEST_F(JsMvpLmd, IndirectFunctionConstructorsAdmitDynamicSource) {
+    boolean("(function(){}).constructor.name==='Function'");
+    boolean("let value=40;const ctor=(function(){}).constructor;"
+            "Object.defineProperty(ctor,'name',{get(){return ()=>value+2}});"
+            "(function(){}).constructor.name()===42");
+    boolean("let value=40;(function(){}).constructor('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor';(()=>{})[key]('return value+2')()===42");
+    boolean("let value=40;function f(){}let alias=f;alias.constructor('return value+2')()===42");
+    boolean("let value=40;function read(f){return f.constructor('return value+2')()}"
+            "read(function(){})===42");
+    boolean("let value=40;function make(){return ()=>{}}make().constructor('return value+2')()===42");
+    boolean("let value=40;class C{}C.constructor('return value+2')()===42");
+    boolean("let value=40,o={f(){}};o.f.constructor('return value+2')()===42");
+    boolean("let value=40;const {constructor:F}=function(){};F('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor';const {[key]:F}=()=>{};F('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor',o={f(){}};o.f[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor',o={f(){}};let alias=o.f;alias[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor';class C {f(){}}"
+            "(new C()).f[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor',o={};o.f=function(){};"
+            "o.f[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor',functions=[()=>{}];"
+            "functions[0][key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor',fn=()=>{},functions=[fn],alias=functions[0];"
+            "alias[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor';Array.prototype.map[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor',fn=(function(){}).bind(null);"
+            "fn[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor';Reflect.get({f(){}},'f')[key]('return value+2')()===42");
+    boolean("let value=40,key='con'+'structor';Object.getPrototypeOf(function(){})[key]('return value+2')()===42");
+    boolean("let value=40,F;({constructor:F}=function(){});F('return value+2')()===42");
+    boolean("let value=40;function read({constructor:F}){return F('return value+2')()}read(()=>{})===42");
+    boolean("let value=40;(function(){}).constructor('value+=2')();value===42");
+    boolean("let effects=0;function key(){effects++;return 'constructor'}"
+            "let f=(function(){})[key()]('effects++;return effects');f()===2&&effects===2");
+    boolean("let effects=0;function key(){effects++;return 'constructor'}"
+            "const {[key()]:F}=function(){};F('effects++')();effects===2");
+    boolean("let effects=0,caught=false;function source(){effects++;return ')'}"
+            "try{(function(){}).constructor(source())}catch(e){caught=e instanceof SyntaxError}"
+            "caught&&effects===1");
+}
+
+TEST_F(JsMvpLmd, ClosedStdioDefersOnlyUnobservedProcessExtension) {
+    MvpLmdHost host = {};
+    const struct { const char* source; bool extended; } cases[] = {
+        {"let effects=0;function text(){effects++;return ''}"
+         "process.stdout.write(text());process.stderr.write('');effects===1", false},
+        {"process['stdout']['write']('');true", false},
+        {"process.stdout.write('');function f(){}f[0]===undefined", false},
+        {"process.stdout.write('');let alias=process;typeof alias.cwd==='function'", true},
+        {"process.stdout.write('');Object.keys(process).includes('cwd')", true},
+        {"process.stdout.write('');require('process')===process", true},
+        {"let writer=process.stdout.write;writer('');true", true},
+        {"process.stdout.write('',()=>{});true", true},
+        {"process.stdout.write('');Function('return typeof process.cwd')()==='function'", true},
+        {"process.stdout.write('');(function(){}).constructor;true", true},
+        {"process.stdout.write('');let key='length';[][key];true", true}
+    };
+    ASSERT_TRUE(jube_node_core_module_enabled());
+    for (const auto& probe : cases) {
+        SCOPED_TRACE(probe.source);
+        EXPECT_EQ(run(probe.source, &host).item, ITEM_TRUE);
+        EXPECT_EQ(jube_node_current_module_state(JUBE_NODE_MODULE_STATE_CORE) != NULL, probe.extended);
+    }
+}
+
+TEST_F(JsMvpLmd, ClosedStdioKeepsUnrelatedFunctionPropertyPlans) {
+    MvpLmdHost host = {};
+    EXPECT_EQ(run("function kernel(box,key){return box[key]+1}"
+                  "function emit(){process.stdout.write('');process.stderr.write('')}"
+                  "let result=kernel({true:41},true);emit();result===42", &host).item, ITEM_TRUE);
+    char* mir = dump("temp/mvp_lmd_stdio_function_scope.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_class_property_host\n"), nullptr);
+    char* body = strstr(mir, "mvp_lmd_f1:\tfunc");
+    ASSERT_NE(body, nullptr);
+    char* end = strstr(body, "\tendfunc");
+    ASSERT_NE(end, nullptr);
+    *end = 0;
+    EXPECT_EQ(strstr(body, "mvp_lmd_class_property_host"), nullptr);
+    EXPECT_NE(strstr(body, "mvp_lmd_class_property_fixed"), nullptr);
+    mem_free(mir);
+
+    // an escaped native writer keeps guards in the function receiving it.
+    EXPECT_EQ(run("function invoke(writer){return writer('')}"
+                  "invoke(process.stdout.write);true", &host).item, ITEM_TRUE);
+    EXPECT_EQ(run("function read(box,key){return box[key]}"
+                  "process.stdout.write('');read({value:42},'value')===42", &host).item, ITEM_TRUE);
+}
+
 TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     ASSERT_TRUE(create_dir("temp"));
     FILE* output = file_open_regular_write("temp/mvp_host_output.txt", true);
@@ -4272,7 +4878,7 @@ TEST_F(JsMvpLmd, ScalarNumbers) {
     numeric("function tiny(){return 5e-324} tiny()", 5e-324);
 }
 TEST_F(JsMvpLmd, NumericRegionLayoutsAndFallback) {
-    boolean(R"JS(
+    const char* source = R"JS(
         class Point { constructor(x,y) { this.x=x; this.y=y; } }
         class Motion { constructor(first,last) { this.first=first; this.last=last; } }
         function kernel(p,m) {
@@ -4292,7 +4898,14 @@ TEST_F(JsMvpLmd, NumericRegionLayoutsAndFallback) {
         p.x=2; p.extra=8; ok=ok && kernel(p,m)===1;
         delete p.y; ok=ok && kernel(p,m)!==kernel(p,m);
         p.x=-1; m.first=null; ok && kernel(p,m)===-1;
-    )JS");
+    )JS";
+    boolean(source);
+    StrBuf* dynamic = strbuf_new();
+    ASSERT_NE(dynamic, nullptr);
+    strbuf_append_str(dynamic, "eval('void 0');\n");
+    strbuf_append_str(dynamic, source);
+    boolean(dynamic->str);
+    strbuf_free(dynamic);
     boolean(R"JS(
         class Point { constructor(x,y) { this.x=x; this.y=y; } }
         function kernel(a,b) {

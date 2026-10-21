@@ -351,6 +351,21 @@ void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* 
                                    color, clip, clip_shapes, clip_depth);
 }
 
+void render_painter_fill_context_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color) {
+    const RdtMatrix* transform = render_state_current_transform(rdcon);
+    if (!transform) {
+        render_painter_fill_surface_rect(rdcon, rdcon->ui_context->surface, rect, color,
+            &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        return;
+    }
+    // native controls and decorations share the owner's paint transform (D4.5.1v4).
+    RdtPath* path = rdt_path_new();
+    if (!path) { rdcon->paint_failed = true; return; }
+    rdt_path_add_rect(path, rect->x, rect->y, rect->width, rect->height, 0, 0);
+    rc_fill_path(rdcon, path, Color{color}, RDT_FILL_WINDING, transform);
+    rdt_path_free(path);
+}
+
 bool render_painter_can_blit_surface(const RasterRenderContext* context) {
     return context && !context->has_transform && !context->css3d_context && context->vector_clip_depth == 0;
 }

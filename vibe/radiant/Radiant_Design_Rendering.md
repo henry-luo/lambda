@@ -217,6 +217,23 @@ the empty stack. Every command no longer embeds a maximum-size clip stack. Gener
 surface handles distinguish live resources from frame-local borrowed pixels.
 Snapshot leases preserve immutable image publications when required.
 
+The persistent ViewTree recorder opts into a 1 MiB idle stop/dash index. Clear
+retires commands while the index keeps its buffer leases for later fresh
+recordings. Reuse compares array kind, size and exact bytes; changed values
+publish distinct immutable buffers. The limit includes buffer and map storage.
+An over-limit index retires whole at the next clear, as does a cache under high
+memory pressure. Active recording storage can exceed the reuse limit until that
+boundary. Other lists retain their existing clear lifetime; destruction always
+releases the index (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+Clear marks indexed values idle. First use in a recording assigns a serial after
+its overlay checkpoint, so rewind can release a reactivated value without
+removing an earlier prefix's lease. Zero remains the idle sentinel even after
+rollback to a checkpoint taken before index creation. Recording adoption either
+transfers the incoming index or keeps eligible idle values when no incoming
+array owner exists. Frame admission conservatively charges the latter before
+retiring the original command recording. Nested recorders keep separate indexes.
+
 Element begin/end markers delimit subtrees and carry matching indices, marker
 geometry and visual bounds. Indices stay local to their recording or immutable
 chunk. The command descriptor table centralizes state, culling, batch-flush and
@@ -297,13 +314,14 @@ generations under **D4.5.1v4 / D4.2.4**. The current caches have different units
 | Retained display-list cache | Chunk own commands plus ordered child references | Checks marker geometry, dirty-source relation and image/glyph/media generations; borrowed chunks avoid recapture. A 32 MiB managed-storage budget evicts old roots by last use; active readers keep their leases and charges. High pressure drops cache ownership between frames. |
 | ViewTree frame recording | Validated document prefix sharing admitted captured root chunks, resource/replay metadata and serial vector context | 8 MiB conservative recording admission; matching document/style/state/layout/resource/target stamps and current handles; overlays record and validate afresh. |
 | SVG layer registry | Raster surface for an inline SVG | Document-owned; keyed by element identity/generation, document/style and interaction state, animation, fonts, images, size, scale and inherited paint. |
+| SVG vector command registry | Commands for visible-overflow inline SVG | Shares SVG paint dependency stamps; viewport and linear transform are additional keys, while translations reuse the publication. One 16 MiB managed-storage cache per document; unsupported recordings keep direct painting. |
 | External SVG picture caches | Parsed SVG owner plus cheap duplicate handles | Process caches keyed by path or data; cache eviction and retained handles govern parse lifetime. |
 | SVG geometry cache | Canonical path buffers and marker topology | Actual path source / resolved basic geometry keys; bounded document ownership; published readers keep snapshots. |
 | ThorVG raster-image cache | Native raster picture upload plus lookup data | Process-owned, count-limited; cache teardown releases native objects. |
 | Published page edition | Page-local geometry, paint, text/font and image resources | Edition ownership survives source-view relayout; consumers borrow/pin the edition. |
 | Tile worker | Vector context and replay scratch | Reused by its worker, reset between jobs and released at worker shutdown. |
 
-Retained fragment reuse currently requires selective dirty painting and matching
+Automatic HTML block-fragment reuse currently requires selective dirty painting and matching
 marker bounds. A hit appends one `DL_DRAW_FRAGMENT` command, which owns a reference
 to the immutable publication. Each parent stores its own commands and ordered
 child spans. `DisplayListCursor` walks the graph without flattening descriptors
@@ -311,9 +329,64 @@ or remapping chunk-local markers. Serial/dirty/tile replay, validation, media,
 resource checks and SVG capture/export consume the same read-only cursor.
 Validation rejects cycles, invalid spans and inconsistent marker/count metadata;
 subtree culling skips an immutable chunk directly. Capturing a mixed frame
-republishes matching chunks, while a different cache copies producer commands into
-its own budget ledger. Active references survive cache eviction/destruction.
+republishes matching chunks. A certified, untranslated zero-ID leaf from another
+cache can remain an immutable child reference beneath a captured parent. The
+parent reserves the child's full retained size in its own budget, conservatively
+per reference, and pins the producer's existing owner. Other foreign fragments
+keep the command-copy path. Active references survive cache eviction/destruction.
 Broad dirty-generation invalidation remains; placement-only reflow is separate.
+
+Foreign subscene references carry no HTML view bindings. Index grouping,
+membership refresh and subtree eviction remain local to each cache's budget;
+an SVG publication key cannot become an HTML marker ID. Only same-budget parent
+edges prevent root reclamation. A foreign reader pins storage and its original
+charge while allowing the producer's publication to retire independently.
+Allocation or budget failure keeps the original frame recording available
+(**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+Explicit vector composition uses `retained_dl_append_fragment_translated`.
+A placement shell pins the original chunk and adds a translation without owning
+copied paths, gradient stops, dashes, images or native pictures. The shared cursor
+accumulates translations through child spans, translates bounds and marker
+origins, and composes object/clip matrices as `T * M`. Gradient coordinates and
+their local paint transforms stay unchanged. The enclosing caller's clip stays
+in world coordinates. Serial, dirty, tile and other cursor consumers see the
+same placed command. Zero translation returns original descriptors; nonzero
+translation uses one cursor-local descriptor, valid until the next cursor read
+or skip. Its copies are counted as `placement_command_copy_bytes`, separately
+from retained command and payload copies.
+
+Nonzero placement validates the complete subtree before appending one reference;
+unsupported CPU effects, glyph bitmap draws, media, non-finite placement and
+invalid graphs reject without appending. Allocation failure releases the source
+lease. Frame storage accounting conservatively includes the shell and its source
+graph, while cache retirement leaves placed readers pinned. Recapture declines
+translated scopes rather than publishing their unshifted source commands under
+the original identity. This explicit API supplies replay composition; automatic
+HTML reuse after reflow still needs dependency and damage admission. Equal size
+alone does not prove unchanged paint (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+Visible-overflow inline SVG now uses that composition in production. Its normal
+recording is bounded by zero-ID semantic markers, then published under a separate
+cache key. Unchanged content replays the original vector payloads at its current
+translation; caller clips remain outside the cached range. The raster and vector
+policies share content stamps for subtree/host styles, selectors, animation,
+fonts, images and inherited paint. Used viewport size, raster scale and the
+linear device transform also constrain vector reuse. Any host foreign HTML
+conservatively bypasses it. Rasterized effects, patterns and color-glyph captures
+mark their recording unsupported even when the final operation is an image;
+their original pixel grid or backdrop cannot be moved as vector geometry.
+Unsupported content records normally until its dependencies change. Allocation
+or budget rejection keeps the direct recording, and memory pressure drops cache
+ownership. `RADIANT_SVG_VECTOR_CACHE=off` supplies a controlled comparison.
+
+Retained chunk arenas belong to the reference-counted storage-budget owner,
+with an independent rendering memory context carrying the source document ID.
+Cache/document teardown releases its ownership; active frame references keep
+that context alive until their final release. This pins published storage
+without retaining DOM or mutable style pointers. Keyed subscene reclamation uses
+the publication back-reference rather than deriving identity from its semantic
+marker (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
 
 Element damage keeps a weak source address alongside its logical ID in the
 dirty tracker. Before reading that address, reuse validates it through the
@@ -469,14 +542,26 @@ scratch payloads and has no earlier arena allocations. This preserves the
 (**D4.2.4 / D4.5.1v4**).
 
 The retained budget charges managed command/span capacity, arena storage,
-shared arrays and a conservative per-reference path footprint. Shared geometry
-can be charged more than once. ThorVG internals and native picture bytes are
-untracked; image pixels and font caches retain their separate resource owners
+shared arrays, foreign subscene leases and a conservative per-reference path
+footprint. Shared geometry and cross-cache leases can be charged more than once;
+budget liability is separate from actual allocated bytes. ThorVG internals and
+native picture bytes are untracked; image pixels and font caches retain their separate resource owners
 and are outside this command-storage charge. A refcounted ledger follows chunks
 beyond cache eviction/destruction; new admission can fail while active readers
 retain the remaining charge.
 
 Document-wide style/interaction/resource epochs provide conservative invalidation.
+SVG layers use the existing scroll-independent selector-state version when the
+host style index contains no SVG `foreignObject`. Scrolling then changes the
+layer's placement without discarding its pixels. The existing index traversal
+records embedded HTML across all host roots, since `use` may reference another
+SVG. Such hosts, and unavailable style metadata, retain the full content-state
+version so foreign HTML scrolling still invalidates paint. Structural mutations
+rebuild this dependency; hover, other interactions and the remaining layer keys
+still expire the raster (**D4.5.3v2 / D4.5.1v4**). This is a conservative host-wide
+test, not per-root reference tracking.
+Concrete pane writes and direct viewport synchronization both classify coordinate
+changes as scroll-only; full-frame recordings still use the content-state version.
 A future dependency-specific cache must account for inherited values and
 references outside the local SVG, including `use`, paint servers, fonts and
 images, before narrowing those invalidations. Ordinary idle frames that require
@@ -540,15 +625,16 @@ Existing profiling and event traces report paint categories, path selection,
 record/replay time, capabilities and retained outcomes. Opt-in
 `RADIANT_RENDER_METRICS=1` adds release-compatible stage timing through teardown,
 command/paint capacity, tracked memory, geometry parse/clone/hash/copy counters,
-retained descriptor copies/borrows and reserved chunk capacity, shared-array
-copies/leases, full-frame reuse and chunk adoption, fragment references/expanded command counts,
+retained descriptor copies/borrows, transient placement descriptor copies and reserved chunk capacity, shared-array
+copies/leases/reuse across recordings, full-frame reuse and chunk adoption, fragment references/expanded command counts,
 resource command/summary/epoch/surface/child checks,
 validation command/publication checks, index publications/prune checks, membership node visits/group refreshes,
 dirty-source ancestry queries/subtree searches,
 resource snapshot command/metadata visits
 and standalone glyph/media discovery visits,
 native construction/duplication and phase timing,
-flush reasons, clip segments, lock waits and layer recording/pass counts. Tile dispatch propagates the active measurement
+flush reasons, clip segments, lock waits, SVG vector recording/hit, foreign
+subscene capture and layer recording/pass counts. Tile dispatch propagates the active measurement
 to workers. Disabled counters take no locks. Nested layer work is included in
 its containing stage, not added again as frame wall time. Native phase timers
 can nest and worker times overlap; their sum is not a frame duration.
@@ -559,6 +645,22 @@ peak memory is a process high-water mark. Native ThorVG internal
 bytes are explicitly untracked; cache registry entry-shell statistics are not a
 total backend footprint. Release comparisons and remaining limitations belong
 in the [implementation plan](../impl/Radiant_Impl_Rendering_Optimization.md).
+
+The versioned [rendering benchmark](../../utils/benchmark_radiant_rendering.py)
+retains a separate directory for every sample and rejects reuse of a nonempty
+output directory. Normal release samples disable logging and allocation tracking;
+their wall time includes startup, warm-up and PNG encoding. A shared process
+helper records each child's CPU time and peak RSS through `wait4`, with unknown
+values on unsupported platforms. RSS is distinct from tracked allocator bytes
+and does not attribute ThorVG's share.
+
+Separate profiles enable logging and `MEMTRACK_MODE=STATS`, validate complete
+outer frame scopes and report encode/write apart from the other frame stages.
+Warm profiles discard an explicit prefix that includes initial presentation.
+These timings include instrumentation overhead. Summaries preserve sample
+distributions and ratios paired by repeat; binary, source, font and fixture hashes
+identify the inputs (**D4.2.5v3**). Placement and dependency milestones must use
+these measurements without treating process peaks as retained-cache sizes.
 
 ## Appendix A. Source map
 
@@ -600,6 +702,7 @@ frames within its ViewTree. Retained chunks reserve only their own command
 storage. Basic-shape lookup precedes construction; gradients/dashes share
 immutable buffers; serial canvas and unchanged full-frame recording reuse are
 implemented. Selective frames now retain chunk references without descriptor
-flattening. Placement-only composition and finer invalidation remain follow-up
-work. Performance and qualification limits are recorded separately from these
+flattening. Explicit translated vector references share payloads through the
+cursor; automatic placement-only reflow, pixel-effect translation and finer
+invalidation remain follow-up work. Performance and qualification limits are recorded separately from these
 structural changes.
