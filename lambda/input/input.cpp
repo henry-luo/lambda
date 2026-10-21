@@ -19,6 +19,7 @@
 #include "../../lib/str.h"
 #include "../io/resource_policy.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hash.h"
 #include <limits.h>
 #include <new>
 #include <pthread.h>
@@ -502,6 +503,7 @@ typedef struct ShapeTreeStats {
     uint64_t external_declined_fanout;
     uint64_t edges_walked;         // edge-list entries scanned, over all adds
     uint64_t max_walk;             // the longest scan of one add
+    uint64_t indexed_hits, indexed_misses;
     uint64_t decline_degree[4];    // out-degree at a fan-out decline: <=16 <=64 <=256 >256
     uint64_t private_types;        // map_put fallbacks to a private type
     uint64_t private_copies;       // runtime adds that copied a whole shape
@@ -522,13 +524,14 @@ static void shape_tree_stats_flush(void) {
             "shape_tree_stats tree=%s hits=%llu mints=%llu "
             "declined_fanout=%llu declined_budget=%llu ext_hits=%llu ext_mints=%llu "
             "ext_declined_fanout=%llu edges_walked=%llu max_walk=%llu "
-            "decline_degree=%llu/%llu/%llu/%llu private_types=%llu private_copies=%llu "
+            "indexed_hits=%llu indexed_misses=%llu decline_degree=%llu/%llu/%llu/%llu private_types=%llu private_copies=%llu "
             "private_entries=%llu peak_nodes=%llu\n",
             kClass[c], (unsigned long long)s->hits, (unsigned long long)s->mints,
             (unsigned long long)s->declined_fanout, (unsigned long long)s->declined_budget,
             (unsigned long long)s->external_hits, (unsigned long long)s->external_mints,
             (unsigned long long)s->external_declined_fanout,
             (unsigned long long)s->edges_walked, (unsigned long long)s->max_walk,
+            (unsigned long long)s->indexed_hits, (unsigned long long)s->indexed_misses,
             (unsigned long long)s->decline_degree[0], (unsigned long long)s->decline_degree[1],
             (unsigned long long)s->decline_degree[2], (unsigned long long)s->decline_degree[3],
             (unsigned long long)s->private_types, (unsigned long long)s->private_copies,
@@ -573,9 +576,9 @@ void shape_tree_stats_note_private_copy(int64_t entries) {
     shape_tree_stat_add(&g_shape_tree_stats[0].private_entries, (uint64_t)(entries > 0 ? entries : 0));
 }
 
-// The edge cap for a step from `parent`, for every tree and for external-table
-// edges alike: each list is walked linearly per add (the table only finds a
-// parent's list). Impl_Map_Transition_Coverage P1.5 measured it (Q5): no
+// the edge cap applies to owned and external parents alike. Root lookup is
+// indexed; bounded interior lists retain their linear scan. P1.5 measured it
+// (Impl_Map_Transition_Coverage Q5): no
 // benchmark or corpus script reached 16 below the root, and lifting the root's
 // 256 to share jq_mix's 2,048 one-key objects cost 9-10% CPU in edge walks.
 static int shape_tree_fanout_cap(const TypeMap* parent) {
@@ -926,6 +929,98 @@ static bool transition_names_key(const TypeMapTransition* tr, const TransitionKe
         memcmp(tr->name, k->name, k->name_len) == 0;
 }
 
+struct RootTransitionIndex {
+    TypeMapTransition** edges;
+    TypeMapTransition* indexed_head;
+    HashMap* by_key;
+    int count;
+};
+
+struct RootTransitionIndexes { HashMap* groups; };
+
+static void root_transition_indexes_release(void* data) {
+    RootTransitionIndexes* indexes = (RootTransitionIndexes*)data;
+    if (indexes->groups) hashmap_free(indexes->groups);
+    indexes->groups = NULL;
+}
+
+static uint64_t root_transition_index_hash(const void* item, uint64_t, uint64_t) {
+    return (uint64_t)(uintptr_t)((const RootTransitionIndex*)item)->edges >> 3;
+}
+
+static int root_transition_index_compare(const void* left, const void* right, void*) {
+    return ((const RootTransitionIndex*)left)->edges != ((const RootTransitionIndex*)right)->edges;
+}
+
+static void root_transition_index_free(void* item) {
+    hashmap_free(((RootTransitionIndex*)item)->by_key);
+}
+
+static uint64_t transition_index_hash(const void* item, uint64_t, uint64_t) {
+    const TypeMapTransition* edge = *(TypeMapTransition* const*)item;
+    uint32_t hash = edge->name_hash;
+    if (!hash && edge->key_kind == NAME_KEY_STRING && edge->name)
+        hash = typemap_name_hash(edge->name, (int)edge->name_len);
+    // the table selects buckets from low bits; shifting the name hash clustered every same-type root key.
+    return hash_combine_u64(hash, ((uint64_t)edge->value_type << 8) | edge->key_kind);
+}
+
+static int transition_index_compare(const void* left, const void* right, void*) {
+    const TypeMapTransition* a = *(TypeMapTransition* const*)left;
+    const TypeMapTransition* b = *(TypeMapTransition* const*)right;
+    TransitionKey key = {b->name_id, b->key_kind, b->name_hash, b->name, b->name_len, NULL};
+    if (!key.name_hash && key.key_kind == NAME_KEY_STRING && key.name)
+        key.name_hash = typemap_name_hash(key.name, (int)key.name_len);
+    return a->value_type != b->value_type || !transition_names_key(a, &key);
+}
+
+static RootTransitionIndex* root_transition_index(Input* input, TypeMapTransition** edges) {
+    if (!input->root_transition_indexes) {
+        RootTransitionIndexes* indexes = (RootTransitionIndexes*)pool_calloc(input->pool, sizeof(*indexes));
+        if (!indexes) return NULL;
+        indexes->groups = hashmap_new(sizeof(RootTransitionIndex), 16, 0, 0,
+            root_transition_index_hash, root_transition_index_compare, root_transition_index_free, NULL);
+        // hand-assembled Inputs also borrow a pool; never retain their stack address in cleanup.
+        if (!indexes->groups || !pool_add_cleanup(input->pool, root_transition_indexes_release, indexes)) {
+            root_transition_indexes_release(indexes);
+            pool_free(input->pool, indexes);
+            return NULL;
+        }
+        input->root_transition_indexes = indexes;
+    }
+    HashMap* groups = input->root_transition_indexes->groups;
+    RootTransitionIndex probe = {edges, NULL, NULL, 0};
+    RootTransitionIndex* index = (RootTransitionIndex*)hashmap_get(groups, &probe);
+    if (!index) {
+        probe.by_key = hashmap_new(sizeof(TypeMapTransition*), 16, 0, 0,
+            transition_index_hash, transition_index_compare, NULL, NULL);
+        if (!probe.by_key) return NULL;
+        hashmap_set(groups, &probe);
+        if (hashmap_oom(groups)) {
+            hashmap_free(probe.by_key);
+            return NULL;
+        }
+        index = (RootTransitionIndex*)hashmap_get(groups, &probe);
+    }
+    // nodes append at the head; only newly published edges need indexing.
+    int count = index->count;
+    for (TypeMapTransition* edge = *edges; edge != index->indexed_head; edge = edge->next) {
+        if (!edge) return NULL;
+        ++count;
+        if (edge->flags || !edge->target) continue;
+        hashmap_set(index->by_key, &edge);
+        if (hashmap_oom(index->by_key)) return NULL;
+    }
+    index->indexed_head = *edges;
+    index->count = count;
+    return index;
+}
+
+static bool transition_child_matches(TypeMap* parent, TypeMapTransition* edge, bool external) {
+    return external ? external_child_matches_parent(parent, edge->target)
+                    : map_transition_prefix_matches_parent(parent, edge->target);
+}
+
 // One step through a tree from `parent`, whose outgoing edges are `*edges`.
 // For a node the tree owns that is `&parent->transitions`. For an external
 // parent (D3.4.3v5) it is the parent's list in the tree's own table, and the
@@ -949,12 +1044,32 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
     const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(parent);
     ShapeTreeStats* stats = shape_tree_stats_for(input);
     int transition_count = 0;
-    for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
+    // D3.4.3v5/D3.4.4v4: root fan-out is program-wide; index names without
+    // changing the bounded graph, identity checks or allocation-failure fallback.
+    RootTransitionIndex* index = parent->length == 0 ? root_transition_index(input, edges) : NULL;
+    TypeMapTransition query = {};
+    query.name_id = k->name_id; query.key_kind = k->key_kind;
+    query.name_hash = k->name_hash; query.name = k->name; query.name_len = k->name_len;
+    query.value_type = type_id;
+    TypeMapTransition* query_pointer = &query;
+    TypeMapTransition* const* indexed = index ? (TypeMapTransition* const*)hashmap_get(index->by_key, &query_pointer) : NULL;
+    bool indexed_miss = index && !indexed;
+    if (indexed && transition_child_matches(parent, *indexed, external)) {
+        if (stats) shape_tree_stat_add(&stats->indexed_hits, 1);
+        if (stats) shape_tree_stat_add(external ? &stats->external_hits : &stats->hits, 1);
+        if (out_entry) *out_entry = (*indexed)->target->last;
+        return (*indexed)->target;
+    }
+    if (indexed_miss) {
+        transition_count = index->count;
+        if (stats) shape_tree_stat_add(&stats->indexed_misses, 1);
+    }
+    for (TypeMapTransition* tr = indexed_miss ? NULL : *edges; tr; tr = tr->next) {
         transition_count++;
         if (tr->value_type != type_id || tr->flags != 0 || !tr->target ||
                 !transition_names_key(tr, k)) continue;
-        if (external ? external_child_matches_parent(parent, tr->target)
-                     : map_transition_prefix_matches_parent(parent, tr->target)) {
+        if (transition_child_matches(parent, tr, external)) {
+            if (index) hashmap_set(index->by_key, &tr);
             if (stats) {
                 shape_tree_stat_add(external ? &stats->external_hits : &stats->hits, 1);
                 shape_tree_stat_add(&stats->edges_walked, (uint64_t)transition_count);
@@ -964,7 +1079,7 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
             return tr->target;
         }
     }
-    if (stats) {
+    if (stats && !indexed_miss) {
         shape_tree_stat_add(&stats->edges_walked, (uint64_t)transition_count);
         shape_tree_stat_max(&stats->max_walk, (uint64_t)transition_count);
     }
@@ -2663,6 +2778,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     input->element_transition_shapes = 0;
     input->keeps_external_edges = false;
     input->external_edges = nullptr;
+    input->root_transition_indexes = nullptr;
     input->url = abs_url;
     input->path = nullptr;
     input->parent = parent;     // Set parent Input for hierarchical ownership
@@ -2714,6 +2830,10 @@ void input_release_document_resources(Input* input) {
     if (input->external_edges) {
         hashmap_free(input->external_edges);
         input->external_edges = nullptr;
+    }
+    if (input->root_transition_indexes) {
+        root_transition_indexes_release(input->root_transition_indexes);
+        input->root_transition_indexes = nullptr;
     }
     if (input->element_roots) {
         pool_free(input->pool, input->element_roots);

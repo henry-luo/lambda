@@ -1267,6 +1267,7 @@
     {
       "name": "lambda-lib",
       "description": "Static general-purpose library layer",
+      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
       "pic_linux": true,
       "lang": "c++17",
       "source_patterns": [

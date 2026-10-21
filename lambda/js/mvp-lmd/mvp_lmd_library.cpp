@@ -1,4 +1,5 @@
 #include "mvp_lmd_runtime.h"
+#include "../js_host_hooks.h"
 #include "mvp_lmd_dynamic.h"
 #include "../js_props.h"
 #include "../js_builtin_catalog.hpp"
@@ -337,7 +338,7 @@ static Item string_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
         if (item_is_error(second.get())) return second.get();
         double position = it2d(second.get());
         if (method == LMD_METHOD_STRING_LAST_INDEX_OF) {
-            int64_t limit = utf8_to_utf16_length(source.get().get_string()->chars, source.get().get_string()->len);
+            int64_t limit = js_string_utf16_length(source.get().get_string());
             if (!isnan(position)) limit = (int64_t)fmin(fmax(trunc(position), 0), limit);
             int64_t found = -1, start = 0;
             while (start <= limit) {
@@ -358,7 +359,7 @@ static Item string_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
         return mvp_lmd_string_at(source.get(), position, method == LMD_METHOD_CODE_AT ? LMD_STRING_CODE : LMD_STRING_CHAR);
     if (method == LMD_METHOD_CODE_POINT_AT || method == LMD_METHOD_STRING_AT) {
         position = isnan(position) ? 0 : trunc(position);
-        int64_t length = utf8_to_utf16_length(source.get().get_string()->chars, source.get().get_string()->len);
+        int64_t length = js_string_utf16_length(source.get().get_string());
         if (method == LMD_METHOD_STRING_AT && position < 0) position += length;
         if (!(position >= 0 && position < length)) return Item{.item = ITEM_JS_UNDEFINED};
         if (method == LMD_METHOD_STRING_AT) return mvp_lmd_string_at(source.get(), position, LMD_STRING_CHAR);

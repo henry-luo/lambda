@@ -1,5 +1,6 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_runtime.h"
+#include "../js_host_hooks.h"
 #include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/lambda-error.h"
@@ -351,12 +352,10 @@ extern "C" Item mvp_lmd_string_at(Item value, double index, int64_t mode) {
         if (index >= 0 && index < string->len) {
             if (string->is_ascii) { unit = (uint8_t)string->chars[(uint32_t)index]; present = true; }
             else {
-                Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
-                uint16_t decoded = 0;
-                for (uint64_t i = 0; i <= (uint64_t)index; i++) {
-                    present = utf16_iterator_next(&iter, &decoded); unit = decoded;
-                    if (!present) break;
-                }
+                // both executors retain the same precisely rooted UTF-16 cursor.
+                int decoded = js_string_utf16_code_unit_at(string, (int64_t)index);
+                present = decoded >= 0;
+                unit = (uint32_t)decoded;
             }
         }
     }

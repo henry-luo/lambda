@@ -2946,3 +2946,19 @@ correct geometry and script behavior, with duplicate computation counters
 separate from query counts. Performance evidence uses comparable release
 trials. Milestones and qualification are tracked in
 [the implementation record](../impl/Radiant_Impl_Retained_Layout.md).
+
+### Container-query convergence follow-up (2026-10-21)
+
+**VR15**, selected-view ownership **D4.5.1v4 / D4.5.2**: convergence and
+condition-result caches now use one `css_container_geometry_key`. It projects
+logical query axes through writing mode and includes only eligible physical
+dimensions. An inline-size container's changing uncontained block extent cannot
+request another whole-document cascade. The provider and convergence collector
+also share zoom-normalized content-box metrics. Size containers still observe
+both axes; container identity, font and name dependencies remain relevant.
+
+Constant query thresholds first use the existing CSS math evaluator with
+absolute units. Only unresolved expressions ask the container's CSSOM numeric
+resolver for its font/custom-property context. Relative units retain that
+owner's semantics. Native regressions cover axis projection, height-only changes,
+aspect ratio, owner-generation changes and resolver call counts.

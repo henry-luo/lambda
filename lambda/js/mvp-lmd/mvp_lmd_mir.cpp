@@ -5,6 +5,7 @@
 #include "../js_transpiler.hpp"
 #include "../js_source_module.hpp"
 #include "../js_runtime.h"
+#include "../js_host_hooks.h"
 #include "../js_builtin_catalog.hpp"
 #include "../js_well_known_names.h"
 #include "../js_props.h"
@@ -4920,9 +4921,9 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
         MIR_label_t done = label(c);
         MIR_reg_t flags = em_load_at(&c->em, string, offsetof(String, flags), MIR_T_U8, "string_flags");
         branch_truth(c, done, op(c, MIR_AND, reg(c, flags), integer(c, 1)));
-        MIR_reg_t bytes = op(c, MIR_ADD, reg(c, string), integer(c, offsetof(String, chars)));
-        move(c, size, reg(c, em_call_2(&c->em, "utf8_to_utf16_length", MIR_T_I64,
-            MIR_T_P, reg(c, bytes), MIR_T_I64, reg(c, size), true)));
+        // share the rooted length/cursor cache with character and range reads.
+        move(c, size, reg(c, em_call_1(&c->em, "js_string_utf16_length", MIR_T_I64,
+            MIR_T_P, reg(c, string), true)));
         put_label(c, done);
         return {size, K_NUMBER, false, 0, true, finite_range(0, UINT32_MAX)};
     }
@@ -9844,7 +9845,7 @@ static const LmdImport imports[] = {
     {"lambda_module_var_store", (void*)lambda_module_var_store, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,SCALAR)|ARG(2,ITEM))},
     {"owned_item_slot_store", (void*)owned_item_slot_store, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,SCALAR)|ARG(2,SCALAR)|ARG(3,ITEM))},
     {"lambda_item_adopt_scalar_home", (void*)lambda_item_adopt_scalar_home, AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR))},
-    {"utf8_to_utf16_length", (void*)utf8_to_utf16_length, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,SCALAR))},
+    {"js_string_utf16_length", (void*)js_string_utf16_length, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,GC_PTR))},
     {"fmod", (void*)(double (*)(double, double))fmod, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,SCALAR)|ARG(1,SCALAR))},
     {"sqrt", (void*)(double (*)(double))sqrt, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,SCALAR))},
     {"sin", (void*)(double (*)(double))sin, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,SCALAR))},

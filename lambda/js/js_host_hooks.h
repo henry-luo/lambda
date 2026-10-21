@@ -27,5 +27,6 @@ bool js_host_object_prototype(Item object, Item* out);
 bool js_is_arguments_exotic_array(Item value);
 int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);
 int64_t js_string_utf16_length(String* string);
+int js_string_utf16_code_unit_at(String* string, int64_t index);
 
 #endif

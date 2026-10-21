@@ -1268,6 +1268,32 @@ TEST_F(IncrementalCssTest, HeightQueriesRetainDistinctWidthsWithoutRepeatingA) {
     EXPECT_EQ(context.profiler.height_cache_hits, 1u);
 }
 
+TEST_F(IncrementalCssTest, InterleavedIntrinsicAxesKeepComputedStyleAndMeasurementsHot) {
+    set_property("width", "80px");
+    set_property("height", "30px");
+    resolve();
+    expect_intrinsic_query(80.0f, false);
+    expect_height_refresh(80.0f, 30.0f);
+    expect_height_refresh(160.0f, 30.0f);
+    uint64_t heights = context.profiler.height_computations;
+    uint64_t widths = context.profiler.intrinsic_cache_misses;
+    int64_t styles = g_style_resolve_measure;
+    for (unsigned pass = 0; pass < 32; ++pass) {
+        SCOPED_TRACE(pass);
+        EXPECT_FLOAT_EQ(calculate_max_content_height(&context, target,
+            pass % 2 ? 160.0f : 80.0f), 30.0f);
+        expect_intrinsic_query(80.0f, true);
+        resolve();
+    }
+    EXPECT_EQ(context.profiler.height_computations, heights);
+    EXPECT_EQ(context.profiler.intrinsic_cache_misses, widths);
+    EXPECT_EQ(g_style_resolve_measure, styles);
+
+    set_property("height", "45px");
+    expect_height_refresh(80.0f, 45.0f);
+    expect_height_refresh(160.0f, 45.0f);
+}
+
 TEST_F(IncrementalCssTest, HeightQueriesUseExplicitWidthAcrossIndependentSpaceLabels) {
     DomElement* child = append_intrinsic_child();
     set_property("display", "block");
@@ -1628,6 +1654,39 @@ TEST_F(IncrementalCssTest, InvalidatesVariablesAndExplicitDirtyNotifications) {
     target->set_needs_style_recompute(true);
     resolve();
     EXPECT_GT(g_style_resolve_measure, full);
+}
+
+TEST_F(IncrementalCssTest, RepeatedContextChangesDoNotAmplifyAncestorStyleInvalidations) {
+    DomElement* child = append_intrinsic_child();
+    DomElement* leaf = append_intrinsic_child(child);
+    set_property("font-size", "20px");
+    set_property("color", "red");
+    set_property(child, "width", "50%");
+    set_property(leaf, "padding-left", "1em");
+    resolve(); resolve_child(child); resolve_child(leaf);
+    uint32_t inherited = radiant::css_resolved_style_inherited_revision(target);
+    int64_t full = g_style_resolve_measure;
+    for (unsigned pass = 0; pass < 32; ++pass) {
+        containing.content_width = containing.given_width = pass % 2 ? 400.0f : 200.0f;
+        resolve(); resolve_child(child); resolve_child(leaf);
+        EXPECT_FLOAT_EQ(child->block()->given_width, containing.content_width * 0.5f);
+        EXPECT_FLOAT_EQ(leaf->boundary()->padding.left, 20.0f);
+        EXPECT_EQ(radiant::css_resolved_style_inherited_revision(target), inherited);
+    }
+    EXPECT_EQ(g_style_resolve_measure, full);
+
+    // a real inherited edit expires each descendant once, then stabilizes again.
+    set_property("font-size", "24px");
+    resolve(); resolve_child(child); resolve_child(leaf);
+    EXPECT_NE(radiant::css_resolved_style_inherited_revision(target), inherited);
+    EXPECT_FLOAT_EQ(leaf->boundary()->padding.left, 24.0f);
+    full = g_style_resolve_measure;
+    for (unsigned pass = 0; pass < 16; ++pass) {
+        resolve(); resolve_child(child); resolve_child(leaf);
+    }
+    EXPECT_EQ(g_style_resolve_measure, full);
+    radiant::css_resolved_style_release(child->layout_cache, tree.prop_pool);
+    radiant::css_resolved_style_release(leaf->layout_cache, tree.prop_pool);
 }
 
 TEST_F(IncrementalCssTest, TracksDefinitenessAndZeroWithoutReusingOldInsets) {

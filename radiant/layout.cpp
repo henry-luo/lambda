@@ -5971,6 +5971,20 @@ static bool layout_container_compute_value(void* context, const CssValue* value,
     return css_prop_compute_numeric_value((DomElement*)context, value, result);
 }
 
+static void layout_container_metrics(DomDocument* document, DomElement* element,
+                                    ViewBlock* block, CssContainerMetrics* result) {
+    LayoutContainingBlock box = layout_containing_block_for_view(block);
+    float zoom = layout_effective_zoom(block);
+    result->identity = element;
+    result->generation = document && document->view_tree
+        ? hash_combine_u64(document->view_tree->layout_generation, document->style_query_epoch) : 0;
+    result->width = box.content_width / zoom;
+    result->height = box.content_height / zoom;
+    result->vertical = layout_element_inline_axis_is_vertical(element);
+    result->resolve_value = layout_container_compute_value;
+    result->value_context = element;
+}
+
 static bool layout_provide_size_container(void* context, DomElement* target,
     const char* name, uint8_t axes, CssContainerMetrics* result) {
     DomDocument* document = (DomDocument*)context;
@@ -5981,16 +5995,7 @@ static bool layout_provide_size_container(void* context, DomElement* target,
         bool vertical = layout_element_inline_axis_is_vertical(ancestor);
         if (!css_container_matches(block->block()->container_names, block->block()->container_axes,
             vertical, name, axes)) continue;
-        LayoutContainingBlock box = layout_containing_block_for_view(block);
-        float zoom = layout_effective_zoom(block);
-        result->identity = ancestor;
-        result->generation = document && document->view_tree
-            ? hash_combine_u64(document->view_tree->layout_generation, document->style_query_epoch) : 0;
-        result->width = box.content_width / zoom;
-        result->height = box.content_height / zoom;
-        result->vertical = vertical;
-        result->resolve_value = layout_container_compute_value;
-        result->value_context = ancestor;
+        layout_container_metrics(document, ancestor, block, result);
         return true;
     }
     return false;
@@ -6009,12 +6014,13 @@ static bool layout_collect_container_measurements(DomNode* node, void* data) {
     ViewBlock* block = lam::view_as_block(element);
     if (!block || !block->blk || (!block->block()->container_axes &&
         !block->block()->container_names)) return true;
-    LayoutContainingBlock box = layout_containing_block_for_view(block);
-    measurements->key = hash_combine_u64(measurements->key, (uintptr_t)element);
+    CssContainerMetrics box = {};
+    layout_container_metrics(element->doc, element, block, &box);
     measurements->key = hash_combine_u64(measurements->key, block->block()->container_axes);
-    measurements->key = hash_combine_u64(measurements->key, hash_fnv1a_64(&box.content_width, sizeof(float)));
-    measurements->key = hash_combine_u64(measurements->key, hash_fnv1a_64(&box.content_height, sizeof(float)));
-    measurements->key = hash_combine_u64(measurements->key, layout_element_writing_mode(element));
+    // an uncontained block axis cannot answer size queries; generated content
+    // or motion may change it between probe and commit without another cascade.
+    measurements->key = hash_combine_u64(measurements->key,
+        css_container_geometry_key(&box, block->block()->container_axes));
     if (element->font) measurements->key = hash_combine_u64(measurements->key,
         hash_fnv1a_64(&element->font->font_size, sizeof(float)));
     const CssValue* names = block->block()->container_names;
@@ -6321,7 +6327,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
     uint64_t t_init = time_now_ns();
     size_t container_pass = 0;
     size_t visibility_pass = 0;
+    size_t flow_pass = 0;
     for (;;) {
+        // convergence diagnostics must survive a root that never finishes layout.
+        uint64_t flow_start = lycon.profiler.enabled ? time_now_ns() : 0;
+        ++flow_pass;
         // a repeated page-flow pass rewinds the pages of the one it replaces
         if (lycon.paged && !paged_flow_pass_begin(&lycon)) break;
         if (!layout_prepare_generated_effects(&lycon, root_node)) {
@@ -6347,6 +6357,12 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         LayoutContainerMeasurements current = container_dependencies
             ? layout_container_measurements(root_node) : LayoutContainerMeasurements{};
         bool stable = current.key == previous.key;
+        if (lycon.profiler.enabled) {
+            log_notice("[LAYOUT_PROFILE] settle: pass=%zu flow=%.1fms containers=%d stable=%d probe=%d visibility=%d elements=%zu previous=%llu current=%llu",
+                flow_pass, time_elapsed_ms_f(flow_start, time_now_ns()), container_dependencies,
+                stable, lycon.css_query_probe, visibility_changed, current.elements,
+                (unsigned long long)previous.key, (unsigned long long)current.key);
+        }
         if ((!container_dependencies || stable) && !lycon.css_query_probe && !visibility_changed) {
             layout_finish_scroll_positions(&lycon, doc);
             // scrollIntoView consumes placeholder geometry, then relevance must settle before paint.
@@ -6367,7 +6383,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         }
         previous = current;
         if (!stable || visibility_changed) {
+            uint64_t cascade_start = lycon.profiler.enabled ? time_now_ns() : 0;
             radiant_recascade_document_styles(doc, doc->root);
+            if (lycon.profiler.enabled)
+                log_notice("[LAYOUT_PROFILE] settle-cascade: pass=%zu elapsed=%.1fms",
+                    flow_pass, time_elapsed_ms_f(cascade_start, time_now_ns()));
         }
         layout_cleanup(&lycon);
         view_pool_reset_retained(doc->view_tree);

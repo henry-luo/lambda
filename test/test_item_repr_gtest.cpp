@@ -19,6 +19,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/lambda-number-runtime.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/core/name_pool.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/memtrack.h"
 
@@ -369,6 +370,105 @@ TEST_F(RuntimeShapeTransition, ShapeTreeUsesOneIndexedOwnerAndExplicitReset) {
     ASSERT_NE(tree, nullptr);
     EXPECT_EQ(context_capsule(&eval, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE), tree);
     EXPECT_EQ(runtime_shape_tree(), tree);
+}
+
+TEST_F(RuntimeShapeTransition, RootTransitionIndexPreservesSpellingTypeAndBudgetSemantics) {
+    NamePool* pooled_names = name_pool_create_mode(pool, nullptr, NAME_POOL_STATIC);
+    ASSERT_NE(pooled_names, nullptr);
+    ASSERT_TRUE(pool_add_cleanup(pool, [](void* value) { name_pool_release((NamePool*)value); }, pooled_names));
+    TypeMap* root = type_tree_map_root(&input, nullptr);
+    ASSERT_NE(root, nullptr);
+    TypeMap* children[40] = {};
+    String* names[40] = {};
+    for (unsigned index = 0; index < 40; index++) {
+        char text[32];
+        snprintf(text, sizeof(text), "root_field_%u", index);
+        names[index] = shape_transition_test_name(pool, text);
+        ASSERT_NE(names[index], nullptr);
+        children[index] = type_tree_add_map_field(&input, root, names[index], LMD_TYPE_INT, nullptr);
+        ASSERT_NE(children[index], nullptr);
+    }
+    ASSERT_NE(input.root_transition_indexes, nullptr);
+    for (unsigned index = 0; index < 40; index++) {
+        String* pooled = name_pool_create_len(pooled_names, names[index]->chars, names[index]->len);
+        ASSERT_NE(pooled, nullptr);
+        EXPECT_EQ(type_tree_add_map_field(&input, root, pooled, LMD_TYPE_INT, nullptr), children[index]);
+    }
+    TypeMap* changed = type_tree_add_map_field(&input, root, names[0], LMD_TYPE_STRING, nullptr);
+    ASSERT_NE(changed, nullptr);
+    EXPECT_NE(changed, children[0]);
+    EXPECT_EQ(type_tree_add_map_field(&input, root, names[0], LMD_TYPE_STRING, nullptr), changed);
+    input.shape_graph_budget = input.shape_transition_shapes;
+    EXPECT_EQ(type_tree_add_map_field(&input, root, late_flag, LMD_TYPE_BOOL, nullptr), nullptr);
+    EXPECT_EQ(type_tree_add_map_field(&input, root, names[0], LMD_TYPE_INT, nullptr), children[0]);
+}
+
+TEST_F(RuntimeShapeTransition, RootTransitionIndexSeparatesHashCollisionsAndIdentityKeys) {
+    NamePool* names = name_pool_create_mode(pool, nullptr, NAME_POOL_STATIC);
+    ASSERT_NE(names, nullptr);
+    ASSERT_TRUE(pool_add_cleanup(pool, [](void* value) { name_pool_release((NamePool*)value); }, names));
+    // these distinct FNV-1a spellings route to the same hash bucket.
+    EXPECT_EQ(typemap_name_hash("costarring", 10), typemap_name_hash("liquid", 6));
+    String* keys[] = {name_pool_create_name(names, "costarring"),
+        name_pool_create_name(names, "liquid"),
+        name_pool_create_unique_symbol(names, {"liquid", 6}),
+        name_pool_create_unique_symbol(names, {"liquid", 6}),
+        name_pool_create_unique_private(names, {"liquid", 6})};
+    TypeMap* root = type_tree_map_root(&input, nullptr);
+    ASSERT_NE(root, nullptr);
+    TypeMap* children[5] = {};
+    for (unsigned index = 0; index < 5; ++index) {
+        ASSERT_NE(keys[index], nullptr);
+        children[index] = type_tree_add_map_field(&input, root, keys[index], LMD_TYPE_INT, nullptr);
+        ASSERT_NE(children[index], nullptr);
+        for (unsigned earlier = 0; earlier < index; ++earlier)
+            EXPECT_NE(children[index], children[earlier]);
+    }
+    int shapes = input.shape_transition_shapes;
+    for (unsigned pass = 0; pass < 16; ++pass)
+        for (unsigned index = 0; index < 5; ++index)
+            EXPECT_EQ(type_tree_add_map_field(&input, root, keys[index], LMD_TYPE_INT, nullptr), children[index]);
+    EXPECT_EQ(input.shape_transition_shapes, shapes);
+    EXPECT_EQ(type_tree_add_map_field(&input, root, shape_transition_test_name(pool, "liquid"),
+        LMD_TYPE_INT, nullptr), children[1]);
+}
+
+TEST_F(RuntimeShapeTransition, RootTransitionNegativeLookupSeesLaterPublicationAfterBudgetRecovery) {
+    TypeMap* root = type_tree_map_root(&input, nullptr);
+    ASSERT_NE(root, nullptr);
+    TypeMap* first = type_tree_add_map_field(&input, root, fixed_left, LMD_TYPE_INT, nullptr);
+    ASSERT_NE(first, nullptr);
+    // cache an absent edge while allocation is denied, then publish that edge.
+    input.shape_graph_budget = input.shape_transition_shapes;
+    for (unsigned pass = 0; pass < 4; ++pass)
+        EXPECT_EQ(type_tree_add_map_field(&input, root, late_flag, LMD_TYPE_INT, nullptr), nullptr);
+    input.shape_graph_budget = 0;
+    TypeMap* added = type_tree_add_map_field(&input, root, late_flag, LMD_TYPE_INT, nullptr);
+    ASSERT_NE(added, nullptr);
+    EXPECT_NE(added, first);
+    input.shape_graph_budget = input.shape_transition_shapes;
+    for (unsigned pass = 0; pass < 16; ++pass) {
+        EXPECT_EQ(type_tree_add_map_field(&input, root, late_flag, LMD_TYPE_INT, nullptr), added);
+        EXPECT_EQ(type_tree_add_map_field(&input, root, fixed_left, LMD_TYPE_INT, nullptr), first);
+    }
+    EXPECT_EQ(input.shape_transition_shapes, input.shape_graph_budget);
+}
+
+TEST_F(RuntimeShapeTransition, RootTransitionIndexesRetireWithTheirInputAndKeepOtherOwnersLive) {
+    Input* first = Input::create(pool);
+    Input* second = Input::create(pool);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    TypeMap* a = type_tree_add_map_field(first, nullptr, fixed_left, LMD_TYPE_INT, nullptr);
+    TypeMap* b = type_tree_add_map_field(second, nullptr, fixed_left, LMD_TYPE_INT, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_NE(a, b);
+    input_release_document_resources(first);
+    EXPECT_EQ(first->root_transition_indexes, nullptr);
+    EXPECT_EQ(type_tree_add_map_field(second, nullptr, fixed_left, LMD_TYPE_INT, nullptr), b);
+    input_release_document_resources(second);
+    EXPECT_EQ(second->root_transition_indexes, nullptr);
 }
 
 TEST_F(RuntimeShapeTransition, HeapDestructionRetiresRootVectorOwner) {
