@@ -2,8 +2,9 @@
 import util: lambda.doc.math.util
 
 type FontSource = \("src:url(data:" ("\a" | "\d" | "/" | "-" | "." | "+")+ ";base64," ("\a" | "\d" | "+" | "/" | "=")+ ")")
-pub fn normalize(html) => join([for (part in split(html, FontSource, true))
-    if (part is FontSource) slice(part, 0, index_of(part, ";base64,") + 8) ++ "FONT_PAYLOAD)"
+// retained delimiters occupy odd slots (S17.1.1); do not rematch large font data.
+pub fn normalize(html) => join([for (i, part in split(html, FontSource, true))
+    if (i % 2 == 1) slice(part, 0, index_of(part, ";base64,") + 8) ++ "FONT_PAYLOAD)"
     else part], "")
 
 // inspect painted glyphs without counting accessible titles or embedded font data.

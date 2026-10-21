@@ -195,6 +195,13 @@ stress; a missing policy file or stale entry fails the gate. Removing an entry
 returns that fixture to full stress. `make test-mir-gc-stress-full`
 (or `LAMBDA_MIR_GC_FULL=1`) restores every GC schedule for those probes.
 
+The DocBook reference gate exports all eight publications in one Lambda process
+per output mode, sharing package compilation while rebuilding each publication.
+Single-page and chunked output retain complete body comparisons, chunk filename
+checks and local resource/link validation. Math SVG snapshots use retained
+`split` delimiters directly (S17.1.1), avoiding another pattern match over each
+embedded font payload; font declarations and geometry remain in the goldens.
+
 Lambda emission fixtures execute in batches of 32 through `test-batch`, which
 resets the heap, roots, module state and Inputs between scripts (D5.4.3).
 GTest filters and shards select the batch contents; every script retains its
