@@ -477,10 +477,10 @@ def skin(scene, geometry, mesh_model, bind_world, influences, joint_ids, joint_b
     scene.oo(skin_id, geometry)
     column = lambda m: [float(m[r][c]) for c in range(4) for r in range(4)]  # FBX stores columns
     for name, weights in influences.items():
-        cluster = scene.add("Deformer", "SubDeformer::" + name, "Cluster", [
-            ("Version", [("I", 100)], []),
-            ("Indexes", [("i", sorted(weights))], []),
-            ("Weights", [("d", [float(weights[i]) for i in sorted(weights)])], []),
+        # like Mixamo's files, a bone that weights nothing still gets a cluster, without Indexes or Weights
+        counts = [("Indexes", [("i", sorted(weights))], []),
+                  ("Weights", [("d", [float(weights[i]) for i in sorted(weights)])], [])] if weights else []
+        cluster = scene.add("Deformer", "SubDeformer::" + name, "Cluster", [("Version", [("I", 100)], [])] + counts + [
             # like Blender and the FBX SDK's files, Transform holds the mesh relative to the bone at bind
             ("Transform", [("d", column(m4_mul(m4_inverse(joint_bind[name]), bind_world)))], []),
             ("TransformLink", [("d", column(joint_bind[name]))], [])])
@@ -593,9 +593,13 @@ RIG = [  # name, parent, model type, chain properties
                                    "roff": (1, 0, 0), "rp": (0, 0.5, 0), "pre": (10, 0, 0), "post": (0, 0, 15),
                                    "soff": (0.5, 0, 0), "sp": (0, 0, 1)}),
     ("Lower", "Upper", "LimbNode", {"t": (0, 0, 8), "order": "ZYX"}),
-    ("Hand", "Lower", "LimbNode", {"t": (0, 0, 6)}),
-    ("Finger1", "Hand", "LimbNode", {"t": (1, 0, 2)}),
-    ("Finger2", "Hand", "LimbNode", {"t": (-1, 0, 2)}),
+    # Hand's uniform scale reaches Finger1 (InheritType RrSs) but not Finger2's scale (Rrs)
+    ("Hand", "Lower", "LimbNode", {"t": (0, 0, 6), "s": (1.5, 1.5, 1.5)}),
+    ("Finger1", "Hand", "LimbNode", {"t": (1, 0, 2), "inherit": 0}),
+    ("Finger2", "Hand", "LimbNode", {"t": (-1, 0, 2), "inherit": 2}),
+    # the tips' positions show each finger's world scale
+    ("Tip1", "Finger1", "LimbNode", {"t": (0, 0, 2)}),
+    ("Tip2", "Finger2", "LimbNode", {"t": (0, 0, 2)}),
 ]
 RIG_SECOND = KTIME
 RIG_CURVES = {  # stack: {(joint, axis): keys [(tick, value, mode, right, left)]}
@@ -617,6 +621,9 @@ def rig_world(stack=None, tick=0, bind=False):
             if joint == name:
                 r["XYZ".index(axis)] = hermite(keys, tick)
         local = fbx_local(node, node["t"], r, node.get("s", (1, 1, 1)))
+        if node.get("inherit", 1) == 2:  # Rrs cancels the parent's uniform local scale, as ufbx evaluates it
+            k = next(n for nm, _p, _k, n in RIG if nm == parent).get("s", (1, 1, 1))[0]
+            local = [[local[i][j] / k if i < 3 and j < 3 else local[i][j] for j in range(4)] for i in range(4)]
         world[name] = m4_mul(world[parent], local) if parent else local
     return world
 
@@ -626,7 +633,7 @@ def rig_scene():
     models = {}
     for name, parent, kind, node in RIG:
         props = [P("RotationOrder", "enum", "", "", ("I", FBX_ROTATION_ORDER[node.get("order", "XYZ")])),
-                 P("RotationActive", "bool", "", "", ("I", 1)), P("InheritType", "enum", "", "", ("I", 1)),
+                 P("RotationActive", "bool", "", "", ("I", 1)), P("InheritType", "enum", "", "", ("I", node.get("inherit", 1))),
                  vec("Lcl Translation", node["t"], "Lcl Translation", "", "A"),
                  vec("Lcl Rotation", node.get("r", (0, 0, 0)), "Lcl Rotation", "", "A"),
                  vec("Lcl Scaling", node.get("s", (1, 1, 1)), "Lcl Scaling", "", "A")]
@@ -646,7 +653,8 @@ def rig_scene():
     points = [(x, y, z) for z in (3, 9, 15, 21) for x in (-2, 2) for y in (-1, 1)]
     quads = [(0, 1, 3, 2), (4, 6, 7, 5), (8, 9, 11, 10), (12, 14, 15, 13), (0, 4, 5, 1), (8, 12, 13, 9)]
     materials = [0, 0, 1, 1, 0, 1]
-    influences = {"Upper": {}, "Lower": {}, "Hand": {}, "Finger1": {}, "Finger2": {}}
+    # Root weights nothing; its cluster sits between weighted ones
+    influences = {"Upper": {}, "Lower": {}, "Root": {}, "Hand": {}, "Finger1": {}, "Finger2": {}}
     for i, (x, y, z) in enumerate(points):
         if z < 10: influences["Upper"][i] = 1.0
         elif z < 18: influences["Upper"][i], influences["Lower"][i] = 0.4, 0.6

@@ -4,9 +4,11 @@
 //
 //   ufbx_dump <file.fbx> <times...>
 //
-// Prints JSON for every animation stack at each clip-relative time, in metres,
+// Prints JSON for every animation stack, in file order (names may repeat), at
+// each clip-relative time, in metres,
 // Y-up, +Z front: node world positions by name, skinned vertices keyed by their
-// bind-time position in millimetres, and unskinned mesh vertices in order.
+// bind-time position in 10 µm units (dense meshes place distinct vertices under
+// a millimetre apart), and unskinned mesh vertices in order.
 #include "ufbx.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +24,7 @@ static void print_name(ufbx_string name) {
     putchar('"');
 }
 static void print_vec(ufbx_vec3 v) { printf("[%.9f,%.9f,%.9f]", v.x, v.y, v.z); }
-static long millimetres(double metres) { return lround(metres * 1000.0); }
+static long key_units(double metres) { return lround(metres * 100000.0); }
 
 static void dump_scene(const ufbx_scene* scene, const ufbx_scene* rest) {
     printf("{\"nodes\":{");
@@ -55,7 +57,7 @@ static void dump_scene(const ufbx_scene* scene, const ufbx_scene* rest) {
             ufbx_matrix deform = ufbx_get_skin_vertex_matrix(skin, v, node ? &node->geometry_to_world : NULL);
             if (!first) putchar(',');
             first = 0;
-            printf("\"%ld,%ld,%ld\":", millimetres(key.x), millimetres(key.y), millimetres(key.z));
+            printf("\"%ld,%ld,%ld\":", key_units(key.x), key_units(key.y), key_units(key.z));
             print_vec(ufbx_transform_position(&deform, local));
         }
     }
@@ -90,12 +92,13 @@ int main(int argc, char** argv) {
     if (!scene) { fprintf(stderr, "ufbx: %s\n", error.description.data); return 1; }
     printf("{\"rest\":");
     dump_scene(scene, scene);
-    printf(",\"stacks\":{");
+    printf(",\"stacks\":[");
     for (size_t s = 0; s < scene->anim_stacks.count; s++) {
         const ufbx_anim_stack* stack = scene->anim_stacks.data[s];
         if (s) putchar(',');
+        printf("{\"name\":");
         print_name(stack->name);
-        printf(":{\"begin\":%.9f,\"end\":%.9f,\"samples\":{", stack->time_begin, stack->time_end);
+        printf(",\"begin\":%.9f,\"end\":%.9f,\"samples\":{", stack->time_begin, stack->time_end);
         for (int t = 2; t < argc; t++) {
             double seconds = atof(argv[t]);
             ufbx_scene* posed = ufbx_evaluate_scene(scene, stack->anim, stack->time_begin + seconds, NULL, &error);
@@ -107,7 +110,7 @@ int main(int argc, char** argv) {
         }
         printf("}}");
     }
-    printf("}}\n");
+    printf("]}\n");
     ufbx_free_scene(scene);
     return 0;
 }
