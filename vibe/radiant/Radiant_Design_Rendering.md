@@ -1,9 +1,9 @@
 # Radiant Rendering Design
 
-**Date:** 2026-10-20
+**Date:** 2026-10-21
 
 **Status / ratification:** current-design consolidation, verified against the
-2026-10-20 optimization working tree. This document introduces no new formal
+2026-10-21 optimization working tree. This document introduces no new formal
 ruling. Implementation and qualification receipts are tracked in the
 [rendering optimization plan](../impl/Radiant_Impl_Rendering_Optimization.md).
 
@@ -329,12 +329,71 @@ or remapping chunk-local markers. Serial/dirty/tile replay, validation, media,
 resource checks and SVG capture/export consume the same read-only cursor.
 Validation rejects cycles, invalid spans and inconsistent marker/count metadata;
 subtree culling skips an immutable chunk directly. Capturing a mixed frame
-republishes matching chunks. A certified, untranslated zero-ID leaf from another
+republishes matching chunks. A certified zero-ID leaf from another
 cache can remain an immutable child reference beneath a captured parent. The
 parent reserves the child's full retained size in its own budget, conservatively
 per reference, and pins the producer's existing owner. Other foreign fragments
 keep the command-copy path. Active references survive cache eviction/destruction.
 Broad dirty-generation invalidation remains; placement-only reflow is separate.
+
+Automatic HTML placement reuse has a bounded atomic-box profile. An empty
+ordinary block/inline-block painted in one complete visit can record a solid
+background without its redundant caller clip when every touched pixel lies
+inside the fully covered interior of a plain rectangular clip. The shared
+background producer retains its usual logical-coordinate/density lowering;
+admission requires that lowering to reproduce the exact physical rectangle.
+HTML/body canvas paint, split paint phases, children/text, borders/radii,
+gradients/images, CSS clips, transforms, effects, fragmented, replaced and custom
+paint remain outside this profile (**D4.5.3v2 / D4.5.1v4**).
+
+On a later paint, the cache compares the entire certified three-command leaf
+(begin/solid rectangle/end) with the exact current rectangle and color. It also
+checks float displacement recomposition. The same source can then be placed
+after reflow without requiring an unchanged document epoch or a clean dirty
+region: the current complete primitive supplies the narrower proof. The private
+placement is explicitly approved for same-cache parent capture; its immutable
+publication and marker bounds remain canonical while the parent edge carries
+the current position. Existing readers keep their original placements. Generic
+dirty reuse still compares canonical marker bounds, and ordinary explicit
+translated semantic fragments keep their previous capture fallback. Allocation
+or admission failure retains the original recording path
+(**D4.5.3v2 / D4.2.4**).
+
+An exact-check failure requires fresh recording during selective paint as well.
+External content callbacks bypass automatic admission. The per-frame
+`RADIANT_HTML_PLACEMENT_CACHE=off` control disables this profile and its redundant
+clip omission; whole-frame recording reuse has its separate control.
+The scoped 512-box movement comparison eliminates retained command copying and
+halves native shape construction, with additional cursor-local placement copies.
+Its observed time/memory changes and qualification limits are recorded in the
+[implementation plan](../impl/Radiant_Impl_Rendering_Optimization.md#29-automatically-reuse-placement-independent-atomic-html-boxes).
+
+Captured child spans can carry a two-float translation. A translated foreign
+leaf pins the same source chunk; the parent edge preserves its effective
+placement without retaining another placement wrapper. The cursor composes edge
+and owner translations, keeping original command/payload storage immutable.
+For nonzero placement, its cursor-local descriptor copies only the opcode,
+bounds and active payload. Rectangles/markers avoid copying the largest union
+member; clip pops need no payload copy. Payload construction starts the selected
+union member's lifetime, while resource handles remain borrowed from the pinned
+source. Inactive union bytes are unspecified, and scratch descriptors remain
+valid only until cursor advance/skip. Zero placement still returns the original
+descriptor (**D4.5.3v2 / D4.2.4**).
+Own-command spans require zero edge displacement. Parent publication requires
+successful validation of translated children: a source certificate at its old
+position cannot attest finite matrices or supported pixel operations at a new
+position. Caller clips remain in the parent's coordinate space; local SVG clips
+move with their child. Span capacity is charged at its actual structure size
+(**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+A successfully validated private placement shell retains a summary for that
+immutable source at that exact displacement. Parent capture transfers the
+attestation to its child edge, without retaining the shell. Sparse attestations
+live with the parent and their capacity is budgeted; unplaced chunks allocate
+none. The cursor recognizes only private certified shells/edges whose cumulative
+displacement still matches. Changed enclosing placements and untrusted wrappers
+keep full command validation. Attestations are immutable after publication and
+retain no additional payloads (**D4.5.3v2 / D4.2.4**).
 
 Foreign subscene references carry no HTML view bindings. Index grouping,
 membership refresh and subtree eviction remain local to each cache's budget;
@@ -360,9 +419,10 @@ Nonzero placement validates the complete subtree before appending one reference;
 unsupported CPU effects, glyph bitmap draws, media, non-finite placement and
 invalid graphs reject without appending. Allocation failure releases the source
 lease. Frame storage accounting conservatively includes the shell and its source
-graph, while cache retirement leaves placed readers pinned. Recapture declines
-translated scopes rather than publishing their unshifted source commands under
-the original identity. This explicit API supplies replay composition; automatic
+graph, while cache retirement leaves placed readers pinned. Recapture admits
+translated foreign zero-ID leaves beneath a captured parent. Other translated
+scopes retain their fallback; their unshifted source commands are never published
+under a moved semantic identity. This explicit API supplies replay composition; automatic
 HTML reuse after reflow still needs dependency and damage admission. Equal size
 alone does not prove unchanged paint (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
 
@@ -508,7 +568,9 @@ composes a certified chunk after checking that both peaks fit the caller's
 remaining nesting space. New publications validate their own commands and use
 already-certified child summaries, avoiding repeated descendant expansion.
 Chunks that cannot validate independently remain uncertified and use the full
-validator, as do foreign publications and mutable commands. Certification owns
+validator, as do untrusted foreign publications and mutable commands. Exact
+placement attestations compose the same properties and nesting peaks; shell
+graph levels remain included in the caller's depth checks. Certification owns
 no additional payloads, survives with the chunk's existing leases and is charged
 with its storage. Resource liveness remains a separate query
 (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
@@ -703,6 +765,9 @@ storage. Basic-shape lookup precedes construction; gradients/dashes share
 immutable buffers; serial canvas and unchanged full-frame recording reuse are
 implemented. Selective frames now retain chunk references without descriptor
 flattening. Explicit translated vector references share payloads through the
-cursor; automatic placement-only reflow, pixel-effect translation and finer
-invalidation remain follow-up work. Performance and qualification limits are recorded separately from these
+cursor. Exact-placement validation summaries avoid repeated source checks
+during frame validation and parent capture. Empty atomic solid HTML boxes have
+automatic placement reuse; broader placement-only reflow,
+pixel-effect translation and finer invalidation remain follow-up work.
+Performance and qualification limits are recorded separately from these
 structural changes.

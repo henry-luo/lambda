@@ -158,7 +158,7 @@ static bool background_sources(ViewBlock* view, Rect rect,
     return recorded;
 }
 
-void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
+void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect, bool clip_to_caller) {
     if (!rdcon || !rdcon->paint_list || !rdcon->dl || !view || render_background_is_table_track(view)) return;
     float scale = rdcon->raster_scale;
     if (scale <= 0.0f) return;
@@ -166,8 +166,8 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     RdtMatrix density = rdt_matrix_scale(scale, scale);
     const RdtMatrix* active = render_state_current_transform(rdcon);
     RdtMatrix transform = active ? rdt_matrix_multiply(active, &density) : density;
-    RdtPath* clip = render_path_create_clip_path(rdcon);
-    rc_push_clip(rdcon, clip, nullptr);
+    RdtPath* clip = clip_to_caller ? render_path_create_clip_path(rdcon) : nullptr;
+    if (clip_to_caller) rc_push_clip(rdcon, clip, nullptr);
     struct RasterBackground {
         RasterRenderContext* raster;
         const RdtMatrix* transform;
@@ -182,8 +182,8 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         });
     paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
     paint_list_clear(rdcon->paint_list);
-    rc_pop_clip(rdcon);
-    rdt_path_free(clip);
+    if (clip_to_caller) rc_pop_clip(rdcon);
+    if (clip) rdt_path_free(clip);
 }
 
 static Color gradient_image_average_color(const RdtGradientStop* stops, int count) {
