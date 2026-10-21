@@ -1,6 +1,9 @@
 # Radiant Design: View Prop Sharing & Storage Reuse
 
 Status: **IMPLEMENTED** — decisions VR1–VR14 and phases R0–R7 completed 2026-07-18. The measured adoption set is retained reset/scratch separation, canonical `InlineProp` sharing, DOM liveness and arena retirement, tree-wide exact Inline interning, and canonical style epochs. Evidence-gated Font sharing and a custom `TextRect` cache were not adopted.
+**Extension (2026-10-20):** VR15 is adopted and being implemented; the earlier
+completion statement does not cover immutable computed-style separation or
+retained sizing/flow results.
 Scope: DOM node storage, view-prop lifecycle, layout/render scratch, canonical prop sharing, and per-element/canonical `specified_style` storage.
 Extends: `vibe/radiant/Radiant_Design_View_Struct.md` (DV1–DV16 complete).
 Related: `Radiant_Design_Memory.md`, `Radiant_Design_Robustness.md` (T7 stale pointers), `vibe/Lambda_Design_Memory_Model.md`, and the completed DOM/view impl plan's alias ledger and memory profile.
@@ -237,6 +240,71 @@ Pseudo-state rematching stays within the current style epoch unless a global sty
 Target code names make the six domains visible: `document_pool`, `node_arena`, `prop_pool`, `canonical_prop_arena`, `scratch_arena`, and `StyleEpoch::pool`. Migration may be mechanical and phased, but no ambiguous second owner remains.
 
 Sharing/recycling stay behind `ensure_*`, `create()`, `VIEW_PROP_TEARDOWN`, the canonical store, and one retirement sweep. Node reuse extends the existing arena recycler. Style epoch creation/destruction has one manager. LOC is reported as a guardrail, never traded against correctness infrastructure.
+
+### Part D — Retained computation
+
+### VR15 — Computation identity follows inputs and values, not execution
+
+Computed styles and sizing/layout results have independent validity. Performing
+measurement, allocating view props, or starting another flow pass cannot by
+itself invalidate computed inheritance. Parent revisions identify relevant
+computed inputs/values; incrementing a revision merely because full resolution
+ran is forbidden. Changed inputs remain conservative invalidation until complete
+field-aware output comparison is available (**VR6**).
+
+Retained results belong to the selected view's pools and never borrow layout
+scratch or unrooted GC values (**D4.5.1v4 / D4.1.4v5 / D4.5.2**). Ordinary geometry
+resets preserve styles whose inputs are unchanged. Replacing the selected view
+still retires its owned records safely. Font descriptors must be separated from
+mutable font handles/metrics before general immutable sharing (**VR4**).
+
+The computed-box migration freezes clean geometry independently of provisional
+horizontal box roles and stores dependent used values separately. New prop
+groups materialize typed computed defaults. A committed box keeps assigned
+constraints only after its computed inputs and context match. Vertical and
+other unmigrated consumers keep their legacy adapters; retained flow queries
+must replace their mutable constraint reads before extending this boundary.
+
+Row-flex preparation requests width independently of height. Partial size
+entries carry explicit validity and upgrade in place. The first completed-flow
+consumer is a horizontal auto-height flex item with one ordinary text child:
+its natural cross-size query retains the view's text rectangles and baselines,
+and final flow consumes them without rebuilding the fragments. The final
+stretched height remains a placement constraint, separate from natural content
+height. Same-update keys include sizing, style/content and resource inputs;
+another trial layout invalidates the in-place geometry before writing it.
+The next consumer extends that live result to ordinary horizontal block/inline
+subtrees. Every descendant must have current computed inputs and no containing
+size dependency, ordered counter/quote/pseudo effect, resource, positioning or
+unmigrated formatting context. Text edits preserve sibling identity and advance
+ancestor intrinsic-input revisions, independently of CSS resolution. The result
+still describes one live geometry tree; another trial invalidates it. Multiple
+independently owned fragment results, dependent descendants and fragmented flow
+remain unmigrated (**D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+
+Sizing and layout cache keys include every input read, with dependency-proven
+omissions only. Independent scalar-height estimates use their explicit wrapping
+width across caller space labels; a dependent descendant preserves the full
+policy key. Completed flow retains available space for atomic shrink-to-fit.
+Active A→B→A queries retain both results. Loader geometry reads
+and presentation share current results, once retained mutation normalization is
+correct. Full design and acceptance:
+[CSS Cascade §3.47](Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs).
+
+The continuous-document update checkpoint owns that publication boundary. Its
+selected-tree snapshot records content/style/constraint/environment inputs;
+unchanged geometry reads and presentation borrow the same result. Reconcile
+pending mutations before checking validity, and publish consumed inputs before
+observer sampling. Restore authored table runs and split first-letter text
+before a real retained reset; refresh list/pseudo content through its retained
+owner. A paint-only commit cannot also satisfy an unrelated viewport/font
+change. Paged and explicit custom-layout lifecycle passes remain separate.
+
+Pool survival does not extend pass-local sizing validity. Expire flex item
+intrinsic work on initialization,
+and expire unkeyed scalar entries at the measurement generation. A scalar
+contribution query restores the live boxes whose fragments it borrows (**VR15**).
+
 
 ---
 

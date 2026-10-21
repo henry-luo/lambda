@@ -526,7 +526,7 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
 
     // layout html doc
     if (doc->root) {
-        layout_html_doc(&ui_context, doc, false);
+        layout_update_document(&ui_context, doc);
         // navigation must start Lambda load handlers as initial presentation does.
         radiant_dispatch_lambda_body_load(&ui_context, doc);
     }
@@ -552,7 +552,7 @@ void reflow_html_doc(DomDocument* doc) {
         log_debug("No document to reflow");
         return;
     }
-    layout_html_doc(&ui_context, doc, true);
+    layout_update_document(&ui_context, doc);
     // Skip render here — let the main loop handle it via render().
     // Mark dirty so the main loop knows to repaint.
     if (doc->state) {
@@ -1908,7 +1908,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     return 1;
                 }
             } else {
-                layout_html_doc(&ui_context, doc, false);
+                layout_update_document(&ui_context, doc);
             }
             phase_timing.layout_ms = view_phase_elapsed_ms(layout_start, time_now_ns());
             log_mem_stage("after-layout");

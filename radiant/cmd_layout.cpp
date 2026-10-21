@@ -3225,31 +3225,8 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
     doc->html_root = lam::up(html_root);
     doc->html_version = version;
     doc->url = lam::own(url);
-    // load-time scripts may already own document timelines; replacing view geometry must preserve their state.
-    // Load-time geometry reads may already have committed a ViewTree.
-    if (doc->page_kind == DOM_PAGE_KIND_HTML && doc->view_tree && doc->view_tree->root) {
-        // The snapshot used pre-script styles; retained used values such as
-        // collapsed zoomed margins cannot seed the post-script layout epoch.
-        // Table wrappers must retire while their view-pool props are still live.
-        if (doc->root && doc->root->is_element()) {
-            layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
-                doc->root->as_element());
-            layout_detach_first_letter_pseudo_content_for_layout_reset(
-                doc->root->as_element());
-        }
-        // geometry replacement keeps committed sizing and motion history in this edition.
-        lam::Own<ContentVisibilityState> visibility = doc->view_tree->content_visibility_state;
-        doc->view_tree->content_visibility_state = nullptr;
-        view_pool_destroy(doc->view_tree);
-        if (doc->root && doc->root->is_element()) {
-            // View teardown needs the complete rendered tree; generated DOM-only
-            // boxes are removed only after its layout resources are gone.
-            layout_detach_materialized_pseudo_content_for_layout_reset(
-                doc->root->as_element());
-        }
-        doc->view_tree->init((MemContext*)doc->services.mem_ctx);
-        doc->view_tree->content_visibility_state = visibility;
-    }
+    // script checkpoints and presentation share this tree; publication validates
+    // its inputs before deciding whether another geometry pass is necessary.
 }
 
 static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
@@ -5781,12 +5758,9 @@ static bool layout_single_file(
     } else {
         auto event_layout_start = time_now_ns();
         layout_start = event_layout_start;
-        // A script geometry read can create a provisional DOM view tree before
-        // font-face loading and post-script cascade; DOM documents still need
-        // this final commit to replace that stale layout-resource epoch.
-        layout_html_doc(ui_context, doc, false);
+        layout_update_document(ui_context, doc);
         if (apply_initial_autofocus(doc, state)) {
-            layout_html_doc(ui_context, doc, false);
+            layout_update_document(ui_context, doc);
         }
         auto event_layout_end = time_now_ns();
         layout_end = event_layout_end;

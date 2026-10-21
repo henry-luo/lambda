@@ -21,7 +21,6 @@ CssEnum layout_flex_direction(ViewElement* container) {
 float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 static bool should_skip_flex_item(ViewElement* item);
 float calculate_item_baseline(ViewElement* item);
-void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item);
 static void sort_flex_items_by_order(View** items, int count);
 static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_count);
 static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line);
@@ -628,7 +627,7 @@ float flex_column_item_content_extent(LayoutContext* lycon,
 
     if (flex_layout) {
         MeasurementCacheEntry* cached = get_from_measurement_cache(item);
-        if (cached && cached->measured_height > 0) {
+        if (cached && cached->has_height && cached->measured_height > 0) {
             return (float)cached->measured_height;
         }
     }
@@ -643,6 +642,10 @@ float flex_column_content_contribution(LayoutContext* lycon, ViewElement* contai
     CssEnum direction = layout_flex_direction(container);
     if (direction != CSS_VALUE_COLUMN && direction != CSS_VALUE_COLUMN_REVERSE) return 0.0f;
 
+    // item initialization zeroes live boxes; a contribution query must not
+    // replace geometry whose fragments still belong to the committed flow.
+    LayoutViewScope view_scope(lycon);
+    radiant::LayoutMeasureScope measure_scope(lycon, container);
     float total = 0.0f;
     for (DomNode* child = container->as_element()->first_child;
          child; child = child->next_sibling) {
@@ -1691,7 +1694,9 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // a clean item of an incremental pass replays its last measurement and content pass.
         flex_retained_item_begin(lycon, item, container_content_width, container_content_height);
         if (!(has_definite_w && has_definite_h)) {
-            measure_flex_child_content(lycon, child);
+            bool width_only = is_main_axis_horizontal(flex_layout) &&
+                !layout_block_inline_axis_is_vertical(item_block);
+            measure_flex_child_content(lycon, child, width_only);
         }
         // Step 3: Check if should skip (absolute, hidden)
         if (should_skip_flex_item(item)) {
@@ -1714,11 +1719,11 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             if (item->width <= 0) {
                 item->width = cached->measured_width;
             }
-            if (!child_is_grid && item->height <= 0) {
+            if (!child_is_grid && cached->has_height && item->height <= 0) {
                 item->height = cached->measured_height;
             }
             item->content_width = cached->content_width;
-            if (!child_is_grid) {
+            if (!child_is_grid && cached->has_height) {
                 item->content_height = cached->content_height;
             }
         }
@@ -3267,9 +3272,8 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         if (!has_flex_item_prop(item)) continue;
         float final_size = flex_main_axis_size(item, flex_layout);
         float hypo = scratch[i].hypothetical;
-        if (fabsf(final_size - hypo) > 0.5f) {
-            item->fi->main_size_from_flex = 1;
-        }
+        // every sizing result owns this flag, including a later query with no redistribution.
+        item->fi->main_size_from_flex = fabsf(final_size - hypo) > 0.5f;
     }
 
 }
@@ -3984,8 +3988,11 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                 float measured_height = 0.0f;
                 if (item_content_width > 0.0f &&
                     !flex_retained_replay_cross(lycon, item, item_content_width, &measured_height)) {
-                    measured_height = flex_measure_intrinsic_max_height(
-                        lycon, static_cast<DomNode*>(item), item_content_width);
+                    if (!flex_measure_completed_flow(lycon, item, flex_layout,
+                            item_content_width, &measured_height)) {
+                        measured_height = flex_measure_intrinsic_max_height(
+                            lycon, static_cast<DomNode*>(item), item_content_width);
+                    }
                     flex_retained_record_cross(lycon, item, item_content_width, measured_height);
                 }
                 if (flex_item_is_anonymous_text(item) && item->fi->anonymous_text &&

@@ -2115,7 +2115,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         DomDocument* previous_document = ui->document;
         ui->document = lam::up(doc);
         script_runner_suspend_js_watchdog();
-        layout_html_doc(ui, doc, false);
+        layout_update_document(ui, doc);
         script_runner_resume_js_watchdog();
         ui->document = lam::up(previous_document);
         if (!radiant_eval_context_switch(owner) || !js_runtime_state_init(owner)) return false;

@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+@font-face { font-family: FlowMetrics; src: url("../layout/data/support/fonts/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 FlowMetrics; }
+.row { display: flex; width: 160px; align-items: flex-start; }
+.item { flex: 0 0 60px; min-width: 0; }
+.generated::before { content: "X"; }
+</style>
+<div id="result">
+<div class="row"><div id="inline" class="item"><span id="span">XX</span> XX <b>XX</b></div></div>
+<div class="row"><div id="atomic" class="item"><span style="display:inline-block;width:40px">XX XX</span><span>XX</span></div></div>
+<div class="row" style="height:160px;align-items:stretch"><div id="blocks" class="item" style="padding:4px;border:1px solid"><div id="first" style="margin-bottom:7px"><span id="nested">XX XX XX</span></div><div id="last" style="margin-top:11px">XX</div></div></div>
+<div class="row" style="height:100px;align-items:stretch"><div id="percent" class="item"><div style="height:50%">XX</div></div></div>
+<div class="row"><div id="generated" class="item"><span class="generated">XX</span></div></div>
+<div class="row"><div id="resource" class="item"><img width="20" height="20" alt=""></div></div>
+<div class="row"><div id="positioned" class="item"><span style="position:relative;top:2px">XX</span></div></div>
+<div class="row"><div id="intrinsic" class="item"><div style="width:min-content">XX XX</div></div></div>
+<div class="row"><div id="counter" class="item"><ol style="margin:0;padding:0">XX</ol></div></div>
+<div class="row"><div id="list-item" class="item"><div style="display:list-item">XX</div></div></div>
+</div>

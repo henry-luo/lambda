@@ -486,8 +486,15 @@ void advance_measurement_cache_generation(ViewTree* tree) {
 
 void store_in_measurement_cache(DomNode* node, float width, float height,
                                float content_width, float content_height,
-                               float context_width) {
+                               float context_width, bool has_height) {
     ViewTree* tree = measurement_cache_tree_for_node(node);
+    // a later axis request completes this query rather than leaving an older partial entry first.
+    MeasurementCacheEntry* entry = get_from_measurement_cache(node);
+    if (entry) {
+        *entry = {lam::up(node), width, height, content_width, content_height,
+            context_width, tree->measurement_cache_generation, has_height};
+        return;
+    }
     if (!ensure_measurement_cache_capacity(tree, tree ? tree->measurement_cache_count + 1 : 1)) {
         return;
     }
@@ -500,6 +507,7 @@ void store_in_measurement_cache(DomNode* node, float width, float height,
     tree->measurement_cache[cache_count].content_height = content_height;
     tree->measurement_cache[cache_count].context_width = context_width;
     tree->measurement_cache[cache_count].generation = tree->measurement_cache_generation;
+    tree->measurement_cache[cache_count].has_height = has_height;
     tree->measurement_cache_count++;
 
 }
@@ -585,20 +593,20 @@ bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
     return eligible;
 }
 
-static bool flex_retained_replay_measure(LayoutContext* lycon, DomNode* child) {
+static bool flex_retained_replay_measure(LayoutContext* lycon, DomNode* child, bool width_only) {
     FlexRetainedPass* retained = child->is_element()
         ? flex_retained_replayable(lycon, lam::view_as_element(child)) : nullptr;
-    if (!retained || !retained->has_measure) return false;
+    if (!retained || !retained->has_measure || (!width_only && !retained->measure_has_height)) return false;
     store_in_measurement_cache(child, retained->measured_width, retained->measured_height,
                                retained->content_width, retained->content_height,
-                               retained->measure_context_width);
+                               retained->measure_context_width, retained->measure_has_height);
     return true;
 }
 
 static void flex_retained_record_measure(LayoutContext* lycon, DomNode* child,
                                          float measured_width, float measured_height,
                                          float content_width, float content_height,
-                                         float context_width) {
+                                         float context_width, bool has_height) {
     ViewElement* item = child->is_element() ? lam::view_as_element(child) : nullptr;
     if (layout_context_is_measuring(lycon) || !item || !has_flex_item_prop(item)) return;
     FlexRetainedPass* retained = &item->fi->retained;
@@ -608,11 +616,19 @@ static void flex_retained_record_measure(LayoutContext* lycon, DomNode* child,
     retained->content_height = content_height;
     retained->measure_context_width = context_width;
     retained->has_measure = true;
+    retained->measure_has_height = has_height;
 }
 
 void flex_retained_forget_content(DomElement* element) {
+    radiant::flex_measured_flow_invalidate(element);
     ViewElement* item = element ? lam::view_as_element(static_cast<DomNode*>(element)) : nullptr;
     if (has_flex_item_prop(item)) item->fi->retained.has_content = false;
+}
+
+void flex_retained_forget_containing_content(DomNode* node) {
+    for (; node; node = node->parent) {
+        if (node->is_element()) flex_retained_forget_content(node->as_element());
+    }
 }
 
 bool flex_retained_replay_cross(LayoutContext* lycon, ViewElement* item, float width,
@@ -677,14 +693,17 @@ void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
 }
 
 // Measure flex child content without applying final sizing
-void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
-    if (!lycon || !child || get_from_measurement_cache(child)) return;
-    if (flex_retained_replay_measure(lycon, child)) return;
+void measure_flex_child_content(LayoutContext* lycon, DomNode* child, bool width_only) {
+    if (!lycon || !child) return;
+    MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+    if (cached && (width_only || cached->has_height)) return;
+    if (!cached && flex_retained_replay_measure(lycon, child, width_only)) return;
 
     float measured_width = 0.0f;
     float measured_height = 0.0f;
     float content_width = 0.0f;
     float content_height = 0.0f;
+    bool has_height = !width_only;
     if (child->is_text()) {
         const char* text = (const char*)child->text_data();
         size_t length = text ? strlen(text) : 0;
@@ -694,12 +713,14 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         float line_height = lycon->font.style && lycon->font.style->font_size > 0.0f
             ? lycon->font.style->font_size : 20.0f;
         measured_height = content_height = line_height;
+        has_height = true;
     } else if (child->is_element()) {
         ViewElement* item = lam::view_as_element(child);
         DomElement* element = child->as_element();
         if (!item || !element) return;
 
         if (item->form_control()) {
+            has_height = true;
             // Form sizing must run before generic intrinsic sizing; that API owns
             // native control padding and otherwise the button min-size is counted twice.
             IntrinsicSize form_size = layout_measure_form_control(
@@ -738,29 +759,36 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         } else {
             // Intrinsic sizing owns wrapping, replaced defaults, and block-flow margins;
             // the former cache path duplicated those rules with tag-specific estimates.
-            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element, true);
-            content_width = layout_content_size_from_border_box(
-                lam::view_as_block(item), sizes.max_content, true);
-            if (layout_axis_has_given_size(item, true)) {
-                measured_width = item->block()->given_width;
-                content_width = layout_css_size_to_content_box(
-                    item->bound, layout_box_sizing(lam::view_as_block(item)),
-                    measured_width, true);
+            if (cached) {
+                measured_width = cached->measured_width;
+                content_width = cached->content_width;
+            } else {
+                IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element, true);
+                content_width = layout_content_size_from_border_box(
+                    lam::view_as_block(item), sizes.max_content, true);
+                if (layout_axis_has_given_size(item, true)) {
+                    measured_width = item->block()->given_width;
+                    content_width = layout_css_size_to_content_box(
+                        item->bound, layout_box_sizing(lam::view_as_block(item)),
+                        measured_width, true);
+                }
             }
 
-            measured_height = flex_measure_intrinsic_max_height(
-                lycon, child, content_width);
-            content_height = layout_content_size_from_border_box(
-                lam::view_as_block(item), measured_height, false);
+            // row flex determines the wrapping width before it needs a natural cross size.
+            if (!width_only) {
+                measured_height = flex_measure_intrinsic_max_height(lycon, child, content_width);
+                content_height = layout_content_size_from_border_box(
+                    lam::view_as_block(item), measured_height, false);
+            }
         }
     }
 
     store_in_measurement_cache(child, measured_width, measured_height,
                                content_width, content_height,
-                               lycon->block.content_width);
+                               lycon->block.content_width, has_height);
     flex_retained_record_measure(lycon, child, measured_width, measured_height,
                                  content_width, content_height,
-                                 lycon->block.content_width);
+                                 lycon->block.content_width, has_height);
 }
 // Create lightweight View for flex item element only (no child processing)
 void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
@@ -794,11 +822,17 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node->as_element()->styles_resolved()) {
         reset_flex_item_prop_for_style(lycon, block);
     }
-    // Set up basic CSS properties (minimal setup for flex items)
     dom_node_resolve_style(node, lycon);
     // CRITICAL FIX: Ensure flex item properties are allocated
     // Even if no flex CSS properties are specified, we need fi for the flex algorithm
     alloc_flex_item_prop(lycon, block);
+    // the previous query's assigned main size cannot constrain this query's intrinsic input.
+    if (block->fi) {
+        block->fi->main_size_from_flex = 0;
+        // these flags describe this algorithm's work, not keyed retained queries;
+        // final content refinement may have overwritten the previous values.
+        block->fi->has_intrinsic_width = block->fi->has_intrinsic_height = 0;
+    }
     // Initialize dimensions (will be set by flex algorithm)
     block->width = 0;  block->height = 0;
     block->content_width = 0;  block->content_height = 0;
@@ -1289,13 +1323,13 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // CRITICAL: cached->measured_height is border-box (includes padding+border added by
         // measure_flex_child_content). calculate_flex_basis will add padding again, so we must
         // store the CONTENT-ONLY height here to avoid double-counting.
-        if (cached && cached->measured_height > 0 && has_explicit_height) {
+        if (cached && cached->has_height && cached->measured_height > 0 && has_explicit_height) {
             min_height = layout_content_size_from_border_box(lam::view_as_block(item), cached->measured_height, false);
             max_height = min_height;
         } else if (children.height > 0.0f) {
             min_height = children.height;
             max_height = children.height;
-        } else if (cached && cached->measured_height > 0) {
+        } else if (cached && cached->has_height && cached->measured_height > 0) {
             // Fallback to cache without explicit height requirement
             min_height = layout_content_size_from_border_box(lam::view_as_block(item), cached->measured_height, false);
             max_height = min_height;

@@ -374,7 +374,7 @@ void dom_text_destroy(DomText* text_node);
 const char* dom_text_get_content(DomText* text_node);
 
 /**
- * Set text content (backed - updates Lambda String via MarkEditor)
+ * Set text content (backed - replaces the Lambda String, preserving node links)
  * @param text_node Text node
  * @param text New text content
  * @return true on success, false on failure

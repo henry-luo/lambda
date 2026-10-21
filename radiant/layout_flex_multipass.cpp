@@ -2,6 +2,7 @@
 #include "../lib/hashmap_helpers.h"
 #include "render.hpp"
 #include "event.hpp"
+#include "css_resolved_style.hpp"
 
 #include "../lib/log.h"
 #include "../lib/mem.h"
@@ -1002,6 +1003,176 @@ static void flex_apply_content_height_after_layout(
 
 static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item);
 
+namespace radiant {
+
+struct FlexMeasuredFlowKey {
+    CssFontKey font;
+    AvailableSpace available_space;
+    const char* text;
+    size_t length;
+    uint64_t style_epoch, mutation_epoch, font_generation;
+    uint32_t generation, style_revision, input_revision;
+    float width, viewport_width, viewport_height, root_font_size, raster_scale;
+    CssEnum text_wrap_style;
+};
+
+// tier-2: the selected view owns the memo and its live subtree geometry.
+// another trial layout invalidates the memo before rewriting those fragments.
+struct FlexMeasuredFlow {
+    FlexMeasuredFlowKey key;
+    SizeF content;
+    float height, first_baseline, last_baseline;
+    bool valid;
+};
+
+void flex_measured_flow_release(LayoutCache* cache, Pool* pool) {
+    if (cache) lam::free_owned(pool, cache->measured_flex_flow);
+}
+
+void flex_measured_flow_invalidate(DomElement* element) {
+    if (element && element->layout_cache && element->layout_cache->measured_flex_flow)
+        element->layout_cache->measured_flex_flow->valid = false;
+}
+
+static bool flex_flow_subtree_is_independent(LayoutContext* context, DomNode* node,
+                                            int depth, int* remaining) {
+    if (depth >= MAX_LAYOUT_DEPTH || --*remaining < 0) return false;
+    if (!node->is_element()) return node->is_text() || node->is_comment();
+    DomElement* element = node->as_element();
+    ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+    if (!css_resolved_style_input_revision(context, element) ||
+        !layout_flow_is_context_independent(element, true) ||
+        element->display.list_item ||
+        element->form_control() || element->scroller || element->embed ||
+        element->transform || element->shadow_root_element() ||
+        layout_is_mathml_root(element) || layout_generated_pseudo(element, nullptr, nullptr) ||
+        layout_is_html_list_container_tag(element->tag()) ||
+        (block->blk && (block->block()->line_clamp || block->block()->line_clamp_inherited ||
+            block->block()->counter_reset || block->block()->counter_increment ||
+            block->block()->counter_set || block->block()->content_visibility_skipped))) return false;
+    // even unmaterialized pseudos can consume counters, quotes or first-line state during flow.
+    for (unsigned kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
+        if (element->pseudo_style(static_cast<PseudoStyleKind>(kind))) return false;
+    }
+    if (element->position) {
+        const PositionProp* position = element->positionp();
+        if ((position->position != CSS_VALUE_STATIC && position->position != CSS_VALUE__UNDEF) ||
+            (position->float_prop != CSS_VALUE_NONE && position->float_prop != CSS_VALUE__UNDEF) ||
+            (position->clear != CSS_VALUE_NONE && position->clear != CSS_VALUE__UNDEF)) return false;
+    }
+    const char* custom_layout = custom_layout_name_for_element(element);
+    if (custom_layout && custom_layout[0]) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!flex_flow_subtree_is_independent(context, child, depth + 1, remaining)) return false;
+    }
+    return true;
+}
+
+static bool flex_flow_key(LayoutContext* context, ViewBlock* item,
+                               FlexContainerLayout* parent, FlexMeasuredFlowKey* key) {
+    if (!context || !context->ui_context || layout_context_is_measuring(context) ||
+        context->node_count >= context->node_limit || context->depth >= MAX_LAYOUT_DEPTH ||
+        !context->doc || !context->doc->view_tree || context->paged || !parent ||
+        !is_main_axis_horizontal(parent) || !item || !has_flex_item_prop(item) ||
+        !item->font || !item->blk ||
+        !layout_css_size_is_automatic(item, false) ||
+        item->fi->aspect_ratio > 0.0f || context->block.line_clamp ||
+        (item->block()->align_content != CSS_VALUE_NORMAL &&
+         item->block()->align_content != CSS_VALUE__UNDEF) || !item->first_child)
+        return false;
+    CssResolvedSize preferred = {};
+    if (!css_resolved_style_size(context, item, LAYOUT_AXIS_Y, &preferred) ||
+        preferred.value >= 0.0f || preferred.percentage ||
+        !css_resolved_style_is_containing_block_independent(item)) return false;
+    int remaining = context->node_limit - context->node_count;
+    if (!flex_flow_subtree_is_independent(context, item, context->depth, &remaining)) return false;
+    // subtree dirty notifications advance input_revision through every ancestor.
+    DomText* text = item->first_child->is_text() && !item->first_child->next_sibling
+        ? item->first_child->as_text() : nullptr;
+    *key = {css_font_key(item->font), context->available_space,
+        text ? text->text.get() : nullptr, text ? text->length : 0,
+        context->doc->style_query_epoch, context->doc->mutation_epoch,
+        context->ui_context->font_ctx
+            ? font_context_resource_generation(context->ui_context->font_ctx) : 0,
+        context->doc->view_tree->measurement_cache_generation,
+        css_resolved_style_input_revision(context, item), item->intrinsic_input_revision,
+        item->width, context->width, context->height, context->root_font_size,
+        ui_context_raster_scale(context->ui_context), context->block.text_wrap_style};
+    return key->generation && key->style_revision;
+}
+
+static bool flex_flow_keys_equal(const FlexMeasuredFlowKey& a, const FlexMeasuredFlowKey& b) {
+    CacheEntry constraints = {};
+    constraints.valid = true;
+    constraints.available_space = a.available_space;
+    // atomic inline shrink-to-fit can distinguish intrinsic and definite available space.
+    return layout_cache_constraints_match(&constraints, known_dimensions_none(), b.available_space, 0.0f) &&
+        css_font_keys_equal(a.font, b.font) && a.text == b.text && a.length == b.length &&
+        a.style_epoch == b.style_epoch && a.mutation_epoch == b.mutation_epoch &&
+        a.font_generation == b.font_generation && a.generation == b.generation &&
+        a.style_revision == b.style_revision && a.input_revision == b.input_revision &&
+        a.width == b.width && a.viewport_width == b.viewport_width &&
+        a.viewport_height == b.viewport_height && a.root_font_size == b.root_font_size &&
+        a.raster_scale == b.raster_scale && a.text_wrap_style == b.text_wrap_style;
+}
+
+static bool flex_replay_measured_flow(LayoutContext* context, ViewBlock* item,
+                                      FlexContainerLayout* parent) {
+    FlexMeasuredFlow* result = item && item->layout_cache
+        ? item->layout_cache->measured_flex_flow.get() : nullptr;
+    FlexMeasuredFlowKey key = {};
+    if (!result || !result->valid || !flex_flow_key(context, item, parent, &key) ||
+        !flex_flow_keys_equal(result->key, key)) return false;
+    // the cross axis may stretch after measurement; every retained descendant is independent of it.
+    item->content_width = result->content.width;
+    item->content_height = result->content.height;
+    item->block_mut()->first_line_baseline = result->first_baseline;
+    item->block_mut()->last_line_baseline = result->last_baseline;
+    context->profiler.flex_flow_reuses++;
+    return true;
+}
+
+} // namespace radiant
+
+bool flex_measure_completed_flow(LayoutContext* context, ViewElement* element,
+                                      FlexContainerLayout* parent, float content_width,
+                                      float* height) {
+    ViewBlock* item = lam::view_as_block(element);
+    radiant::FlexMeasuredFlowKey key = {};
+    if (!height || content_width <= 0.0f ||
+        !radiant::flex_flow_key(context, item, parent, &key) ||
+        content_width != layout_content_size_from_border_box(item, item->width, true)) return false;
+    radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(context, item);
+    if (!cache) return false;
+    if (!cache->measured_flex_flow) cache->measured_flex_flow = lam::own(
+        (radiant::FlexMeasuredFlow*)pool_calloc(context->pool, sizeof(radiant::FlexMeasuredFlow)));
+    radiant::FlexMeasuredFlow* result = cache->measured_flex_flow;
+    if (!result) return false;
+    if (radiant::flex_replay_measured_flow(context, item, parent)) {
+        *height = result->height;
+        return true;
+    }
+    float previous_height = item->height;
+    FlexContainerLayout* previous_parent = context->flex_container;
+    context->flex_container = lam::up(parent);
+    item->height = layout_border_size_from_content_box(item, 0.0f, false);
+    flex_retained_forget_content(item);
+    layout_flex_item_content_pass(context, item);
+    // a definite parent may stretch the used box; line sizing needs its natural content contribution.
+    *height = layout_border_size_from_content_box(item, item->content_height, false);
+    // budget-limited traversal is not a completed result that final flow can consume.
+    radiant::FlexMeasuredFlowKey completed_key = {};
+    bool complete = context->node_count <= context->node_limit &&
+        radiant::flex_flow_key(context, item, parent, &completed_key);
+    *result = {completed_key, {item->content_width, item->content_height}, *height,
+        item->block()->first_line_baseline, item->block()->last_line_baseline,
+        complete};
+    item->height = previous_height;
+    context->flex_container = lam::up(previous_parent);
+    context->profiler.flex_flow_measures++;
+    return result->valid;
+}
+
 static void flex_update_item_scroller(ViewBlock* item) {
     if (!item->scroller) return;
     // content_height excludes the content origin; scrollers compare against the border box.
@@ -1014,9 +1185,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // every content pass of an item comes through here, so a replay always
     // finds the subtree as the recorded pass left it.
     FlexContainerLayout* parent_flex = lycon->flex_container;
+    if (radiant::flex_replay_measured_flow(lycon, flex_item, parent_flex)) return;
     if (flex_retained_replay_content(lycon, flex_item, parent_flex)) return;
     float final_width = flex_item->width;
     float final_height = flex_item->height;
+    // any content write replaces the live fragments described by either retention path.
+    flex_retained_forget_content(flex_item);
     layout_flex_item_content_pass(lycon, flex_item);
     flex_retained_record_content(lycon, flex_item, parent_flex, final_width, final_height);
 }
@@ -1062,6 +1236,8 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
 
     lycon->block.content_width = content_width;
     lycon->block.content_height = content_height;
+    // the item owns this flow cursor and the percentage constraints supplied to its children.
+    lycon->block.flow_box = lam::up(flex_item);
     lycon->block.given_width = content_width;
     lycon->block.given_height = content_height;
     lycon->block.advance_y = content_y_offset;

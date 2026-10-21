@@ -13,9 +13,32 @@ enum CssStyleMiss : uint8_t {
 extern uint64_t css_style_misses[CSS_STYLE_MISS_COUNT];
 const char* css_style_miss_name(CssStyleMiss reason);
 CssStyleMiss css_resolved_style_last_miss(DomElement* element);
+uint32_t css_resolved_style_input_revision(LayoutContext* context, DomElement* element);
+
+struct CssResolvedSize {
+    float value;
+    bool percentage;
+};
+// the caller first applies CSS for this query; never read layout-consumed preferred sizes.
+bool css_resolved_style_size(LayoutContext* context, DomElement* element,
+    LayoutAxis axis, CssResolvedSize* result);
+
+// tier-3: geometry inputs shared by CSS used values and intrinsic queries.
+struct CssGeometryContext {
+    SizeF block, parent, viewport;
+    ViewBlock* percentage_owner; // borrowed containing-box identity for dependent descendants
+    float inline_basis;
+    float parent_given_width, parent_given_height;
+    bool has_parent, intrinsic_width, intrinsic_height, vertical_inline, percentage_height_auto;
+    bool percentage_owner_definite;
+};
+CssGeometryContext css_geometry_context(LayoutContext* context, DomElement* element);
+bool css_geometry_context_equal(const CssGeometryContext& a, const CssGeometryContext& b);
 
 // selected-view computed state; size-query caches have a separate lifetime.
 bool css_resolved_style_apply(LayoutContext* context, DomElement* element);
+bool css_resolved_style_cache_allowed(LayoutContext* context, DomElement* element);
+bool css_resolved_style_matches_context(LayoutContext* context, DomElement* element);
 bool css_resolved_style_is_containing_block_independent(DomElement* element);
 void css_resolved_style_release(LayoutCache* cache, Pool* pool);
 void css_resolved_style_record(LayoutContext* context, CssPropertyCode property,

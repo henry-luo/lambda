@@ -225,6 +225,15 @@ void layout_profiler_report(LayoutContext* lycon) {
         (unsigned long long)p->intrinsic_miss_reasons[3],
         (unsigned long long)p->intrinsic_miss_reasons[4],
         (unsigned long long)p->intrinsic_miss_reasons[5]);
+    log_notice("[LAYOUT_PROFILE] height: requests=%llu hits=%llu computations=%llu uncacheable=%llu",
+        (unsigned long long)p->height_requests, (unsigned long long)p->height_cache_hits,
+        (unsigned long long)p->height_computations, (unsigned long long)p->height_uncacheable);
+    log_notice("[LAYOUT_PROFILE] height-cache: stores=%llu unstable=%llu version=%llu available=%llu geometry=%llu font=%llu width=%llu environment=%llu policy=%llu",
+        (unsigned long long)p->height_stores, (unsigned long long)p->height_unstable,
+        (unsigned long long)p->height_version_misses,
+        (unsigned long long)p->height_key_misses[0], (unsigned long long)p->height_key_misses[1],
+        (unsigned long long)p->height_key_misses[2], (unsigned long long)p->height_key_misses[3],
+        (unsigned long long)p->height_key_misses[4], (unsigned long long)p->height_key_misses[5]);
 
     log_notice("[LAYOUT_PROFILE] buckets: block=%.1fms inline=%.1fms text=%.1fms flex=%.1fms grid=%.1fms table=%.1fms intrinsic=%.1fms style=%.1fms image=%.1fms cache=%lld/%lld",
         p->block_ms, p->inline_ms, p->text_ms, p->flex_ms, p->grid_ms, p->table_ms,
@@ -246,6 +255,8 @@ void layout_profiler_report(LayoutContext* lycon) {
     }
     log_notice("[LAYOUT_PROFILE] shifted_reuse: %lld flex_retained: %lld",
         (long long)g_layout_shifted_reuse_count, (long long)g_layout_flex_retained_count);
+    log_notice("[LAYOUT_PROFILE] completed-flex-flow: measured=%llu reused=%llu",
+        (unsigned long long)p->flex_flow_measures, (unsigned long long)p->flex_flow_reuses);
 
     for (int i = 0; i < p->top_node_count; i++) {
         const LayoutProfileNode* entry = &p->top_nodes[i];

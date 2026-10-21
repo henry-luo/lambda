@@ -10,7 +10,8 @@ standard-host regression harness remain disabled in ordinary page loads.
 **Verified against:** `0a46bd2129c6a4f5bf444bf5deec8a767c250126`  
 **Scope:** CSS condition evaluation, matching, specified-style storage, style
 epochs, custom properties, pseudo styles, and the seam to computed view props.  
-**Extension (2026-10-20):** native incremental computed/used resolution, §3.45.
+**Extension (2026-10-20):** native incremental computed/used resolution, §3.45;
+retained style, sizing and layout architecture, §3.47 (adopted; implementation in progress).
 **Related record:** [Slow Online-Page Loading](Radiant_Issue_Slow_Page_Loading.md).  
 **Spec linkage:** [Formal Design](../../doc/Lambda_Formal_Design.md)
 **D4.1.4v4** (arena versus pool reclamation), **D4.2.1v3–D4.2.5v3**
@@ -2720,3 +2721,174 @@ walks has not repaired conservative inherited-style invalidation. The next
 targets are constraint-keyed height reuse and stable inherited computed-style
 validity, followed by the retained-geometry defects above. Raw counters:
 `temp/layout-deep-qualified-profile-summary.json`.
+
+### 3.47 Resolve and lay out once for unchanged inputs
+
+**Status: adopted 2026-10-20; staged implementation in progress.**
+Stable style inputs, retained height queries and the computed-box boundary are
+qualified for supported horizontal flow. The first milestone-3b consumer is
+also qualified: demand-driven flex sizing and completed text flow shared with
+final layout. General query-owned results remain pending; shared continuous-document
+update/publication is implemented and undergoing qualification;
+historical and current measurements are separated in the
+[implementation record](../impl/Radiant_Impl_Retained_Layout.md).
+
+This extends **VR1–VR6 / VR10 / VR13**; ownership remains governed by
+**D4.5.1v4 / D4.1.4v5 / D4.5.2**. It does not change a formal ruling.
+The execution contract is **one computation per unchanged set of inputs**:
+computed CSS per element/style input version, intrinsic sizes per distinct
+sizing query, and flow per distinct box constraint. A fixed viewport alone
+does not freeze DOM, styles, font/image resources, or container constraints.
+Synchronous script reads after geometry-affecting writes may require separate
+updates; identical reads and final presentation must reuse current results.
+
+The logical pipeline is:
+
+`style inputs → immutable computed styles → stable boxes → intrinsic queries → retained layout results → paint/geometry reads`
+
+Intrinsic queries are demand-driven. Ordinary block flow establishes widths
+downward and returns heights upward during one recursive execution; it does
+not first estimate the height of the same subtree.
+
+- **Computed style has semantic identity.** Cascade, substitution and
+  inheritance publish a clean snapshot. Deferred percentages retain their
+  expressions and dependency masks. Measurement, property allocation,
+  provisional box roles and flow-margin consumption cannot change that
+  snapshot's identity. Parent dependencies track inherited values, custom
+  properties and explicit inheritance, rather than a count of full-resolution
+  executions. Equal inputs may preserve identity without resolving again;
+  equal outputs use field-aware equality (**VR6**), never hash equality alone.
+- **Sizing is a query over stable inputs.** Min/max inline contributions share
+  a traversal. Width-dependent block size includes wrapping width, percentage
+  bases/definiteness, writing mode, relevant content/style/resource versions,
+  and any external formatting inputs it reads. Omit a key component only when
+  dependency analysis proves independence. Retain active results through the
+  update, including A→B→A requests; cache-slot collisions must not cause
+  repeated evaluation. Unsupported contexts keep an explicit conservative path.
+- **Measurement can retain completed layout.** A height request at final
+  constraints returns a `LayoutResult` with line fragments, child placements,
+  baselines, overflow and boundary state. Final flow consumes that result.
+  Position-only placement reuses internal layout when its inputs are unchanged.
+  Intrinsic and final percentage policies remain distinct queries where CSS
+  requires them; flex stretch, cyclic percentages and fragmentation cannot be
+  hidden by returning a result computed under different constraints.
+- **One scheduler owns updates.** Loader checkpoints, CSSOM reads and
+  presentation share the same dirty-dependency processing and retained view.
+  Mutations invalidate actual consumers; a document-wide query counter is not
+  proof that every computed value changed. Geometry reconstruction retires
+  geometry, with style lifetime independent of scratch. Retained anonymous
+  table/list normalization must be correct before removing the loader rebuild.
+
+The shared continuous-document checkpoint validates a selected-tree publication
+against root identity, content/style/subtree revisions, cascade,
+viewport/input capabilities, font resources/defaults, raster scale and
+motion/media policy (**VR15**). CSSOM and task checkpoints reconcile through the
+existing mutation path; presentation consumes the same current result. Loader
+root publication retains that tree. Actual full resets restore authored table
+runs and first-letter text before resetting props, then detach materialized
+pseudos so their retained owners can refresh them in source order. A completed
+pass records its inputs before observer sampling; subsequent writes stay dirty.
+Paint-only/detached commits can advance their consumed versions only while the
+published environment still matches. Paged editions and explicit custom-layout
+lifecycle passes retain their own flow entry points.
+
+Ordinary invalidation retains the existing view-pool epoch, while incremental
+updates preserve clean sibling results. Flex intrinsic
+work flags belong to an item-initialization pass, and unkeyed scalar caches to
+a measurement generation; neither can borrow the prop pool's longer lifetime.
+Contribution-only queries must restore live boxes as well as leave their
+fragments intact (**VR15**). General flex estimator/ancestor-height fidelity
+remains a qualification limit recorded with the full LLVM comparison.
+
+The legacy mutable view-prop adapters remain during migration. First remove
+execution-count invalidation with stable style input identities and establish
+constraint-keyed height reuse; then migrate consumers to immutable computed
+records and retained flow results. Input identity is a conservative bridge:
+a changed declaration that computes to the same value may still invalidate
+until output comparison is complete. Do not claim that bridge implements
+semantic equality or the complete once-only pipeline.
+
+**Computed-box migration (milestone 3a):** eligible horizontal selected-view
+elements compute box/text properties before provisional view typing. A frozen
+typed baseline and normalized percentage expressions survive box allocation;
+context-dependent applications live in a separate, lazily allocated used-box
+record. Committed reuse validates computed inputs and containing constraints
+before keeping algorithm-assigned dimensions. Height queries read clean
+preferred sizes, with percentage definiteness tied to the owning flow/flex/page
+constraint. Ratio transfer removes border-box padding once; cyclic intrinsic
+widths never accept a provisional parent sample as a definite contribution.
+
+Vertical flow, secondary views, table/replaced/form/SVG roles and unsupported
+effects retain their existing adapters. In particular, vertical flow still
+stores assigned inline constraints in mutable props. This boundary does not
+implement immutable font sharing or retain line fragments; stable query inputs
+and `LayoutResult` consumption belong to milestone 3b, followed by shared update
+publication in milestone 4 (**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+
+Milestone 3a is qualified: 168 core cases and the full Radiant baseline pass
+(6,036 passed, 143 partial, 2 skipped, zero unexpected failures). LLVM full CSS
+resolutions fall from 595,226 to 325,474. Three paired release trials give a
+40.043→39.663 s median, an effectively flat load time; 1,847,772 height
+computations and four document layouts remain. Retained completed flow results
+and shared publication were the next milestones at that checkpoint. The later
+implementation and evidence are recorded below and in the implementation record.
+
+**First flow migration (milestone 3b):** row-flex preparation requests width
+without estimating height at an unassigned wrapping width. Measurement entries
+record height validity explicitly; a later column/height request completes the
+same entry. Vertical items and controls keep their paired measurement policy.
+At the assigned row width, an ordinary horizontal, auto-height flex item with
+independent block/inline descendants can perform real flow and retain its
+view-owned fragments, content extent and baselines. Final flow consumes those fragments, preserving
+the final stretched box. Line sizing uses the natural content height even when
+the container has a definite cross size. Trial layouts invalidate the memo
+before overwriting geometry; changed constraints/style/text/font/resource
+inputs miss. Each descendant must have current computed inputs and pass the
+shared context-independence check. Percentages, ordered pseudo/counter effects,
+resources, positioned boxes and other formatting contexts keep the existing
+path. This retains one live subtree result; independent fragment storage for
+multiple constraints remains pending. This is a bounded
+consumer of retained flow, not the general `LayoutResult` migration (**VR15**).
+
+For the first text-only consumer, against the qualified milestone-3a release,
+LLVM's complete serialized tree is
+identical, with height computations reduced 1,847,772→1,208,921 (**34.6%**).
+Three isolated paired release trials give a 39.663→35.744 s median (**9.9%**),
+and median peak RSS falls 789.1→767.0 MiB. The four document layouts and general
+mixed/block-flow estimation remain; see the implementation record for provenance
+and qualification. The final Radiant baseline has zero unexpected failures
+(6,037 passed, 143 existing partial outcomes, 2 skipped); 169 focused core
+tests, 169 native text/layout tests and the integer-cast lint also pass.
+
+The ordinary block/inline extension is also qualified: 170 core, 170 native
+text/layout, 917 CSS cases and the full Radiant baseline pass. Dependency-proven
+height queries share an explicit wrapping width across caller space labels;
+dependent descendants retain the full policy key. LLVM geometry stays identical
+and height computations fall another **10.2%**, but paired release median load
+time is effectively flat (**34.575→34.389 s**, overlapping ranges). Four document
+layouts remain. Retained anonymous-table/list normalization and shared
+publication follow in milestone 4; general query-owned fragments
+and generated effects remain pending (**VR15**). Evidence and existing browser
+fidelity limitations are in the implementation record.
+
+**Shared update/publication (milestone 4):** continuous CSSOM, task/load and
+presentation paths now use the checkpoint above (**VR15**). Native tests verify
+unchanged reads preserve box/fragment identity and add no flow; changed inputs
+and targeted text mutations invalidate. The release Radiant baseline passes
+with 6,044 passed, 143 existing partial outcomes, 2 skipped and zero unexpected
+failures; 176 native text/layout cases, 170 core cases and the layout lint pass.
+LLVM document layouts fall 4→3 and height computations 1,085,928→817,930
+(24.7% fewer). Three isolated paired release trials give a **34.263→25.881 s
+median (24.5% faster)**. Its full-tree comparison remains nonidentical, including
+five ancestor-height changes; general flex estimator/flow fidelity and query-owned
+fragment results remain open. Full classification and provenance are in the
+implementation record.
+
+Acceptance: nested document/flex fixtures compute unchanged style inputs and
+each sizing query once; repeated geometry reads do no additional work; A→B→A
+constraints reuse A; inherited font/color/variable edits and changed
+percentage bases still update geometry. The local LLVM fixture must retain
+correct geometry and script behavior, with duplicate computation counters
+separate from query counts. Performance evidence uses comparable release
+trials. Milestones and qualification are tracked in
+[the implementation record](../impl/Radiant_Impl_Retained_Layout.md).

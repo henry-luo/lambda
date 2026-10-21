@@ -19,6 +19,9 @@ struct LayoutViewSnapshot {
     float content_width;
     float content_height;
     bool measuring_intrinsic_width;
+    bool main_size_from_flex;
+    bool flex_has_intrinsic_width, flex_has_intrinsic_height;
+    IntrinsicSizes flex_intrinsic_width, flex_intrinsic_height;
     bool has_form;
     float form_intrinsic_width;
     float form_intrinsic_height;
@@ -35,6 +38,8 @@ struct LayoutViewSnapshot {
 static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* scope,
                                             ArrayList* snapshots, ::DomNode* node) {
     if (!lycon || !snapshots || !node) return;
+    // trial snapshots restore scalar boxes, not the live fragments of contained flex items.
+    if (node->is_element()) flex_retained_forget_content(node->as_element());
 
     LayoutViewSnapshot* snapshot = (LayoutViewSnapshot*)scratch_scope_calloc(
         &lycon->scratch, scope, sizeof(LayoutViewSnapshot));
@@ -55,6 +60,13 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* 
         snapshot->content_width = element->content_width;
         snapshot->content_height = element->content_height;
         snapshot->measuring_intrinsic_width = element->measuring_intrinsic_width();
+        snapshot->main_size_from_flex = element->flex_item() && element->flex_item()->main_size_from_flex;
+        if (FlexItemProp* item = element->flex_item()) {
+            snapshot->flex_has_intrinsic_width = item->has_intrinsic_width;
+            snapshot->flex_has_intrinsic_height = item->has_intrinsic_height;
+            snapshot->flex_intrinsic_width = item->intrinsic_width;
+            snapshot->flex_intrinsic_height = item->intrinsic_height;
+        }
         snapshot->has_form = element->form_control();
         if (snapshot->has_form) {
             snapshot->form_intrinsic_width = element->form->intrinsic_width;
@@ -109,6 +121,13 @@ static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* s
             // Intrinsic results are pure for one layout generation. Retain them
             // across a temporary measurement so nested flex/grid queries share it.
             element->set_measuring_intrinsic_width(snapshot->measuring_intrinsic_width);
+            if (FlexItemProp* item = element->flex_item()) {
+                item->main_size_from_flex = snapshot->main_size_from_flex;
+                item->has_intrinsic_width = snapshot->flex_has_intrinsic_width;
+                item->has_intrinsic_height = snapshot->flex_has_intrinsic_height;
+                item->intrinsic_width = snapshot->flex_intrinsic_width;
+                item->intrinsic_height = snapshot->flex_intrinsic_height;
+            }
             if (snapshot->has_form &&
                 element->form_control()) {
                 element->form->intrinsic_width = snapshot->form_intrinsic_width;
@@ -166,9 +185,7 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt);
     // a trial layout rewrites line and text geometry the snapshot does not
     // restore, so no enclosing flex item may replay its recorded content pass.
-    for (::DomNode* node = measure_elmt; node; node = node->parent) {
-        if (node->is_element()) flex_retained_forget_content(node->as_element());
-    }
+    flex_retained_forget_containing_content(measure_elmt);
 
     lycon->run_mode = RunMode::ComputeSize;
     lycon->elmt = lam::up(measure_elmt);
@@ -236,15 +253,8 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
     SizeF* out_size, const char* label) {
     if (!lycon || !element || !element->layout_cache || !out_size) return false;
     if (lycon->run_mode != RunMode::ComputeSize) return false;
-    uint32_t generation = lycon->doc && lycon->doc->view_tree
-        ? lycon->doc->view_tree->layout_generation : 0;
-    if (element->layout_cache->generation != generation) {
-        // A retained prop block may survive reflow, but its measurements may
-        // only be consumed by the generation that produced them.
-        layout_cache_clear(element->layout_cache);
-        element->layout_cache->generation = generation;
-        return false;
-    }
+    // the prop pool survives document updates; unkeyed scalar entries do not.
+    layout_pass_ensure_cache(lycon, element);
 
     if (layout_cache_get(element->layout_cache, known_dimensions, available_space,
                          lycon->run_mode, out_size)) {
@@ -273,15 +283,18 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
 LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* element) {
     if (!lycon || !element) return nullptr;
     LayoutCache* cache = element->layout_cache;
+    uint32_t generation = lycon->doc && lycon->doc->view_tree
+        ? lycon->doc->view_tree->measurement_cache_generation : 0;
     if (!cache && lycon->pool) {
         cache = (LayoutCache*)pool_calloc(lycon->pool, sizeof(LayoutCache));
         if (cache) {
-            uint32_t generation = lycon->doc && lycon->doc->view_tree
-                ? lycon->doc->view_tree->layout_generation : 0;
             layout_cache_init(cache, generation);
             element->layout_cache = lam::view_prop(cache);
             if (element->doc) element->doc->services.layout_cache_allocations++;
         }
+    } else if (cache && cache->generation != generation) {
+        layout_cache_clear(cache);
+        cache->generation = generation;
     }
     return cache;
 }

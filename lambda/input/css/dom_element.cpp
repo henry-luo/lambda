@@ -3829,81 +3829,17 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         return false;
     }
 
-    // Get current child index
-    int64_t child_idx = dom_text_get_child_index(text_node);
-    if (child_idx < 0) {
-        log_error("dom_text_set_content: failed to get child index");
+    String* replacement = dom_document_create_string(parent->doc, new_content, strlen(new_content));
+    if (!replacement) return false;
+    // replacing a character payload must not relink children: Mark relinking can
+    // preserve the old wrapper beside its replacement, making identity repair self-link.
+    if (!dom_text_replace_backed_string(text_node, replacement)) {
+        pool_free(parent->doc->document_pool, replacement);
         return false;
     }
-    // Create new String via MarkBuilder
-    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
-    String* new_s = dom_create_mutation_string(
-        editor.builder(), new_content, parent->doc->input->ui_mode);
-    if (!new_s) {
-        log_error("dom_text_set_content: failed to create string");
-        return false;
-    }
-    Item new_string_item = (Item){.item = s2it(new_s)};
-
-    // Replace child in parent Element's items array
-    Item result = editor.dom_replace_child(
-        {.element = dom_element_to_element(parent)},
-        child_idx,
-        new_string_item
-    );
-
-    if (!result.element) {
-        log_error("dom_text_set_content: failed to replace child");
-        return false;
-    }
-
-    if (parent->doc->input->ui_mode) {
-        String* new_string = new_string_item.get_string();
-        DomText* replacement = dom_text_from_fat_string(parent->doc, new_string);
-        if (!replacement || replacement->parent != parent) {
-            replacement = dom_find_text_child(parent, new_string);
-        }
-        if (replacement && replacement != text_node) {
-            DomNode* prev = replacement->prev_sibling;
-            DomNode* next = replacement->next_sibling;
-            // Inline Mark replacement creates a wrapper for the new String, but
-            // a Text data mutation must retain its existing DOM node identity.
-            // Replace that transient wrapper in the live chain before exposing
-            // the new backing string, so later removal cannot use stale links.
-            text_node->parent = lam::up(parent);
-            text_node->prev_sibling = lam::up(prev);
-            text_node->next_sibling = lam::own(next);
-            if (prev) {
-                prev->next_sibling = lam::own(text_node);
-            } else {
-                parent->first_child = lam::own(text_node);
-            }
-            if (next) {
-                next->prev_sibling = lam::up(text_node);
-            } else {
-                parent->last_child = lam::up(text_node);
-            }
-            replacement->parent = nullptr;
-            replacement->prev_sibling = nullptr;
-            replacement->next_sibling = nullptr;
-        }
-    }
-
-    // Update text_node fields to point to new String (backward compat for callers)
-    text_node->native_string = lam::up(new_string_item.get_string());
-    if (!text_node->native_string) {
-        log_error("dom_text_set_content: replacement string disappeared");
-        return false;
-    }
-    text_node->text = lam::up(text_node->native_string->chars);
-    text_node->length = text_node->native_string->len;
-    dom_node_registry_set_backing_value(parent->doc, text_node, new_string_item);
-
-    if (result.element != dom_element_to_element(parent)) {
-        log_error("dom_text_set_content: inline editor changed backing identity");
-        return false;
-    }
-    log_debug("dom_text_set_content: updated text at index %lld to '%s'", child_idx, new_content);
+    parent->invalidate_intrinsic_inputs();
+    for (DomNode* node = text_node; node; node = node->parent) node->layout_dirty = true;
+    log_debug("dom_text_set_content: replaced character payload without changing sibling links");
     return true;
 }
 

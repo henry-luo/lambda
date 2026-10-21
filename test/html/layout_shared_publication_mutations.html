@@ -1,0 +1,31 @@
+<!doctype html>
+<style>
+@font-face { font-family: MutationMetrics; src: url('../layout/data/support/fonts/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 MutationMetrics; }
+.cell { display: table-cell; width: 50px; height: 100px; }
+.group { display: table-row-group; }
+.filler { width: 100px; height: 50px; }
+.item, .item::after { display: list-item; }
+.item::after { content: counter(section); }
+.table-header { display: table-header-group; }
+#scroller { height: 100px; width: 100px; overflow: auto; position: relative; }
+#contents { height: 400px; }
+#sticky { position: sticky; top: 5px; height: 20px; }
+</style>
+<div id="result">
+  <div><span id="cell-a" class="cell"></span><span id="remove-cell">X</span><span id="cell-b" class="cell"></span></div>
+  <span><span class="group"><span class="cell"><div id="row-a" class="filler"></div></span></span><span id="remove-group">X</span><span class="group"><span class="cell"><div id="row-b" class="filler"></div></span></span></span>
+  <ol reversed><span id="header"><figure id="figure" class="item"></figure></span></ol>
+  <div id="scroller"><div id="contents"><div id="sticky">X</div></div></div>
+  <div style="display:flex"><div id="control-slot" style="display:inline-flex;min-width:0"><select id="control" style="box-sizing:content-box;min-width:120px;height:32px;padding:4px 11px;border:1px solid"><option>X</option></select></div></div>
+  <div><span id="append-inline">XX<i style="white-space:pre-line"> &#10;</i></span></div>
+</div>
+<script>
+document.body.offsetTop;
+document.getElementById('remove-cell').remove();
+document.getElementById('remove-group').remove();
+document.getElementById('header').className = 'table-header';
+document.body.offsetTop;
+document.getElementById('append-inline').append('XX');
+document.getElementById('scroller').scrollTop = 150;
+</script>
