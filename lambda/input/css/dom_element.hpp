@@ -281,6 +281,7 @@ struct DomDocumentServices {
     void* svg_geometry_cache; // document-owned immutable SVG path resources
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
     void* paint_layer_registry;  // document-owned HTML paint layers (render_paint_layer.cpp)
+    void* shadow_image_cache;  // document-owned transformed box-shadow rasters (render_background.cpp)
     void* svg_filter_registry; // document-owned compiled SVG filter programs
     void* svg_animation_registry; // document-owned SMIL clocks and sampled values
     void* svg_use_resource_cache; // retained external-use DOM/style owners
@@ -294,7 +295,7 @@ struct DomDocumentServices {
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),
-        svg_geometry_cache(nullptr), svg_layer_registry(nullptr), paint_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
+        svg_geometry_cache(nullptr), svg_layer_registry(nullptr), paint_layer_registry(nullptr), shadow_image_cache(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), pragma_language(nullptr), protocol_language(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {

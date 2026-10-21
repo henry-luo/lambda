@@ -1127,7 +1127,12 @@ static bool rdt_fill_linear_gradient_analytic(RdtVector* vec, RdtPath* path,
     RdtMatrix frame = transform ? *transform : rdt_matrix_identity();
     if (gradient_transform) frame = rdt_matrix_multiply(&frame, gradient_transform);
     // projective gradients retain the backend path until inverse-perspective sampling is shared.
-    if (frame.e31 != 0.0f || frame.e32 != 0.0f || frame.e33 != 1.0f) return false;
+    // The backend's own tolerance decides: a composed 3D transform that cancels to a
+    // translation (a back face under a turned leaf) leaves ~1e-18 of perspective residue,
+    // which must not move it onto a rasteriser with a different stripe phase.
+    if (matrix_is_projective(&frame)) return false;
+    frame.e31 = frame.e32 = 0.0f;
+    frame.e33 = 1.0f;
     RdtMatrix inverse;
     if (!rdt_matrix_invert_affine(&frame, &inverse)) return false;
     RdtVectorImpl* impl = vec->impl;
