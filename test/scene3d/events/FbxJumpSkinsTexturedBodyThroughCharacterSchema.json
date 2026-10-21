@@ -1,0 +1,205 @@
+{
+  "name": "FbxJumpSkinsTexturedBodyThroughCharacterSchema",
+  "viewport": {
+    "width": 200,
+    "height": 260
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#hero-view",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "rest",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          150,
+          255
+        ],
+        [
+          100,
+          200
+        ],
+        [
+          80,
+          170
+        ]
+      ],
+      "count": {
+        "min": 1000
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        88,
+        50,
+        24,
+        20
+      ],
+      "rgba": [
+        [
+          180,
+          255
+        ],
+        [
+          0,
+          100
+        ],
+        [
+          0,
+          100
+        ]
+      ],
+      "count": {
+        "min": 40
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        88,
+        50,
+        24,
+        20
+      ],
+      "rgba": [
+        [
+          0,
+          100
+        ],
+        [
+          0,
+          120
+        ],
+        [
+          180,
+          255
+        ]
+      ],
+      "count": {
+        "max": 10
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        88,
+        70,
+        24,
+        20
+      ],
+      "rgba": [
+        [
+          0,
+          100
+        ],
+        [
+          0,
+          120
+        ],
+        [
+          180,
+          255
+        ]
+      ],
+      "count": {
+        "min": 40
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#hero-view",
+      "seconds": 0.5
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "reference": "rest",
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          150,
+          255
+        ],
+        [
+          100,
+          200
+        ],
+        [
+          80,
+          170
+        ]
+      ],
+      "count": {
+        "min": 1000
+      }
+    }
+  ]
+}

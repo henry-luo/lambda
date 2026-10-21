@@ -171,11 +171,15 @@ void input_character(Input* input, const char* source, size_t length, const char
         const char* path = url && url->pathname ? url->pathname->chars : "";
         MimeDetector* detector = mime_detector_init();
         const char* mime = detect_mime_type(detector, path, source, length);
-        type = asset_is(mime, "model/x-bvh") ? "bvh" : "unknown";
+        type = asset_is(mime, "model/x-bvh") ? "bvh" : asset_is(mime, "model/x-fbx") ? "fbx" : "unknown";
         mime_detector_destroy(detector);
     }
     char name[128];
-    if (strcmp(type, "bvh")) asset.fail("character: expected a .bvh source (or an explicit format)");
+    if (!strcmp(type, "fbx")) {
+        input_fbx(input, source, length);
+        if (!input->parse_failed && !character_from_fbx(asset, input->root) && !asset.ctx.hasErrors())
+            asset.fail("invalid FBX structure");
+    } else if (strcmp(type, "bvh")) asset.fail("character: expected a .bvh or .fbx source (or an explicit format)");
     else if (input_parse_model(input, source, length, "bvh") && !input->parse_failed) {
         Item raw = input->root;
         if (!character_from_bvh(asset, raw, character_clip_name(input, name, sizeof(name))) &&

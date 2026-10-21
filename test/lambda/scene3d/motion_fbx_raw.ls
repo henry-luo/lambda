@@ -7,9 +7,11 @@ let raw74 = input(dir ++ "jump.fbx")^
 let raw75 = input(dir ++ "jump-7500.fbx")^
 let text = input(dir ++ "jump-ascii.fbx")^
 
+// ASCII spells embedded bytes as base64, which the JSON writer also produces
 fn plain(v) {
     if (v is number) float(v)
     else if (v is array) [for (x in v) plain(x)]
+    else if (v is binary) parse(format(v, 'json'), 'json') ^ { null }
     else v
 }
 fn tree(e) => [name(e), plain(e.props), [for (x in content(e)) tree(x)]];

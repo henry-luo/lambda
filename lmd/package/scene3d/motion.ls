@@ -153,11 +153,11 @@ fn world_pairs(j, parent, channels, k) array {
 }
 let identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
-// each joint's world matrix at key `key` of the clip named `take`, or at rest
-pub fn pose(c, take = null, key = 0) map^ {
-    let found = if (take == null) [] else [for (k in clips_of(c) where k.name == take) k]
-    let checked = if (take != null and len(found) != 1) raise fail("clip '" ++ string(take) ++ "' must match exactly one clip")
-    let channels = if (take == null) {} else map([for (ch in content(found[0])) (ch.joint, ch)])
+// each joint's world matrix at key `key` of the clip named `clip_name`, or at rest
+pub fn pose(c, clip_name = null, key = 0) map^ {
+    let found = if (clip_name == null) [] else [for (k in clips_of(c) where k.name == clip_name) k]
+    let checked = if (clip_name != null and len(found) != 1) raise fail("clip '" ++ string(clip_name) ++ "' must match exactly one clip")
+    let channels = if (clip_name == null) {} else map([for (ch in content(found[0])) (ch.joint, ch)])
     let pairs = [for (root in content(skeleton_of(c))) *world_pairs(root, identity, channels, key)];
     map([for (p in pairs) (p[0], p[1])])
 }

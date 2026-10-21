@@ -3,7 +3,7 @@
 "2 the three trees agree modulo numeric kinds"
 [true, true]
 "3 records keep their order and typed properties"
-[22, 69, ["Model::Hips", "Model::LeftUpLeg", "Model::LeftLeg"], ['Default', 'KeyVer', 'KeyTime', 'KeyValueFloat', 'KeyAttrFlags', 'KeyAttrDataFloat', 'KeyAttrRefCount']]
+[23, 69, ["Model::Hips", "Model::LeftUpLeg", "Model::LeftLeg"], ['Default', 'KeyVer', 'KeyTime', 'KeyValueFloat', 'KeyAttrFlags', 'KeyAttrDataFloat', 'KeyAttrRefCount']]
 [float, i32, array, array, array, array, array]
 [float, int, array, array, array, array, array]
 [i64, int, i64, f32, float]

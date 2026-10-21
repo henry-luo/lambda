@@ -35,5 +35,7 @@ inline CharacterQuat character_quat_continue(const CharacterQuat& previous, Char
 }
 
 bool character_from_bvh(SceneAsset& a, Item raw, const char* clip_name);
+// FBX profile 1 (Lambda_Pkg_Motion.md §7.2), from the raw <fbx> tree of input-fbx.cpp
+bool character_from_fbx(SceneAsset& a, Item raw);
 
 }  // namespace lambda

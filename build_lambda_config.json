@@ -3007,6 +3007,7 @@
         "lambda/input/input-scene3d.cpp",
         "lambda/input/input-scene3d-gltf.cpp",
         "lambda/input/input-character.cpp",
+        "lambda/input/input-character-fbx.cpp",
         "lambda/input/input-fbx.cpp",
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-toml.cpp",
