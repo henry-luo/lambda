@@ -362,7 +362,7 @@ Radiant or formatted as `'html'`. See [XHTML support and examples](Markup_Format
 let doc = input("article.md", 'markdown')^;
 
 // Query for all headings using type-based search
-let headings = doc?(h1 | h2) |> ~.content;
+let headings = doc?(<h1> | <h2>) |> ~.content;
 
 // Generate table of contents
 let toc = <div class: "toc",

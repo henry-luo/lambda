@@ -423,6 +423,7 @@ If Expressions / Statements (else optional):
 **Match Expressions:**
 ```lambda
 // Type patterns or Literal
+type Circle { r: float }
 match value {
     case 200: "OK"              // case literal
     case string: "text"         // case type

@@ -1,0 +1,10 @@
+"1 a schema written root first"
+[true, false]
+"2 mutual recursion through fields, content and a union"
+[true, false, true, false, true, false]
+"3 an alias of a later alias or union"
+[true, false, true, true, false]
+"4 annotations, object fields and match arms"
+[2001, true, "count", "other"]
+"5 a pattern naming a later pattern"
+[true, false, false]
