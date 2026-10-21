@@ -1,4 +1,5 @@
 #include "mvp_lmd_runtime.h"
+#include "../js_host_hooks.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
@@ -75,7 +76,7 @@ extern "C" int64_t mvp_lmd_array_indices_use_own_storage(Item owner) {
 Item mvp_lmd_sequence_length(Item source) {
     TypeId type = get_type_id(source);
     if (type == LMD_TYPE_ARRAY) return Item{.item = i2it(source.array->length)};
-    if (type == LMD_TYPE_STRING) return Item{.item = i2it(utf8_to_utf16_length(source.get_string()->chars, source.get_string()->len))};
+    if (type == LMD_TYPE_STRING) return Item{.item = i2it(js_string_utf16_length(source.get_string()))};
     if (!mvp_lmd_is_object(source)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;

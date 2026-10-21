@@ -282,6 +282,8 @@ bool css_container_length_to_px(CssEngine* engine, struct DomElement* target,
 uint8_t css_container_type_axes(const CssValue* value);
 bool css_container_matches(const CssValue* names, uint8_t available_axes, bool vertical,
     const char* name, uint8_t requested_axes);
+// convergence and condition caches share the same axis-specific geometry identity.
+uint64_t css_container_geometry_key(const CssContainerMetrics* metrics, uint8_t axes);
 
 // Statistics and debugging
 typedef struct CssEngineStats {

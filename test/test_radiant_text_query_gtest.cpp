@@ -256,7 +256,81 @@ protected:
         ui.document = lam::up(document);
         return dom_find_element_by_id(document->root->as_element(), "result");
     }
+    DomElement* load_script_source(const char* source) {
+        Url* base = get_current_dir();
+        if (!base) return nullptr;
+        Url* url = url_parse_path_or_url("test/html/navigation.html", base);
+        url_destroy(base);
+        Pool* pool = pool_create();
+        if (!url || !pool) {
+            if (url) url_destroy(url);
+            if (pool) pool_destroy(pool);
+            return nullptr;
+        }
+        DocumentJsHostConfig host = {}; host.ui_context = &ui;
+        host.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+        host.auto_close_event_loop = true;
+        host.virtual_clock_enabled = true;
+        // retain the redirecting document itself, before the outer loader follows it.
+        document = load_lambda_html_doc(url, nullptr, 320, 200, pool,
+            source, false, true, &host);
+        if (!document) { url_destroy(url); pool_destroy(pool); return nullptr; }
+        if (!dom_document_finalize_loader_pool(document, pool) || !document->root) return nullptr;
+        ui.document = lam::up(document);
+        return dom_find_element_by_id(document->root->as_element(), "result");
+    }
 };
+
+TEST_F(RadiantTextQuery, CrossDocumentNavigationFinishesMicrotasksWithoutDrainingOldTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        var result=document.getElementById('result');
+        setTimeout(function(){result.setAttribute('data-timer','yes')},0);
+        Promise.resolve().then(function(){result.setAttribute('data-microtask','yes')});
+        location.replace('next.html');
+        result.setAttribute('data-sync','yes');
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-sync"), "yes");
+    EXPECT_STREQ(result->get_attribute("data-microtask"), "yes");
+    EXPECT_EQ(result->get_attribute("data-timer"), nullptr);
+    ASSERT_NE(document->pending_navigation_url, nullptr);
+    EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
+}
+
+TEST_F(RadiantTextQuery, FragmentNavigationRetainsCurrentDocumentTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
+        location.replace('#result');
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
+}
+
+TEST_F(RadiantTextQuery, NavigationClassificationUsesTheCompletedMicrotaskCheckpoint) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
+        location.replace('next.html');
+        Promise.resolve().then(function(){location.replace('#result')});
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
+}
+
+TEST_F(RadiantTextQuery, InlineSizeQueriesSettleGeneratedBlockExtent) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body { margin:0 }
+        #container { container-type:inline-size; width:120px }
+        @container (min-width:100px) {
+            #result::before { content:'generated'; display:block; height:30px }
+        }
+    </style><div id="container"><div id="result"></div></div>)HTML"), nullptr);
+    // probe flow suppresses generated effects; that uncontained height is not a query input.
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        layout_html_doc(&ui, document, pass != 0);
+        expect_box("container", 0, 0, 120, 30);
+        expect_box("result", 0, 0, 120, 30);
+    }
+}
 
 TEST_F(RadiantTextQuery, PreparedStylesKeepInheritedFontsAndRebindControlPercentages) {
     ASSERT_NE(load("test/html/layout_prepared_context.html"), nullptr);

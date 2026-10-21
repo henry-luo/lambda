@@ -819,6 +819,74 @@ TEST_F(MotionCascadeTest, ContainerConditionsSelectAllAxesAndInvalidateMeasureme
     EXPECT_FALSE(css_evaluate_container_query(engine, &element, "not (width:0px)"));
 }
 
+struct ContainerValueProbe {
+    unsigned calls;
+    double em;
+};
+
+TEST(CssContainerIdentity, GeometryTracksOnlyEligibleAxesAcrossWritingModes) {
+    DomElement owner = {}, other = {};
+    CssContainerMetrics box = {&owner, 1, 300.0, 100.0, false, nullptr, nullptr};
+    uint64_t horizontal = css_container_geometry_key(&box, CSS_CONTAINER_INLINE);
+    uint64_t size = css_container_geometry_key(&box, CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK);
+    box.height = 200.0;
+    EXPECT_EQ(css_container_geometry_key(&box, CSS_CONTAINER_INLINE), horizontal);
+    EXPECT_NE(css_container_geometry_key(&box, CSS_CONTAINER_INLINE | CSS_CONTAINER_BLOCK), size);
+    box.width = 400.0;
+    EXPECT_NE(css_container_geometry_key(&box, CSS_CONTAINER_INLINE), horizontal);
+    box.vertical = true;
+    uint64_t vertical = css_container_geometry_key(&box, CSS_CONTAINER_INLINE);
+    box.width = 500.0;
+    EXPECT_EQ(css_container_geometry_key(&box, CSS_CONTAINER_INLINE), vertical);
+    box.height = 300.0;
+    EXPECT_NE(css_container_geometry_key(&box, CSS_CONTAINER_INLINE), vertical);
+    uint64_t named = css_container_geometry_key(&box, 0);
+    box.width = 600.0;
+    box.height = 400.0;
+    EXPECT_EQ(css_container_geometry_key(&box, 0), named);
+    box.identity = &other;
+    EXPECT_NE(css_container_geometry_key(&box, 0), named);
+}
+
+static bool resolve_container_probe_value(void* context, const CssValue* value, CssMathResult* result) {
+    ContainerValueProbe* probe = (ContainerValueProbe*)context;
+    ++probe->calls;
+    CssMathEvaluationContext math = {[](void* context, const CssValue* leaf, double* pixels) {
+        if (leaf->type != CSS_VALUE_TYPE_LENGTH) return false;
+        if (leaf->data.length.unit != CSS_UNIT_EM)
+            return css_absolute_length_to_px(leaf->data.length.unit, leaf->data.length.value, pixels);
+        *pixels = leaf->data.length.value * ((ContainerValueProbe*)context)->em;
+        return true;
+    }, probe, 1.0, false};
+    *result = css_math_evaluate(value, &math);
+    return result->resolved;
+}
+
+TEST_F(MotionCascadeTest, ContainerConstantThresholdsAvoidFontResolutionAndRelativeValuesKeepTheirOwner) {
+    ContainerValueProbe values = {0, 24.0};
+    ContainerQueryProbe probe = {{&element, 1, 300.0, 120.0, false,
+        resolve_container_probe_value, &values}, 0, nullptr, true};
+    engine->container_provider = provide_container_probe;
+    engine->container_context = &probe;
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "(width > 200px)"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "(width > calc(100px + 1in))"));
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "(aspect-ratio:5/2)"));
+    EXPECT_EQ(values.calls, 0u);
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "(width > 2em)"));
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "(width > 20em)"));
+    EXPECT_EQ(values.calls, 2u);
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "(width > 2em)"));
+    EXPECT_EQ(values.calls, 2u);
+    probe.metrics.height = 240.0;
+    EXPECT_TRUE(css_evaluate_container_query(engine, &element, "(width > 2em)"));
+    EXPECT_EQ(values.calls, 2u);
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "(aspect-ratio:5/2)"));
+    values.em = 200.0;
+    ++probe.metrics.generation;
+    EXPECT_FALSE(css_evaluate_container_query(engine, &element, "(width > 2em)"));
+    EXPECT_EQ(values.calls, 3u);
+}
+
 TEST_F(MotionCascadeTest, ContainerUnitsUseEligibleAxesAndViewportFallback) {
     ContainerQueryProbe probe = {{&element, 1, 300.0, 120.0, true, nullptr, nullptr}, 0, nullptr, true};
     engine->container_provider = provide_container_probe;

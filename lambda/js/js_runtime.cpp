@@ -8714,7 +8714,7 @@ int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
     return units;
 }
 
-static int js_utf16_code_unit_at(String* string, int64_t index) {
+int js_string_utf16_code_unit_at(String* string, int64_t index) {
     if (!string || index < 0) return -1;
     const char* chars = string->chars;
     int str_len = (int)string->len;
@@ -8743,9 +8743,9 @@ static int js_utf16_code_unit_at(String* string, int64_t index) {
 int64_t js_regex_advance_string_index_units(String* s, int64_t index, bool full_unicode) {
     if (!s || index < 0) return index + 1;
     if (!full_unicode) return index + 1;
-    int first = js_utf16_code_unit_at(s, index);
+    int first = js_string_utf16_code_unit_at(s, index);
     if (utf_is_high_surrogate((uint32_t)first)) {
-        int second = js_utf16_code_unit_at(s, index + 1);
+        int second = js_string_utf16_code_unit_at(s, index + 1);
         if (utf_is_low_surrogate((uint32_t)second)) return index + 2;
     }
     return index + 1;
@@ -19701,7 +19701,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 // ever arises as the second half of such a pair, so this is exact.
 static bool js_split_index_is_trailing_surrogate(String* s, int64_t index) {
     if (!s || s->is_ascii || index <= 0) return false;
-    int unit = js_utf16_code_unit_at(s, index);
+    int unit = js_string_utf16_code_unit_at(s, index);
     return utf_is_low_surrogate((uint32_t)unit);
 }
 
@@ -21762,11 +21762,11 @@ static Item js_string_matchall_get_flags(Item rx) {
         get_type_id(flags_val) == LMD_TYPE_STRING) {
         Item proto = js_get_regexp_prototype();
         if (get_type_id(proto) == LMD_TYPE_MAP) {
-            Item desc = js_object_get_own_property_descriptor(proto, flags_key);
-            if (get_type_id(desc) == LMD_TYPE_MAP) {
-                bool getter_found = false;
-                Item getter = js_map_shape_lookup(desc.map, "get", 3, &getter_found);
-                if (getter_found) {
+            // protocol reads need the descriptor fields, not a guest descriptor object per match.
+            JsPropertyDescriptor descriptor = {};
+            if (js_get_own_property_descriptor(proto, "flags", 5, &descriptor)) {
+                if (descriptor.flags & JS_PD_HAS_GET) {
+                    Item getter = descriptor.getter;
                     if (getter.item == ItemNull.item || getter.item == ITEM_JS_UNDEFINED ||
                         get_type_id(getter) == LMD_TYPE_UNDEFINED || get_type_id(getter) == LMD_TYPE_NULL) {
                         return make_js_undefined();
@@ -21775,8 +21775,8 @@ static Item js_string_matchall_get_flags(Item rx) {
                         return js_call_accessor_getter(getter, rx);
                     }
                 }
-                Item value = js_map_own_or(desc.map, "value", 5, ItemNull);
-                if (value.item != ItemNull.item) return value;
+                if ((descriptor.flags & JS_PD_HAS_VALUE) && descriptor.value.item != ItemNull.item)
+                    return descriptor.value;
             }
         }
     }
@@ -22526,7 +22526,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (!s || s->len == 0) return js_make_number(NAN);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return js_make_number(NAN);
-        int code_unit = js_utf16_code_unit_at(s, target_idx);
+        int code_unit = js_string_utf16_code_unit_at(s, target_idx);
         return code_unit < 0 ? js_make_number(NAN) :
             (Item){.item = i2it((int64_t)code_unit)};
     }
@@ -22540,10 +22540,10 @@ static Item js_string_intrinsic_algorithm(Item str,
         double didx = js_get_number(idx_num);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return make_js_undefined();
-        int first = js_utf16_code_unit_at(s, target_idx);
+        int first = js_string_utf16_code_unit_at(s, target_idx);
         if (first < 0) return make_js_undefined();
         if (utf_is_high_surrogate((uint32_t)first)) {
-            int second = js_utf16_code_unit_at(s, target_idx + 1);
+            int second = js_string_utf16_code_unit_at(s, target_idx + 1);
             if (utf_is_low_surrogate((uint32_t)second)) {
                 int codepoint = 0x10000 +
                     (((first - 0xD800) << 10) | (second - 0xDC00));

@@ -1,5 +1,6 @@
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
+#include "lambda/js/js_host_hooks.h"
 #include "lambda/js/js_interp.hpp"
 #include "lambda/js/js_transpiler.hpp"
 #include "lambda/js/js_execution_internal.hpp"
@@ -83,6 +84,31 @@ TEST_F(JsFormalMir, StringEqualitySharesUtf16SemanticsAcrossEncodings) {
     EXPECT_EQ(js_string_equal(prefix.get(), ascii.get()), 0);
     EXPECT_EQ(js_string_equal(ascii.get(), ascii.get()), 1);
     EXPECT_EQ(js_strict_equal(ascii.get(), prefix.get()).item, ITEM_FALSE);
+}
+
+TEST_F(JsFormalMir, MixedUnicodeReadsRetainTheirCursorAcrossCompiledCallsAndCollection) {
+    ASSERT_EQ(run(R"JS(
+        const mixedSource=('ab\u20ac\u{1f600}\ud800z').repeat(1024);
+        function readMixed(i){return mixedSource.charCodeAt(i)}
+        function rangeMixed(i){return mixedSource.substring(i,i+3)}
+        mixedSource.length===7168 && readMixed(7002)===0x20ac &&
+            rangeMixed(7003)==='\ud83d\ude00\ud800';
+    )JS").item, ITEM_TRUE);
+    // the source is held by the realm's precise cache root range, including after GC.
+    ASSERT_NE(js_active_runtime_state, nullptr);
+    JsStringCacheState* caches = js_active_runtime_state->string_caches;
+    ASSERT_NE(caches, nullptr);
+    EXPECT_EQ(caches->utf16_positions[0].length, 7168);
+    EXPECT_GE(caches->utf16_positions[0].unit_offset, 7000);
+    heap_gc_collect();
+    EXPECT_EQ(run(R"JS(
+        readMixed(7004)===0xde00 && readMixed(7003)===0xd83d &&
+            rangeMixed(7004)==='\ude00\ud800z' && mixedSource.at(-2)==='\ud800' &&
+            mixedSource.codePointAt(7003)===0x1f600 && mixedSource['length']===7168;
+    )JS").item, ITEM_TRUE);
+    reset_runtime();
+    EXPECT_EQ(run("const replacement='é😀';replacement.length===3&&replacement.charCodeAt(2)===0xde00").item,
+        ITEM_TRUE);
 }
 
 TEST_F(JsFormalMir, ScalarLoopRegionsRetainOpenScriptBindingsAndLifetime) {

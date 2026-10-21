@@ -736,3 +736,99 @@ The previously measured release median was 47.319 s with four document layouts,
 2,573,534 recursive height calls and 1,178,513 full CSS resolutions, including
 828,676 parent-key misses. These are historical measurements, not a baseline
 measurement of the current binary.
+
+
+## Online Notion/Kafka follow-up (2026-10-21)
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**. Finite acceptance:
+Notion completes a fresh headless load; Kafka follows its redirect without
+running discarded-document background work; container-query changes, script
+microtasks, same-document timers and shape-owner retirement retain their
+behavior. Verify focused regressions, required Radiant/Lambda baselines, then
+isolated release page trials. No timing-dependent readiness shortcut is added.
+
+Notion repeatedly alternated query-probe and committed layout. Its inline-size
+container widths were stable, but convergence also hashed uncontained heights;
+generated/motion content changed those heights and triggered whole-document
+recascades. A shared axis-specific geometry key repairs the dependency identity.
+Container query constants also invoked ancestor font/custom-property resolution
+on every evaluation: absolute math now resolves before requesting that context.
+The provider and convergence collector share zoom-normalized content metrics.
+Gated per-pass settlement logs survive a root that never finishes layout.
+
+Kafka redirects `/documentation/` to `/43/getting-started/introduction/`.
+The old snapshot settlement built the 107-document Lunr search index in both
+documents. Settlement now completes the current microtask checkpoint, then
+leaves timers queued when the final pending navigation targets another
+document. The loader retires that old owner before following navigation.
+Fragment-only navigation still drains the current document's tasks; a
+microtask changing the pending target is observed before classification.
+
+The remaining index is real page JavaScript. It exposed almost a billion
+linear shape-edge visits; Input-owned root indexing reduces those visits while
+preserving identity, budgets and teardown (**D3.4.3v5 / D3.4.4v4 / D4.2.6**).
+RegExp protocol flag reads also use the existing unboxed descriptor helper
+instead of allocating guest descriptor objects (**D6.2.2v2**). Neither change
+removes or delays the final document's search-index task.
+
+An intermediate release (`descriptor-fixed.exe`) completes Notion in 9.049 s
+and Kafka in 40.479 s, versus the source-current baseline's Notion >240 s
+and Kafka 85.808 s. Kafka spends 38.502 s settling script tasks and 0.115 s
+in layout. This is progress, not browser-speed completion: retained closure
+execution/search indexing remains the Kafka bottleneck. An eager compiled
+backend experiment regresses to 162 s and peaks at 8.6 GiB during MIR linking;
+the established browser AST adapter remains unchanged. The independent shared
+Unicode cursor repair is recorded in `JS_MVP_Integration.md`.
+
+Artifacts: `temp/notion-kafka-tuning/` contains before/after release executables,
+matching module sets, native samples/link maps, phase logs and result JSON.
+Final repeat measurements and aggregate qualification follow below.
+
+**Build-profile isolation:** native consumers shared the
+`build/lib/liblambda-lib-cpp.a` output across configurations. The utility target
+now isolates platform/build configuration in JSON; wrappers and explicit Linux
+linker groups follow that directory. The generator regression builds and
+executes consumers through debug → release → debug → release and checks
+preservation of both archives. This is a build correctness fix, not a measured
+page speedup: rebuilding the original source with the corrected policy produces
+exactly the original 7508 CLI hash. Its utility functions come from the CLI's
+own release objects, so the intermediate CLI timings remain valid.
+
+**Qualification:** the full Lambda/Input baseline passes **7,988/7,988**,
+including 319 forced-GC cases. The Radiant baseline has **zero unexpected
+failures**: 6,114 passed, 143 existing partial outcomes and 2 skipped. The
+subsequent release rebuild with isolated utility archives passes all 153 CSS
+animation/cascade, 43 item/shape, 188 native text/layout and 838 MVP cases.
+The build-profile switch regression, layout integer-cast lint and diff checks
+also pass. The new inline-size/generated-content fixture settles both initial
+and retained flow at 120×30; navigation tests retain same-document timers and
+current-task microtasks while deferring discarded-document timers.
+
+**Final isolated release trials:** three interleaved before/after Kafka pairs
+and three Notion loads, normal HTTP cache, profiling disabled, fresh process per
+load. Times include script settlement, render and cleanup.
+
+| Page | Before (s) | After (s) | Median after |
+|---|---|---|---:|
+| Kafka | 86.267 / 84.067 / 84.279 | 38.144 / 38.533 / 38.365 | **38.365 s** |
+| Notion AI | >240 s timeout | 9.139 / 7.648 / 7.711 | **7.711 s** |
+
+Kafka's median falls **84.279→38.365 s (54.5%)**. All nine final loads exit 0,
+render, match no runtime/resource error patterns and report **0 live tracked
+bytes / 0 allocations**. Kafka's remaining median script settlement is
+**37.418 s**, versus **0.104 s layout**; the final document's genuine search
+index is still expensive. Notion's median layout is 6.357 s, with query
+convergence completing rather than oscillating. Browser-speed completion is
+still open for the JavaScript workload.
+
+The final hash correction mixes name entropy into the root table's low bucket
+bits; the complete 7,988-case core baseline and all four focused native suites
+pass again afterwards. The Radiant sources remain those qualified by the
+aggregate above. Main CLI and frozen Node images match the measured candidate;
+release archive members were checked against their release object files.
+
+Reproduction/provenance: `temp/notion-kafka-tuning/{final-summary,final-trials,
+qualification,source-hashes,final-module-hashes}.json`; per-run stdout, phase
+TSV and Lambda logs are beside them. Source base `b8521d3c1` plus the working
+patch; before CLI SHA-256 `7508594d94e582397aafe10e1766fcf74673cd3657595b87b909d545880d0e54`,
+after `3d9d230c4a311c7c4c1c04e7594bc40f9dcb8a13001c24e2d5610f71648f0335`.
