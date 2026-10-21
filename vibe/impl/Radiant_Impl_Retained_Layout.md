@@ -832,3 +832,35 @@ qualification,source-hashes,final-module-hashes}.json`; per-run stdout, phase
 TSV and Lambda logs are beside them. Source base `b8521d3c1` plus the working
 patch; before CLI SHA-256 `7508594d94e582397aafe10e1766fcf74673cd3657595b87b909d545880d0e54`,
 after `3d9d230c4a311c7c4c1c04e7594bc40f9dcb8a13001c24e2d5610f71648f0335`.
+
+## Session regression coverage (2026-10-21)
+
+**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: retain the earlier
+milestone regressions and add cross-operation tests for the remaining gaps.
+Work bounds use cache/computation/layout counters, not wall-clock thresholds.
+These are deterministic local fixtures; online timing remains separate evidence.
+
+| Session change | Regression coverage |
+|---|---|
+| Geometry-only CSS rebinding and stable inherited identity | `IncrementalCssTest.RebindsOnlyChangedGeometryAndRestoresAuthoredValues`, `InheritedIdentityFollowsComputedValuesAndKeepsFontMetricsOwned`, and new `RepeatedContextChangesDoNotAmplifyAncestorStyleInvalidations`: 32 alternating contexts preserve descendant CSS; an inherited font edit updates them and stabilizes again. |
+| Demand-driven intrinsic sizing and independent query identities | Existing axis, A→B→A, percentage-base, font/resource and explicit-dirty cases; new `InterleavedIntrinsicAxesKeepComputedStyleAndMeasurementsHot` keeps both axes cached across 32 mixed requests and refreshes after a height edit. |
+| Retained flow and ordered generated effects | Existing owned-fragment, ancestor-replay, nested-natural-height and stretch cases; `CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrderedEffects` now repeats both constraint entries 16 times for lists, generated content, images, positioning, tables, grids and inline percentages, checking geometry and zero additional flow computations. |
+| Shared update/publication and Notion convergence | Existing foreign-frame, font, table/list and mutation tests; new `InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce` crosses the query threshold four times, checks generated geometry and ensures repeated reads do not lay out again. |
+| Container constant fast path and owner-relative values | Existing axis/writing-mode and absolute/em cases; new `ContainerRelativeMathUsesOwnerMetricsAndInvalidatesItsCachedResult` checks rem/viewport math against deliberately different fallback metrics, height-independent hits and owner-generation invalidation. |
+| Kafka redirect task settlement | Existing synchronous/microtask, fragment-only and cross-document→fragment cases; new nested-microtask fragment→cross-document and absolute same-document cases preserve the final checkpoint and correct timer policy. |
+| Root shape index (**D3.4.3v5 / D3.4.4v4 / D4.2.6**) | Existing type/spelling/budget and owner-retirement cases; new collision/identity test distinguishes naturally colliding FNV spellings, Symbols and private names; negative-lookup test checks later publication after budget recovery. |
+| Shared Unicode cursor (**D5.3.3 / D5.3.5 / D5.4**) | Existing compiled-call/GC/runtime-reset and UTF-16 range cases; new eviction test interleaves six sources across the four-entry cache and collection, and mutable-buffer test verifies changed bytes never reuse immutable offsets/lengths. |
+| Unboxed RegExp descriptor reads (**D6.2.2v2**) | New `JsOpt.RegexFlagsDescriptorReadsPreserveAccessorsDataAndAbruptCompletion` covers inherited accessor receivers, data descriptors, thrown getters and undefined getters under AST and MIR. |
+| Native build-profile isolation | `utils/test_premake_generator.py` builds and executes debug→release→debug→release consumers, preserving utility/image/archive outputs and checking wrapper/linker paths. |
+
+The renamed `test_radiant_core_gtest` remains the registered native runner;
+no duplicate runner, network fixture or load-time cutoff is added.
+
+Qualification: **1,521/1,521** tests pass across the complete affected suites:
+core 174, text/layout 191, CSS 154, item/shape 45, MVP 840 and JS optimization
+117. Native engine suites use `release_native`; JS optimization uses the
+instrumented debug host for its trace contracts, including AST/MIR execution of
+the new descriptor case. The Premake profile-switch self-test, layout cast lint
+and diff checks also pass. Reports: `temp/session-unit-coverage/`. This addition
+changes tests/documentation only; the earlier broad engine gates and page timings
+are not rerun or presented as fresh measurements.

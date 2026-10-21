@@ -332,6 +332,65 @@ TEST_F(RadiantTextQuery, InlineSizeQueriesSettleGeneratedBlockExtent) {
     }
 }
 
+TEST_F(RadiantTextQuery, NestedMicrotaskNavigationDefersDiscardedDocumentTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        var result=document.getElementById('result');
+        setTimeout(function(){result.setAttribute('data-timer','ran')},0);
+        location.replace('#result');
+        Promise.resolve().then(function(){
+            result.setAttribute('data-first','yes');
+            Promise.resolve().then(function(){
+                location.replace('next.html');
+                result.setAttribute('data-last','yes');
+            });
+        });
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-first"), "yes");
+    EXPECT_STREQ(result->get_attribute("data-last"), "yes");
+    EXPECT_EQ(result->get_attribute("data-timer"), nullptr);
+    ASSERT_NE(document->pending_navigation_url, nullptr);
+    EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
+}
+
+TEST_F(RadiantTextQuery, AbsoluteSameDocumentNavigationRetainsTimers) {
+    DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
+        setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
+        location.replace(location.href.split('#')[0]+'#result');
+    </script>)HTML");
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
+}
+
+TEST_F(RadiantTextQuery, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce) {
+    DomElement* result = load_script_source(R"HTML(<style>
+        body { margin:0 }
+        #container { container-type:inline-size; width:120px }
+        #result::before { content:'generated'; display:block; height:10px }
+        @container (min-width:100px) { #result::before { height:30px } }
+    </style><div id="container"><div id="result"></div></div>)HTML");
+    ASSERT_NE(result, nullptr);
+    DomElement* container = dom_find_element_by_id(document->root->as_element(), "container");
+    ASSERT_NE(container, nullptr);
+    layout_html_doc(&ui, document, false);
+    expect_box("result", 0, 0, 120, 30);
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        bool narrow = pass % 2 == 0;
+        ASSERT_TRUE(container->set_attribute("style", narrow ? "width:80px" : "width:120px"));
+        uint64_t layouts = document->view_tree->document_layout_count;
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_EQ(document->view_tree->document_layout_count, layouts + 1);
+        expect_box("container", 0, 0, narrow ? 80.0f : 120.0f, narrow ? 10.0f : 30.0f);
+        expect_box("result", 0, 0, narrow ? 80.0f : 120.0f, narrow ? 10.0f : 30.0f);
+        layouts = document->view_tree->document_layout_count;
+        for (unsigned read = 0; read < 16; ++read) {
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            ASSERT_TRUE(layout_update_document(&ui, document));
+        }
+        EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+    }
+}
+
 TEST_F(RadiantTextQuery, PreparedStylesKeepInheritedFontsAndRebindControlPercentages) {
     ASSERT_NE(load("test/html/layout_prepared_context.html"), nullptr);
     DomElement* code = dom_find_element_by_id(document->root->as_element(), "code");
@@ -844,7 +903,8 @@ TEST_F(RadiantTextQuery, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrder
             item->width = 30.0f;
             ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
                 &flow.parent, 30.0f, &height));
-            EXPECT_NE(retained_subtree_geometry(item), original);
+            uint64_t narrow = retained_subtree_geometry(item);
+            EXPECT_NE(narrow, original);
             EXPECT_EQ(flow.layout.profiler.flex_flow_measures, computations + 1);
             item->width = 60.0f;
             item->height = 111.0f;
@@ -857,6 +917,14 @@ TEST_F(RadiantTextQuery, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrder
             { radiant::LayoutMeasureScope trial(&flow.layout, item); }
             layout_flex_item_content(&flow.layout, lam::view_require_block(item));
             EXPECT_EQ(retained_subtree_geometry(item), original);
+            // repeated ancestor probes must replay both owned entries without rerunning flow or effects.
+            for (unsigned replay = 0; replay < 16; ++replay) {
+                item->width = replay % 2 ? 60.0f : 30.0f;
+                ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, lam::view_require_block(item),
+                    &flow.parent, item->width, &height));
+                EXPECT_EQ(retained_subtree_geometry(item), replay % 2 ? original : narrow);
+                EXPECT_EQ(flow.layout.profiler.flex_flow_measures, computations + 1);
+            }
         }
         auto generated = [&](const char* id, bool before) -> const char* {
             DomElement* element = find(id);
