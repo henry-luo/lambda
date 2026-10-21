@@ -13,6 +13,10 @@
   },
   "events": [
     {
+      "type": "script",
+      "js": "globalThis.leafAngle=(el)=>{const t=getComputedStyle(el).transform;let m=/rotatey\\(([-0-9.e]+)deg\\)/i.exec(t);if(m)return Number(m[1]);m=/matrix3d\\(([^)]*)\\)/.exec(t);if(!m)return NaN;const v=m[1].split(',').map(Number);const a=Math.atan2(-v[2],v[0])*180/Math.PI;return a>90?a-360:a}"
+    },
+    {
       "type": "advance_time",
       "ms": 100
     },
@@ -63,7 +67,7 @@
     },
     {
       "type": "assert_script",
-      "js": "/rotatey\\(-180deg\\)/i.test(document.getElementById('bk-leaf-0').style.transform) && document.querySelector('#bk-leaf-1 .bk-front .bk-title').textContent==='Library'"
+      "js": "Math.abs(leafAngle(document.getElementById('bk-leaf-0'))+180)<0.5 && document.querySelector('#bk-leaf-1 .bk-front .bk-title').textContent==='Library'"
     },
     {
       "type": "click",
@@ -77,7 +81,7 @@
     },
     {
       "type": "assert_script",
-      "js": "const m=/rotatey\\((-?[0-9.]+)deg\\)/i.exec(document.getElementById('bk-leaf-1').style.transform);const a=m&&Number(m[1]);a<-5&&a>-175"
+      "js": "const a0=leafAngle(document.getElementById('bk-leaf-1'));const m=[0,a0];const a=m&&Number(m[1]);a<-5&&a>-175"
     },
     {
       "type": "assert_script",
@@ -146,7 +150,7 @@
     },
     {
       "type": "assert_script",
-      "js": "const m=/rotatey\\((-?[0-9.]+)deg\\)/i.exec(document.getElementById('bk-leaf-5').style.transform);const a=m&&Number(m[1]);a<-10&&a>-90"
+      "js": "const a0=leafAngle(document.getElementById('bk-leaf-5'));const m=[0,a0];const a=m&&Number(m[1]);a<-10&&a>-90"
     },
     {
       "type": "mouse_up",
@@ -186,7 +190,7 @@
     },
     {
       "type": "assert_script",
-      "js": "const m=/rotatey\\((-?[0-9.]+)deg\\)/i.exec(document.getElementById('bk-leaf-5').style.transform);Number(m[1])<-90"
+      "js": "const a0=leafAngle(document.getElementById('bk-leaf-5'));const m=[0,a0];Number(m[1])<-90"
     },
     {
       "type": "mouse_up",

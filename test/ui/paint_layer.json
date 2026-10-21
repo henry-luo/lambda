@@ -1,0 +1,301 @@
+{
+  "name": "Paint layers: presentation-moved subtrees painted from retained rasters match direct paints (translate, preserve-3d faces, mutation and hover inside a layer)",
+  "html": "test/ui/presentation_damage.ls",
+  "viewport": {
+    "width": 900,
+    "height": 560
+  },
+  "env": [
+    {
+      "key": "RADIANT_LAYER_VERIFY",
+      "value": "1"
+    }
+  ],
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "mouse_move",
+      "x": 290,
+      "y": 80
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "mouse_move",
+      "x": 880,
+      "y": 540
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "advance_time",
+      "ms": 16
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.getElementById('card')).transform.length>0 && document.getElementById('label').style.color.length>0"
+    },
+    {
+      "type": "assert_layer_parity",
+      "min_frames": 30,
+      "max_mean": 2.0
+    }
+  ]
+}

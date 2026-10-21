@@ -166,7 +166,7 @@ masks, filter images and text paths. Reuse existing lookup/load guards and add
 typed target validation and cycle detection as required. Dependencies include
 host stylesheet changes, referenced nodes outside the SVG subtree, font loads,
 viewport/font-relative units, external resources and animation time. Extend
-`svg_layer_generation`/layer keys so cached and direct rendering agree.
+`layer_generation` (formerly `svg_layer_generation`)/layer keys so cached and direct rendering agree.
 
 ### 4.2 Geometry and compositing
 

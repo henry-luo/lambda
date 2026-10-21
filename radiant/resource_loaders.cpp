@@ -368,9 +368,11 @@ static void request_network_layout_update(NetworkResourceManager* mgr,
     DocState* state = (DocState*)mgr->document->state;
     if (needs_reflow) {
         state->needs_reflow = true;
+        state->full_repaint_requests++;
         state->is_dirty = true;
         log_debug("network: triggered document reflow from resource completion");
     } else if (needs_repaint) {
+        state->full_repaint_requests++;
         state->is_dirty = true;
         log_debug("network: triggered document repaint from resource completion");
     }

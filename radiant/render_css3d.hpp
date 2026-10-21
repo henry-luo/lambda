@@ -27,6 +27,10 @@ bool css3d_order_planes(const Css3dPolygon* polygons, size_t count,
 bool css3d_clip_to_viewport(Css3dPolygon* polygon, const RdtMatrix* paint,
     Rect viewport, ScratchScope* scratch);
 
+// A block's painted extent in layout px, in the paint coordinates of its own plane: the
+// border box, in-flow content beyond it and visual overflow (shadows, outlines).
+Rect css3d_block_paint_rect(RasterRenderContext* rdcon, ViewBlock* block);
+
 struct Css3dPaintPlane {
     lam::Up<ViewBlock> view;
     RdtMatrix4 depth;

@@ -1,6 +1,6 @@
 # Radiant — Animation & Frame Scheduling
 
-> **Last verified against tree:** 2026-10-09 (§8 detached mutation reconciliation); 2026-10-07 (§8 presentation-style paint-only commit); 2026-09-29
+> **Last verified against tree:** 2026-10-21 (§8 presentation damage, paint layers); 2026-10-09 (§8 detached mutation reconciliation); 2026-10-07 (§8 presentation-style paint-only commit); 2026-09-29
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *timing half* of Radiant: the cross-platform `RadiantFrameClock` vsync wake source, the `window.cpp` render loop it paces, the generic `AnimationScheduler`/`TimingFunction`/`AnimationInstance` engine, the CSS `@keyframes` runtime (`KeyframeRegistry`, per-frame keyframe sampling into in-place view mutations and dirty rects), and the video-frame wake path. The threading contract is the load-bearing idea: the native clock only *wakes* the loop; every animation sample and every mutation runs on the UI thread.
 >
@@ -258,6 +258,78 @@ pending before the turn; those turns take the incremental path
 (`test/ui/presentation_paint_only.json`). A non-inherited presentation write also
 leaves `DomDocument::style_content_epoch` unchanged, so inline SVG layers outside
 the written subtree stay cached ([RAD_14 §4.4](RAD_14_SVG_Vector_Graph.md)).
+
+**Presentation damage** ([Radiant_Design_Animation_Repaint](../../../vibe/radiant/Radiant_Design_Animation_Repaint.md) stage A).
+A paint-only commit repaints only its targets' old and new visual bounds instead of
+the whole surface.
+
+- **Tracking.** `presentation_damage.cpp` tracks written elements in
+  `DocState::presentation_damage`. Every screen recording stores each tracked
+  element's bounds: the union of its recorded items, device space, projected
+  through 3D transforms.
+- **Commit.** The commit marks the old bounds as surface rects and requests a
+  region repaint (`doc_state_request_region_repaint`), which leaves `is_dirty`
+  alone. A write to a plane of a `preserve-3d` context also damages the whole
+  context (its root is tracked too): composition orders and splits every plane
+  against the others, so a moving plane changes other planes' clip seams.
+- **Dirtiness withdrawal.** The batch's own reflow requests set `is_dirty`; the
+  commit withdraws that dirtiness only when the document was clean at the
+  batch's first mutation (`dirty_before_batch`). It also requires that no full
+  repaint was requested since. `DocState::full_repaint_requests` counts every
+  other way of dirtying.
+- **Frame tick.** `radiant_tick_document_animations` likewise downgrades its
+  per-tick repaint to a region repaint when presentation damage is pending and
+  the tick made no full request.
+- **Render.** The raster driver records first, adds the targets' new bounds,
+  clears the union and replays it as a single tile
+  (`render_output_replay_region`). Tile edges clip without a vector clip mask.
+- **Present.** The window uploads only that rectangle to a persistent texture.
+- **Fallbacks to a full frame:**
+  - an element not yet painted;
+  - an unbounded plane or video;
+  - export targets;
+  - any full request.
+- **Switches.**
+  - `RADIANT_PRESENTATION_DAMAGE=off` disables the path.
+  - Headless replays render in full unless `RADIANT_SELECTIVE_SIM=1`.
+  - `RADIANT_DAMAGE_VERIFY=1` compares each selective frame with a full render;
+    nothing may differ outside the union, nothing perceptibly inside.
+  - Tests: `test/ui/presentation_damage.json` and
+    `test/ui/photo_album/book_damage.json`.
+
+**Paint layers** ([Radiant_Design_Animation_Repaint](../../../vibe/radiant/Radiant_Design_Animation_Repaint.md) stage B).
+A flat subtree moved by a presentation transform is painted as one image, its own
+or an ancestor's within a `preserve-3d` context (each plane: a book face or shade).
+`render_paint_layer.cpp`, called from `render_block_view_content`:
+
+- **Capture.** The subtree is recorded through its ordinary pipeline into an
+  offscreen list, starting from the inverse of the root's own transform, and
+  rasterised by the SVG layer's `render_layer_rasterize`. This happens on the
+  second identical paint, at most two per frame. Surfaces are document-owned
+  (48 MB per layer, 256 MB per document).
+- **Stamp.** `DomElement::layer_generation`, document epochs, the layout count,
+  font and image generations, scale and the plane's painted extent.
+- **Paint.** One image item under the root's pushed transform, with the root's
+  own opacity applied at draw time. A resting translation is drawn 1:1 from a
+  capture aligned to it, as a direct composite (`rdt_draw_image`), and css3d
+  compose drops the plane clip for a whole, axis-aligned plane whose run is
+  only such copies. Motion and projection resample bilinearly.
+- **Damage.** A switch between live and layer paint, or a new capture, damages
+  the root's projected extent.
+- **Revalidation and idle captures.** A stamp change re-records the subtree and
+  keeps the surface when `dl_content_fingerprint` is unchanged. Projected layers
+  use `SCALE_MODE_LINEAR_EDGE`, which antialiases the quad edges without a plane
+  clip. A capture with at most two painting items stays live. Once interaction
+  stops, the window runs a damage-free presentation frame for layers still
+  waiting to capture (`render_paint_layers_pending`).
+- **Ineligible:** media, canvas, embedded documents, animations, blending,
+  backdrop filters and presentation filters.
+- **Switches.**
+  - `RADIANT_PAINT_LAYER=off|eager`.
+  - `RADIANT_LAYER_VERIFY=1` re-renders layered frames without layers;
+    `assert_layer_parity` bounds the frame's mean difference.
+  - Tests: `test/ui/paint_layer.json` and
+    `test/ui/photo_album/book_layers.json`.
 
 ## 9. Known Issues & Future Improvements
 

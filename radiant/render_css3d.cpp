@@ -324,6 +324,11 @@ Css3dPaintPlane Css3dPaintContext::enter(ViewBlock* block) {
     // Flat packets are captured with the same basis even when collection pauses.
     RdtMatrix4 complete = view_accumulated_transform_3d(block, false);
     current.paint = radiant::matrix4_project_to_2d(&complete);
+    current.rect = css3d_block_paint_rect(rdcon, block);
+    return previous;
+}
+
+Rect css3d_block_paint_rect(RasterRenderContext* rdcon, ViewBlock* block) {
     float x = rdcon->block.x / rdcon->raster_scale + block->x;
     float y = rdcon->block.y / rdcon->raster_scale + block->y;
     float min_x = 0.0f, min_y = 0.0f, max_x = block->width, max_y = block->height;
@@ -337,9 +342,8 @@ Css3dPaintPlane Css3dPaintContext::enter(ViewBlock* block) {
         min_y = fminf(min_y, low); max_y = fmaxf(max_y, high);
     }
     float overflow = render_geometry_block_visual_overflow(block, rdcon->raster_scale);
-    current.rect = {x + min_x - overflow, y + min_y - overflow,
+    return {x + min_x - overflow, y + min_y - overflow,
         max_x - min_x + 2.0f * overflow, max_y - min_y + 2.0f * overflow};
-    return previous;
 }
 
 void Css3dPaintContext::restore(const Css3dPaintPlane& plane) {
@@ -353,6 +357,43 @@ void Css3dPaintContext::geometry(ViewBlock* block) {
     float scale = rdcon->raster_scale;
     current.paint.e13 /= scale; current.paint.e23 /= scale;
     current.paint.e31 *= scale; current.paint.e32 *= scale;
+}
+
+// A run whose only paint is paint-layer images needs no plane clip when its fragment is the
+// whole plane: a 1:1 copy is the plane's own pixels rounded out to the device grid, and a
+// projected layer antialiases its own quad edges (SCALE_MODE_LINEAR_EDGE). A vector clip
+// would force a coverage-masked composite of each.
+static bool css3d_run_is_layer_images(const DisplayList* packets, const Css3dPaintRun& run) {
+    bool painted = false;
+    for (int index = run.packet_start; index < run.packet_end; index++) {
+        const DisplayItem* item = &packets->data()[index];
+        if (item->op == DL_PUSH_CLIP || item->op == DL_POP_CLIP) continue;
+        if (item->op != DL_DRAW_IMAGE) return false;
+        const DlDrawImage* image = &item->draw_image;
+        float x, y;
+        if (image->scale_mode != SCALE_MODE_LINEAR_EDGE &&
+            !rdt_image_is_pixel_copy(image->has_transform ? &image->transform : nullptr, image->src_w,
+                image->src_h, image->dst_x, image->dst_y, image->dst_w, image->dst_h, &x, &y)) return false;
+        painted = true;
+    }
+    return painted;
+}
+
+// True when a fragment is its whole plane: its four vertices are the plane rectangle's
+// corners (in plane coordinates), so no other plane split it and the viewport did not cut it.
+static bool css3d_fragment_is_whole_plane(const Css3dPolygon& polygon, const Css3dPaintPlane& plane) {
+    if (polygon.count != 4) return false;
+    const float e = 0.01f;
+    const Rect& r = plane.rect;
+    unsigned corners = 0;
+    for (size_t i = 0; i < polygon.count; i++) {
+        const Css3dVertex& vertex = polygon.vertices[i];
+        bool left = fabsf(vertex.u - r.x) < e, right = fabsf(vertex.u - (r.x + r.width)) < e;
+        bool top = fabsf(vertex.v - r.y) < e, bottom = fabsf(vertex.v - (r.y + r.height)) < e;
+        if (!(left || right) || !(top || bottom)) return false;
+        corners |= 1u << ((right ? 1 : 0) + (bottom ? 2 : 0));
+    }
+    return corners == 15u;
 }
 
 bool Css3dPaintContext::compose() {
@@ -413,6 +454,10 @@ bool Css3dPaintContext::compose() {
             0.0f, 0.0f, 0.0f, 0.0f);
         for (const Css3dPolygon& polygon : ordered) {
             Css3dPaintRun& run = runs[polygon.fragment];
+            if (css3d_run_is_layer_images(&packets, run) && css3d_fragment_is_whole_plane(polygon, run.plane)) {
+                if (!dl_copy_range(&packets, &packets, run.packet_start, run.packet_end - 1)) return false;
+                continue;
+            }
             RdtPath* clip = rdt_path_new();
             if (!clip) return false;
             bool valid = true;
