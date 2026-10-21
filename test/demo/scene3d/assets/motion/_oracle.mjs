@@ -133,6 +133,8 @@ const fbxCases = mixamo ? [
   ['rig.fbx', 'sway', [0.3, 0.7, 1.5]],
   ['kenney/characterMedium.fbx', null, [0]],
   ['kenney/jump.fbx', 'Root|Jump', [0, 0.25, 0.5]],
+  ['cube-pets/animal-cat.fbx', 'walk', [0, 0.1, 0.25, 0.4]],
+  ['cube-pets/animal-cat.fbx', 'dance', [0, 0.1, 0.25, 0.4]],
 ];
 for (const [file, clipName, times] of fbxCases) {
   const group = fbx(file);

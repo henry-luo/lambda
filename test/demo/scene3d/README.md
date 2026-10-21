@@ -25,10 +25,14 @@ uses one CLI catalog entry; individual pages can still be opened with `view`.
 | Crystal garden | `three-gallery.html` | Instanced crystals, textures, lighting, and transparency |
 | Kinetic observatory | `observatory.html` | Materials, shadows, satellites, and camera interaction |
 | Shared animation | `shared-animation.html` | Native skinning/morphing and SVG timelines |
+| Cube pets | `motion/pets.ls` | Kenney's CC0 Cube Pets switching clips together through motion controllers |
+| Mixamo dance | `motion/mixamo.ls` | One Mixamo character dancing, taking another rig's samba and a mocap jump (local-only files) |
 
 The tile previews use local scene captures and the existing Chromium references.
 CellScope bundles its Plant model; its other specimens need a network connection
-on first selection. The other demos use local resources.
+on first selection. Mixamo files are never committed: the Mixamo dance page shows
+how to fetch them (`sh test/demo/scene3d/assets/motion/_fetch_mixamo.sh`) until
+they are in `temp/mixamo/`. The other demos use local resources.
 
 `three-gallery.html` runs the official, unmodified Three.js 0.186.1
 `WebGLRenderer` in LambdaJS. It shows 49 instanced crystals, Lambert lighting,

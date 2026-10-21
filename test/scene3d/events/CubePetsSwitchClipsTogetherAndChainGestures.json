@@ -1,0 +1,218 @@
+{
+  "name": "CubePetsSwitchClipsTogetherAndChainGestures",
+  "viewport": {
+    "width": 1100,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#pets-view",
+      "name": "start"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#pets-view",
+      "seconds": 0.3
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "idle",
+      "source": "scene3d",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        480,
+        240
+      ],
+      "rgba": [
+        [
+          190,
+          255
+        ],
+        [
+          80,
+          160
+        ],
+        [
+          30,
+          120
+        ]
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        480,
+        240
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ]
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play-dance"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#pets-view",
+      "seconds": 0.5
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#parade"
+      },
+      "attribute": "data-state",
+      "equals": "dance"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        480,
+        240
+      ],
+      "reference": "idle",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play-gesture-positive"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#pets-view",
+      "width": 480,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#pets-view",
+      "seconds": 0.1
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#parade"
+      },
+      "attribute": "data-state",
+      "equals": "gesture-positive"
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#pets-view",
+      "seconds": 0.6
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#parade"
+      },
+      "attribute": "data-state",
+      "equals": "idle"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#pets-view",
+      "fields": {
+        "graphics.gpu_bytes": {
+          "baseline": "start",
+          "eq": 0
+        },
+        "graphics.resources": {
+          "baseline": "start",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

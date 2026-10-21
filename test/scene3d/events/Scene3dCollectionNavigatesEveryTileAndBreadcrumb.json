@@ -9,7 +9,7 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "assert_script",
@@ -48,7 +48,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -74,7 +74,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -100,7 +100,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -126,7 +126,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -152,7 +152,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -178,7 +178,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -204,7 +204,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -230,7 +230,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -256,7 +256,59 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"motion/pets.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Cube pets\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#pets-view')!==null && document.querySelector('#parade').getAttribute('data-state')==='idle'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"motion/mixamo.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Mixamo dance\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#dancer-view')!==null || document.querySelector('#mixamo-missing')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     }
   ]
 }
