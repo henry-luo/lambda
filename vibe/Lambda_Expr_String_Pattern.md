@@ -874,7 +874,7 @@ a golden run on all three tiers or by a negative fixture in
   - a pattern RE2 refuses is E200 ("this pattern cannot be compiled: …");
   - a self-reference is caught as an undefined name, and a depth guard stops
     any expansion that would recurse.
-  - *Superseded in part by S11.4.12 (2026-10-21, TE-23; not yet implemented):* a top-level pattern name binds for the whole module, so a later-defined name becomes legal and islands compile in dependency order; a self-reference or any other cycle among patterns is E240, since no regular pattern can recurse; an unknown name stays E204.
+  - *Superseded in part by S11.4.12 (2026-10-21, TE-23; implemented the same day):* a top-level pattern name binds for the whole module, so a later-defined name becomes legal and islands compile in dependency order; a self-reference or any other cycle among patterns is E240, since no regular pattern can recurse; an unknown name stays E204.
 - **#5, counts.** A count inside a pattern is checked by the scanner type
   position uses: `{n}`, `{n,m}` or `{n+}`, blanks allowed as in the reference
   grammar. `{n,}` names `{n+}`; `{,5}` and `{a}` are E103. The regex engine's

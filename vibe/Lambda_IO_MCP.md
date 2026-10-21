@@ -51,7 +51,7 @@ An LLM, agent loop, and MCP gateway are not prerequisites.
 |---|---|
 | **S12.1.1v3**, **D6.1.1v2** | External calls, discovery, listening, and resource acquisition are `pn` operations. A tool's `readOnlyHint` cannot make network access pure. Pure transformation of already received data stays `fn`. |
 | **S12.4.1v3–S12.4.3** | Acquire clients/listeners through scoped `open()` resources. Block exit closes them; cancellation/error cleanup follows the same ownership rules. GC finalizers are only a backstop. These rules are partly unimplemented and are an implementation dependency. |
-| **S13.1.1v2–S13.1.3v2**, **S13.3.1–S13.3.2** | Calls may suspend without new `async`/`await` syntax. Explicit concurrency uses `start`/`wait`; waiter timeouts do not imply cancellation of underlying work. |
+| **S13.1.1v2–S13.1.3v2**, **S13.3.1v2–S13.3.2** | Calls may suspend without new `async`/`await` syntax. Explicit concurrency uses `start`/`wait`; waiter timeouts do not imply cancellation of underlying work. |
 | **S7.4.1–S7.4.4** | Preserve the distinction between Lambda errors, raised failures, and system faults; define the separate MCP protocol/tool-error mapping (§4.4). |
 | **D5.3.3**, **D5.4.1–D5.4.4** | Precisely root retained values and callbacks. An isolate owns its evaluator and event loop; generic HTTP pool threads cannot share an evaluator or its `Item` pointers. |
 | **D7.1.1**, **D7.1.2v2**, **D7.1.3**, **D7.5.2** | Resource acquisition belongs to the I/O layer and central policy door. Protocol code cannot introduce a dependency from I/O/runtime to Radiant. |

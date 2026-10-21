@@ -570,7 +570,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
@@ -647,6 +647,8 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-lambda-full - Lambda baseline plus concurrency, extended-script, DOM-node and validator-input gates"
 	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
+	@echo "  test-mir-gc-stress - Run batched GC stress and reviewed backend-parity probes"
+	@echo "  test-mir-gc-stress-full - Force GC for every MIR corpus fixture"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-math-corpus - Run the font-driven SVG math formula corpus"
@@ -1758,10 +1760,9 @@ test-gc-rooting-core: build
 	@python3 utils/check_gc_effects.py
 	@python3 utils/check_gc_root_hazards.py
 	@# The MIR emission corpus is swept by a driver rather than more shell
-	@# blocks here: it runs every test/mir fixture plus the capture/hoist
-	@# regressions through all three forced-GC modes and compares each against
-	@# the same script's unstressed output, so adding a fixture extends this
-	@# gate automatically. See MT4 in vibe/Lambda_Design_MIR_Emission_Test.md.
+	@# blocks here: new fixtures default to full stress, while reviewed scalar
+	@# and NO_GC emission probes retain ordinary backend parity. The full target
+	@# forces every fixture. See MT4 in vibe/Lambda_Design_MIR_Emission_Test.md.
 	@$(MAKE) --no-print-directory test-mir-gc-stress
 	@echo "Core exact-root forced-GC gates passed."
 
@@ -1770,7 +1771,10 @@ test-gc-rooting-core: build
 test-mir-gc-stress:
 	@if [ ! -x test/test_mir_gc_stress_gtest.exe ]; then $(MAKE) --no-print-directory build-test; fi
 	@echo "Running forced-GC stress sweep over the MIR emission corpus..."
-	@./test/test_mir_gc_stress_gtest.exe
+	@./test/test_mir_gc_stress_gtest.exe $(ARGS)
+
+test-mir-gc-stress-full:
+	@LAMBDA_MIR_GC_FULL=1 $(MAKE) --no-print-directory test-mir-gc-stress
 
 test-gc-rooting: test-gc-rooting-core
 	@echo "Aggregate exact-root forced-GC gates passed."

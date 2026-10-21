@@ -120,6 +120,7 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_INVALIDATED_BINDING, "INVALIDATED_BINDING", "Binding read follows a hidden cross-frame mutation"},
     {ERR_FILTER_BODY_NO_CURRENT, "FILTER_BODY_NO_CURRENT", "Filter body does not mention ~"},
     {ERR_FOR_CLAUSE, "FOR_CLAUSE", "Invalid for-header clause"},
+    {ERR_TYPE_CYCLE, "TYPE_CYCLE", "Type refers to itself through no structural position"},
 
     // 3xx - Runtime Errors
     {ERR_RUNTIME_ERROR, "RUNTIME_ERROR", "Runtime error"},

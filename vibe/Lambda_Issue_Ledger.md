@@ -688,6 +688,18 @@ A sound fix types the reads before the widening assignment: either a declaration
 <a id="lr03-41"></a>**LR03-41 · A derived type that redeclares an inherited field fails with E209, reported at 1:1 · OPEN, needs a ruling (found 2026-10-07, std test triage)**
 `type Animal { name: string, sound: string = "..." }` then `type Dog : Animal { sound: string = "woof" }` is rejected with `error[E209]: duplicate definition of 'sound' in the same scope`, located at line 1 column 1 rather than at the redeclaration. S2.1.3v2 (and OB7) say only that attributes "merge", so whether a derived type may override an inherited field's default needs a ruling; the location is wrong either way. Parked tests: `test/std/core/statements/_type_declarations.ls`, `test/std/boundary/_object_limits.ls` (their pending goldens assume the override is allowed).
 
+<a id="lr03-44"></a>**LR03-44 · A numeric or bool literal type admits any value of its kind as an array item or a bracket-pattern slot (S11.2.1, S10.1.1v4, S11.1.1v3) · OPEN (found 2026-10-21, while implementing S11.4.12)**
+```
+type Lit = 1
+type F = 1.5
+type B = true
+let a = [3]
+[a is 1[], [2] is Lit[], [2] is Lit[1], [2.5] is F[], [false] is B[]]   // all true on both tiers
+[[1, 2] is [1, Lit], [2] is [Lit]]                                      // true, true
+[2 is Lit, {a: 2} is {a: Lit}, ["b"] is "a"[], [3] is (1 | 2)[]]        // false, as expected
+```
+S11.2.1 and S10.1.1v4 make a scalar's literal type the singleton of its value, but as the item type of `T[]` or `T[n]`, or as a type slot of a bracket pattern, a numeric or bool literal type admits every value of its kind. The same type is correct on its own (`2 is Lit`), as a map field, as a string or symbol literal, inside a literal union and as a range; declaration order makes no difference (the alias and the inline `1[]` agree), and both tiers answer the same. Every failing case is a packed `ArrayNum` (an int, float or bool lane), while text arrays, which are boxed, are checked value by value, so a lane-tag shortcut that skips the value test is the likely cause; it is not yet located. The validator path carries a guard for exactly this case: `element_contract_is_plain` (`lambda/validator/validate_pattern.cpp`) keeps a literal element contract off the tag-only path and cites `[3] is 1[]`, added in `a20e59b4f1` (2026-09-23), yet `is` still answers `true` there, so `is` reaches a different shortcut, or the guard regressed. No fixture pins the case.
+
 ## 4. Numbers, decimal & datetime (LR_04)
 
 

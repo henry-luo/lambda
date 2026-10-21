@@ -31,5 +31,7 @@ v.scale(2.0) != null
 let items = <root>;
     <item> "a"
     <item> "b"
-len(items?item)
-len(items?nonexistent)
+// S11.4.12: a query key names a type, so an element is `<item>`; a bare name
+// that names no type is E204 rather than `any`
+len(items?<item>)
+len(items?<nonexistent>)

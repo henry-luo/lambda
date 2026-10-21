@@ -44,7 +44,7 @@ Lambda is a **custom C/C++ runtime with MIR JIT** and a tracing garbage collecto
 
 ### Concurrency
 
-Clojure has **STM, atoms, agents, core.async** — coordinating *shared* mutable state is a first-class design concern. Lambda takes the opposite route: there is no shared mutable state at all (S9.1.7), so nothing needs coordinating. Concurrency enters through the colorless `start` builtin plus bounded per-task mailboxes with `send`/`receive`/`select` (S13) — closer to Erlang's actors than to Clojure's coordinated references. `core.async` channels are the nearest Clojure analog, but Lambda adds structured scope (block-owned handles, cancel-then-join on error exit, S13.3.1) and typed backpressure (`send` returns `ok^E`, S13.2.2).
+Clojure has **STM, atoms, agents, core.async** — coordinating *shared* mutable state is a first-class design concern. Lambda takes the opposite route: there is no shared mutable state at all (S9.1.7), so nothing needs coordinating. Concurrency enters through the colorless `start` builtin plus bounded per-task mailboxes with `send`/`receive`/`select` (S13) — closer to Erlang's actors than to Clojure's coordinated references. `core.async` channels are the nearest Clojure analog, but Lambda adds structured scope (block-owned handles, cancel-then-join on error exit, S13.3.1v2) and typed backpressure (`send` returns `ok^E`, S13.2.2).
 
 ## Where Lambda Stands Out
 

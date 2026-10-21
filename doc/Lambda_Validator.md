@@ -151,9 +151,7 @@ type Person = {name: string, age: int, address: Address?}
 type Document = {members: [Person+], tags: string[]}   // the root
 ```
 
-A schema's types may also be written root first. A type may name a type declared later in the file, and two types may name each other, as long as each cycle passes through a field, an attribute, element content or an array item ([Recursive Types and Forward References](Lambda_Type.md#recursive-types-and-forward-references), S11.4.12).
-
-> **Not yet implemented.** A reference to a type declared later in the schema currently reads as `any` with only a log warning, so the validator checks nothing below it: `type Document = {a: Later}` followed by `type Later = int` accepts `{"a": "x"}`. Until S11.4.12 lands, declare each type before the types that use it.
+A schema's types may also be written root first. A type may name a type declared later in the file, and two types may name each other, as long as each cycle passes through a field, an attribute, element content or an array item ([Recursive Types and Forward References](Lambda_Type.md#recursive-types-and-forward-references), S11.4.12). A misspelled type name is a compile error (E204), so a schema can no longer silently check nothing below it.
 
 ## Running the Validator
 

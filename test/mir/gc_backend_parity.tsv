@@ -1,0 +1,25 @@
+# Reviewed emission fixtures whose executed subject is scalar-only or NO_GC.
+# Keep native/MIR-interpreter output parity and their separate .mir-checks.
+# LAMBDA_MIR_GC_FULL=1 restores every forced-GC schedule. New fixtures default
+# to full stress; a missing policy file or duplicate/renamed entry fails the gate.
+# path<TAB>reason
+test/mir/lambda/tail_call_tco.ls	D5.3.2: scalar factorial tail-loop lowering; no retained GC value in the subject.
+test/mir/lambda/tail_call_tco_proc.ls	D5.3.2: the procedural scalar tail-loop has its own emission assertion, without a GC lifetime boundary.
+test/mir/lambda/tune18_float_const.ls	D5.2.2v3: native float immediates and accumulation use scalar storage, not GC roots.
+test/mir/lambda/tune16_native_bitwise.ls	D5.3.2: native band/bor/bxor operate on integer parameters without a collecting edge.
+test/mir/lambda/tune20_shift_native_lane.ls	D2.4.1-D2.4.3: raw integer shift/mask operands; emission and backend parity pin representation.
+test/mir/lambda/tune26_dynamic_equality_compare.ls	D5.2.2v3: finite/NaN/infinity equality exercises scalar lanes without a live GC owner.
+test/mir/lambda/tune26_dynamic_ordered_compare.ls	D5.2.2v3: ordered sentinel comparisons exercise scalar lanes without a live GC owner.
+test/mir/lambda/tune26_parity_compare.ls	D5.3.2: integer parity and its scalar sentinel fallback retain no GC owner across a collecting call.
+test/mir/lambda/tune30_leaf_div_cast.ls	D5.3.2: inlined integer division/remainder leaves and scalar loop state; retain backend parity.
+test/mir/lambda/tune15_number_frame_elision.ls	D5.2.2v3: empty number-frame elision is an emission property of a native scalar leaf.
+test/mir/lambda/tune28_module_const_fold.ls	D4.1.1v2: module scalar constants and native arithmetic have no runtime GC-owned operand.
+test/mir/lambda/u32_shift_width.ls	D5.3.2: sized integer shift boundary results are scalar values, without a GC ownership handoff.
+test/mir/lambda/gc_effect_forward_order.ls	D5.3.2: forward-declared NO_GC edge; the held string is an immortal literal. Keep its order-sensitive emission check.
+test/mir/lambda/gc_effect_reverse_order.ls	D5.3.2: reverse-declared NO_GC edge; the held string is an immortal literal. Keep its order-sensitive emission check.
+test/mir/lambda/gc_effect_mutual_component.ls	D5.3.2: recursive NO_GC component and literal string; preserve component-effect emission assertions.
+test/mir/lambda/gc_effect_many_bodies.ls	D5.3.2: effect-registry capacity and NO_GC declarations are pinned by emission assertions, not GC lifetime pressure.
+test/mir/lambda/gc_effect_scalar_homes.ls	D5.2.2v3/D5.3.2: number homes are not GC roots; held strings are literals and the callees do not collect.
+test/mir/lambda/string_pointer_no_gc.ls	D5.3.1-D5.3.2: string-equality leaf uses immortal literal operands and has no collecting edge.
+test/mir/lambda/readonly_length_no_gc.ls	D5.3.2: flat/N-D length leaves do not collect; retain their distinct layout/emission checks and output parity.
+test/mir/lambda/tune30_libm_no_gc.ls	D5.3.2: native sqrt/sin loop has no collecting edge; array construction is covered by allocating-root probes.

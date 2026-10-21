@@ -1,0 +1,1 @@
+pattern `A` refers to itself: a pattern cannot recurse

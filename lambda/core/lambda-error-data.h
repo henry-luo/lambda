@@ -98,6 +98,7 @@ typedef enum LambdaErrorCode {
     ERR_BINDER_TRAILING_THAT = 237,   // `that` follows an `as T` binder
     ERR_FILTER_BODY_NO_CURRENT = 238, // S10.1.6: a `|:` body must mention `~`
     ERR_FOR_CLAUSE = 239,             // S14.1: misplaced, repeated or malformed for-header clause
+    ERR_TYPE_CYCLE = 240,             // S11.4.12: a type refers to itself through no structural position
 
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors

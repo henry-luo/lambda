@@ -420,8 +420,8 @@ let person: {name: string, age: int} = {name: "Bob", age: 25}
 |------|---------|
 | `<tag>` | Element with tag |
 | `<tag attr: type>` | With attribute types |
-| `<tag content_type>` | With content type |
-| `<tag attr: type, content_type>` | With attribute and content types — `,` marks the boundary (S16.9.3) |
+| `<tag string*>` | With a content type (here `string*`) |
+| `<tag attr: type, string*>` | With attribute and content types — `,` marks the boundary (S16.9.3) |
 
 Examples:
 
@@ -432,6 +432,7 @@ type Article = <article title: string, author: string,
     string,           // Text content
     Section*          // Zero or more sections
 >
+type Section = <section title: string, string*>   // may follow its first use
 ```
 
 ---
@@ -546,7 +547,7 @@ Three rules keep this well defined:
 - A type declared inside a block sees only the types declared before it in that block, itself included, as block-local functions do.
 - A type name that resolves to no declaration, import or base type is a compile error (E204).
 
-> **Not yet implemented.** Self-reference works today. A reference to a type declared *later* in the file still reads as `any`, with only a log warning, so `Message` above accepts any `parts` array; an unresolved name also reads as `any`, and cycles are not checked. Until S11.4.12 lands, declare a type before the types that use it.
+> **Not yet implemented.** A type whose body has a `that` predicate is still resolved in source order, so a function parameter or object field typed with it *before* its declaration is checked against an incomplete type and can be rejected; declare such a type before the code that uses it. A `grammar`, and the base of an object type (`type B : A`), must also come first.
 
 ### Object Types
 
