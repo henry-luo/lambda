@@ -355,7 +355,7 @@ Existing scene-asset limits apply to body geometry unchanged (vertices, indices,
 | `pose(character, clip, key)` | `map^` | World transforms of every joint at one key. |
 | `mannequin(character, options)` | `character^` | Add a capsule-figure body to a bodiless skeleton. |
 | `scene(character, options)` | `group^` | Compile to `<scene3d>` content (§8.7). |
-| `control(group, states, options)` / `state(name, clip, options)` | `group^` / `element` | Append a `<motion-controller>` to a compiled group (§9.2). |
+| `control(group, states, options)` / `motion_state(name, clip, options)` | `group^` / `element` | Append a `<motion-controller>` to a compiled group (§9.2). `state` is a reserved word in Lambda, so the state constructor is named after its element. |
 
 ### 8.2 Loading and humanoid roles
 
@@ -444,9 +444,9 @@ fn stage(state, cue) element^ => s.normalize(s.scene([
     s.light('ambient', {intensity: 0.4}),
     s.light('directional', {position: [3.0, 5.0, 4.0]}),
     motion.control(compiled, [
-        motion.state('walk', "walk"),
-        motion.state('dance', "dance"),
-        motion.state('jump', "jump", {loop: 'once', next: 'walk', fade: 0.1})
+        motion.motion_state('walk', "walk"),
+        motion.motion_state('dance', "dance"),
+        motion.motion_state('jump', "jump", {loop: 'once', next: 'walk', fade: 0.1})
     ], {state: state, cue: cue, fade: 0.3})^
 ], {camera: "cam", width: 640, height: 480}))^
 ```
@@ -479,7 +479,7 @@ The validators (`model.ls` skeleton and skin-index checks), the A3D quota and §
 - **Reconciliation:** `state` and `cue` are excluded from `scene3d_animation_source_hash`; everything else about the controller, its states and its clips stays in the hash. When a regenerated scene keeps the hash but changes `(state, cue)`, the host resets and plays the new state's action and calls the existing `animation_action_crossfade(from, to, fade, false)`. Other mutations that keep the hash leave playback untouched, which is the rule the current code already applies to sibling UI mutations.
 - **Automatic transitions:** when a `once` state with `next` finishes, the host crossfades to `next` using the mixer's existing `finished` event. The template's `state` attribute is not rewritten. Requesting the same state again needs a new `cue`.
 - **Deterministic seek:** exact-time sampling (render captures, tests) replays the requested state from time 0, including its `next` chain, so `lambda render … -o frame.png` at time `t` is reproducible.
-- **Events:** state changes and finishes reach the document as events on the `<scene3d>` element through the existing host path (D7.5.3v2, D7.4.2v2), so a template can react (for example, re-enable a "Jump" button). The event names and payload follow the mixer's existing `finished`/`loop` events plus one `statechange {controller, from, to}`. Delivery to Lambda templates is §13 decision 10.
+- **Events:** state changes and finishes reach the document as events on the `<scene3d>` element through the existing host path (D7.5.3v2, D7.4.2v2), so a template can react (for example, re-enable a "Jump" button). The event names and payload follow the mixer's existing `finished`/`loop` events plus one `statechange {controller, from, to, time}`. Lambda template handlers receive them (`on statechange(evt)`; §13 decision 10, confirmed by `test/scene3d/motion-control.ls`).
 
 ### 9.3 What stays the same
 
@@ -534,7 +534,7 @@ Each milestone ends at its named gate (D7.3.5). Required aggregate gates (`make 
 7. **Rest-pose alignment for retargeting:** comparable rest poses plus `rest_frame` initially (*recommended*), or automatic T/A-pose alignment now.
 8. **BVH position channels on non-root joints:** replace `OFFSET` (proposed), to be confirmed against the pinned `BVHLoader`.
 9. **Clip track cap:** raise from 256 to 1,024 alongside the palette.
-10. **Event delivery to Lambda templates:** confirm the existing DOM event path covers `<scene3d>` events for Lambda handlers, or scope the gap.
+10. **Event delivery to Lambda templates:** confirm the existing DOM event path covers `<scene3d>` events for Lambda handlers, or scope the gap. *Confirmed at M5:* the timing-event path delivers `statechange` and `finished` to `on …` handlers in a Lambda view.
 11. **Skin binding in the schema:** body geometry in character space with one `inverse_bind` per joint and skin indices in skeleton preorder (*recommended*; matches the native bone-level binds), or a per-mesh palette of joint names with per-mesh inverse binds (handles inconsistent per-mesh bind poses, at the cost of a remap and duplicated skeletons in the scene).
 12. **`lambda.scene3d.load` routing:** keep it to its current formats, with characters through `motion.load` + `motion.scene` (*recommended*), or route FBX/BVH through the character path inside `load`.
 
@@ -568,3 +568,4 @@ Each milestone ends at its named gate (D7.3.5). Required aggregate gates (`make 
 - **2026-10-21, schema detail:** the first chat sketch of the schema gave each mesh a palette of joint names with per-mesh inverse binds. The proposal instead stores body geometry in character space with one `inverse_bind` per joint, because the native renderer stores binds on bones; the alternative remains §13 decision 11.
 - **2026-10-21, decisions selected:** the user took every recommended option in §13 and asked for M0–M5 in a worktree branch.
 - **2026-10-21, implementation (M4):** §8.3 step 1 matched joints by name before roles. Tested against a CMU-named source and a Mixamo-named target, that paired CMU `Spine` (chest) with Mixamo `Spine` (spine) and shifted the whole spine. Roles now take precedence wherever both joints are tagged, and names remain the fallback for untagged joints.
+- **2026-10-21, implementation (M5):** a Lambda view's re-render rebuilds its DOM subtree rather than patching it, so §9.2's reconciliation could not see a `<scene3d>` survive regeneration. Radiant now carries a scene's entry, GL context and playback to the structurally corresponding viewport (`scene3d_follow_rebuild`, beside the other `*_follow_rebuild` hooks), and the animation source hash covers content rather than node identity; bindings still require their bone and mesh nodes to stay connected. `state` is a reserved word in Lambda, so the state constructor is `motion.motion_state`.

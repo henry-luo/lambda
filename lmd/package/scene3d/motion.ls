@@ -455,3 +455,34 @@ pub fn scene(c, options = {}) element^ {
             autoplay: options.autoplay == cs[n].name, *[for (ch in content(cs[n])) *tracks(ch, cs[n].times, id, index)]>];
     <group *: (if (options.transform is map) options.transform else {}), id: id, *[skeleton, *meshes, *clips]>
 }
+
+// ---- controlling playback ---------------------------------------------------------
+
+// one controller state (§9.2; `state` is a reserved word): `loop` 'repeat' | 'once' | 'pingpong', the state
+// that follows a finished `once` (`next`), the fade into it and its `time_scale`
+pub fn motion_state(label, clip_name, options = {}) element => <'motion-state' name: label, clip: clip_name,
+    *: (if (options.loop != null) {loop: options.loop} else {}),
+    *: (if (options.next != null) {next: options.next} else {}),
+    *: (if (options.fade != null) {fade: options.fade} else {}),
+    *: (if (options.time_scale != null) {'time-scale': options.time_scale} else {})>
+
+// append a <motion-controller> to a compiled group, resolving each state's clip
+// name to its clip ID; `state` and `cue` are the template's request, `fade` the
+// default crossfade (§9.2)
+pub fn control(group, states, options = {}) element^ {
+    let clips = map([for (x in content(group) where name(x) == 'animation-clip') (string(x.label), x)])
+    let names = [for (st in states) string(st.name)]
+    let checked_names = if (len(states) == 0 or len(unique(names)) != len(names)) raise fail("controller states need unique names")
+    let checked_next = [for (st in states where st.next != null and not contains(names, string(st.next)))
+        raise fail("state '" ++ string(st.name) ++ "' names an unknown next state")]
+    let requested = if (options.state == null) states[0].name else options.state
+    let checked_state = if (not contains(names, string(requested))) raise fail("controller state '" ++ string(requested) ++ "' is not one of its states")
+    let resolved = [for (st in states) (let k = clips[string(st.clip)],
+        if (k == null) raise fail("state '" ++ string(st.name) ++ "' names no clip of the group")
+        else if (k.autoplay == true) raise fail("clip '" ++ string(st.clip) ++ "' autoplays; compile it without autoplay to control it")
+        else <'motion-state' *: {*: fields(st), clip: k.id}>)]
+    let controller = <'motion-controller' id: (if (options.id == null) string(group.id) ++ "-motion" else options.id),
+        state: requested, cue: (if (options.cue == null) 0 else options.cue), fade: (if (options.fade == null) 0.25 else options.fade),
+        *resolved>;
+    <group *: fields(group), *[*content(group), controller]>
+}

@@ -8932,6 +8932,20 @@ void radiant_dispatch_scene_animation_event(UiContext* uicon,DomElement* target,
     RadiantTimingEventData data={type,clip,nullptr,seconds,detail,action};
     radiant_queue_timing_event(uicon,target,radiant_build_scene_timing_event,&data);
 }
+struct RadiantSceneStateEventData { const char* controller; const char* from; const char* to; double seconds; };
+static Item radiant_build_scene_state_event(void* userdata) {
+    auto* data=(RadiantSceneStateEventData*)userdata;
+    RootFrame roots(2);Rooted<Item> event(roots,js_create_event("statechange",false,false));
+    Rooted<Item> value(roots,make_string_item(data->controller));dom_realm_set_name(event.get(),"controller",value.get());
+    value.set(make_string_item(data->from));dom_realm_set_name(event.get(),"from",value.get());
+    value.set(make_string_item(data->to));dom_realm_set_name(event.get(),"to",value.get());
+    value.set(js_make_number(data->seconds));dom_realm_set_name(event.get(),"time",value.get());return event.get();
+}
+bool radiant_dispatch_scene_state_event(UiContext* uicon,DomElement* target,const char* controller,
+        const char* from,const char* to,double seconds) {
+    RadiantSceneStateEventData data={controller,from,to,seconds};
+    return radiant_queue_timing_event(uicon,target,radiant_build_scene_state_event,&data);
+}
 
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value, double elapsed_time) {

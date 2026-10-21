@@ -748,7 +748,7 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
             if (scene3d_tag(element,"geometry")) { if (!scene3d_geometry(build,scene3d_definition(build,element,nullptr,"geometry"))) return false; }
             else if (scene3d_tag(element,"material")) { if (!scene3d_material(build,scene3d_definition(build,element,nullptr,"material"))) return false; }
             else if (scene3d_tag(element,"texture")) { if (!scene3d_texture(build,scene3d_definition(build,element,nullptr,"texture")).id) return false; }
-            else if (scene3d_tag(element,"animation-clip")) continue;
+            else if (scene3d_tag(element,"animation-clip")||scene3d_tag(element,"motion-controller")) continue;
             else if (!scene3d_project_node(build,element,world,visible)) return false;
         }
     return true;
@@ -851,6 +851,19 @@ void scene3d_collect(DomDocument* document) {
         for (DomNode* parent=node;parent;parent=parent->parent) if (parent==document->root) { attached=true;break; }
         if (!attached) { *link=entry->next; scene3d_entry_destroy(entry); registry->count--; }
         else link=&entry->next;
+    }
+}
+// a template re-render replaces the scene's DOM subtree; the entry, its GL
+// context and its playback follow the structurally corresponding viewport
+void scene3d_follow_rebuild(DomDocument* document, DomNode* old_root, DomNode* new_root) {
+    Scene3dRegistry* registry=scene3d_registry(document,false);
+    if (!registry || !old_root || !new_root || old_root==new_root) return;
+    for (Scene3dEntry* entry=registry->entries;entry;entry=entry->next) {
+        DomNode* owner=dom_node_ref_validate(document,entry->root);
+        DomNode* replacement=owner?view_state_corresponding_node(owner,old_root,new_root):nullptr;
+        if (!replacement || !replacement->is_element() || !scene3d_tag(replacement->as_element(),"scene3d")) continue;
+        entry->root=dom_node_ref(replacement); entry->mutation_epoch=UINT64_MAX;
+        scene3d_animation_follow_rebuild(entry->animation,old_root,new_root);
     }
 }
 void scene3d_release_subtree(DomNode* root) {

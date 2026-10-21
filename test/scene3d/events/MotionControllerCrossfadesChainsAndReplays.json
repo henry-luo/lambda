@@ -1,0 +1,287 @@
+{
+  "name": "MotionControllerCrossfadesChainsAndReplays",
+  "viewport": {
+    "width": 240,
+    "height": 360
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#hero-view",
+      "seconds": 0.3
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "jump",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "name": "start"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "rgba": [
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ],
+        [
+          200,
+          255
+        ]
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#hero-view",
+      "seconds": 0.3
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "reference": "jump",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tick"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#stage"
+      },
+      "attribute": "data-ticks",
+      "equals": "1"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "reference": "jump",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick-flip"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#hero-view",
+      "seconds": 0.5
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#stage"
+      },
+      "attribute": "data-state",
+      "equals": "flip"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "reference": "jump",
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick-rise"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "scene3d",
+      "op": "update",
+      "target": "#hero-view",
+      "seconds": 0.6
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#stage"
+      },
+      "attribute": "data-state",
+      "equals": "jump"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#again"
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240
+    },
+    {
+      "type": "wait",
+      "ms": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#stage"
+      },
+      "attribute": "data-state",
+      "equals": "rise"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#hero-view",
+      "seconds": 0.7
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "width": 200,
+      "height": 240,
+      "region": [
+        0,
+        0,
+        200,
+        240
+      ],
+      "reference": "jump",
+      "count": {
+        "max": 20
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#hero-view",
+      "fields": {
+        "graphics.gpu_bytes": {
+          "baseline": "start",
+          "eq": 0
+        },
+        "graphics.resources": {
+          "baseline": "start",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

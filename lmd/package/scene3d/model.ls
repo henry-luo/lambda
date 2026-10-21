@@ -60,7 +60,7 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera"] else if (kind == 'mesh') ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture"] else []) where n[key] != null)
@@ -79,10 +79,10 @@ fn check_node(n, all_nodes) bool^ {
         not color(n[if (kind == 'scene3d') "background" else "color"])) raise fail("invalid color")
     let checked_visible = if (n.visible != null and not (n.visible is bool)) raise fail("invalid visibility")
     let children = content(n)
-    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint']
+    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'material', 'texture']
-        else if (kind == 'animation-clip') ['keyframe-track']
+        else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
         else if (kind == 'mesh') ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
     if (kind == 'animation-clip') {
@@ -122,6 +122,22 @@ fn check_node(n, all_nodes) bool^ {
             (n.view_height!=null and (not numeric(n.view_height) or n.view_height<=0)) or
             not numeric(far) or far <= near or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
             raise fail("invalid scene camera") else true
+    } else if (kind == 'motion-controller') {
+        // Lambda_Pkg_Motion.md §9.2: unique state names; `state` and every `next` name a state
+        let names = [for (st in children) string(st.name)]
+        if (not text(n.id) or len(children) == 0 or len(children) > 64 or len(unique(names)) != len(names) or
+            (n.fade != null and (not numeric(n.fade) or n.fade < 0)) or (n.cue != null and not numeric(n.cue)) or
+            (n.state != null and not contains(names, string(n.state))) or
+            any([for (st in children) st.next != null and not contains(names, string(st.next))]))
+            raise fail("invalid motion controller") else true
+    } else if (kind == 'motion-state') {
+        // a state's clip is an animation-clip that no other state uses and that does not autoplay
+        let clips = [for (c in all_nodes where name(c) == 'animation-clip' and c.id != null and string(c.id) == string(n.clip)) c]
+        let users = [for (c in all_nodes where name(c) == 'motion-state' and string(c.clip) == string(n.clip)) c]
+        if (not text(n.name) or not text(n.clip) or len(clips) != 1 or clips[0].autoplay == true or len(users) != 1 or
+            (n.loop != null and not contains(["repeat", "once", "pingpong"], string(n.loop))) or
+            (n.fade != null and (not numeric(n.fade) or n.fade < 0)) or (n["time-scale"] != null and not numeric(n["time-scale"])))
+            raise fail("invalid motion state") else true
     } else if (kind == 'geometry') check_geometry(n)^
     else if (kind == 'material') {
         let checked_type = if (not contains(['basic', 'lambert'], n.type)) raise fail("unknown material type")
