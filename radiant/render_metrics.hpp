@@ -21,6 +21,7 @@
     X(tile_lock_wait_ns) X(tile_work_ns) X(shared_array_hits) X(shared_array_retains) X(shared_array_reuses) \
     X(fragment_references) X(fragment_commands) X(placement_command_copy_bytes) \
     X(svg_vector_recordings) X(svg_vector_hits) \
+    X(html_box_recordings) X(html_box_reuses) X(html_box_translations) \
     X(retained_foreign_chunks) X(retained_index_publications) X(retained_index_prune_checks) \
     X(retained_membership_nodes) X(retained_membership_groups) \
     X(retained_dirty_subtree_searches) X(retained_dirty_ancestry_queries) \

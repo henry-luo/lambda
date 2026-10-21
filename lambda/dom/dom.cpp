@@ -479,54 +479,15 @@ static DomNode* dom_table_fixup_significant_sibling(DomNode* child,
     return nullptr;
 }
 
-static bool dom_table_fixup_cells_only_descendants(DomNode* node,
-                                                       bool* has_cell) {
-    if (!node || !node->is_element()) return false;
-    for (DomNode* child = node->as_element()->first_child; child;
-         child = child->next_sibling) {
-        if (child->is_text()) {
-            if (!layout_dom_text_has_non_whitespace(child->as_text())) continue;
-            return false;
-        }
-        if (!child->is_element()) return false;
-        CssEnum display = resolve_display_value((void*)child).inner;
-        if (display == CSS_VALUE_TABLE_CELL) {
-            if (has_cell) *has_cell = true;
-            continue;
-        }
-        if (display != CSS_VALUE_TABLE_ROW &&
-            display != CSS_VALUE_TABLE_ROW_GROUP &&
-            display != CSS_VALUE_TABLE_HEADER_GROUP &&
-            display != CSS_VALUE_TABLE_FOOTER_GROUP) {
-            return false;
-        }
-        if (!child->as_element()->is_table_fixup() ||
-            !dom_table_fixup_cells_only_descendants(child, has_cell)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static bool dom_table_fixup_is_cells_only_run(DomNode* node) {
-    if (!node || !node->is_element() || !node->as_element()->is_table_fixup()) {
-        return false;
-    }
-    bool has_cell = false;
-    return dom_table_fixup_cells_only_descendants(node, &has_cell) && has_cell;
-}
-
 static bool dom_removal_merges_table_fixup_runs(DomElement* parent,
                                                   DomNode* child) {
-    if (!parent || !child ||
-        resolve_display_value((void*)parent).outer != CSS_VALUE_INLINE) {
-        return false;
-    }
+    if (!parent || !child) return false;
     DomNode* previous = dom_table_fixup_significant_sibling(child, false);
     DomNode* next = dom_table_fixup_significant_sibling(child, true);
-    bool previous_cells = dom_table_fixup_is_cells_only_run(previous);
-    bool next_cells = dom_table_fixup_is_cells_only_run(next);
-    return previous_cells && next_cells;
+    // removing a separator can join any table-internal runs in either block
+    // or inline flow; their generated wrappers must not preserve old partitions.
+    return previous && previous->is_element() && previous->as_element()->is_table_fixup() &&
+        next && next->is_element() && next->as_element()->is_table_fixup();
 }
 
 static bool dom_child_is_nested_in_table_fixup(DomElement* parent,
@@ -910,17 +871,14 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 static thread_local bool dom_geometry_flush_in_progress = false;
 
 static bool dom_flush_pending_document_layout(UiContext* uicon, DomDocument* doc) {
-    if (doc->js.mutation_count > 0) {
-        dom_engine_reconcile_dom_mutations(uicon, doc);
-        return true;
-    }
+    uint64_t before = doc->view_tree ? doc->view_tree->document_layout_count : 0;
+    bool mutations = doc->js.mutation_count > 0;
     bool pending_scroll = doc->pending_scroll_into_view_target.address;
-    bool pending_reflow = doc->state && doc->state->needs_reflow;
-    if (!pending_scroll && !pending_reflow) return false;
-    // animation seeks and scroll requests change layout without changing the DOM.
+    // the engine checkpoint validates viewport/font/native style inputs too;
+    // the mutation ledger alone cannot determine whether geometry is current.
     if (!dom_engine_layout_document(uicon, doc, true)) return false;
-    dom_engine_document_clear_reflow(doc);
-    return true;
+    return mutations || pending_scroll ||
+        (doc->view_tree && doc->view_tree->document_layout_count != before);
 }
 
 extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
@@ -11560,11 +11518,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
 
-        // A geometry read during initial scripts can build a provisional pane
-        // before the document owns a DocState; retain the requested offset
-        // until the final layout establishes its scroll range.
+        // loading lifecycle bookkeeping can outlive a published geometry read;
+        // only a missing snapshot/state makes this pane provisional.
         bool layout_pending = elem->doc && (!elem->doc->state ||
-            ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED);
+            !dom_has_committed_geometry_snapshot(elem->doc));
         bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
             dom_engine_element_has_vertical_rl_flow(elem);
         const FlexProp* flex = elem->embedp()->flex;
@@ -16072,6 +16029,15 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_ar
     return ItemNull;
 }
 
+static Item dom_insert_text_value_before_child(DomElement* parent, Item value,
+                                                DomNode* reference) {
+    RootFrame roots(1);
+    Rooted<Item> text(roots, js_to_string(value));
+    if (item_is_error(text.get())) return text.get();
+    return dom_insert_text_before_child(parent, text.get(), reference)
+        ? make_js_undefined() : ItemNull;
+}
+
 static Item dom_insert_adjacent_text_bridge(DomElement* elem, Item position_arg,
                                              Item text_arg) {
     if (!elem) return ItemNull;
@@ -16086,17 +16052,13 @@ static Item dom_insert_adjacent_text_bridge(DomElement* elem, Item position_arg,
     if (parent->doc && parent->doc->js.doc_node == parent) {
         return dom_raise_named("HierarchyRequestError", "Document cannot have text children");
     }
-    Item text = js_to_string(text_arg);
-    if (item_is_error(text)) return text;
-    RootFrame roots(1);
-    Rooted<Item> rooted_text(roots, text);
-    return dom_insert_text_before_child(parent, rooted_text.get(), reference)
-        ? make_js_undefined() : ItemNull;
+    return dom_insert_text_value_before_child(parent, text_arg, reference);
 }
 
 extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
+    bool pending_node_notification = false;
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
@@ -16131,15 +16093,16 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
             }
             if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
             dom_post_insert((DomNode*)elem, child_node);
+            pending_node_notification = true;
         } else {
-            const char* text = fn_to_cstr(args[i]);
-            if (text) {
-                DomText* tn = DomText::create_copy(text, strlen(text), elem);
-                if (tn) ((DomNode*)elem)->append_child(tn);
-            }
+            // string insertion must update backing storage and invalidate its
+            // containing flow; a target-less batch notification cannot do that.
+            Item inserted = dom_insert_text_value_before_child(elem, args[i], nullptr);
+            if (item_is_error(inserted)) return inserted;
+            if (inserted.item == ItemNull.item) return make_js_undefined();
         }
     }
-    dom_mutation_notify();
+    if (pending_node_notification) dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -16147,6 +16110,7 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
     DomNode* ref = elem->first_child;
+    bool pending_node_notification = false;
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
@@ -16177,6 +16141,7 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
             }
             if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
             dom_post_insert((DomNode*)elem, child_node);
+            pending_node_notification = true;
             if (elem->tag() == MARKUP_NAME_SELECT && child_node->is_element() &&
                 child_node->as_element()->tag() == MARKUP_NAME_OPTION) {
                 DomElement* child_elem = child_node->as_element();
@@ -16187,14 +16152,12 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
                 }
             }
         } else {
-            const char* text = fn_to_cstr(args[i]);
-            if (text) {
-                DomText* tn = DomText::create_copy(text, strlen(text), elem);
-                if (tn) ((DomNode*)elem)->insert_before(tn, ref);
-            }
+            Item inserted = dom_insert_text_value_before_child(elem, args[i], ref);
+            if (item_is_error(inserted)) return inserted;
+            if (inserted.item == ItemNull.item) return make_js_undefined();
         }
     }
-    dom_mutation_notify();
+    if (pending_node_notification) dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 

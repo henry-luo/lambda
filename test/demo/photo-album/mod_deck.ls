@@ -8,6 +8,12 @@ pub let H = 720
 pub let MAX_PHOTOS = 120
 pub let THEMES = [{key:"dark", title:"Gallery, dark"}, {key:"light", title:"Gallery, light"}, {key:"postcard", title:"Postcard"}]
 pub let TRANSITIONS = ["fade", "push", "slide"]
+// player chrome in the album viewer's palette (lambda.slide `ui` tokens); saved decks keep it standalone
+pub let ALBUM_UI = {page:"#111214", background:"#1b1c1f", border:"#2c2d31", text:"#f2f2f7", muted:"#a1a1a6",
+    control:"rgba(255,255,255,0.08)", control_border:"rgba(255,255,255,0.06)", control_hover:"rgba(255,255,255,0.16)",
+    control_hover_border:"rgba(255,255,255,0.12)", control_active:"rgba(255,255,255,0.04)",
+    accent:"#0a84ff", accent_hover:"#409cff", accent_active:"#0071e3", accent_text:"#ffffff", shadow:"none",
+    font:"-apple-system, \"Helvetica Neue\", Arial, sans-serif", radius:"7px"}
 
 fn portrait(p) => p.aspect < 0.9
 
@@ -25,7 +31,7 @@ fn step(lib, ids, i, n) {
 
 pub fn plan(lib, ids) => [{kind:"title", ids:slice(ids, 0, 1)}, *step(lib, slice(ids, 0, MAX_PHOTOS), 0, 1), {kind:"credits", ids:slice(ids, 0, MAX_PHOTOS)}]
 
-fn years(lib, ids) {
+pub fn years(lib, ids) {
     let ys = [for (id in ids) L.photo(lib, id).year]
     let lo = min(ys)
     let hi = max(ys);
@@ -34,10 +40,10 @@ fn years(lib, ids) {
 
 fn place(lib, p) => join([for (part in [L.album_name(lib, p), L.location_label(p)] where part != "") part], " · ")
 
-// a photo, or its average colour when the file is not downloaded
-fn picture(p, id, box, prefix, fit, morph = null) => if (p.has_photo)
+// a photo, or its average colour when the file is not downloaded; the film also uses it
+pub fn picture(p, id, box, prefix, fit, morph = null, style = null) => if (p.has_photo)
     <image id:id, src:prefix ++ "photos/" ++ p.file, x:box[0], y:box[1], width:box[2], height:box[3], fit:symbol(fit),
-        *:(if (morph != null) {morph_id:morph} else {})>
+        *:(if (morph != null) {morph_id:morph} else {}), *:(if (style != null) {style:style} else {})>
     else <shape id:id, kind:'rect', x:box[0], y:box[1], width:box[2], height:box[3], fill:p.color or "#444444",
         *:(if (morph != null) {morph_id:morph} else {})>
 
@@ -129,7 +135,7 @@ pub fn deck(lib, options) {
     let postcard = options.theme == "postcard";
     <presentation id:"album", title:options.title, width:W, height:H,
         theme:if (options.theme == "dark") 'midnight' else 'paper',
-        autostart:true, autoplay_dwell_ms:options.dwell_ms,
+        autostart:true, autoplay_dwell_ms:options.dwell_ms, ui:ALBUM_UI,
         *[for (i, s in slides) (let built = slide_for(lib, s, i, options), if (postcard) framed(built) else built)]>
 }
 
@@ -146,9 +152,5 @@ fn resolve_child(c, base) => if (not (c is element)) c
     else c
 pub fn resolve_sources(deck, base) => <presentation *:map(deck), *[for (c in content(deck)) resolve_child(c, base)]>
 
-// file name for a deck title: its lower-case letter and digit runs joined by "-"
-type SlugWord = \(("a" to "z" | "0" to "9")+)
-pub fn file_name(title) {
-    let slug = slice(join([for (m in find(lower(title), SlugWord)) m.value], "-"), 0, 48);
-    (if (slug == "") "slideshow" else slug) ++ ".slides"
-}
+// file name for a deck title
+pub fn file_name(title) => L.slug(title, "slideshow") ++ ".slides"

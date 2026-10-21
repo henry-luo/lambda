@@ -565,12 +565,17 @@ static const VectorPathProp VECTOR_PATH_PROP_DEFAULT = {};
 static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->layout_cache) return;
     radiant::css_resolved_style_release(elem->layout_cache, tree->prop_pool);
+    radiant::intrinsic_height_cache_release(elem->layout_cache, tree->prop_pool);
+    radiant::flex_measured_flow_release(elem->layout_cache, tree->prop_pool);
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
 }
 
 static void free_layout_cache_payload(DomElement* elem, ViewTree* tree) {
-    if (elem && elem->layout_cache)
+    if (elem && elem->layout_cache) {
         radiant::css_resolved_style_release(elem->layout_cache, tree->prop_pool);
+        radiant::intrinsic_height_cache_release(elem->layout_cache, tree->prop_pool);
+        radiant::flex_measured_flow_release(elem->layout_cache, tree->prop_pool);
+    }
 }
 
 static void reset_marker_prop(DomElement*, ViewTree*) {
@@ -1133,6 +1138,7 @@ void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root) {
 
 void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root) {
     if (!tree || !root) return;
+    layout_invalidate_document_geometry(tree);
 
     // A style mutation invalidates the target's materialized layout properties,
     // but resetting the whole tree also resets anonymous table fixup owners.
@@ -1146,6 +1152,7 @@ void ViewTree::init(MemContext* owner) {
     // The document context outlives the view tree: free_document destroys the
     // tree before it releases the document's Input context.
     mem_ctx = lam::up(owner);
+    document_layout = nullptr;
     render_list = nullptr;
     render_frame_cache = nullptr;
     render_list_in_use = false;
@@ -1173,15 +1180,22 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 }
 
 void ViewTree::reset_retained() {
+    layout_invalidate_document_geometry(this);
     if (model) {
         if (!view_tree_model_reset(this)) return;
     } else layout_generation = generation_next32(layout_generation);
     if (root) {
+        DomElement* source = root->is_element() ? root->as_element() : nullptr;
+        // generated table roles and split text cannot survive resetting their
+        // inherited props; restore source runs while their owners are still live.
+        layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(source);
+        layout_detach_first_letter_pseudo_content_for_layout_reset(source);
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
         view_teardown_visit_node(this, root,
             VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_RESET_IN_PLACE,
             false);
+        layout_detach_materialized_pseudo_content_for_layout_reset(source);
         root = NULL;
     }
     // Measurement entries point at this tree's views; reset invalidates them with the layout epoch.
@@ -1226,6 +1240,7 @@ void ViewTree::destroy() {
     render_scratch_arena = NULL;
     display_list_arena = NULL;
     prop_pool = NULL;
+    document_layout = nullptr;
     free_text_rects = NULL;
     // Factory-created view roots must unregister their memory-context nodes on teardown.
     if (old_arena) mem_arena_destroy(old_arena);

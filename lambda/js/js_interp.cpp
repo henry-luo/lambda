@@ -3560,7 +3560,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     }
     // a wide result outlives this C frame; use the existing transient-number
     // ownership boundary before returning its completion (D5.3.4).
-    result = scalar_storage_read(result, false);
+    result = js_scalar_storage_read(result, false);
     JS_INTERP_CALL_RETURN(item_is_error(result) ? js_interp_throw(result)
         : js_interp_normal(result));
 #undef JS_INTERP_CALL_RETURN
@@ -6408,7 +6408,7 @@ static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
     Item result = mvp_lmd_call_function_satellite(callee_root.get(),
         (Item){.function = (Function*)handoff->function}, this_root.get(),
         arguments.items(), count, result_root.home());
-    result = scalar_storage_read(result, false);
+    result = js_scalar_storage_read(result, false);
     if (!cell->loop_entered) {
         cell->loop_entered = true;
         log_info("js-loop-handoff: entered loop=%u", (unsigned)handoff->ordinal);

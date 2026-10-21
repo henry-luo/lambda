@@ -1,0 +1,14 @@
+'1. result fields'
+["Life Along the River | Travel Stories", "By Jane Doe", "A visit to a quiet river town.", "Example Times", "en", null, null, 711]
+'2. content is the page element; html is its markup'
+['div', "readability-page-1", "page", true]
+'3. links resolve against options.url, and stay as written without one'
+[["https://example.com/travel/history.html"], ["history.html"]]
+'4. a parsed document and its source text give the same article'
+true
+'5. options'
+[["page", "post"], ["page", "story"], 722, 928, ["Bridges and Ferries", "The Daily River"], ["https://ads.example.com/frame"], 652, "too many elements"]
+'6. readerable, with its thresholds'
+[[false, false, false, true], [false, true, true, true], [false, true, true, true]]
+'7. a page with no content has no article'
+true

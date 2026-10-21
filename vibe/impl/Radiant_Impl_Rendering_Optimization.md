@@ -1,9 +1,21 @@
 # Radiant Rendering Optimization — Implementation Plan
 
-**Date:** 2026-10-20
+**Date:** 2026-10-21
 
-**Status:** committed core pass and continuations through §25; §26 complete with
-release/ASan, SVG and Radiant qualification, 2026-10-20.
+**Status:** committed core pass and continuations through §30 (`b32046f25`); §§27–28 complete
+with release/ASan, SVG and Radiant qualification, 2026-10-21.
+§29 implements bounded automatic placement reuse for empty atomic solid HTML
+boxes, with release/ASan, SVG, movement and Radiant qualification complete for
+the frozen build. Later concurrent runtime edits and a replacement workspace CLI
+are outside that qualification; see §29.
+§30 completes active-payload copying for translated cursor descriptors, with
+release/ASan, SVG and Radiant qualification. Its scoped movement comparison
+reduces requested placement-copy bytes by 71.8%; speed and memory improvement
+are not established.
+§31 implements pixel-exact opaque rectangle rasterization without added native barriers;
+focused pixel/boundary, release/ASan and SVG checks pass. The selected repeated
+repaint comparison improves; repeated-PNG capture is slower at 2×. Required
+aggregate qualification has missing-fixture and CSS-memory limits; see §31.
 The committed checkpoint and its qualification limits are in §7. Subsequent
 sections record serial/recording reuse, shared paint buffers, native batching,
 chunk references, resource summaries, the SVG producer boundary, validated
@@ -37,6 +49,14 @@ The §26 parent-capture path shares zero-ID foreign leaf subscenes with conserva
 budget charges and independent publication ownership. Release/ASan, SVG, scoped
 copy-work checks and the final Radiant aggregate pass after the paged-fixture
 teardown correction recorded below.
+The §27 path retains translated foreign SVG leaves on parent edges. Focused
+identity, validation, resource/failure and serial/dirty/tile checks and the final
+aggregate pass; its same-base measurement records both admission and added
+validation work.
+The §28 exact-placement attestations eliminate repeated source validation during
+frame validation and parent capture. Release/ASan, SVG, scoped work-reduction
+measurement and the final Radiant aggregate pass; overall frame-time and memory
+improvements are not established by that measurement.
 
 **Artifact retention:** an external cleanup removed `./temp/` during continuation
 qualification. The earlier temporary receipts cited in §7 and the historical
@@ -2609,3 +2629,709 @@ This bounded milestone is complete. General HTML placement-only reuse, translate
 and non-leaf foreign capture, finer inherited/reference invalidation and matched-base
 movement/resource/backend performance attribution remain open. Command sharing
 does not eliminate native shape construction or establish a general speedup.
+
+## 27. Retain translated foreign SVG subscenes during parent capture
+
+**Priority / outcome, 2026-10-21:** moved visible-overflow SVG already reuses its
+vector producer, but §26 rejects its translated child during HTML capture.
+Preserve placement on the parent-to-child reference so the parent can be retained
+without copying or republishing SVG geometry. Ownership and budget charges remain
+those of §26 (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+Acceptance: multiple integer/fractional placements share the original zero-ID SVG
+leaf and retain a valid parent/resource snapshot. Serial, dirty and tile replay
+match direct recording, including caller/local clips and gradients. Producer
+keys stay independent; source replacement, either cache teardown order and budget
+or allocation rejection preserve readers and fallback behavior. Non-finite,
+unsupported pixel and malformed placements publish no parent fragment.
+
+Implementation: add optional translation to child spans and compose it in the
+existing display-list cursor. Capture only certified foreign zero-ID leaf scopes;
+store their effective displacement on the parent span. Validate translated
+commands before publishing their parent. Do not introduce another persistent
+wrapper, geometry representation or translated semantic view identity.
+
+Scope excludes top-level/nonzero/nested foreign capture, arbitrary HTML reflow
+admission and CPU-effect translation. Verification budget: focused capture,
+identity, finite/unsupported, failure/budget/resource and native pixel cases;
+affected native release/ASan, SVG paint, an attributable release comparison and
+one required Radiant aggregate after the implementation is stable.
+
+### Implemented behavior
+
+`DisplayCommandSpan` now stores a two-float child displacement. The cursor
+composes it with enclosing/owner translations; own-command spans reject nonzero
+displacement. Parent capture retains a foreign zero-ID leaf and records its
+effective position on the edge. The source publication and payload owners stay
+unchanged, and budget accounting includes the larger span capacity. General
+translated HTML, same-cache semantic publications and top-level/nested foreign
+graphs keep their previous paths.
+
+Newly placed child commands must validate successfully before their parent can
+publish. This matters even when an ad hoc source wrapper bypasses the public
+translated-append validator: unsupported CPU operations and image matrices that
+overflow at their new position cannot create a cached parent. Snapshot/admission
+failure releases acquired leases and leaves the original recording available.
+
+The original capture regression failed on the same base before implementation.
+It now retains two fractional/integer placements, shares source descriptors and
+supports an enclosing translation that cancels one displacement to zero. Existing
+budget/resource/failure cases also exercise translated imports. Cursor checks
+cover malformed own-span offsets, non-finite/cancelling translations, graph limits
+and cycles. The production SVG case compares uncached output, serial/dirty/tile
+replay, caller/local placement and gradients after both cache teardown orders.
+Replay setup is shared through the existing native rendering test utilities.
+The local vector clip is a nested SVG viewport. An initial `clipPath` fixture
+correctly hit the existing raster-effect exclusion: SVG clip-path coverage is
+rasterized in the current producer and stays outside vector-cache admission.
+That experiment is preserved in `vector-raster-clip-excluded.log`; this milestone
+does not change effect eligibility or add clip-path vectorization.
+
+### Scoped release measurement
+
+A same-base release control (`aaba82623`, SHA-256
+`59759f188a7da5e942a397e7040e4b3ba74c0af10f6b2b329203f9f85527a995`)
+was built before production edits. The 512-path SVG fixture asserts a root scroll
+of 24.5 px, then completes twelve forced renders with whole-frame reuse disabled
+and SVG vector caching enabled. Five normal child-process samples per binary
+alternate order; separate profiles contain fourteen complete scopes. Discarding
+the first three leaves eleven steady frames. All final PNGs match and every
+scroll assertion passes (**D4.2.5v3**). Receipts and the driver are under
+`temp/rendering-placed-subscenes/measurement/`.
+
+The candidate imports one translated SVG leaf per steady frame; the control
+rejects that child. Both have eleven SVG hits, zero SVG producers and 5,665 native
+shapes across the steady profile. The new successful parent capture copies nine
+surrounding HTML commands per frame; the old failed capture copied only its first
+five commands before rejection. Parent validation adds one transient translated
+SVG descriptor pass: placement-copy bytes rise from 333,288 to 444,312 per frame.
+Avoiding repeated validation with trustworthy placement metadata remains open.
+
+| Measure | Same-base control | Candidate |
+|---|---:|---:|
+| Normal child-process wall median, 5 samples | 160.081 ms | 155.201 ms |
+| Per-child peak RSS median | 34,816,000 bytes | 34,783,232 bytes |
+| Profiled retained-capture median | 0.097 ms | 0.098 ms |
+| Profiled scope median | 10.786 ms | 10.440 ms |
+| Profiled steady tracked-end bytes median | 4,085,982 | 4,096,794 |
+
+Normal wall samples range 155.562–178.910 ms for control and 153.899–809.000 ms
+for candidate; OS caches are uncontrolled and profiles include logging/tracking.
+The observed wall ratio is 0.970, RSS ratio 0.999. This establishes translated
+parent admission and sharing, not a general frame-time or total-memory reduction.
+Native shape construction and cursor-local translation copies remain.
+
+### Qualification
+
+The frozen `release_native` CLI is SHA-256
+`8da52dacd2fb3497627b37d862293b2dd3654f37a5c4f1e9ef2a2b046a5da35f`,
+at base `aaba82623` plus the recorded local inputs. All 414 affected native cases
+pass in release and `debug_asan_native`: 220 vector, 63 retained, 103 display-list
+and 28 state-store. Final pixel coverage includes the nested SVG viewport clip;
+the same CLI is used by the measurement and SVG gate. ASan leak detection is
+disabled and vendor instrumentation is not claimed. Twelve shared release products
+were saved/restored with exact hashes before aggregate qualification. SVG paint
+passes twelve off/eager 1×/2× scenarios and 680 assertions. Integer-cast lint,
+scoped diff, document fences and local links pass.
+
+The final required aggregate completes in 343,983 ms: **6,075 passed, zero failed,
+146 partial and two skipped**, of 6,223 cases. UI automation passes 662/662,
+input events 32/32, paged media 502/502 and DOM 160/160. View passes 216 with one
+skip; layout retains 3,152 fully passing and 142 partial cases. All final source
+and release-product hashes match the frozen candidate. `qualification.json` and
+the successful `aggregate-exit.json` record the result under
+`temp/rendering-placed-subscenes/`. `pixel-coverage-audit.json` confirms that the
+final native clipping refinement changed only its test source/executable; the
+measured renderer inputs, CLI and other qualified products remained identical.
+
+This milestone is complete. Reusing trusted placement validation metadata to
+avoid the added command pass remains open, alongside non-leaf/top-level foreign
+capture, automatic HTML placement-only reflow admission, finer inherited/reference
+invalidation and the broader movement/resource/backend performance envelope.
+
+## 28. Reuse exact-placement validation during parent capture
+
+**Priority / outcome, 2026-10-21:** §27 adds a complete translated-command
+validation pass when capturing a moved SVG leaf. Its public placement shell has
+already validated the same immutable source and displacement. Preserve that
+attestation on the private shell and copy it onto the captured parent edge,
+avoiding repeated descriptor checks without weakening validation
+(**D4.5.3v2 / D4.2.4**).
+
+Acceptance: repeated validation of a public translated fragment and capture of
+its parent use chunk summaries rather than walking the source commands. Two
+distinct placements keep independent attestations through source replacement and
+cache teardown. An enclosing displacement, untrusted wrapper, non-finite matrix,
+unsupported CPU operation or nesting-limit violation cannot borrow a certificate
+for another placement. Budget and allocation failure release all new metadata.
+Serial/dirty/tile pixels remain identical.
+
+Implementation hypothesis: keep shell certification private and immutable after
+successful full validation; retain sparse edge attestations inside the owning
+parent chunk, charged by actual capacity. A cursor-aware query recognizes only
+the exact private owner/edge at its certified cumulative displacement. Changed
+placements use the existing full validator. No mutable source certificate cache,
+new vector model or general HTML placement admission is introduced.
+
+Verification budget: first reproduce repeated command checks in the existing
+translated-leaf regression; then focused certificate, changed-placement, graph,
+resource and failure cases. Qualify affected native release/ASan suites, SVG
+paint, a matched §27 release comparison and one required Radiant aggregate after
+the implementation stabilizes. The control is the previously qualified local
+§27 renderer; provenance is saved under `temp/rendering-placement-validation/`.
+
+### Implemented behavior
+
+Private placement shells publish a child validation summary only after the full
+translated stream passes. The cursor-aware query recognizes its exact source
+and cumulative displacement. It also recognizes sparse, sorted attestations
+copied onto newly captured parent edges; binary search avoids scanning all
+placements for every child. Public source certificates remain unchanged. New
+shells validate fully, changed placements validate fully, and untrusted wrappers
+cannot manufacture attestations by matching an offset.
+
+Parent metadata uses one optional pointer per chunk and allocates an array only
+for certified translated children, starting at one entry. Admission charges the
+array object and its actual capacity; teardown and failed admission release it.
+No source commands or geometry are copied to certify an edge. Existing graph
+and element peaks include enclosing shell levels even when validation skips the
+certified source.
+
+The original regression observed 134 command checks when validating two
+64-rectangle placements. It now checks two parent markers and composes two
+summaries, with one cursor-local translated marker per child. Parent capture
+copies only its two markers and uses the same attestations. Coverage includes
+both cache teardown orders, producer replacement, enclosing translation and
+cancellation, image matrix overflow, CPU operation rejection, maximum graph
+depth, independently valid untrusted wrappers, resource generations, budgets and
+allocation failures. Native pixel coverage from §27 remains unchanged.
+
+### Scoped release measurement
+
+The control is the qualified §27 local renderer, SHA-256
+`8da52dacd2fb3497627b37d862293b2dd3654f37a5c4f1e9ef2a2b046a5da35f`;
+the candidate is SHA-256
+`514315b3e76452c1c163c90467aaf0abeb3e239bb6a6357f59172dbdb96e4e88`.
+Both share HEAD `aaba82623`; control/candidate source manifests record the local
+delta. The same 512-path fixture asserts root scroll at 24.5 px, with whole-frame
+reuse and SVG layers disabled, vector caching enabled and one rendering thread.
+Five normal child-process samples alternate order; separate fourteen-scope
+profiles discard the first three frames. All twelve final PNGs and all scroll
+assertions match (**D4.2.5v3**). Receipts are under
+`temp/rendering-placement-validation/measurement/`.
+
+| Measure | §27 control | Candidate |
+|---|---:|---:|
+| Warm-frame validation command checks | 1,560 | 532 |
+| Warm-frame validation chunk checks | 0 | 2 |
+| Warm-frame transient placement descriptor bytes | 444,312 | 222,696 |
+| Warm-frame copied retained command bytes | 1,944 | 1,944 |
+| Warm-frame native shapes | 515 | 515 |
+| Normal child-process wall median, 5 samples | 163.258 ms | 166.168 ms |
+| Normal per-child peak RSS median | 34,930,688 bytes | 34,963,456 bytes |
+| Profiled retained-capture median | 0.093 ms | 0.104 ms |
+| Profiled scope median | 10.414 ms | 11.462 ms |
+| Profiled tracked-end bytes median | 4,096,936 | 4,097,008 |
+
+Two complete 514-command validation passes become two summary checks per warm
+frame. Initial placement validation and raster replay still visit the commands;
+parent capture and each skipped validation scope still translate its first
+marker. This reduces validation command checks by 65.9% and placement-copy bytes
+by 49.9% on this fixture, with unchanged recording copies/native construction.
+It does not demonstrate lower frame time or memory use. Normal wall ranges are
+156.058–793.587 ms for control and 155.375–818.726 ms for candidate; wall/RSS
+median ratios are 1.018/1.001. OS caches are uncontrolled, profiles include
+logging/tracking, and the candidate allocates a small amount of attestation
+metadata. Broader movement/resource/backend performance qualification stays open.
+
+### Qualification and remaining work
+
+All **415** affected native cases pass in both `release_native` and
+`debug_asan_native`: 220 vector, 64 retained, 103 display-list and 28 state-store.
+ASan leak detection is disabled; vendor internals are not claimed as
+instrumented. Final test refinement reuses the caller-depth harness for placed
+and unplaced sources and shares image-descriptor setup. The complete retained
+suite passes again in release and ASan; `final-test-audit.json` confirms that
+only that test source/executable changed, while the measured renderer, CLI and
+other products remained byte-identical. Twelve shared release products were
+restored and verified before the aggregate.
+
+SVG paint passes twelve off/eager 1×/2× scenarios and **680 assertions** on the
+same frozen CLI as the measurement. The required Radiant aggregate exits zero
+in **362,844 ms**: **6,076 passed, zero failed, 146 partial and two skipped**, of
+6,224 cases. UI passes 662/662, input events 32/32, paged media 502/502 and DOM
+160/160. View passes 216 with one skip; layout retains 3,152 fully passing and
+142 partial cases. Integer-cast lint, scoped diff, Markdown fences/local links
+and final semantic-input/release-product/CLI hash checks pass. The receipts are
+`qualification.json` and `aggregate-exit.json` under
+`temp/rendering-placement-validation/`.
+
+This milestone is complete. Initial placement validation, changed-placement
+fallback and raster replay still walk source commands. Non-leaf/top-level
+foreign capture, automatic HTML placement-only reflow admission, finer
+inherited/reference invalidation and broader movement/resource/backend
+performance qualification remain open. No general speedup or memory-reduction
+claim is made.
+
+## 29. Automatically reuse placement-independent atomic HTML boxes
+
+**Priority / outcome, 2026-10-21:** start automatic HTML placement reuse with
+empty boxes painted in one complete atomic visit (including inline-blocks),
+whose entire paint is one solid-color rectangle. Ordinary flow blocks can have
+split background/foreground visits and stay outside this admission. Existing
+background commands snapshot caller clipping, so arbitrary
+fragment translation is unsafe. Admit only boxes whose painted pixels are fully
+inside a plain caller clip, and record their rectangle without that redundant
+clip. An exact retained-primitive check can then reuse the canonical leaf at its
+current position after reflow (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+
+Acceptance: changing a preceding sibling's height moves an unchanged box and
+reuses its original immutable commands on repeated full paints, including
+fractional movement and output density changes. Current size/color/visibility,
+children, transforms, effects, fragmentation and clip coverage control admission.
+Changed or unsupported paint records normally. Parent capture preserves approved
+local placements and their canonical source index; ordinary explicit translated
+semantic fragments retain their previous recapture rejection. Producer eviction,
+teardown, allocation rejection and serial/dirty/tile replay preserve pixels and
+ownership.
+
+Implementation: share one eligibility helper between first recording and reuse.
+Compare a certified three-command leaf (begin/solid rectangle/end) with the exact
+current rectangle and color; require exact float position recomposition. Tag only
+this successfully checked private placement for same-cache parent capture. Its
+source publication stays canonical, and the parent edge carries the current
+position. No per-view style hash, second HTML cache or mutable geometry is added.
+
+Scope excludes split-phase blocks, descendants/text, borders/radii, images/gradients, clipping at
+partially covered pixels, transforms/effects, table/replaced/custom paint and
+automatic general-subtree reuse. Verification budget: focused API/capture and
+real HTML reflow regressions, negative admission and pixel controls at 1×/2×;
+affected native release/ASan, SVG paint, a matched release movement measurement
+and one required Radiant aggregate after stabilization. Control provenance is
+saved under `temp/rendering-html-placement/`.
+
+### Implemented behavior
+
+`render_block_solid_box` shares first-recording and reuse admission. It accepts
+only a complete atomic paint visit with no descendants, non-boundary paint,
+replaced/native producer, custom layout, transform, effect, fragmentation,
+border/radius or active/declared CSS clip. Rectangular caller clips must fully
+cover every touched pixel; logical-to-device projection must reproduce the
+exact physical primitive. The ordinary background producer/lowerer is reused,
+with only its redundant caller clip omitted. Other callers keep clipping.
+
+`retained_dl_append_solid_box` compares the entire certified canonical leaf with
+the current rectangle/color and checks exact float translation recomposition.
+Approved private placements permit same-cache parent capture to retain that
+source. Canonical marker bounds stay unchanged; parent spans carry current
+positions and exact-placement validation summaries. Generic translated semantic
+fragments still cannot refresh that publication. No geometry, style hash or
+second per-document cache is introduced. Failed exact checks record freshly
+even during selective repaint, preventing weaker dirty hints from overriding a
+known primitive mismatch. External content callbacks bypass automatic admission.
+
+The first empty normal-flow block regression exposed the existing split-phase
+paint contract: it has no complete cached scope. The finite profile therefore
+uses atomic boxes (including inline-blocks), preserving §15's paint-order rule.
+Negative pixel controls also caught own `clip-path` admission before the box's
+clip scope opens; admission now queries the same CSS declaration helper used by
+that scope. Replaced/native producers are excluded through the existing CSS
+classification, including an initially empty producer that later draws content.
+
+The frame-level `RADIANT_HTML_PLACEMENT_CACHE=off` switch disables this admission
+and the clip-elision fast path. Paired measurements use that switch on one frozen
+release binary, with whole-frame reuse separately disabled. Unrelated Lambda
+runtime/reader/HTML-parser and test/document edits appeared during this work;
+they are preserved and common to both measurement modes. The older §28 control
+saved before those edits remains a provenance artifact, not an attributable
+performance comparison for this final candidate.
+
+### Scoped release movement measurement
+
+Both modes use the same frozen `release_native` CLI, SHA-256
+`8d490249c6b5b0b1b76d1d5fb5af07fd55f3fb2dd47285ecb0e9f8ec414f5f98`,
+at `aaba82623` plus the recorded local inputs. Only
+`RADIANT_HTML_PLACEMENT_CACHE=off/on` differs. Whole-frame reuse and SVG caches
+are disabled; rendering uses one thread at 1×. The 512 empty inline-block boxes
+alternate between two positions with horizontal and vertical fractional moves.
+Each run completes twelve style scripts, twelve geometry assertions and twelve
+PNG captures. All twelve images match across every run in both modes.
+Five normal child-process samples per mode alternate order; separate profiles
+have twenty-five complete paint scopes (initial paint plus script-triggered and
+forced paints). Discarding the first three leaves twenty-two steady scopes
+(**D4.2.5v3**). The driver and receipts are under
+`temp/rendering-html-placement/measurement/`.
+
+| Measure | Feature off | Feature on |
+|---|---:|---:|
+| Normal child-process wall median, 5 samples | 279.663 ms | 267.569 ms |
+| Normal per-child peak RSS median | 64,045,056 bytes | 58,294,272 bytes |
+| Profiled steady recording median | 0.565 ms | 0.446 ms |
+| Profiled steady capture median | 0.405 ms | 0.134 ms |
+| Profiled steady scope median | 6.436 ms | 6.315 ms |
+| Steady physical frame commands | 2,560 | 512 |
+| Steady retained command-copy bytes | 552,960 | 0 |
+| Steady transient placement-copy bytes | 0 | 884,736 |
+| Steady native shapes | 1,024 | 512 |
+| Steady path clones | 1,536 | 0 |
+| Steady clip segments | 512 | 1 |
+| Steady validation command checks | 5,120 | 1,536 |
+| Steady validation chunk checks | 0 | 512 |
+| Steady tracked-end bytes median | 8,708,222 | 7,495,763 |
+
+Every steady enabled frame reuses and translates all 512 original leaves with
+zero box recordings. Native construction remains at one shape per box; this is
+not a ThorVG scene cache. Cursor placement adds transient descriptor copies even
+though retained copying is eliminated, so total descriptor traffic is not claimed
+to decrease. The normal wall/RSS ratios are **0.957 / 0.910**. Normal wall ranges
+are 257.787–293.878 ms off and 246.381–284.211 ms on. Profiles include
+logging/tracking and OS caches are uncontrolled. This establishes a scoped
+movement improvement and lower resident memory, not a general HTML speedup.
+
+The first observer expected script events not to count as assertions and later
+expected every assertion event to paint. The runner actually counts successful
+scripts and assertions (24 checks), while assertions without damage do not paint
+(25 scopes). Those rejected observer receipts are preserved separately. The ten
+valid normal samples were retained with command/binary/image checks; only the
+profile observation was repeated after deriving its expected paint inventory.
+
+### Qualification inputs
+
+All 421 affected native cases pass in release and `debug_asan_native`: 224 vector,
+66 retained, 103 display-list and 28 state-store. ASan leak detection is disabled;
+vendor instrumentation is not claimed. SVG paint passes twelve off/eager 1×/2×
+scenarios and 680 assertions on the same frozen CLI. Native cases cover sibling
+reflow and repeated canonical identity, density changes, current color/size,
+visibility/children, transforms, effects/gradients, partial/rounded/declarative
+clips, split paint phases, external callbacks, known selective-paint mismatch,
+allocation/budget rejection and serial/dirty/tile pixels beyond cache teardown.
+
+Concurrent edits to the readability package did not change compiled inputs or
+the frozen release products. The movement fixture, native checks and SVG paint
+do not import those edited sources. For the final aggregate, all 749 runtime
+asset files are snapshotted under `runtime-lmd/`, selected using `LAMBDA_HOME`.
+`runtime-assets.json` guards that copy independently of live package edits;
+`runtime-source-audit.json` records the change from the measurement's workspace
+manifest. The frozen CLI, renderer/test inputs and twelve restored shared release
+products were hash-checked for the aggregate.
+
+### Final qualification and remaining scope
+
+The required Radiant aggregate completes successfully in 387,626 ms: **6,230
+total, 6,082 passed, zero failed, 146 partial and two skipped**. UI automation
+passes 662/662, input events 32/32, paged media 502/502 and DOM 160/160. View
+tests pass 216 with one skip; layout has 3,152 full passes out of 3,294 cases,
+with 142 partial results. The native suites and SVG checks above, the Radiant
+integer-cast lint and scoped diff/document checks complete this milestone's
+verification budget. `qualification.json`, `aggregate-exit.json` and
+`aggregate/test_summary.json` preserve the results under
+`temp/rendering-html-placement/`.
+
+Concurrent runtime/core/JS/URL source edits and a workspace CLI rebuild occurred
+after the aggregate finished. `dependency-drift-review.json` records their
+hashes and modification times against the completed gate. The qualified CLI
+remains `lambda-qualified.exe` with the SHA-256 above; retained release products
+and runtime assets preserve that snapshot. This qualification covers the frozen
+build and unchanged renderer/test inputs, not the newer working-tree runtime.
+The newer source edits and executable are preserved.
+
+Automatic placement reuse for split-phase blocks, text/descendants, borders,
+images, effects and general HTML subtrees remains open. So do non-leaf foreign
+capture, finer inherited/reference dependency admission and the broader M0–M7
+backend/performance envelope. The atomic solid-box milestone is complete; its
+scoped measurement does not establish general HTML speed or memory improvement.
+
+## 30. Copy only the active payload for translated cursor commands
+
+**Priority / outcome, 2026-10-21:** §29 measures 884,736 bytes of transient
+placement-descriptor copying per steady 512-box frame. `placed_item` copies the
+largest command union for every translated rectangle, marker and clip pop.
+Retain its existing cursor-local view, but copy only the common header and the
+operation's active payload before applying displacement. This reduces work for
+both explicit vector placements and automatic HTML boxes without a second
+representation or backend scene cache (**D4.5.3v2 / D4.2.4**).
+
+Acceptance: small rectangle/marker streams copy fewer bytes; zero displacement
+still borrows original descriptors; all supported vector operations preserve
+their complete active payload, resource identity and composed transforms.
+Alternating large/small payloads must not expose stale fields. Unsupported
+operations, non-finite coordinates/matrices, graph validation and scope skipping
+retain their rejection behavior. Source storage and ownership remain unchanged;
+serial/dirty/tile pixels remain byte-identical after producer teardown.
+
+Use the existing translation switch and a shared payload-copy helper so copying
+and transformation stay in the same operation case. Inactive union bytes in a
+translated cursor item are unspecified; callers already select payloads by op
+and must copy scratch items before advancing the cursor. Do not change retained
+command storage or payload leases. Verification budget: focused byte-work and
+mixed-payload regression, existing translated-vector pixel/ownership cases,
+affected native release/ASan, SVG paint, one release movement comparison and one
+required Radiant aggregate after stabilization. Broader HTML admission and
+foreign graph capture remain separate milestones. Artifacts belong under
+`temp/rendering-active-payload/`.
+
+### Implemented behavior
+
+`DisplayListCursor::placed_item` copies the opcode and four bounds values, then
+uses the existing translation case to copy only that operation's active payload.
+`dl_copy_placed_payload` starts the selected union member with placement
+construction, preserving C++17 lifetime rules and borrowing the original
+resource handles. Transform-bearing operations share the same copy/transform
+helper; rectangles share their copy/point helper. A clip pop copies no union
+payload. Copy-byte accounting remains one atomic metric update per command.
+Zero displacement, scope traversal, immutable source descriptors, retention
+budgets and lease ownership are unchanged.
+
+The mixed gradient/rectangle/marker regression first fails on the old release
+implementation's **864 copied bytes**, while all its value checks already pass.
+The new implementation copies **372 bytes**, preserving transformed placement,
+gradient coordinates/options, resource identity, rectangle values, marker IDs
+and local matching indices. Existing translated-vector tests cover every
+supported operation, nested/cancelled offsets, non-finite rejection and
+serial/dirty/tile pixel equivalence after source/cache teardown.
+
+The SVG paint harness now honors the aggregate's existing
+`RADIANT_TEST_EXECUTABLE` selection and hashes that selected executable. Private
+native runner copies retain a frozen node-core DSO at their expected relative
+rpath. This permits qualification without replacing the shared workspace CLI.
+An initial relocated vector runner failed to load that relative DSO; restoring
+the frozen module beside the runners resolves the launch failure.
+
+The first instrumented comparison exposed an avoidable extra atomic counter
+update in the draft copy helper; accounting was consolidated before final
+qualification. A subsequent run overlapped builds and used the preceding CLI
+while its replacement linked. Those receipts remain separately labeled and do
+not qualify the final candidate's timing. Final measurements use a completed,
+hash-guarded private release executable (**D4.2.5v3**).
+
+### Final release movement comparison
+
+The control and final CLI SHA-256 values are respectively
+`7559cc7ef629a3e7a850ecb51cc0ab6b7ab3c754723f37efdd71fb84e74efa17` and
+`df90ae34051ebaa21b77d6f37bdeddde75b6c94103a49a3efc8a07044441f487`.
+Both use `release_native`, with matching recorded compiled inputs apart from the
+active-payload implementation and native tests. The SVG harness change does not
+change the CLI. Whole-frame reuse and SVG caches are disabled; HTML box reuse
+is enabled, with one rendering thread at 1× and the same 512-box fractional
+movement fixture as §29. Runtime assets are frozen using `LAMBDA_HOME`.
+An unrelated readability expected-output generator appeared during the work;
+it is preserved in the source manifest and is not used by these checks.
+
+Five normal child processes per version alternate order, followed by separate
+logging/tracking profiles. Each completes twelve style scripts, twelve geometry
+assertions and twelve captures; all twelve image hashes match in all twelve
+runs. Profiles contain twenty-five complete paints; the first three are
+discarded. Every steady frame reuses all 512 boxes and records none.
+
+| Measure | Whole descriptor control | Active payload |
+|---|---:|---:|
+| Steady placement-copy bytes | 884,736 | 249,856 |
+| Steady retained command-copy bytes | 0 | 0 |
+| Steady native shapes / path clones | 512 / 0 | 512 / 0 |
+| Steady validation command / chunk checks | 1,536 / 512 | 1,536 / 512 |
+| Normal child wall median, 5 samples | 295.034 ms | 293.524 ms |
+| Normal per-child peak RSS median | 55,869,440 bytes | 56,508,416 bytes |
+| Profiled recording median | 0.581 ms | 0.582 ms |
+| Profiled retained capture median | 0.142 ms | 0.135 ms |
+| Profiled scope median | 6.657 ms | 7.023 ms |
+
+This establishes **71.8% fewer requested placement-copy bytes**, with unchanged
+validation/native work and byte-identical output. It does not establish lower
+frame time or resident memory: normal wall medians are effectively unchanged,
+profiled scope time is higher, and peak RSS is slightly higher. OS caches are
+uncontrolled and another checkout's input-event gate was still active; timing
+is diagnostic rather than a speedup qualification. Neither retained storage nor
+the cursor's scratch size shrinks. The driver, command manifests, per-process
+receipts and final profiles are under `measurement/` in the milestone directory
+(**D4.2.5v3**).
+
+### Qualification inputs
+
+All **422** affected native cases pass in both release and `debug_asan_native`:
+104 display-list, 66 retained, 224 vector and 28 state-store. ASan leak detection
+is disabled, and vendor instrumentation is not claimed. SVG paint passes all
+twelve off/eager 1×/2× scenarios and **680 assertions** using the final CLI.
+The integer-cast lint, scoped diff and Markdown fence/local-link checks pass.
+The 22 release runners, their node-core DSO, shared release products and all
+750 runtime asset files are frozen and hash-guarded. The workspace CLI is
+preserved.
+
+### Final qualification and remaining scope
+
+The required Radiant aggregate exits successfully in **425,159 ms**: **6,231
+total, 6,083 passed, zero failed, 146 partial and two skipped** under the existing
+baseline policy. UI automation passes 662/662, paged media 502/502 and DOM
+160/160. View tests pass 216 with one skip, and layout retains 3,152 full passes
+out of 3,294 cases with 142 partial results. The input-event baseline gate passes
+32/32 using its existing unsupported/known-failure exclusions. No assertions,
+goldens or baseline thresholds were weakened. `qualification.json`,
+`aggregate-exit.json` and `aggregate/test_summary.json` preserve the result in
+the milestone directory.
+
+Final source, HEAD, frozen CLI, 22 private release-runner, node-core DSO,
+retained release-product and runtime-asset hashes match the candidate. The
+milestone is complete. Initial placement validation and raster replay still
+visit source commands; the cursor keeps its largest scratch descriptor and
+native shape construction is unchanged. Broader HTML admission, non-leaf
+foreign capture, finer inherited/reference dependencies and the full M0–M7
+backend/performance envelope remain open.
+
+## 31. Rasterize pixel-exact opaque rectangles without extra native barriers
+
+**Priority / outcome, 2026-10-21:** §30 still constructs 512 native shapes per
+steady rectangle frame. The existing direct rectangle path already implements
+pixel-exact source-over for translucent fills, but excludes opaque fills.
+Extend that path to opaque rectangles only when no native scene or sealed root
+is pending. Reuse the existing rectangle/clip/tile intersection proof and raster
+writer; retain native rendering for fractional coverage, nonrectangular clips
+and pending native work (**D4.5.3v2 / D4.2.4 / D4.2.6**).
+
+Acceptance: admitted integer intersections create no native shape and match an
+explicit native rectangle path byte-for-byte. Exercise 1×/2×, negative/fractional
+coordinates, integer/fractional tile displacement and rectangular/curved clips.
+Opaque admission must introduce no CPU flush ahead of either an active native
+segment or a sealed root. Existing translucent behavior, painter order, target
+ownership and serial/dirty/tile replay remain intact. The context-level
+`RADIANT_TVG_RECT_RASTER=off` control disables only the new opaque admission.
+
+Scope: the existing pixel-exact rectangle subset; no new sampler, compound
+geometry, persistent native cache or renderer API. Verification budget: focused
+work/pixel/clip/barrier checks, affected native release/ASan, SVG paint, the
+versioned benchmark's paired release rectangle comparison, and one required
+Radiant aggregate. Artifacts belong under `temp/rendering-opaque-rectangles/`
+(**D4.2.5v3**).
+
+### Rejected compound-path experiment
+
+The first candidate combined equal-color disjoint rectangles into one native
+shape. Eight shapes became one, but fractional-coordinate controls failed:
+the vendored software renderer recognizes a lone axis-aligned rectangle and
+rasterizes its snapped bounds, whereas a compound path uses antialiased RLE
+coverage. Restricting coalescing to integral device edges preserves pixels,
+but the quiet same-binary release comparison is slower: 1× wall medians
+142.716 → 154.155 ms and 2× 465.017 → 521.133 ms, approximately 8% / 12% worse.
+Losing the rectangle fast path outweighs fewer native objects.
+
+That implementation is removed. Its source patch, frozen CLI and raw comparison
+remain under `temp/rendering-rect-batches/`. A concurrent `build_ast.cpp` edit
+landed after that CLI was compiled; those on/off samples use one identical
+binary and do not qualify the newer workspace runtime. No vendor source is
+modified. M6's instruction to retain the measured better path applies here.
+
+### Implemented behavior
+
+`vector_raster_fill_rect` now permits opaque fills when its context switch is
+enabled and both `batch_scene` and `batch_root` are empty. The existing
+`vector_raster_clip_rect` must produce an integral device-space intersection,
+including active clips, tile displacement and target bounds. The ordinary
+raster rectangle writer then draws directly into the borrowed target. Pending
+native paints retain their original vector submission, so the new path adds no
+synchronization barrier or native lifetime. Existing translucent admission and
+its required flush are unchanged.
+
+The shared intersection helper also rejects non-finite tile displacement before
+`fmin`/`fmax` can turn a NaN into finite target edges. The deferred-submission
+regression checks that neither opaque nor translucent admission writes pixels
+for that invalid displacement, then restores finite placement before native
+submission. This is part of the pixel-exact admission proof.
+
+The native clip-mask regression now uses an explicit rectangle path, keeping
+its native mask-composition assertions meaningful while ordinary rectangles can
+use the CPU path. Separate controls compare ordinary opaque rectangles with
+that same native geometry, including fractional fallback and active versus
+sealed native work. No pixel assertion or baseline threshold is relaxed.
+
+The versioned benchmark adds the `rectangles` fixture and
+`--warm-control opaque-rectangles`. Both modes disable whole-frame reuse; its
+environment-contract test prevents the feature-on sample from silently reusing
+an entire frame. Existing default recording-cache comparisons are unchanged.
+
+### Release measurement and limits
+
+`measurement/results.json` records five alternating normal on/off children at
+each scale, 12 captures per child, with separate instrumented profiles. Both
+variants use one frozen release CLI, one rendering thread and whole-frame reuse
+disabled. All output PNG hashes agree. The native paint count per steady frame
+falls from 514 to zero, with no CPU flush added. Median replay time falls from
+0.3485 to 0.2125 ms at 1× and 0.342 to 0.217 ms at 2×.
+
+| Normal capture process | Control / opaque off | Opaque on |
+|---|---:|---:|
+| 1× wall median | 142.783 ms | 141.332 ms |
+| 2× wall median | 450.479 ms | 507.207 ms |
+| 1× peak RSS median | 33,128,448 B | 32,751,616 B |
+| 2× peak RSS median | 38,895,616 B | 38,617,088 B |
+
+The 2× capture process is **12.6% slower** despite faster replay. Its profile is
+dominated by PNG encoding (33.718 / 34.594 ms median per capture, off / on).
+This does not explain the full normal-process difference; a capture speedup is
+not established. The 1× first control child also has a 742 ms cold-start outlier;
+raw samples and paired distributions remain in the receipt. Do not infer a
+general memory reduction from the small process high-water differences
+(**D4.2.5v3**).
+
+To isolate repeated paint from repeated encoding, `repaint_probe.py` and
+`repaint-isolation/` preserve a bounded follow-up: five alternating normal
+2× pairs, each with 240 forced repaint/pixel checks and one final PNG, plus a
+separate profile per mode. Every pixel assertion and final PNG hash agrees;
+profiled frames report zero whole-frame reuses. Normal wall medians improve
+190.866 → 168.931 ms (11.5%), CPU medians 201.054 → 165.249 ms (17.8%). Profiled
+steady repaint scope improves 1.634 → 1.507 ms, with replay 0.359 → 0.232 ms.
+This supports the selected repaint workload; repeated-PNG capture performance
+remains unresolved. M6's broader end-to-end acceptance stays open. No density
+special case, timing delay or vendor modification is introduced.
+
+### Qualification
+
+The frozen release build passes all affected native suites: display list 104,
+retained list 66, vector 227 and state 28. The vector suite includes the final
+finite-displacement admission regression. The SVG paint gate passes its final
+CLI's 680 pixel assertions across 12 scenario/scale/policy combinations. The
+same 425 native tests pass under AddressSanitizer in the isolated build; vendor
+internals are not instrumented and leak detection is disabled. The 14 Python
+benchmark receipt/environment contracts, Radiant integer-cast lint, scoped diff
+checks and Markdown fence/local-file checks pass.
+
+Unrelated runtime, parser, URL and test sources changed after the CLI and 22
+release runners were frozen. Their original modified inputs are preserved under
+`build-source/`; `candidate.json` pins the HEAD, input hashes, binaries, DSO and
+runtime assets. `workspace-drift.json` records the later changes. The scoped
+adapter, tests and benchmark sources still match the frozen build. Release
+qualification applies to those preserved inputs, not to later concurrent edits;
+ASan receives its own source/build receipt. The first ASan build detected source
+changes during compilation and is invalidated, even though compilation exited
+successfully. A private `asan-tree/` is built from the pinned HEAD plus the
+preserved modified inputs; its complete source hashes are checked before and
+after compilation. No live source is temporarily reverted or overwritten.
+
+The required Radiant aggregate completes with **6,052 passes, 34 failures, 146
+partial results and two skips out of 6,234 cases**. Its exit code is 2; this is
+not a green milestone gate. UI automation passes 662/662, paged media 502/502,
+DOM UI 160/160 and layout keeps 3,152 full passes with 142 partial results.
+
+Two native harnesses launch `./lambda.exe` directly despite the selected private
+CLI. A concurrent build briefly removes that workspace executable, producing
+32 CSS-syntax failures and a CSS-memory child-launch failure. A separate
+`aggregate-tree/` supplies the frozen CLI and node-core DSO at the expected
+relative paths, keeps external corpus links, and reruns those two unchanged
+harnesses. CSS syntax then passes all 44 cases.
+
+CSS-memory launch succeeds in that directory but its existing live-byte budgets
+fail: jqueryui 392,754 / 373,940 B, linuxmint 682,643 / 667,901 B, and bschool
+744,776 / 731,361 B (actual / allowed), both initially and after recascade.
+`css-memory-control-off.log` reproduces the **same six byte pairs** with opaque
+admission disabled. This excludes the new opaque route as the cause; the
+CSS-memory baseline/environment discrepancy remains open. No budget is raised.
+
+The view suite passes 215 cases with one skip and one failure:
+`DemoCommandLaunchesCatalogAndPreservesViewerOptions`. The frozen concurrent
+demo registration expects `test/demo/readability/readability.ls`, which is no
+longer present after the unrelated readability changes were withdrawn. That
+untracked `.ls` fixture was not part of the native source manifest. Its absence
+limits aggregate qualification; no substitute fixture or test exclusion is
+introduced.
+
+`qualification.json` records **limited** status, the failed original aggregate
+and the isolated rerun. Both remaining qualification issues and the 2× capture
+performance regression stay outstanding. The adapter implementation and its
+focused release/ASan/SVG checks are complete; full §31/M6 acceptance is not.

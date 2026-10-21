@@ -372,7 +372,7 @@ static bool render_batch_single(
     process_document_font_faces(ui_context, doc);
 
     if (doc->root) {
-        layout_html_doc(ui_context, doc, false);
+        layout_update_document(ui_context, doc);
     }
 
     int output_width = surface_width;

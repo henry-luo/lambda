@@ -2641,6 +2641,27 @@ TEST_F(NegativeScriptTest, SemanticError_SizedConstantConversionOverflow) {
     ExpectErrorCode("test/lambda/negative/semantic/sized_constant_conversion_overflow.ls", "error[E108]");
 }
 
+// S4.1.5: a sized constant expression that leaves its lane is a compile error.
+TEST_F(NegativeScriptTest, SemanticError_SizedConstantExpressionOverflow) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_constant_overflow.ls", false,
+        "sized integer constant expression overflows u8");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedConstantNegationOverflow) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_constant_negation.ls", false,
+        "sized integer constant expression overflows u8");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedLiteralBareMinimum) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_literal_bare_min.ls", false,
+        "sized integer literal '128' overflows i8");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_SizedLiteralI64Range) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/sized_literal_i64_range.ls", false,
+        "sized integer literal '18446744073709551615' overflows i64");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_FunctionArgumentLimit) {
     ExpectErrorMessage("test/lambda/negative/semantic/function_argument_limit.ls",
         "function formal count 17 exceeds Core Lambda limit 16");

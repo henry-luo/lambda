@@ -1,5 +1,5 @@
 // Multi-dim write: arr[i, j, k] = v
-// Phase 2b §1 of Lambda_Typed_Array2.md — first-class multi-dim indexing
+// Lambda_Typed_Array.md §5 — first-class multi-dim indexing; §8.3 element writes
 
 pn write_nd(var m, i, j, value) int^ {
     m[i, j] = value

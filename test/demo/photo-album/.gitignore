@@ -1,5 +1,6 @@
 # downloaded by _fetch.py / built by _thumbs.ls; Commons photos are not redistributed in git.
-# photos/thumbs anchored so the committed fixture/ corpus is kept; slideshows/ are decks the app saves
+# photos/thumbs anchored so the committed fixture/ corpus is kept; slideshows/ and collages/ are what the app saves
 /photos/
 /thumbs/
 slideshows/
+collages/

@@ -195,7 +195,13 @@ static char* url_idna_encode_hostname(const char* hostname) {
 // Percent-encode URL-component bytes that cannot be handed to a network
 // client literally. Characters already percent-encoded (%XX) are preserved.
 // Returns a malloc'd string; caller must free.
+static char* url_percent_encode_set(const char* input, size_t len, bool c0_only);
 static char* url_percent_encode(const char* input, size_t len) {
+    return url_percent_encode_set(input, len, false);
+}
+// c0_only selects the C0 control percent-encode set of opaque paths (data:,
+// mailto:), which keeps spaces literal; the default also encodes spaces.
+static char* url_percent_encode_set(const char* input, size_t len, bool c0_only) {
     // worst case: every byte becomes %XX (3x expansion)
     char* out = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
     if (!out) return NULL;
@@ -209,7 +215,7 @@ static char* url_percent_encode(const char* input, size_t len) {
             out[j++] = input[i+1];
             out[j++] = input[i+2];
             i += 2;
-        } else if (c <= 0x20 || c > 0x7E) {
+        } else if (c < 0x20 || c > 0x7E || (c == 0x20 && !c0_only)) {
             // Components built during relative resolution need the same
             // whitespace/control normalization as directly parsed URLs.
             int written = snprintf(out + j, 4, "%%%02X", c);
@@ -302,6 +308,10 @@ UrlError url_parse_into(const char* input, Url* url) {
 
     strncpy(scheme_buf, current, scheme_len);
     scheme_buf[scheme_len] = '\0';
+    // schemes are ASCII case-insensitive and serialize lowercased (WHATWG URL)
+    for (size_t si = 0; si < scheme_len; si++) {
+        scheme_buf[si] = (char)tolower((unsigned char)scheme_buf[si]);
+    }
 
     // Update scheme
     url->scheme = url_scheme_from_string(scheme_buf);
@@ -408,6 +418,12 @@ UrlError url_parse_into(const char* input, Url* url) {
             if (host_len < sizeof(host_buf)) {
                 strncpy(host_buf, host_start, host_len);
                 host_buf[host_len] = '\0';
+                // domain-to-ASCII lowercases the hosts of special schemes; opaque hosts keep case
+                if (url_scheme_is_special(url->scheme)) {
+                    for (size_t hi = 0; hi < host_len; hi++) {
+                        host_buf[hi] = (char)tolower((unsigned char)host_buf[hi]);
+                    }
+                }
                 // v12: Apply IDNA/Punycode encoding for internationalized domain names
                 char* idna_host = url_idna_encode_hostname(host_buf);
                 const char* final_host = idna_host ? idna_host : host_buf;
@@ -461,12 +477,20 @@ UrlError url_parse_into(const char* input, Url* url) {
         if (path_buf) {
             strncpy(path_buf, path_start, path_len);
             path_buf[path_len] = '\0';
-            // Normalize backslashes to forward slashes per URL spec
-            for (size_t pi = 0; pi < path_len; pi++) {
+            bool special = url_scheme_is_special(url->scheme);
+            // a non-special URL without authority has an opaque path (data:, mailto:)
+            bool opaque = !special && path_start == colon + 1 && path_buf[0] != '/';
+            // Normalize backslashes to forward slashes in special-scheme paths
+            for (size_t pi = 0; special && pi < path_len; pi++) {
                 if (path_buf[pi] == '\\') path_buf[pi] = '/';
             }
-            // Percent-encode non-ASCII bytes
-            char* encoded = url_percent_encode(path_buf, strlen(path_buf));
+            // a file URL's Windows drive letter is normalized to "C:" (file:///C|/x)
+            if (url->scheme == URL_SCHEME_FILE && path_len >= 3 && path_buf[0] == '/' &&
+                    isalpha((unsigned char)path_buf[1]) && path_buf[2] == '|' &&
+                    (path_len == 3 || path_buf[3] == '/' || path_buf[3] == '?' || path_buf[3] == '#')) {
+                path_buf[2] = ':';
+            }
+            char* encoded = url_percent_encode_set(path_buf, strlen(path_buf), opaque);
             url_free_string(url->pathname);
             url->pathname = url_create_string(encoded ? encoded : path_buf);
             if (encoded) mem_free(encoded);
@@ -519,7 +543,7 @@ UrlError url_parse_into(const char* input, Url* url) {
 
         // Fragment goes to end of string
         size_t fragment_len = strlen(fragment_start);
-        if (fragment_len < 4096) {  // preserve an explicitly empty fragment
+        {  // preserve an explicitly empty fragment
             char* fragment_buf = mem_alloc(fragment_len + 2, MEM_CAT_TEMP); // +1 for '#', +1 for '\0'
             if (fragment_buf) {
                 fragment_buf[0] = '#';
@@ -532,52 +556,61 @@ UrlError url_parse_into(const char* input, Url* url) {
         }
     }
 
-    // Reconstruct href from parsed components (normalized)
+    // Reconstruct href from parsed components (normalized); sized from the
+    // components, since data: URLs routinely exceed any fixed buffer
     {
-        char href_buf[4096];
+        size_t href_cap = 16;
+        String* parts[] = {url->protocol, url->username, url->password, url->hostname,
+            url->port, url->pathname, url->search, url->hash};
+        for (size_t pi = 0; pi < sizeof(parts) / sizeof(parts[0]); pi++) {
+            if (parts[pi]) href_cap += parts[pi]->len;
+        }
+        char* href_buf = mem_alloc(href_cap, MEM_CAT_TEMP);
+        if (!href_buf) return URL_ERROR_MEMORY_ALLOCATION;
         int pos = 0;
         // protocol
         if (url->protocol) {
-            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->protocol->chars);
+            href_appendf(href_buf, href_cap, &pos, "%s", url->protocol->chars);
         }
         // File URLs retain an empty authority so their canonical spelling is
         // file:///path, rather than the relative-looking file:/path.
         if (url_has_authority(url)) {
-            href_appendf(href_buf, sizeof(href_buf), &pos, "//");
+            href_appendf(href_buf, href_cap, &pos, "//");
         }
         if (url->hostname && url->hostname->len > 0) {
             // credentials
             if (url->username && url->username->len > 0) {
-                href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->username->chars);
+                href_appendf(href_buf, href_cap, &pos, "%s", url->username->chars);
                 if (url->password && url->password->len > 0) {
-                    href_appendf(href_buf, sizeof(href_buf), &pos, ":%s", url->password->chars);
+                    href_appendf(href_buf, href_cap, &pos, ":%s", url->password->chars);
                 }
-                href_appendf(href_buf, sizeof(href_buf), &pos, "@");
+                href_appendf(href_buf, href_cap, &pos, "@");
             }
-            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->hostname->chars);
+            href_appendf(href_buf, href_cap, &pos, "%s", url->hostname->chars);
             // port (only if non-default)
             if (url->port && url->port->len > 0) {
                 uint16_t default_port = url_default_port_for_scheme(url->scheme);
                 if (url->port_number != default_port) {
-                    href_appendf(href_buf, sizeof(href_buf), &pos, ":%s", url->port->chars);
+                    href_appendf(href_buf, href_cap, &pos, ":%s", url->port->chars);
                 }
             }
         }
         // pathname
         if (url->pathname) {
-            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->pathname->chars);
+            href_appendf(href_buf, href_cap, &pos, "%s", url->pathname->chars);
         }
         // search
         if (url->search) {
-            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->search->chars);
+            href_appendf(href_buf, href_cap, &pos, "%s", url->search->chars);
         }
         // hash
         if (url->hash) {
-            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->hash->chars);
+            href_appendf(href_buf, href_cap, &pos, "%s", url->hash->chars);
         }
         href_buf[pos] = '\0';
         url_free_string(url->href);
         url->href = url_create_string(href_buf);
+        mem_free(href_buf);
     }
     if (!url->href) {
         return URL_ERROR_MEMORY_ALLOCATION;
@@ -908,11 +941,14 @@ UrlError url_handle_authority_relative(const char* input, const Url* base_url, U
     result->protocol = url_string_clone(base_url->protocol);
 
     // Parse the authority-relative URL as if it were absolute
-    char temp_url[2048];
-    snprintf(temp_url, sizeof(temp_url), "%s:%s",
-             url_scheme_to_string(base_url->scheme), input);
+    const char* scheme_name = url_scheme_to_string(base_url->scheme);
+    size_t temp_cap = strlen(scheme_name) + strlen(input) + 2;
+    char* temp_url = mem_alloc(temp_cap, MEM_CAT_TEMP);
+    if (!temp_url) return URL_ERROR_MEMORY_ALLOCATION;
+    snprintf(temp_url, temp_cap, "%s:%s", scheme_name, input);
 
     Url* temp = url_parse(temp_url);
+    mem_free(temp_url);
     if (!temp || !temp->is_valid) {
         if (temp) url_destroy(temp);
         return URL_ERROR_INVALID_INPUT;
@@ -1064,21 +1100,19 @@ UrlError url_handle_path_relative(const char* input, const Url* base_url, Url* r
         path_end = fragment_start;
     }
 
-    // Extract relative path
+    // Extract relative path (a fixed buffer emptied long paths)
     size_t path_len = path_end - input;
-    char relative_path[1024];
-    if (path_len > 0 && path_len < sizeof(relative_path) - 1) {
-        strncpy(relative_path, input, path_len);
-        relative_path[path_len] = '\0';
-    } else {
-        relative_path[0] = '\0';
-    }
+    char* relative_path = mem_alloc(path_len + 1, MEM_CAT_TEMP);
+    if (!relative_path) return URL_ERROR_MEMORY_ALLOCATION;
+    memcpy(relative_path, input, path_len);
+    relative_path[path_len] = '\0';
 
     // Resolve path
     const char* base_path = (base_url->pathname && base_url->pathname->len > 0)
                           ? base_url->pathname->chars : "/";
 
     char* resolved_path = url_resolve_path(base_path, relative_path);
+    mem_free(relative_path);
     if (resolved_path) {
         url_free_string(result->pathname);
         result->pathname = url_create_string(resolved_path);
@@ -1160,6 +1194,7 @@ Url* url_resolve_relative(const char* input, const Url* base_url) {
 }
 
 // Enhanced relative URL resolution implementation
+static UrlError url_resolve_trimmed_into(const char* input, const Url* base_url, Url* result);
 UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* result) {
     // Comprehensive parameter validation
     if (!input || !base_url || !result) {
@@ -1197,14 +1232,17 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
     while (end > input && str_char_is_ascii_space(*end)) end--;
     size_t input_len = end - input + 1;
 
-    // Create trimmed input string
-    char trimmed_input[2048];
-    if (input_len > 0 && input_len < sizeof(trimmed_input)) {
-        strncpy(trimmed_input, input, input_len);
-        trimmed_input[input_len] = '\0';
-        input = trimmed_input;
-    }
+    // resolve a trimmed heap copy: a fixed buffer left long inputs untrimmed
+    char* trimmed_input = mem_alloc(input_len + 1, MEM_CAT_TEMP);
+    if (!trimmed_input) return URL_ERROR_MEMORY_ALLOCATION;
+    memcpy(trimmed_input, input, input_len);
+    trimmed_input[input_len] = '\0';
+    UrlError err = url_resolve_trimmed_into(trimmed_input, base_url, result);
+    mem_free(trimmed_input);
+    return err;
+}
 
+static UrlError url_resolve_trimmed_into(const char* input, const Url* base_url, Url* result) {
     if (!*input) {
         // Empty input - return copy of base URL
         if (base_url) {

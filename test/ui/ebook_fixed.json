@@ -38,7 +38,7 @@
         "selector": "body"
       },
       "property": "transform",
-      "contains": "scale("
+      "contains": "matrix("
     },
     {
       "type": "switch_frame"

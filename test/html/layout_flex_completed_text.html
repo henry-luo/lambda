@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+@font-face { font-family: FlowMetrics; src: url("../layout/data/support/fonts/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 FlowMetrics; }
+.row { display: flex; width: 160px; align-items: flex-start; }
+.text { flex: 0 0 60px; min-width: 0; }
+.quotes { display:flex; quotes:'A' 'Z' '1' '9'; }
+.quotes::before,.quotes span::before { content:open-quote; }
+.quotes::after { content:close-quote; }
+.quotes span { contain:style; }
+</style>
+<div id="result">
+  <div class="row"><div id="wrapped" class="text">XX XX XX</div></div>
+  <div class="row" style="height:100px;align-items:stretch"><div id="stretched" class="text">XX XX XX</div></div>
+  <div class="row"><div id="padded" class="text" style="padding:5px;border:2px solid">XX XX XX</div></div>
+  <div class="row" style="align-items:baseline"><div id="baseline" class="text">XX</div><div style="font-size:40px">X</div></div>
+  <div class="row"><div id="complex" class="text"><span>XX</span> XX XX</div></div>
+  <div class="row" style="width:100px;height:100px;flex-wrap:wrap;align-items:stretch;align-content:start"><div id="line-a" style="width:75px;border:3px solid">X</div><div id="line-b" style="width:75px;border:3px solid">X</div></div>
+  <div class="quotes"><span id="quote-inner"></span></div>
+  <div class="row"><ol id="implicit-counter" class="text" style="margin:0;padding:0">XX</ol></div>
+</div>

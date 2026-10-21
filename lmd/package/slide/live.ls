@@ -8,25 +8,35 @@ import sampler: .sample
 import transitions: .transitions
 import morph: .morph
 import presenter: .presenter
+import clock: .clock
 
 fn instance(options) => c.as_text(c.value(options.instance, "slide"))
+// `controls: false` is for hosts that drive playback through slide_command: no control bar
+fn has_controls(options) => c.value(options.controls, true)
+// commands a host may send with a slide_command event; detail carries the reducer's fields
+let host_commands = ["play", "pause", "resume", "next", "previous", "restart", "end", "jump", "seek", "seek_time", "speed"]
 fn event_owner(target, options) {
     let owner = dom.closest(target, ".slide-player")
     if (owner != null and dom.get_attribute(owner, "id") == instance(options)) owner else null
 }
 
 fn tree(plan, options) {
-    let key = instance(options);
+    let key = instance(options)
+    let controls = has_controls(options);
     // focus eligibility reads HTML attributes as text, including tabindex.
     <div class: "slide-player", id: key, tabindex: "0", role: "region", ["aria-label"]: plan.title,
-        style: if (c.value(options.fit_viewport, false)) "" else "width:" ++ c.px(c.value(options.width, plan.width)) ++ ";",
+        ["data-slide-duration"]: c.fmt(clock.timeline(plan, options).duration_ms),
+        *:(if (controls) {} else {["data-slide-toolbar"]: "false"}),
+        style: (if (c.value(options.fit_viewport, false)) "" else "width:" ++ c.px(c.value(options.width, plan.width)) ++ ";") ++
+            html.ui_style(plan),
         *[<div class: "slide-workspace", *[
             <div class: "slide-audience", *[html.stage(plan, {slide: 0, cue: -1, time_ms: 0.0}, options),
                 <div class: "slide-blackout", ["data-slide-tool"]: "blackout", ["aria-hidden"]: "true">,
                 <div class: "slide-pointer", ["aria-hidden"]: "true">,
                 presenter.overview_tree(plan)]>, presenter.console_tree(key)]>,
-        <button class: "slide-toolbar-toggle", type: "button", ["data-slide-tool"]: "toolbar", ["aria-label"]: "Toggle toolbar (H)", "Toolbar">,
-        <div class: "slide-controls",
+        *(if (controls) [<button class: "slide-toolbar-toggle", type: "button", ["data-slide-tool"]: "toolbar", ["aria-label"]: "Toggle toolbar (H)", "Toolbar">] else []),
+        // without controls the bar stays mounted but hidden: status and speed writes still find it
+        <div class: "slide-controls", *:(if (controls) {} else {style: "display:none;", inert: "", ["aria-hidden"]: "true"}),
             *[<button type: "button", ["data-slide-command"]: "previous", "Previous">,
             <button type: "button", ["data-slide-command"]: "play", "Play">,
             <button type: "button", ["data-slide-command"]: "pause", "Pause">,
@@ -151,7 +161,7 @@ pn show_layers(owner, plan, before, ps, key) {
     }
 }
 
-pn present(owner, plan, before, ps, options, painted, tools) {
+pn present(owner, plan, before, ps, options, painted, tools, now_ms) {
     let key = instance(options)
     let switched = before.slide != ps.slide or before.outgoing != ps.outgoing
     let is_morph = ps.phase == 'transition' and plan.slides[ps.slide].transition == 'morph'
@@ -183,8 +193,12 @@ pn present(owner, plan, before, ps, options, painted, tools) {
     for (property, value in diagnostics where value != old_diagnostics[property] or not dom.has_attribute(owner, "data-slide-" ++ string(property)))
         dom.set_attribute(owner, "data-slide-" ++ string(property), string(value))
     // Publish parked/command time without invalidating attribute selectors every frame.
-    if (not player.needs_frame(ps) or before.generation != ps.generation or before.paused != ps.paused)
+    // the deck position goes with it, stamped with its sample time: a host extrapolates while playing
+    if (not player.needs_frame(ps) or before.generation != ps.generation or before.paused != ps.paused) {
         dom.set_attribute(owner, "data-slide-time", c.fmt(ps.time_ms))
+        dom.set_attribute(owner, "data-slide-position", c.fmt(clock.position(plan, ps)))
+        dom.set_attribute(owner, "data-slide-position-at", c.fmt(now_ms))
+    }
     if (before.slide != ps.slide)
         set_text(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
     if (before.slide != ps.slide) {
@@ -203,7 +217,7 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools) {
         { {ps: ~, problem: null} }
     // procedure handlers publish through locals; their statement result is null (S7.6.7v4).
     var displayed = {problem: null, painted: null}
-    present(owner, plan, before, result.ps, options, painted, tools) ^ { displayed = {problem: ^.message, painted: null} } ~
+    present(owner, plan, before, result.ps, options, painted, tools, c.value(event.time_ms, before.anchor_ms)) ^ { displayed = {problem: ^.message, painted: null} } ~
         { displayed = {problem: null, painted: ~} }
     let scheduled = if (result.problem is null and displayed.problem is null and player.needs_frame(result.ps)) dom.request_frame(owner, "slide_frame") else 0
     let problem = if (not (result.problem is null)) result.problem else if (not (displayed.problem is null)) displayed.problem
@@ -298,6 +312,7 @@ pn tool_event(owner, plan, ps, tools, command, now_ms, options, clock_token) {
 
 // one session value publishes playback and presenter state together after each action.
 pn action(owner, plan, session, command, value, now_ms, options) {
+    if (command == "toolbar" and not has_controls(options)) { return session }
     if (contains(["console", "overview", "toolbar", "blackout", "pointer", "escape", "timer-toggle", "timer-reset"], command)) {
         let changed = tool_event(owner, plan, session.ps, session.tools, command, now_ms, options, session.clock_token)^;
         return {*: session, tools: changed.tools, clock_token: changed.token}
@@ -324,7 +339,7 @@ pn action(owner, plan, session, command, value, now_ms, options) {
 }
 
 view <slide_player> state session: {ps: player.initial_state(~.plan, ~.options), token: 0, painted: null,
-    tools: presenter.initial_state(), clock_token: 0} {
+    tools: {*: presenter.initial_state(), toolbar: has_controls(~.options)}, clock_token: 0} {
     ~.rendered
 }
 on slide_fit(evt) {
@@ -351,6 +366,17 @@ on slide_activate(evt) {
     session = action(evt.target, ~.plan, session, "activate", null, evt.time_stamp, ~.options)^
     return 'handled'
 }
+// a host drives an embedded player by dispatching {type: "slide_command", detail: {command, ...}}
+on slide_command(evt) {
+    let detail = evt.detail
+    if (evt.event_phase != 2 or not (detail is map) or not contains(host_commands, c.as_text(detail.command))) { return 'pass' }
+    let next = commit_event(evt.target, ~.plan, session.ps, {*: detail, time_ms: evt.time_stamp},
+        ~.options, session.token, session.painted, session.tools)
+    if (c.as_text(detail.command) == "speed" and next.ps.playback_rate == detail.rate)
+        dom.set_property(dom.query_selector(evt.target, ".slide-speed-input"), "value", c.fmt(detail.rate))
+    session = {*: session, *: next}
+    return 'handled'
+}
 on input(evt) {
     let owner = event_owner(evt.target, ~.options)
     if (owner == null or not dom.matches(evt.target, ".slide-speed-input")) { return 'pass' }
@@ -367,6 +393,8 @@ on click(evt) {
     let button = dom.closest(evt.target, "[data-slide-command]")
     let interactive = dom.closest(evt.target, "a, input, button, select, textarea, [contenteditable], [role=button], [role=link]")
     if (tool == null and button == null and (interactive != null or dom.closest(evt.target, ".slide-stage") == null)) { return 'pass' }
+    // without controls the host owns playback input: a click on the stage is the host's
+    if (tool == null and button == null and not has_controls(~.options)) { return 'pass' }
     let command = if (tool != null) dom.get_attribute(tool, "data-slide-tool")
         else if (button != null) dom.get_attribute(button, "data-slide-command") else "next"
     let value = if (tool != null and dom.has_attribute(tool, "data-slide-destination")) dom.get_attribute(tool, "data-slide-destination")

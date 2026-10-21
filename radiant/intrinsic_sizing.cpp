@@ -2,17 +2,23 @@
 #include "layout_table.hpp"
 #include "css_resolved_style.hpp"
 
+namespace radiant { static bool intrinsic_height_cacheable(LayoutContext*, DomElement*); }
+
 static bool intrinsic_declared_css_height_is_definite(LayoutContext* lycon,
                                                       DomElement* element);
 
 static bool intrinsic_view_uses_border_box(ViewBlock* view, DomElement* element) {
-    if (layout_uses_border_box(view)) return true;
     CssDeclaration* box_decl = element && element->specified_style
         ? style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BOX_SIZING)
         : nullptr;
-    return box_decl && box_decl->value &&
-        box_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-        box_decl->value->data.keyword == CSS_VALUE_BORDER_BOX;
+    bool keyword = box_decl && box_decl->value &&
+        box_decl->value->type == CSS_VALUE_TYPE_KEYWORD;
+    // native controls can expose provisional UA border-box props before their
+    // cascade; an authored content-box must still size its intrinsic minimum.
+    if (keyword && !element->styles_resolved() &&
+        box_decl->value->data.keyword == CSS_VALUE_CONTENT_BOX) return false;
+    return layout_uses_border_box(view) ||
+        (keyword && box_decl->value->data.keyword == CSS_VALUE_BORDER_BOX);
 }
 
 #include "view.hpp" // For FormDefaults
@@ -46,7 +52,6 @@ IntrinsicFontScope::~IntrinsicFontScope() {
 }
 #include <cstdlib>
 
-void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
 // Intrinsic sizing is recursive. Attribute nested work to both inclusive and
 // exclusive time so a large container does not hide its expensive descendants.
@@ -265,10 +270,7 @@ CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizonta
     DomElement* element = block->is_element() ? block->as_element() : nullptr;
     CssDeclaration* declaration = layout_specified_physical_size_declaration(element, horizontal);
     CssEnum keyword = layout_intrinsic_size_keyword_from_declaration(declaration);
-    if (declaration && declaration->value &&
-        declaration->value->type == CSS_VALUE_TYPE_FUNCTION &&
-        declaration->value->data.function && declaration->value->data.function->name &&
-        strcmp(declaration->value->data.function->name, "fit-content") == 0) {
+    if (declaration && layout_css_fit_content_function_limit(declaration->value)) {
         // fit-content() is a preferred-size function; min/max constraints use
         // their existing constraint path and must not become preferred keywords.
         keyword = CSS_VALUE_FIT_CONTENT;
@@ -2344,38 +2346,9 @@ static bool is_inline_level_element(DomElement* element) {
         return !layout_display_contents_has_block_child(element);
     }
 
-    // Anonymous inline-table wrappers store resolved display on the DOM element
-    // before a view box exists, so intrinsic sizing must read it directly.
-    if (element->display.outer == CSS_VALUE_INLINE ||
-        element->display.outer == CSS_VALUE_INLINE_BLOCK) {
-        return true;
-    }
-
-    // First check if the view has been styled. Inline-block and inline-table
-    // are inline-level boxes for intrinsic inline-run accumulation.
-    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
-    if (view->display.outer == CSS_VALUE_INLINE ||
-        view->display.outer == CSS_VALUE_INLINE_BLOCK) {
-        return true;
-    }
-
-    // Fall back to checking specified CSS style
-    CssEnum display_value = (CssEnum)0;
-    if (intrinsic_specified_display_keyword(element, &display_value)) {
-        // Check for inline display values
-        if (layout_display_is_inline_level(display_value)) {
-            return true;
-        }
-        // Explicit block display
-        if (display_value == CSS_VALUE_BLOCK ||
-            display_value == CSS_VALUE_FLEX ||
-            display_value == CSS_VALUE_GRID ||
-            display_value == CSS_VALUE_TABLE) {
-            return false;
-        }
-    }
-
-    return layout_tag_is_default_inline(element->tag());
+    // generated list-item boxes and other block roles must not fall back to
+    // the synthetic tag's inline default after their display was resolved.
+    return layout_display_is_inline_level(resolved_display.outer);
 }
 
 static bool intrinsic_element_has_percentage_height(DomElement* element) {
@@ -3280,20 +3253,29 @@ static float intrinsic_store_ratio_width_from_height(
     return aspect_width;
 }
 
-static bool intrinsic_width_is_context_independent(DomElement* element) {
+bool layout_box_is_context_independent(DomElement* element, bool include_height) {
     if (!radiant::css_resolved_style_is_containing_block_independent(element)) return false;
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
-    // ordinary horizontal flow reads containing dimensions only for CSS lengths.
-    // Other formatting modes and ratio transfer keep their complete context key.
-    return (element->display.inner == CSS_VALUE_FLOW ||
-            element->display.inner == CSS_VALUE_FLOW_ROOT) &&
-        element->display.outer != CSS_VALUE_LIST_ITEM && !element->pseudo &&
-        !layout_block_inline_axis_is_vertical(view) && !is_multicol_container(view) &&
-        layout_used_preferred_aspect_ratio(view) <= 0.0f &&
-        !layout_block_has_size_containment_in_axis(view, true) &&
-        layout_intrinsic_preferred_size_keyword(view, true) == CSS_VALUE__UNDEF &&
-        layout_intrinsic_min_size_keyword(view, true) == CSS_VALUE__UNDEF &&
-        layout_intrinsic_max_size_keyword(view, true) == CSS_VALUE__UNDEF;
+    // independent box lengths can share constraints; each formatting algorithm
+    // still owns any additional inputs it reads, including flex block size.
+    if (element->display.outer == CSS_VALUE_LIST_ITEM || element->pseudo ||
+        layout_block_inline_axis_is_vertical(view) || is_multicol_container(view) ||
+        layout_used_preferred_aspect_ratio(view) > 0.0f) return false;
+    // intrinsic/stretch keywords can read constraints outside ordinary CSS length bindings.
+    for (unsigned axis = 0; axis < (include_height ? 2u : 1u); axis++) {
+        bool horizontal = axis == 0;
+        if (layout_block_has_size_containment_in_axis(view, horizontal) ||
+            layout_intrinsic_preferred_size_keyword(view, horizontal) != CSS_VALUE__UNDEF ||
+            layout_intrinsic_min_size_keyword(view, horizontal) != CSS_VALUE__UNDEF ||
+            layout_intrinsic_max_size_keyword(view, horizontal) != CSS_VALUE__UNDEF) return false;
+    }
+    return true;
+}
+
+bool layout_flow_is_context_independent(DomElement* element, bool include_height) {
+    return element && (element->display.inner == CSS_VALUE_FLOW ||
+        element->display.inner == CSS_VALUE_FLOW_ROOT) &&
+        layout_box_is_context_independent(element, include_height);
 }
 
 // tier-3: layout-transient, valid within one measurement generation
@@ -3317,7 +3299,7 @@ struct IntrinsicWidthCacheScope {
 
     ~IntrinsicWidthCacheScope() {
         entry.context_independent = cacheable && children_independent &&
-            intrinsic_width_is_context_independent(element);
+            layout_flow_is_context_independent(element);
         active = parent;
         // a dependent descendant makes its ancestors dependent too, including on hits.
         note_dependency(entry.context_independent);
@@ -3702,10 +3684,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         resolved_width_view->block()->given_width_type != CSS_VALUE__UNDEF &&
         !has_intrinsic_preferred_width;
     ViewBlock* intrinsic_parent = element->parent && element->parent->is_element()
-        ? lam::view_as_block(element->parent->as_element()) : nullptr;
+        ? lam::unsafe_view_block_element_storage(element->parent->as_element()) : nullptr;
     bool parent_has_intrinsic_width = intrinsic_parent && intrinsic_parent->blk &&
         (intrinsic_parent->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
-         intrinsic_parent->block()->given_width_type == CSS_VALUE_MAX_CONTENT);
+         intrinsic_parent->block()->given_width_type == CSS_VALUE_MAX_CONTENT ||
+         intrinsic_parent->block()->given_width_type == CSS_VALUE_FIT_CONTENT);
     bool parent_has_auto_inline_width = intrinsic_parent &&
         (!intrinsic_parent->blk ||
          ((intrinsic_parent->block()->given_width_type == CSS_VALUE_AUTO ||
@@ -3726,6 +3709,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         layout_specified_physical_minmax_size_declaration(element, true, false);
     CssDeclaration* min_width_declaration =
         layout_specified_physical_minmax_size_declaration(element, true, true);
+    bool max_width_is_fit_function = max_width_declaration &&
+        layout_css_fit_content_function_limit(max_width_declaration->value);
+    if (max_width_is_fit_function) has_intrinsic_max_width = false;
     bool authored_definite_width = width_declaration && width_declaration->value &&
         (width_declaration->value->type == CSS_VALUE_TYPE_LENGTH ||
          (width_declaration->value->type == CSS_VALUE_TYPE_NUMBER &&
@@ -3745,7 +3731,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->available_space.width.value <= 0.0f &&
         (width_is_percentage || max_width_is_percentage) &&
         !parent_has_auto_inline_width;
-    bool intrinsic_width_context = lycon->available_space.width.is_intrinsic() ||
+    // an auto-sized flex item is a cyclic basis before its main size is assigned.
+    bool parent_measures_auto_width = intrinsic_parent && intrinsic_parent->measuring_intrinsic_width() &&
+        intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_FLEX &&
+        layout_block_has_automatic_size(intrinsic_parent, true);
+    bool intrinsic_width_context = parent_measures_auto_width || lycon->available_space.width.is_intrinsic() ||
         intrinsic_percentage_width_is_indefinite(lycon) ||
         parent_has_intrinsic_width || parent_has_auto_inline_width;
     bool percentage_width_is_intrinsic_auto = width_is_percentage &&
@@ -3796,7 +3786,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
 
         float max_border = -1.0f;
-        if (!max_width_is_percentage) {
+        if (!max_width_is_percentage && !max_width_is_fit_function &&
+            (!resolved_width_view->blk || resolved_width_view->block()->given_max_width_type != CSS_VALUE_STRETCH)) {
             // A definite max-width constrains a definite intrinsic width; percentage
             // components are deferred because their containing block is not definite.
             float max_width = resolved_width_view->blk
@@ -3945,7 +3936,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (aspect_ratio > 0) {
         float height = -1;
         ViewBlock* aspect_parent = element->parent && element->parent->is_element()
-            ? lam::view_as_block(element->parent->as_element()) : nullptr;
+            ? lam::unsafe_view_block_element_storage(element->parent->as_element()) : nullptr;
         bool parent_has_intrinsic_inline_size = aspect_parent && aspect_parent->blk &&
             (aspect_parent->block()->given_width_type == CSS_VALUE_FIT_CONTENT ||
              aspect_parent->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
@@ -4066,14 +4057,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
             // Ratio transfer uses the constrained used height; transferring the
             // raw specified height ignores min/max-height before width:min-content.
-            if (layout_aspect_ratio_uses_content_box(view_block_for_aspect) &&
-                intrinsic_view_uses_border_box(view_block_for_aspect, element)) {
-                // `auto <ratio>` measures the content box; remove border-box
-                // padding before transferring a definite height to the width.
-                float pad_border_height = layout_intrinsic_padding_border_axis(
-                    lycon, element, false, lycon->block.content_width);
-                ratio_height = max(ratio_height - pad_border_height, 0.0f);
-            }
+            // the shared ratio transfer converts border-box height to content once.
             float aspect_width = intrinsic_store_ratio_width_from_height(
                 lycon, element, view_block_for_aspect, aspect_ratio, ratio_height,
                 false, layout_uses_border_box(view_block_for_aspect),
@@ -5851,11 +5835,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // CSS Tables sizes anonymous cells from all in-flow descendants;
             // a table fixup therefore retains its marker contribution.
             float marker_width = intrinsic_list_item_marker_width(lycon, view_block);
-
-            // The marker participates in the list item's intrinsic inline size.
-            has_inline_content = true;
-            inline_max_sum += marker_width;
-            inline_min_sum = max(inline_min_sum, marker_width);
+            if (!marker_is_inside) {
+                // outside marker bounds constrain the anonymous cell, but do
+                // not add an inline advance to the principal box's content.
+                sizes.min_content = max(sizes.min_content, marker_width);
+                sizes.max_content = max(sizes.max_content, marker_width);
+            } else {
+                has_inline_content = true;
+                inline_max_sum += marker_width;
+                inline_min_sum = max(inline_min_sum, marker_width);
+            }
         }
     }
 
@@ -6182,6 +6171,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             lycon, CSS_PROPERTY_MAX_WIDTH, max_width_declaration->value);
     }
     if (given_max_width >= 0 &&
+        (!view_for_minmax->blk || view_for_minmax->block()->given_max_width_type != CSS_VALUE_STRETCH) &&
         max_width_keyword != CSS_VALUE_FIT_CONTENT &&
         !(max_width_is_percentage && percentage_size_is_intrinsic_auto)) {
         // CSS Sizing 3 §§5.1–5.2 measure intrinsic sizes with an auto-sized
@@ -6219,7 +6209,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         sizes.max_content = sizes.min_content;
     }
 
-    if (physical_width_is_vertical_block_axis && !content_only) {
+    if (physical_width_is_vertical_block_axis && !content_only && !percentage_width_is_intrinsic_auto) {
         float explicit_width = -1.0f;
         if (view_for_minmax->blk &&
             view_for_minmax->block()->given_width >= 0.0f &&
@@ -6440,9 +6430,8 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
     return height;
 }
 
-float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
-                                   bool ignore_definite_block_size) {
-    radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT, node);
+static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode* node, float width,
+                                                   bool ignore_definite_block_size) {
     if (!node) return 0;
 
     // For text nodes, estimate based on line height and text width
@@ -6537,15 +6526,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	    DomElement* element = node->as_element();
 	    if (!element) return 0;
 
-    LayoutMeasurementRootScope root_scope(lycon, element);
-    {
-        IntrinsicFontScope style_font_scope(lycon, lycon->font);
-        LayoutViewScope style_view_scope(lycon);
-        radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
-        lycon->view = lam::up(static_cast<View*>(element));
-        dom_node_resolve_style(element, lycon);
-    }
-
 	    // CSS 2.1 §9.2.4: Elements with display: none do not generate boxes
 	    // and contribute zero height.
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
@@ -6594,22 +6574,24 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
-    // Check for explicit height from CSS (e.g., iframe with height: 580px)
     float explicit_height = -1.0f;
     bool contain_intrinsic_height_auto = view->blk &&
         view->block()->contain_intrinsic_height_auto;
-    if (element->specified_style) {
-        CssDeclaration* height_decl = layout_specified_physical_size_declaration(element, false);
-        if (height_decl && height_decl->value &&
-            height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
-                                                   height_decl->value);
+    radiant::CssResolvedSize resolved = {};
+    if (radiant::intrinsic_height_cacheable(lycon, element) &&
+        radiant::css_resolved_style_size(lycon, element, LAYOUT_AXIS_Y, &resolved)) {
+        // a provisional percentage sample is not a definite intrinsic contribution (VR15).
+        if (!resolved.percentage || !layout_percentage_height_is_automatic(view, lycon))
+            explicit_height = resolved.value;
+    } else {
+        // unsupported computed consumers retain their existing declaration/UA path.
+        if (element->specified_style) {
+            CssDeclaration* height_decl = layout_specified_physical_size_declaration(element, false);
+            if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
         }
-    }
-    if (!ignore_definite_block_size && explicit_height <= 0.0f &&
-        view->blk && view->block_mut()->given_height > 0.0f) {
-        // UA intrinsic defaults also populate given_height, so a winning author
-        // height declaration must take precedence during intrinsic measurement.
+        if (!ignore_definite_block_size && explicit_height <= 0.0f &&
+            view->blk && view->block()->given_height > 0.0f)
             explicit_height = view->block()->given_height;
     }
     bool has_intrinsic_height_constraint =
@@ -7348,6 +7330,207 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
+    return height;
+}
+
+namespace radiant {
+
+struct IntrinsicHeightKey {
+    CssGeometryContext geometry;
+    AvailableSpace available_space;
+    CssFontKey input_font;
+    FontHandle* input_handle;
+    float width, root_font_size, raster_scale, font_size, flex_inline_basis;
+    CssEnum text_wrap_style;
+    ViewType view_type;
+    uint32_t role_flags;
+    bool ignore_definite_block_size;
+};
+
+struct IntrinsicHeightVersion {
+    uint64_t style_epoch, mutation_epoch, font_generation;
+    uint32_t generation, style_revision, input_revision;
+};
+
+// tier-2: immutable query results owned by the selected view's property pool.
+struct IntrinsicHeightEntry {
+    IntrinsicHeightEntry* next;
+    IntrinsicHeightKey key;
+    float height;
+    bool context_independent;
+};
+
+struct IntrinsicHeightCache {
+    IntrinsicHeightVersion version;
+    IntrinsicHeightEntry* entries;
+};
+
+static void intrinsic_height_entries_clear(IntrinsicHeightCache* cache, Pool* pool) {
+    while (cache->entries) {
+        IntrinsicHeightEntry* entry = cache->entries;
+        cache->entries = entry->next;
+        pool_free(pool, entry);
+    }
+}
+
+void intrinsic_height_cache_release(LayoutCache* cache, Pool* pool) {
+    if (!cache || !cache->intrinsic_heights) return;
+    intrinsic_height_entries_clear(cache->intrinsic_heights, pool);
+    lam::free_owned(pool, cache->intrinsic_heights);
+}
+
+static IntrinsicHeightVersion intrinsic_height_version(LayoutContext* context, DomElement* element) {
+    DomDocument* doc = context->doc;
+    return {doc->style_query_epoch, doc->mutation_epoch,
+        context->ui_context && context->ui_context->font_ctx
+            ? font_context_resource_generation(context->ui_context->font_ctx) : 0,
+        doc->view_tree->measurement_cache_generation, css_resolved_style_input_revision(context, element),
+        element->intrinsic_input_revision};
+}
+
+static bool intrinsic_height_version_equal(const IntrinsicHeightVersion& a,
+                                           const IntrinsicHeightVersion& b) {
+    return a.style_epoch == b.style_epoch && a.mutation_epoch == b.mutation_epoch &&
+        a.input_revision == b.input_revision && a.font_generation == b.font_generation &&
+        a.generation == b.generation && a.style_revision == b.style_revision;
+}
+
+static uint8_t intrinsic_height_key_changes(const IntrinsicHeightKey& a, const IntrinsicHeightKey& b,
+                                           bool context_independent) {
+    CacheEntry available = {};
+    available.valid = true;
+    available.available_space = a.available_space;
+    uint8_t changed = 0;
+    // ordinary independent flow consumes the explicit wrapping width, not the
+    // caller's intrinsic/definite space label. Descendant proof is propagated on store.
+    if (!context_independent &&
+        !layout_cache_constraints_match(&available, known_dimensions_none(), b.available_space, 0.0f))
+        changed |= 1;
+    if (!(context_independent
+            ? a.geometry.viewport.width == b.geometry.viewport.width &&
+                a.geometry.viewport.height == b.geometry.viewport.height
+            : css_geometry_context_equal(a.geometry, b.geometry) &&
+                a.flex_inline_basis == b.flex_inline_basis)) changed |= 2;
+    if (!css_font_keys_equal(a.input_font, b.input_font) || a.input_handle != b.input_handle ||
+        a.font_size != b.font_size) changed |= 4;
+    if (a.width != b.width) changed |= 8;
+    if (a.root_font_size != b.root_font_size || a.raster_scale != b.raster_scale) changed |= 16;
+    if (a.text_wrap_style != b.text_wrap_style || a.view_type != b.view_type ||
+        a.role_flags != b.role_flags || a.ignore_definite_block_size != b.ignore_definite_block_size)
+        changed |= 32;
+    return changed;
+}
+
+static bool intrinsic_height_cacheable(LayoutContext* context, DomElement* element) {
+    if (!css_resolved_style_input_revision(context, element)) return false;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    // flex descendants read their container's mutable used width; ancestor keys cannot
+    // describe those inputs until measurement and flow share an immutable result.
+    // table/grid/resource/fragmentation consumers also lack complete retained queries.
+    return (element->display.inner == CSS_VALUE_FLOW ||
+            element->display.inner == CSS_VALUE_FLOW_ROOT) &&
+        !element->pseudo && !layout_is_mathml_root(element) &&
+        !layout_block_inline_axis_is_vertical(view) && !is_multicol_container(view) &&
+        !layout_block_has_size_containment_in_axis(view, false);
+}
+
+struct IntrinsicHeightScope {
+    IntrinsicHeightScope* parent;
+    bool cacheable;
+    bool context_independent;
+    static thread_local IntrinsicHeightScope* active;
+    IntrinsicHeightScope(bool allowed, bool independent)
+        : parent(active), cacheable(allowed), context_independent(independent) { active = this; }
+    ~IntrinsicHeightScope() {
+        active = parent;
+        // a parent result must not conceal a descendant whose resource/used inputs are unkeyed.
+        if (parent && !cacheable) parent->cacheable = false;
+        if (parent && !context_independent) parent->context_independent = false;
+    }
+};
+thread_local IntrinsicHeightScope* IntrinsicHeightScope::active = nullptr;
+
+} // namespace radiant
+
+float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
+                                   bool ignore_definite_block_size) {
+    if (!lycon || !node) return 0.0f;
+    radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC_HEIGHT, node);
+    lycon->profiler.height_requests++;
+    DomElement* element = node->is_element() ? node->as_element() : nullptr;
+    LayoutMeasurementRootScope root_scope(lycon, element);
+    if (element) {
+        IntrinsicFontScope font_scope(lycon, lycon->font);
+        LayoutViewScope view_scope(lycon);
+        radiant::LayoutRunModeScope mode_scope(lycon, radiant::RunMode::ComputeSize);
+        lycon->view = lam::up(static_cast<View*>(element));
+        lycon->elmt = lam::up(node);
+        dom_node_resolve_style(element, lycon);
+    }
+    bool allowed = element && radiant::intrinsic_height_cacheable(lycon, element);
+    radiant::IntrinsicHeightScope scope(!element || allowed,
+        !element || layout_flow_is_context_independent(element, true));
+    radiant::IntrinsicHeightCache* cache = nullptr;
+    radiant::IntrinsicHeightKey key = {};
+    radiant::IntrinsicHeightVersion version = {};
+    if (allowed) {
+        // the estimator installs the resolved element font before visiting content.
+        bool installs_font = lycon->ui_context && element->font;
+        const FontProp* measured_font = installs_font ? element->font.get() : lycon->font.style.get();
+        // style resolution temporarily uses a direct flex item's actual containing width.
+        ViewBlock* parent = lam::view_as_block(element->parent.get());
+        float flex_inline_basis = parent && parent->display.inner == CSS_VALUE_FLEX
+            ? layout_containing_block_for_view(parent).content_width : 0.0f;
+        key = {radiant::css_geometry_context(lycon, element), lycon->available_space,
+            radiant::css_font_key(measured_font), installs_font ? nullptr : font_box_handle(&lycon->font),
+            width, lycon->root_font_size, ui_context_raster_scale(lycon->ui_context),
+            installs_font ? measured_font->font_size : lycon->font.current_font_size,
+            flex_inline_basis,
+            lycon->block.text_wrap_style, element->view_type,
+            element->elmt_flags & (ELMT_FLAG_PARENT_ITEM_KIND_MASK | ELMT_FLAG_ROLE_KIND_MASK),
+            ignore_definite_block_size};
+        version = radiant::intrinsic_height_version(lycon, element);
+        radiant::LayoutCache* owner = radiant::layout_pass_ensure_cache(lycon, element);
+        if (owner && !owner->intrinsic_heights) owner->intrinsic_heights = lam::own(
+            (radiant::IntrinsicHeightCache*)pool_calloc(lycon->pool, sizeof(radiant::IntrinsicHeightCache)));
+        cache = owner ? owner->intrinsic_heights.get() : nullptr;
+        if (cache) {
+            if (!radiant::intrinsic_height_version_equal(cache->version, version)) {
+                if (cache->entries) lycon->profiler.height_version_misses++;
+                radiant::intrinsic_height_entries_clear(cache, lycon->pool);
+                cache->version = version;
+            }
+            uint8_t common_changes = 63;
+            for (radiant::IntrinsicHeightEntry* entry = cache->entries; entry; entry = entry->next) {
+                uint8_t changes = radiant::intrinsic_height_key_changes(
+                    entry->key, key, entry->context_independent);
+                common_changes &= changes;
+                if (!changes) {
+                    scope.context_independent = entry->context_independent;
+                    lycon->profiler.height_cache_hits++;
+                    return entry->height;
+                }
+            }
+            // count inputs that disagree with every retained query, not each candidate.
+            if (cache->entries) for (unsigned bit = 0; bit < 6; bit++) {
+                if (common_changes & (1u << bit)) lycon->profiler.height_key_misses[bit]++;
+            }
+        }
+    }
+    lycon->profiler.height_computations++;
+    float height = calculate_max_content_height_uncached(lycon, node, width, ignore_definite_block_size);
+    if (element && !scope.cacheable) lycon->profiler.height_uncacheable++;
+    if (cache && scope.cacheable && isfinite(height) &&
+        radiant::intrinsic_height_version_equal(version, radiant::intrinsic_height_version(lycon, element))) {
+        auto* entry = (radiant::IntrinsicHeightEntry*)pool_calloc(lycon->pool, sizeof(radiant::IntrinsicHeightEntry));
+        if (entry) {
+            *entry = {cache->entries, key, height, scope.context_independent};
+            cache->entries = entry;
+            lycon->profiler.height_stores++;
+        }
+    } else if (cache && scope.cacheable) {
+        lycon->profiler.height_unstable++;
+    }
     return height;
 }
 

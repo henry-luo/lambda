@@ -2828,3 +2828,62 @@ TEST(DisplayListStorageTest, FragmentCursorRejectsCyclesRangesAndInconsistentCom
     EXPECT_TRUE(dl_validate(&list, nullptr));
     dl_destroy(&list); dl_payload_owner_release(&fragment); EXPECT_EQ(fragment.retired, 1u);
 }
+
+TEST(DisplayListStorageTest, TranslatedCursorCopiesActivePayloadAndPreservesMixedCommandValues) {
+    TestDisplayFragment fragment;
+    dl_clear(&fragment.own);
+    int begin = dl_begin_element(&fragment.own, 731, 1, 2, 30, 40);
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 1, 2, 30, 40, 0, 0);
+    RdtGradientStop stops[] = {{0, 10, 20, 30, 255}, {1, 40, 50, 60, 128}};
+    RdtMatrix transform = {1, 0.25f, 3, -0.5f, 2, 4, 0, 0, 1};
+    RdtMatrix gradient = {2, 0.5f, 7, 0.25f, 3, 8, 0, 0, 1};
+    RdtGradientOptions options = {};
+    options.spread = RDT_GRADIENT_REFLECT; options.stroke_width = 2;
+    options.cap = RDT_CAP_ROUND; options.join = RDT_JOIN_ROUND; options.miter_limit = 7;
+    dl_fill_linear_gradient(&fragment.own, path, 1, 2, 31, 42, stops, 2,
+        RDT_FILL_EVEN_ODD, &transform, &gradient, &options);
+    rdt_path_free(path);
+    dl_fill_rect(&fragment.own, 5, 6, 7, 8, Color{0x80403020u});
+    dl_end_element(&fragment.own, begin);
+    fragment.span.count = fragment.command_count = fragment.own.item_count();
+    fragment.translate_x = 10.25f; fragment.translate_y = -1.5f;
+    const auto& original = fragment.own[1].fill_linear_gradient;
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    DisplayListCursor cursor(&fragment);
+    ASSERT_NE(cursor.next(), nullptr);
+    EXPECT_EQ(cursor.item->element_marker.view_id, 731u);
+    EXPECT_FLOAT_EQ(cursor.item->element_marker.marker_x, 11.25f);
+    EXPECT_EQ(cursor.item->element_marker.matching_index, 3);
+    ASSERT_NE(cursor.next(), nullptr);
+    const auto& moved = cursor.item->fill_linear_gradient;
+    EXPECT_EQ(moved.path.get(), original.path.get()); EXPECT_EQ(moved.stops.get(), original.stops.get());
+    EXPECT_EQ(moved.stop_count, 2); EXPECT_EQ(moved.rule, RDT_FILL_EVEN_ODD);
+    EXPECT_TRUE(moved.has_transform); EXPECT_TRUE(moved.has_gradient_transform);
+    EXPECT_FLOAT_EQ(moved.transform.e13, 13.25f); EXPECT_FLOAT_EQ(moved.transform.e23, 2.5f);
+    EXPECT_EQ(memcmp(&moved.gradient_transform, &gradient, sizeof(gradient)), 0);
+    EXPECT_EQ(moved.options.spread, RDT_GRADIENT_REFLECT);
+    EXPECT_FLOAT_EQ(moved.options.stroke_width, 2); EXPECT_FLOAT_EQ(moved.options.miter_limit, 7);
+    EXPECT_EQ(moved.options.cap, RDT_CAP_ROUND); EXPECT_EQ(moved.options.join, RDT_JOIN_ROUND);
+    EXPECT_EQ(moved.options.dash_array.get(), original.options.dash_array.get());
+    EXPECT_EQ(moved.options.dash_count, original.options.dash_count);
+    EXPECT_FLOAT_EQ(moved.options.dash_phase, original.options.dash_phase);
+    ASSERT_NE(cursor.next(), nullptr);
+    EXPECT_FLOAT_EQ(cursor.item->fill_rect.x, 15.25f); EXPECT_FLOAT_EQ(cursor.item->fill_rect.y, 4.5f);
+    EXPECT_FLOAT_EQ(cursor.item->fill_rect.w, 7); EXPECT_FLOAT_EQ(cursor.item->fill_rect.h, 8);
+    EXPECT_EQ(cursor.item->fill_rect.color.c, 0x80403020u);
+    ASSERT_NE(cursor.next(), nullptr);
+    EXPECT_EQ(cursor.item->element_marker.view_id, 731u);
+    EXPECT_EQ(cursor.item->element_marker.matching_index, 0);
+    EXPECT_EQ(cursor.next(), nullptr); EXPECT_FALSE(cursor.failed);
+    const size_t header = sizeof(DisplayOp) + sizeof(fragment.own.front().bounds);
+    EXPECT_EQ(counters.placement_command_copy_bytes,
+        4 * header + 2 * sizeof(DlElementMarker) + sizeof(DlFillLinearGradient) + sizeof(DlFillRect));
+    EXPECT_LT(counters.placement_command_copy_bytes, fragment.own.size() * sizeof(DisplayItem));
+    EXPECT_FLOAT_EQ(original.transform.e13, 3); EXPECT_FLOAT_EQ(original.transform.e23, 4);
+    EXPECT_FLOAT_EQ(fragment.own[2].fill_rect.x, 5);
+    counters = {}; fragment.translate_x = fragment.translate_y = 0;
+    DisplayListCursor unplaced(&fragment);
+    for (const auto& command : fragment.own) EXPECT_EQ(unplaced.next(), &command);
+    EXPECT_EQ(counters.placement_command_copy_bytes, 0u);
+}

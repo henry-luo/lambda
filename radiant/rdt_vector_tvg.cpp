@@ -39,6 +39,7 @@ struct RdtVectorImpl {
     int height;
     int stride;
     int batch_depth;
+    bool opaque_rect_raster_enabled;
     uint64_t clip_mask_count;
     float tile_offset_x;  // physical-pixel X start of current tile (0 = full page)
     float tile_offset_y;  // physical-pixel Y start of current tile (0 = full page)
@@ -834,6 +835,8 @@ void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride)
     impl->width = w;
     impl->height = h;
     impl->stride = stride;
+    const char* opaque_rect_raster = getenv("RADIANT_TVG_RECT_RASTER");
+    impl->opaque_rect_raster_enabled = !opaque_rect_raster || strcmp(opaque_rect_raster, "off") != 0;
 
     Tvg_Result result = tvg_swcanvas_set_target(impl->canvas, pixels, stride,
                                                  w, h, TVG_COLORSPACE_ABGR8888);
@@ -1416,7 +1419,8 @@ bool rdt_path_get_rect_bound(const RdtPath* path, const RdtMatrix* transform, Bo
 
 static bool vector_raster_clip_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Bound* bounds) {
     float left = x, top = y, right = x + w, bottom = y + h;
-    if (!isfinite(left) || !isfinite(top) || !isfinite(right) || !isfinite(bottom)) return false;
+    if (!isfinite(left) || !isfinite(top) || !isfinite(right) || !isfinite(bottom) ||
+        !isfinite(impl->tile_offset_x) || !isfinite(impl->tile_offset_y)) return false;
     for (int index = 0; index < s_clip_depth; index++) {
         const ClipEntry& clip = s_clip_stack[s_clip_base + index];
         Bound bound;
@@ -1435,7 +1439,9 @@ static bool vector_raster_clip_rect(RdtVectorImpl* impl, float x, float y, float
 }
 
 static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Color color) {
-    if (color.a == 255 || w <= 0.0f || h <= 0.0f) return false;
+    if (w <= 0.0f || h <= 0.0f) return false;
+    // opaque writes bypass native construction only when they introduce no extra batch barrier.
+    if (color.a == 255 && (!impl->opaque_rect_raster_enabled || impl->batch_scene || impl->batch_root)) return false;
     Bound bounds;
     if (!vector_raster_clip_rect(impl, x, y, w, h, &bounds)) return false;
     if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) return true;

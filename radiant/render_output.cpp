@@ -590,7 +590,7 @@ static bool render_export_session_begin_internal(
         css_engine_set_viewport(engine, page_style.content_rect.width,
             page_style.content_rect.height);
     }
-    layout_html_doc(session->ui_context, session->document, false);
+    layout_update_document(session->ui_context, session->document);
 
     session->content_width = session->has_page_geometry
         ? (int)ceilf(session->page_width) : layout_width; // INT_CAST_OK: legacy export extent stores integral CSS pixels.
@@ -838,6 +838,8 @@ struct RenderOverlayRecordingScope {
 static void render_output_init_context(RasterRenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
                                        RenderProfiler* profiler, Arena* scratch_backing, RenderFrameCache* cache) {
     memset(rdcon, 0, sizeof(RasterRenderContext));
+    const char* html_box_cache = getenv("RADIANT_HTML_PLACEMENT_CACHE");
+    rdcon->html_box_cache_enabled = !html_box_cache || strcmp(html_box_cache, "off") != 0;
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
     render_svg_begin_paint_pass();

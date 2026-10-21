@@ -89,7 +89,7 @@ machinery to close them already exists in-tree.** Evidence, capability-by-capabi
 | **Schema validation** | Define record shape in Lambda type syntax, `validate(schema, data)` → `{valid, errors[]}`; element/document schemas too. | `lambda/validator/`, `doc/Lambda_Validator.md` |
 | **Module/package system** | `import alias: lambda.<name>.<name>`, `pub` exports, script-relative resolution, seven existing package precedents (chart/graph/latex/math/pdf/openapi/editor). | `lambda/`, `vibe/Lambda_Package.md` |
 | **Output formats** | `format(data, 'json'|'yaml'|'xml'|'html'|'markdown'|...)`, `output(data, path)`. | `doc/Lambda_Sys_Func.md` |
-| **Content extraction** | A **1,701-line Mozilla Readability port already exists in Lambda** — main-content/title/byline extraction works today. | `utils/readability2.ls` |
+| **Content extraction** | `lambda.doc.readability` ports Mozilla Readability.js 0.6.0 and passes all 130 of its test pages — main content, title, byline, excerpt, site name, language and direction. | `lmd/package/doc/readability/`, [Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) |
 | **Network machinery (in-tree, not yet script-exposed)** | RFC-6265 cookie jar + public-suffix, ETag/Cache-Control LRU cache, exponential-backoff retry, `CURLSH` connection pool + HTTP/2 multiplex, per-origin concurrency caps, curl-multi async backend. | `lambda/network/` (cookie_jar, enhanced_file_cache, network_downloader, network_scheduler) |
 | **Headless JS rendering** | `lambda.exe layout page.html` runs the page's inline+external(HTTP) scripts, ES modules, async/defer, on a real libuv loop (timers, `fetch`, microtasks, rAF, MutationObserver), windowless/GPU-less, with a bounded settle-drain. Event simulation (click/type/scroll/…) via a JSON driver. | `radiant/script_runner.cpp`, `radiant/cmd_layout.cpp`, `radiant/event_sim.cpp`, `radiant/ui_context.cpp` |
 
@@ -138,7 +138,7 @@ headless runtime already exist; the work is surfacing them to scripts.
   │ [L3]  EXTRACT / SELECT  (Lambda)                                       │
   │   dom.ls      — HTML string/URL → CSS-queryable node; css()/xpath-lite │
   │   select.ls   — extractors: text, attr, html; ::text/::attr combinators│
-  │   extract.ls  — readability (wraps utils/readability2.ls), tables,     │
+  │   extract.ls  — readability (wraps lambda.doc.readability), tables,    │
   │                 JSON-LD / OpenGraph / microdata metadata, page→markdown│
   │   item.ls     — item builder + schema validation + dedup keys          │
   ├───────────────────────────────────────────────────────────────────────┤
@@ -384,7 +384,7 @@ existing driver: `ctx.page.click(sel)`, `.type(sel, text)`, `.scroll_to(sel)`.
 ```lambda
 let doc = scrape.fetch_dom("https://example.com/article")^
 
-let article  = scrape.readability(doc)        // wraps utils/readability2.ls → {title, byline, content, text}
+let article  = scrape.readability(doc)        // wraps lambda.doc.readability → {title, byline, content, text}
 let markdown = scrape.to_markdown(doc)        // clean page → Markdown (format(_, 'markdown'))
 let meta     = scrape.metadata(doc)           // {og:{...}, json_ld:[...], title, description, canonical}
 let tables   = scrape.tables(doc)             // [[{col: val}...]] — <table> → array of row-maps
@@ -392,7 +392,7 @@ let tables   = scrape.tables(doc)             // [[{col: val}...]] — <table> �
 
 | Signature | Purpose |
 |---|---|
-| `pub fn readability(doc: Node) Article` | main-content extraction (existing `readability2.ls`) |
+| `pub fn readability(doc: Node) Article` | main-content extraction (`lambda.doc.readability`) |
 | `pub fn to_markdown(doc: Node) string` | page/subtree → Markdown |
 | `pub fn metadata(doc: Node) Meta` | OpenGraph + JSON-LD + microdata + `<title>`/canonical |
 | `pub fn tables(doc: Node) any[]` | HTML tables → row-map arrays |
@@ -539,5 +539,5 @@ CPU/mem probe sysfunc), resumable frontier (KeyValueStore persistence), and a ro
 | `lambda/js/js_event_loop.cpp` (`EVENT_LOOP_DRAIN_TIMEOUT_MS` :1611) | E6 — settle watchdog to make configurable |
 | `lambda/concurrency.cpp`, `test/lambda/conc/` | crawler worker pool / frontier |
 | `lambda/validator/`, `doc/Lambda_Validator.md` | item schema validation |
-| `utils/readability2.ls` | main-content extraction (existing Lambda port) |
+| `lmd/package/doc/readability.ls` | main-content extraction (`lambda.doc.readability`, [Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md)) |
 | `lambda/{chart,graph,latex}/` | package layout precedent |

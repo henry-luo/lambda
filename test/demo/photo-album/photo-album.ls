@@ -9,6 +9,14 @@ import L: .mod_library
 import G: .mod_grid
 import ui: .mod_ui
 import D: .mod_deck
+import C: .mod_collage
+import CA: .mod_collage_app
+import BK: .mod_book_app
+import B: .mod_book
+import F: .mod_film
+import FA: .mod_film_app
+import P: .mod_places
+import maps: lambda.map
 import slide: lambda.slide
 import slide_html: lambda.slide.html
 
@@ -19,6 +27,9 @@ let DIR_URL = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/", DIR)
 let MANIFEST = input(DIR ++ "photos.json", 'json')^
 let PRESENT = [for (p in MANIFEST.photos) {photo:exists(DIR ++ "photos/" ++ p.file), thumb:exists(DIR ++ "thumbs/" ++ p.file)}]
 let LIB = L.build(MANIFEST, PRESENT, DIR_URL)^
+let CTX = {lib:LIB, dir:DIR, dir_url:DIR_URL}
+// a coarse bundled land outline: lambda.map has no tile or URL sources, so no offline basemap (G6)
+let WORLD = input(slice(BASE, 7) ++ "world-outline.json", 'json') ^ { {type:"FeatureCollection", features:[]} }
 let FETCH = "python3 -I test/demo/photo-album/_fetch.py && ./lambda.exe run test/demo/photo-album/_thumbs.ls"
 let GAP = 4.0
 let ZOOM_LEVELS = [1.0, 1.5, 2.25, 3.4, 5.0, 8.0]
@@ -28,7 +39,7 @@ let SHOW_CHROME = 172.0
 let INITIAL = {mode:"library", album:"", query:"", favorites:[], selected:[], anchor:0, focus:0,
     target:160.0, width:0.0, height:0.0, top:0.0, ids:LIB.order, lay:null, rows:[], heads:[],
     layout_frame:0, band:null, scrub:null, pan:null, swallow_click:false, active:false, opening:null,
-    sheet:null, show:false,
+    sheet:null, show:false, collage:null, collage_edit:null, book:null, film:null, places:null, places_frame:0,
     viewer:{open:false, id:0, zoom:1.0, x:0.0, y:0.0, info:false, strip:true}}
 
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "album")
@@ -122,7 +133,9 @@ pn reveal(owner, st, id) {
 
 // ---------------------------------------------------------------- viewer
 
-fn viewer_index(st) => index_of(st.ids, st.viewer.id) or 0
+// the viewer steps through its own list when opened from the book, otherwise the grid's scope
+fn vids(st) => st.viewer.ids or st.ids
+fn viewer_index(st) => index_of(vids(st), st.viewer.id) or 0
 
 // The open animation grows the photo from its tile. The stage is still hidden when it starts, so
 // its box is derived from the viewport and the viewer chrome sizes in photo-album.css.
@@ -148,12 +161,13 @@ pn begin_open(owner, st) {
     let image = node(owner, "viewer-image")
     updates.style(image, "transform", box_transform(from.x, from.y, from.s))
     updates.style(image, "opacity", "0.6")
-    return {*:st, opening:{id:st.viewer.id, start:clock(), from:from, frame:dom.request_frame(owner, "album_open")}}
+    return {*:st, opening:{id:st.viewer.id, start:null, from:from, frame:dom.request_frame(owner, "album_open")}}
 }
-pn step_open(owner, st) {
-    let a = st.opening
+// progress runs on frame timestamps (the document timeline) from the animation's first frame
+pn step_open(owner, st, now_ms) {
+    let a = if (st.opening.start == null) {*:st.opening, start:now_ms} else st.opening
     let image = node(owner, "viewer-image")
-    let p = min(1.0, (clock() - a.start) / OPEN_SECONDS)
+    let p = min(1.0, (now_ms - a.start) / (OPEN_SECONDS * 1000.0))
     // the animation yields to any viewer change: another photo, zoom or close
     if (p >= 1.0 or not st.viewer.open or st.viewer.id != a.id or st.viewer.zoom != 1.0) {
         updates.style(image, "opacity", "1")
@@ -183,7 +197,7 @@ pn publish_viewer(owner, st) {
     if (st.opening == null) updates.style(image, "transform", box_transform(v.x, v.y, v.zoom))
     updates.attr(owner, "data-zoomed", v.zoom > 1.0)
     updates.text(owner, "viewer-title", p.title)
-    updates.text(owner, "viewer-subtitle", string(viewer_index(st) + 1) ++ " of " ++ string(len(st.ids)) ++ " · " ++ L.date_label(p))
+    updates.text(owner, "viewer-subtitle", string(viewer_index(st) + 1) ++ " of " ++ string(len(vids(st))) ++ " · " ++ L.date_label(p))
     updates.text(owner, "viewer-zoom-label", if (v.zoom == 1.0) "Fit" else string(round(v.zoom * 100)) ++ "%")
     updates.attr(node(owner, "viewer-favorite"), "aria-pressed", contains(st.favorites, v.id))
     updates.attr(node(owner, "viewer-info"), "aria-pressed", v.info)
@@ -191,21 +205,22 @@ pn publish_viewer(owner, st) {
     updates.show(owner, "viewer-info-panel", v.info)
     if (v.info) region(owner, "viewer-info-panel", format([ui.info(LIB, p)], 'html'))
     updates.show(owner, "filmstrip", v.strip, "flex")
-    if (v.strip) region(owner, "filmstrip", format([ui.filmstrip(LIB, st.ids, v.id)], 'html'))
+    if (v.strip) region(owner, "filmstrip", format([ui.filmstrip(LIB, vids(st), v.id)], 'html'))
     let at = viewer_index(st)
     updates.attr(node(owner, "viewer-prev"), "aria-disabled", at == 0)
-    updates.attr(node(owner, "viewer-next"), "aria-disabled", at >= len(st.ids) - 1)
+    updates.attr(node(owner, "viewer-next"), "aria-disabled", at >= len(vids(st)) - 1)
     // neighbours load into hidden images so the next step shows a decoded photo
-    let nearby = [for (j in [at + 1, at - 1] where j >= 0 and j < len(st.ids)) L.photo(LIB, st.ids[j])]
+    let nearby = [for (j in [at + 1, at - 1] where j >= 0 and j < len(vids(st))) L.photo(LIB, vids(st)[j])]
     region(owner, "prefetch", join([for (q in nearby where q.has_photo) format([<img src:q.photo_src,alt:"">], 'html')], ""))
     return null
 }
 
-fn open_viewer(st, id) => {*:st, focus:id, viewer:{*:st.viewer, open:true, id:id, zoom:1.0, x:0.0, y:0.0}}
+fn open_viewer(st, id) => {*:st, focus:id, viewer:{*:st.viewer, open:true, id:id, zoom:1.0, x:0.0, y:0.0, ids:null}}
 fn step(st, delta) {
     let at = viewer_index(st)
-    let next = max(0, min(len(st.ids) - 1, at + delta));
-    if (len(st.ids) == 0) st else open_viewer(st, st.ids[next])
+    let ids = vids(st)
+    let next = max(0, min(len(ids) - 1, at + delta));
+    if (len(ids) == 0) st else {*:open_viewer(st, ids[next]), viewer:{*:open_viewer(st, ids[next]).viewer, ids:st.viewer.ids}}
 }
 fn viewer_zoom(st, level) {
     let zoom = max(1.0, min(8.0, level));
@@ -273,6 +288,162 @@ pn close_show(owner, st) {
     return {*:st, show:false}
 }
 
+// ---------------------------------------------------------------- collage
+
+// a collage starts from the selection or the first photos shown, 2 to 30 of them
+pn open_collage(owner, st, source) {
+    let ids = slice(if (source == "selection") [for (id in st.ids where contains(st.selected, id)) id] else st.ids, 0, C.MAX_PHOTOS)
+    if (len(ids) < C.MIN_PHOTOS) { return st }
+    let title = L.scope_title(LIB, st.mode, st.album, st.query)
+    updates.show(owner, "collage", true, "flex")
+    let cs = CA.start(owner, CTX, ids, title)
+    // keyboard shortcuts reach the album only from focus inside it
+    dom.focus_set(node(owner, "collage"), false)
+    return {*:st, collage:cs, viewer:{*:st.viewer, open:false}}
+}
+
+pn collage_command(owner, st, action) {
+    let cs = st.collage
+    if (action == "collage-close") {
+        updates.show(owner, "collage", false)
+        dom.focus_set(home(owner, st), false)
+        return {*:st, collage:null, collage_edit:null}
+    }
+    if (action == "collage-undo" or action == "collage-redo") { return {*:st, collage:CA.undo(owner, CTX, cs, action == "collage-redo")} }
+    if (action == "collage-shuffle") { return {*:st, collage:CA.change(owner, CTX, cs, C.shuffle(cs.model))} }
+    var next = cs
+    var status = ""
+    if (action == "collage-save") { CA.save_model(owner, CTX, cs) ^ { status = "Could not save: " ++ ^.message } ~ { status = ~ } }
+    if (action == "collage-open") { CA.load_saved(owner, CTX, cs) ^ { status = ^.message } ~ { next = ~ } }
+    if (action == "collage-export") {
+        CA.export_image(owner, CTX, cs) ^ { status = "Could not export: " ++ ^.message }
+            ~ { status = "Exported " ++ slice(~.path, len(DIR), len(~.path)) ++ " (" ++ string(~.width) ++ " × " ++ string(~.height) ++ ") and its credits file" }
+    }
+    updates.text(owner, "cl-status", status)
+    return {*:st, collage:next}
+}
+
+// sliders and the caption edit live; history records each control once, when its edit ends
+pn collage_control(owner, st, id, value, final) {
+    let key = if (id == "cl-gutter") "gutter" else if (id == "cl-radius") "radius" else if (id == "cl-border") "border"
+        else if (id == "cl-caption") "caption" else if (id == "cl-aspect") "aspect" else if (id == "cl-credits") "credits" else ""
+    if (key == "") { return st }
+    let cs = st.collage
+    let start = if (st.collage_edit == null) cs.model else st.collage_edit
+    let typed = if (key == "caption" or key == "aspect") value else if (key == "credits") value == true
+        else int(round(float(value) ^ { 0.0 }))
+    let model = C.set(cs.model, key, typed)
+    if (final) { return {*:st, collage:CA.change(owner, CTX, {*:cs, model:start}, model), collage_edit:null} }
+    return {*:st, collage:CA.preview(owner, CTX, cs, model), collage_edit:start}
+}
+
+// ---------------------------------------------------------------- album book
+
+pn open_book(owner, st, source) {
+    let ids = slice(if (source == "selection") [for (id in st.ids where contains(st.selected, id)) id] else st.ids, 0, B.MAX_PHOTOS)
+    if (len(ids) == 0) { return st }
+    updates.show(owner, "book", true, "flex")
+    updates.attr(owner, "data-book", true)
+    let bs = BK.start(owner, CTX, ids, L.scope_title(LIB, st.mode, st.album, st.query))
+    dom.focus_set(node(owner, "book"), false)
+    return {*:st, book:bs, viewer:{*:st.viewer, open:false}}
+}
+
+// the cover and paper selects restyle the book; either input or change may report a selection
+fn book_select(id) => id == "bk-cover" or id == "bk-paper"
+pn book_restyle(owner, bs) {
+    let options = {cover:[for (c in B.COVERS) c.key][dom.selected_index(node(owner, "bk-cover")) or 0],
+        paper:[for (p in B.PAPERS) p.key][dom.selected_index(node(owner, "bk-paper")) or 0]}
+    if (options == bs.options) { return bs }
+    return BK.restyle(owner, CTX, bs, options)
+}
+
+pn book_command(owner, st, action) {
+    let bs = st.book
+    if (action == "book-close") {
+        updates.show(owner, "book", false)
+        updates.attr(owner, "data-book", false)
+        dom.focus_set(home(owner, st), false)
+        return {*:st, book:null}
+    }
+    if (action == "book-next" or action == "book-prev") { return {*:st, book:BK.turn(owner, CTX, bs, action == "book-next")} }
+    return st
+}
+
+// ---------------------------------------------------------------- film
+
+pn open_film(owner, st, source) {
+    let ids = slice(if (source == "selection") [for (id in st.ids where contains(st.selected, id)) id] else st.ids, 0, F.MAX_PHOTOS)
+    if (len(ids) == 0) { return st }
+    updates.show(owner, "film", true, "flex")
+    updates.attr(owner, "data-film", true)
+    let fs = FA.begin(owner, CTX, ids, L.scope_title(LIB, st.mode, st.album, st.query))
+    dom.focus_set(node(owner, "film"), false)
+    return {*:st, film:fs, viewer:{*:st.viewer, open:false}}
+}
+
+pn film_command(owner, st, action, now_ms) {
+    if (action == "film-close") {
+        FA.close(owner, st.film)
+        updates.show(owner, "film", false)
+        updates.attr(owner, "data-film", false)
+        dom.focus_set(home(owner, st), false)
+        return {*:st, film:null}
+    }
+    if (action == "film-toggle") { return {*:st, film:FA.toggle(owner, st.film, now_ms)} }
+    if (action == "film-sound") { return {*:st, film:FA.sound(owner, st.film, now_ms)} }
+    return st
+}
+
+// ---------------------------------------------------------------- places
+
+fn places_mode(st) => st.mode == "places" and st.query == ""
+// the map takes focus once it exists; before that, the panel's list
+fn places_focus(owner) => dom.query_selector(node(owner, "places-view"), "geomap") or node(owner, "places-list")
+// where focus returns when a layer over the library closes
+fn home(owner, st) => if (places_mode(st)) places_focus(owner) else node(owner, "port")
+
+// the map is built on the frame after Places shows: its size comes from the committed layout
+pn open_places(owner, st) {
+    let box = dom.bounding_box(node(owner, "places-map"))
+    let width = max(200.0, box.width)
+    let height = max(200.0, box.height)
+    let plan = P.plan(LIB, LIB.order)
+    let fitted = maps.update({width:width, height:height, center:[0.0, 0.0], zoom:1.0}, {type:"fit_bounds", bounds:plan.bounds, padding:48})
+    let camera = {*:fitted, zoom:max(0.5, min(8.0, fitted.zoom))}
+    let spec = maps.geomap([maps.source("land", WORLD), maps.source("pins", plan.features),
+        maps.layer("sea", "background", null, {'background-color':"#dde6ee"}),
+        maps.layer("land", "fill", "land", {'fill-color':"#f6f3ec", 'fill-outline-color':"#cfc8ba"}),
+        <layer id:"pins", type:"circle", source:"pins", filter:P.PIN_FILTER, paint:P.PIN_PAINT>],
+        {width:width, height:height, center:camera.center, zoom:camera.zoom})
+    dom.dispatch(node(owner, "places-view"), {type:"album_places_show", bubbles:false, detail:{spec:spec, bounds:plan.bounds}})
+    return render_places(owner, {*:st, places:{plan:plan, camera:camera, pick:null, frame:0}})
+}
+
+pn render_places(owner, st) {
+    let ps = st.places
+    let pins = [for (c in P.shown(ps.plan, ps.camera.zoom) order by len(c.ids) desc, c.id) c]
+    updates.text(owner, "places-heading", string(len(pins)) ++ (if (len(pins) == 1) " place" else " places"))
+    region(owner, "places-list", format([ui.places_list(LIB, pins, ps.pick, [for (c in pins) maps.project(ps.camera, [c.lon, c.lat])])], 'html'))
+    region(owner, "places-detail", format([ui.place_detail(LIB, if (ps.pick == null) null else P.cluster(ps.plan, ps.pick))], 'html'))
+    return st
+}
+
+pn pick_place(owner, st, id) {
+    if (st.places == null or P.cluster(st.places.plan, id) == null) { return st }
+    return render_places(owner, {*:st, places:{*:st.places, pick:id}})
+}
+
+// the map's callbacks run in its own view; they hand their result to the album as events
+pn places_picked(detail) {
+    let album = dom.get_element_by_id(dom.root_node(detail.node), "album")
+    dom.dispatch(album, {type:"album_places_pick", bubbles:false, detail:{ids:[for (f in detail.features) f.feature_id]}})
+}
+pn places_moved(detail) {
+    let album = dom.get_element_by_id(dom.root_node(detail.node), "album")
+    dom.dispatch(album, {type:"album_places_camera", bubbles:false, detail:{camera:detail.camera}})
+}
+
 // ---------------------------------------------------------------- publish
 
 pn publish(owner, st) {
@@ -290,7 +461,8 @@ pn publish(owner, st) {
     let cards = st.mode == "albums" and st.query == ""
     updates.show(owner, "empty", not cards and len(st.ids) == 0, "flex")
     if (not cards and len(st.ids) == 0) region(owner, "empty", format([ui.empty(st.query)], 'html'))
-    updates.show(owner, "scrubber", not cards and len(st.ids) > 0)
+    updates.show(owner, "scrubber", not cards and not places_mode(st) and len(st.ids) > 0)
+    updates.show(owner, "places", places_mode(st), "flex")
     updates.show(owner, "selection-bar", len(st.selected) > 0, "flex")
     updates.text(owner, "selection-count", string(len(st.selected)) ++ " selected")
     let all_favorite = len(st.selected) > 0 and all([for (id in st.selected) contains(st.favorites, id)])
@@ -327,7 +499,13 @@ fn select_tile(st, id, toggle_key, extend) {
     {*:st, selected:selected, focus:id, anchor:if (extend and anchor != null) st.anchor else id}
 }
 
-pn command(owner, st, action) {
+pn command(owner, st, action, now_ms = 0.0) {
+    if (action == "film-scope" or action == "film-selection") { return open_film(owner, st, slice(action, 5, len(action))) }
+    if (starts_with(action, "film-") and st.film != null) { return film_command(owner, st, action, now_ms) }
+    if (action == "book-scope" or action == "book-selection") { return open_book(owner, st, slice(action, 5, len(action))) }
+    if (starts_with(action, "book-") and st.book != null) { return book_command(owner, st, action) }
+    if (action == "collage-scope" or action == "collage-selection") { return open_collage(owner, st, slice(action, 8, len(action))) }
+    if (starts_with(action, "collage-") and st.collage != null) { return collage_command(owner, st, action) }
     if (starts_with(action, "slideshow-")) { return open_sheet(owner, st, slice(action, 10, len(action))) }
     if (action == "show-cancel") { return {*:st, sheet:null} }
     if (action == "show-save") {
@@ -368,9 +546,17 @@ pn after_favorites(owner, before, st) {
     return st
 }
 
-pn dispatch(owner, st, action) {
-    let next = after_favorites(owner, st, command(owner, st, action))
+pn dispatch(owner, st, action, now_ms = 0.0) {
+    let next = after_favorites(owner, st, command(owner, st, action, now_ms))
     let published = publish(owner, next)
+    if (st.viewer.open and not next.viewer.open and next.book != null) {
+        dom.focus_set(node(owner, "book"), false)
+        return published
+    }
+    if (st.viewer.open and not next.viewer.open and places_mode(next)) {
+        dom.focus_set(places_focus(owner), false)
+        return published
+    }
     if (st.viewer.open and not next.viewer.open) {
         let shown = reveal(owner, published, st.viewer.id)
         dom.focus_set(node(owner, "port"), false)
@@ -378,7 +564,7 @@ pn dispatch(owner, st, action) {
     }
     if (next.viewer.open and not st.viewer.open) dom.focus_set(node(owner, "viewer"), false)
     if (next.sheet != null and st.sheet == null) dom.focus_set(node(owner, "show-name"), false)
-    if ((st.show and not next.show) or (st.sheet != null and next.sheet == null and not next.show)) dom.focus_set(node(owner, "port"), false)
+    if ((st.show and not next.show) or (st.sheet != null and next.sheet == null and not next.show)) dom.focus_set(home(owner, next), false)
     return published
 }
 
@@ -451,6 +637,36 @@ on album_show_close(evt) {
     return 'handled'
 }
 
+// The Places map, created when Places first shows; the camera and selection are the map's state.
+view <album_places> state shown:null {
+    <div id:"places-view",class:"places-view",
+        (if (shown == null) null else maps.interactive(shown.spec, {controls:true, label:"Places map", on_select:places_picked,
+            on_camera:places_moved, bounds:shown.bounds, padding:48}))>
+}
+on album_places_show(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    shown = evt.detail
+    return 'handled'
+}
+
+// The film's player, created from the deck the album dispatches with album_film_open. It has no
+// controls: the album's film bar drives it with slide_command events (lambda.slide host control).
+view <album_film> state shown:null {
+    <div id:"film-stage",class:"film-stage",
+        (if (shown == null) null else slide.player(shown.deck, {instance:"album-film", width:shown.width, height:shown.height,
+            controls:false, autoplay_dwell_ms:F.DWELL_MS})^)>
+}
+on album_film_open(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    shown = evt.detail
+    return 'handled'
+}
+on album_film_close(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    shown = null
+    return 'handled'
+}
+
 view <album_session> state session:INITIAL { ~.rendered }
 on album_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
@@ -465,9 +681,40 @@ on album_scroll(evt) {
     if (top != session.top) { session = mount(evt.target, {*:session, top:top}) }
     return 'handled'
 }
+on places_open(evt) {
+    if (evt.event_phase != 2 or evt.detail != session.places_frame) { return 'pass' }
+    session = open_places(evt.target, {*:session, places_frame:0})
+    return 'handled'
+}
+on album_places_pick(evt) {
+    if (evt.event_phase != 2 or session.places == null) { return 'pass' }
+    let known = [for (id in evt.detail.ids where P.cluster(session.places.plan, id) != null) id]
+    session = if (len(known) > 0) pick_place(evt.target, session, known[0]) else render_places(evt.target, {*:session, places:{*:session.places, pick:null}})
+    return 'handled'
+}
+on album_places_camera(evt) {
+    if (evt.event_phase != 2 or session.places == null) { return 'pass' }
+    session = render_places(evt.target, {*:session, places:{*:session.places, camera:evt.detail.camera}})
+    return 'handled'
+}
+on film_start(evt) {
+    if (evt.event_phase != 2 or session.film == null or evt.detail != session.film.frame) { return 'pass' }
+    session = {*:session, film:FA.start(evt.target, session.film, evt.time_stamp)}
+    return 'handled'
+}
+on film_frame(evt) {
+    if (evt.event_phase != 2 or session.film == null or evt.detail != session.film.frame) { return 'pass' }
+    session = {*:session, film:FA.frame(evt.target, session.film, evt.time_stamp)}
+    return 'handled'
+}
+on book_frame(evt) {
+    if (evt.event_phase != 2 or session.book == null or evt.detail != session.book.frame) { return 'pass' }
+    session = {*:session, book:BK.frame(evt.target, CTX, session.book, evt.time_stamp)}
+    return 'handled'
+}
 on album_open(evt) {
     if (evt.event_phase != 2 or session.opening == null or evt.detail != session.opening.frame) { return 'pass' }
-    session = step_open(evt.target, session)
+    session = step_open(evt.target, session, evt.time_stamp)
     return 'handled'
 }
 on album_layout(evt) {
@@ -477,6 +724,8 @@ on album_layout(evt) {
 }
 on resize(evt) {
     let owner = owner_of(evt)
+    if (owner != null and session.book != null) { session = {*:session, book:BK.restyle(owner, CTX, session.book, session.book.options)} }
+    if (owner != null and session.collage != null) { session = {*:session, collage:CA.preview(owner, CTX, session.collage, session.collage.model)} }
     if (owner != null and session.active and session.layout_frame == 0) {
         session = {*:session, layout_frame:dom.request_frame(owner, "album_layout")}
     }
@@ -489,6 +738,43 @@ on click(evt) {
         return 'prevent-default'
     }
     let owner = owner_of(evt)
+    if (session.film != null) {
+        let chapter = dom.closest(evt.target, "[data-film-seek]")
+        let button = dom.closest(evt.target, "[data-action]")
+        if (chapter != null) {
+            session = {*:session, film:FA.seek(owner, session.film, float(dom.get_attribute(chapter, "data-film-seek")) ^ { 0.0 }, evt.time_stamp)}
+        } else if (button != null) {
+            session = dispatch(owner, session, dom.get_attribute(button, "data-action"), evt.time_stamp)
+        } else if (dom.closest(evt.target, "#film-stage") != null) {
+            // a click on the picture plays or pauses, as in a video player
+            session = dispatch(owner, session, "film-toggle", evt.time_stamp)
+        }
+        return 'handled'
+    }
+    if (session.book != null and not session.viewer.open) {
+        let spread = dom.closest(evt.target, "[data-spread]")
+        if (spread != null) {
+            session = {*:session, book:BK.jump(owner, CTX, session.book, int(dom.get_attribute(spread, "data-spread")) ^ { 0 })}
+            return 'handled'
+        }
+        let button = dom.closest(evt.target, "[data-action]")
+        if (button != null) { session = dispatch(owner, session, dom.get_attribute(button, "data-action")) }
+        return 'handled'
+    }
+    if (session.collage != null) {
+        if (dom.closest(evt.target, "#collage") == null) { return 'prevent-default' }
+        let template = dom.closest(evt.target, "[data-collage-template]")
+        let swatch = dom.closest(evt.target, "[data-collage-bg]")
+        if (template != null or swatch != null) {
+            let model = if (template != null) C.set(session.collage.model, "template", dom.get_attribute(template, "data-collage-template"))
+                else C.set(session.collage.model, "background", dom.get_attribute(swatch, "data-collage-bg"))
+            session = {*:session, collage:CA.change(owner, CTX, session.collage, model)}
+            return 'handled'
+        }
+        let button = dom.closest(evt.target, "[data-action]")
+        if (button != null) { session = dispatch(owner, session, dom.get_attribute(button, "data-action")) }
+        return 'handled'
+    }
     if (session.show and dom.closest(evt.target, ".show-bar") == null) { return 'pass' }
     if (session.sheet != null and dom.closest(evt.target, ".sheet") == null) { return 'prevent-default' }
     let nav = dom.closest(evt.target, "[data-nav]")
@@ -500,7 +786,22 @@ on click(evt) {
         let key = dom.get_attribute(album, "data-album")
         dom.set_state(node(owner, "search"), "value", "")
         session = rescope(owner, {*:session, query:"", mode:if (album != null) "album" else dom.get_attribute(nav, "data-nav"), album:key or ""})
-        dom.focus_set(node(owner, "port"), false)
+        if (places_mode(session) and session.places == null and session.places_frame == 0) {
+            session = {*:session, places_frame:dom.request_frame(owner, "places_open")}
+        }
+        dom.focus_set(if (places_mode(session)) places_focus(owner) else node(owner, "port"), false)
+        return 'handled'
+    }
+    let place = dom.closest(evt.target, "[data-place]")
+    let place_photo = dom.closest(evt.target, "[data-place-photo]")
+    if (place != null) {
+        session = pick_place(owner, session, int(dom.get_attribute(place, "data-place")) ^ { 0 })
+        return 'handled'
+    }
+    if (place_photo != null and session.places != null and session.places.pick != null) {
+        let opened = open_viewer(session, int(dom.get_attribute(place_photo, "data-place-photo")) ^ { 0 })
+        session = publish(owner, {*:opened, viewer:{*:opened.viewer, ids:P.cluster(session.places.plan, session.places.pick).ids}})
+        dom.focus_set(node(owner, "viewer"), false)
         return 'handled'
     }
     if (strip != null) {
@@ -521,6 +822,13 @@ on click(evt) {
 }
 on dblclick(evt) {
     let owner = owner_of(evt)
+    let print = dom.closest(evt.target, "[data-photo]")
+    if (session.book != null and print != null and not session.viewer.open) {
+        let opened = open_viewer(session, int(dom.get_attribute(print, "data-photo")) ^ { 0 })
+        session = publish(owner, {*:opened, viewer:{*:opened.viewer, ids:session.book.book.ids}})
+        dom.focus_set(node(owner, "viewer"), false)
+        return 'prevent-default'
+    }
     let tile = dom.closest(evt.target, ".tile")
     if (tile != null and not session.viewer.open) {
         session = begin_open(owner, publish(owner, open_viewer(session, int(dom.get_attribute(tile, "data-id")) ^ { 0 })))
@@ -536,6 +844,15 @@ on dblclick(evt) {
 on input(evt) {
     let owner = owner_of(evt)
     let id = dom.get_attribute(evt.target, "id")
+    if (session.book != null and book_select(id)) {
+        session = {*:session, book:book_restyle(owner, session.book)}
+        return 'handled'
+    }
+    if (session.collage != null) {
+        let value = if (id == "cl-caption") dom.get_state(evt.target, "value") else string(dom.range_value(evt.target))
+        if (id != "cl-aspect" and id != "cl-credits") { session = collage_control(owner, session, id, value, false) }
+        return 'handled'
+    }
     if (id == "search") {
         session = rescope(owner, {*:session, query:dom.get_state(evt.target, "value")})
         return 'handled'
@@ -547,8 +864,29 @@ on input(evt) {
     }
     return 'pass'
 }
+// a control's change ends its edit: the collage history records it once
+on change(evt) {
+    let owner = owner_of(evt)
+    if (session.book != null and book_select(dom.get_attribute(evt.target, "id"))) {
+        session = {*:session, book:book_restyle(owner, session.book)}
+        return 'handled'
+    }
+    if (session.collage == null) { return 'pass' }
+    let id = dom.get_attribute(evt.target, "id")
+    let value = if (id == "cl-credits") dom.get_state(evt.target, "checked")
+        else if (id == "cl-gutter" or id == "cl-radius" or id == "cl-border") string(dom.range_value(evt.target))
+        else if (id == "cl-aspect") [for (a in C.ASPECTS) a.key][dom.selected_index(evt.target) or 0]
+        else dom.get_state(evt.target, "value")
+    session = collage_control(owner, session, id, value, true)
+    return 'handled'
+}
 on wheel(evt) {
     let owner = owner_of(evt)
+    if (session.collage != null) {
+        if (dom.closest(evt.target, "#cl-stage") == null) { return 'pass' }
+        session = {*:session, collage:CA.wheel(owner, CTX, session.collage, evt)}
+        return 'prevent-default'
+    }
     if (session.viewer.open) {
         if (dom.closest(evt.target, "#viewer-stage") == null) { return 'pass' }
         session = publish(owner, viewer_zoom(session, session.viewer.zoom * (if (evt.deltaY < 0) 1.15 else 1 / 1.15)))
@@ -572,6 +910,26 @@ on pointerdown(evt) {
     if (evt.button != 0) { return 'pass' }
     session = {*:session, swallow_click:false}
     let owner = owner_of(evt)
+    if (session.film != null) {
+        if (dom.closest(evt.target, "#film-track") == null) { return 'pass' }
+        session = {*:session, film:FA.press(owner, session.film, evt, evt.time_stamp)}
+        dom.set_pointer_capture(node(owner, "film-track"), evt.pointerId)
+        return 'prevent-default'
+    }
+    if (session.book != null and not session.viewer.open) {
+        if (dom.closest(evt.target, "#bk-book") == null) { return 'pass' }
+        session = {*:session, book:BK.press(owner, session.book, evt)}
+        dom.focus_set(node(owner, "book"), false)
+        if (session.book.drag != null) dom.set_pointer_capture(node(owner, "book"), evt.pointerId)
+        return 'prevent-default'
+    }
+    if (session.collage != null) {
+        if (dom.closest(evt.target, "#cl-stage,#cl-tray") == null) { return 'pass' }
+        session = {*:session, collage:CA.press(owner, CTX, session.collage, evt)}
+        dom.focus_set(node(owner, "collage"), false)
+        dom.set_pointer_capture(node(owner, "collage"), evt.pointerId)
+        return 'prevent-default'
+    }
     if (session.viewer.open) {
         if (session.viewer.zoom > 1.0 and dom.closest(evt.target, "#viewer-image") != null) {
             session = {*:session, pan:{x:evt.clientX, y:evt.clientY, ox:session.viewer.x, oy:session.viewer.y, pointer:evt.pointerId}}
@@ -598,6 +956,18 @@ on pointerdown(evt) {
 }
 on pointermove(evt) {
     let owner = owner_of(evt)
+    if (session.film != null and session.film.drag != null) {
+        session = {*:session, film:FA.drag(owner, session.film, evt, evt.time_stamp)}
+        return 'prevent-default'
+    }
+    if (session.book != null and session.book.drag != null) {
+        session = {*:session, book:BK.drag(owner, CTX, session.book, evt)}
+        return 'prevent-default'
+    }
+    if (session.collage != null and session.collage.drag != null) {
+        session = {*:session, collage:CA.move(owner, CTX, session.collage, evt)}
+        return 'prevent-default'
+    }
     if (session.pan != null) {
         let pan = session.pan
         // the zoomed image may move by its overflow beyond the stage on each side, no further
@@ -626,6 +996,18 @@ on pointermove(evt) {
     return 'pass'
 }
 on pointerup(evt) {
+    if (session.film != null and session.film.drag != null) {
+        session = {*:session, film:FA.release(owner_of(evt), session.film, evt.time_stamp)}
+        return 'prevent-default'
+    }
+    if (session.book != null and session.book.drag != null) {
+        session = {*:session, book:BK.release(owner_of(evt), CTX, session.book)}
+        return 'prevent-default'
+    }
+    if (session.collage != null and session.collage.drag != null) {
+        session = {*:session, collage:CA.release(owner_of(evt), CTX, session.collage, evt), swallow_click:session.collage.drag.moved}
+        return 'prevent-default'
+    }
     if (session.pan == null and session.scrub == null and session.band == null) { return 'pass' }
     session = end_gesture(owner_of(evt), session)
     return 'prevent-default'
@@ -638,6 +1020,31 @@ on keydown(evt) {
     let owner = owner_of(evt)
     let key = evt.key
     let modifier = evt.metaKey or evt.ctrlKey
+    if (session.film != null) {
+        let action = if (key == "Escape") "film-close" else if (key == " " or key == "k") "film-toggle" else if (lower(key) == "m") "film-sound" else ""
+        if (action != "") { session = dispatch(owner, session, action, evt.time_stamp); return 'prevent-default' }
+        let fs = session.film
+        if (key == "ArrowLeft" or key == "ArrowRight") { session = {*:session, film:FA.skip(owner, fs, if (key == "ArrowLeft") -5000.0 else 5000.0, evt.time_stamp)}; return 'prevent-default' }
+        if (key == "Home" or key == "End") { session = {*:session, film:FA.seek(owner, fs, if (key == "Home") 0.0 else fs.film.duration_ms, evt.time_stamp)}; return 'prevent-default' }
+        return 'pass'
+    }
+    // a viewer opened over the book keeps its own keys (its branch below)
+    if (session.book != null and not session.viewer.open) {
+        let action = if (key == "Escape") "book-close" else if (key == "ArrowRight" or key == "PageDown" or key == " ") "book-next"
+            else if (key == "ArrowLeft" or key == "PageUp") "book-prev" else ""
+        if (action != "") { session = dispatch(owner, session, action); return 'prevent-default' }
+        if (key == "Home" or key == "End") {
+            session = {*:session, book:BK.jump(owner, CTX, session.book, if (key == "Home") 0 else len(session.book.book.leaves))}
+            return 'prevent-default'
+        }
+        return 'pass'
+    }
+    if (session.collage != null) {
+        if (key == "Escape") { session = dispatch(owner, session, "collage-close"); return 'prevent-default' }
+        if (dom.closest(evt.target, "input,textarea,select") != null) { return 'pass' }
+        if (modifier and lower(key) == "z") { session = dispatch(owner, session, if (evt.shiftKey) "collage-redo" else "collage-undo"); return 'prevent-default' }
+        return 'pass'
+    }
     if (session.show) {
         // the player owns its keys; Escape closes the show once the player has nothing of its own to dismiss
         let player = node(owner, "album-show")
@@ -657,12 +1064,16 @@ on keydown(evt) {
         if (action != "") { session = dispatch(owner, session, action); return 'prevent-default' }
         if (key == "0") { session = publish(owner, viewer_zoom(session, 1.0)); return 'prevent-default' }
         if (key == "Home" or key == "End") {
-            session = publish(owner, open_viewer(session, if (key == "Home") session.ids[0] else session.ids[last]))
+            let ids = vids(session)
+            let opened = open_viewer(session, if (key == "Home") ids[0] else ids[last])
+            session = publish(owner, {*:opened, viewer:{*:opened.viewer, ids:session.viewer.ids}})
             return 'prevent-default'
         }
         return 'pass'
     }
     if (modifier and lower(key) == "f") { dom.focus_set(node(owner, "search"), false); return 'prevent-default' }
+    // the map owns its keys; grid navigation does not apply under Places
+    if (places_mode(session) and dom.closest(evt.target, "input,textarea,select") == null) { return 'pass' }
     if (dom.closest(evt.target, "input,textarea,select") != null) {
         if (key == "Escape" and dom.get_attribute(evt.target, "id") == "search") {
             dom.set_state(evt.target, "value", "")

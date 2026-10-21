@@ -57,6 +57,17 @@ Morph compatibility. These choices add package behavior without revising a
 formal ruling. See [the public reference](../doc/Lambda_Slide.md) and
 [implementation evidence](impl/Lambda_Impl_Slide_Presentation.md).
 
+### Player chrome theming — 2026-10-21
+
+The user asked that an embedded player can match its host application's look
+(the photo album demo). The chrome stylesheet now reads its colors, font and
+radius from `--slide-ui-*` custom properties whose fallbacks are the previous
+literal values, so existing decks render identically (Northstar's presenter view
+was compared pixel for pixel). A validated `ui` map in options or on
+`<presentation>` sets the properties on the player root and page body; option
+tokens override deck tokens. This is package behavior under D7.2.4 and adds no
+formal ruling. Public reference: [Player chrome](../doc/Lambda_Slide.md#player-chrome).
+
 ## 1. Purpose
 
 Provide `lambda.slide`, a source package for authoring and playing slide decks.

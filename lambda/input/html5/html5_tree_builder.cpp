@@ -12,7 +12,7 @@
 #define log_debug(...) log_trace(__VA_ARGS__)
 
 // JSON parser for embedded JSON-LD in <script type="application/ld+json">
-Item parse_json_to_item(Input* input, const char* json_string);
+Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
 
 // tag classes by markup name id, lists in html5_parser.cpp (html5_tag_classes)
 static bool html5_is_heading_tag(NameId tag_id, const char* tag) {
@@ -1042,10 +1042,18 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
                         if (json_str) {
                             const char* json_text = json_str->chars;
                             log_debug("html5: parsing JSON-LD content (%zu bytes)", (size_t)json_str->len);
-                            Item parsed = parse_json_to_item(parser->input, json_text);
+                            // script content is raw text (HTML5), so the JSON reading is best-effort:
+                            // a malformed block stays text and must not fail the shared document Input
+                            Input* input = parser->input;
+                            bool was_failed = input->parse_failed;
+                            char* was_message = input->parse_error_message;
+                            bool ok = false;
+                            Item parsed = parse_json_to_item_strict(input, json_text, &ok);
+                            input->parse_failed = was_failed;
+                            input->parse_error_message = was_message;
                             TypeId parsed_type = get_type_id(parsed);
-                            if (parsed_type == LMD_TYPE_MAP || parsed_type == LMD_TYPE_ELEMENT
-                                || parsed_type == LMD_TYPE_ARRAY) {
+                            if (ok && (parsed_type == LMD_TYPE_MAP || parsed_type == LMD_TYPE_ELEMENT
+                                || parsed_type == LMD_TYPE_ARRAY)) {
                                 // replace the string child with the parsed JSON
                                 current->items[current->length - 1] = parsed;
                                 log_debug("html5: replaced JSON-LD text with parsed structure");

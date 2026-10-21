@@ -5246,8 +5246,7 @@ static void radiant_host_document_clear_reflow(void* document) {
 
 static bool radiant_host_layout_document(void* ui_context, void* document, bool is_reflow) {
     if (!ui_context || !document) return false;
-    layout_html_doc((UiContext*)ui_context, (DomDocument*)document, is_reflow);
-    return true;
+    return layout_update_document((UiContext*)ui_context, (DomDocument*)document);
 }
 static float radiant_host_element_effective_zoom(void* element) {
     return layout_effective_zoom((DomNode*)element);

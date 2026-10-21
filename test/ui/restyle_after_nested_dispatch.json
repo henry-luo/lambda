@@ -1,0 +1,12 @@
+{
+  "name": "DOM writes after a nested view re-render in the same handler still get their cascade",
+  "html": "test/ui/restyle_after_nested_dispatch.ls",
+  "viewport": {"width": 500, "height": 300},
+  "events": [
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "advance_time", "ms": 50},
+    {"type": "assert_script", "js": "document.querySelector('#other p') !== null && document.querySelector('#other p').textContent === 'map on'"},
+    {"type": "assert_script", "js": "const b = document.querySelector('.place'); getComputedStyle(b).textAlign === 'left' && getComputedStyle(b).color === 'rgb(10, 132, 255)' && getComputedStyle(b).display === 'grid'"},
+    {"type": "assert_script", "js": "getComputedStyle(document.querySelector('.place-name')).textAlign === 'left'"}
+  ]
+}

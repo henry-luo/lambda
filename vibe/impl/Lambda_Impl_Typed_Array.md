@@ -11,8 +11,8 @@
   `ArrayNum` kernels are retained and brought under the contract model.
 - **Out of scope:** LambdaJS `TypedArray`, new image algorithms, manual SIMD,
   dependent-shape types, a C-text/C2MIR back end, and changes to vendored MIR.
-- **Prior records:** `../Lambda_Typed_Array.md`,
-  `../Lambda_Typed_Array2.md`, `../Lambda_Typed_Array4.md`,
+- **Prior records:** `../Lambda_Typed_Array.md` (consolidated on
+  2026-10-21 from Typed Array 1–4; this plan cited Typed Array 1, 2 and 4),
   `../Lambda_Design_Type_Enforcement.md`,
   `../Lambda_Design_Runtime_COW.md`,
   `../Lambda_Design_Compiling_Lane.md`, and

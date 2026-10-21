@@ -1,0 +1,64 @@
+{
+  "name": "Photo album Places: offline outline map, pins clustered per zoom, list and map picks, photos open in the viewer",
+  "html": "test/demo/photo-album/photo-album.ls",
+  "env": [
+    {"key": "PHOTO_ALBUM_DIR", "value": "test/demo/photo-album/fixture"}
+  ],
+  "viewport": {"width": 1400, "height": 900},
+  "events": [
+    {"type": "advance_time", "ms": 100},
+    {"type": "assert_text", "target": {"selector": "#nav-places small"}, "equals": "12"},
+    {"type": "click", "target": {"selector": "#nav-places"}},
+    {"type": "advance_time", "ms": 100},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('places')).display==='flex' && getComputedStyle(document.getElementById('scrubber')).display==='none'"},
+    {"type": "assert_text", "target": {"selector": "#title"}, "equals": "Places"},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "12 photos"},
+    {"type": "assert_attribute", "target": {"selector": "#nav-places"}, "attribute": "aria-current", "equals": "true"},
+    {"type": "assert_script", "js": "document.querySelector('#places-view geomap')!==null && document.querySelectorAll('#places-view [data-map-action]').length===4"},
+    {"type": "assert_text", "target": {"selector": "#places-heading"}, "equals": "11 places"},
+    {"type": "assert_text", "target": {"selector": "[data-place] .place-name"}, "equals": "2 photos · 51° N, 19° E"},
+    {"type": "assert_script", "js": "document.querySelector('.places-hint')!==null"},
+
+    {"type": "click", "target": {"selector": "[data-place]"}},
+    {"type": "assert_attribute", "target": {"selector": "[data-place]"}, "attribute": "aria-current", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": ".places-title"}, "equals": "2 photos · 51° N, 19° E"},
+    {"type": "assert_script", "js": "document.querySelectorAll('.places-photo').length===2 && document.querySelector('.places-meta').textContent==='2019–2021 · 2 photos'"},
+
+    {"type": "script", "js": "const b=[...document.querySelectorAll('[data-place]')].find(b=>b.querySelector('.place-name').textContent==='Heron'); globalThis.heron=b.getAttribute('data-place'); globalThis.heronAt=b.getAttribute('data-map-x')+','+b.getAttribute('data-map-y')"},
+    {"type": "assert_script", "js": "heronAt==='262,591'"},
+    {"type": "click", "target": {"selector": "#places-view geomap", "offset_x": 262, "offset_y": 591}},
+    {"type": "assert_text", "target": {"selector": ".places-title"}, "equals": "Heron"},
+    {"type": "assert_script", "js": "document.querySelector('[data-place=\"'+heron+'\"]').getAttribute('aria-current')==='true' && document.querySelectorAll('.places-photo').length===1"},
+    {"type": "click", "target": {"selector": "#places-view geomap", "offset_x": 600, "offset_y": 120}},
+    {"type": "assert_script", "js": "document.querySelector('.places-hint')!==null && document.querySelectorAll('[data-place][aria-current=\"true\"]').length===0"},
+
+    {"type": "click", "target": {"selector": "[data-map-action='zoom-in']"}},
+    {"type": "assert_text", "target": {"selector": "#places-heading"}, "equals": "12 places"},
+    {"type": "assert_script", "js": "[...document.querySelectorAll('[data-place] small')].every(s=>s.textContent==='1')"},
+    {"type": "click", "target": {"selector": "[data-map-action='reset']"}},
+    {"type": "assert_text", "target": {"selector": "#places-heading"}, "equals": "11 places"},
+
+    {"type": "click", "target": {"selector": "[data-place]"}},
+    {"type": "click", "target": {"selector": ".places-photo"}},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('viewer')).display==='flex' && / of 2 · /.test(document.getElementById('viewer-subtitle').textContent)"},
+    {"type": "key_press", "key": "right"},
+    {"type": "assert_script", "js": "/^2 of 2 · /.test(document.getElementById('viewer-subtitle').textContent)"},
+    {"type": "key_press", "key": "escape"},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('viewer')).display==='none' && getComputedStyle(document.getElementById('places')).display==='flex'"},
+    {"type": "assert_focus", "target": {"selector": "#places-view geomap"}},
+    {"type": "capture_surface", "source": "page", "file": "temp/photo_album/places.png"},
+
+    {"type": "click", "target": {"selector": "#nav-library"}},
+    {"type": "assert_script", "js": "getComputedStyle(document.getElementById('places')).display==='none' && document.querySelectorAll('#grid .tile').length===24"},
+    {"type": "assert_focus", "target": {"selector": "#port"}},
+    {"type": "click", "target": {"selector": "#nav-places"}},
+    {"type": "advance_time", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".places-title"}, "equals": "2 photos · 51° N, 19° E"},
+    {"type": "assert_focus", "target": {"selector": "#places-view geomap"}},
+    {"type": "click", "target": {"selector": "#film-button"}},
+    {"type": "advance_time", "ms": 100},
+    {"type": "assert_text", "target": {"selector": "#film-title"}, "equals": "Places"},
+    {"type": "click", "target": {"selector": "#film-close"}},
+    {"type": "assert_focus", "target": {"selector": "#places-view geomap"}}
+  ]
+}

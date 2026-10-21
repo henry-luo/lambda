@@ -35,7 +35,8 @@ pn accumulate_u64(n: int) {
     var acc: u64 = 0u64
     var i = 0
     while (i < n) {
-        acc = acc + 6364136223846793005u64 * 3u64
+        // both operands literal, so the product must fit u64 (S4.1.5)
+        acc = acc + 1442695040888963407u64 * 3u64
         i = i + 1
     }
     return acc

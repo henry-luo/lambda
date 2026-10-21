@@ -53,8 +53,8 @@ class ArrayReader;
 // ArrayNumView — INTERNAL stack descriptor of a typed-array (ArrayNum) slab:
 // either a whole 1-D array, or one axis-level of an N-D tensor.  Carried by
 // value inside ItemReader/ArrayReader so typed arrays traverse exactly like
-// generic arrays with zero heap allocation (Appendix A guidelines G1/G2/G3 in
-// vibe/Lambda_Typed_Array2.md).  Never surfaced to reader consumers.
+// generic arrays with zero heap allocation (Appendix B guidelines G1/G2/G3 in
+// vibe/Lambda_Typed_Array.md).  Never surfaced to reader consumers.
 // ----------------------------------------------------------------------------
 struct ArrayNumView {
     ArrayNum* base = nullptr;   // underlying typed array (must stay static during read)

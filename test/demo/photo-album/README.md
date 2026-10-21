@@ -2,8 +2,8 @@
 
 A photo library written in Lambda and rendered by Radiant: a date timeline in a
 justified grid, albums, search, favorites and a full-screen viewer, over 1000
-featured photographs from Wikimedia Commons. The design and the later features
-(collage, memories film, album book, slideshow) are in
+featured photographs from Wikimedia Commons, with a map of places, a collage
+editor, slideshows, a classic album book and a memories film. The design is in
 [the proposal](../../../vibe/Lambda_Demo_Photo_Album.md).
 
 ## Run it
@@ -37,7 +37,11 @@ colour, and a banner repeats the commands above.
 | Favorite | `F`, or the selection bar's **Add to Favorites**. |
 | Search | ⌘/Ctrl+F. Every word must match a title, description, keyword, album, camera, year or month. |
 | Albums | The sidebar's album list, or **Albums** for cover cards. |
+| Places | **Places** in the sidebar: the photos with a location as pins on a world outline, sized by how many photos they hold. Click a pin, or a place in the list, to see its photos; click a photo to open it. Double-click, scroll or press **+** to zoom in, and pins split. |
+| Collage | The collage icon in the toolbar (the first 30 photos shown) or the selection bar. Pick a template and canvas, drag inside a cell to move the crop, scroll to zoom it, drag a photo onto another cell (or from the tray) to swap, and adjust spacing, corners, border, background and caption. In the scrapbook, drag prints and use their handles to rotate or resize. ⌘Z / ⇧⌘Z undo and redo. **Save** keeps the collage in `collages/`; **Export image** writes PNG or JPEG with a credits file. |
 | Slideshow | **Slideshow** in the toolbar (the photos shown), the selection bar (the selection) or the viewer (from that photo). Choose a name, theme, transition and pace, then **Present** or **Save as .slides**. Decks are saved in `slideshows/` and open with `lambda view`. In the show, the player's keys apply; Escape returns to the album. |
+| Film | The film icon in the toolbar (the photos shown, up to 60) or **Film** in the selection bar. An autoplaying story with a title, a card per chapter, slow pans and zooms, quick cuts, a soundtrack and rolling credits. Space or a click on the picture plays and pauses; ←/→ skip 5 s; Home/End; drag the bar to scrub; click a chapter to jump; **M** or the speaker turns the sound off; Escape closes. |
+| Album book | The book icon in the toolbar (the photos shown, up to 240) or the selection bar. ←/→, Page Up/Down, Space, Home/End, **Previous**/**Next** or a click on either page turn a leaf; drag a page to turn it by hand, and release past the middle to finish the turn or before it to let it fall back. The bar below jumps to a spread. Choose the cover and paper in the header. Double-click a print to open it in the viewer; Escape closes the book. |
 | Viewer | Double-click a photo or press Enter. ←/→ step, Home/End jump, `I` shows info, `F` favorites, `=`/`-`/`0` zoom, drag pans a zoomed photo, Escape closes. |
 
 ## Files
@@ -48,6 +52,17 @@ colour, and a banner repeats the commands above.
 | `mod_library.ls` | The immutable library: ordering, albums, scopes and search |
 | `mod_grid.ls` | Justified row packing, the mounted row window, hit testing and zoom anchoring |
 | `mod_ui.ls` | Markup for the shell, grid rows, album cards, viewer and slideshow sheet |
+| `mod_collage.ls` | Collage model, template layouts, edits, history and credits |
+| `mod_collage_ui.ls` | Collage canvas markup (shared by the editor and exports) and the editor shell |
+| `mod_collage_app.ls` | Collage editor procedures: gestures, save/open and export through Radiant |
+| `mod_book.ls` | Album book model: pagination into templates and chapters, leaves, spreads and turn maths |
+| `mod_book_ui.ls` | Album book markup: pages, prints, leaves, spread bar and shell |
+| `mod_book_app.ls` | Album book procedures: leaf mounting, frame-driven turns, drags and jumps |
+| `mod_film.ls` | Memories film: chapters, shots and timing on the beat, and its lowering to a `lambda.slide` deck |
+| `mod_film_app.ls` | Film playback: an embedded player without controls, the film bar, scrubbing, chapters and the soundtrack |
+| `mod_score.ls` | The film's soundtrack, composed from the film plan; MIDI helpers in `../mod_midi.ls` |
+| `mod_places.ls` | Places: clusters of located photos for each zoom, as GeoJSON for `lambda.map` |
+| `world-outline.json` | A coarse hand-drawn land outline, the offline map background |
 | `mod_deck.ls` | Slideshow decks for `lambda.slide`: slide plan, layouts, notes and credits |
 | `photo-album.css` | Styles |
 | `mod_corpus.ls` | Thumbnail and colour building shared by `_thumbs.ls` and `_fixture.ls` |
@@ -68,6 +83,11 @@ directory, relative to the current directory.
 ./lambda.exe test/demo/photo-album/tests/album_library.ls
 ./lambda.exe test/demo/photo-album/tests/album_grid.ls
 ./lambda.exe test/demo/photo-album/tests/album_deck.ls
+./lambda.exe test/demo/photo-album/tests/album_collage.ls
+./lambda.exe test/demo/photo-album/tests/album_book.ls
+./lambda.exe test/demo/photo-album/tests/album_film.ls
+./lambda.exe test/demo/photo-album/tests/album_places.ls
+./lambda.exe run test/demo/photo-album/tests/proc/collage_export.ls
 ./test/test_ui_automation_gtest.exe --suite photo_album
 ```
 

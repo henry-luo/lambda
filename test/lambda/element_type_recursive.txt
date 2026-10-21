@@ -1,0 +1,10 @@
+"1 content naming its own type"
+[true, true, true, false, false]
+"2 attributes checked at every level"
+[true, false]
+"3 an attribute naming its own type"
+[true, true, true, false]
+"4 recursion through a union in content"
+[true, false, true, false]
+"5 a parameter contract and a match arm"
+[3, "s-tree", "other"]

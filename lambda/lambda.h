@@ -1529,6 +1529,9 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
+// JS reading: an in-band i64/u64 may return as an inline int (one JS number type)
+Item js_owned_item_slot_read(Item* storage, int64_t item_count,
+                             int64_t index, bool immortal);
 Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
 // v3 (RV5): resolve a shape-2 call result whose lane 1 came back pending.
 // Boxes the lane-2 payload into the CALLING frame's number extent.

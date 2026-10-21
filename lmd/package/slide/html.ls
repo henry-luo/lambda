@@ -2,9 +2,11 @@ import c: .common
 import samples: .sample
 import theme: .theme
 
+// Player chrome colours, font and radius are `--slide-ui-*` custom properties whose
+// fallbacks are the original values; hosts override them in CSS or with the `ui` option.
 pub let css = "
 html, body { margin: 0; width: 100%; min-height: 100%; }
-.slide-page { background: #111827; font-family: Arial, sans-serif; }
+.slide-page { background: var(--slide-ui-page, #111827); font-family: var(--slide-ui-font, Arial, sans-serif); }
 .slide-stage { position: relative; overflow: hidden; margin: 0 auto; }
 .slide-canvas { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; }
 .slide-layer { position: absolute; left: 0; top: 0; overflow: hidden; }
@@ -14,53 +16,53 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-text p { margin: 0 0 0.6em; }
 .slide-image { width: 100%; height: 100%; }
 .slide-controls { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
-    gap: 8px; padding: 14px 24px; background: #102333; border-top: 1px solid #2b4353; color: #dce8ee; }
+    gap: 8px; padding: 14px 24px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
 .slide-controls button, .slide-console button, .slide-overview button, .slide-toolbar-toggle { appearance: none; box-sizing: border-box; font-family: inherit;
     font-size: 13px; font-weight: 600; line-height: 20px; padding: 8px 16px;
-    border: 1px solid #365263; border-radius: 8px; background: #1b3445; color: #e5eef2;
-    cursor: pointer; box-shadow: 0 1px 2px #081724; }
-.slide-controls button:hover { background: #28495c; border-color: #5c8495; }
-.slide-controls button:active { background: #122b3c; }
-.slide-controls button:focus-visible { outline: 2px solid #8be2c6; outline-offset: 3px; }
-.slide-controls button[data-slide-command=next] { background: #8be2c6; border-color: #8be2c6;
-    color: #102b35; font-weight: 700; padding-left: 24px; padding-right: 24px; }
-.slide-controls button[data-slide-command=next]:hover { background: #b0efdb; border-color: #b0efdb; }
-.slide-controls button[data-slide-command=next]:active { background: #69c8ab; }
+    border: 1px solid var(--slide-ui-control-border, #365263); border-radius: var(--slide-ui-radius, 8px); background: var(--slide-ui-control, #1b3445); color: var(--slide-ui-text, #e5eef2);
+    cursor: pointer; box-shadow: var(--slide-ui-shadow, 0 1px 2px #081724); }
+.slide-controls button:hover { background: var(--slide-ui-control-hover, #28495c); border-color: var(--slide-ui-control-hover-border, #5c8495); }
+.slide-controls button:active { background: var(--slide-ui-control-active, #122b3c); }
+.slide-controls button:focus-visible { outline: 2px solid var(--slide-ui-accent, #8be2c6); outline-offset: 3px; }
+.slide-controls button[data-slide-command=next] { background: var(--slide-ui-accent, #8be2c6); border-color: var(--slide-ui-accent, #8be2c6);
+    color: var(--slide-ui-accent-text, #102b35); font-weight: 700; padding-left: 24px; padding-right: 24px; }
+.slide-controls button[data-slide-command=next]:hover { background: var(--slide-ui-accent-hover, #b0efdb); border-color: var(--slide-ui-accent-hover, #b0efdb); }
+.slide-controls button[data-slide-command=next]:active { background: var(--slide-ui-accent-active, #69c8ab); }
 .slide-controls button[data-slide-command=restart] { margin-left: 8px; background: transparent; }
-.slide-controls button[data-slide-command=restart]:hover { background: #28495c; }
+.slide-controls button[data-slide-command=restart]:hover { background: var(--slide-ui-control-hover, #28495c); }
 .slide-speed { display: flex; align-items: center; gap: 10px; margin-left: 8px;
-    padding: 8px 12px; border: 1px solid #2b4353; border-radius: 8px;
-    font-size: 12px; font-weight: 600; line-height: 20px; color: #afc5d0; }
-.slide-speed-input { width: 104px; height: 20px; margin: 0; padding: 0; cursor: pointer; accent-color: #8be2c6; }
-.slide-speed-input:focus-visible { outline: 2px solid #8be2c6; outline-offset: 3px; }
-.slide-speed-value { min-width: 36px; color: #8be2c6; text-align: right; }
-.slide-status { margin-left: 8px; padding: 8px 14px; border: 1px solid #2b4353; border-radius: 8px;
-    font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0.5px; color: #afc5d0; }
+    padding: 8px 12px; border: 1px solid var(--slide-ui-border, #2b4353); border-radius: var(--slide-ui-radius, 8px);
+    font-size: 12px; font-weight: 600; line-height: 20px; color: var(--slide-ui-muted, #afc5d0); }
+.slide-speed-input { width: 104px; height: 20px; margin: 0; padding: 0; cursor: pointer; accent-color: var(--slide-ui-accent, #8be2c6); }
+.slide-speed-input:focus-visible { outline: 2px solid var(--slide-ui-accent, #8be2c6); outline-offset: 3px; }
+.slide-speed-value { min-width: 36px; color: var(--slide-ui-accent, #8be2c6); text-align: right; }
+.slide-status { margin-left: 8px; padding: 8px 14px; border: 1px solid var(--slide-ui-border, #2b4353); border-radius: var(--slide-ui-radius, 8px);
+    font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0.5px; color: var(--slide-ui-muted, #afc5d0); }
 .slide-player { position: relative; }
 .slide-workspace { display: flex; align-items: flex-start; }
 .slide-audience { position: relative; flex-shrink: 0; }
 .slide-toolbar-toggle { position: absolute; top: 6px; left: 6px; z-index: 20; opacity: 0.7; padding: 4px 8px; font-size: 11px; }
-.slide-picker { width: 70px; box-sizing: border-box; padding: 8px; border: 1px solid #365263; border-radius: 6px;
-    background: #1b3445; color: #e5eef2; font-size: 13px; }
-.slide-picker-label { font-size: 12px; color: #afc5d0; }
+.slide-picker { width: 70px; box-sizing: border-box; padding: 8px; border: 1px solid var(--slide-ui-control-border, #365263); border-radius: 6px;
+    background: var(--slide-ui-control, #1b3445); color: var(--slide-ui-text, #e5eef2); font-size: 13px; }
+.slide-picker-label { font-size: 12px; color: var(--slide-ui-muted, #afc5d0); }
 .slide-console { display: none; box-sizing: border-box; flex-shrink: 0; padding: 16px; overflow: auto;
-    background: #102333; color: #e5eef2; border-left: 1px solid #365263; font: 14px Arial, sans-serif; }
+    background: var(--slide-ui-background, #102333); color: var(--slide-ui-text, #e5eef2); border-left: 1px solid var(--slide-ui-control-border, #365263); font-size: 14px; font-family: var(--slide-ui-font, Arial, sans-serif); }
 .slide-console h2 { font-size: 18px; margin: 0 0 16px; }
-.slide-console h3 { font-size: 14px; margin: 20px 0 10px; color: #8be2c6; }
+.slide-console h3 { font-size: 14px; margin: 20px 0 10px; color: var(--slide-ui-accent, #8be2c6); }
 .slide-console h4 { font-size: 15px; margin: 0 0 10px; }
 .slide-notes { line-height: 1.5; }
 .slide-timer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.slide-timer { display: block; width: 100%; font: 28px monospace; color: #8be2c6; }
+.slide-timer { display: block; width: 100%; font: 28px monospace; color: var(--slide-ui-accent, #8be2c6); }
 .slide-console button { padding: 4px 8px; font-size: 12px; }
 .slide-preview-stage { position: relative; overflow: hidden; }
 .slide-preview-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
-.slide-preview-end { display: none; color: #afc5d0; }
+.slide-preview-end { display: none; color: var(--slide-ui-muted, #afc5d0); }
 .slide-overview { display: none; position: absolute; left: 8px; right: 8px; top: 8px; bottom: 8px;
-    box-sizing: border-box; z-index: 12; padding: 12px; overflow: auto; background: #102333; color: #e5eef2; border-radius: 12px; }
-.slide-overview h2 { margin: 0 0 8px; font: 18px Arial, sans-serif; }
+    box-sizing: border-box; z-index: 12; padding: 12px; overflow: auto; background: var(--slide-ui-background, #102333); color: var(--slide-ui-text, #e5eef2); border-radius: 12px; }
+.slide-overview h2 { margin: 0 0 8px; font-size: 18px; font-family: var(--slide-ui-font, Arial, sans-serif); }
 .slide-overview-list { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 .slide-overview-list button { width: 140px; min-height: 48px; text-align: left; white-space: normal; }
-.slide-overview-list button[aria-current=true] { border-color: #8be2c6; color: #8be2c6; }
+.slide-overview-list button[aria-current=true] { border-color: var(--slide-ui-accent, #8be2c6); color: var(--slide-ui-accent, #8be2c6); }
 .slide-blackout { display: none; position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000000; z-index: 15; }
 .slide-pointer { display: none; position: absolute; left: 0; top: 0; width: 14px; height: 14px; border-radius: 50%;
     background: #ff3344; border: 2px solid #ffffff; box-sizing: border-box; box-shadow: 0 0 10px #ff3344; pointer-events: none; z-index: 14; }
@@ -180,8 +182,11 @@ pub fn stage(plan, address, options = {}) {
     >
 }
 
+// chrome custom properties for a compiled plan; the plan's ui map was validated by compile
+pub fn ui_style(plan) => theme.ui_style(plan.ui) ^ { "" }
+
 pub fn document(plan, body) {
     let base = if (plan.base_uri != null) <base href: plan.base_uri> else null;
     <html lang: "en", <head *[<meta charset: "UTF-8">, <title plan.title>, base, <style css>]>
-        <body class: "slide-page", body>>
+        <body class: "slide-page", style: ui_style(plan), body>>
 }

@@ -1,5 +1,5 @@
 // Dynamic runtime auto-promotion of nested arrays to N-D ArrayNum.
-// Phase 2b §1 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §4.2
 // Triggers when static AST detection couldn't tell the structure ahead of time
 // (e.g. let-bound rows, function-returned rows). At runtime, array_end inspects
 // children and folds uniform numeric arrays into a single N-D tensor.
@@ -32,16 +32,17 @@ m2[0]                              // [1, 2, 3]
 m2[2]                              // [3, 6, 9]
 
 // ============================================================
-// MIXED INT/FLOAT ROWS — promoted with widening to float
+// MIXED INT/FLOAT ROWS — never widened: construction keeps each row's
+// element type, so the rows stay a nested array (Lambda_Typed_Array.md §4.2)
 // ============================================================
 '=== int + float rows ==='
 let ir = [1, 2, 3]
 let fr = [4.5, 5.5, 6.5]
 let mixed = [ir, fr]
 mixed
-ndim(mixed)                        // 2
-shape(mixed)                       // [2, 3]
-sum(mixed)                         // 22.5
+len(mixed)                         // 2
+type(mixed[0][0])                  // int
+type(mixed[1][0])                  // float
 
 // ============================================================
 // ARITHMETIC ON DYNAMICALLY-PROMOTED MATRICES

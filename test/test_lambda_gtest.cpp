@@ -40,6 +40,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/map",
     "test/lambda/grammar",
     "test/lambda/diff",
+    "test/lambda/readability",
     "test/lambda/sem",
     "test/demo/doom/tests",
     "test/demo/photo/tests",
@@ -49,6 +50,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/finder/tests",
     "test/demo/photo-album/tests",
     "test/demo/note/tests",
+    "test/demo/readability/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -150,6 +152,7 @@ static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
     "test/lambda/docbook/proc",
     "test/demo/photo/tests/proc",
+    "test/demo/photo-album/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",
     "test/lambda/eps",
@@ -370,6 +373,20 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWrites) {
 TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWritesJit) {
     test_lambda_script_against_file("test/mir/lambda/typed_path_store.ls",
         "test/mir/lambda/typed_path_store.txt", true, "jit");
+}
+
+// LR07-49: `string(f())`, where f returns an annotated i64/u64 local, reached
+// print as a bare String* on the JIT (the call's carrier was the boxed lane but
+// the raw return was never boxed). The MIR check and the stress run never read
+// this fixture's values, so pin them on the default tier and the JIT.
+TEST(LambdaTypedPathTests, WideIntNativeLaneValues) {
+    test_lambda_script_against_file("test/mir/lambda/wide_int_native_lane.ls",
+        "test/mir/lambda/wide_int_native_lane.txt", true);
+}
+
+TEST(LambdaTypedPathTests, WideIntNativeLaneValuesJit) {
+    test_lambda_script_against_file("test/mir/lambda/wide_int_native_lane.ls",
+        "test/mir/lambda/wide_int_native_lane.txt", true, "jit");
 }
 
 TEST(LambdaTypedPathTests, ReopensBoxedTypedAdapterResultForNativeConsumer) {

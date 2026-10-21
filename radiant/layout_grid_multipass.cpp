@@ -9,7 +9,6 @@ extern "C" {
 // Multi-pass grid layout implementation
 // Follows the same pattern as layout_flex_multipass.cpp
 // External function declarations
-void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void line_init(LayoutContext* lycon, float left, float right);
 void line_break(LayoutContext* lycon);

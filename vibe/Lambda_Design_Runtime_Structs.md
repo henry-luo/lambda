@@ -172,8 +172,8 @@ the chain, and the content face is shared by `List`, `ArrayNum`, and `Element`.
 | 5–6 | constructor-reservation mask (`ctor_reserved_mask_lo`/`_hi`) |
 | 7 | `reserved_state` |
 
-`array_flags` bits 0–4 are `is_ndim`, `is_view`, `is_pinned`,
-`is_mutable_view`, `is_native_lane_array`; **bits 5–7 are not free** — they are
+`array_flags` bits 0–4 are `is_ndim`, `is_view`, `is_pinned` (retired: nothing
+sets or reads it), `is_mutable_view`, `is_native_lane_array`; **bits 5–7 are not free** — they are
 `JsElementsKind`, addressed through `JS_ELEMENTS_STATE_MASK` (`0xe0`).
 `reserved_state` is the byte with room to spare.
 

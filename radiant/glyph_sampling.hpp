@@ -103,10 +103,15 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
                                                           float surface_origin_y) {
     if (!surface || !bitmap || !clip || !transform || color.a == 0) return;
 
+    // CSS 3D planes paint with projective matrices: bound the glyph after the homogeneous divide,
+    // as the inverse sampling below does. An affine-only bound misses most of a projected glyph.
+    // A glyph crossing w=0 has no finite bound; sample the clip and let the inverse reject points.
     float min_x, min_y, max_x, max_y;
-    rdt_matrix_transform_rect_bounds(transform, (float)x, (float)y,
-        (float)(x + bitmap->width), (float)(y + bitmap->height),
-        &min_x, &min_y, &max_x, &max_y);
+    if (!rdt_matrix_project_rect_bounds(transform, (float)x, (float)y,
+            (float)(x + bitmap->width), (float)(y + bitmap->height),
+            &min_x, &min_y, &max_x, &max_y)) {
+        min_x = clip->left; min_y = clip->top; max_x = clip->right; max_y = clip->bottom;
+    }
 
     int left = (int)clip->left > (int)floorf(min_x) ? (int)clip->left : (int)floorf(min_x);
     int right = (int)clip->right < (int)ceilf(max_x) ? (int)clip->right : (int)ceilf(max_x);

@@ -950,6 +950,7 @@ struct DisplayPayloadOwner;
 struct DisplayCommandSpan {
     DisplayPayloadOwner* child;
     int start, count;
+    float translate_x = 0, translate_y = 0; // child placement only; own-command spans stay unshifted.
 };
 struct DisplayPayloadOwner {
     RefCount refs;
@@ -1041,7 +1042,7 @@ struct DisplayListCursor {
 private:
     DisplayItem translated;
     const DisplayItem* placed_item(const DisplayItem* source);
-    bool push(const DisplayPayloadOwner* chunk);
+    bool push(const DisplayPayloadOwner* chunk, float translate_x = 0, float translate_y = 0);
 };
 
 typedef struct DisplayListValidationResult {
@@ -1278,6 +1279,8 @@ bool dl_validate_chunk(const DisplayPayloadOwner* chunk, DisplayListValidationRe
     DisplayChunkValidation* validation);
 // only successfully validated private immutable publications supply a summary.
 const DisplayChunkValidation* retained_dl_chunk_validation(const DisplayPayloadOwner* chunk);
+// private placement attestations apply only at their exact cumulative cursor displacement.
+const DisplayChunkValidation* retained_dl_cursor_validation(const DisplayListCursor& cursor);
 bool dl_validate_range_or_log(const DisplayList* dl, int first, int end,
     const char* context, DisplayListProperties* properties = nullptr);
 bool dl_item_is_retainable_for_fragment(const DisplayItem* item);
@@ -2123,6 +2126,9 @@ bool retained_dl_append_fragment(DisplayList* dst,
 // explicit placement for vector-only chunks; unsupported commands reject without appending.
 bool retained_dl_append_fragment_translated(DisplayList* dst,
     const RetainedDisplayListFragment* fragment, float translate_x, float translate_y);
+// exact complete solid-rectangle admission; its canonical publication can survive local recapture.
+bool retained_dl_append_solid_box(DisplayList* dst, const RetainedDisplayListFragment* fragment,
+    Rect current, Color color);
 
 // ===== render.hpp =====
 // format to SDL_PIXELFORMAT_ARGB8888
@@ -2193,6 +2199,7 @@ typedef struct RasterRenderContext : RenderContext {
     // PaintBuilder and lowers them to dl (byte-identical to direct dl_*).
     lam::Up<PaintList> paint_list;
     lam::Up<RetainedDisplayListCache> retained_dl_cache;
+    bool html_box_cache_enabled = true; // one frame-level setting for bounded atomic-box admission.
 
     // Transform state
     RdtMatrix transform;           // Current combined transform matrix
@@ -2260,7 +2267,7 @@ typedef struct RenderElementMarkerScope {
 
 bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block);
 bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block);
-bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block);
+bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block, bool allow_solid_box = true);
 void render_block_view(RasterRenderContext* rdcon, ViewBlock* view_block);
 void render_block_view_content(RasterRenderContext* rdcon, ViewBlock* block,
     void (*content)(RasterRenderContext*, ViewBlock*));
@@ -4180,7 +4187,7 @@ bool render_paint_ink_bounds(const PaintList* paint, const RdtMatrix* transform,
 
 // ===== render_background.hpp =====
 // Background rendering functions
-void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect, bool clip_to_caller = true);
 bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                              RenderExportTargetKind target);
 bool render_paint_background_requires_composite(const BackgroundProp* background, RenderExportTargetKind target);
@@ -4327,6 +4334,10 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 // paged: lay the document out as a page flow for that composition (layout_paged.cpp)
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow,
                      struct PagedFlowState* paged = nullptr);
+// shared continuous-document checkpoint; true means a current geometry snapshot exists.
+bool layout_update_document(UiContext* uicon, DomDocument* doc);
+void layout_publish_document_geometry(UiContext* uicon, DomDocument* doc);
+void layout_invalidate_document_geometry(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 void view_pool_reset_retained(ViewTree* tree);
 void view_pool_release_detached_subtree(DomNode* root);
