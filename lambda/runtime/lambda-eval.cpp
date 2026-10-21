@@ -8633,7 +8633,7 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
 bool text_item_is_ascii(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
-        String* string = item.get_safe_string();
+        String* string = item.get_string();
         return string && string->is_ascii;
     }
     if (type == LMD_TYPE_SYMBOL) {
@@ -9202,8 +9202,11 @@ Item fn_join2(Item list_item, Item sep_item) {
         Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
-            if (!lam::checked_add(total_len, item.get_len(), &total_len)) return ItemError;
-            is_ascii = is_ascii && text_item_is_ascii(item);
+            // classification already proves String storage; retain that proof for its metadata.
+            String* string = item_type == LMD_TYPE_STRING ? item.get_string() : nullptr;
+            size_t length = string ? string->len : item.get_len();
+            if (!lam::checked_add(total_len, length, &total_len)) return ItemError;
+            is_ascii = is_ascii && (string ? string->is_ascii : text_item_is_ascii(item));
         }
     }
 
@@ -12203,7 +12206,6 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
 // tree per heap generation of a context. It is a capsule extension rather than
 // an EvalContext slot, so the context layout that separately built modules read
 // is unchanged.
-#define RUNTIME_SHAPE_TREE_OWNER 0x53485054u  // 'SHPT'
 // Every runtime-grown map shares this one tree, so its budget sits far above an
 // Input's 1,024 map types; past it a map keeps a private type (D3.4.3v4).
 static const int RUNTIME_SHAPE_GRAPH_BUDGET = 65536;
@@ -12226,12 +12228,13 @@ void runtime_shape_tree_release(EvalContext* owner) {
     // with that heap generation. Kept across runtime_reset_heap, the next
     // pool's recycled ids matched stale edges: a batch script's group-by
     // `region` followed the previous script's `r` edge.
-    context_capsule_extensions_drop_owner(owner, RUNTIME_SHAPE_TREE_OWNER);
+    context_capsule_drop(owner, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE);
 }
 
 Input* runtime_shape_tree(void) {
     if (!context) return NULL;
-    Input* tree = (Input*)context_capsule_extension(context, RUNTIME_SHAPE_TREE_OWNER, 0);
+    // core shape storage uses an indexed owner, independent of optional JS/host registrations.
+    Input* tree = (Input*)context_capsule(context, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE);
     if (tree) return tree;
     // The tree owns a pool of its own, as InputManager's global_pool does, so
     // its teardown is the capsule's alone: in context->pool (the heap's pool) a
@@ -12241,7 +12244,7 @@ Input* runtime_shape_tree(void) {
     if (!tree_pool) return NULL;
     tree = Input::create(tree_pool, nullptr, nullptr);
     if (!tree || !tree->arena || !tree->type_list ||
-            !context_capsule_extension_install(context, RUNTIME_SHAPE_TREE_OWNER, 0, tree,
+            !context_capsule_install(context, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE, tree,
                 &runtime_shape_tree_ops)) {
         mem_pool_destroy(tree_pool);
         return NULL;

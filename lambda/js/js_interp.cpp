@@ -951,22 +951,21 @@ static JsInterpEnv* js_interp_find_eval_binding_env(JsInterpEnv* env,
     return NULL;
 }
 
-static bool js_interp_env_get_private_binding(JsInterpEnv* env, Item source_key,
-        Item* out_private_key) {
-    if (!env) return false;
+static Item js_interp_env_get_private_binding(JsInterpEnv* env, Item source_key) {
+    if (!env) return make_js_undefined();
     Item bindings = (Item){.item = env->private_bindings};
-    if (get_type_id(bindings) != LMD_TYPE_ARRAY) return false;
+    if (get_type_id(bindings) == LMD_TYPE_MAP)
+        return js_collection_method(bindings, 1, source_key, ItemNull);
+    if (get_type_id(bindings) != LMD_TYPE_ARRAY) return make_js_undefined();
+    // compiled direct-eval bridges retain their existing rooted pair representation.
     for (int64_t index = js_array_length(bindings) - 2; index >= 0; index -= 2) {
         Item bound_source = js_interp_array_at(bindings, index);
         Item equal = js_strict_equal(bound_source, source_key);
         if (!item_is_error(equal) && js_is_truthy(equal)) {
-            if (out_private_key) {
-                *out_private_key = js_interp_array_at(bindings, index + 1);
-            }
-            return true;
+            return js_interp_array_at(bindings, index + 1);
         }
     }
-    return false;
+    return make_js_undefined();
 }
 
 static Item js_interp_find_private_home(JsInterpFrame* frame) {
@@ -984,18 +983,18 @@ static Item js_interp_find_private_home(JsInterpFrame* frame) {
 
 static Item js_interp_private_key_for_frame(JsInterpFrame* frame, Item source_key) {
     if (!js_interp_private_source_name(source_key)) return source_key;
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source_root(roots, source_key), home_root(roots, ItemNull), key_root(roots, ItemNull);
     // Private identifiers resolve through the lexical private environment,
     // so an inner class can retain access to a private member of its outer class.
     for (JsInterpEnv* env = frame ? frame->env : NULL; env; env = env->outer) {
-        Item private_key = ItemNull;
-        if (js_interp_env_get_private_binding(env, source_key, &private_key)) {
-            return private_key;
-        }
+        key_root.set(js_interp_env_get_private_binding(env, source_root.get()));
+        if (item_is_error(key_root.get()) || get_type_id(key_root.get()) != LMD_TYPE_UNDEFINED)
+            return key_root.get();
     }
-    RootFrame roots(2);
-    Rooted<Item> source_root(roots, source_key);
-    Rooted<Item> home_root(roots, js_interp_find_private_home(frame));
-    if (!roots.valid() || home_root.get().item == ItemNull.item ||
+    home_root.set(js_interp_find_private_home(frame));
+    if (home_root.get().item == ItemNull.item ||
             home_root.get().item == 0) {
         return js_throw_type_error("Private name used outside its declaring class");
     }
@@ -1017,9 +1016,14 @@ static Item js_interp_register_private_binding(JsInterpFrame* frame,
     Rooted<Item> bindings_root(roots, (Item){.item = env->private_bindings});
     if (item_is_error(source_root.get())) return source_root.get();
     if (bindings_root.get().item == 0 || bindings_root.get().item == ItemNull.item) {
-        bindings_root.set(js_interp_array_new(0));
+        // hashing avoids quadratic class declaration and field-key resolution.
+        bindings_root.set(js_map_collection_storage_new());
         if (item_is_error(bindings_root.get())) return bindings_root.get();
         env->private_bindings = bindings_root.get().item;
+    }
+    if (get_type_id(bindings_root.get()) == LMD_TYPE_MAP) {
+        Item stored = js_collection_method(bindings_root.get(), 0, source_root.get(), key_root.get());
+        return item_is_error(stored) ? stored : js_status_ok();
     }
     if (get_type_id(bindings_root.get()) != LMD_TYPE_ARRAY) return ItemError;
     Item pushed = js_interp_array_append(bindings_root.get(), source_root.get());
@@ -1892,8 +1896,10 @@ static Item js_interp_class_private_declare(JsInterpFrame* frame, JsClassNode* c
         AstNode* name = js_ast_class_element_key(member, &computed, &statics);
         if (computed || !name || name->node_type != AST_NODE_IDENT) continue;
         source.set(js_interp_name_key(((JsIdentifierNode*)name)->name));
-        if (!js_interp_private_source_name(source.get()) ||
-                js_interp_env_get_private_binding(frame->env, source.get(), NULL)) continue;
+        if (!js_interp_private_source_name(source.get())) continue;
+        key.set(js_interp_env_get_private_binding(frame->env, source.get()));
+        if (item_is_error(key.get())) return key.get();
+        if (get_type_id(key.get()) != LMD_TYPE_UNDEFINED) continue;
         key.set(js_interp_host ? js_interp_host->private_element(held.get(), source.get(),
             make_js_undefined(), JS_INTERP_PRIVATE_NAME) : js_private_key_for_class(held.get(), source.get()));
         if (item_is_error(key.get())) return key.get();
@@ -2700,7 +2706,8 @@ static Item js_interp_binding_raw_value(JsInterpFrame* frame, NameEntry* entry) 
 
 static bool js_interp_env_has_private_bindings(JsInterpEnv* env) {
     for (; env; env = env->outer) {
-        if (get_type_id((Item){.item = env->private_bindings}) == LMD_TYPE_ARRAY) {
+        TypeId type = get_type_id((Item){.item = env->private_bindings});
+        if (type == LMD_TYPE_ARRAY || type == LMD_TYPE_MAP) {
             return true;
         }
     }
@@ -2711,17 +2718,34 @@ static void js_interp_eval_bind_private_envs(JsInterpEnv* env) {
     if (!env) return;
     js_interp_eval_bind_private_envs(env->outer);
     Item bindings = (Item){.item = env->private_bindings};
-    if (get_type_id(bindings) != LMD_TYPE_ARRAY) return;
+    TypeId type = get_type_id(bindings);
+    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_MAP) return;
     RootFrame roots(3);
+    if (!roots.valid()) return;
     Rooted<Item> bindings_root(roots, bindings);
     Rooted<Item> source_root(roots, ItemNull);
     Rooted<Item> key_root(roots, ItemNull);
+    auto bind = [&](Item source, Item key) {
+        source_root.set(source); key_root.set(key);
+        if (item_is_error(source_root.get()) || item_is_error(key_root.get())) return false;
+        js_eval_private_bind(source_root.get(), key_root.get());
+        return true;
+    };
+    if (type == LMD_TYPE_MAP) {
+        // preserve source declaration order and outer-before-inner private shadowing for direct eval.
+        const JsCollectionStorageOps* storage = &js_collection_default_storage;
+        JsCollectionCursor cursor = {};
+        storage->begin(bindings_root.get());
+        Item source, key;
+        while (storage->next(bindings_root.get(), &cursor, &source, &key))
+            if (!bind(source, key)) break;
+        storage->end(bindings_root.get());
+        return;
+    }
     int64_t length = js_array_length(bindings_root.get());
     for (int64_t index = 0; index + 1 < length; index += 2) {
-        source_root.set(js_interp_array_at(bindings_root.get(), index));
-        key_root.set(js_interp_array_at(bindings_root.get(), index + 1));
-        if (item_is_error(source_root.get()) || item_is_error(key_root.get())) return;
-        js_eval_private_bind(source_root.get(), key_root.get());
+        if (!bind(js_interp_array_at(bindings_root.get(), index),
+                js_interp_array_at(bindings_root.get(), index + 1))) return;
     }
 }
 

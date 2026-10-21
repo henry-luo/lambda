@@ -11,6 +11,7 @@
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/heap_api.h"
+#include "../lambda/runtime/context_capsule.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/side_stack.h"
 #include "../lambda/runtime/sys_func_registry.h"
@@ -354,6 +355,20 @@ TEST_F(RuntimeShapeTransition, EmptyStringUsesPinnedSharedItem) {
     EXPECT_FALSE(empty->is_pooled);
     EXPECT_EQ(heap_strcpy("", 0), empty);
     EXPECT_EQ(heap_strcpy("", 0), empty);
+}
+
+TEST_F(RuntimeShapeTransition, ShapeTreeUsesOneIndexedOwnerAndExplicitReset) {
+    Input* tree = runtime_shape_tree();
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(context_capsule(&eval, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE), tree);
+    EXPECT_EQ(runtime_shape_tree(), tree);
+    runtime_shape_tree_release(&eval);
+    EXPECT_EQ(context_capsule(&eval, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE), nullptr);
+    runtime_shape_tree_release(&eval);
+    tree = runtime_shape_tree();
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(context_capsule(&eval, CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE), tree);
+    EXPECT_EQ(runtime_shape_tree(), tree);
 }
 
 TEST_F(RuntimeShapeTransition, HeapDestructionRetiresRootVectorOwner) {
