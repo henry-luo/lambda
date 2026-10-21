@@ -345,6 +345,7 @@ static const char* mime_extension_lookup(const char* content_type, int serve_pro
         {"model/mtl",                ".mtl", 1},
         {"model/gltf+json",          ".gltf", 1},
         {"text/x-3d-model",          ".a3d", 1},
+        {"model/x-bvh",              ".bvh", 1},
         {"text/xml",                 ".xml", 1},
         {"application/xml",          ".xml"},
         {"text/markdown",            ".md"},

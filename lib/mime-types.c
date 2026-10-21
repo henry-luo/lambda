@@ -64,6 +64,9 @@ MimePattern magic_patterns[] = {
     {"3dmodel\t", 8, 0, 50, "text/x-3d-model"},
     {"\xef\xbb\xbf" "3dmodel ", 11, 0, 50, "text/x-3d-model"},
     {"\xef\xbb\xbf" "3dmodel\t", 11, 0, 50, "text/x-3d-model"},
+    // BVH motion capture opens with its HIERARCHY section; no media type is registered
+    {"HIERARCHY", 9, 0, 50, "model/x-bvh"},
+    {"\xef\xbb\xbf" "HIERARCHY", 12, 0, 50, "model/x-bvh"},
 
     // Plain text (fallback)
         // XML
@@ -290,6 +293,7 @@ MimeGlob glob_patterns[] = {
     {"*.mtl", "model/mtl"},
     {"*.gltf", "model/gltf+json"},
     {"*.a3d", "text/x-3d-model"},
+    {"*.bvh", "model/x-bvh"},
     {"*.3mf", "model/3mf"},
 
     // Executables

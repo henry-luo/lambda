@@ -754,6 +754,201 @@ static void ascii_model3d(ModelText& p) {
     p.finish(root);
 }
 
+// BVH (Biovision Hierarchy): a joint tree and one row of channel values per
+// frame (Lambda_Pkg_Motion.md §5). The hierarchy is a token stream whose
+// braces may break lines anywhere; the motion rows are one line each.
+struct BvhTokens {
+    ModelText& p;
+    StrView rest = {"", 0};
+    StrView pending = {nullptr, 0};
+    bool has_pending = false;
+    explicit BvhTokens(ModelText& model) : p(model) {}
+    bool next(StrView* out) {
+        if (has_pending) { *out = pending; has_pending = false; return true; }
+        for (;;) {
+            strview_trim(&rest);
+            if (rest.length) { *out = token(p, &rest); return true; }
+            StrView line;
+            if (!p.next_line(&line)) return false;
+            rest = line;
+        }
+    }
+    // a token read ahead stays valid until the next line is read
+    bool peek(StrView* out) {
+        if (!has_pending && !next(&pending)) return false;
+        has_pending = true;
+        *out = pending;
+        return true;
+    }
+    bool expect(const char* word) {
+        StrView t;
+        if (next(&t) && str_ieq(t.str, t.length, word, strlen(word))) return true;
+        p.ctx.addError("BVH input: expected '%s'", word);
+        return false;
+    }
+};
+
+static const char* bvh_channel_name(StrView token) {
+    static const char* names[] = {"Xposition", "Yposition", "Zposition", "Xrotation", "Yrotation", "Zrotation"};
+    for (const char* name : names) if (str_ieq(token.str, token.length, name, strlen(name))) return name;
+    return nullptr;
+}
+
+static Item bvh_number_list(ModelText& p, BvhTokens& t, size_t count) {
+    ArrayBuilder values = p.ctx.builder.array();
+    for (size_t i = 0; i < count; i++) {
+        StrView value;
+        if (!t.next(&value)) { p.ctx.addError("BVH input: truncated numbers"); break; }
+        values.append(number(p, value));
+    }
+    return values.final();
+}
+
+// `tag` is root, joint or end; an end site has an offset and nothing else
+static bool bvh_joint(ModelText& p, BvhTokens& t, Item parent, const char* tag, size_t depth,
+        int64_t* columns, size_t* joints) {
+    if (depth > 64 || ++*joints > 1024) {
+        p.ctx.addError("BVH input: more than 1024 joints or a hierarchy deeper than 64");
+        return false;
+    }
+    bool end = !strcmp(tag, "end");
+    Item joint = p.element(tag);
+    StrView name;
+    if (!end) {
+        if (!t.next(&name) || is(name, "{")) { p.ctx.addError("BVH input: joint without a name"); return false; }
+        p.attr(joint, "name", p.text(name));
+    }
+    if (!t.expect("{") || !t.expect("OFFSET")) return false;
+    p.attr(joint, "offset", bvh_number_list(p, t, 3));
+    if (!end) {
+        StrView count_token;
+        if (!t.expect("CHANNELS") || !t.next(&count_token)) return false;
+        int64_t count = 0;
+        if (!strview_to_int64(&count_token, &count) || count < 1 || count > 6) {
+            p.ctx.addError("BVH input: CHANNELS needs a count of 1..6");
+            return false;
+        }
+        ArrayBuilder channels = p.ctx.builder.array();
+        for (int64_t i = 0; i < count; i++) {
+            StrView channel;
+            const char* canonical = t.next(&channel) ? bvh_channel_name(channel) : nullptr;
+            if (!canonical) { p.ctx.addError("BVH input: unknown channel name"); return false; }
+            channels.append(p.ctx.builder.createSymbolItem(canonical));
+        }
+        p.attr(joint, "channels", channels.final());
+        p.attr(joint, "column", p.ctx.builder.createInt(*columns));
+        *columns += count;
+    }
+    for (;;) {
+        StrView keyword;
+        if (!t.next(&keyword)) { p.ctx.addError("BVH input: unclosed joint"); return false; }
+        if (is(keyword, "}")) break;
+        if (end) { p.ctx.addError("BVH input: an End Site has no children"); return false; }
+        if (str_ieq(keyword.str, keyword.length, "JOINT", 5)) {
+            if (!bvh_joint(p, t, joint, "joint", depth + 1, columns, joints)) return false;
+        } else if (str_ieq(keyword.str, keyword.length, "End", 3)) {
+            if (!t.expect("Site") || !bvh_joint(p, t, joint, "end", depth + 1, columns, joints)) return false;
+        } else {
+            p.ctx.addError("BVH input: unexpected '%.*s' in a joint", (int)keyword.length, keyword.str);
+            return false;
+        }
+    }
+    p.append(parent, joint);
+    return true;
+}
+
+// `Frames: n` and `Frame Time: t`, with the colon attached or spaced
+static bool bvh_header_value(ModelText& p, BvhTokens& t, const char* first, const char* second, StrView* value) {
+    StrView word;
+    if (!t.next(&word)) return false;
+    size_t length = word.length && word.str[word.length - 1] == ':' ? word.length - 1 : word.length;
+    if (!str_ieq(word.str, length, first, strlen(first))) return false;
+    bool colon = length != word.length;
+    if (second) {
+        if (!t.next(&word)) return false;
+        length = word.length && word.str[word.length - 1] == ':' ? word.length - 1 : word.length;
+        if (!str_ieq(word.str, length, second, strlen(second))) return false;
+        colon = length != word.length;
+    }
+    if (!colon && !(t.next(&word) && is(word, ":"))) return false;
+    return t.next(value);
+}
+
+static void biovision_hierarchy(ModelText& p) {
+    Item root = p.element("bvh");
+    BvhTokens t(p);
+    StrView keyword;
+    if (!t.next(&keyword) || !str_ieq(keyword.str, keyword.length, "HIERARCHY", 9)) {
+        p.ctx.addError("BVH input: expected HIERARCHY");
+        p.finish(root);
+        return;
+    }
+    Item hierarchy = p.element("hierarchy");
+    int64_t columns = 0;
+    size_t joints = 0;
+    bool ok = true;
+    while (ok && t.peek(&keyword) && str_ieq(keyword.str, keyword.length, "ROOT", 4)) {
+        t.next(&keyword);
+        ok = bvh_joint(p, t, hierarchy, "root", 0, &columns, &joints);
+    }
+    p.append(root, hierarchy);
+    if (ok && !joints) { p.ctx.addError("BVH input: no ROOT joint"); ok = false; }
+    // a header token lives in the line buffer, so each value converts before
+    // the next line is read
+    StrView value_token;
+    int64_t frames = 0;
+    double frame_time = 0;
+    bool frames_read = ok && t.expect("MOTION") && bvh_header_value(p, t, "Frames", nullptr, &value_token);
+    bool frames_valid = frames_read && strview_to_int64(&value_token, &frames) && frames >= 0;
+    bool time_read = frames_read && bvh_header_value(p, t, "Frame", "Time", &value_token);
+    bool time_valid = time_read && strview_to_double(&value_token, &frame_time) && frame_time > 0 && isfinite(frame_time);
+    if (ok && (!frames_read || !time_read)) {
+        p.ctx.addError("BVH input: expected MOTION, Frames: n and Frame Time: t");
+        ok = false;
+    } else if (ok && (!frames_valid || !time_valid)) {
+        p.ctx.addError("BVH input: Frames must be a count and Frame Time positive");
+        ok = false;
+    }
+    if (ok && (uint64_t)frames * (uint64_t)columns > 8388608) {
+        p.ctx.addError("BVH input: more than 8388608 motion values");
+        ok = false;
+    }
+    strview_trim(&t.rest);
+    if (ok && (t.has_pending || t.rest.length)) { p.ctx.addError("BVH input: content after Frame Time"); ok = false; }
+    if (ok) {
+        size_t count = (size_t)frames * (size_t)columns;
+        double* values = count ? (double*)mem_alloc(count * sizeof(double), MEM_CAT_TEMP) : nullptr;
+        int64_t row = 0;
+        StrView line;
+        while ((!count || values) && p.next_line(&line)) {
+            if (!line.length) continue;
+            if (row == frames) { p.ctx.addError("BVH input: more motion rows than Frames"); break; }
+            for (int64_t c = 0; c < columns; c++) {
+                StrView value = token(p, &line);
+                double number_value;
+                if (!decimal_token(value, false) || !strview_to_double(&value, &number_value) || !isfinite(number_value)) {
+                    p.ctx.addError("BVH input: motion row %lld has a missing or invalid value", (long long)row + 1);
+                    break;
+                }
+                values[row * columns + c] = number_value;
+            }
+            strview_trim(&line);
+            if (line.length) p.ctx.addError("BVH input: motion row %lld has extra values", (long long)row + 1);
+            row++;
+            if (p.ctx.hasErrors()) break;
+        }
+        if (!p.ctx.hasErrors() && row != frames) p.ctx.addError("BVH input: %lld motion rows for %lld frames", (long long)row, (long long)frames);
+        Item motion = p.element("motion");
+        p.attr(motion, "frames", p.ctx.builder.createInt(frames));
+        p.attr(motion, "frame_time", p.ctx.builder.createFloat(frame_time));
+        int64_t shape[2] = {frames, columns};
+        p.attr(motion, "data", p.ctx.builder.createNumericArray(ELEM_FLOAT64, 2, shape, values));
+        if (values) mem_free(values);
+        p.append(root, motion);
+    }
+    p.finish(root);
+}
+
 static void gltf_document(ModelText& p) {
     bool ok = false;
     // JSON's existing parser owns the value mapping, including extensions and
@@ -778,7 +973,7 @@ bool input_parse_model(Input* input, const char* source, size_t length, const ch
     typedef void (*Parser)(ModelText&);
     static const struct { const char* type; Parser parse; } parsers[] = {
         {"obj", wavefront_obj}, {"mtl", wavefront_mtl},
-        {"gltf", gltf_document}, {"a3d", ascii_model3d}
+        {"gltf", gltf_document}, {"a3d", ascii_model3d}, {"bvh", biovision_hierarchy}
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); i++) {
         if (strcmp(type, parsers[i].type) != 0) continue;

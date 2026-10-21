@@ -24,3 +24,28 @@ pub fn point(m, p) array^ {
     let checked = if (not vector(m, 16) or not vector(p, 3)) raise error("scene3d: invalid matrix or point");
     [for (r in 0 to 2) m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]]
 }
+
+// [x, y, z, w] quaternions; the motion package's poses and retargeting use them
+pub fn quaternion_multiply(a, b) => [
+    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]]
+// the inverse of a unit quaternion is its conjugate
+pub fn quaternion_inverse(q) => [0.0 - q[0], 0.0 - q[1], 0.0 - q[2], q[3]]
+pub fn quaternion_normalize(q) {
+    let length = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (length > 0) [q[0] / length, q[1] / length, q[2] / length, q[3] / length] else [0.0, 0.0, 0.0, 1.0]
+}
+pub fn quaternion_rotate(q, v) {
+    let p = quaternion_multiply(quaternion_multiply(q, [v[0], v[1], v[2], 0.0]), quaternion_inverse(q));
+    [p[0], p[1], p[2]]
+}
+// a column-major affine matrix from a translation, a unit quaternion and a scale
+pub fn compose(position, q, scale) {
+    let x = q[0], y = q[1], z = q[2], w = q[3];
+    [(1 - 2 * (y * y + z * z)) * scale[0], 2 * (x * y + w * z) * scale[0], 2 * (x * z - w * y) * scale[0], 0.0,
+     2 * (x * y - w * z) * scale[1], (1 - 2 * (x * x + z * z)) * scale[1], 2 * (y * z + w * x) * scale[1], 0.0,
+     2 * (x * z + w * y) * scale[2], 2 * (y * z - w * x) * scale[2], (1 - 2 * (x * x + y * y)) * scale[2], 0.0,
+     position[0], position[1], position[2], 1.0]
+}
