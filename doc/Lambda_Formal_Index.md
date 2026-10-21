@@ -261,228 +261,228 @@ in full — including lines too long for a viewer — run
 | S10.2.2v2* | 1619 | Bare comparisons `< <= > >=` are **scalar-only**, never element-wise (a mask is a container, containers are … |
 | S10.2.3 | 1627 | Mask consumption is explicit and non-magical: `sum(mask)` counts true lanes; |
 | S10.2.4 | 1631 | Element-wise arithmetic promotes exactly as scalar arithmetic does: each result element has the type the … |
-| **§S10.3** | 1644 | *Keyword operators* |
-| S10.3.1v3 | 1646 | `and or not is in to div that at eq ne lt le gt ge` |
-| **§S10.4** | 1655 | *Parent navigation* |
-| S10.4.1* | 1657 | Postfix `.~~` is the parent-navigation step at the ordinary member/index precedence tier; |
-| S10.4.2* | 1663 | Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is bound, selects the innermost current-value … |
-| S10.4.3v2* | 1669 | Contextual parent navigation is occurrence-based and carries lineage in the evaluation context as a … |
-| **§S10.5** | 1676 | *Root navigation* |
-| S10.5.1* | 1678 | `/` is the one root-selection operation |
-| S10.5.2* | 1683 | For a path, `./` selects its logical or provider/authority anchor |
-| S10.5.3v2* | 1688 | Dynamic root navigation is occurrence-based |
-| **§S10.6** | 1693 | *Concatenation* |
-| S10.6.1 | 1695 | `++` concatenates sequences and appends scalars |
-| **§S11** | 1711 | *Types and Patterns* |
-| **§S11.1** | 1713 | *Types compose like values* |
-| S11.1.1v3* | 1715 | A bracket type is a structural pattern whose positions mix values, types, and occurrence runs freely: `[1, … |
-| S11.1.2v4 | 1726 | String and symbol structural patterns share the delimiter `\( ... )`; quotes and named patterns determine one … |
-| S11.1.3 | 1761 | A range type `X to Y` denotes inclusive membership in the consecutive values between its bounds |
-| S11.1.4v2 | 1769 | The binary type relation is spelled `<:` |
-| S11.1.5v2* | 1779 | Three function types: `fn`, `pn`, and their union `function` |
-| S11.1.6v3 | 1797 | Two type families, split by concept: a run and an array |
-| S11.1.7* | 1824 | `none` is the empty type |
-| **§S11.2** | 1826 | *Match* |
-| S11.2.1 | 1828 | `match` is a **type match**: arms are type expressions tried in order, first match wins, no fall-through; |
-| S11.2.2 | 1835 | Poison is unequal, not untypeable: `case float:` catches nan, `case error:` catches errors; |
-| S11.2.3* | 1840 | Exhaustiveness is compiler-checked: unions need every constituent, `bool` both arms, `T?` needs `T` and … |
-| **§S11.3** | 1845 | *Structural `is`, nominal objects* |
-| S11.3.1v2 | 1847 | `is` is structural for maps/arrays/elements (extra fields permitted; |
-| **§S11.4** | 1856 | *Declared types are contracts* |
-| S11.4.1v3 | 1860 | An annotation is a contract on the binding, not a hint |
-| S11.4.2 | 1874 | Signatures spell both failure dimensions: plain `T` excludes null *and* error; |
-| S11.4.3 | 1882 | `any` is the top type and includes error; |
-| S11.4.4 | 1888 | *When the user is explicit, we check explicitly*: an explicitly declared error possibility cannot enter a … |
-| S11.4.5* | 1893 | Deferred numeric admission is **value-aware**: an exactly-embedding value passes and is re-represented … |
-| S11.4.6* | 1898 | User-defined types are enforced by the validator: deep, on first crossing, or a rich error with a validator … |
-| S11.4.7 | 1902 | Containment and discharge follow §S7.7–S7.8: skip at declaration boundaries, destination-contract container … |
-| S11.4.8v2 | 1905 | A function signature may establish a **type binder** with an explicit `T: type` parameter, a … |
-| S11.4.9 | 1922 | A system-function registry row may declare a **type relation** from one call argument to its success result |
-| S11.4.10* | 1935 | Verified at the crossing, valid while unchanged |
-| S11.4.11 | 1947 | A `that` predicate is an `fn` body over the scope it is written in |
-| **§S11.5** | 1963 | *Physical binary schemas* |
-| S11.5.1v2* | 1965 | `type A : binary & {…} { field: T & {…}, … }` declares a physical binary layout |
-| S11.5.2* | 1976 | `binary_decode(bytes, A)` returns a lazy, read-only element backed by its byte source and schema |
-| S11.5.3v3* | 1982 | A native schema names a host binding |
-| S11.5.4 | 1989 | A native pointer field `T[n] & {pointer: 'native'}` exposes a lazy read-only array of contiguous fixed-width … |
-| **§S12** | 2005 | *Functions, Effects, Resources* |
-| **§S12.1** | 2007 | *The one-bit effect system* |
-| S12.1.1v3 | 2009 | `fn`/`pn` is a declared, compiler-checked, one-bit effect system: `fn` is pure and deterministic under any … |
-| S12.1.2 | 2021 | `break`, `continue`, `return`, `while`, and `var` declarations are `pn`-only; |
-| S12.1.3 | 2025 | Reactive templates are the doctrine applied: template body = pure `fn` transformation; |
-| S12.1.4v3* | 2028 | Effect polymorphism: the `function` declaration |
-| S12.1.5v2 | 2057 | Presentation authority by state tier |
-| **§S12.2** | 2071 | *Assignment* |
-| S12.2.1 | 2073 | `let` bindings and parameters are immutable; |
-| S12.2.2 | 2079 | Element mutation is defined on both faces: `elem.attr = v` as map-field assignment; |
-| **§S12.3** | 2083 | *The call contract* |
-| S12.3.1 | 2085 | A function has at most **16 source-language argument slots** (a rest collector consumes one); |
-| S12.3.2 | 2089 | Two dynamic-call restrictions are deliberate: a dynamic call with named arguments is rejected, and a dynamic … |
-| S12.3.3v2* | 2092 | Member access is resolution, not membership |
-| S12.3.4* | 2114 | `call(f, args)` is the dynamic-application form |
-| S12.3.5v2 | 2128 | Spread splices into containers, never into an argument list; the spelling follows the container's shape |
-| S12.3.6 | 2143 | No arity overloading for user definitions |
-| S12.3.7* | 2152 | User definitions shadow system functions — user-first, module-lexical, warned |
-| **§S12.4** | 2171 | *Resources* |
-| S12.4.1v3* | 2176 | `open()` is resource acquisition and is `pn`-only |
-| S12.4.2* | 2187 | A resource auto-closes at the end of its enclosing **block**; |
-| S12.4.3* | 2194 | No `defer`, `with`, or `finally` keyword: auto-close is the only user-facing cleanup mechanism; |
-| **§S13** | 2202 | *Concurrency* |
-| **§S13.1** | 2207 | *Tasks and workers* |
-| S13.1.1v2 | 2209 | `start` is a builtin `pn`, not a keyword |
-| S13.1.2v2 | 2216 | Calls are **colorless**: `f(x)` synchronously yields the value and may suspend invisibly (`f(x)` ≡ … |
-| S13.1.3v2* | 2221 | Two tiers, one handle vocabulary: tasks (`start(f, [x])`, shared context) and isolated workers (`start(f, … |
-| S13.1.4 | 2227 | The capture rule |
-| S13.1.5 | 2231 | Failures are values; faults are not |
-| **§S13.2** | 2237 | *Messaging* |
-| S13.2.1 | 2239 | Handle = address; |
-| S13.2.2 | 2244 | `send(h, msg)` never blocks and returns `ok^E`: a full mailbox is the error value `'mailbox_full'` |
-| S13.2.3 | 2248 | Ordering: per-sender FIFO; |
-| **§S13.3** | 2253 | *Scope and cancellation* |
-| S13.3.1 | 2255 | A started handle is a scoped resource owned by the nearest lexical block: normal exit **joins**; |
-| S13.3.2 | 2259 | Cancellation is an error value at park points (`'cancelled'`), unwinding by ordinary `^` propagation with … |
-| **§S13.4** | 2265 | *Determinism* |
-| S13.4.1* | 2267 | Builtin numeric reductions (`sum`, `avg`, `prod`, `variance`, dot, `min`/`max` join) are … |
-| S13.4.2* | 2273 | In stream pipelines, `fn` stages auto-parallelize and are **ordered by default** (a re-sequencing buffer … |
-| **§S14** | 2279 | *Data Processing* |
-| **§S14.1** | 2281 | *For-clause grouping and joins* |
-| S14.1.1v2 | 2283 | `group by KEY [as NAME], … into g` binds, for each group, **every key under its name** and **`g` to the … |
-| S14.1.2v2 | 2290 | Key equality is `==` with numeric-tower coherence (`1` and `1.0` group together); |
-| S14.1.3 | 2303 | Join `on` is restricted to conjunctions of equality tests (non-equi conditions are a compile error pointing … |
-| **§S14.2** | 2309 | *Verbs and windows** |
-| S14.2.1* | 2311 | The verb surface is generic over row-oriented data |
-| S14.2.2* | 2315 | Column references in verb arguments are `~.field` (the pipe current-item reference extended into verb scope; |
-| **§S14.3** | 2320 | *Streams and laziness** |
-| S14.3.1v3* | 2322 | `input()` is eager, `stream()` lazy |
-| S14.3.2* | 2336 | Two stream kinds: value-backed streams are true values (re-forcible, usable in `fn`); |
-| S14.3.3* | 2340 | Handles are stream sources/sinks (`stream(h)`, `send_to(h)`); |
-| **§S15** | 2347 | *Metaprogramming* |
-| S15.1 | 2349 | Lambda is homoiconic through elements: the canonical AST is an element tree in the ambient **`lm.` … |
-| S15.2 | 2354 | Element literals are inverted quasiquotation: expression children evaluate (splice); |
-| S15.3* | 2358 | `input(f, 'lambda')` parses Lambda source into the `lm.` AST; |
-| S15.4 | 2364 | `name(item)` is the shadow-proof accessor for intrinsic names (element tag, function name, type name); |
-| **§S16** | 2371 | *Surface Syntax* |
-| **§S16.1** | 2379 | *Whitespace and separation* |
-| S16.1.1* | 2381 | Line breaks carry no meaning |
-| S16.1.2v2* | 2386 | `;` is a **strict separator** between statements |
-| S16.1.3v2* | 2392 | Adjacent statements need **no separator** when the second begins with a token that cannot continue the first, … |
-| **§S16.2** | 2403 | *Line-start classification* |
-| S16.2.1* | 2405 | An **incomplete** expression continues across a line break unconditionally: a trailing operator, an unclosed … |
-| S16.2.2v2* | 2408 | After a **complete** expression, a line-start token that can only continue an expression does continue it: … |
-| S16.2.3v3* | 2414 | After an **open-tail** statement (S16.1.3v2), a line-start **dual-role** token |
-| S16.2.4v3* | 2428 | One carve-out: `.` followed by a step other than a digit |
-| S16.2.5* | 2436 | `return` followed by a line break and a start token returns that value: `return` ⏎ `42` is `return 42` |
-| S16.2.6* | 2441 | A handler's brace opens **on the same line as its `^`** (`expr ^ {  |
-| **§S16.3** | 2445 | *Juxtaposition* |
-| S16.3.1* | 2447 | Juxtaposition **sequences, never combines.** Adjacent expressions are separate statements or content items; |
-| **§S16.4** | 2455 | *Braces* |
-| S16.4.1v4* | 2457 | Interior decides, wherever braces are an expression |
-| S16.4.2v2 | 2472 | Empty `{}` resolves by context, and only where a tie exists |
-| S16.4.3 | 2483 | Declaration braces are structural and never read as maps |
-| **§S16.5** | 2510 | *Element scope* |
-| S16.5.1v2* | 2512 | In an exposed element attribute value or bare content expression, `< > <= >=` **are not operators**: `>` … |
-| **§S16.6** | 2526 | *Control forms* |
-| S16.6.1* | 2528 | `if`, `for`, and `while` each have **one node with two spellings**: parenthesized head with any-expression … |
-| S16.6.2* | 2533 | `(` immediately after `if` or `while` **commits** to the parenthesized spelling |
-| S16.6.3* | 2538 | `else` is **optional** in both spellings |
-| S16.6.4* | 2541 | `match` keeps its single braced form: its braces delimit an arm list, not a body, so no parenthesized … |
-| S16.6.5* | 2544 | The expression/statement distinction is enforced by semantic analysis on the S12.1 effect boundary, not by … |
-| S16.6.6* | 2549 | Control statements require braces |
-| S16.6.7v2 | 2558 | A procedure's body is always the braced statement block, and the arrow is the one anonymous function |
-| S16.6.8v2* | 2573 | A **procedural block is a statement, never an expression** |
-| S16.6.9* | 2586 | Branch homogeneity |
-| **§S16.7** | 2597 | *Script top level* |
-| S16.7.1 | 2599 | A script's top level is element content, not a list |
-| S16.7.2v2 | 2607 | Nulls and empty strings are dropped (S2.6.2) |
-| S16.7.3v2 | 2612 | Lists spread and adjacent strings or binaries merge (S2.6.3, S2.6.4) |
-| S16.7.4 | 2615 | A REPL entry echoes its value unless it is declarations only |
-| S16.7.5 | 2622 | A session top level rebinds nothing |
-| S16.7.6 | 2627 | Two session kinds |
-| **§S16.8** | 2636 | *Lexical forms* |
-| S16.8.1 | 2638 | `not` is the one logical negation |
-| S16.8.2 | 2642 | `not` binds loose |
-| S16.8.3 | 2645 | Numeric spelling |
-| S16.8.4* | 2649 | No implicit adjacent-literal concatenation |
-| S16.8.5 | 2654 | Unary `+` is kept |
-| S16.8.6v4 | 2657 | `*` is spread; `*` and `...` are two wildcard families, not one |
-| S16.8.7 | 2669 | A single-quoted literal is a symbol, not a string |
-| S16.8.8* | 2673 | The backtick syntax space is reserved and must not be spent otherwise |
-| S16.8.9* | 2677 | Computed keys: `[expr]: val` |
-| **§S16.9** | 2689 | *Declarations, elements, paths* |
-| S16.9.1 | 2691 | `pub` is a uniform prefix modifier |
-| S16.9.2* | 2694 | The **`apply;` fused token is retired**: bare `apply` is the keyword statement, disambiguated from … |
-| S16.9.3 | 2697 | `;` has exactly one role language-wide: statement separation |
-| S16.9.4 | 2708 | The relative path is spelled `\.a.b` |
-| S16.9.5 | 2714 | `a?: T` marks an optional field |
-| S16.9.6 | 2719 | `.` is the only import separator |
-| S16.9.7 | 2723 | A rest parameter `...` closes a parameter list |
-| S16.9.8 | 2728 | An import path's first token picks one of three roots |
-| **§S16.10** | 2745 | *Keywords as names* |
-| S16.10.1v3* | 2747 | Keywords never name bindings — where they could capture |
-| S16.10.2* | 2779 | Data names admit keywords |
-| S16.10.3* | 2796 | Member steps admit keywords |
-| **§S17** | 2804 | *System Library* |
-| **§S17.1** | 2809 | *String splitting* |
-| S17.1.1 | 2811 | `split` follows ECMAScript `String.prototype.split` |
-| **§S17.2** | 2830 | *The system-function namespace* |
-| S17.2.1 | 2832 | System functions live at `lambda.sys.*`, and the prelude imports them unqualified |
-| S17.2.2 | 2838 | `lambda.sys.f` is the escape from a shadow |
-| **§S17.3** | 2848 | *Process information* |
-| S17.3.1 | 2850 | `sys.proc.self.argv` is the sole argument-vector path |
-| **§S17.4** | 2856 | *String search positions* |
-| S17.4.1 | 2858 | A text search result uses its source's code-point index domain |
-| **§S17.5** | 2864 | *Sized integer conversions* |
-| S17.5.1 | 2866 | Sized integer conversions use the type names as callable constructors |
-| **§S17.6** | 2872 | *String replacement* |
-| S17.6.1 | 2874 | `replace` steps through matches as ECMAScript `String.prototype.replaceAll` does, and inserts its replacement … |
-| **§S17.7** | 2887 | *Letter case* |
-| S17.7.1 | 2889 | Case-insensitive matching folds by Unicode simple case folding |
-| S17.7.2 | 2901 | `lower` and `upper` map by Unicode full case mapping |
-| **§S17.8** | 2909 | *Option maps* |
-| S17.8.1* | 2911 | An option name a system function does not define is a compile-time error where the compiler can see it, and a … |
-| SO1 | 3046 | Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` … |
-| SO2 | 3047 | Int v5 §5 details: poison-algebra table ratification; |
-| SO3 | 3048 | The `int?` fourth lane value (`INT_LANE_NULL`) is undocumented in the Int_Type sentinel table; |
-| SO4 | 3049 | Bitwise semantics were ruled (S4.1.2), but the interaction with the retired sparse band in old goldens needs … |
-| SO50 | 3052 | Error-preserving comparison follow-ups: canonical field traversal for key-unordered maps, selection among … |
-| SO5 | 3058 | TE-17 transitivity: does discharging `(int \| error)[]` re-narrow in place, or only by copy? Copy is the safe … |
-| SO6 | 3059 | Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); |
-| SO7 | 3060 | TE-5 R5 sticky `any`; |
-| SO8 | 3061 | Should `is` become value-aware? Deliberately undecided (S11.3.1v2 records the intentional asymmetry) |
-| SO9 | 3062 | A surface spelling for `any \ error` (the `!` exclusion operator route is broken |
-| SO10 | 3063 | A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) |
-| SO13 | 3066 | COW granularity on large documents: node representation for spine-copying, refcount discipline for … |
-| SO14 | 3067 | Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or … |
-| SO15 | 3068 | Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping) |
-| SO16 | 3069 | Close-error routing (double fault): proposed |
-| SO17 | 3070 | Resource-carrying-type containment rules (when a wrapping value is itself resource-typed) |
-| SO18 | 3071 | Snapshot iteration (C4.2d) |
-| SO19 | 3072 | Root and upward-parent navigation are resolved by S10.4.3v2, S10.5.3v2 / PTH10, PTH29: lineage lives in a … |
-| SO39 | 3076 | Node identity (S5.1.4v2): which operations preserve an identity (a COW detach and an in-place `var` write are … |
-| SO42 | 3083 | Instance type alteration (S2.1.5): the surface spelling, which declared fields must be satisfiable from the … |
-| SO43 | 3087 | Type alteration |
-| SO41 | 3090 | Cross-reference form for document graphs under S9.1.5v2: an identity or key stored as data and resolved … |
-| SO20 | 3096 | O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
-| SO21 | 3097 | `select` surface syntax; |
-| SO22 | 3098 | Deferred opt-ins: blocking send, true selective receive, `unordered` streams, CPU-bound cancellation … |
-| SO23 | 3101 | PD4 join column-collision suffixes; |
-| SO24 | 3102 | PD12 sub-items: `on error` resume semantics (abort vs skip-record), handler scoping over multiple forced … |
-| SO25 | 3103 | Deferred group-by vocabulary: `having`-style filter, post-group `let`, extended aggregates, … |
-| SO26 | 3106 | RF6 mutator convention: updated-owner vs unit; |
-| SO27 | 3107 | Whether debug logging inside `fn` is a permitted non-observable effect |
-| SO44 | 3108 | Binder depth on function values: whether a binder (S11.4.8v2) over a function value selects its full … |
-| SO29 | 3113 | File write/append syntax (C6a: `into`/`onto` candidates); |
-| SO31 | 3114 | The `<file>` element shape (name/size/mime, content as child) |
-| SO32 | 3115 | Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns |
-| SO33 | 3116 | A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in … |
-| SO34 | 3117 | `emit()` vs `send()` |
-| SO47 | 3118 | Whether an empty literal needle matches at every code-point boundary |
-| SO35 | 3121 | A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics … |
-| SO38 | 3122 | Whether `\|:` over a **map** should keep the surviving keys (yielding a map) rather than dropping them … |
-| SO36 | 3128 | Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or … |
-| SO45 | 3136 | Whether a function type takes a suffix directly: `fn?`, `fn (x: int)?`, `fn ()[]` |
-| SO46 | 3147 | How an element pattern spells *content must be empty* |
-| SO48 | 3148 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
+| **§S10.3** | 1646 | *Keyword operators* |
+| S10.3.1v3 | 1648 | `and or not is in to div that at eq ne lt le gt ge` |
+| **§S10.4** | 1657 | *Parent navigation* |
+| S10.4.1* | 1659 | Postfix `.~~` is the parent-navigation step at the ordinary member/index precedence tier; |
+| S10.4.2* | 1665 | Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is bound, selects the innermost current-value … |
+| S10.4.3v2* | 1671 | Contextual parent navigation is occurrence-based and carries lineage in the evaluation context as a … |
+| **§S10.5** | 1678 | *Root navigation* |
+| S10.5.1* | 1680 | `/` is the one root-selection operation |
+| S10.5.2* | 1685 | For a path, `./` selects its logical or provider/authority anchor |
+| S10.5.3v2* | 1690 | Dynamic root navigation is occurrence-based |
+| **§S10.6** | 1695 | *Concatenation* |
+| S10.6.1 | 1697 | `++` concatenates sequences and appends scalars |
+| **§S11** | 1713 | *Types and Patterns* |
+| **§S11.1** | 1715 | *Types compose like values* |
+| S11.1.1v3* | 1717 | A bracket type is a structural pattern whose positions mix values, types, and occurrence runs freely: `[1, … |
+| S11.1.2v4 | 1728 | String and symbol structural patterns share the delimiter `\( ... )`; quotes and named patterns determine one … |
+| S11.1.3 | 1763 | A range type `X to Y` denotes inclusive membership in the consecutive values between its bounds |
+| S11.1.4v2 | 1771 | The binary type relation is spelled `<:` |
+| S11.1.5v2* | 1781 | Three function types: `fn`, `pn`, and their union `function` |
+| S11.1.6v3 | 1799 | Two type families, split by concept: a run and an array |
+| S11.1.7* | 1826 | `none` is the empty type |
+| **§S11.2** | 1828 | *Match* |
+| S11.2.1 | 1830 | `match` is a **type match**: arms are type expressions tried in order, first match wins, no fall-through; |
+| S11.2.2 | 1837 | Poison is unequal, not untypeable: `case float:` catches nan, `case error:` catches errors; |
+| S11.2.3* | 1842 | Exhaustiveness is compiler-checked: unions need every constituent, `bool` both arms, `T?` needs `T` and … |
+| **§S11.3** | 1847 | *Structural `is`, nominal objects* |
+| S11.3.1v2 | 1849 | `is` is structural for maps/arrays/elements (extra fields permitted; |
+| **§S11.4** | 1858 | *Declared types are contracts* |
+| S11.4.1v3 | 1862 | An annotation is a contract on the binding, not a hint |
+| S11.4.2 | 1876 | Signatures spell both failure dimensions: plain `T` excludes null *and* error; |
+| S11.4.3 | 1884 | `any` is the top type and includes error; |
+| S11.4.4 | 1890 | *When the user is explicit, we check explicitly*: an explicitly declared error possibility cannot enter a … |
+| S11.4.5* | 1895 | Deferred numeric admission is **value-aware**: an exactly-embedding value passes and is re-represented … |
+| S11.4.6* | 1900 | User-defined types are enforced by the validator: deep, on first crossing, or a rich error with a validator … |
+| S11.4.7 | 1904 | Containment and discharge follow §S7.7–S7.8: skip at declaration boundaries, destination-contract container … |
+| S11.4.8v2 | 1907 | A function signature may establish a **type binder** with an explicit `T: type` parameter, a … |
+| S11.4.9 | 1924 | A system-function registry row may declare a **type relation** from one call argument to its success result |
+| S11.4.10* | 1937 | Verified at the crossing, valid while unchanged |
+| S11.4.11 | 1949 | A `that` predicate is an `fn` body over the scope it is written in |
+| **§S11.5** | 1965 | *Physical binary schemas* |
+| S11.5.1v2* | 1967 | `type A : binary & {…} { field: T & {…}, … }` declares a physical binary layout |
+| S11.5.2* | 1978 | `binary_decode(bytes, A)` returns a lazy, read-only element backed by its byte source and schema |
+| S11.5.3v3* | 1984 | A native schema names a host binding |
+| S11.5.4 | 1991 | A native pointer field `T[n] & {pointer: 'native'}` exposes a lazy read-only array of contiguous fixed-width … |
+| **§S12** | 2007 | *Functions, Effects, Resources* |
+| **§S12.1** | 2009 | *The one-bit effect system* |
+| S12.1.1v3 | 2011 | `fn`/`pn` is a declared, compiler-checked, one-bit effect system: `fn` is pure and deterministic under any … |
+| S12.1.2 | 2023 | `break`, `continue`, `return`, `while`, and `var` declarations are `pn`-only; |
+| S12.1.3 | 2027 | Reactive templates are the doctrine applied: template body = pure `fn` transformation; |
+| S12.1.4v3* | 2030 | Effect polymorphism: the `function` declaration |
+| S12.1.5v2 | 2059 | Presentation authority by state tier |
+| **§S12.2** | 2073 | *Assignment* |
+| S12.2.1 | 2075 | `let` bindings and parameters are immutable; |
+| S12.2.2 | 2081 | Element mutation is defined on both faces: `elem.attr = v` as map-field assignment; |
+| **§S12.3** | 2085 | *The call contract* |
+| S12.3.1 | 2087 | A function has at most **16 source-language argument slots** (a rest collector consumes one); |
+| S12.3.2 | 2091 | Two dynamic-call restrictions are deliberate: a dynamic call with named arguments is rejected, and a dynamic … |
+| S12.3.3v2* | 2094 | Member access is resolution, not membership |
+| S12.3.4* | 2116 | `call(f, args)` is the dynamic-application form |
+| S12.3.5v2 | 2130 | Spread splices into containers, never into an argument list; the spelling follows the container's shape |
+| S12.3.6 | 2145 | No arity overloading for user definitions |
+| S12.3.7* | 2154 | User definitions shadow system functions — user-first, module-lexical, warned |
+| **§S12.4** | 2173 | *Resources* |
+| S12.4.1v3* | 2178 | `open()` is resource acquisition and is `pn`-only |
+| S12.4.2* | 2189 | A resource auto-closes at the end of its enclosing **block**; |
+| S12.4.3* | 2196 | No `defer`, `with`, or `finally` keyword: auto-close is the only user-facing cleanup mechanism; |
+| **§S13** | 2204 | *Concurrency* |
+| **§S13.1** | 2209 | *Tasks and workers* |
+| S13.1.1v2 | 2211 | `start` is a builtin `pn`, not a keyword |
+| S13.1.2v2 | 2218 | Calls are **colorless**: `f(x)` synchronously yields the value and may suspend invisibly (`f(x)` ≡ … |
+| S13.1.3v2* | 2223 | Two tiers, one handle vocabulary: tasks (`start(f, [x])`, shared context) and isolated workers (`start(f, … |
+| S13.1.4 | 2229 | The capture rule |
+| S13.1.5 | 2233 | Failures are values; faults are not |
+| **§S13.2** | 2239 | *Messaging* |
+| S13.2.1 | 2241 | Handle = address; |
+| S13.2.2 | 2246 | `send(h, msg)` never blocks and returns `ok^E`: a full mailbox is the error value `'mailbox_full'` |
+| S13.2.3 | 2250 | Ordering: per-sender FIFO; |
+| **§S13.3** | 2255 | *Scope and cancellation* |
+| S13.3.1 | 2257 | A started handle is a scoped resource owned by the nearest lexical block: normal exit **joins**; |
+| S13.3.2 | 2261 | Cancellation is an error value at park points (`'cancelled'`), unwinding by ordinary `^` propagation with … |
+| **§S13.4** | 2267 | *Determinism* |
+| S13.4.1* | 2269 | Builtin numeric reductions (`sum`, `avg`, `prod`, `variance`, dot, `min`/`max` join) are … |
+| S13.4.2* | 2275 | In stream pipelines, `fn` stages auto-parallelize and are **ordered by default** (a re-sequencing buffer … |
+| **§S14** | 2281 | *Data Processing* |
+| **§S14.1** | 2283 | *For-clause grouping and joins* |
+| S14.1.1v2 | 2285 | `group by KEY [as NAME], … into g` binds, for each group, **every key under its name** and **`g` to the … |
+| S14.1.2v2 | 2292 | Key equality is `==` with numeric-tower coherence (`1` and `1.0` group together); |
+| S14.1.3 | 2305 | Join `on` is restricted to conjunctions of equality tests (non-equi conditions are a compile error pointing … |
+| **§S14.2** | 2311 | *Verbs and windows** |
+| S14.2.1* | 2313 | The verb surface is generic over row-oriented data |
+| S14.2.2* | 2317 | Column references in verb arguments are `~.field` (the pipe current-item reference extended into verb scope; |
+| **§S14.3** | 2322 | *Streams and laziness** |
+| S14.3.1v3* | 2324 | `input()` is eager, `stream()` lazy |
+| S14.3.2* | 2338 | Two stream kinds: value-backed streams are true values (re-forcible, usable in `fn`); |
+| S14.3.3* | 2342 | Handles are stream sources/sinks (`stream(h)`, `send_to(h)`); |
+| **§S15** | 2349 | *Metaprogramming* |
+| S15.1 | 2351 | Lambda is homoiconic through elements: the canonical AST is an element tree in the ambient **`lm.` … |
+| S15.2 | 2356 | Element literals are inverted quasiquotation: expression children evaluate (splice); |
+| S15.3* | 2360 | `input(f, 'lambda')` parses Lambda source into the `lm.` AST; |
+| S15.4 | 2366 | `name(item)` is the shadow-proof accessor for intrinsic names (element tag, function name, type name); |
+| **§S16** | 2373 | *Surface Syntax* |
+| **§S16.1** | 2381 | *Whitespace and separation* |
+| S16.1.1* | 2383 | Line breaks carry no meaning |
+| S16.1.2v2* | 2388 | `;` is a **strict separator** between statements |
+| S16.1.3v2* | 2394 | Adjacent statements need **no separator** when the second begins with a token that cannot continue the first, … |
+| **§S16.2** | 2405 | *Line-start classification* |
+| S16.2.1* | 2407 | An **incomplete** expression continues across a line break unconditionally: a trailing operator, an unclosed … |
+| S16.2.2v2* | 2410 | After a **complete** expression, a line-start token that can only continue an expression does continue it: … |
+| S16.2.3v3* | 2416 | After an **open-tail** statement (S16.1.3v2), a line-start **dual-role** token |
+| S16.2.4v3* | 2430 | One carve-out: `.` followed by a step other than a digit |
+| S16.2.5* | 2438 | `return` followed by a line break and a start token returns that value: `return` ⏎ `42` is `return 42` |
+| S16.2.6* | 2443 | A handler's brace opens **on the same line as its `^`** (`expr ^ {  |
+| **§S16.3** | 2447 | *Juxtaposition* |
+| S16.3.1* | 2449 | Juxtaposition **sequences, never combines.** Adjacent expressions are separate statements or content items; |
+| **§S16.4** | 2457 | *Braces* |
+| S16.4.1v4* | 2459 | Interior decides, wherever braces are an expression |
+| S16.4.2v2 | 2474 | Empty `{}` resolves by context, and only where a tie exists |
+| S16.4.3 | 2485 | Declaration braces are structural and never read as maps |
+| **§S16.5** | 2512 | *Element scope* |
+| S16.5.1v2* | 2514 | In an exposed element attribute value or bare content expression, `< > <= >=` **are not operators**: `>` … |
+| **§S16.6** | 2528 | *Control forms* |
+| S16.6.1* | 2530 | `if`, `for`, and `while` each have **one node with two spellings**: parenthesized head with any-expression … |
+| S16.6.2* | 2535 | `(` immediately after `if` or `while` **commits** to the parenthesized spelling |
+| S16.6.3* | 2540 | `else` is **optional** in both spellings |
+| S16.6.4* | 2543 | `match` keeps its single braced form: its braces delimit an arm list, not a body, so no parenthesized … |
+| S16.6.5* | 2546 | The expression/statement distinction is enforced by semantic analysis on the S12.1 effect boundary, not by … |
+| S16.6.6* | 2551 | Control statements require braces |
+| S16.6.7v2 | 2560 | A procedure's body is always the braced statement block, and the arrow is the one anonymous function |
+| S16.6.8v2* | 2575 | A **procedural block is a statement, never an expression** |
+| S16.6.9* | 2588 | Branch homogeneity |
+| **§S16.7** | 2599 | *Script top level* |
+| S16.7.1 | 2601 | A script's top level is element content, not a list |
+| S16.7.2v2 | 2609 | Nulls and empty strings are dropped (S2.6.2) |
+| S16.7.3v2 | 2614 | Lists spread and adjacent strings or binaries merge (S2.6.3, S2.6.4) |
+| S16.7.4 | 2617 | A REPL entry echoes its value unless it is declarations only |
+| S16.7.5 | 2624 | A session top level rebinds nothing |
+| S16.7.6 | 2629 | Two session kinds |
+| **§S16.8** | 2638 | *Lexical forms* |
+| S16.8.1 | 2640 | `not` is the one logical negation |
+| S16.8.2 | 2644 | `not` binds loose |
+| S16.8.3 | 2647 | Numeric spelling |
+| S16.8.4* | 2651 | No implicit adjacent-literal concatenation |
+| S16.8.5 | 2656 | Unary `+` is kept |
+| S16.8.6v4 | 2659 | `*` is spread; `*` and `...` are two wildcard families, not one |
+| S16.8.7 | 2671 | A single-quoted literal is a symbol, not a string |
+| S16.8.8* | 2675 | The backtick syntax space is reserved and must not be spent otherwise |
+| S16.8.9* | 2679 | Computed keys: `[expr]: val` |
+| **§S16.9** | 2691 | *Declarations, elements, paths* |
+| S16.9.1 | 2693 | `pub` is a uniform prefix modifier |
+| S16.9.2* | 2696 | The **`apply;` fused token is retired**: bare `apply` is the keyword statement, disambiguated from … |
+| S16.9.3 | 2699 | `;` has exactly one role language-wide: statement separation |
+| S16.9.4 | 2710 | The relative path is spelled `\.a.b` |
+| S16.9.5 | 2716 | `a?: T` marks an optional field |
+| S16.9.6 | 2721 | `.` is the only import separator |
+| S16.9.7 | 2725 | A rest parameter `...` closes a parameter list |
+| S16.9.8 | 2730 | An import path's first token picks one of three roots |
+| **§S16.10** | 2747 | *Keywords as names* |
+| S16.10.1v3* | 2749 | Keywords never name bindings — where they could capture |
+| S16.10.2* | 2781 | Data names admit keywords |
+| S16.10.3* | 2798 | Member steps admit keywords |
+| **§S17** | 2806 | *System Library* |
+| **§S17.1** | 2811 | *String splitting* |
+| S17.1.1 | 2813 | `split` follows ECMAScript `String.prototype.split` |
+| **§S17.2** | 2832 | *The system-function namespace* |
+| S17.2.1 | 2834 | System functions live at `lambda.sys.*`, and the prelude imports them unqualified |
+| S17.2.2 | 2840 | `lambda.sys.f` is the escape from a shadow |
+| **§S17.3** | 2850 | *Process information* |
+| S17.3.1 | 2852 | `sys.proc.self.argv` is the sole argument-vector path |
+| **§S17.4** | 2858 | *String search positions* |
+| S17.4.1 | 2860 | A text search result uses its source's code-point index domain |
+| **§S17.5** | 2866 | *Sized integer conversions* |
+| S17.5.1 | 2868 | Sized integer conversions use the type names as callable constructors |
+| **§S17.6** | 2874 | *String replacement* |
+| S17.6.1 | 2876 | `replace` steps through matches as ECMAScript `String.prototype.replaceAll` does, and inserts its replacement … |
+| **§S17.7** | 2889 | *Letter case* |
+| S17.7.1 | 2891 | Case-insensitive matching folds by Unicode simple case folding |
+| S17.7.2 | 2903 | `lower` and `upper` map by Unicode full case mapping |
+| **§S17.8** | 2911 | *Option maps* |
+| S17.8.1* | 2913 | An option name a system function does not define is a compile-time error where the compiler can see it, and a … |
+| SO1 | 3048 | Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` … |
+| SO2 | 3049 | Int v5 §5 details: poison-algebra table ratification; |
+| SO3 | 3050 | The `int?` fourth lane value (`INT_LANE_NULL`) is undocumented in the Int_Type sentinel table; |
+| SO4 | 3051 | Bitwise semantics were ruled (S4.1.2), but the interaction with the retired sparse band in old goldens needs … |
+| SO50 | 3054 | Error-preserving comparison follow-ups: canonical field traversal for key-unordered maps, selection among … |
+| SO5 | 3060 | TE-17 transitivity: does discharging `(int \| error)[]` re-narrow in place, or only by copy? Copy is the safe … |
+| SO6 | 3061 | Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); |
+| SO7 | 3062 | TE-5 R5 sticky `any`; |
+| SO8 | 3063 | Should `is` become value-aware? Deliberately undecided (S11.3.1v2 records the intentional asymmetry) |
+| SO9 | 3064 | A surface spelling for `any \ error` (the `!` exclusion operator route is broken |
+| SO10 | 3065 | A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) |
+| SO13 | 3068 | COW granularity on large documents: node representation for spine-copying, refcount discipline for … |
+| SO14 | 3069 | Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or … |
+| SO15 | 3070 | Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping) |
+| SO16 | 3071 | Close-error routing (double fault): proposed |
+| SO17 | 3072 | Resource-carrying-type containment rules (when a wrapping value is itself resource-typed) |
+| SO18 | 3073 | Snapshot iteration (C4.2d) |
+| SO19 | 3074 | Root and upward-parent navigation are resolved by S10.4.3v2, S10.5.3v2 / PTH10, PTH29: lineage lives in a … |
+| SO39 | 3078 | Node identity (S5.1.4v2): which operations preserve an identity (a COW detach and an in-place `var` write are … |
+| SO42 | 3085 | Instance type alteration (S2.1.5): the surface spelling, which declared fields must be satisfiable from the … |
+| SO43 | 3089 | Type alteration |
+| SO41 | 3092 | Cross-reference form for document graphs under S9.1.5v2: an identity or key stored as data and resolved … |
+| SO20 | 3098 | O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
+| SO21 | 3099 | `select` surface syntax; |
+| SO22 | 3100 | Deferred opt-ins: blocking send, true selective receive, `unordered` streams, CPU-bound cancellation … |
+| SO23 | 3103 | PD4 join column-collision suffixes; |
+| SO24 | 3104 | PD12 sub-items: `on error` resume semantics (abort vs skip-record), handler scoping over multiple forced … |
+| SO25 | 3105 | Deferred group-by vocabulary: `having`-style filter, post-group `let`, extended aggregates, … |
+| SO26 | 3108 | RF6 mutator convention: updated-owner vs unit; |
+| SO27 | 3109 | Whether debug logging inside `fn` is a permitted non-observable effect |
+| SO44 | 3110 | Binder depth on function values: whether a binder (S11.4.8v2) over a function value selects its full … |
+| SO29 | 3115 | File write/append syntax (C6a: `into`/`onto` candidates); |
+| SO31 | 3116 | The `<file>` element shape (name/size/mime, content as child) |
+| SO32 | 3117 | Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns |
+| SO33 | 3118 | A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in … |
+| SO34 | 3119 | `emit()` vs `send()` |
+| SO47 | 3120 | Whether an empty literal needle matches at every code-point boundary |
+| SO35 | 3123 | A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics … |
+| SO38 | 3124 | Whether `\|:` over a **map** should keep the surviving keys (yielding a map) rather than dropping them … |
+| SO36 | 3130 | Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or … |
+| SO45 | 3138 | Whether a function type takes a suffix directly: `fn?`, `fn (x: int)?`, `fn ()[]` |
+| SO46 | 3149 | How an element pattern spells *content must be empty* |
+| SO48 | 3150 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
 ## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v38.3.0 (2026-10-20)
 

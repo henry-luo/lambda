@@ -656,6 +656,26 @@ double array_num_read_double(ArrayNum* arr, int64_t offset) {
     }
 }
 
+// An integer lane element as its two's-complement 64-bit pattern: exact for
+// every integer lane, so a kernel can wrap in 64 bits and truncate to its lane
+// on store without boxing each element into a number home.
+int64_t array_num_read_int64_bits(ArrayNum* arr, int64_t offset) {
+    if (!arr || offset < 0) return 0;
+    if (!array_num_resolve_data(arr, false) && arr->length > 0) return 0;
+    switch (arr->get_elem_type()) {
+    case ELEM_INT: case ELEM_INT64: return arr->items[offset];
+    case ELEM_INT8:   return ((int8_t*)arr->data)[offset];
+    case ELEM_INT16:  return ((int16_t*)arr->data)[offset];
+    case ELEM_INT32:  return ((int32_t*)arr->data)[offset];
+    case ELEM_UINT8: case ELEM_UINT8_CLAMPED: return ((uint8_t*)arr->data)[offset];
+    case ELEM_UINT16: return ((uint16_t*)arr->data)[offset];
+    case ELEM_UINT32: return ((uint32_t*)arr->data)[offset];
+    case ELEM_UINT64: return (int64_t)((uint64_t*)arr->data)[offset];
+    case ELEM_BOOL:   return ((uint8_t*)arr->data)[offset] ? 1 : 0;
+    default:          return 0;
+    }
+}
+
 // Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
 // Walks strides to compute a flat offset, then reads the scalar at that offset.
 // Fewer indices than axes select a leading-axis view, as the chained arr[i][j]

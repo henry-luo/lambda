@@ -3606,6 +3606,65 @@ Item fn_ravel(Item vec) {
 
 // matmul(a, b) - matrix product. Supports 1-D·1-D (dot scalar), 2-D·2-D,
 // 1-D·2-D and 2-D·1-D (vector-matrix). int·int → int64, else float.
+// S10.2.4: matmul follows NumPy -- a cell is a dot product in the lane the
+// scalar rule selects for `a * b + a * b`, so u8 @ u8 wraps in u8, i8 @ u8
+// computes in i16, f32 @ f32 stays f32 and int @ float is float.
+static LambdaNumericKind matmul_cell_kind(ArrayNum* a, ArrayNum* b) {
+    LambdaNumericDecision product = lambda_numeric_classify(LAMBDA_NUM_OP_MUL,
+        lambda_numeric_kind_from_elem_type(a->get_elem_type()),
+        lambda_numeric_kind_from_elem_type(b->get_elem_type()));
+    if (!product.valid) return LAMBDA_NUM_INVALID;
+    LambdaNumericDecision sum = lambda_numeric_classify(LAMBDA_NUM_OP_ADD,
+        product.result, product.result);
+    return sum.valid ? sum.result : LAMBDA_NUM_INVALID;
+}
+
+// Store one cell: the sum over p of a[a_off + p*a_step] * b[b_off + p*b_step].
+// Machine lanes compute natively: integers wrap modulo 2^64 and truncate to
+// the lane on store, which equals wrapping at every step, and no element takes
+// a number home. Other kinds (flex int, f16, integer) fold the scalar
+// operators exactly as math.dot does.
+static bool matmul_store_cell(Rooted<ArrayNum*>& a, Rooted<ArrayNum*>& b,
+        Rooted<Item>& result, bool typed, int64_t index, LambdaNumericKind kind,
+        int64_t a_off, int64_t a_step, int64_t b_off, int64_t b_step, int64_t k) {
+    if (lambda_numeric_is_sized_integer(kind)) {
+        uint64_t acc = 0;
+        for (int64_t p = 0; p < k; p++) {
+            acc += (uint64_t)array_num_read_int64_bits(a.get(), a_off + p * a_step) *
+                   (uint64_t)array_num_read_int64_bits(b.get(), b_off + p * b_step);
+        }
+        array_num_set_int64_value(result.get().array_num, index, (int64_t)acc);
+        return true;
+    }
+    if (kind == LAMBDA_NUM_FLOAT || kind == LAMBDA_NUM_F32) {
+        double acc = 0.0;
+        float acc32 = 0.0f;  // f32 rounds every product and sum to binary32
+        for (int64_t p = 0; p < k; p++) {
+            double x = array_num_read_double(a.get(), a_off + p * a_step);
+            double y = array_num_read_double(b.get(), b_off + p * b_step);
+            if (kind == LAMBDA_NUM_F32) acc32 += (float)x * (float)y;
+            else acc += x * y;
+        }
+        array_num_set_double_value(result.get().array_num, index,
+            kind == LAMBDA_NUM_F32 ? (double)acc32 : acc);
+        return true;
+    }
+    // an empty inner dimension sums nothing: the cell is 0, as in NumPy
+    if (k == 0) return vector_store_result(&result, typed, index, (Item){.item = i2it(0)});
+    RootFrame roots(2);
+    Rooted<Item> product(roots, ItemNull);
+    Rooted<Item> acc(roots, ItemNull);
+    for (int64_t p = 0; p < k; p++) {
+        Item x = array_num_read_item(a.get(), a_off + p * a_step);
+        Item y = array_num_read_item(b.get(), b_off + p * b_step);
+        product.set(fn_mul(x, y));
+        if (get_type_id(product.get()) == LMD_TYPE_ERROR) return false;
+        acc.set(p == 0 ? product.get() : fn_add(acc.get(), product.get()));
+        if (get_type_id(acc.get()) == LMD_TYPE_ERROR) return false;
+    }
+    return vector_store_result(&result, typed, index, acc.get());
+}
+
 Item fn_matmul(Item a_item, Item b_item) {
     GUARD_ERROR2(a_item, b_item);
     if (get_type_id(a_item) != LMD_TYPE_ARRAY_NUM || get_type_id(b_item) != LMD_TYPE_ARRAY_NUM) {
@@ -3619,71 +3678,42 @@ Item fn_matmul(Item a_item, Item b_item) {
     int a_ndim = array_num_get_shape_strides(A, a_shp, a_str);
     int b_ndim = array_num_get_shape_strides(B, b_shp, b_str);
     if (a_ndim < 1 || b_ndim < 1) return ItemError;
-    bool rf = !elem_is_int(A->get_elem_type()) || !elem_is_int(B->get_elem_type());
-    ArrayNumElemType ret_et = rf ? ELEM_FLOAT64 : ELEM_INT64;
-
-    if (a_ndim == 1 && b_ndim == 1) {           // dot product → scalar
-        if (a_shp[0] != b_shp[0]) { log_error("fn_matmul: length mismatch %lld vs %lld", (long long)a_shp[0], (long long)b_shp[0]); return ItemError; }
-        double sum = 0;
-        for (int64_t k = 0; k < a_shp[0]; k++)
-            sum += array_num_read_double(A, k * a_str[0]) * array_num_read_double(B, k * b_str[0]);
-        return rf ? push_d(sum) : box_int64_value((int64_t)sum);
+    if (a_ndim > 2 || b_ndim > 2) {
+        log_error("fn_matmul: only 1-D and 2-D operands supported (got %d-D and %d-D)", a_ndim, b_ndim);
+        return ItemError;
     }
-    // Every remaining branch allocates its result before reading the operands;
-    // exact-root both owners so nursery compaction cannot stale their data pointers.
-    RootFrame roots(2);
+    if (a_ndim == 1 && b_ndim == 1) {           // dot product -> scalar
+        if (a_shp[0] != b_shp[0]) { log_error("fn_matmul: length mismatch %lld vs %lld", (long long)a_shp[0], (long long)b_shp[0]); return ItemError; }
+        return fn_math_dot(a_item, b_item);
+    }
+    // (m,k)·(k,n) -> (m,n); a vector operand is one row (k)·(k,n) -> (n) or
+    // one column (m,k)·(k) -> (m), with a zero stride on its missing axis
+    int64_t m = a_ndim == 2 ? a_shp[0] : 1, k = a_ndim == 2 ? a_shp[1] : a_shp[0];
+    int64_t n = b_ndim == 2 ? b_shp[1] : 1;
+    int64_t a_row = a_ndim == 2 ? a_str[0] : 0, a_k = a_ndim == 2 ? a_str[1] : a_str[0];
+    int64_t b_k = b_str[0], b_col = b_ndim == 2 ? b_str[1] : 0;
+    if (k != b_shp[0]) { log_error("fn_matmul: inner dim mismatch %lld vs %lld", (long long)k, (long long)b_shp[0]); return ItemError; }
+    LambdaNumericKind kind = matmul_cell_kind(A, B);
+    ArrayNumElemType elem = ELEM_INT;
+    // flex-int cells may cross to float, so they stage generically (as vector ops do)
+    bool typed = kind != LAMBDA_NUM_INT && lambda_numeric_kind_to_elem_type(kind, &elem);
+    int out_ndim = a_ndim == 2 && b_ndim == 2 ? 2 : 1;
+    int64_t out_shape[2] = { a_ndim == 2 ? m : n, n };
+    // the result allocates before the operands are read; root both owners
+    RootFrame roots(3);
     Rooted<ArrayNum*> rooted_a(roots, A);
     Rooted<ArrayNum*> rooted_b(roots, B);
-    if (a_ndim == 2 && b_ndim == 2) {           // (m,k)·(k,n) → (m,n)
-        int64_t m = a_shp[0], k = a_shp[1], n = b_shp[1];
-        if (k != b_shp[0]) { log_error("fn_matmul: inner dim mismatch %lld vs %lld", (long long)k, (long long)b_shp[0]); return ItemError; }
-        int64_t out_shape[2] = { m, n };
-        ArrayNum* R = alloc_ndim_arraynum(ret_et, 2, out_shape);
-        if (!R) return ItemError;
-        A = rooted_a.get();
-        B = rooted_b.get();
-        for (int64_t i = 0; i < m; i++)
-            for (int64_t j = 0; j < n; j++) {
-                double sum = 0;
-                for (int64_t p = 0; p < k; p++)
-                    sum += array_num_read_double(A, i * a_str[0] + p * a_str[1])
-                         * array_num_read_double(B, p * b_str[0] + j * b_str[1]);
-                if (rf) R->float_items[i * n + j] = sum; else R->items[i * n + j] = (int64_t)sum;
-            }
-        return { .array_num = R };
-    }
-    if (a_ndim == 1 && b_ndim == 2) {           // (k)·(k,n) → (n)
-        int64_t k = a_shp[0], n = b_shp[1];
-        if (k != b_shp[0]) { log_error("fn_matmul: dim mismatch"); return ItemError; }
-        ArrayNum* R = array_num_new(ret_et, n);
-        if (!R) return ItemError;
-        A = rooted_a.get();
-        B = rooted_b.get();
+    Rooted<Item> result(roots, ItemNull);
+    result.set(!typed ? (Item){.array = array()} : (Item){.array_num = out_ndim == 2 ?
+        alloc_ndim_arraynum(elem, 2, out_shape) : array_num_new(elem, out_shape[0])});
+    if (!result.get().item) return ItemError;
+    for (int64_t i = 0; i < m; i++) {
         for (int64_t j = 0; j < n; j++) {
-            double sum = 0;
-            for (int64_t p = 0; p < k; p++)
-                sum += array_num_read_double(A, p * a_str[0]) * array_num_read_double(B, p * b_str[0] + j * b_str[1]);
-            if (rf) R->float_items[j] = sum; else R->items[j] = (int64_t)sum;
+            if (!matmul_store_cell(rooted_a, rooted_b, result, typed, i * n + j, kind,
+                    i * a_row, a_k, j * b_col, b_k, k)) return ItemError;
         }
-        return { .array_num = R };
     }
-    if (a_ndim == 2 && b_ndim == 1) {           // (m,k)·(k) → (m)
-        int64_t m = a_shp[0], k = a_shp[1];
-        if (k != b_shp[0]) { log_error("fn_matmul: dim mismatch"); return ItemError; }
-        ArrayNum* R = array_num_new(ret_et, m);
-        if (!R) return ItemError;
-        A = rooted_a.get();
-        B = rooted_b.get();
-        for (int64_t i = 0; i < m; i++) {
-            double sum = 0;
-            for (int64_t p = 0; p < k; p++)
-                sum += array_num_read_double(A, i * a_str[0] + p * a_str[1]) * array_num_read_double(B, p * b_str[0]);
-            if (rf) R->float_items[i] = sum; else R->items[i] = (int64_t)sum;
-        }
-        return { .array_num = R };
-    }
-    log_error("fn_matmul: only 1-D and 2-D operands supported (got %d-D and %d-D)", a_ndim, b_ndim);
-    return ItemError;
+    return vector_finalize_result(&result, typed, out_ndim, out_shape);
 }
 
 // helper: pick the result elem_type for a binary join (concat/stack)

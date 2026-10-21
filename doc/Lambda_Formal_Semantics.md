@@ -1638,8 +1638,10 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `i64`/`u64` lane in itself, whole-array or along an axis, so
   `sum([200u8, 100u8])` is `300`; `avg`, `mean`, `variance` and `deviation`
   accumulate every bounded number in `float`, so `avg([200u8, 100u8])` is
-  `150.0`; `min` and `max` keep the lane. [USER 2026-10-21; Typed_Array §7.2,
-  §7.6]
+  `150.0`; `min` and `max` keep the lane. `dot` and `matmul` follow NumPy
+  instead: each product and sum is element arithmetic in the operands' common
+  lane, so `math.dot([200u8, 1u8], [2u8, 1u8])` wraps to `145u8`.
+  [USER 2026-10-21; Typed_Array §7.2, §7.6]
 
 ### S10.3 Keyword operators
 

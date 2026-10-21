@@ -85,6 +85,12 @@ avg(u)                             // 150: a mean accumulates in float
 type(avg(u))
 sum([9223372036854775807i64, 1i64]) // i64 keeps its lane and wraps
 math.mean([1i64, 2i64])            // 1.5: float, not decimal
-math.dot([200u8, 1u8], [2u8, 1u8]) // 145: dot is element arithmetic (open)
+math.dot([200u8, 1u8], [2u8, 1u8]) // 145: dot follows NumPy, wraps in the lane
+let mm = matmul([[200u8, 1u8], [1u8, 1u8]], [[2u8, 0u8], [1u8, 1u8]])
+mm                                 // [[145, 1], [3, 1]]: matmul wraps in u8
+type(mm[0][0])
+type(matmul([[100i8, 1i8]], [[2u8], [1u8]])[0][0])  // i16: the common lane
+type(matmul([[1, 2]], [[3], [4]])[0][0])            // int, not i64
+type(matmul([[1.5f32]], [[2.0f32]])[0][0])          // f32
 max(u)                             // 200: min/max keep the lane
 type(max(u))
