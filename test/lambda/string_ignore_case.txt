@@ -25,3 +25,12 @@
 ["aA-"]
 "3.4"
 ['eCOLE']
+'4. a negated set excludes the case variants of what it complements'
+"4.1"
+["-", "_"]
+"4.2"
+[]
+"4.3"
+["1"]
+"4.4"
+["Ab__"]
