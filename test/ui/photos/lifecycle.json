@@ -1,0 +1,26 @@
+{
+  "name":"Photos close cancels previews before checking saved content",
+  "html":"test/demo/photos/photos.ls",
+  "viewport":{"width":1280,"height":820},
+  "events":[
+    {"type":"advance_time","ms":50},
+    {"type":"click","target":{"selector":"#preview","offset_x":120,"offset_y":120}},
+    {"type":"key_press","key":"right"},
+    {"type":"mouse_down","target":{"selector":"#preview","offset_x":120,"offset_y":120}},
+    {"type":"mouse_move","target":{"selector":"#preview","offset_x":160,"offset_y":150}},
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":false},
+    {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-dialog","equals":"discard"},
+    {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-drag","equals":""},
+    {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-history","equals":"1"},
+    {"type":"assert_value","target":{"selector":"#position-x"},"equals":"1"},
+    {"type":"mouse_up","target":{"selector":"#preview","offset_x":160,"offset_y":150}},
+    {"type":"click","target":{"selector":"#discard-cancel"}},
+    {"type":"click","target":{"selector":"#undo"}},
+    {"type":"assert_attribute","target":{"selector":"#photos"},"attribute":"data-dirty","equals":"false"},
+    {"type":"mouse_down","target":{"selector":"#preview","offset_x":120,"offset_y":120}},
+    {"type":"mouse_move","target":{"selector":"#preview","offset_x":160,"offset_y":150}},
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":true}
+  ]
+}

@@ -751,6 +751,18 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
+<a id="lr05-16"></a>**LR05-16 · Axis `sum`/`avg` of a ubyte array wrap modulo 256 · OPEN**
+Found 2026-10-20 while building the photo album demo's placeholder colours.
+For a decoded `(H,W,4)` ubyte image, `sum(img, 0)` returns per-lane sums
+reduced modulo 256: a 42-row column of alpha 255 sums to 214 (10710 mod 256),
+and `avg(img, 0)` divides that wrapped sum, giving alpha 5.1 instead of 255.
+The plain 1-D case `avg([[1,2],[3,4]], 0)` is correct, and `as_float(img)`
+first gives correct results. The axis path is `array_num_reduce_axis`
+(`lambda-vector.cpp:3974`); the result kind comes from
+`reduce_result_decision`, which appears to keep the ubyte element type for
+the collapsed lanes. Repro: load any JPEG with `load({data:..., thumbnail:64})`
+and compare `sum(img, 0)[0]` with the column sum computed after `as_float`.
+
 ---
 
 
@@ -1587,6 +1599,12 @@ absent attributes validate, and a real type violation still fails.
 
 
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
+*Update 2026-10-20:* the clause tail is now ruled and enforced — S14.1.2v2
+puts `let`/`where` before `group by` and `order by`/`limit`/`offset` after
+it, each at most once (E239). That is the phase-ordered tail both options
+below keep; only the generator/`let` prefix question remains open
+([Expr_For_Clauses §4.4](Lambda_Expr_For_Clauses.md#44-the-clause-pipeline)).
+
 Clause order is fixed: **all generators, then all `let`s**. Measured
 2026-08-25:
 

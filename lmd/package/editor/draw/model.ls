@@ -8,6 +8,7 @@ import geom: lambda.editor.draw.geometry
 import router: lambda.editor.draw.routing
 import shapes: .shapes
 import paths: .path
+import alignment: lambda.editor.mod_alignment
 
 pub let width = 1120.0
 pub let height = 760.0
@@ -238,18 +239,10 @@ pub fn remove(st) {
 pub fn align(st,mode) any^ {
     let ids = selected_ids(st)
     let nodes = [for (node in objects(st.doc) where node.tag == 'shape' and contains(ids,id(node))) node]
-    let horizontal = contains(["left","center","right","distribute-x"],mode)
-    let axis = if (horizontal) "x" else "y"
-    let size = if (horizontal) "width" else "height"
+    let horizontal = alignment.horizontal(mode)
     let all_bounds = selection_box(st.doc,[for (node in nodes) id(node)])
-    let ordered = sort(nodes,(node) => world_box(node)[axis])
     let distributing = starts_with(mode,"distribute-")
-    let gap = if (len(nodes)>1) (all_bounds[size]-sum([for (node in nodes) world_box(node)[size]]))/(len(nodes)-1) else 0
-    let positions = map([for (i,node in ordered) (let b = world_box(node),
-        let desired = if (distributing) all_bounds[axis]+sum([for (j in 0 to i-1) world_box(ordered[j])[size]])+gap*i
-            else all_bounds[axis]+(if (contains(["right","bottom"],mode)) all_bounds[size]-b[size]
-                else if (contains(["center","middle"],mode)) (all_bounds[size]-b[size])/2 else 0),
-        *[id(node),desired-b[axis]])])
+    let positions = alignment.offsets([for (node in nodes) {*:world_box(node),id:id(node)}],all_bounds,mode)
     let changed = drawing_with(st.doc,[for (node in objects(st.doc)) if (positions[id(node)] == null) node
         else translate(node,if (horizontal) positions[id(node)] else 0,if (horizontal) 0 else positions[id(node)],ids)]);
     if (len(nodes)<2 or (distributing and len(nodes)<3)) st

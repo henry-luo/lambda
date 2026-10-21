@@ -232,16 +232,16 @@ try {
             assert.ok(selected.has(name), name);
         }
         assert.ok(!selected.has('test_scene3d_gtest'));
-        assert.ok(!selected.has('test_view_reuse_gtest'));
+        assert.ok(!selected.has('test_radiant_core_gtest'));
         const paged = inventory.find(t => t.baseName === 'test_paged_media_gtest');
         assert.equal(paged.buildTarget, 'test_paged_media_gtest');
         assert.deepEqual(paged.runnerArgs, []);
         const extended = JSON.parse(invoke(['--target=extended', '--list']).stdout);
-        const reuse = extended.find(t => t.baseName === 'test_view_reuse_gtest');
-        assert.ok(reuse);
-        assert.equal(reuse.buildTarget, 'test_view_reuse_gtest');
-        assert.deepEqual(reuse.runnerArgs, []);
-        assert.ok(!extended.some(t => t.baseName === 'test_view_reuse_extended_gtest'));
+        const core = extended.find(t => t.baseName === 'test_radiant_core_gtest');
+        assert.ok(core);
+        assert.equal(core.buildTarget, 'test_radiant_core_gtest');
+        assert.deepEqual(core.runnerArgs, []);
+        assert.ok(!extended.some(t => t.baseName === 'test_radiant_core_extended_gtest'));
         assert.equal(selected.size, inventory.length);
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
@@ -522,7 +522,7 @@ try {
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
+        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade,photos', 'view', 'dom'].entries()) {
             const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
             assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
         }

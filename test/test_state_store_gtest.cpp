@@ -13,6 +13,7 @@ extern "C" {
 #include "../radiant/event.hpp"
 #include "../radiant/state_store_internal.hpp"
 #include "../radiant/view.hpp"
+#include "../radiant/render_metrics.hpp"
 
 #include <new>
 
@@ -74,6 +75,90 @@ protected:
         return doc.state;
     }
 };
+
+TEST_F(StateStoreDomMutationTest, DirtyCoalescingKeepsOnlyUnambiguousSourceHints) {
+    DirtyTracker* tracker = &state()->dirty_tracker;
+    dirty_clear(tracker);
+    live->width = live->height = orphan->width = orphan->height = 20;
+    dirty_mark_element(state(), static_cast<View*>(live));
+    DirtyRect* dirty = tracker->dirty_list; ASSERT_NE(dirty, nullptr);
+    EXPECT_EQ(dirty->source_view_id, static_cast<DomNode*>(live)->id);
+    EXPECT_EQ(dirty->source_view_address, live);
+    dirty_mark_element(state(), static_cast<View*>(live));
+    EXPECT_EQ(tracker->dirty_list, dirty); EXPECT_EQ(dirty->next, nullptr);
+    EXPECT_EQ(dirty->source_view_address, live);
+
+    // an alternate synthetic view can carry the same ID without the same address.
+    DomElement alias = {}; alias.node_type = DOM_NODE_ELEMENT;
+    alias.set_synthetic(true); alias.width = alias.height = 20;
+    static_cast<DomNode*>(&alias)->id = static_cast<DomNode*>(live)->id;
+    dirty_mark_element(state(), static_cast<View*>(&alias));
+    EXPECT_EQ(dirty->source_view_id, static_cast<DomNode*>(live)->id);
+    EXPECT_EQ(dirty->source_view_address, nullptr);
+    EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(root), dirty));
+    dirty_mark_element(state(), static_cast<View*>(orphan));
+    EXPECT_EQ(dirty->source_view_id, 0u); EXPECT_EQ(dirty->source_view_address, nullptr);
+    dirty_clear(tracker);
+
+    // rect-only damage cannot acquire an element identity when it coalesces.
+    for (bool unknown_first : {false, true}) {
+        if (unknown_first) dirty_mark_rect(tracker, 0, 0, 20, 20);
+        dirty_mark_element(state(), static_cast<View*>(live));
+        if (!unknown_first) dirty_mark_rect(tracker, 0, 0, 20, 20);
+        ASSERT_NE(tracker->dirty_list, nullptr);
+        EXPECT_EQ(tracker->dirty_list->source_view_id, 0u);
+        EXPECT_EQ(tracker->dirty_list->source_view_address, nullptr);
+        dirty_clear(tracker);
+    }
+}
+
+TEST_F(StateStoreDomMutationTest, DirtySourceAncestryUsesCurrentLinksIncludingDetachedSources) {
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+    DirtyRect dirty = {}; dirty.source_view_id = static_cast<DomNode*>(orphan)->id;
+    dirty.source_view_address = orphan;
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(orphan), &dirty));
+    EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(root), &dirty));
+    EXPECT_FALSE(dirty_source_in_view_subtree(&doc, static_cast<View*>(live), &dirty));
+    ASSERT_TRUE(root->remove_child(orphan));
+    EXPECT_FALSE(dirty_source_in_view_subtree(&doc, static_cast<View*>(root), &dirty));
+    ASSERT_TRUE(live->append_child(orphan));
+    EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(live), &dirty));
+    DomElement* wrapper = make_element(); ASSERT_TRUE(wrapper->append_child(root));
+    EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(wrapper), &dirty));
+    ASSERT_TRUE(wrapper->remove_child(root)); delete wrapper;
+    EXPECT_EQ(counters.retained_dirty_ancestry_queries, 6u);
+    EXPECT_EQ(counters.retained_dirty_subtree_searches, 0u);
+    ASSERT_TRUE(live->remove_child(orphan)); ASSERT_TRUE(root->append_child(orphan));
+}
+
+TEST_F(StateStoreDomMutationTest, DirtySourceHintsFallBackByIdWithoutReadingInvalidAddresses) {
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, live, sizeof(DomElement), false));
+    DirtyRect dirty = {}; dirty.source_view_id = static_cast<DomNode*>(orphan)->id;
+    RenderPipelineMetrics counters; RenderPipelineMetricsScope probe(&counters);
+    // missing hint, obsolete identity at a valid address, and inaccessible storage.
+    DomNode* addresses[] = {nullptr, live, reinterpret_cast<DomNode*>(uintptr_t(1)), orphan};
+    for (DomNode* address : addresses) {
+        dirty.source_view_address = address;
+        EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(root), &dirty));
+        EXPECT_FALSE(dirty_source_in_view_subtree(&doc, static_cast<View*>(live), &dirty));
+    }
+    EXPECT_EQ(counters.retained_dirty_ancestry_queries, 0u);
+    EXPECT_EQ(counters.retained_dirty_subtree_searches, 8u);
+    dirty.source_view_id = 0;
+    EXPECT_TRUE(dirty_source_in_view_subtree(&doc, static_cast<View*>(live), &dirty));
+    EXPECT_EQ(counters.retained_dirty_subtree_searches, 8u);
+    dirty.source_view_id = static_cast<DomNode*>(orphan)->id;
+    EXPECT_TRUE(dirty_source_in_view_subtree(nullptr, static_cast<View*>(root), &dirty));
+    // an adoption can keep the source registry's record under its earlier ID.
+    uint32_t old_id = static_cast<DomNode*>(live)->id;
+    dirty.source_view_id = old_id; dirty.source_view_address = live;
+    static_cast<DomNode*>(live)->id = doc.next_node_id++;
+    EXPECT_FALSE(dirty_source_in_view_subtree(&doc, static_cast<View*>(root), &dirty));
+    static_cast<DomNode*>(live)->id = old_id;
+}
 
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveViewStateAndDropsOrphan) {
     DocState* doc_state = state();

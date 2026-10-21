@@ -29,8 +29,8 @@
   §1.2–§1.3 (phase-local LOC conservation, what counts as retirement), §3.4,
   §3.7–§3.9, §7 (rejected directions);
   [`Lambda_Proposal_JS_Unify_P7.md`](../Lambda_Proposal_JS_Unify_P7.md)
-  (U-A withdrawn, U-E unstarted); [`jube/JS_Tune14.md`](../jube/JS_Tune14.md)
-  §3.3–§3.4 (shared slices in flight, duplicate-work rules). The formal spec
+  (U-A withdrawn, U-E unstarted); [`jube/JS_Tune_History.md`](../jube/JS_Tune_History.md)
+  §4.7 (Tune14 shared slices and duplicate-work rules). The formal spec
   wins on disagreement.
 - **Predecessor:** the JLR clone-extraction ledger (retired at `e3063f604`;
   recover with `git show e3063f604^:vibe/Lambda_Impl_JS_LOC_Reduce.md`). It
@@ -805,7 +805,7 @@ Resolved (USER, 2026-09-22):
 Open:
 
 1. **Tune14 ownership.** JLS-5, JLS-7 and JLS-9 are Tune14 §3.3 slices. Track
-   them here with a cross-reference, or only in `JS_Tune14.md` with this file
+   them here with a cross-reference, or only in `JS_Tune14.md` (now consolidated into `JS_Tune_History.md` §4.7) with this file
    holding the LOC ledger row?
 2. **`js_mir_analyze_and_plan` split (JLS-6).** Splitting the 1,765-line
    function into pass functions is uncredited but is the precondition for

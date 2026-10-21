@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 68.0.1 (2026-10-16)
+**Spec version:** 70.0.0 (2026-10-20)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -34,7 +34,7 @@ REH-D1–D14
 K11–K32 ([`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md));
 PD9–PD16 / FC1–FC11
 ([`Lambda_Design_Data_Processing.md`](../vibe/Lambda_Design_Data_Processing.md),
-[`Lambda_Expr_For_Clauses2.md`](../vibe/Lambda_Expr_For_Clauses2.md));
+[`Lambda_Expr_For_Clauses.md`](../vibe/Lambda_Expr_For_Clauses.md));
 RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
 R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
@@ -325,6 +325,54 @@ harnesses.
   absolute path values retain distinct root kinds even when they resolve to
   the same qualified target. All three forms use the same typed operations.
   [S5.1.4v2, PTH21–PTH28]
+
+- **S2.4.6** **A wildcard step may sit anywhere in a path, and a force
+  reads exactly the files that a spelled step enters.** `*` and `**` are
+  steps (S2.4.2v5), so `\.src.*.name` and `/.*.b` are ordinary lazy
+  references (S2.4.3v3): nothing is read until `#` (PTH32). Forcing a
+  wildcard enumerates the key domain the step lands in and continues the
+  remaining steps per match, set-at-a-time (S8.2.6). In the file-system
+  domain `*` is one level of directory entries and `**` the closure of `*`
+  (S8.2.5) — the base, then every entry beneath it, files and directories
+  alike, in pre-order and to any depth; a match that does not exist forces
+  to `null` (S7.1.1v3) and drops. A step applied to a file match enters that
+  file, exactly as `\.data.'x.json'.users` does (PTH34), and once a step has
+  entered a file the same spellings enumerate the parsed document. So
+  `\.src.**#` reads nothing, `\.src.**.name#` reads every file beneath src,
+  and `\.src.**.**#` is the explicit full-content search: `**` never crosses
+  the file boundary by itself. A wildcard result in the path domain is a
+  set, deduplicated by path equality (S2.4.2v5) in first-appearance order,
+  which makes `**.**` idempotent on the directory side; results inside a
+  document stay runs, which never deduplicate (S8.2.4v3). `#` is the line
+  between reference and value: steps before it extend the plan and may
+  enter files, steps after it act on values — `\.src.*#.name` is each path
+  value's `name` property, mapped over the run, and reads no file. *Why: a
+  single `**` that read every file beneath a tree would be an unbounded
+  implicit read (S2.4.4); the crossing must be spelled, and then its cost is
+  visible in the spelling.* (Ruled 2026-10-20, USER.) [PTH81–PTH84,
+  Type_Path §6.4]
+- **S2.4.7** **A query step on a path follows the wildcard rule: it never
+  crosses the file boundary by itself.** `?T` and `.?T` applied to a path
+  are path operations like `*` and `**` (S2.4.2v5, S2.4.6): `p?T` is a
+  reference until `#`, and its type operand is part of the path's identity.
+  Forcing applies the query to each match. Over a directory, `p?T` is the
+  proper closure `p.*.**` and `p.?T` the inclusive closure `p.**`
+  (S8.2.5), each kept where the path value is `T`; no file is read, so
+  `\.src?<div>#` is `null` and `\.src?path#` is every path beneath `src`.
+  Over a file the query is the step that enters it (PTH82), and is
+  S8.2.4v3's query on the parsed value: `\.data.'x.json'?int#` is every
+  `int` in `x.json`. So a query or wildcard applied to the matches of
+  another crosses the boundary, because each file match is entered by the
+  step applied to it: `\.src.**?T#` and `\.src.**.?T#` search the content
+  of every file beneath `src`, and `\.src?T.**#` and `\.src.?T.**#`
+  enumerate the content of every file the first query keeps.
+  `\.src.*?T#` searches the files directly in `src` and no deeper file.
+  Path-domain results deduplicate by path equality and document results
+  stay runs (S2.4.6). After `#` a query acts on values: `\.src.**#?T`
+  tests the path values and reads no file. *Why: `?T` and `.?T` are
+  recursive like `**`; a query that opened every file beneath a directory
+  would be the same unbounded implicit read S2.4.6 rules out.* (Ruled
+  2026-10-20, USER.) [PTH85, Type_Path §6.4]
 
 ### S2.5 Lists and blocks
 
@@ -1281,6 +1329,45 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 - **S8.2.4v3*** **Two subscript worlds: a type key answers as XPath, a positional selection as NumPy.** `e[T]` walks `e`'s content as `for (x in e)` does — a list, range, array, map (its values) or element (attribute values, then children) — and keeps each `x` that is `T` and is not `null`; it answers as a subscript does: the match itself for one, `null` for none, a list for two or more — the run `T*` (S11.1.6v2), collapsing by S2.5.5v2 — so a lone match needs no unwrapping (`doc[<title>]`) and `if (e?T)` is the absence idiom; `count(e?T)` is the match count (S8.3.3v3), `len` is not. A list is stepped set-at-a-time: `e[T]` on a list applies the step to each item and splices, so `html[table][tr][td]` reads as XPath's `//table/tr/td` at any number of tables; a scalar item has no content, so `(1, "a", 2)[int]` is `null` where the array `[1, "a", 2][int]` is `(1, 2)` (an array is a container, a list a sequence: S2.5.1v2). `e?T` / `e.?T` (S7.6.4) is `e[T]` applied recursively in document order, the root excluded / included — on a list, each item's descendants, so `html?<div>?<div>` is the divs nested in divs. A `null` value never matches, even under `T | null` or `null`. The result is a value, never an item-position producer: `[e?T, 9]` with no match is `[null, 9]`; `*e?T` splices whatever there is. **Positional selections are NumPy's**: a range `[i to j]` (S7.1.2), a boolean mask, and an index array `[[1, 3, 5]]` yield an array whatever the count — a range clamps and is `[]` when empty; an index array keeps its own length, and an out-of-range or negative position contributes `null` (S7.1.1v3, S7.2.1) — and they compose with a type key: `e[T][1 to 3]` slices the run, on a lone match that value's own content. *Why two worlds: a type key names members, and the one expected match must not need `[0]`; a positional key names a window, whose shape must follow the key, not the data (R's `drop = TRUE`). Aligning them breaks one or the other — ruled 2026-09-26 after an array reading of the type key was tried and reverted.* [Expr_Query §4.1]
 
+- **S8.2.5** **The item step `.*` and its closure.** `e.*` is the
+  run (S8.2.4v3) of `e`'s items in walk order — what `for (x in e)` walks
+  (S8.1.2v3): an array, list or range by item, a map by value, an element by
+  attribute values then children — so `e.*` ≡ `e[any]`, and named and
+  indexed members are both items (`users.*.name` reads JSON). `e.**` is zero
+  or more applications of `.*` — `e`, then `e.*`, then `e.*.*`, … — spliced
+  in document order (pre-order), so `e.**` ≡ `e.?any`, `e.*.**` ≡ `e?any`,
+  and `e.*` never includes `e`: glob's `a/*/b` against `a/**/b`, XPath's
+  `a/*` against `a//b`. Text is a scalar to the walk, as it is to `[any]`:
+  `"abc".*` is `null`, although `for` and `|>` walk text by code point
+  (S2.5.8). The steps have ordinary member precedence and chain: `e.*.b`,
+  `e.**[<p>]`, `e.*.~~`. A wildcard step always has a base: bare `*.a` and
+  `**.b` do not exist (`*` is spread, S12.3.5v2; `**` is power), and in a
+  body that binds `~` the spelling is `~.*.a` (S10.1.7v2 leaves only bare
+  names implicit). *Why closure: self-inclusion is the zero-step case, not a
+  convention, which is what keeps `a.*.b` from reading `a.b`.* (Ruled
+  2026-10-20, USER.) [Expr_Query §4.4, S16.8.6v4]
+- **S8.2.6** **A run is stepped set-at-a-time by every key kind except
+  positional.** S8.2.4v3's list rule extends from the type key to every
+  navigation step: a name step (`.b`, `.'b'`, `["b"]`), the type key `[T]`,
+  the queries `?T`/`.?T`, the wildcards `.*`/`.**`, the parent `.~~` and the
+  root `./` apply to each item of a list in order as if it stood alone; the
+  results splice into one run, `null` results drop, and the run collapses by
+  S2.5.5v2 — so `html?<div>.class` is the classes, `(e?<p>).b` the `b` of
+  every `p`, and a stored run steps as an inline one, since being a list is
+  the whole property. Positional keys — an integer, a range `[i to j]`, a
+  mask, an index array — select a window over the run itself (S8.2.4v3):
+  `(html?<p>)[0]` is the first `p`, XPath's `(//p)[1]`; the per-item reading
+  `//p[1]` is the pipe `html?<p> |> ~[0]`. Methods first: a name on a run
+  resolves the list type's methods before mapping (S8.2.1v4, S12.3.3v2), so
+  `run.len()` is the method and a field spelled like one is reached by pipe.
+  An array is not a run: `arr.b` stays `null` under S8.2.1v4, `arr[T]` walks
+  the array's own content, and `arr.*.b` is the uniform spelling for both
+  kinds (S2.5.1v2). Steps never deduplicate (Expr_Query §4.1): `e?<p>.~~`
+  yields a shared parent once per child. *This supersedes the deferral of the
+  auto-mapped member step (Expr_Query §12): ruling by value kind, not by
+  spelling, is what keeps `let d = html?<div>; d.class` equal to
+  `html?<div>.class`.* (Ruled 2026-10-20, USER.) [Expr_Query §4.4, §12]
+
 ### S8.3 `len`
 
 - **S8.3.1v3** The law: **`len(x)` is the number of iterations `for (i in x)`
@@ -2172,17 +2259,26 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
 
 ### S14.1 For-clause grouping and joins
 
-- **S14.1.1** `group by KEY [as ALIAS], … into g` — and **a group is an
-  element**: keys are attributes, members are children, tag `'group'`. *A
-  group is a document node* — it formats and queries like any element.
-  [FC1, FC10]
-- **S14.1.2** Key equality is `==` with numeric-tower coherence (`1` and
+- **S14.1.1v2** `group by KEY [as NAME], … into g` binds, for each group,
+  **every key under its name** and **`g` to the group's rows**: an array in
+  input order holding each row verbatim — nulls and strings included,
+  nothing merged. *A group is rows, not content.* (Revised 2026-10-20, v2: v1
+  made a group an element — keys as attributes, members as children — whose
+  content normalization, S2.6.2–S2.6.4, merged string members and dropped
+  null rows, so a group lost its rows.) [FC1-B]
+- **S14.1.2v2** Key equality is `==` with numeric-tower coherence (`1` and
   `1.0` group together); null keys form one group. Groups emit in
   first-appearance order; `order by`/`limit`/`offset` after `group by`
-  apply to groups; loop variables go out of scope after grouping — only the
-  `into` binding survives. An omitted `as` infers a name only from a
-  trailing field access; anything else demands `as` (no generated names).
-  [FC2–FC4, FC9]
+  apply to groups; loop variables and row `let`s go out of scope after
+  grouping — only the key names and the `into` binding survive. An omitted
+  `as` names a key only from a trailing field access; anything else
+  demands `as` (no generated names), and the key names differ from each
+  other and from the `into` name. Row clauses (`let`, `where`) precede
+  `group by` and group clauses (`order by`, `limit`, `offset`) follow it,
+  each at most once; a misplaced or repeated clause is a compile error.
+  (Revised 2026-10-20, v2: keys became bindings with S14.1.1v2, and the
+  placement sentence is new — a misplaced or repeated clause used to run
+  in the wrong phase or replace its twin silently.) [FC2–FC4, FC9]
 - **S14.1.3** Join `on` is restricted to conjunctions of equality tests
   (non-equi conditions are a compile error pointing at `where` — never a
   silent O(n·m)); `c? in src on …` is the null-padded side; **null join
@@ -2537,15 +2633,18 @@ below by its section.
 - **S16.8.5** **Unary `+` is kept** (identity, plus string→number
   coercion), and `+` stays banned at line start: the arithmetic family
   `- + * /` is banned as a class, not per token. [Design_Syntax §7.12]
-- **S16.8.6v3** **`*` is spread; `*` and `...` are two wildcard families,
-  not one.** `*` is the unit wildcard (path segment, any-key, `T*`
-  repetition, spread); `T{n,m}` is the counted repetition — `T{n}` exactly,
+- **S16.8.6v4** **`*` is spread; `*` and `...` are two wildcard families,
+  not one.** `*` is the unit wildcard (path segment, the item step `.*` and
+  its closure `.**` on any value — S8.2.5 — any-key, `T*` repetition,
+  spread); a wildcard step always has a base, so bare `*.a` and `**.b` do
+  not exist (S8.2.5); `T{n,m}` is the counted repetition — `T{n}` exactly,
   `T{n+}` at least (S11.1.6v2) — which retires `T[n+]`, `T[n, m]`, and
   regex's `T{n,}`: braces carry the count, and `+` inside them means "or
   more" exactly as the bare suffix does;
   `...` is the elided run (pattern gap, rest parameters), with the normative
   equivalence `...` ≡ `any*`. Paths keep `*`/`**` — an ellipsis would
-  collide with path dots. [Design_Syntax §7.10, §7.28]
+  collide with path dots. (Revised 2026-10-20, v4: the value steps.)
+  [Design_Syntax §7.10, §7.28]
 - **S16.8.7** **A single-quoted literal is a symbol, not a string**, and
   comma decomposition (`let a, b = expr`) is by design; bracket destructuring
   patterns are rejected. [Design_Syntax §7.8]
@@ -2894,8 +2993,11 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.1.7 | **Ruled and implemented 2026-09-26 (USER; both tiers); partial for the literal decisions listed in the residue.** Container literals decide since the clarification of the same day (USER: "literal operands decide" includes containers, and the `int & string` sentence was implementation status, not a ruling), spec 47.2.0. `TYPE_NONE` is a compact meta type beside `number` and `integer` — the `LMD_TYPE_TYPE` tag, told apart by pointer identity — with the singleton type value `LIT_TYPE_NONE`; the word is in the three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, the builder's `BASE_TYPE_NAMES`). The reduction is one function, `lambda_type_operation_reduced` (`type_contract.cpp`), that asks three-valued whether one operand admits all, none or only some of a literal operand's values: a scalar literal's (every value `==` to it, S11.2.1), a range's (by its bounds), or a container pattern's (part by part — slots, fields, tag and content — against a pattern of its own kind, by kind alone against any other type). A predicate, a string pattern or a run answers *unknown* and never reduces; so does whatever `is` could answer otherwise. The runtime type operators return its result — `none`, or the surviving operand — and the builder's three binary-type constructors give a reduced node its result as the type value, a survivor in a type_list slot of its own, which the JIT emits by that slot. The static boundary rejects a known source crossing into `none` (E201 at a declaration, E208 at a return) and defers an unknown one, and any `none` source. Fixed on the way, both older than `none`: `==` on type values compared the payload tag alone, so `number == integer` was `true` (and `none == type` would have been) — the compact meta types now compare by identity; and `is` tested a bare numeric literal type by its tag, so `2 is (none \| 1)` answered `true`. Migration: eight bindings named `none` in six fixtures. Fixtures `test/lambda/type_none.ls` (three tiers, `kTune27TierParity`), `negative/semantic/none_type_rejections.ls`, `negative/semantic/none_binding_barred.ls`; baseline 5947/5947, S16 harnesses C 354/354 and reference grammar 341/341. **Residue:** the implementation reduces only what literal operands decide, so `int & string` stays as written and nothing warns of it (the informative remark), and `<:` with an unreduced intersection as the candidate is incomplete (`(int & string) <: bool` is `false`). Some literal decisions answer *unknown*: a numeric literal against a numeric kind other than `number`, unless the kind is an integer kind and the literal has a fraction (`1.5 & int` is `none`, `1 ! float` stays); a datetime literal against `date` or `time`; a pattern with a run; the empty bracket pattern `[]` beyond its kind, since the validator admits every array into it ([LR13-14](../vibe/Lambda_Issue_Ledger.md#lr13-14)); and an element's attributes, since the validator never requires one (`<p> is <p a: 1>` is `true`, so `<p a: 1> & <p a: 2>` admits `<p>`), an unruled point. A range that union arms cover only together reduces since 2026-09-26 (`(1 to 3) ! (1 \| 2 \| 3)` is `none`, [LR03-21](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-21>)). Also: type equality compares normalized forms beyond the compact meta types since 2026-09-26 (S5.5.2, [LR03-29](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-29>), fixture `type_repr_equality.ls`); container patterns and function types still compare by kind ([LR03-33](../vibe/Lambda_Issue_Ledger.md#lr03-33)); `!none` (`any ! none`) reduces to `any` in every position — in a type position it always did, and the builder's value-position negation now reduces as well. Found on the way and fixed the same day: [LR03-30](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-30>), a one-literal alias (`type T = 1`) that was not a type value and a symbol alias that admitted nothing. Its fix also returns the shared `type` from `type(x)` of a type value, since the identity comparison above had made `type(int) == type` false (fixture `test/lambda/type_literal_alias.ls`, three tiers); a bool literal type carried no value and admitted both bools ([LR03-31](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-31>), fixed the same day, with [LR07-38](<../vibe/Lambda_Issue_Ledger (fixed).md#lr07-38>): the JIT skipped a one-value numeric literal contract). The container clarification's pass fixed [LR03-32](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-32>) — the reduction asked only a numeric literal's own value, so `1 ! int` and `(1 \| 2) ! int` were `none` though `1.0 is 1`, and `t'2025-01-01' ! date` was `none` across precisions — and [LR13-13](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-13>), a literal union member that tested the TypeId before the value, so `1.0 is (1 \| 2)` was `false`; it found [LR13-15](../vibe/Lambda_Issue_Ledger.md#lr13-15), a present `null` map field that only a run type admits. Fixtures: `type_none.ls` (container and literal sections, three tiers) and `type_literal_admission.ls`; baseline 5954/5954 (the forced-GC sweep included) and validator suites 154/154. Argument and prior art: [Formal2 C6.5](../vibe/Lambda_Semantics_Formal2.md). |
 | S11.1.1v3, S11.1.2v3, S11.1.6v3, S16.8.6v3 | **Ruled 2026-09-22; conformant since P5 of the list fixes (2026-09-23, both tiers).** The two families are split by bracket: `T{n}`, `T{n,m}`, `T{n+}` count a run and `T[]`, `T[n]` describe an array, in the C parser, the reference grammar and the pattern islands (`\(d{3})`). As a boundary type an occurrence admits what a run is (S2.5.5v2): `null` for zero, a bare `T` for one, a sequence of two or more for more, so `null is int*` is true while `[5] is int*` and `[] is int*` are false and `{f: int*}` admits `{f: null}` and `{f: [5, 6]}` but not `{f: [5]}`. A run whose operand is itself a container takes that container as its one item, which is how `int[]?` still holds `[]`. In a sequence-pattern slot an occurrence is a run of the sequence's items and zero is void, matched by backtracking over the counts a run can take: `[1, int*, 2]` matches `[1, 2]` and `[1, 5, 6, 2]`, never `[1, null, 2]` or `[1, [5, 6], 2]`. The array family admits only arrays, so `5 is int[]` is now false, and a counted array checks its length (`int[0]` is `[]`). `<:` relates the families: `int <: int*`, `int? <: int*` and `int[2] <: int*` hold while `int[] <: int*` and `int* <: int[]` do not, and `list <: array` and `range <: array` hold where `array <: list` does not (S2.5.1v2). `T[n+]` and `T[n, m]` are rejected with a diagnostic naming their replacement (`test/lambda/negative/semantic/occurrence_retired_*.ls`). Two spelling notes: the open count is `T{n+}` (2026-09-23, USER) — regex's `T{n,}` is rejected with a diagnostic naming it, since an exact `T{n}` would be a silently different type — and a `{` count binds tight (`int{2}`, never `int {2}`), since a spaced brace opens a body or a block, and a **return** type never takes one at all — there the body wins, so a counted return type goes through a type alias. Migration: every retired spelling in the tree (`type_pattern.ls` 18 sites, `type_occurrence.ls`, five island fixtures) and the user docs. **The v3 element-content clause is conformant since 2026-09-25 (both tiers):** an element pattern's content section resolves to `TypeElmt::content_list`, and `validate_against_element_type` — the path `is` and the validator share — matches the children against it with the bracket-pattern matcher, where it had compared counts ([LR13-10](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-10>)). The same change stopped a structural slot — `<p>`, `{y: int}`, `[int, int]`, `int[]`, a function signature — from reducing to a TypeId test, which had let `[<li>]` match `[<p>]` in bracket patterns too. Fixture `test/lambda/element_content_pattern.ls`; baseline 5869/5869. **Residue in the pattern islands (found 2026-09-27) is fixed the same day, on all three tiers:** a count inside an island takes exactly the type-position spellings, checked by one shared scanner, where its text had reached the regex unchecked (`\(d{2,})` had regex's meaning, `\(d{,5})` and `\(d{a})` matched literal text), plus the regex engine's bounds (`n ≤ m`, at most 1000); `...` matches newlines (S16.8.6v3's `...` ≡ `any*`), where it had stopped at one; a pattern's failures are compile-time diagnostics, where a name it could not use or a pattern RE2 refused had been logged while the pattern silently matched nothing or only `""` (an unknown or later-defined name is E204, a name that is no pattern E200, RE2's refusal E200); a pattern annotates a `let` or a parameter, where the static check had read it as the type of type values (E201, E207; a pattern contract now proves its tag's domain and defers membership, as a range contract does); and a pattern value prints as its canonical source, where printing one crashed ([Lambda_Expr_String_Pattern.md §7](../vibe/Lambda_Expr_String_Pattern.md#7-conformance-defects-found-by-the-audit)). Fixtures `pattern_annotation.ls`, `pattern_replace.ls` (S17.6.1), eight `negative/semantic/string_pattern_*.ls`, and count cases in both S16 harnesses. **S11.1.2v3's single-character `!` is implemented since 2026-09-27, on all three tiers:** the resolver rejects an operand that is not a single-character set (E200), where the regex compiler had silently left out a negation of anything but `d`, `w`, `s` or `a`; a set compiles to one RE2 class over code points. The same change made a range's bounds code points checked to be single characters (S11.1.3), where the regex had taken each bound's first byte, and let an island name a literal union (S11.1.2v3's literal-only identity) or a character range type (S11.1.3; `\(Lower+)` with `type Lower = "a" to "z"` had matched only the empty string). Fixtures `pattern_negation.ls`, `negative/semantic/string_pattern_negation_non_set.ls`, `negative/semantic/string_pattern_range_bound.ls`. **S11.1.2v3's tiers and its `\|`-only binary tier are conformant since 2026-09-27 in both front ends (SP19, SP20):** the reference grammar now reads `\(!d+)` as `(!d)+`, as the C parser already did, where it had rejected the form; and both reject an island `&`, which the C parser had taken onto one tier with `\|` and lowered to a lookahead RE2 rejects. Fixtures `pattern_precedence.ls` (all three tiers), `negative/semantic/string_pattern_intersection.ls`, and an island section in both S16 harnesses. [Impl_Element_Type_Sharing P0](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md) |
 | S12.3.5v2 | **Ruled 2026-09-22; conformant since P4 of the list fixes (2026-09-23, both tiers).** `*x` builds the list of x's items instead of marking x, so spreading never modifies its operand and the JIT no longer rewrites a pooled literal (`fn g() => [1, "y"]` returned a list on every later call — the tier divergence is pinned on all three tiers by `test/lambda/spread_star.ls`). A range is materialized (`[*(1 to 3), 9]` is `[1, 2, 3, 9]`), `*null` splices nothing, and a non-sequence — text included — is one item, so `[*xs]` packages any value as an array. Because it is a value, `*x` also finishes by position (S2.5.5v2): `let b = *[2, 3]` is the list `(2, 3)`. |
-| S2.2.3, S2.6.1v2, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; conformant since P3 of the list fixes (2026-09-23, both tiers)**. The LaTeX parser deviation closed on 2026-10-02 (S2.6.1v2): consecutive command string arguments are array children. S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Closed by P3: (1) a lone `""` is dropped (`<e "">` has no children, and a bare `""` at the top level prints nothing); (2) adjacent binaries merge (`<e b'\x01' b'\x02'>` has one child); (3) content writes normalize — `e[1] = "m"` on `<e "x" 1 "y">` leaves one child `"xmy"`, `e[1] = null` removes the child and merges its neighbours, `e[0] = ""` removes it, `e[0] = (3, 4)` splices, and `push` on an element appends content. String merging no longer waits for an input context (D2.6.5v3). Parser-owned element construction now uses the content append; collection append helpers also normalize element destinations (D2.6.5v4), including the string and null members of group elements (S14.1.1). MarkEditor insert, batch insert, replace and delete now rebuild through the owner-aware content append in both edit modes, with 54/54 editor and 112/112 DOM node/range tests passing. Verified 2026-10-02: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
+| S2.2.3, S2.6.1v2, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; conformant since P3 of the list fixes (2026-09-23, both tiers)**. The LaTeX parser deviation closed on 2026-10-02 (S2.6.1v2): consecutive command string arguments are array children. S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Closed by P3: (1) a lone `""` is dropped (`<e "">` has no children, and a bare `""` at the top level prints nothing); (2) adjacent binaries merge (`<e b'\x01' b'\x02'>` has one child); (3) content writes normalize — `e[1] = "m"` on `<e "x" 1 "y">` leaves one child `"xmy"`, `e[1] = null` removes the child and merges its neighbours, `e[0] = ""` removes it, `e[0] = (3, 4)` splices, and `push` on an element appends content. String merging no longer waits for an input context (D2.6.5v3). Parser-owned element construction now uses the content append; collection append helpers also normalize element destinations (D2.6.5v4), which merged the string members and dropped the null members of v1 group elements (S14.1.1, revised by S14.1.1v2). MarkEditor insert, batch insert, replace and delete now rebuild through the owner-aware content append in both edit modes, with 54/54 editor and 112/112 DOM node/range tests passing. Verified 2026-10-02: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
+| S14.1.1v2, S14.1.2v2, S14.1.3 | **Ruled and implemented 2026-10-20 (USER; both tiers).** `fn_group_by_keys` returns one record per group, `[members, key_1, …, key_n]`, with the members a plain array filled by the verbatim append; T0 (`interp_for_emit_groups`) and MIR (`mir_emit_group_stage`) bind each key's post-group `NameEntry` and the `into` array, so the v1 group element and its aliases array are gone. The resolver reports a key with no inferable name and the clause-placement rules as E239 (`ERR_FOR_CLAUSE`), and colliding key names as E209. The S14.1.3 non-equi `on` check, which had only logged, is now E239 too. In the same change, `order by` honours every key with its own direction and sorts a multi-item body as one row (`fn_order_rows`; it had used only the first key, and a multi-item body left the stream unsorted). The new placement errors exposed three chart-package `for` headers whose second `where` had silently replaced the first; each now applies both conditions. Fixtures `for_group_test.ls`, `for_join_group_test.ls`, `for_clauses_test.ls` (tests 46–47); negatives `for_group_key_name.ls`, `for_group_key_collision.ls`, `for_join_non_equi.ls`, `for_clause_placement.ls`. Design record: [Expr_For_Clauses](../vibe/Lambda_Expr_For_Clauses.md). |
 | S17.8.1 | **Ruled 2026-10-04 (USER); partially implemented.** `io.grep` conforms on both arms (2026-10-04): the AST builder checks a literal options map against the registry table `sys_func_option_names` (`lambda/runtime/sys_func_registry.c`), and the function warns about an unknown name in an options value; registering another function's option names extends the compile-time arm to it. `start` already conforms to the compile-time arm: an unknown name in its options literal is an error. `find` and `replace` look up `limit`, `last` and `ignore_case` and ignore any other name silently in both cases — no error for a literal, no warning for a value. Other system functions with an options map (`input`, `output`, `fetch`, `cmd`) are not yet audited. Existing implementations are to be migrated. [Lambda_Lib_Grep.md Appendix C](../vibe/Lambda_Lib_Grep.md#appendix-c-unknown-option-names-current-state) |
+| S2.4.6, S8.2.5, S8.2.6 | **Implemented 2026-10-20 on interp and jit.** `.*`/`.**` lower to `fn_step_items`/`fn_step_closure`, which reuse the `[T]`/`.?T` walks with a wildcard key. A name step on a list maps per item inside `fn_member`, and `.~~`/`./` without a `~` cursor go through `fn_navigate_value`, which also lets the JIT select a dynamically typed path as the interpreter did. `#` on a wildcard path splits at the first wildcard: over a directory it enumerates and continues per match, deduplicating paths by canonical spelling; anywhere else it forces the prefix and enumerates the parsed value. `**` enumeration now heads with its base, has no depth cap, and lists but does not enter symlinked directories; `path.ls` goldens gained the base line. Fixtures: `wildcard_steps.ls`, `run_stepping.ls`, `path_wildcard_force.ls` (tree `test/input/wild_tree`). Design: [Expr_Query §4.4](../vibe/Lambda_Expr_Query.md#44-wildcard-steps-and-run-stepping-ruled-2026-10-20-user-s825-s826), [Type_Path §6.4](../vibe/Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826). |
+| S2.4.7 | **Implemented 2026-10-20 on interp and jit.** `fn_query` on a path returns a new path step (kind `LPATH_SEG_QUERY`, `.?` flagged) holding the type pinned into the runtime pool; the path prints it through a runtime type printer, so equality and hashing compare the type's canonical spelling. `#` treats the step like a wildcard: over a directory it enumerates the closure of `**` (base kept for `.?T`) filtered by `fn_is`, over anything else it forces the prefix and queries the value. `.*`/`.**` on a path held in a variable now extend the path instead of walking the reference as a value. `for`, `len` and printing reach such paths through an enumeration hook the runtime registers with the path layer, so a query path, or a wildcard with steps after it, iterates exactly what `#` yields. Fixture: `path_query_force.ls`. Design: [Type_Path §6.4](../vibe/Lambda_Type_Path.md#64-wildcard-steps-and-forcing-pth81pth84-s246-s825-s826). |
 
 **S2.6.6v2 — MVP with dictionaries, 2026-10-02.** Raw strings/binaries, null/empty dropping,
 list spreading, computed selectors, empty files, and byte output are implemented
@@ -3033,21 +3135,21 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29; OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29, PTH81–PTH84 (S2.4.6), PTH85 (S2.4.7); OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
 | S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7–C8.8, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; C8.8 (errors; sort retained); OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
-| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
+| S8 membership | C5.3a, C5.3b, C21 (S8.2.2v4), C22 (the `of` axis); §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3), §4.4 and §12 (S8.2.5–S8.2.6) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |
 | S11.5 | Physical binary schemas and native references | `Lambda_Type_Binary_Schema.md` §10 |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5; Reactive_UI §2.7 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md`, `Lambda_Design_Reactive_UI.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
-| S14 data processing | PD9–PD16; FC1–FC11; IO ZIP §5 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md`, `Lambda_IO_Zip.md` |
+| S14 data processing | PD9–PD16; FC1–FC11; IO ZIP §5 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses.md`, `Lambda_IO_Zip.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 | S16 surface syntax | Design_Syntax §3–§7 (39 decided points); RI1–RI3 | `Lambda_Design_Syntax.md`, `Lambda_Design_Repl_Interp.md` |
 | S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25; SP21–SP23; GRP28 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md`, `Lambda_Expr_String_Pattern.md`, `Lambda_Lib_Grep.md` |

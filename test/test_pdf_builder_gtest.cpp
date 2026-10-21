@@ -5,6 +5,9 @@
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/core/binary.h"
+#include "../lib/shell.h"
+#include "../lib/file.h"
+#include "../lib/str.h"
 
 namespace {
 
@@ -168,4 +171,56 @@ TEST(PdfFileBuilder, RejectsDictionaryMetadataAllocationFailure) {
         output->ops->destroy(output);
     }
     pool_destroy(pool);
+}
+
+// The written PDF is checked by an independent reader (test/pdf_output_check.py):
+// object offsets and stream lengths, the fixture's own semantics, and the same
+// objects as its accepted golden PDF with streams compared inflated. The golden
+// was rendered and sampled with poppler when it was accepted (`accept` mode).
+TEST(PdfFileOutput, LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers) {
+    const struct {
+        const char* script;
+        const char* file;
+        const char* page_count;
+        const char* golden;
+        const char* golden_pdf;
+    } fixtures[] = {
+        {"test/lambda/pdf/output_resources.ls", "temp/pdf_lambda_resources.pdf", nullptr,
+            "test/lambda/pdf/output_resources.txt", "test/lambda/pdf/output_resources.golden.pdf"},
+        {"test/lambda/pdf/output_phase6.ls", "temp/pdf_lambda_phase6.pdf", "phase6",
+            "test/lambda/pdf/output_phase6.txt", "test/lambda/pdf/output_phase6.golden.pdf"},
+        {"test/lambda/pdf/output_pages.ls", "temp/pdf_lambda_pages.pdf", "3",
+            "test/lambda/pdf/output_pages.txt", "test/lambda/pdf/output_pages.golden.pdf"},
+    };
+    const char* tiers[] = {"interp", "jit"};
+    for (const char* tier : tiers) {
+        ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {"LAMBDA_DISABLE_MIR_CACHE", "1"}, {nullptr, nullptr}};
+        ShellOptions options = {};
+        options.env = env;
+        options.timeout_ms = 30000;
+        for (const auto& fixture : fixtures) {
+            // share the script oracle so added PDF checks cannot leave a stale C++ copy.
+            char* expected = read_text_file(fixture.golden);
+            EXPECT_NE(expected, nullptr) << fixture.golden;
+            if (!expected) continue;
+            const char* trimmed = expected;
+            size_t length = strlen(expected);
+            str_rtrim(&trimmed, &length);
+            expected[length] = '\0';
+            EXPECT_GT(length, 0u) << fixture.golden;
+            const char* arguments[] = {"./lambda.exe", "run", fixture.script, nullptr};
+            ShellResult generated = shell_exec(arguments[0], arguments, &options);
+            EXPECT_FALSE(generated.timed_out) << tier;
+            EXPECT_EQ(generated.exit_code, 0) << tier << (generated.stderr_buf ? generated.stderr_buf : "");
+            if (length) EXPECT_NE(strstr(generated.stdout_buf ? generated.stdout_buf : "",
+                expected), nullptr) << tier << fixture.script;
+            free(expected);
+            shell_result_free(&generated);
+            const char* check[] = {"python3", "test/pdf_output_check.py", fixture.file, "golden",
+                fixture.golden_pdf, fixture.page_count, nullptr};
+            ShellResult checked = shell_exec(check[0], check, &options);
+            EXPECT_EQ(checked.exit_code, 0) << tier << (checked.stderr_buf ? checked.stderr_buf : "");
+            shell_result_free(&checked);
+        }
+    }
 }

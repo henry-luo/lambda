@@ -166,7 +166,7 @@ pn mix_digest() {
     results.push(acc)
     results.push(reverse(jq_range(0, 65536, 1)))
     results.push(sort([for (x in jq_range(0, 65536, 1)) 0 - x]))
-    results.push([for (x in jq_range(0, 65536, 1) group by (x % 2) as k into g order by g.k) [*content(g)]])
+    results.push([for (x in jq_range(0, 65536, 1) group by (x % 2) as k into g order by k) g])
     let mm = jq_range(0, 65536, 1)
     results.push(min(mm) + max(mm))
     results.push(add_singletons(8192))

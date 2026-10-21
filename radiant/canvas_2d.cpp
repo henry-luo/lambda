@@ -308,8 +308,17 @@ static CanvasEntry* canvas_entry_for_element(DomElement* element, bool create) {
     return entry;
 }
 
+static void canvas_request_repaint(CanvasEntry* entry) {
+    DocState* state = entry && entry->element && entry->element->doc ? entry->element->doc->state : nullptr;
+    if (!state) return;
+    // bitmap changes invalidate paint resources without changing canvas layout or selector inputs.
+    state->dirty_tracker.full_repaint = true;
+    doc_state_request_repaint(state);
+}
+
 static void canvas_note_pixels_changed(CanvasEntry* entry) {
     if (entry && entry->surface) image_surface_bump_generation(entry->surface);
+    canvas_request_repaint(entry);
 }
 
 static Color canvas_effective_color(Color color, float global_alpha) {
@@ -1017,7 +1026,7 @@ extern "C" bool radiant_webgl_call(uint64_t canvas,const WebGlCommand* command,W
         case WEBGL_clear: case WEBGL_drawArrays: case WEBGL_drawElements:
         case WEBGL_drawArraysInstanced: case WEBGL_drawElementsInstanced:
         case WEBGL_blitFramebuffer:
-            if(entry->element->doc->state) doc_state_request_repaint(entry->element->doc->state);
+            canvas_request_repaint(entry);
             break;
         default:break;
     }
@@ -1168,7 +1177,7 @@ extern "C" bool radiant_webgl_lose(uint64_t canvas) {
     native_gl_webgl_call(entry->graphics,&command,&reply);if (reply.n[0]) return false;
     native_gl_lose(entry->graphics);
     image_surface_bump_generation(entry->surface);image_surface_snapshot_release(entry->surface);entry->surface=nullptr;
-    if (entry->element->doc->state) doc_state_request_repaint(entry->element->doc->state);
+    canvas_request_repaint(entry);
     return true;
 }
 extern "C" bool radiant_webgl_restore(uint64_t canvas) {
@@ -1183,7 +1192,7 @@ extern "C" bool radiant_webgl_restore(uint64_t canvas) {
         native_gl_destroy(replacement);return false;
     }
     native_gl_destroy(entry->graphics);entry->graphics=replacement;
-    if (element->doc->state) doc_state_request_repaint(element->doc->state);
+    canvas_request_repaint(entry);
     return true;
 }
 

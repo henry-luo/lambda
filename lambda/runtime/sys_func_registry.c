@@ -534,6 +534,12 @@ SysFuncInfo sys_func_defs[] = {
      /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
+    {SYSPROC_IMAGE_STORAGE, "image_storage", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "pn_image_storage", PROFILE_IMAGE_PROCESSING_FPTR(pn_image_storage), NULL, NULL, false, 0,
+     false, &TYPE_ANY, true},
+    {SYSFUNC_IMAGE_EDIT, "image_edit", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_image_edit", PROFILE_IMAGE_PROCESSING_FPTR(fn_image_edit), NULL, NULL, false, 0,
+     false, &TYPE_ANY, true},
     {SYSFUNC_IMAGE_CAPABILITIES, "image_capabilities", 0, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_image_capabilities", PROFILE_IMAGE_IO_FPTR(fn_image_capabilities), NULL, NULL, false, 0,
      false, &TYPE_ANY, true},
@@ -2277,6 +2283,9 @@ JitImport jit_runtime_imports[] = {
     {"const_pattern_with_tl", FPTR(const_pattern_with_tl)},
     {"target_equal", FPTR(target_equal)},
     {"fn_query", FPTR(fn_query)},
+    {"fn_step_items", FPTR(fn_step_items)},
+    {"fn_step_closure", FPTR(fn_step_closure)},
+    {"fn_navigate_value", FPTR(fn_navigate_value)},
     {"fn_to", FPTR(fn_to)},
     {"fn_range_bound_error", FPTR(fn_range_bound_error)},
 
@@ -2333,8 +2342,8 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Sort helper
     // ========================================================================
-    {"fn_sort_by_keys", FPTR(fn_sort_by_keys)},
-    {"fn_group_by_keys_items", FPTR(fn_group_by_keys_items)},
+    {"fn_order_rows", FPTR(fn_order_rows)},
+    {"fn_group_by_keys", FPTR(fn_group_by_keys)},
     {"fn_join_seed_tuples", FPTR(fn_join_seed_tuples)},
     {"fn_hash_join_tuples", FPTR(fn_hash_join_tuples)},
     {"fn_cross_join_tuples", FPTR(fn_cross_join_tuples)},

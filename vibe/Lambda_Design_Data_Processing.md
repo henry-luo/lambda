@@ -69,7 +69,7 @@ Lambda has two query surfaces, and both matter:
 
 ### 4.1 For-clause (completes FLWOR)
 
-> **Extracted 2026-07-10 → `Lambda_Expr_For_Clauses2.md`** (settled, implement-first, FC1–FC9). Final surface (2026-07-11): `group by KEY [as ALIAS], ... into g` — **`g` is an element**: keys = named attributes (FC9 inference from trailing field access, else `as` required), members = children; loop variable out of scope post-group. Supersedes the sketch below and the interim `g.key`/`g.items` and XQuery-regrouping forms. This section kept for history.
+> **Extracted 2026-07-10 → `Lambda_Expr_For_Clauses.md`** (settled, implement-first, FC1–FC9). Current surface (FC1-B, 2026-10-20, S14.1.1v2): `group by KEY [as NAME], ... into g` — each key is **bound by name** (FC9 inference from trailing field access, else `as` required) and **`g` is the array of the group's rows**; loop variable out of scope post-group. It replaced the 2026-07-11 form in which `g` was an element (keys as attributes, members as children), whose content normalization merged string members. Supersedes the sketch below and the interim `g.key`/`g.items` and XQuery-regrouping forms. This section kept for history.
 
 LINQ-style explicit grouping — no XQuery-style implicit variable regrouping (Lambda's no-NSE explicitness bias):
 
@@ -113,7 +113,7 @@ One hash-partition engine (hash on canonical value-hash consistent with C8; `lib
 
 ### 5.1 For-clause: `on`
 
-> **Extracted 2026-07-10 → `Lambda_Expr_For_Clauses2.md`** (settled, implement-first, FC5–FC7; v1 = inner + left join, full/right outer deferred to the verb surface).
+> **Extracted 2026-07-10 → `Lambda_Expr_For_Clauses.md`** (settled, implement-first, FC5–FC7; v1 = inner + left join, full/right outer deferred to the verb surface).
 
 ```lambda
 // equi-join of two sources — hash join under the hood

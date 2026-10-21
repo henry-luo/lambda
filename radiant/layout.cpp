@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "css_resolved_style.hpp"
 #include "layout_paged.hpp"
 #include "page_document.hpp"
 #include "view.hpp"
@@ -1005,7 +1006,7 @@ void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* v
     reset_background_style_cache(lycon, view);
 }
 
-static void reset_position_style_cache(LayoutContext* lycon, ViewSpan* view) {
+void layout_reset_position_style(LayoutContext* lycon, ViewSpan* view) {
     if (!view->position) return;
     PositionProp* position = view->position;
     if (layout_context_is_measuring(lycon)) {
@@ -1018,6 +1019,16 @@ static void reset_position_style_cache(LayoutContext* lycon, ViewSpan* view) {
     } else {
         memcpy(position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
     }
+}
+
+void layout_reset_boundary_flow_state(BoundaryProp* boundary) {
+    boundary->flow_margin = BOUNDARY_PROP_DEFAULT.flow_margin;
+    boundary->has_flow_margin = false;
+    boundary->collapsed_through_mb = 0.0f;
+    boundary->has_clearance = false;
+    boundary->clearance_in_margin_chain = false;
+    boundary->margin_chain_positive = 0.0f;
+    boundary->margin_chain_negative = 0.0f;
 }
 
 static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view) {
@@ -1062,7 +1073,7 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
     if (view->position) {
         // Removed positioning declarations otherwise survive retained recascade
         // and leave a now-static table cell excluded from normal row sizing.
-        reset_position_style_cache(lycon, view);
+        layout_reset_position_style(lycon, view);
     }
 
     reset_background_style_cache(lycon, view);
@@ -1078,21 +1089,13 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
         memset(boundary->border.get(), 0, offsetof(BorderProp, radius));
     }
     boundary->margin = BOUNDARY_PROP_DEFAULT.margin;
-    boundary->flow_margin = BOUNDARY_PROP_DEFAULT.flow_margin;
-    boundary->has_flow_margin = false;
-    boundary->collapsed_through_mb = 0.0f;
-    boundary->has_clearance = false;
-    boundary->clearance_in_margin_chain = false;
-    boundary->margin_chain_positive = 0.0f;
-    boundary->margin_chain_negative = 0.0f;
-
-    if (view->boundary()->outline) {
-        view->boundary_mut()->outline->width = 0.0f;
-        view->boundary_mut()->outline->offset = 0.0f;
-        view->boundary_mut()->outline->style = CSS_VALUE_NONE;
-        view->boundary_mut()->outline->color = {};
+    layout_reset_boundary_flow_state(boundary);
+    if (boundary->outline) {
+        boundary->outline->width = 0.0f;
+        boundary->outline->offset = 0.0f;
+        boundary->outline->style = CSS_VALUE_NONE;
+        boundary->outline->color = {};
     }
-
 }
 
 CssEnum layout_element_css_all_reset_keyword(DomElement* element) {
@@ -1156,7 +1159,7 @@ static void reset_css_all_visual_style(LayoutContext* lycon, ViewSpan* view) {
         view->scroller->pane = lam::own(pane);
     }
     if (view->position) {
-        reset_position_style_cache(lycon, view);
+        layout_reset_position_style(lycon, view);
     }
     if (view->embed) {
         view->embed->object_fit = EMBED_PROP_DEFAULT.object_fit;
@@ -1185,6 +1188,9 @@ void reset_layout_timing() {
     g_style_resolve_count = 0;
     g_style_resolve_full = 0;
     g_style_resolve_measure = 0;
+    g_style_resolve_incremental = 0;
+    g_style_geometry_evaluations = 0;
+    memset(radiant::css_style_misses, 0, sizeof(radiant::css_style_misses));
     g_text_layout_count = 0;
     g_block_layout_count = 0;
     g_inline_layout_count = 0;
@@ -1200,6 +1206,8 @@ void log_layout_timing_summary() {
         g_style_resolve_time, g_style_resolve_count, g_style_resolve_full, g_style_resolve_measure,
         g_text_layout_time, g_text_layout_count,
         g_block_layout_time, g_block_layout_count);
+    log_info("[TIMING] css reuse: incremental=%lld geometry=%lld",
+        g_style_resolve_incremental, g_style_geometry_evaluations);
     log_info("[TIMING] layout breakdown: table=%.1fms, flex=%.1fms, grid=%.1fms",
         g_table_layout_time, g_flex_layout_time, g_grid_layout_time);
     if (g_layout_cache_hits > 0 || g_layout_cache_misses > 0) {
@@ -2329,23 +2337,16 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 return;  // early return - reuse existing styles
             }
 
-            // Measurement refreshes used values in the current context, but
-            // must not discard a clean subtree's keyed intrinsic cache.
-            // A width query can resolve speculative styles before a height
-            // query. Mutations clear the intrinsic flag; an uncommitted style
-            // alone does not make that pass-local contribution stale.
-            bool retain_intrinsic_cache = layout_context_is_measuring(lycon) &&
-                dom_elem->has_cached_intrinsic_widths();
+            // committing provisional CSS does not invalidate keyed intrinsic results.
+            // Mutations clear the flag; context/font/generation changes are checked
+            // by the query itself, including after a speculative sizing pass.
+            bool retain_intrinsic_cache = dom_elem->has_cached_intrinsic_widths();
             if (dom_elem->layout_cache && !styles_current && !retain_intrinsic_cache) {
                 radiant::layout_cache_clear(dom_elem->layout_cache);
             }
 
-            reset_non_inherited_style_cache(lycon, lam::view_require_element(lycon->view));
             DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())
                 ? dom_elem->parent->as_element() : nullptr;
-            if (parent_elem && parent_elem->font) {
-                setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
-            }
             ViewBlock* flex_parent = parent_elem
                 ? lam::view_as_block(parent_elem) : nullptr;
             bool is_direct_flex_item = flex_parent &&
@@ -2357,45 +2358,56 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             LayoutContainingBlockScope flex_item_percentage_scope(
                 lycon, LAYOUT_AXIS_X, flex_item_cb.content_width,
                 is_direct_flex_item && flex_item_cb.content_width > 0.0f);
-            apply_element_default_style(lycon, dom_elem);
-            if (layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
-                // CSS Cascade: HTML defaults remain available for control semantics,
-                // while a winning all keyword resets the visual property state.
-                reset_css_all_visual_style(lycon,
-                    lam::view_require_element(lycon->view));
-            }
-
-            if (layout_context_is_measuring(lycon)) {
-                g_style_resolve_measure++;
-            } else {
-                g_style_resolve_full++;
-            }
-
-            resolve_css_styles(dom_elem, lycon);
-            radiant_native_resolved(lycon, dom_elem);
-            // HTML Rendering sizes native meter/progress widgets in em units;
-            // apply the computed font after the author cascade has resolved.
-            layout_refresh_html_em_replaced_size(lycon, dom_elem);
-
-            if (dom_elem->specified_style && dom_elem->specified_style->tree) {
-                AvlNode* display_node = avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
-                if (display_node ||
-                    layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
-                    DisplayValue resolved = resolve_display_value(dom_elem);
-                    dom_elem->display = resolved;
+            bool incremental = radiant::css_resolved_style_apply(lycon, dom_elem);
+            if (!incremental) {
+                radiant::CssStyleRecordScope record(lycon, dom_elem);
+                reset_non_inherited_style_cache(lycon, lam::view_require_element(lycon->view));
+                if (parent_elem && parent_elem->font) {
+                    setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
                 }
-            }
+                apply_element_default_style(lycon, dom_elem);
+                if (layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
+                    // CSS Cascade: HTML defaults remain available for control semantics,
+                    // while a winning all keyword resets the visual property state.
+                    reset_css_all_visual_style(lycon,
+                        lam::view_require_element(lycon->view));
+                }
 
-            // CSS Zoom resolves author lengths after UA defaults; refresh only
-            // untouched body sides so authored margins remain cascade winners.
-            layout_refresh_html_body_ua_margin(lycon, dom_elem);
+                if (layout_context_is_measuring(lycon)) {
+                    g_style_resolve_measure++;
+                } else {
+                    g_style_resolve_full++;
+                }
 
-            if (dom_elem->bound) {
-                ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
-                float used_font_size = (span->font && span->fontp()->font_size > 0)
-                                      ? font_prop_used_size(span->font)
-                                      : lycon->font.style->font_size;
-                layout_reresolve_ua_em_margins(dom_elem, used_font_size);
+                resolve_css_styles(dom_elem, lycon);
+                radiant_native_resolved(lycon, dom_elem);
+                // HTML Rendering sizes native meter/progress widgets in em units;
+                // apply the computed font after the author cascade has resolved.
+                layout_refresh_html_em_replaced_size(lycon, dom_elem);
+
+                if (dom_elem->specified_style && dom_elem->specified_style->tree) {
+                    AvlNode* display_node = avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
+                    if (display_node ||
+                        layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
+                        DisplayValue resolved = resolve_display_value(dom_elem);
+                        dom_elem->display = resolved;
+                    }
+                }
+
+                // CSS Zoom resolves author lengths after UA defaults; refresh only
+                // untouched body sides so authored margins remain cascade winners.
+                layout_refresh_html_body_ua_margin(lycon, dom_elem);
+
+                if (dom_elem->bound) {
+                    ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
+                    float used_font_size = (span->font && span->fontp()->font_size > 0)
+                                          ? font_prop_used_size(span->font)
+                                          : lycon->font.style->font_size;
+                    layout_reresolve_ua_em_margins(dom_elem, used_font_size);
+                }
+
+                layout_refresh_font_used_zoom(static_cast<View*>(dom_elem), lycon);
+                record.commit();
             }
 
             // finalize HTML defaults before capturing or sampling animation values.
@@ -2424,7 +2436,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             apply_element_default_style(lycon, dom_elem);
             // CSS 2.1: Elements without specified styles still have computed values
             if (lycon->font.style) {
-                if (!dom_elem->font) {
+                // A scratch-lived anonymous item has no font slot of its own to
+                // allocate: it keeps inheriting the context font, which outlives
+                // the pass. A pool prop would leak per pass, and a scratch one
+                // would dangle in the text views that borrow it.
+                if (!dom_elem->font && !dom_elem->scratch_lived()) {
                     dom_elem->ensure_font(lycon);
                 }
                 if (dom_elem->font) {

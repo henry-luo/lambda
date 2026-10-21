@@ -192,7 +192,7 @@ p is Point                                // true (nominal)
 | | `el[string]` | attribute values + text children |
 | | `html[body]?<p>` | child then recursive (given `type body = <body>`) |
 | For expression | `(for (x in [1,2,3] where x > 1 order by x desc) x * 2)` | clauses: `let` / `where` / `group by` / `order by` / `limit` / `offset` |
-| | `(for (x in sales group by x.region into g) {region: g.region, n: len(content(g))})` | each group `g` is a `<group>` element — keys become attributes, members children, and `content(g)` is the members |
+| | `(for (x in sales group by x.region into g) {region: region, n: len(g)})` | per group, each key is bound by name (`as` names a computed key) and `g` is the array of its rows |
 | | `(for (o in orders, c in customers on o.cust_id == c.id) {id: o.id, name: c.name})` | equi-join; `c?` = left join, `c` is null on no match |
 | If | `if (x > 0) "positive" else "negative"` | |
 | | `if x > 0 { compute(x) } else "default"` | block form, expression `else` |
@@ -333,10 +333,9 @@ let total = data.sales |> ~.amount |> sum;
 // Filter high-value sales
 let high_value = data.sales |: ~.amount > 1000;
 
-// Summarize by region — each group `g` is a <group> element
-// (grouping key becomes an attribute, members become children)
+// Summarize by region — `region` is the group's key, `g` the array of its rows
 let by_region = for (s in data.sales group by s.region into g)
-    {region: g.region, total: sum(content(g) |> ~.amount), count: len(content(g))};
+    {region: region, total: sum(g |> ~.amount), count: len(g)};
 
 // Generate report
 let report = {

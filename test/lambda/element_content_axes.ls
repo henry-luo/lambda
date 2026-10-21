@@ -56,7 +56,3 @@ type Box { label: string, string* }
 let b = <Box label: "t", "c">
 len(b); len(content(b))
 
-"-- a group element: attributes are the KEY, members are the content --"
-let rows = [{r: "w", n: 1}, {r: "e", n: 2}, {r: "w", n: 3}]
-let groups = [for (x in rows group by x.r into g) [len(g), len(content(g)), sum(g |> ~["n"])]]
-groups

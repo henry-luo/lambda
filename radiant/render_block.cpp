@@ -111,22 +111,14 @@ bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block) 
         !render_block_has_visible_child_overflow(rdcon, block);
 }
 
-static bool render_view_subtree_contains_id(View* view, uint32_t id) {
-    if (!view || id == 0) return false;
-    if (view->id == id) return true;
-    if (!view->is_element()) return false;
+struct RenderRetainedDirtySource {
+    DomDocument* document;
+    View* root;
+};
 
-    DomElement* elem = lam::dom_require_element(view);
-    View* child = static_cast<View*>(elem->first_child);
-    while (child) {
-        if (render_view_subtree_contains_id(child, id)) return true;
-        child = static_cast<View*>(child->next_sibling);
-    }
-    return false;
-}
-
-static bool render_retained_dirty_source_inside(void* userdata, uint32_t source_view_id) {
-    return render_view_subtree_contains_id((View*)userdata, source_view_id);
+static bool render_retained_dirty_source_inside(void* userdata, const DirtyRect* dirty) {
+    auto* source = static_cast<RenderRetainedDirtySource*>(userdata);
+    return dirty_source_in_view_subtree(source->document, source->root, dirty);
 }
 
 bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block) {
@@ -172,9 +164,13 @@ bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* b
         marker_rect.x + marker_rect.width,
         marker_rect.y + marker_rect.height
     };
+    RenderRetainedDirtySource source = {
+        rdcon->ui_context ? rdcon->ui_context->document.get() : nullptr,
+        static_cast<View*>(block)
+    };
     if (!retained_dl_append_fragment_for_dirty(
             rdcon->dl, fragment, marker_bound, rdcon->dirty_tracker, rdcon->raster_scale,
-            render_retained_dirty_source_inside, static_cast<View*>(block))) {
+            render_retained_dirty_source_inside, &source)) {
         retained_dl_cache_note_reuse_rejected_dirty(rdcon->retained_dl_cache);
         return false;
     }

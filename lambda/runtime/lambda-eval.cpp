@@ -15,9 +15,11 @@
 #include "interp.hpp"
 #include "output_demand.hpp"
 #include "doc_context.hpp"
+#include "image_raster.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../core/print.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
@@ -112,6 +114,10 @@ extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern "C" Pool* eval_context_get_pool(void);
 extern "C" Path* path_extend(Pool* pool, Path* base, const char* segment);
 extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
+extern "C" Path* path_append_op(Pool* pool, Path* base, Path* op);
+extern "C" bool path_has_wildcards(Path* path);
+extern "C" bool path_is_directory(Path* path);
+extern "C" Path* path_query(Pool* pool, Path* base, uint64_t type_item, bool self);
 extern "C" Path* path_qualify_default(Pool* pool, Path* path);
 extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
@@ -3453,6 +3459,13 @@ static Bool element_semantic_eq(Item a_item, Item b_item, int depth,
         if (key_status == VIRTUAL_OP_ERROR) return BOOL_ERROR;
         if (key_status != VIRTUAL_OP_OK) return BOOL_FALSE;
 
+        // S5.4.3: native u8 samples have the same structural relation without allocating projections.
+        bool samples_equal;
+        if (lambda_raster_compare_samples(a_root.get(),b_root.get(),key_root.get(),&samples_equal)) {
+            if (!samples_equal) return BOOL_FALSE;
+            continue;
+        }
+
         Item value_a = ItemNull;
         VirtualOpStatus value_a_status = element_attr_value_at_for(a_root.get(), i, &value_a);
         value_a_root.set(value_a);
@@ -4510,9 +4523,11 @@ static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
 
 // S8.2.4v3: a null value never matches, even under `T | null`, so a query's
 // absence is always the run of none rather than a run holding null.
+// A zero type_val is the wildcard key of `.*`/`.**` (S8.2.5): every value is
+// an item, so no type test runs.
 static void query_push_match(Array* result, Item val, Item type_val) {
     if (val.item && get_type_id(val) != LMD_TYPE_NULL &&
-            fn_is(val, type_val) == BOOL_TRUE) {
+            (!type_val.item || fn_is(val, type_val) == BOOL_TRUE)) {
         array_push_verbatim(result, val);
     }
 }
@@ -4621,11 +4636,44 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
 // yields: `null` for no match, the match itself for one, and a list for more
 // (S2.5.5v2). It is a value, never an item-position producer, so `[e?T, 9]`
 // with no match is `[null, 9]`, exactly like `[e[-1], 9]`.
+// A query step on a path keeps its type for as long as the path's pool lives.
+// A type value is pool-owned except the simple wrappers the runtime builds on
+// the GC heap (`type(x)`, contract values); those are copied into the pool, and
+// `type(x)` keeps its payload inline in the same block, so that is copied too.
+static uint64_t pin_query_type(Item type_val) {
+    Type* type = type_val.type;
+    if (!type || type->kind != TYPE_KIND_SIMPLE) return type_val.item;
+    TypeType* source = (TypeType*)type;
+    TypeType* pinned = (TypeType*)alloc_type(context->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    if (!pinned) return 0;
+    memcpy(pinned, source, sizeof(TypeType));
+    Type* inline_payload = (Type*)((uint8_t*)source + sizeof(TypeType));
+    if (source->type == inline_payload) {
+        Type* copy = (Type*)alloc_type(context->pool, inline_payload->type_id, sizeof(Type));
+        if (!copy) return 0;
+        memcpy(copy, inline_payload, sizeof(Type));
+        pinned->type = copy;
+    }
+    return (uint64_t)(uintptr_t)pinned;
+}
+
+// Printer for a path's query step (registered with the path layer): the type's
+// canonical spelling, which path equality and hashing compare.
+extern "C" void lambda_path_type_printer(uint64_t type_item, void* strbuf) {
+    print_item((StrBuf*)strbuf, (Item){.item = type_item});
+}
+
 Item fn_query(Item data, Item type_val, int direct) {
     TypeId type_tid = get_type_id(type_val);
     if (type_tid != LMD_TYPE_TYPE) {
         log_error("query: 2nd argument must be a type, got: %s", get_type_name(type_tid));
         return ItemNull;
+    }
+    // S2.4.7: on a path the query is a path step, a reference until `#`
+    if (get_type_id(data) == LMD_TYPE_PATH) {
+        uint64_t pinned = pin_query_type(type_val);
+        Path* step = pinned ? path_query(context->pool, data.path, pinned, direct != 0) : NULL;
+        return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
     }
     // use array (not list) to avoid automatic string merging. The walk can
     // allocate -- a virtual carrier's keys and values, a boxed field -- so the
@@ -4706,6 +4754,91 @@ Item fn_child_query(Item data, Item type_val) {
     child_query_collect(source.get(), type_root.get(), result.get());
     if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
     return list_collapse_value({.array = result.get()});   // the run a subscript yields (S8.2.4v3)
+}
+
+// S8.2.5: `e.*` is the run of e's items in walk order -- `e[any]` -- and
+// `e.**` its closure, zero or more `.*` steps in document order -- `e.?any`.
+// Both reuse the type-key walks with the wildcard key, so a list is stepped
+// set-at-a-time and text, a scalar to the walk, has no items.
+extern "C" Item fn_step_items(Item data) {
+    // S2.4.2v5: on a path the wildcard is a path operation, a reference until `#`
+    if (get_type_id(data) == LMD_TYPE_PATH) {
+        Path* step = path_wildcard(context->pool, data.path);
+        return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
+    }
+    RootFrame roots(2);
+    Rooted<Item> source(roots, data);
+    Rooted<Array*> result(roots, array_plain());
+    uint64_t failure_version = virtual_failure_version;
+    child_query_collect(source.get(), (Item){.item = 0}, result.get());
+    if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
+    return list_collapse_value({.array = result.get()});
+}
+
+extern "C" Item fn_step_closure(Item data) {
+    if (get_type_id(data) == LMD_TYPE_PATH) {
+        Path* step = path_wildcard_recursive(context->pool, data.path);
+        return step ? (Item){.item = (uint64_t)(uintptr_t)step} : ItemError;
+    }
+    RootFrame roots(2);
+    Rooted<Item> source(roots, data);
+    Rooted<Array*> result(roots, array_plain());
+    uint64_t failure_version = virtual_failure_version;
+    query_collect(source.get(), (Item){.item = 0}, true, result.get(), 0);
+    if (virtual_failure_version != failure_version) return err2it_or_error(context ? context->last_error : nullptr);
+    return list_collapse_value({.array = result.get()});
+}
+
+// S10.4.1/S10.5.2 without a traversal context: a path selects its parent or
+// root, any other value is its own root and has no parent, and a run is
+// stepped set-at-a-time (S8.2.6). The `~` occurrence relation is lowered by
+// each tier before this fallback.
+extern "C" Item fn_navigate_value(Item object, int root) {
+    TypeId type_id = get_type_id(object);
+    if (type_id == LMD_TYPE_PATH) {
+        Path* path = (Path*)(uintptr_t)object.item;
+        Path* result = root ? path_select_root(context->pool, path)
+                            : path_select_parent(context->pool, path);
+        return result ? (Item){.item = (uint64_t)(uintptr_t)result} : ItemNull;
+    }
+    if (!item_is_list(object)) return root ? object : ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> source(roots, object);
+    Rooted<Item> stepped(roots, ItemNull);
+    Rooted<Array*> result(roots, array_plain());
+    int64_t count = fn_len(source.get());
+    for (int64_t i = 0; i < count; i++) {
+        stepped.set(fn_navigate_value(item_at(source.get(), i), root));
+        if (get_type_id(stepped.get()) != LMD_TYPE_NULL) {
+            array_push_verbatim(result.get(), stepped.get());
+        }
+    }
+    return list_collapse_value({.array = result.get()});
+}
+
+// S8.2.6: a run is stepped set-at-a-time by a name key. Each item takes the
+// step as if it stood alone; results splice, null results drop, and the run
+// collapses (S2.5.5v2). Steps never deduplicate (SI13).
+static Item run_step_member(Item run, Item key) {
+    RootFrame roots(4);
+    Rooted<Item> source(roots, run);
+    Rooted<Item> name(roots, key);
+    Rooted<Item> stepped(roots, ItemNull);
+    Rooted<Array*> result(roots, array_plain());
+    int64_t count = fn_len(source.get());
+    for (int64_t i = 0; i < count; i++) {
+        stepped.set(fn_member(item_at(source.get(), i), name.get()));
+        if (get_type_id(stepped.get()) == LMD_TYPE_NULL) continue;
+        if (item_is_list(stepped.get())) {
+            int64_t n = fn_len(stepped.get());
+            for (int64_t j = 0; j < n; j++) {
+                array_push_verbatim(result.get(), item_at(stepped.get(), j));
+            }
+        } else {
+            array_push_verbatim(result.get(), stepped.get());
+        }
+    }
+    return list_collapse_value({.array = result.get()});
 }
 
 static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) {
@@ -5787,8 +5920,18 @@ static Item force_apply_step(Item value, Path* step) {
         String* name = heap_strcpy(step->name, strlen(step->name));
         return fn_member(value, (Item){.item = s2it(name)});
     }
+    // S8.2.5/PTH82: once a step has entered a document, the wildcards
+    // enumerate the parsed value
+    case LPATH_SEG_WILDCARD:
+        return fn_step_items(value);
+    case LPATH_SEG_WILDCARD_REC:
+        return fn_step_closure(value);
+    // S2.4.7: inside a document a query step is the value query
+    case LPATH_SEG_QUERY:
+        return fn_query(value, (Item){.item = step->query_type},
+            (step->flags & PATH_FLAG_QUERY_SELF) ? 1 : 0);
     default:
-        // A parent/root/wildcard step is a path operation, not an in-document
+        // A parent/root step is a path operation, not an in-document
         // navigation; it belongs to the prefix, which the walk below guarantees.
         return ItemNull;
     }
@@ -5959,6 +6102,160 @@ static Item force_symbol(Item ref) {
     return ItemNull;
 }
 
+// ============================================================================
+// Wildcard forcing (S2.4.6, PTH81-PTH84)
+// ============================================================================
+// A wildcard path is a lazy reference until `#`. Forcing it splits the path at
+// its first wildcard: over a directory the step enumerates entries (`*` one
+// level, `**` the closure with its base) and the remaining steps continue per
+// match; anywhere else the prefix is forced and the wildcard enumerates the
+// parsed value. So a step applied to a file match enters that file, and `**`
+// alone never reads one (PTH82).
+
+struct ForceSeenKey {
+    char* chars;
+    size_t len;
+};
+
+static uint64_t force_seen_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ForceSeenKey* key = (const ForceSeenKey*)item;
+    return hashmap_hash_lenstr(key->chars, key->len, seed0, seed1);
+}
+
+static int force_seen_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const ForceSeenKey* x = (const ForceSeenKey*)a;
+    const ForceSeenKey* y = (const ForceSeenKey*)b;
+    return hashmap_compare_lenstr(x->chars, x->len, y->chars, y->len);
+}
+
+// PTH83: a path result is a set in first-appearance order, deduplicated by its
+// canonical spelling (S2.4.2v5); document values are a run and never deduped.
+static void force_wild_push_one(Array* result, struct hashmap* seen, Item value) {
+    if (get_type_id(value) == LMD_TYPE_NULL) return;
+    if (get_type_id(value) == LMD_TYPE_PATH) {
+        StrBuf* sb = strbuf_new();
+        path_to_string((Path*)(uintptr_t)value.item, sb);
+        ForceSeenKey probe = {sb->str, sb->length};
+        bool fresh = hashmap_get(seen, &probe) == NULL;
+        if (fresh) {
+            ForceSeenKey key = {mem_strdup(sb->str, MEM_CAT_EVAL), sb->length};
+            hashmap_set(seen, &key);
+        }
+        strbuf_free(sb);
+        if (!fresh) return;
+    }
+    array_push_verbatim(result, value);
+}
+
+static void force_wild_push(Array* result, struct hashmap* seen, Item value) {
+    if (!item_is_list(value)) {
+        force_wild_push_one(result, seen, value);
+        return;
+    }
+    RootFrame roots(1);
+    Rooted<Item> run(roots, value);
+    int64_t count = fn_len(run.get());
+    for (int64_t i = 0; i < count; i++) {
+        force_wild_push_one(result, seen, item_at(run.get(), i));
+    }
+}
+
+// Collects one wildcard path's matches into `result`; false when a force
+// raised, whose error is the whole force's (S7.4.5).
+static bool force_wild_collect(Path* path, Array* result, struct hashmap* seen) {
+    Path* wild = NULL;
+    for (Path* probe = path; probe && probe->parent; probe = probe->parent) {
+        LPathSegmentType type = PATH_GET_SEG_TYPE(probe);
+        if (type == LPATH_SEG_WILDCARD || type == LPATH_SEG_WILDCARD_REC ||
+                type == LPATH_SEG_QUERY) wild = probe;
+    }
+    RootFrame roots(2);
+    Rooted<Item> value(roots, ItemNull);
+    Rooted<Item> matches(roots, ItemNull);
+    if (!wild) {
+        value.set(fn_force((Item){.item = (uint64_t)(uintptr_t)path}));
+        if (value.get().item == ItemError.item || get_type_id(value.get()) == LMD_TYPE_ERROR) return false;
+        force_wild_push(result, seen, value.get());
+        return true;
+    }
+    // the steps after the wildcard, leaf-first
+    Path* trailing[FORCE_MAX_TRAILING_STEPS];
+    int trailing_count = 0;
+    for (Path* probe = path; probe != wild; probe = probe->parent) {
+        if (trailing_count >= FORCE_MAX_TRAILING_STEPS) {
+            set_runtime_error(ERR_IO_ERROR,
+                "'#' reference has more than %d steps past its wildcard",
+                FORCE_MAX_TRAILING_STEPS);
+            return false;
+        }
+        trailing[trailing_count++] = probe;
+    }
+    Path* prefix = wild->parent;
+    if (!path_is_directory(prefix)) {
+        // the wildcard lands inside a document (or a provider value): force the
+        // prefix and enumerate in memory
+        value.set(fn_force((Item){.item = (uint64_t)(uintptr_t)prefix}));
+        if (value.get().item == ItemError.item || get_type_id(value.get()) == LMD_TYPE_ERROR) return false;
+        value.set(force_apply_step(value.get(), wild));
+        for (int i = trailing_count - 1; i >= 0 && value.get().item != ItemNull.item; i--) {
+            value.set(force_apply_step(value.get(), trailing[i]));
+            if (value.get().item == ItemError.item) return false;
+        }
+        force_wild_push(result, seen, value.get());
+        return true;
+    }
+    Pool* pool = context->pool;
+    // S2.4.7: over a directory `?T` is the proper closure and `.?T` the
+    // inclusive one, kept where the path value is T; no file is read
+    bool query = PATH_GET_SEG_TYPE(wild) == LPATH_SEG_QUERY;
+    bool keep_base = query && (wild->flags & PATH_FLAG_QUERY_SELF);
+    Item query_type = {.item = query ? wild->query_type : 0};
+    matches.set(path_resolve_for_iteration(query ? path_wildcard_recursive(pool, prefix) : wild));
+    if (matches.get().item == ItemError.item) return false;
+    int64_t count = fn_len(matches.get());
+    for (int64_t i = query && !keep_base ? 1 : 0; i < count; i++) {
+        Item match = item_at(matches.get(), i);
+        if (get_type_id(match) != LMD_TYPE_PATH) continue;
+        if (query && fn_is(match, query_type) != BOOL_TRUE) continue;
+        if (trailing_count == 0) {
+            force_wild_push_one(result, seen, match);   // a reference, nothing read
+            continue;
+        }
+        Path* full = (Path*)(uintptr_t)match.item;
+        for (int j = trailing_count - 1; j >= 0; j--) {
+            full = path_append_op(pool, full, trailing[j]);
+        }
+        if (!force_wild_collect(full, result, seen)) return false;
+    }
+    return true;
+}
+
+// The matches of a wildcard or query path as one array, never collapsed.
+static Item force_wildcard_matches(Path* path) {
+    RootFrame roots(1);
+    Rooted<Array*> result(roots, array_plain());
+    struct hashmap* seen = hashmap_new(sizeof(ForceSeenKey), 16, 0, 0,
+        force_seen_hash, force_seen_compare, NULL, NULL);
+    bool ok = force_wild_collect(path, result.get(), seen);
+    size_t iter = 0;
+    void* entry = NULL;
+    while (hashmap_iter(seen, &iter, &entry)) mem_free(((ForceSeenKey*)entry)->chars);
+    hashmap_free(seen);
+    return ok ? (Item){.array = result.get()} : ItemError;
+}
+
+static Item force_wildcard(Path* path) {
+    Item matches = force_wildcard_matches(path);
+    return matches.item == ItemError.item ? ItemError : list_collapse_value(matches);
+}
+
+// `for`, `len` and printing enumerate a query path, or a wildcard with steps
+// after it, through the force walk, so they see what `#` yields (S2.4.7).
+extern "C" Item lambda_path_enumerate(Path* path) {
+    return force_wildcard_matches(path);
+}
+
 Item fn_force(Item ref) {
     TypeId tid = get_type_id(ref);
     if (tid == LMD_TYPE_ERROR) return ref;
@@ -5973,6 +6270,7 @@ Item fn_force(Item ref) {
     }
     Path* path = ref.path;
     if (!path) return ItemNull;
+    if (path_has_wildcards(path)) return force_wildcard(path);
 
     // PTH34: force the longest prefix that names a document, then apply the
     // remaining steps in memory. `a.b#c.d`, `a.b.c.d#` and `a.b#.c.d` are one
@@ -7404,6 +7702,9 @@ Item fn_member(Item item, Item key) {
             if (k && strcmp(k, "length") == 0) {
                 return {.item = i2it(fn_len(item))};
             }
+            // S8.2.6: the list's own members first, then a name maps over a run;
+            // an array is not a run, so its name reads stay null (S8.2.1v4)
+            if (item_is_list(item)) return run_step_member(item, key);
         }
         int64_t index = -1;
         // Numeric dotted members are IntKey access (`a.1`), not NameKey

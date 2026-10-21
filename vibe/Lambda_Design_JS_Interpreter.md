@@ -8,7 +8,7 @@
 requires native execution whenever LambdaJS selects MIR. MIR interpretation is
 retired for JS, including diagnostic and size-based selection. This decision is
 ratified; removal of the existing runtime paths is planned in
-[JS Tune13](jube/JS_Tune13.md). The other staged architecture below remains
+[JS Tune13](jube/JS_Tune_History.md) (§4.6). The other staged architecture below remains
 subject to its implementation gates; the formal spec and
 [implementation record](impl/Lambda_Impl_JS_Interpreter.md) describe the already
 landed AST slice.
@@ -271,7 +271,8 @@ cannot select MIR interpretation or silently reroute a selected MIR unit to AST.
 Native compilation failure is reported without replay. Existing AST admission
 and any future explicit AUTO policy are separate from MIR execution mode.
 Other language profiles' MIR-interpreter support is unchanged. Rationale,
-selection inventory, and implementation gates are in [JS Tune13](jube/JS_Tune13.md).
+selection inventory, and implementation gates are in [JS Tune13](jube/JS_Tune_History.md) (§4.6) and
+[`impl/JS_Tune13_Impl.md`](impl/JS_Tune13_Impl.md).
 
 ### JSI17 — Admission uses semantic facts
 

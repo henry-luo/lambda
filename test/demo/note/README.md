@@ -76,9 +76,9 @@ reuse the shared edit-session file lifecycle. Files are limited to 64 MB; other
 save destinations need an existing parent directory. Undo history is session
 state and is not written to disk.
 
-Use **… → Close Notebook** for the save/discard prompt. The viewer host currently
-honors native window-close guards only for `lambda edit` sessions, so closing
-a demo with the OS window control does not prompt; save explicitly first.
+Use **… → Close Notebook** or the OS window control for the save/discard prompt.
+The notebook's explicit close guard opts the view-launched application into
+document-owned Escape and close handling (**D7.2.5 / S12.1.3**).
 
 Cloud sync, collaboration, file attachments, locked notes, tags, scanning, drawing,
 OS sharing, and timed trash expiry are outside this demo. Narrow windows hide

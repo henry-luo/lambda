@@ -2866,7 +2866,7 @@ under `vibe/impl` after the proposal is taken up.
 | [Runtime struct design](Lambda_Design_Structs.md) | Shared storage descriptor and ABI authority, SCU7–SCU17 |
 | [Initial JS consolidation](Lambda_Design_Structs_JS.md) | JSCU9–JSCU35; current landed/residual status in Appendix B |
 | [JS compiler unification](Lambda_Design_JS_Unified.md) | Existing shared indexed compiler and demand-driven lowering |
-| [Tune10](<jube/JS_Tune10_Fast_Paths (done).md>) | Numeric-key recovery and §12 literal-shape support; early status paragraphs are historical |
+| [Tune10](jube/JS_Tune_History.md) (History §4.3) | Numeric-key recovery (T10-1, retired 2026-09-10) and literal-shape support (T10-2) |
 | [AST core](../lambda/runtime/ast-core.hpp) | `FnAnalysis`, `FnVariantAnalysis`, `FnReturnAnalysis`, indexed identities |
 | [Shared emitter](../lambda/runtime/mir_emitter_shared.hpp) | `MirValue`, `MirCallResult`, `MirFunctionPlan`, profiles and root finalization |
 | [Lambda MIR lowering](../lambda/runtime/transpile-mir.cpp) | `mir_expr_candidate_shape`, `mir_module_unique_shape_for_field`, guarded reads/writes |

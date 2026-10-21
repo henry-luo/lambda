@@ -2226,6 +2226,7 @@ typedef struct StateEntry {
 typedef struct DirtyRect {
     float x, y, width, height;
     uint32_t source_view_id;       // 0 when source is unknown or non-elemental
+    DomNode* source_view_address;  // weak hint; validate address + ID before reading
     struct DirtyRect* next;
 } DirtyRect;
 
@@ -3696,6 +3697,9 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
  * Mark an element as needing repaint (uses element's bounds)
  */
 void dirty_mark_element(DocState* state, void* view);
+
+// validates the weak marking hint; synthetic/stale sources resolve by live ID.
+bool dirty_source_in_view_subtree(DomDocument* document, View* root, const DirtyRect* dirty);
 
 /**
  * Clear all dirty regions

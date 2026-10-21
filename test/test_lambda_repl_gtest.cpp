@@ -55,6 +55,10 @@ test_result run_lambda_repl_with(const char* input, const char* const* session_a
     ShellOptions options = {0};
     options.stdin_path = temp_file;
     options.merge_stderr = true;
+    // The prompt is `λ> ` only under a UTF-8 locale (get_repl_prompt); pin one
+    // so the expected transcripts do not depend on the host's LANG.
+    static const ShellEnvEntry utf8_locale[] = {{"LC_ALL", "en_US.UTF-8"}, {nullptr, nullptr}};
+    options.env = utf8_locale;
     // File-backed stdin preserves REPL input without invoking a redirection shell.
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     result.exit_code = shell_result.exit_code;

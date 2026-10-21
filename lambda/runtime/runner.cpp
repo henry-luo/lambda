@@ -363,6 +363,10 @@ char* lambda_home_path(const char* rel) {
 #include <windows.h>
 #endif
 
+// S2.4.7: prints a path query step's type (defined in lambda-eval.cpp)
+extern "C" void lambda_path_type_printer(uint64_t type_item, void* strbuf);
+extern "C" Item lambda_path_enumerate(Path* path);
+
 // ============================================================================
 // Phase-Level Profiling (enabled by LAMBDA_PROFILE=1 environment variable)
 // ============================================================================
@@ -2936,6 +2940,9 @@ void runner_setup_context(Runner* runner) {
         runtime_context_publish_owners(rt, ctx);
     }
     path_register_pool_provider(runner_path_pool_provider);
+    // S2.4.7: a path's query step prints its type through the runtime printer
+    path_register_type_printer(lambda_path_type_printer);
+    path_register_enumeration_resolver(lambda_path_enumerate);
 
 #ifndef LAMBDA_NO_TASKS
     if (rt && runtime_scheduler(rt)) {

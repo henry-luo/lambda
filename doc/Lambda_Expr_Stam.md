@@ -599,7 +599,10 @@ data?(int | string)         // all int or string values
 html?<div class: string>    // <div> elements with a class attribute
 data?{name: string}         // maps with a string 'name' field
 data?{status: "ok"}         // maps where status == "ok"
+doc?\("" ... "TODO" ...)     // every text that contains TODO
 ```
+
+A string pattern `\(...)` is a type, so `?`, `.?` and `[...]` accept it like any other type and find the text whose whole value matches. [Querying Documents with Patterns](Lambda_String_Pattern.md#querying-documents-with-patterns) has examples.
 
 The `.?` variant is **self-inclusive** — it also tests the root value itself:
 
@@ -677,6 +680,36 @@ html?<table>[tr][td]           // all tables → their direct rows → their dir
 | Analogy | XPath `//`, CSS descendant | XPath `/`, CSS `>` child |
 | Result | The run `T*`: `null`, the match, or a list | The run `T*`: `null`, the match, or a list |
 | Match count | `count(expr?T)` | `count(expr[T])` |
+
+### Wildcard Steps: `.*` and `.**`
+
+`e.*` is the **item step**: the run of `e`'s items in the order `for (x in e)` walks them. An array, list or range gives its items, a map its values, and an element its attribute values and then its children. Named and indexed members are both items, so `.*` reads JSON-shaped data directly. `e.*` is the same as `e[any]`.
+
+`e.**` is the **closure** of `.*`: zero or more item steps, so it yields `e` itself and then every value beneath it in document order. `e.**` is the same as `e.?any`, and `e.*.**` is every proper descendant, the same as `e?any`.
+
+```lambda
+let users = [{name: "ann", age: 31}, {name: "bob", age: 42}]
+users.*.name                // ("ann", "bob")
+let doc = <div id: "x", <p b: 1> <p b: 2, <p b: 3>>>
+doc.*                       // ("x", <p b: 1>, <p b: 2 …>) — attribute values, then children
+doc.**.b                    // (1, 2, 3) — every b at any depth
+count(doc.**)               // 8 — doc itself and its seven descendants
+```
+
+Text is one value to the walk, so `"abc".*` is `null` even though `for` walks a string by character. A wildcard step always needs a base: there is no bare `*.a`, and inside a pipe or `that` body you write `~.*.a`. A quoted `'*'` is an ordinary key: `m.'*'` reads the field named `*`.
+
+### Stepping a run
+
+A query result with two or more matches is a list, and any list is stepped **set-at-a-time**: a name, a type key, a query, a wildcard, `.~~` or `./` applies to each item, the results are joined, and `null` results drop out. A stored result behaves exactly as an inline one.
+
+```lambda
+let page = <div <p class: "a"> <p class: "b"> <p>>
+page?<p>.class              // ("a", "b") — the third p has no class
+let ps = page?<p>
+ps.class                    // the same
+```
+
+Positional keys are the exception: they select from the run itself. `(page?<p>)[0]` is the first `p`, and the first child of each `p` is the pipe `page?<p> |> ~[0]`. A name that the list itself answers, such as `length`, is read from the list. An array is a container, not a run: `[{b: 1}, {b: 2}].b` is `null`, and `[{b: 1}, {b: 2}].*.b` is `(1, 2)`.
 
 ---
 
@@ -818,9 +851,9 @@ for (i of "abc") i                 // [0, 1, 2]
 On an element `of` walks the children only, the mirror of `at` walking the attributes only (S8.1.2v3):
 
 ```lambda
-let e = <div id: "main", "a" <b "x">>
-[for (i, c of e) i]     // [0, 1]
-[for (k at e) k]        // ['id']
+let e = <div id: "main", "a" <b "x">>;
+[for (i, c of e) i];    // [0, 1]
+[for (k at e) k];       // ['id']
 [for (k, v in e) k]     // ['id', 0, 1]
 ```
 
@@ -832,7 +865,7 @@ Each axis is also a membership operator with the same meaning: `i of arr` is tru
 let xs = [10, 20, 30]
 2 of xs        // true
 3 of xs        // false
-1.0 of xs      // true — normalizes as a subscript does (S8.2.1v4)
+1.0 of xs;     // true — normalizes as a subscript does (S8.2.1v4)
 -1 of xs       // false
 20 of xs       // false — `of` tests keys, `in` tests values
 'a' of {a: 1}  // false — a name is not a position; use `at`
@@ -865,10 +898,10 @@ When a for-expression iterates over an empty collection or filters all elements,
 For expressions support SQL/XQuery-inspired clauses for filtering, sorting, pagination, and intermediate bindings. The full syntax is:
 
 ```
-for (<bindings> [, let <name> = <expr>, ...] [where <cond>] [order by <spec>] [limit <n>] [offset <n>]) <body>
+for (<bindings> [, let <name> = <expr>, ...] [where <cond>] [group by <keys> into <name>] [order by <spec>] [limit <n>] [offset <n>]) <body>
 ```
 
-Clauses are processed in logical order: **bindings → let → where → order by → offset → limit → body**.
+Clauses are processed in logical order: **bindings → let → where → group by → order by → offset → limit → body**. Write them in that order: `let` and `where` come before `group by`, `order by`, `limit` and `offset` after it, and each clause appears once. A misplaced or repeated clause is a compile error (E239); two conditions combine with `and` in one `where`.
 
 #### `where` — Filter
 
@@ -970,35 +1003,34 @@ for (x in [1, 2, 3] limit 10) x
 
 #### `group by` — Grouping
 
-`group by` partitions the (post-`where`) rows by one or more key expressions and binds each
-group to a name via `into`:
+`group by` partitions the (post-`where`) rows by one or more key expressions and runs the rest of the expression once per group:
 
 ```
-group by <key-expr> [as <alias>] [, <key-expr> [as <alias>] ...] into <group-name>
+group by <key-expr> [as <name>] [, <key-expr> [as <name>] ...] into <group-name>
 ```
 
-**The group binding is an element** (tag `group`): the grouping keys become its *attributes* and the group's members become its *children* (S14.1.1). One value carries the whole group, reusing Lambda's element duality — so `g.region` reads a key, `g[0]` indexes the members, and `content(g)` is the array of members: `len(content(g))` counts them and `content(g) |> ~["amount"]` projects a field across them. Plain `len(g)` would count the key attributes as well, because `len` counts what `for` walks, and `for` walks an element's attributes before its children (S8.3.1v3).
+In each group, **every key is bound by name** and **`into` binds the array of the group's rows** (S14.1.1v2). The rows are kept exactly as they came — nulls and strings included, nothing merged — so `len(g)` counts them, `g[0]` is the first, and `g |> ~.amount` projects a field across them.
 
 ```lambda
-// single key — attribute name inferred from the trailing field access (g.region)
+// single key — named after the trailing field access: `region`
 for (x in sales group by x.region into g)
-  {region: g.region, total: sum(content(g) |> ~["amount"])}
+  {region: region, total: sum(g |> ~.amount), orders: len(g)}
 
-// multiple keys — each becomes a named attribute (no positional g.key[i])
+// multiple keys — each bound by its own name
 for (o in orders group by o.year, o.month into g)
-  {year: g.year, month: g.month, n: len(content(g))}
+  {year: year, month: month, n: len(g)}
 
-// computed key — an alias is required (only trailing field access is inferable)
-for (w in words group by len(w) as wlen into g)
-  {length: g.wlen, n: len(content(g))}
+// a computed key needs a name; an infix key takes parentheses
+for (p in people group by (p.age div 10) as decade into g)
+  {decade: decade, n: len(g)}
 
-// grouping by the loop item itself also requires an alias
-for (w in doc.words
+// grouping by the loop item itself also needs a name
+for (w in doc_words
      where len(w) > 3
      group by w as word into g
-     order by len(content(g)) desc
+     order by len(g) desc
      limit 10)
-  {word: g.word, freq: len(content(g))}
+  {word: word, freq: len(g)}
 ```
 
 Semantics:
@@ -1006,12 +1038,16 @@ Semantics:
 - **Key equality** is value equality with numeric-tower coherence, so `1` and `1.0` land in
   the same group. Multi-key grouping compares the key tuple element-wise. **Null keys form one
   group.**
-- The **loop variable (and per-tuple `let` bindings) go out of scope** after `group by` — only
-  the `into` element (plus enclosing scope) is visible in `order by`/`limit`/`offset` and the body.
+- **Key names.** An omitted `as` names a key after its trailing field access (`o.date.year` →
+  `year`). Any other key — a call, arithmetic, the loop variable itself — needs `as`, and the
+  key names must differ from each other and from the `into` name; otherwise it is a compile
+  error (E239, E209).
+- The **loop variable (and per-row `let` bindings) go out of scope** after `group by` — only
+  the key names and the `into` array (plus enclosing scope) are visible in `order by`/`limit`/`offset`
+  and the body.
 - **Groups emit in first-appearance order** of their key; `order by` then reorders groups.
-- `where` filters rows *before* grouping; `order by`/`limit`/`offset` apply to *groups*.
-- Because a group is an element, it also formats/queries like any markup node — `group by`
-  literally turns flat data into a `<group ...>...</group>` tree.
+- `where` filters rows *before* grouping; `order by`/`limit`/`offset` apply to *groups*. There
+  is no `having` clause yet: filter the groups afterwards with `|:`.
 
 #### Join `on` — Relating Multiple Sources
 

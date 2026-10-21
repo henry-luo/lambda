@@ -74,6 +74,11 @@
       "tags": ["finder"]
     },
     {
+      "name": "photos",
+      "globs": ["test/ui/photos/*.json"],
+      "tags": ["photos", "baseline"]
+    },
+    {
       "name": "note",
       "globs": ["test/ui/note/*.json"],
       "tags": ["note"]

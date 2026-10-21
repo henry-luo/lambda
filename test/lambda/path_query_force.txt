@@ -1,0 +1,50 @@
+"lazy: a query on a path is a path"
+[\.test.input.wild_tree?path, path]
+"identity: same spelling, other type, other closure"
+[true, false, false]
+"directory ?path: proper closure, nothing read"
+[\.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json']
+"directory .?path: inclusive closure"
+[\.test.input.wild_tree, \.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json']
+"directory ?int: no path value is an int"
+[]
+"**?int: every file beneath"
+[1, 2, 3]
+"**.?string: every file beneath"
+["a", "b", "c"]
+"?path.**: every kept file entered"
+[{
+    name: "a",
+    items: [1, 2]
+  }, "a", [1, 2], 1, 2, \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json', {
+    name: "b",
+    items: [3]
+  }, "b", [3], 3, {
+    name: "c"
+  }, "c"]
+".?path.**: base included"
+[\.test.input.wild_tree, \.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json', {
+    name: "a",
+    items: [1, 2]
+  }, "a", [1, 2], 1, 2, {
+    name: "b",
+    items: [3]
+  }, "b", [3], 3, {
+    name: "c"
+  }, "c"]
+"*?int: only the files directly in d"
+[1, 2]
+"file ?int"
+[1, 2]
+"file .?int"
+[3]
+"after #: the query tests path values"
+[]
+"after #: .?path keeps the path values themselves"
+[\.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub]
+"a held path takes wildcard steps"
+[\.test.input.wild_tree.*, \.test.input.wild_tree.**]
+"for and len see what # yields"
+[[\.test.input.wild_tree.'a.json', \.test.input.wild_tree.sub, \.test.input.wild_tree.sub.'b.json', \.test.input.wild_tree.sub.deep, \.test.input.wild_tree.sub.deep.'c.json'], 3]
+"a wildcard with steps after it iterates its matches"
+["a"]
