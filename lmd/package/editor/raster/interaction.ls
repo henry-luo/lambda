@@ -34,11 +34,12 @@ pub fn begin(st,input) any^ {
             else if (hit == null) model.select(st,[])^
             else if (hit in st.selected) st else model.select(st,[hit])^
         let target = if (st.tool in ["brush","erase","gradient",*retouch.kinds]) model.pixel_target(st)^ else null
-        let transform_target = if (st.tool == "transform") model.active(st)^ else null;
+        let transform_target = if (st.tool == "transform") transforms.target(st)^ else null;
         if (st.tool == "move" and (input.shift or len(picked.selected) == 0)) picked
         else render({*:picked,gesture:{before:picked.doc,context:model.context(picked),pan:picked.pan,
             mode:st.tool,pointer:input.pointer,start:input.point,screen:input.screen,end:input.point,crop:st.crop,
-            points:[xy(input)],rotate:input.shift,selection_mode:if (input.shift) "add" else st.selection_mode}})^
+            points:[xy(input)],rotate:input.shift,handle:input.handle,shift:input.shift,alt:input.alt,
+            selection_mode:if (input.shift) "add" else st.selection_mode}})^
     }
 }
 pub fn sample(st,input) {
@@ -46,7 +47,7 @@ pub fn sample(st,input) {
     else if (st.gesture.mode == "pan")
         {*:st,pan:{x:st.gesture.pan.x+input.screen.x-st.gesture.screen.x,
             y:st.gesture.pan.y+input.screen.y-st.gesture.screen.y}}
-    else {*:st,gesture:{*:st.gesture,end:input.point,
+    else {*:st,gesture:{*:st.gesture,end:input.point,shift:input.shift,alt:input.alt,
         points:if (st.gesture.mode in ["brush","erase","lasso",*retouch.kinds] and st.gesture.points[last] != xy(input))
             [*st.gesture.points,xy(input)] else st.gesture.points}}
 }
@@ -60,7 +61,9 @@ pub fn render(st) any^ {
         let end = [g.end.x,g.end.y]
         let command = if (g.mode == "move") {id:"layer.move",dx:int(round(g.end.x-g.start.x)),dy:int(round(g.end.y-g.start.y))}
             else if (g.mode in retouch.kinds) {id:"retouch.stroke",kind:g.mode,points:g.points}
-            else if (g.mode == "transform" and start != end) transforms.gesture(before,g.start,g.end,g.rotate)^
+            else if (g.mode == "transform" and start != end)
+                (if (g.handle == null) transforms.gesture(before,g.start,g.end,g.rotate)^
+                    else transforms.handle_gesture(before,g.start,g.end,g.handle,g.shift == true,g.alt == true)^)
             else if (g.mode in ["brush","erase"]) {id:"paint.stroke",points:g.points,options:{mode:if (g.mode == "erase") "erase" else "paint"}}
             else if (g.mode == "gradient" and start != end)
                 {id:"paint.gradient",start:start,end:end,options:{kind:st.gradient_kind}}

@@ -19,6 +19,7 @@ import workspaces: lambda.editor.raster.workspace
 import batch: lambda.editor.raster.batch
 import exports: lambda.editor.raster.export
 import crop: lambda.editor.raster.crop
+import tone: lambda.editor.raster.tone
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
@@ -26,7 +27,8 @@ let INITIAL = editor.open_session(editor.new_document()^ )^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"photos")
 fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending:"",error:"",status:"Ready · Place images to build a composition",
-    effect_index:0,style_index:0,effect_draft:{},painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
+    effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_channel:"rgb",curve_point:1,curve_drag:null,
+    painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
 pn publish(owner,st,workspace=null) {
     var next = st
     present.publish(owner,st) ^ { dom.set_attribute(owner,"data-error",^.message) } ~ { next = ~ }
@@ -85,6 +87,25 @@ pn command(owner,st,action) any^ {
         raise error("Photos: stop action recording before file operations")
     if (action == "crop-cancel") { return {*:st,crop:null} }
     if (action == "crop-apply") { return crop.apply_draft(st)^ }
+    if (action in ["curve-reset","curve-remove"]) {
+        let curves = if (action == "curve-reset") tone.with_points(st.curve_draft,st.curve_channel,tone.identity)^
+            else tone.remove(st.curve_draft,st.curve_channel,st.curve_point)^;
+        if (action == "curve-reset") present.set_value(present.node(owner,"curve-points"),format(tone.identity,'mark'))
+        return {*:st,curve_draft:curves,curve_point:1}
+    }
+    if (action in ["levels-add","levels-apply","curves-add","curves-apply"]) {
+        let adding = ends_with(action,"add")
+        let current = effects.items(model.active(st)^.node)[st.effect_index]
+        if (not adding and current == null) raise error("Photos: select an effect to update")
+        let initial = if (adding) ({}) else current.options
+        let options = if (starts_with(action,"levels-")) reduce([initial,*[for (control in tone.levels)
+            {[control.key]:float(field(owner,"levels-" ++ control.key))/control.scale}]],(result,entry) => {*:result,*:entry})
+            else {*:initial,curves:read_curves(owner,st)^}
+        let changed = editor.exec(st,{id:if (adding) "effect.add" else "effect.update",options:options,
+            *:if (adding) ({}) else ({index:st.effect_index}),
+            name:if (adding) (if (starts_with(action,"levels-")) "Levels" else "Curves") else current.name})^;
+        return {*:changed,effect_index:if (adding) len(effects.items(model.active(changed)^.node))-1 else st.effect_index}
+    }
     if (starts_with(action,"align-") or starts_with(action,"distribute-")) {
         return editor.exec(st,{id:if (starts_with(action,"align-")) "layer.align" else "layer.distribute",
             *:if (starts_with(action,"align-")) ({mode:slice(action,6,len(action))}) else ({axis:slice(action,11,len(action))}),
@@ -231,13 +252,37 @@ pn command(owner,st,action) any^ {
     return editor.exec(st,{id:action})^
 }
 pn pointer_input(owner,evt) {
-    return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},
+    let handle = dom.closest(evt.target,"[data-raster-handle]")
+    return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},handle:dom.get_attribute(handle,"data-raster-handle"),
         point:surface.point(owner,evt.clientX,evt.clientY),shift:evt.shiftKey,alt:evt.altKey}
+}
+pn curve_point(owner,evt) {
+    let box = dom.bounding_box(present.node(owner,"curve-chart"))
+    return {x:max(0,min(1,(evt.clientX-box.x)/box.width)),y:max(0,min(1,1-(evt.clientY-box.y)/box.height))}
+}
+pn curve_sample(owner,st,evt) any^ {
+    return {*:st,curve_draft:tone.move(st.curve_draft,st.curve_channel,st.curve_drag.index,curve_point(owner,evt))^}
+}
+pn read_curves(owner,st) any^ {
+    return tone.with_points(st.curve_draft,st.curve_channel,parse(field(owner,"curve-points"),'mark')^)^
+}
+pn begin_curve(owner,st,evt) any^ {
+    let curves = read_curves(owner,st)^
+    let selected = dom.closest(evt.target,"[data-curve-point]")
+    let chosen = if (selected == null) tone.insert(curves,st.curve_channel,curve_point(owner,evt))^
+        else {curves:curves,index:int(dom.get_attribute(selected,"data-curve-point"))}
+    dom.focus_set(present.node(owner,"curve-editor"),false)
+    // the graph is republished during a drag; its stable parent owns pointer capture.
+    dom.set_pointer_capture(present.node(owner,"curve-editor"),evt.pointerId)
+    return {*:st,curve_draft:chosen.curves,curve_point:chosen.index,
+        curve_drag:{pointer:evt.pointerId,index:chosen.index,before:curves}}
 }
 pn cancel_preview(owner,st) {
     if (st.gesture.pointer != null) dom.release_pointer_capture(present.node(owner,"stage"),st.gesture.pointer)
     if (st.token > 0) dom.cancel_frame(owner,st.token)
-    return {*:interaction.cancel(st),token:0}
+    if (st.curve_drag != null) dom.release_pointer_capture(present.node(owner,"curve-editor"),st.curve_drag.pointer)
+    return {*:interaction.cancel(st),token:0,curve_drag:null,
+        curve_draft:if (st.curve_drag == null) st.curve_draft else st.curve_drag.before}
 }
 pn publish_preview(owner,st,workspace) {
     var next = st
@@ -359,6 +404,13 @@ on change(evt) {
         return 'handled'
     }
     var next = {*:session,error:""}
+    if (id in ["curve-channel","curve-points"]) {
+        // switching channels must retain text drafts even before a native blur/change arrives.
+        read_curves(owner,next) ^ { next = {*:next,error:^.message,status:^.message} }
+            ~ { next = {*:next,curve_draft:~,curve_channel:if (id == "curve-channel") field(owner,id) else next.curve_channel,curve_point:1} }
+        session = publish(owner,next,documents)
+        return 'handled'
+    }
     if (id == "channel-view") {
         editor.exec(next,{id:"channel.view",channel:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
         session = publish(owner,next,documents)
@@ -398,6 +450,12 @@ on change(evt) {
 }
 on pointerdown(evt) {
     let owner = owner_of(evt)
+    if (evt.button == 0 and session.dialog == "" and dom.closest(evt.target,"#curve-chart") != null) {
+        var next = {*:session,error:""}
+        begin_curve(owner,next,evt) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        session = publish(owner,next,documents)
+        return 'prevent-default'
+    }
     if (evt.button != 0 or session.dialog != "" or dom.closest(evt.target,"#stage") == null or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
     dom.focus_set(present.node(owner,"stage"),false)
     var next = session
@@ -415,6 +473,12 @@ on mousedown(evt) {
     return 'pass'
 }
 on pointermove(evt) {
+    if (session.curve_drag != null and evt.pointerId == session.curve_drag.pointer) {
+        let owner = owner_of(evt)
+        session = curve_sample(owner,session,evt)^
+        if (session.token == 0) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
+        return 'prevent-default'
+    }
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
     session = interaction.sample(session,pointer_input(owner,evt))
@@ -422,6 +486,14 @@ on pointermove(evt) {
     return 'prevent-default'
 }
 on pointerup(evt) {
+    if (session.curve_drag != null and evt.pointerId == session.curve_drag.pointer) {
+        let owner = owner_of(evt)
+        if (session.token>0) dom.cancel_frame(owner,session.token)
+        let next = curve_sample(owner,session,evt)^
+        dom.release_pointer_capture(present.node(owner,"curve-editor"),evt.pointerId)
+        session = publish(owner,{*:next,curve_drag:null,token:0},documents)
+        return 'prevent-default'
+    }
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
     if (session.token > 0) dom.cancel_frame(owner,session.token)
@@ -432,6 +504,11 @@ on pointerup(evt) {
     return 'prevent-default'
 }
 on pointercancel(evt) {
+    if (session.curve_drag != null and evt.pointerId == session.curve_drag.pointer) {
+        let owner = owner_of(evt)
+        session = publish(owner,cancel_preview(owner,session),documents)
+        return 'prevent-default'
+    }
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
     session = publish(owner,cancel_preview(owner,session),documents)

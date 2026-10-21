@@ -1,0 +1,399 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos anchored transform handles, modifiers, cancellation and undo",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "16",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "12",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-fill"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-shape"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "10",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-y"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-transform"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-raster-handle='se']"
+      },
+      "dx": 16,
+      "dy": 12,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "32"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-height",
+      "equals": "24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "10"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-y",
+      "equals": "8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "16"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-height",
+      "equals": "12"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "32"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-raster-handle='se']"
+      },
+      "dx": 8,
+      "dy": 0,
+      "steps": 3,
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-height",
+      "equals": "18"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-raster-handle='se']"
+      },
+      "dx": 8,
+      "dy": 6,
+      "steps": 3,
+      "mods_str": "alt"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "32"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-height",
+      "equals": "24"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-y",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-raster-handle='se']"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 40,
+        "offset_y": 35
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "16"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-raster-handle='rotate']"
+      },
+      "dx": 34,
+      "dy": 34,
+      "steps": 3,
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "12"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-height",
+      "equals": "16"
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-20261021/handles-rotated.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-bounds-width",
+      "equals": "16"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-20261021/handles.png"
+    }
+  ]
+}

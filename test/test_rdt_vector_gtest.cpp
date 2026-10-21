@@ -7,6 +7,7 @@
 #include "../lambda/dom/dom_observers.h"
 #include "../lib/memtrack.h"
 #include <string.h>
+#include <math.h>
 #include <thorvg_capi.h>
 #include "../radiant/rdt_path_internal.hpp"
 #include "../radiant/render_metrics.hpp"
@@ -64,14 +65,20 @@ TEST(ImageProcessTest, CacheInvalidationMatchesFreshEvaluation) {
     for (size_t i=0;i<sizeof(pixels);i++) pixels[i]=(uint8_t)(i*37%256);
     ImageProcessSource source={pixels,64,48,{64*4,4,1},1};
     ImageProcessOptions options; options.angle=3; options.gamma=1.2; options.softness=3;
-    ImageProcessCache* cache=image_process_cache_create(200000);
+    ImageProcessCache* cache=image_process_cache_create(300000);
     ASSERT_NE(cache,nullptr);
-    for (int step=0;step<6;step++) {
+    for (int step=0;step<9;step++) {
         if (step==1) options.vignette=0.7;
         if (step==2) options.sharpen=0.9;
         if (step==3) options.exposure=0.4;
         if (step==4) { options.output_width=31; options.output_height=27; }
         if (step==5) { source.revision++; pixels[0]=255; }
+        if (step==6) {
+            options.curve_counts[0]=2;
+            options.curves[0][0][1]=1; options.curves[0][1][0]=1;
+        }
+        if (step==7) options.curves[0][1][1]=0.3;
+        if (step==8) { options.output_black=0.1; options.output_white=0.8; }
         ImageProcessResult cached, fresh;
         ASSERT_TRUE(image_process(source,options,&cached,cache));
         ASSERT_TRUE(image_process(source,options,&fresh));
@@ -83,10 +90,81 @@ TEST(ImageProcessTest, CacheInvalidationMatchesFreshEvaluation) {
         }
         if (step==3) { EXPECT_EQ(cached.color_hits,0u); EXPECT_EQ(cached.blur_hits,0u); }
         if (step==5) { EXPECT_EQ(cached.geometry_hits,0u); EXPECT_EQ(cached.color_hits,0u); EXPECT_EQ(cached.blur_hits,0u); }
-        EXPECT_LE(cached.cache_bytes,200000u);
+        if (step>=6) {
+            EXPECT_EQ(cached.geometry_hits,1u); EXPECT_EQ(cached.color_hits,0u); EXPECT_EQ(cached.blur_hits,0u);
+        }
+        EXPECT_LE(cached.cache_bytes,300000u);
         image_process_result_free(&cached); image_process_result_free(&fresh);
     }
     image_process_cache_destroy(cache);
+}
+
+TEST(ImageProcessTest, LevelsAndChannelCurvesMatchIndependentReference) {
+    uint8_t pixels[256*4];
+    for (int x=0;x<256;x++) {
+        pixels[x*4]=(uint8_t)x; pixels[x*4+1]=(uint8_t)(255-x);
+        pixels[x*4+2]=(uint8_t)(x*37%256); pixels[x*4+3]=(uint8_t)(x%255+1);
+    }
+    ImageProcessSource source={pixels,256,1,{256*4,4,1},1};
+    ImageProcessOptions options;
+    options.black=0.1; options.white=0.9; options.gamma=1.7;
+    options.output_black=0.15; options.output_white=0.85;
+    const double master[][2]={{0,0.1},{0.3,0.8},{0.7,0.2},{1,0.9}};
+    options.curve_counts[0]=4; memcpy(options.curves[0],master,sizeof(master));
+    for (int channel=1;channel<4;channel++) {
+        options.curve_counts[channel]=2;
+        options.curves[channel][0][1]=0.1*channel;
+        options.curves[channel][1][0]=1; options.curves[channel][1][1]=1-0.1*channel;
+    }
+    ImageProcessResult result;
+    ASSERT_TRUE(image_process(source,options,&result));
+    for (int x=0;x<256;x++) {
+        for (int c=0;c<3;c++) {
+            double value=fmax(0.0,fmin(1.0,(pixels[x*4+c]/255.0-0.1)/0.8));
+            value=pow(value,1.0/1.7);
+            unsigned segment=value<0.3 ? 0 : value<0.7 ? 1 : 2;
+            const double* a=master[segment]; const double* b=master[segment+1];
+            value=a[1]+(b[1]-a[1])*(value-a[0])/(b[0]-a[0]);
+            value=0.1*(c+1)+value*(1-0.2*(c+1));
+            int expected=(int)round((0.15+value*0.7)*255);
+            EXPECT_LE(abs((int)result.pixels[x*4+c]-expected),1) << "x=" << x << " channel=" << c;
+        }
+        EXPECT_EQ(result.pixels[x*4+3],pixels[x*4+3]);
+    }
+    image_process_result_free(&result);
+}
+
+TEST(ImageProcessTest, CurvesPreservePeaksBetweenEightBitLookupSamples) {
+    uint8_t pixels[]={64,64,64,255};
+    ImageProcessSource source={pixels,1,1,{4,4,1},1};
+    ImageProcessOptions options; options.gamma=2;
+    double peak=sqrt(64.0/255.0);
+    const double points[][2]={{0,0},{peak-0.00001,0},{peak,1},{peak+0.00001,0},{1,0}};
+    options.curve_counts[0]=5; memcpy(options.curves[0],points,sizeof(points));
+    ImageProcessResult result;
+    ASSERT_TRUE(image_process(source,options,&result));
+    EXPECT_EQ(result.pixels[0],255); EXPECT_EQ(result.pixels[1],255); EXPECT_EQ(result.pixels[2],255);
+    image_process_result_free(&result);
+}
+
+TEST(ImageProcessTest, InvalidToneDataFailsBeforeAllocatingOutput) {
+    uint8_t pixels[]={64,128,192,255};
+    ImageProcessSource source={pixels,1,1,{4,4,1},1};
+    for (int variant=0;variant<6;variant++) {
+        ImageProcessOptions options;
+        options.curve_counts[0]=3;
+        options.curves[0][1][0]=0.5; options.curves[0][1][1]=0.8;
+        options.curves[0][2][0]=1; options.curves[0][2][1]=1;
+        if (variant==0) options.curve_counts[0]=IMAGE_TONE_POINTS+1;
+        if (variant==1) options.curves[0][2][0]=0.5;
+        if (variant==2) options.curves[0][1][1]=NAN;
+        if (variant==3) options.curves[0][1][1]=1.1;
+        if (variant==4) options.curves[0][0][0]=0.1;
+        if (variant==5) { options.output_black=0.8; options.output_white=0.2; }
+        ImageProcessResult result;
+        EXPECT_FALSE(image_process(source,options,&result));
+        EXPECT_EQ(result.pixels,nullptr);
+    }
 }
 
 TEST(ImageProcessTest, CacheBudgetAndCancellationKeepOwnedBuffersBounded) {

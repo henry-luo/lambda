@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate codec headers and dispatch tables from Lambda's build configuration."""
-import json
 from pathlib import Path
 import subprocess
 import sys
+from build_config import load_build_config
 
 
 def write_changed(path, text):
@@ -15,7 +15,7 @@ def write_changed(path, text):
 
 
 def main():
-    settings = json.loads(Path(sys.argv[1]).read_text())
+    settings = load_build_config(sys.argv[1])
     configs = [settings[name] for name in ('image_codecs', 'archive_codecs') if name in settings]
     config = {key: [spec for group in configs for spec in group.get(key, [])]
               for key in ('generated_files', 'dispatch_generators')}

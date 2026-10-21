@@ -28,6 +28,7 @@ bool lambda_image_options(Item options, ImageProcessOptions* out) {
         {"brightness",&out->brightness,-1,1}, {"contrast",&out->contrast,0,2},
         {"saturation",&out->saturation,0,2}, {"temperature",&out->temperature,-1,1},
         {"gamma",&out->gamma,0.2,3}, {"black",&out->black,0,0.95}, {"white",&out->white,0.05,1},
+        {"output_black",&out->output_black,0,1}, {"output_white",&out->output_white,0,1},
         {"shadows",&out->shadows,-1,1}, {"highlights",&out->highlights,-1,1},
         {"intensity",&out->intensity,0,1}, {"vignette",&out->vignette,0,1},
         {"softness",&out->softness,0,6}, {"sharpen",&out->sharpen,0,2}};
@@ -79,7 +80,31 @@ bool lambda_image_options(Item options, ImageProcessOptions* out) {
             if (!isfinite(out->matrix[i]) || fabs(out->matrix[i])>16) return false;
         }
     }
-    return out->white>out->black && out->crop[2]>out->crop[0] && out->crop[3]>out->crop[1] &&
+    auto curves=map.get("curves");
+    if (!curves.isNull()) {
+        if (!curves.isMap()) return false;
+        const char* channels[]={"rgb","r","g","b"};
+        MapReader curve_map=curves.asMap();
+        auto entries=curve_map.entries(); const char* key; ItemReader points;
+        while (entries.next(&key,&points)) {
+            int channel=-1;
+            for (int c=0;c<IMAGE_TONE_CHANNELS;c++) if (!strcmp(channels[c],key)) channel=c;
+            if (channel<0 || !points.isArray()) return false;
+            auto rows=points.asArray();
+            int64_t count=rows.length();
+            if (count<2 || count>IMAGE_TONE_POINTS) return false;
+            out->curve_counts[channel]=(uint64_t)count;
+            for (int64_t p=0;p<count;p++) {
+                auto point=rows.get(p);
+                if (!point.isArray() || point.asArray().length()!=2) return false;
+                for (int axis=0;axis<2;axis++) {
+                    auto value=point.asArray().get(axis);
+                    if (!value.isNumber() || !item_try_to_double(value.item(),&out->curves[channel][p][axis])) return false;
+                }
+            }
+        }
+    }
+    return image_process_tone_valid(*out) && out->white>out->black && out->crop[2]>out->crop[0] && out->crop[3]>out->crop[1] &&
         ((out->output_width==0 && out->output_height==0) ||
          (out->output_width>0 && out->output_height>0 && (int64_t)out->output_width*out->output_height<=16000000));
 }

@@ -10,6 +10,7 @@ import colors: lambda.slide.color
 import effects: lambda.editor.raster.effects
 import styles: lambda.editor.raster.styles
 import channels: lambda.editor.raster.channels
+import tone: lambda.editor.raster.tone
 
 // selects use selectedness; text/range controls use the canonical value writer.
 pub pn set_value(control,value) {
@@ -32,6 +33,9 @@ pub pn publish(owner,st) any^ {
     let rows = editor.layers(st.doc)
     let active = if (len(st.selected)==1) editor.lookup(st.doc,st.selected[0]) else null
     let active_effect = effects.items(active.node)[st.effect_index]
+    let tone_owner = if (active == null) "" else active.id ++ "/" ++ string(st.effect_index)
+    let tone_changed = active_effect != st.tone_effect or tone_owner != st.tone_owner
+    let curves = if (tone_changed) model.value(active_effect.options.curves,{}) else st.curve_draft
     let primary = model.primary(active.node)
     let active_style = styles.items(active.node)[st.style_index]
     for (id,requested in {status:st.status,'document-name':st.name,dirty:if (editor.dirty(st)) "●" else "",
@@ -46,6 +50,9 @@ pub pn publish(owner,st) any^ {
         'data-history':string(len(st.hist.undo)),'data-selected':join(st.selected,","),'data-target':st.target,
         'data-x':if (active == null) "" else string(model.bounds(active.node).x),
         'data-y':if (active == null) "" else string(model.bounds(active.node).y),
+        'data-bounds-width':if (active == null) "" else string(model.bounds(active.node).width),
+        'data-bounds-height':if (active == null) "" else string(model.bounds(active.node).height),
+        'data-curve-points':string(len(tone.points(curves,st.curve_channel))),
         'data-dirty':string(editor.dirty(st)),'data-dialog':st.dialog,'data-tool':st.tool,
         'data-recording':if (st.recording == null) "off" else string(len(st.recording.steps)),
         'data-actions':string(len(st.actions)),
@@ -72,6 +79,18 @@ pub pn publish(owner,st) any^ {
         dom.set_inner_html(node(owner,"effects"),effect_html)
         dom.set_attribute(node(owner,"effects"),"data-items",effect_html)
     }
+    if (tone_changed or st.painted_doc == null) for (control in tone.levels)
+        set_value(node(owner,"levels-" ++ control.key),string(model.value(active_effect.options[control.key],control.value)*control.scale))
+    if (st.painted_doc == null or curves != st.painted_curves or st.curve_channel != st.painted_curve_channel or st.curve_point != st.painted_curve_point) {
+        dom.set_inner_html(node(owner,"curve-graph"),format(scene.curve_chart(curves,st.curve_channel,st.curve_point),'xml'))
+        if (st.painted_doc == null or curves != st.painted_curves or st.curve_channel != st.painted_curve_channel)
+            set_value(node(owner,"curve-points"),format(tone.points(curves,st.curve_channel),'mark'))
+    }
+    if (dom.get_state(node(owner,"curve-channel"),"value") != st.curve_channel)
+        set_value(node(owner,"curve-channel"),st.curve_channel)
+    if (st.curve_point<=0 or st.curve_point>=len(tone.points(curves,st.curve_channel))-1)
+        dom.set_attribute(node(owner,"curve-remove"),"disabled","")
+    else dom.remove_attribute(node(owner,"curve-remove"),"disabled")
     let style_html = markup(scene.style_rows(st))
     if (dom.get_attribute(node(owner,"styles"),"data-items") != style_html) {
         dom.set_inner_html(node(owner,"styles"),style_html)
@@ -139,5 +158,7 @@ pub pn publish(owner,st) any^ {
     dom.set_attribute(owner,"data-crop",if (st.crop == null) "none" else "draft")
     dom.style_set_property(node(owner,"discard-dialog"),"display",if (st.dialog == "discard") "block" else "none")
     if (st.dialog == "discard" and previous_dialog != "discard") dom.focus_set(node(owner,"discard-cancel"),false)
-    return {*:painted,artwork_node:primary,style_node:active_style,histogram_doc:st.doc}
+    return {*:painted,artwork_node:primary,style_node:active_style,histogram_doc:st.doc,
+        tone_effect:active_effect,tone_owner:tone_owner,curve_draft:curves,painted_curves:curves,
+        painted_curve_channel:st.curve_channel,painted_curve_point:st.curve_point}
 }

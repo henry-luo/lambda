@@ -3,6 +3,8 @@ import editor: lambda.editor.raster
 import tools: lambda.editor.raster.tools
 import effects: lambda.editor.raster.effects
 import styles: lambda.editor.raster.styles
+import transforms: lambda.editor.raster.transform
+import tone: lambda.editor.raster.tone
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -35,6 +37,17 @@ fn histogram_channel(counts,c) {
 }
 pub fn histogram_chart(counts) => <svg viewBox:"0 0 256 72",width:256,height:72,'aria-label':"RGB histogram",
     *[for (c in [0,1,2]) histogram_channel(counts,c)]>
+pub fn curve_chart(curves,channel,selected=1) {
+    let points = tone.points(curves,channel)
+    let color = {rgb:"#e8e9ec",r:"#ef7777",g:"#6acb8b",b:"#72a7ed"}[channel]
+    let path = join([for (i,p in points) (if (i == 0) "M " else "L ") ++ string(p[0]*256) ++ " " ++ string((1-p[1])*160)]," ");
+    <svg id:"curve-chart",viewBox:"0 0 256 160",width:256,height:160,preserveAspectRatio:"none",'aria-label':"Editable " ++ upper(channel) ++ " curve", *[
+        <path d:join([for (v in [0.25,0.5,0.75]) "M " ++ string(v*256) ++ " 0 V 160 M 0 " ++ string(v*160) ++ " H 256"]," "),stroke:"#41444a",fill:"none">,
+        <path d:"M 0 160 L 256 0",stroke:"#626976",fill:"none">,
+        <path d:path,stroke:color,fill:"none",'stroke-width':2>,
+        *[for (i,p in points) <circle 'data-curve-point':string(i),cx:p[0]*256,cy:(1-p[1])*160,r:4,
+            fill:if (i == selected) "#ffffff" else color,stroke:"#172130",'stroke-width':1>]]>
+}
 pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
     <header class:"menubar",<strong "λ Photos"> <nav 'aria-label':"Document commands", *[
         button("new","new","New"),button("open","open","Open…"),button("place","place","Place image…"),
@@ -55,7 +68,12 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition">
                 <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">
                 <div class:"raster-crop-shade",*[for (edge in ["top","bottom","left","right"]) <div 'data-crop-shade':edge>]>
-                <div class:"raster-crop">>
+                <div class:"raster-crop">
+                <div class:"raster-transform",'aria-label':"Layer transform controls", *[
+                    *[for (handle in transforms.handles) <button type:"button",'data-raster-handle':handle.id,
+                        class:"transform-handle handle-" ++ handle.id,title:"Resize " ++ handle.id,
+                        'aria-label':"Resize " ++ handle.id,style:"left:" ++ string(handle.x*100) ++ "%;top:" ++ string(handle.y*100) ++ "%">],
+                    <button type:"button",'data-raster-handle':"rotate",class:"transform-handle handle-rotate",title:"Rotate; Shift snaps to 15°",'aria-label':"Rotate layer","↻">]>>
             <div id:"crop-controls",class:"crop-controls",style:"display:none", *[
                 <span "Drag to crop">,button("crop-apply","crop-apply","Apply crop"),button("crop-cancel","crop-cancel","Cancel") ]>>,
         <aside class:"dock", *[
@@ -97,7 +115,7 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <section class:"transform-panel", *[<h2 "Transform & blend">,
                 <div class:"button-grid", *[button("clipping","layer.clipping","Toggle clipping"),button("isolation","layer.isolation","Toggle isolation")]>,
                 <label "Blend mode" <select id:"blend", *[for (mode in ["normal","multiply","screen","overlay","darken","lighten","difference","exclusion"]) <option value:mode,mode>]>>,
-                <p "Transform tool: drag to scale; Shift-drag to rotate.">,
+                <p "Transform: drag handles to resize or rotate. Shift keeps corner proportions / snaps rotation; Alt resizes about the center. Drag the image to scale; Shift-drag rotates.">,
                 <div class:"fields", *[field("transform-angle","Rotate degrees",0,"number"),field("transform-x","Scale X",1,"number"),field("transform-y","Scale Y",1,"number")]>,
                 <div class:"button-grid", *[button("transform-apply","transform-apply","Apply transform"),button("transform-reset","transform-reset","Reset transform"),
                     button("flip-x","flip-x","Flip horizontal"),button("flip-y","flip-y","Flip vertical"),button("rasterize","layer.rasterize","Rasterize layer")]>]>,
@@ -150,7 +168,17 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <label "Relative to" <select id:"align-relative",<option value:"canvas","Canvas"> <option value:"selection","Selected layers">>>,
                 <div class:"button-grid", *[for (mode in ["left","center","right","top","middle","bottom"])
                     button("align-" ++ mode,"align-" ++ mode,mode),
-                    button("distribute-x","distribute-x","Equal horizontal gaps"),button("distribute-y","distribute-y","Equal vertical gaps")]>]>]>]>,
+                    button("distribute-x","distribute-x","Equal horizontal gaps"),button("distribute-y","distribute-y","Equal vertical gaps")]>]>,
+            <section class:"levels-panel", *[<h2 "Levels">,
+                <p "Set input endpoints, midtone gamma and output endpoints. Apply updates the selected effect.">,
+                <div class:"fields",*[for (control in tone.levels) field("levels-" ++ control.key,control.label,control.value*control.scale,"number")]>,
+                <div class:"button-grid",*[button("levels-add","levels-add","Add Levels"),button("levels-apply","levels-apply","Apply to effect")]>]>,
+            <section id:"curve-editor",class:"curves-panel",tabindex:"0", *[<h2 "Curves">,
+                <label "Channel" <select id:"curve-channel",*[for (channel in tone.channels) <option value:channel,upper(channel)>]>>,
+                <div id:"curve-graph",curve_chart({},"rgb")>,<p "Input → · Output ↑. Click adds a point; drag to adjust. Curves use straight segments.">,
+                <label "Points [input,output], from 0 to 1" <textarea id:"curve-points",rows:3,"[[0,0],[1,1]]">>,
+                <div class:"button-grid",*[button("curve-reset","curve-reset","Reset channel"),button("curve-remove","curve-remove","Remove point"),
+                    button("curves-add","curves-add","Add Curves"),button("curves-apply","curves-apply","Apply to effect")]>]>]>]>,
     <footer class:"statusbar",<output id:"status",role:"status",'aria-live':"polite","Opening sample…"> <span id:"dimensions","">>,
     <section id:"file-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"File operation", *[
         <h2 id:"file-title","Open image">,field("file-path","Path"),

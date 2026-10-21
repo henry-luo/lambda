@@ -1,0 +1,643 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos editable Levels and Curves, graph drafts, save/reopen and validation",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#levels-output_white"
+      },
+      "text": "128",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#levels-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 128,
+      "max_r": 128,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#curve-points"
+      },
+      "text": "[[0,1],[1,0]]",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 127,
+      "max_r": 127,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 128,
+      "max_r": 128,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 127,
+      "max_r": 127,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/tone-ui.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/tone-ui.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 127,
+      "max_r": 127,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-select-effect='1']"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#curve-chart"
+      },
+      "dx": 0,
+      "dy": -40,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-points",
+      "equals": "3"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#curve-chart",
+        "offset_x": 118,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#curve-chart",
+        "offset_x": 118,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-points",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-points",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-tab"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-points",
+      "equals": "3"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#curve-chart",
+        "offset_x": 50,
+        "offset_y": 100
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#curve-chart",
+        "offset_x": 70,
+        "offset_y": 90
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#curve-chart"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-points",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 190,
+      "max_r": 192,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 127,
+      "max_r": 127,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-points",
+      "equals": "2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#levels-black"
+      },
+      "text": "220",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#levels-white"
+      },
+      "text": "30",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#levels-apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 127,
+      "max_r": 127,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#curve-points"
+      },
+      "text": "[[0,0],[0.5,1],[0.5,0],[1,1]]",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 127,
+      "max_r": 127,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curve-reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 128,
+      "max_r": 128,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#curve-channel"
+      },
+      "value": "r"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#curve-points"
+      },
+      "text": "[[0,0],[1,0.5]]",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#curve-channel"
+      },
+      "value": "rgb"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#curve-channel"
+      },
+      "value": "r"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#curve-points"
+      },
+      "equals": "[[0, 0], [1, 0.5]]"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-apply"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-20261021/tone.png"
+    }
+  ]
+}
