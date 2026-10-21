@@ -37,6 +37,7 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 - **Layering.** The input layer (`lambda-boundary-io`) cannot call runtime functions such as `array_num_get_number_value`; the converter reads typed arrays through the mark reader.
 - **`InheritType`** RrSs (0) and Rrs (2) are accepted while the immediate parent's local scale is uniform, matching ufbx: RrSs is then ordinary composition, and Rrs divides the child's local scale by the parent's, at rest and at every key (an Rrs joint gains a channel when its parent's scale is animated). A non-uniform parent scale is an error. Mixamo writes Rrs on spine and eye joints, which the first profile rejected.
 - **Clusters without weights read stale arrays.** Mixamo writes a cluster for every bone in every mesh, most without `Indexes` or `Weights`; a missing child record left the previous cluster's arrays in place, so a bone took another bone's vertices. Rest poses hid it (every skin matrix is the identity at bind), and joint checks could not see it; animated skinned vertices against ufbx did. A missing record now reads as empty, and `rig.fbx` carries an empty cluster between weighted ones.
+- **No golden for the Kenney render fixture.** Its document golden was 885 KB, almost all mesh arrays at full precision (float32 numbers would only reach 585 KB), while `motion_oracle.ls` checks the same conversion against ufbx and `FBXLoader` with a tolerance and the render case checks pixels. Asset-heavy view fixtures are exempt from the golden rule, as `imported-assets.ls` already was (user decision, 2026-10-21; `test/README.md`).
 - **Oracle keys.** Skinned vertices were keyed by bind position in millimetres; Mixamo's 57,000-vertex body places distinct vertices closer than that, so keys now use 10 µm. The ufbx dump also listed stacks by name, so the rig's empty duplicate `wave` stack replaced the real one and its check passed vacuously until the new finger tips depended on Finger1's 350° turn; stacks are now a list and the oracle takes the first of a name, as `FBXLoader` does.
 - **Events reach Lambda handlers (§13 decision 10).** `on statechange(evt)` in a Lambda view receives `controller`, `from`, `to` and `time`; `finished` and `loop` use the same path.
 
@@ -53,7 +54,6 @@ The branch adds about 2,970 lines of engine and package code (`lambda/`, `radian
 
 ## 4. Open items
 
-- **Kenney render golden.** `test/scene3d/motion-kenney.txt` is 885 KB, almost all mesh geometry printed at full precision; float32 numbers would only bring it to 585 KB. How to keep asset-heavy view fixtures small is a convention decision (as `imported-assets.ls` has no golden at all).
 - **`FBXLoader` differences.** Three.js keys every curve linearly and re-slerps Euler turns, so it differs from ufbx and the converter on constant steps, cubic keys and long Euler turns; `motion_oracle.ls` records where.
 - **Package import warnings.** Importing `lambda.scene3d.motion` logs shadow-lint warnings for `load` (as `lambda.scene3d.asset` already does).
 - **Later stages** remain as listed in the proposal's §12.
