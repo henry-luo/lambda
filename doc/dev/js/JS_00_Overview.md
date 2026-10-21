@@ -59,7 +59,7 @@ Inside the engine, a front-end feeds a multi-phase MIR transpiler; the runtime c
 
 <img alt="Compilation pipeline overview" src="diagram/pipeline_overview.svg" width="318">
 
-Source → first-party C parse/direct AST reduction → early-error validation → a 14-step lowering pipeline producing a MIR module → link as native code (default) or the MIR interpreter (large/cold/document scripts) → execute `js_main` → drain the event loop → result. The full pipeline, phase model, and interpreter-vs-JIT policy are in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md).
+Source → first-party C parse/direct AST reduction → validation/binding/indexing → AUTO admission → AST execution, with fast MVP MIR for unsupported units and eligible hot promotion → drain the event loop → result. AUTO is the default; explicit `JS_EXEC_BACKEND=mir` selects whole-unit MVP MIR (**D8.1.3v29**). The full pipeline, phase model, and tier policy are in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md).
 
 ---
 
@@ -117,7 +117,7 @@ A handful of decisions recur across the set and are worth knowing before diving 
 - **`Item` everywhere.** Every JS value is a 64-bit tagged `Item`; objects are Lambda `Map` structs with a `TypeMap` shape. This is what makes interop with Lambda's parsers/formatters and Radiant free. ([JS_03](JS_03_Value_Model.md), [JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Metadata-selected object operations.** Immutable `TypeMap::js_meta` selects the semantic class/family and its `JsPropertyOps`; the 4-bit `map_kind` remains only a physical storage/tracing tag. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Boxed-by-default, native-on-proof codegen.** MIR carries boxed `Item`s unless type inference proves a value and its consumer are numeric, enabling native arithmetic and shaped-slot access without losing generality. ([JS_04](JS_04_MIR_Lowering.md), [JS_15](JS_15_Performance.md))
-- **JIT with an interpreter escape hatch.** Native code is the default; large, cold, or document-embedded scripts link to the MIR interpreter because link-time codegen dominates their cost. ([JS_01](JS_01_Compilation_Pipeline.md), [JS_15](JS_15_Performance.md))
+- **AUTO with hot MIR promotion.** Supported units start in the AST interpreter; unsupported units and eligible hot definitions use fast MVP MIR. Explicit AST and MIR choices remain available (**D8.1.3v29**). ([JS_01](JS_01_Compilation_Pipeline.md), [JS_15](JS_15_Performance.md))
 - **Preamble + batch process model.** test262/Node conformance runs compile a shared harness once and then each test against that snapshot inside a persistent, crash-recoverable worker. ([JS_01](JS_01_Compilation_Pipeline.md), [JS_16](JS_16_Testing.md))
 - **Shape and metadata ownership.** Property descriptors use `ShapeEntry` flags and `JsAccessorPair`; built-in identity uses immutable `TypeMap::js_meta`, while private names use NamePool identity. The Tune6 migration is complete under **D3.4.7**. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Generator-based async.** Async functions reuse the generator state-machine transform; the event loop is libuv with a custom microtask queue layered on top. ([JS_08](JS_08_Iterators_Generators.md), [JS_09](JS_09_Async_Modules.md))

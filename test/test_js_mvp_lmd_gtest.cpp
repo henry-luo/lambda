@@ -2066,8 +2066,7 @@ TEST_F(JsFormalMir, AgentAsyncWaitSettlesInOwningJobQueue) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
-TEST_F(JsFormalMir, UnsetBackendSelectsMvpMir) {
-    unsetenv("JS_EXEC_BACKEND");
+TEST_F(JsFormalMir, MirBackendSelectsMvpMir) {
     Item value = run("function answer(){return 42} answer");
     ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
     EXPECT_TRUE(function_has_abi(value.function, FN_ENTRY_ABI_MVP_LMD));

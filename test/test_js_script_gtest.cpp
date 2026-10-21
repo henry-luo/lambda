@@ -1197,22 +1197,18 @@ TEST(JsScriptOwnership, PreservesClassFieldInitializerCaptureOverlay) {
     runtime_cleanup(&index_runtime);
 }
 
-TEST(JsMir, UnsetBackendSelectsMvpForSupportedScript) {
+TEST(JsInterpreter, UnsetBackendSelectsAutoForSupportedScript) {
+    JsExecutionBackendScope backend(NULL);
     Runtime runtime = {};
     runtime_init(&runtime);
-    const char* previous = getenv("JS_EXEC_BACKEND");
-    char saved_backend[32] = {};
-    if (previous) str_copy(saved_backend, sizeof(saved_backend), previous,
-        strlen(previous));
-    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
-    const char source[] = "var answer = 6 * 7; answer;";
-    Item result = transpile_js_to_mir(&runtime, source, "unset-mvp.js", NULL);
+    const char source[] = "function answer() { return 6 * 7; } answer();";
+    Item result = transpile_js_to_mir(&runtime, source, "unset-auto.js", NULL);
 
-    if (saved_backend[0]) ASSERT_EQ(setenv("JS_EXEC_BACKEND", saved_backend, 1), 0);
     ASSERT_FALSE(item_is_error(result));
-    EXPECT_FALSE(runtime.js_ast_backend);
-    EXPECT_NE(js_runtime_state.formal_mir_owner, nullptr);
+    EXPECT_TRUE(runtime.js_ast_backend);
+    EXPECT_TRUE(runtime.js_promotion_auto);
+    EXPECT_EQ(js_runtime_state.formal_mir_owner, nullptr);
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
     runtime_cleanup(&runtime);
 }
