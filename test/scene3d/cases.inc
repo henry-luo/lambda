@@ -23,6 +23,7 @@
 {"ResponsiveSvgConstrainsAuthoredWidthBeforeDerivingAutoHeight", "test/html/svg_responsive_limits.html", "test/scene3d/events/ResponsiveSvgConstrainsAuthoredWidthBeforeDerivingAutoHeight.json", 12},
 {"SvgSizingParityCoversRatioAttributesPercentLimitsFlexGridAndFallbacks", "test/scene3d/sizing.html", "test/scene3d/events/SvgSizingParityCoversRatioAttributesPercentLimitsFlexGridAndFallbacks.json", 23},
 {"LambdaPackageSceneRendersWithTypedAttributesBesideHtmlAndSvg", "test/scene3d/mixed.ls", "test/scene3d/events/LambdaPackageSceneRendersWithTypedAttributesBesideHtmlAndSvg.json", 3},
+{"SkinningPaletteHolds256BonesAndRejectsMore", "test/scene3d/skinning-palette.ls", "test/scene3d/events/SkinningPaletteHolds256BonesAndRejectsMore.json", 17},
 {"TransparentSceneCompositesOverSvgAndAntialiasesEdges", "test/scene3d/events/TransparentSceneCompositesOverSvgAndAntialiasesEdges.html", "test/scene3d/events/TransparentSceneCompositesOverSvgAndAntialiasesEdges.json", 5},
 {"OpaqueDepthCullingAndBufferVertexColorsDeterminePixels", "test/scene3d/events/OpaqueDepthCullingAndBufferVertexColorsDeterminePixels.html", "test/scene3d/events/OpaqueDepthCullingAndBufferVertexColorsDeterminePixels.json", 9},
 {"TypedTextAttributesCannotSilentlyUseDefaultMaterialColor", "test/scene3d/events/TypedTextAttributesCannotSilentlyUseDefaultMaterialColor.ls", "test/scene3d/events/TypedTextAttributesCannotSilentlyUseDefaultMaterialColor.json", 1},

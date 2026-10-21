@@ -1,6 +1,6 @@
 # Lambda Motion — FBX/BVH Character Animation for Scene3D
 
-**Status:** proposal, 2026-10-21. Nothing here is implemented or ratified. The user asked for (1) FBX and BVH parsing into Lambda element trees and (2) rendering and animating the loaded characters in `<scene3d>`, packaged as `lambda.scene3d.motion`. On 2026-10-21 the user selected a **common, renderer-independent `<character>` schema** that both formats map into (§6); the earlier draft converted each format straight into the scene vocabulary (Appendix C). Choices marked *recommended* still need the user's selection; they are collected in §13.
+**Status:** proposal, 2026-10-21; on 2026-10-21 the user selected every recommended option in §13 and asked for M0–M5 to be implemented on the `motion` branch (implementation record: [Lambda_Impl_Motion.md](impl/Lambda_Impl_Motion.md)). The user asked for (1) FBX and BVH parsing into Lambda element trees and (2) rendering and animating the loaded characters in `<scene3d>`, packaged as `lambda.scene3d.motion`. On 2026-10-21 the user selected a **common, renderer-independent `<character>` schema** that both formats map into (§6); the earlier draft converted each format straight into the scene vocabulary (Appendix C). The choices collected in §13 were selected as recommended.
 
 **Scope:** two new `input()` formats (`fbx`, `bvh`) with faithful raw mappings; the `<character>` schema with Lambda type definitions; one native converter per format into that schema; a source package that validates, edits, retargets and compiles characters into `<scene3d>` content; and the Radiant host changes that need (a larger skinning palette and retained controller playback). Root motion, blend spaces, IK, VRM and FBX blend shapes are later stages (§12).
 
@@ -521,7 +521,9 @@ Each milestone ends at its named gate (D7.3.5). Required aggregate gates (`make 
 
 **Later stages** (each needs its own scope): converters from skinned glTF, VRM (glTF with the `VRMC_vrm` humanoid map, so roles come for free) and A3D into `<character>` — the existing glTF scene importer should then route its skinned content through the character path rather than keep a second skin interpretation; root motion applied to the character's presented transform (with the physics package's authored/simulated/presented split); 1-D blend spaces (walk ↔ run by a parameter); two-bone foot IK and look-at; FBX blend shapes, which need schema morph targets and more than the native renderer's two; additive upper-body layers; crowds through skinned instancing; generated motion (text-to-motion and music-to-dance models typically export BVH, so they enter through M1); a system function exposing the shared sampler for resampling.
 
-## 13. Open decisions
+## 13. Decisions
+
+**Selected 2026-10-21 (USER: "all recommended").** Each item below takes its recommended or proposed option; decision 8 remains to be confirmed against the pinned `BVHLoader`, and decision 10 is settled by what the implementation finds.
 
 1. **FBX implementation:** own parser and converter with ufbx/Three.js as oracles (*recommended*), or vendored ufbx (§10).
 2. **Raw FBX shape:** properties in a `props` attribute with child records as content (*recommended*), or another layout.
@@ -564,3 +566,4 @@ Each milestone ends at its named gate (D7.3.5). Required aggregate gates (`make 
 - **2026-10-21, first draft:** FBX and BVH converted straight into the scene3d vocabulary as new `scene3d-asset` flavors, with clip binding done by rewriting generated track paths.
 - **2026-10-21, user selection:** a common `<character>` schema that both formats map into. The draft's direct conversion is superseded: motion no longer passes through generated IDs, and `motion.scene` is the single compile point into the scene.
 - **2026-10-21, schema detail:** the first chat sketch of the schema gave each mesh a palette of joint names with per-mesh inverse binds. The proposal instead stores body geometry in character space with one `inverse_bind` per joint, because the native renderer stores binds on bones; the alternative remains §13 decision 11.
+- **2026-10-21, decisions selected:** the user took every recommended option in §13 and asked for M0–M5 in a worktree branch.

@@ -246,7 +246,8 @@ static bool scene3d_animation_parse(Scene3dAnimationState* state,DomElement* roo
         for(auto* clip=state->clips;clip;clip=clip->next) if(!strcmp(clip->name,name)) return false;
         unsigned count=0;
         for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) count++;
-        if(!count||count>256) return false;
+        // a clip may animate position, rotation and scale of every bone (1024 tracks)
+        if(!count||count>1024) return false;
         auto* channels=(AnimationChannelView*)pool_calloc(state->pool,count*sizeof(AnimationChannelView));if(!channels) return false;
         double inferred=0;unsigned index=0;
         for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) {

@@ -18,6 +18,9 @@
 #include <float.h>
 
 static constexpr unsigned SCENE_NODE_LIMIT = 8192;
+// bones per skeleton: the palette is a data texture, so the cap is a resource
+// bound rather than the vertex-uniform space GL 4.1 guarantees (64 mat4)
+static constexpr unsigned SCENE_BONE_LIMIT = 256;
 static constexpr unsigned SCENE_VERTEX_LIMIT = 262144;
 static constexpr unsigned SCENE_INSTANCE_LIMIT = 16384;
 
@@ -54,10 +57,13 @@ struct Scene3dMesh {
     bool visible;
     float depth;
     unsigned order;
-    DomNodeRef bones[16];
-    Scene3dMatrix inverse_bind[16], bone_matrices[16], bind_matrix;
-    bool authored_bind[16];
-    unsigned bone_count;
+    // one record per skeleton bone in preorder, sized to the skeleton
+    DomNodeRef* bones;
+    Scene3dMatrix *inverse_bind, *bone_matrices, bind_matrix;
+    bool* authored_bind;
+    unsigned bone_count, bone_capacity;
+    // the bone matrices, one RGBA32F row of four texels per bone
+    NativeGlResource palette;
     float morph_weights[2], morph_base_weights[2];
 };
 struct Scene3dProjection {
@@ -396,7 +402,7 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
             float total=0;
             for(unsigned c=0;c<4;c++) {
                 float index=deformation[0][i*4+c],weight=deformation[1][i*4+c];
-                if(index<0||index>=16||floorf(index)!=index||weight<0||weight>1) {
+                if(index<0||index>=SCENE_BONE_LIMIT||floorf(index)!=index||weight<0||weight>1) {
                     scene3d_fail(build->entry,"invalid skin index or weight");return nullptr;
                 }
                 vertices[i].skin_indices[c]=index;vertices[i].skin_weights[c]=weight;total+=weight;
@@ -514,10 +520,18 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
 static float scene3d_determinant(const float* m) {
     return m[0]*(m[5]*m[10]-m[9]*m[6])-m[4]*(m[1]*m[10]-m[9]*m[2])+m[8]*(m[1]*m[6]-m[5]*m[2]);
 }
+static unsigned scene3d_count_bones(DomElement* node,unsigned depth=0) {
+    unsigned count=0;
+    if(depth>64) return 0;
+    for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) {
+        count+=1+scene3d_count_bones(child->as_element(),depth+1);
+    }
+    return count;
+}
 static bool scene3d_collect_bones(Scene3dBuild* build,Scene3dMesh* mesh,DomElement* node,unsigned depth=0) {
     if(depth>64) return false;
     for(DomNode* child=node->first_child;child;child=child->next_sibling) if(child->is_element()) {
-        DomElement* bone=child->as_element();if(!scene3d_tag(bone,"bone")||mesh->bone_count>=16) return false;
+        DomElement* bone=child->as_element();if(!scene3d_tag(bone,"bone")||mesh->bone_count>=mesh->bone_capacity) return false;
         Scene3dMatrix world;bool visible;unsigned index=mesh->bone_count++;
         if(!scene3d_components(bone,"inverse-bind-matrix",mesh->inverse_bind[index].v,16,&mesh->authored_bind[index])) return false;
         if(mesh->authored_bind[index]) {
@@ -547,11 +561,23 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
     const char* skeleton=scene3d_text(build->mesh_source,"skeleton");
     if(skeleton||geometry->bone_index_count) {
         Scene3dDefinition* rig=scene3d_definition(build,nullptr,skeleton,"skeleton");bool visible;
+        unsigned bones=rig?scene3d_count_bones(rig->source):0;
+        if(bones>SCENE_BONE_LIMIT) return scene3d_fail(build->entry,"skeleton exceeds 256 bones");
+        if(bones) {
+            mesh->bones=(DomNodeRef*)pool_calloc(p->pool,bones*sizeof(DomNodeRef));
+            mesh->inverse_bind=(Scene3dMatrix*)pool_calloc(p->pool,bones*sizeof(Scene3dMatrix));
+            mesh->bone_matrices=(Scene3dMatrix*)pool_calloc(p->pool,bones*sizeof(Scene3dMatrix));
+            mesh->authored_bind=(bool*)pool_calloc(p->pool,bones*sizeof(bool));
+            if(!mesh->bones||!mesh->inverse_bind||!mesh->bone_matrices||!mesh->authored_bind) return false;
+            mesh->bone_capacity=bones;
+        }
         if(!rig||!scene3d_collect_bones(build,mesh,rig->source)||!geometry->bone_index_count||
             mesh->bone_count<geometry->bone_index_count||!scene3d_world(build->entry,build->mesh_source,&mesh->bind_matrix,&visible,true))
             return scene3d_fail(build->entry,"invalid skeleton, bind pose or skin indices");
         if(count!=1||matrices||memcmp(local_instance.v,scene3d_identity().v,sizeof(local_instance.v)))
             return scene3d_fail(build->entry,"skinned meshes require a single identity instance");
+        mesh->palette=native_gl_data_texture(build->entry->graphics,4,mesh->bone_count);
+        if(!scene3d_resource(build,mesh->palette)) return false;
     }
     bool unit=!matrices;
     if (unit && geometry->unit_vertices.id) mesh->vertices=geometry->unit_vertices;
@@ -898,18 +924,24 @@ layout(location=11) in vec3 morph_position1;
 layout(location=12) in vec3 morph_normal0;
 layout(location=13) in vec3 morph_normal1;
 uniform mat4 model, projection;
-uniform mat4 bones[16];
+uniform sampler2D palette;
 uniform vec2 morph_weights;
 uniform float skinned, colored;
 out vec3 world_normal, vertex_color;
 out vec2 texture_uv;
+// a bone matrix is one palette row: four texels, one per column
+mat4 bone(float index) {
+    int row = int(index);
+    return mat4(texelFetch(palette, ivec2(0, row), 0), texelFetch(palette, ivec2(1, row), 0),
+        texelFetch(palette, ivec2(2, row), 0), texelFetch(palette, ivec2(3, row), 0));
+}
 void main() {
     mat4 world = model * instance;
     vec3 vertex = position + morph_position0*morph_weights.x + morph_position1*morph_weights.y;
     vec3 posed_normal = normal + morph_normal0*morph_weights.x + morph_normal1*morph_weights.y;
     if(skinned>0.5) {
-        mat4 skin = bones[int(skin_indices.x)]*skin_weights.x+bones[int(skin_indices.y)]*skin_weights.y+
-            bones[int(skin_indices.z)]*skin_weights.z+bones[int(skin_indices.w)]*skin_weights.w;
+        mat4 skin = bone(skin_indices.x)*skin_weights.x+bone(skin_indices.y)*skin_weights.y+
+            bone(skin_indices.z)*skin_weights.z+bone(skin_indices.w)*skin_weights.w;
         vertex=(skin*vec4(vertex,1.0)).xyz;posed_normal=mat3(skin)*posed_normal;
     }
     world_normal = transpose(inverse(mat3(world))) * posed_normal;
@@ -1048,11 +1080,13 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         float skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0;
         rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"colored",&colored,1)&&
             scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
-        if(mesh->bone_count) rendered=rendered&&scene3d_uniform(entry,"bones[0]",mesh->bone_matrices[0].v,16,mesh->bone_count);
+        if(mesh->bone_count) rendered=rendered&&native_gl_data_texture_update(entry->graphics,mesh->palette,
+            mesh->bone_matrices[0].v,mesh->bone_count);
         NativeGlDraw draw={entry->program,mesh->vertices,material->texture.id?material->texture:entry->white,
             mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
             mesh->geometry->index_count!=0,material->transparent,material->side,mesh->clockwise};
         draw.depth_only=material->depth_only;
+        if(mesh->bone_count) draw.data=mesh->palette;
         rendered=rendered&&native_gl_draw(entry->graphics,&draw);
     }
     ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,entry->target):nullptr;

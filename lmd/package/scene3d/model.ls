@@ -40,7 +40,7 @@ fn check_geometry(n) bool^ {
         let skin = n["skin-indices"], weights = n["skin-weights"]
         let checked_skin = if (skin != null or weights != null) {
             if (not (skin is array) or not (weights is array) or len(skin) != vertices * 4 or len(weights) != len(skin) or
-                not all([for (x in skin) numeric(x) and x >= 0 and x < 16 and floor(x) == x]) or
+                not all([for (x in skin) numeric(x) and x >= 0 and x < 256 and floor(x) == x]) or
                 not all([for (x in weights) numeric(x) and x >= 0 and x <= 1]) or
                 not all([for (i in 0 to (vertices - 1)) abs(sum(slice(weights, i * 4, i * 4 + 4)) - 1.0) <= 0.00001]))
                 raise fail("invalid skin indices or weights") else true
@@ -86,7 +86,7 @@ fn check_node(n, all_nodes) bool^ {
         else if (kind == 'mesh') ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
     if (kind == 'animation-clip') {
-        if (not text(n.id) or len(children) == 0 or len(children) > 256 or
+        if (not text(n.id) or len(children) == 0 or len(children) > 1024 or
             (n.duration != null and not numeric(n.duration)) or
             (n.autoplay != null and not (n.autoplay is bool)) or (n.additive != null and not (n.additive is bool)))
             raise fail("invalid animation clip") else true
@@ -164,7 +164,7 @@ fn check_node(n, all_nodes) bool^ {
         let checked_skeleton = if (n.skeleton != null) {
             let rig = definition(all_nodes, n.skeleton, 'skeleton')^
             let bones = [for (b in nodes(rig)^ where name(b) == 'bone') b]
-            if (len(bones) == 0 or len(bones) > 16 or n.instances != null) raise fail("invalid skeleton or skinned instances") else true
+            if (len(bones) == 0 or len(bones) > 256 or n.instances != null) raise fail("invalid skeleton or skinned instances") else true
         } else true
         let checked_weights = if (n["morph-weights"] != null and
             (not (n["morph-weights"] is array) or len(n["morph-weights"]) < 1 or len(n["morph-weights"]) > 2 or
