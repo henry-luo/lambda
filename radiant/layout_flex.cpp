@@ -111,7 +111,7 @@ static bool flex_container_height_is_fixed(FlexContainerLayout* flex,
         container->gi && container->gi->computed_grid_row_start > 0;
     if (!fixed && is_grid_item && container->height > 0.0f) fixed = true;
     if (!fixed && container->height > 0.0f &&
-        flex_height_is_parent_constrained(container, true, row_axis ? false : true)) {
+        flex_height_is_parent_constrained(flex->lycon, container, true, row_axis ? false : true)) {
         fixed = true;
     }
     return fixed;
@@ -788,7 +788,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool has_max_height = layout_positive_max_axis_or(container, false, 0.0f) > 0.0f;
     // is not definite; auto-height flex containers may carry cached intrinsic
     bool height_assigned_by_parent = false;
-    if (container->height > 0) {
+    if (container->height > 0 && lycon->natural_flex_height_root != container) {
         bool is_grid_item_col = (container->parent_item_kind() == DomElement::PARENT_ITEM_GRID) &&
                                 container->gi && container->gi->computed_grid_row_start > 0;
         if (is_grid_item_col) {

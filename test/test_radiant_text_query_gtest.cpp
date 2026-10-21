@@ -578,6 +578,58 @@ TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConst
 
 }
 
+TEST_F(RadiantTextQuery, NestedFlexNaturalFlowPrecedesStretchAndValidatesBlockConstraint) {
+    ASSERT_NE(load("test/html/layout_flex_natural_nested.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    ui.viewport_width = 320.0f;
+    ui.viewport_height = 240.0f;
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
+    for (unsigned pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const char* id : {"row", "column", "start-row", "start-column"})
+            EXPECT_FLOAT_EQ(find(id)->height, 40.0f) << id;
+        for (const char* id : {"page", "main", "content"})
+            EXPECT_FLOAT_EQ(find(id)->height, 60.0f) << id;
+        EXPECT_FLOAT_EQ(find("article")->height, 40.0f);
+        EXPECT_FLOAT_EQ(find("footer")->y - find("article")->y, 40.0f);
+        for (const char* id : {"fixed-row", "fixed-column", "min-row", "min-column"})
+            EXPECT_FLOAT_EQ(find(id)->height, 100.0f) << id;
+        EXPECT_FLOAT_EQ(find("fill-first")->height, 50.0f);
+        EXPECT_FLOAT_EQ(find("fill-last")->y - find("fill-first")->y, 50.0f);
+        ASSERT_NE(find("column")->layout_cache, nullptr);
+        EXPECT_NE(find("column")->layout_cache->measured_flex_flow, nullptr);
+        for (const char* id : {"percent-gap", "percent-basis", "stretch-basis"}) {
+            ASSERT_NE(find(id)->layout_cache, nullptr);
+            EXPECT_EQ(find(id)->layout_cache->measured_flex_flow, nullptr) << id;
+        }
+    }
+    DomElement* item = find("fixed-column");
+    FlexFlowTestContext flow(&ui, document, item);
+    ASSERT_NE(flow.arena, nullptr);
+    ViewBlock* block = lam::view_require_block(item);
+    float height = 0.0f;
+    radiant::flex_measured_flow_invalidate(item);
+    ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, block, &flow.parent, 200.0f, &height));
+    EXPECT_FLOAT_EQ(height, 40.0f);
+    EXPECT_EQ(flow.layout.profiler.flex_flow_measures, 1u);
+    DomText* text = find("fill-first")->first_child->as_element()->first_child->as_text();
+    TextRect* fragments = text->rect;
+    item->height = height;
+    layout_flex_item_content(&flow.layout, block);
+    EXPECT_EQ(flow.layout.profiler.flex_flow_reuses, 1u);
+    EXPECT_EQ(text->rect, fragments);
+    EXPECT_FLOAT_EQ(find("fill-first")->height, 20.0f);
+    item->height = 100.0f;
+    layout_flex_item_content(&flow.layout, block);
+    EXPECT_EQ(flow.layout.profiler.flex_flow_reuses, 1u);
+    EXPECT_FLOAT_EQ(find("fill-first")->height, 50.0f);
+    ASSERT_TRUE(find("row")->set_attribute("style", "width:20px"));
+    ASSERT_TRUE(dom_text_set_content(find("text")->first_child->as_text(), "XX XX XX"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(find("row")->height, 80.0f);
+    EXPECT_FLOAT_EQ(find("column")->height, 80.0f);
+}
+
 TEST_F(RadiantTextQuery, ColumnContributionPreservesPublishedChildGeometry) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);

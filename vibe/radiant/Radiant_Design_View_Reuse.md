@@ -305,6 +305,12 @@ intrinsic work on initialization,
 and expire unkeyed scalar entries at the measurement generation. A scalar
 contribution query restores the live boxes whose fragments it borrows (**VR15**).
 
+Natural-size flow of an eligible nested flex subtree precedes final stretch.
+Its root receives an explicit unconstrained block query instead of inheriting
+provisional parent geometry. Final reuse additionally validates the measured
+block constraint; a changed height can redistribute nested flex descendants.
+The same selected-view ownership and mutation/resource keys apply (**VR15**).
+
 
 ---
 

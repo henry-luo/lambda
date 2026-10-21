@@ -348,6 +348,7 @@ float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size = false);
 bool layout_flow_is_context_independent(DomElement* element, bool include_height = false);
+bool layout_box_is_context_independent(DomElement* element, bool include_height = false);
 bool layout_has_cyclic_percentage_replaced_descendant(DomElement* element);
 bool layout_has_cyclic_percentage_ratio_descendant(LayoutContext* lycon, DomElement* element);
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
@@ -2814,7 +2815,7 @@ CssEnum layout_flex_direction(ViewElement* container);
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
 float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
                                         float percentage_containing_width = -1.0f);
-bool flex_height_is_parent_constrained(ViewBlock* container,
+bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* container,
                                        bool include_column_main_size,
                                        bool include_row_cross_stretch);
 
@@ -3849,6 +3850,8 @@ typedef struct LayoutContext {
     lam::Up<radiant::CssResolvedStyle> css_style_recording;
     // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
     lam::Up<DomElement> measurement_root;
+    // a completed natural-size query precedes the root's final flex stretch.
+    lam::Up<ViewBlock> natural_flex_height_root;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox

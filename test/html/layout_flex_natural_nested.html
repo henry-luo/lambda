@@ -1,0 +1,19 @@
+<!doctype html>
+<style>
+@font-face { font-family: HeightMetrics; src: url('../layout/data/support/fonts/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 HeightMetrics; }
+.row { display: flex; width: 200px; }
+.column { display: flex; flex-direction: column; flex: 1; }
+.small { font-size: 10px; }
+.fill { flex: 1; }
+</style>
+<div id="result">
+  <div id="row" class="row"><div id="column" class="column"><div id="first"><span id="text" class="small">XX</span></div><div id="last"><span class="small">XX</span></div></div></div>
+  <div id="page" class="row"><div id="main" class="column"><div id="content" class="column"><article id="article"><div><span class="small">XX</span></div><div><span class="small">XX</span></div></article><footer id="footer">XX</footer></div></div></div>
+  <div id="fixed-row" class="row" style="height:100px"><div id="fixed-column" class="column"><div id="fill-first" class="fill"><span class="small">XX</span></div><div id="fill-last" class="fill"><span class="small">XX</span></div></div></div>
+  <div id="min-row" class="row" style="min-height:100px"><div id="min-column" class="column"><div class="fill"><span class="small">XX</span></div><div class="fill"><span class="small">XX</span></div></div></div>
+  <div id="start-row" class="row" style="align-items:flex-start"><div id="start-column" class="column"><div><span class="small">XX</span></div><div><span class="small">XX</span></div></div></div>
+  <div class="row"><div id="percent-gap" class="column" style="row-gap:10%"><div>XX</div><div>XX</div></div></div>
+  <div class="row"><div id="percent-basis" class="column"><div style="flex-basis:50%">XX</div><div>XX</div></div></div>
+  <div class="row"><div id="stretch-basis" class="column"><div style="flex-basis:stretch;flex-shrink:0">XX</div><div>XX</div></div></div>
+</div>

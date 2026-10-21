@@ -170,6 +170,12 @@ Ordinary invalidation retains its view pool; retained pool ownership does not
 extend flex sizing work or scalar-cache validity beyond their measurement pass.
 General flex estimator/ancestor-height fidelity remains open (**VR15**).
 
+Eligible nested flex subtrees also share natural-size flow at their assigned
+inline width. The query owns an unconstrained root before final stretch; final
+reuse validates its block constraint because nested flex placement can depend
+on height. Percentage gaps and percentage/stretch bases retain their existing
+path until sizing-policy dependencies are represented (**VR15**).
+
 ## Execution plan
 
 Every implementation phase is separate and must be behavior-neutral unless a

@@ -3253,14 +3253,12 @@ static float intrinsic_store_ratio_width_from_height(
     return aspect_width;
 }
 
-bool layout_flow_is_context_independent(DomElement* element, bool include_height) {
+bool layout_box_is_context_independent(DomElement* element, bool include_height) {
     if (!radiant::css_resolved_style_is_containing_block_independent(element)) return false;
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
-    // ordinary horizontal flow reads containing dimensions only for CSS lengths.
-    // Other formatting modes and ratio transfer keep their complete context key.
-    if ((element->display.inner != CSS_VALUE_FLOW &&
-         element->display.inner != CSS_VALUE_FLOW_ROOT) ||
-        element->display.outer == CSS_VALUE_LIST_ITEM || element->pseudo ||
+    // independent box lengths can share constraints; each formatting algorithm
+    // still owns any additional inputs it reads, including flex block size.
+    if (element->display.outer == CSS_VALUE_LIST_ITEM || element->pseudo ||
         layout_block_inline_axis_is_vertical(view) || is_multicol_container(view) ||
         layout_used_preferred_aspect_ratio(view) > 0.0f) return false;
     // intrinsic/stretch keywords can read constraints outside ordinary CSS length bindings.
@@ -3272,6 +3270,12 @@ bool layout_flow_is_context_independent(DomElement* element, bool include_height
             layout_intrinsic_max_size_keyword(view, horizontal) != CSS_VALUE__UNDEF) return false;
     }
     return true;
+}
+
+bool layout_flow_is_context_independent(DomElement* element, bool include_height) {
+    return element && (element->display.inner == CSS_VALUE_FLOW ||
+        element->display.inner == CSS_VALUE_FLOW_ROOT) &&
+        layout_box_is_context_independent(element, include_height);
 }
 
 // tier-3: layout-transient, valid within one measurement generation

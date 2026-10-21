@@ -2884,6 +2884,16 @@ five ancestor-height changes; general flex estimator/flow fidelity and query-own
 fragment results remain open. Full classification and provenance are in the
 implementation record.
 
+The nested-flex continuation measures eligible auto-height flex subtrees with
+real flow at the assigned inline width. An explicit natural-size root constraint
+precedes final cross stretch; a provisional height or horizontal flex growth
+cannot fix that query's block size. Nested flex results also key the completed
+block constraint, since a later stretched height can redistribute descendants.
+Ordinary block/inline results retain their proven height independence. Ordered
+generated effects, resources and dependent lengths remain on existing paths;
+this does not yet provide independent fragments for multiple constraints
+(**VR15**, selected-view ownership **D4.5.1v4 / D4.5.2**).
+
 Acceptance: nested document/flex fixtures compute unchanged style inputs and
 each sizing query once; repeated geometry reads do no additional work; A→B→A
 constraints reuse A; inherited font/color/variable edits and changed

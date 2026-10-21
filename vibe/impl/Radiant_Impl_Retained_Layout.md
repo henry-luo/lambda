@@ -1,6 +1,6 @@
 # Retained computed style, sizing and layout
 
-**Status:** milestones 1–3a, the ordinary milestone-3b consumers and shared
+**Status:** milestones 1–3a, the independent milestone-3b consumers and shared
 update/publication implemented and regression-qualified; general 3b and LLVM
 ancestor-height fidelity remain open, 2026-10-21.  
 **Design:** [CSS Cascade §3.47](../radiant/Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs),
@@ -14,7 +14,7 @@ ancestor-height fidelity remain open, 2026-10-21.
 | 1. Stable style inputs | Repeating a parent's resolution for layout storage/context does not invalidate descendants when computed inputs are unchanged. Font, variables, real style edits and unsupported effects still invalidate correctly. | implemented and qualified |
 | 2. Retained sizing queries | Repeated height requests and A→B→A constraints reuse results; changed width, percent bases, fonts, content/style versions and measurement policy miss correctly. | implemented and qualified for supported horizontal flow subtrees, including flex-item flow |
 | 3a. Computed box boundary | Provisional inline/block roles and new prop allocation do not rerun the cascade. Clean computed geometry is immutable; dependent used values have separate storage. | implemented and qualified for eligible horizontal boxes |
-| 3b. Retained flow results | Measurement consumes clean computed records; exact height requests retain layout results for final flow. | demand-driven row preparation, independent block/inline flow sharing and height-key normalization qualified; general query-owned results pending |
+| 3b. Retained flow results | Measurement consumes clean computed records; exact height requests retain layout results for final flow. | demand-driven row preparation, independent block/inline/nested-flex flow sharing and height-key normalization qualified; general query-owned results pending |
 | 4. Shared update/publication | Correct retained anonymous-table/list mutations; reuse current script-produced geometry at presentation and skip unchanged geometry reads. | implemented; regression gates pass, LLVM ancestor-height fidelity open |
 
 Milestone 1 uses stable input identity as a conservative migration step, not
@@ -414,6 +414,58 @@ text/core tests, then the Radiant baseline and layout integer-cast lint. Compare
 LLVM's complete serialized geometry, work counts and three isolated interleaved
 release timing pairs with the previous qualified binary. Artifacts live in
 `temp/shared-publication/`; do not compare overlapping build/profile wall times.
+
+## Milestone 3b continuation: natural-size queries for nested flex
+
+**VR15:** measure an auto-height nested flex item by real flow at its assigned
+inline width, before final cross-axis stretch. A natural-size query owns an
+explicit root constraint; horizontal flex growth and provisional cross stretch
+cannot turn that root's estimated height into a fixed input. Preserve the normal
+final constraint policy, including cyclic percentages and definite stretch.
+Selected-view results keep their existing ownership (**D4.5.1v4 / D4.5.2**).
+
+The minimal reproducer has two 20px line boxes containing 10px glyphs. Chromium
+gives its column and row 40px; the scalar estimate leaves both at 20px while
+children extend to 40px. A nested page/main/content version likewise leaves its
+outer ancestors at 40px while content reaches 60px. LLVM has the same structural
+mismatch: a 443,059.5px article container inside 315,655.7px flex ancestors.
+
+Scope: independent horizontal flex/block/inline subtrees without dependent box
+lengths, ordered generated effects, resources, percentage gaps/bases, stretch
+bases or other unmigrated formatting contexts. Retain the natural result for final flow only when the nested flex
+block constraint also matches; stretch is a distinct query when it changes
+descendant flex placement. General query-owned fragments and ordered effects
+remain separate work.
+
+Acceptance: correct 40px/60px nested heights on initial and retained layout;
+definite stretch keeps its allocated box and relays out dependent nested flex;
+matching constraints preserve fragments; width/content edits invalidate;
+existing cyclic percentage controls remain 36px/28px. Verification: focused
+native text/core cases and Chromium references, then Radiant baseline and layout
+lint. Refresh the LLVM full-tree/work comparison; use three isolated release
+pairs for any load-time claim. Artifacts: `temp/retained-flow-columns/`.
+
+Implemented: shared box-length dependency checks admit nested flex while keeping
+each formatting algorithm's additional constraints explicit. Natural flow owns
+its root constraint; final nested-flex reuse validates the measured block size.
+The native regression verifies fragment identity, redistribution after stretch,
+retained layout and width/text invalidation, plus dependent-gap/basis fallbacks.
+Chromium 148 independently confirms the fixture and cyclic-percentage controls.
+All 178 native text/layout and 170 core cases, layout lint and diff checks pass.
+The full release Radiant baseline passes: **6,086 passed, 143 existing partial
+outcomes, 2 skipped, zero unexpected failures** (6,231 total), including all
+3,294 layout floors, 662 UI cases and 32 WPT input-event files. No baseline
+reference, comparator or pass floor changed. Evidence: `baseline.log` and
+`baseline-output/` in the same artifact directory.
+
+LLVM's complete serialized layout tree is identical to the predecessor. Document
+layouts remain three, full CSS resolutions 239,073 and parent-key misses four.
+Height requests change 855,309→855,303 and computations 817,930→817,928. This
+does not materially reduce LLVM work; no load-time improvement is claimed and
+no timing sweep was run. Its generated/effectful and dependent formatting paths,
+including the known ancestor-height mismatch, remain open. Full comparison and
+binary/input/source provenance: `geometry-report.json`, `manifest.json` and
+`source.patch`; native/lint evidence: `*-qualified.log`.
 
 ## Verification budget
 
