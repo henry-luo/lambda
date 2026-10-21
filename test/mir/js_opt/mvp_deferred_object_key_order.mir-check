@@ -1,9 +1,6 @@
 {
   "schema_version": 1,
   "description": "D3.3.4, D5.2.1v3, D8.2.6v2: an object assignment key remains boxed across RHS evaluation, then converts once. Callback-capable sites retain a single canonical-key path and indexed-property fallback.",
-  "args": [
-    "--runtime=mvp-lmd"
-  ],
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

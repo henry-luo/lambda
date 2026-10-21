@@ -7,6 +7,8 @@ const {launchBrowser, serveWorkspace} = require('./svg_test_browser.cjs');
 const {PNG} = require('../render/node_modules/pngjs');
 const {assertPixels} = require('./svg_pixel_assertions.cjs');
 const root = path.resolve(__dirname, '../..');
+// match the aggregate runner's frozen host without replacing another task's workspace CLI.
+const binary = path.resolve(root, process.env.RADIANT_TEST_EXECUTABLE || 'lambda.exe');
 const names = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const fixtures = names.length ? names : require('./svg_paint_fixtures.json');
 const browserMode = process.argv.includes('--browser');
@@ -19,7 +21,7 @@ if (useReferences && !browserMode) throw new Error('--references requires --brow
 fs.mkdirSync(out, {recursive: true});
 
 async function main() {
-  const report = {binary_sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'lambda.exe'))).digest('hex'), results: []};
+  const report = {binary_sha256: crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'), results: []};
   let server, browser;
   try {
     if (browserMode) {
@@ -43,7 +45,7 @@ async function main() {
           await page.close();
         } else {
           const fixtureEnv = Object.fromEntries((fixture.env || []).map(entry => [entry.key, entry.value]));
-          const log = execFileSync(path.join(root, 'lambda.exe'), ['render', fixture.html, '-o', file,
+          const log = execFileSync(binary, ['render', fixture.html, '-o', file,
             '-vw', String(fixture.viewport.width), '-vh', String(fixture.viewport.height), '--scale', String(scale), '--no-log'],
             {cwd: root, timeout: 120000, env: {...process.env, ...fixtureEnv, RADIANT_SVG_LAYER: mode, TMPDIR: path.join(root, 'temp')}});
           fs.writeFileSync(file + '.log', log);

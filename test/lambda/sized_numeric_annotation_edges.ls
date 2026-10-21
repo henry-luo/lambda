@@ -16,7 +16,9 @@ let d16: i16 = i16(d16_source);
 let e16_source = 65536
 let e16: u16 = u16(e16_source);
 [e16, type(e16)]
-let d: u32 = -1u32;
+// run-time operand: `-1u32` alone is a constant overflow (S4.1.5)
+let one_u32 = 1u32
+let d: u32 = 0u32 - one_u32;
 [d, type(d)]
 let e: u64 = 18446744073709551615u64;
 [e, type(e)]
@@ -39,20 +41,26 @@ take_u16(param_u16)
 let ret_i8_source = 128
 fn ret_i8() i8 => i8(ret_i8_source);
 [ret_i8(), type(ret_i8())]
-fn ret_u32() u32 => -1u32;
+fn ret_u32() u32 => 0u32 - one_u32;
 [ret_u32(), type(ret_u32())]
 
 "=== fixed-width arithmetic ==="
-49734321i32 * 1103515245i32
-type(49734321i32 * 1103515245i32)
-127i8 + 1i8
-type(127i8 + 1i8)
-255u8 + 1u8
-type(255u8 + 1u8)
-2147483647i32 + 1i32
-type(2147483647i32 + 1i32)
-4294967295u32 + 1u32
-type(4294967295u32 + 1u32)
+// run-time operands: a literal-only overflow is a compile error (S4.1.5)
+let seed_i32 = 49734321i32
+let max_i8 = 127i8
+let max_u8 = 255u8
+let max_i32 = 2147483647i32
+let max_u32 = 4294967295u32
+seed_i32 * 1103515245i32
+type(seed_i32 * 1103515245i32)
+max_i8 + 1i8
+type(max_i8 + 1i8)
+max_u8 + 1u8
+type(max_u8 + 1u8)
+max_i32 + 1i32
+type(max_i32 + 1i32)
+max_u32 + 1u32
+type(max_u32 + 1u32)
 
 "=== mixed promotion ==="
 42i8 + 10u8
@@ -63,8 +71,9 @@ type(65535u16 + 1i16)
 type(2147483647i32 + 1u32);
 -1i32 + 4294967295u32
 type(-1i32 + 4294967295u32)
-18446744073709551615u64 + 1u64
-type(18446744073709551615u64 + 1u64)
+let max_u64 = 18446744073709551615u64
+max_u64 + 1u64
+type(max_u64 + 1u64)
 
 "=== integer operators ==="
 5i8 div 2i8
@@ -77,12 +86,16 @@ type(255u8 div 2u8)
 type(255u8 % 2u8)
 
 "=== unary wrap ===";
--(-128i8)
-type(-(-128i8));
--(1u8)
-type(-(1u8));
--(9223372036854775807i64 + 1i64)
-type(-(9223372036854775807i64 + 1i64))
+// run-time operands: negating a constant out of its lane is a compile error (S4.1.5)
+let neg_i8 = -128i8
+let pos_u8 = 1u8
+let wrap_i64 = 9223372036854775807i64;
+-neg_i8
+type(-neg_i8);
+-pos_u8
+type(-pos_u8);
+-(wrap_i64 + 1i64)
+type(-(wrap_i64 + 1i64))
 
 "=== bitwise ==="
 band(4294967295u32, 255u32)
@@ -92,7 +105,8 @@ shr(-1i32, 1u8)
 
 "=== typed array store ==="
 let arr_second = 256
-let arr: u8[] = [255u8, u8(arr_second), -1u8]
+let arr_one = 1u8
+let arr: u8[] = [255u8, u8(arr_second), 0u8 - arr_one]
 arr
 type(arr[0])
 type(arr[1])

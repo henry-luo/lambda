@@ -1,5 +1,5 @@
 // Multi-dimensional indexing: arr[i, j, k] for N-D ArrayNum.
-// New section in Lambda_Typed_Array2.md (First-class multi-dim indexing).
+// Lambda_Typed_Array.md §5 (first-class multi-dim indexing).
 // Grammar accepts comma-separated indices inside [...]; runtime dispatches to
 // array_num_at_nd which walks strides for a single offset, no view allocations.
 

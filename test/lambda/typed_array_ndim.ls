@@ -1,5 +1,5 @@
 // N-dimensional typed arrays via reshape (views with shape metadata)
-// Phase 2b §1 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §6
 // Covers: reshape, shape, ndim, nested format output, reductions on N-D.
 //
 // Limitation: arithmetic operations on N-D arrays currently return flat 1-D

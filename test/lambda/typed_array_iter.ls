@@ -1,5 +1,5 @@
 // Iteration sites over typed ArrayNum
-// Phase 2a §4 of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §4.3
 // Verifies that for-in, where-filter, pipe, sum/avg/min/max,
 // and inline predicates all work natively on ArrayNum without boxing.
 

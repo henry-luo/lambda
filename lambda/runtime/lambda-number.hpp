@@ -81,6 +81,14 @@ static inline uint8_t lambda_numeric_sized_is_unsigned(LambdaNumericKind kind) {
            kind == LAMBDA_NUM_U32 || kind == LAMBDA_NUM_U64;
 }
 
+// S10.2.4: the kind an accumulating reduction (sum, prod, cumsum, cumprod)
+// combines in. A narrow sized integer (i8..u32) accumulates in `int`, as
+// NumPy, Julia and R widen; i64/u64 and every other kind keep their domain.
+static inline LambdaNumericKind lambda_reduction_kind(LambdaNumericKind kind) {
+    return lambda_numeric_is_sized_integer(kind) && lambda_numeric_sized_bits(kind) < 64 ?
+        LAMBDA_NUM_INT : kind;
+}
+
 static inline LambdaNumericKind lambda_numeric_sized_kind(uint8_t is_unsigned, int bits) {
     if (is_unsigned) {
         if (bits <= 8) return LAMBDA_NUM_U8;

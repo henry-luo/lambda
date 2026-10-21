@@ -34,7 +34,7 @@
 0
 error
 '=== mixed types ==='
-2
+0
 '=== single row ==='
 [1, 3]
 2

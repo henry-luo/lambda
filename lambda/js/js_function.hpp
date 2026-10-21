@@ -390,7 +390,7 @@ static inline void js_function_set_bound_this(JsFunction* fn, Item value) {
 static inline Item js_function_get_bound_this(JsFunction* fn) {
     // only a bound function has the home; anything else has no bound receiver
     if (!fn || !fn->payload || !fn->payload->bound) return ItemNull;
-    return owned_item_slot_read(fn->payload->bound->this_store, 1, 0, false);
+    return js_owned_item_slot_read(fn->payload->bound->this_store, 1, 0, false);
 }
 
 // JSCUO9: only a method carries a home class, and its setter

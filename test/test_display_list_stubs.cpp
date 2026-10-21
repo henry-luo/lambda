@@ -4,6 +4,7 @@
 
 // this standalone recorder target has no private retained publisher.
 const DisplayChunkValidation* retained_dl_chunk_validation(const DisplayPayloadOwner*) { return nullptr; }
+const DisplayChunkValidation* retained_dl_cursor_validation(const DisplayListCursor&) { return nullptr; }
 
 static const RdtPath* g_test_path = nullptr;
 static bool g_test_path_has_bounds = false;

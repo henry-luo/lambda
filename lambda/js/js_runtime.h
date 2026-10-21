@@ -568,6 +568,7 @@ Item js_get_css_object_value(void);
 // =============================================================================
 
 Item js_process_stdout_write(Item str_item);
+Item js_process_stderr_write(Item str_item);
 void js_store_process_argv(int argc, const char** argv);
 const char* const* js_process_bootstrap_arguments(int* argc);
 void js_set_process_argv(int argc, const char** argv);
@@ -804,6 +805,8 @@ Item js_array_method_with_ops(int builtin_id, Item receiver, Item* args, int arg
 Item js_array_of_with_ops(Item constructor, Item* args, int argc, const JsArrayOps* ops);
 
 Item js_map_collection_new(void);
+// internal lexical tables use canonical collection storage without observable prototype lookup.
+Item js_map_collection_storage_new(void);
 Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
@@ -861,6 +864,7 @@ typedef struct JsCollectionStorageOps {
     bool (*next)(Item, JsCollectionCursor*, Item* key, Item* value);
     void (*end)(Item);
 } JsCollectionStorageOps;
+extern const JsCollectionStorageOps js_collection_default_storage;
 Item js_collection_for_each_with_ops(Item collection, Item callback, Item this_arg,
     bool is_set, const JsCollectionOps* ops, const JsCollectionStorageOps* storage);
 Item js_set_operation_with_ops(Item receiver, Item other, int operation,

@@ -33,7 +33,7 @@ typedef struct JsInterpEnv {
     // Class evaluation publishes this lexical private-name owner for member
     // bodies, field initializers, static blocks, and their nested closures.
     uint64_t private_home_class;
-    // Flat [source name, identity key] pairs retained by direct eval's lexical scope.
+    // GC-owned private-name table; compiled eval bridges can publish flat name/key pairs.
     uint64_t private_bindings;
     // Flat [name, value] pairs declared by direct eval in this variable
     // environment. Closures retain this GC-owned record after the caller exits.

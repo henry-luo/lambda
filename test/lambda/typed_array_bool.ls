@@ -1,5 +1,5 @@
 // ELEM_BOOL — typed boolean arrays
-// Phase 2a of Lambda_Typed_Array2.md
+// Lambda_Typed_Array.md §2 (bool lanes), §7.4 (masks)
 // Covers: construction, indexing, iteration, any()/all() reductions, edge cases
 
 // ============================================================

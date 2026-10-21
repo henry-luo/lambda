@@ -37,8 +37,10 @@ let s: i64 = -1i64;
 [s + u, type(s + u)]
 
 "=== literal operands ==="
-9223372036854775807i64 + 9223372036854775807i64
-9223372036854775807i64 * 3i64
+// one run-time operand: a literal-only overflow is a compile error (S4.1.5)
+let wide_max = 9223372036854775807i64
+wide_max + 9223372036854775807i64
+wide_max * 3i64
 
 "=== off-lane joins are unchanged ===";
 // i64 against `int` widens to the exact integer tower, not the wrapping lane

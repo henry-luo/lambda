@@ -167,6 +167,70 @@ def expect_host_export_list(module) -> None:
         fail("a host without the Jube loader still exports the allowlist")
 
 
+def expect_profile_isolated_archives(module) -> None:
+    premake = os.environ.get('PREMAKE5_BIN') or shutil.which('premake5')
+    if not premake:
+        fail('premake5 not found')
+    generator = linux_validation_generator(module)
+    for name in ('archive-readers', 'image-codecs'):
+        library = generator.external_libraries[name]
+        target = next(t for t in generator.config['targets'] if t['name'] == library['build_target'])
+        with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as directory:
+            work = Path(directory)
+            (work / 'mode.c').write_text('int archive_mode(void) { return PROFILE_VALUE; }\n')
+            (work / 'app.c').write_text(
+                'int archive_mode(void); int main(void) { return archive_mode() != PROFILE_VALUE; }\n')
+            script = work / 'premake5.lua'
+            script.write_text('\n'.join([
+                'workspace "profile_switch"',
+                '    configurations { "debug", "release" }',
+                '    platforms { "native" }',
+                '    location "build/premake"',
+                '    language "C"',
+                '    objdir "build/obj/%{prj.name}/%{cfg.platform}/%{cfg.buildcfg}"',
+                '    filter "configurations:debug"',
+                '        defines { "PROFILE_VALUE=11" }',
+                '    filter "configurations:release"',
+                '        defines { "PROFILE_VALUE=29" }',
+                '    filter {}',
+                'project "' + target['name'] + '"',
+                '    kind "StaticLib"',
+                '    targetdir "' + target.get('target_dir', 'build/lib') + '"',
+                '    files { "mode.c" }',
+                *generator._static_lib_rebuild_lines('StaticLib'),
+                'project "app"',
+                '    kind "ConsoleApp"',
+                '    targetdir "bin/%{cfg.buildcfg}"',
+                '    targetextension ".exe"',
+                '    files { "app.c" }',
+                '    dependson { "' + target['name'] + '" }',
+                '    linkoptions { "../../' + library['lib'] + '" }',
+                '',
+            ]))
+            commands = [[premake, '--file=' + str(script), 'gmake']]
+            commands += [['make', '-C', str(work / 'build/premake'),
+                          'config=' + profile + '_native', 'app', 'CC=gcc', 'CXX=g++']
+                         for profile in ('debug', 'release', 'debug', 'release')]
+            snapshots = {}
+            for index, command in enumerate(commands):
+                result = subprocess.run(command, cwd=work, text=True,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                if result.returncode:
+                    fail(f'{name} profile-switch build failed:\n{result.stdout}')
+                if not index:
+                    continue
+                profile = ('debug', 'release')[(index - 1) % 2]
+                executable = work / 'bin' / profile / 'app.exe'
+                if subprocess.run([str(executable)], cwd=work).returncode:
+                    fail(f'{name} {profile} executable linked the other profile archive')
+                archive = work / library['lib'].replace('%{cfg.platform}', 'native').replace('%{cfg.buildcfg}', profile)
+                snapshots.setdefault(profile, (archive, archive.read_bytes()))
+                # switching profiles must preserve the previously built archive's contents.
+                for previous, (path, contents) in snapshots.items():
+                    if path.read_bytes() != contents:
+                        fail(f'{name} {profile} build overwrote the {previous} archive')
+
+
 def expect_image_source_build(module) -> None:
     for architecture in ('arm64', 'x86_64'):
         generator = linux_validation_generator(module, architecture)
@@ -214,6 +278,7 @@ def main() -> int:
     if not {'archive-readers', 'archive-iconv', 'lzma', 'zstd', 'bzip2'}.issubset(closure):
         fail('source-built archive consumers lost their codec/charset link requirements')
     expect_image_source_build(module)
+    expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")
     expect_archive_link_deps(module)

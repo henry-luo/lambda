@@ -133,12 +133,12 @@ With this alone, a Lambda DataFrame and a Polars/pandas/DuckDB frame can share c
 
 ### 3.3 The load-bearing caveat: moving GC vs stable Arrow buffers
 
-This is the same constraint the typed-array→Arrow analysis surfaced, and it applies identically here. `ArrayNum` element data lives in the **compacting** GC data zone — the collector relocates buffers and rewrites pointers ([gc_heap.c:1203‑1231](../lib/gc/gc_heap.c)) unless `is_view`/`is_pinned` is set. Arrow consumers hold raw buffer pointers and expect them to **never move**. Therefore:
+This is the same constraint the typed-array→Arrow analysis surfaced, and it applies identically here. `ArrayNum` element data lives in the **compacting** GC data zone — the collector relocates buffers and rewrites pointers ([gc_heap.c](../lambda/runtime/gc/gc_heap.c), `gc_compact_array_num_owned_data`) and rebases any view over a moved buffer; ~~unless `is_view`/`is_pinned` is set~~ (pinning is retired, 2026-10-21). Arrow consumers hold raw buffer pointers and expect them to **never move**. Therefore:
 
-- **Export (Lambda → Arrow):** pin the column buffers (`is_pinned`) for the lifetime of the exported array (zero-copy), *or* copy them into non-moving (`mem_alloc`) buffers (safe default). The Arrow release callback unpins/frees.
-- **Import (Arrow → Lambda):** the foreign buffer is already stable and non-moving; wrap each column as an `is_view` `ArrayNum` over it (the existing external-base view path), keeping the foreign array alive via the release callback. Zero-copy and natural — exactly as JS→Lambda was the easy direction.
+- **Export (Lambda → Arrow):** ~~pin the column buffers (`is_pinned`) for the lifetime of the exported array (zero-copy), *or*~~ copy them into non-moving (`mem_alloc`) buffers. The Arrow release callback frees them. Zero-copy export would need the column bytes to live in `ByteStorage`, the owned-`ArrayNum` migration that [Lambda_Type_Binary.md](Lambda_Type_Binary.md) §11.7 deferred; it is open ([Lambda_Typed_Array.md](Lambda_Typed_Array.md) §13, Q3).
+- **Import (Arrow → Lambda):** the foreign buffer is already stable and non-moving; wrap each column as a byte-storage-backed `ArrayNum` view (`array_num_new_storage_view`) whose `ByteStorage` release callback calls the Arrow release callback, keeping the foreign array alive exactly as long as a view needs it. Zero-copy and natural — exactly as JS→Lambda was the easy direction.
 
-So Arrow export is "pin or copy"; import is free. This asymmetry is documented, not hidden.
+So Arrow export is ~~"pin or copy"~~ a copy; import is free. This asymmetry is documented, not hidden.
 
 ---
 
@@ -257,7 +257,7 @@ Lambda reads closest to **dplyr** (pipe + named verbs) and works like **Polars**
 
 **Phase 5 — SQL I/O.** Columnar fetch from the existing RDB drivers (read); extend the `RdbDriver` vtable with `CREATE TABLE` + bulk `INSERT` (write). *Tests:* SQLite round-trip (table → frame → table).
 
-**Phase 6 — Arrow.** Arrow C Data Interface export (pin-or-copy) and import (zero-copy view); the bool bit/byte conversion. *Tests:* round-trip a frame through pyarrow / DuckDB via the C Data Interface. Later: Feather/Parquet via the Arrow library.
+**Phase 6 — Arrow.** Arrow C Data Interface export (~~pin-or-copy~~ copy) and import (zero-copy view); the bool bit/byte conversion. *Tests:* round-trip a frame through pyarrow / DuckDB via the C Data Interface. Later: Feather/Parquet via the Arrow library.
 
 Each phase is independently shippable; Phases 1–3 stand alone as an in-memory analytics layer even before any new I/O.
 
@@ -295,9 +295,9 @@ Each phase is independently shippable; Phases 1–3 stand alone as an in-memory 
 | Surface | Location |
 |---|---|
 | Native-backed `Map` pattern + `MAP_KIND` enum | [lambda.h:526‑540](../lambda/lambda.h); JS typed-array constructors |
-| `ArrayNum` columns (14 element kinds, masks, axis reductions, vectorized cmp) | [lambda-vector.cpp](../lambda/lambda-vector.cpp), [lambda-data-runtime.cpp](../lambda/lambda-data-runtime.cpp) (Typed Array 1/2) |
-| Boolean mask indexing `arr[mask]` → filter | [lambda-vector.cpp `fn_mask_index`](../lambda/lambda-vector.cpp) |
+| `ArrayNum` columns (14 element kinds, masks, axis reductions, vectorized cmp) | [lambda-vector.cpp](../lambda/runtime/lambda-vector.cpp), [lambda-data-runtime.cpp](../lambda/runtime/lambda-data-runtime.cpp) (Typed Array 1/2) |
+| Boolean mask indexing `arr[mask]` → filter | [lambda-vector.cpp `fn_mask_index`](../lambda/runtime/lambda-vector.cpp) |
 | CSV input parser | [input-csv.cpp](../lambda/input/input-csv.cpp) |
 | RDB integration (SQLite/PostgreSQL driver vtable, read-only, for→SQL) | [input-rdb.cpp](../lambda/input/input-rdb.cpp), [rdb_query.cpp](../lambda/input/rdb_query.cpp), [lib/rdb.h](../lib/rdb.h), [Lambda_IO_RDB.md](Lambda_IO_RDB.md) |
-| Compacting GC + view/pinned skip (the Arrow stable-buffer constraint) | [gc_heap.c:1203‑1231](../lib/gc/gc_heap.c) |
-| Arrow design constraints (element-kind map, C Data Interface, moving-GC) | [Lambda_Typed_Array3.md](Lambda_Typed_Array3.md) §3, §7 |
+| Compacting GC: owned data relocates, GC views are rebased (the Arrow stable-buffer constraint) | [gc_heap.c](../lambda/runtime/gc/gc_heap.c) `gc_rebind_array_num_gc_view` |
+| Arrow design constraints (element-kind map, C Data Interface, moving-GC) | [Lambda_Typed_Array.md](Lambda_Typed_Array.md) §9.2, §9.4–§9.5 |

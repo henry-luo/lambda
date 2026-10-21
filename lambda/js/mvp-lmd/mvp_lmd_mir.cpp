@@ -293,6 +293,7 @@ struct MvpLmdProgram {
     bool host_enabled;
     bool native_host_values;
     bool closed_stdio;
+    bool direct_stdio;
     bool host_active;
     bool timers;
     uint32_t timer_slot;
@@ -2964,7 +2965,8 @@ static MIR_reg_t guard_function_instance(LmdCompiler* c, MIR_reg_t owner, MIR_la
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
     MIR_reg_t name = 0, MIR_reg_t value = 0, String* spelling = NULL, bool numeric = false,
-    const LmdValue* native_value = NULL, bool plain = false, unsigned owner_kind = K_ANY);
+    const LmdValue* native_value = NULL, bool plain = false, unsigned owner_kind = K_ANY,
+    bool computed_own = false);
 static void branch_condition(LmdCompiler* c, AstNode* node, MIR_label_t target, bool yes = true);
 static void statement(LmdCompiler* c, AstNode* n);
 static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast, MIR_reg_t inferred_name = 0);
@@ -3938,7 +3940,11 @@ static bool native_host_values(LmdCompiler* c, unsigned kinds = K_ANY) {
     constexpr unsigned primitives = K_UNDEFINED | K_NULL | K_BOOL | K_NUMBER | K_STRING | K_BIGINT | K_SYMBOL;
     if (kinds && !(kinds & ~primitives)) return false;
     LmdFunction* active = c->inlining ? c->inlining->function : c->function;
-    return c->program->native_host_values && (!c->program->closed_stdio || active->uses_process);
+    return c->program->native_host_values && !c->program->direct_stdio &&
+        (!c->program->closed_stdio || active->uses_process);
+}
+static bool cold_host_operation(LmdCompiler* c) {
+    return !repeated_execution(c) && native_host_values(c);
 }
 static MIR_reg_t global_binding_access(LmdCompiler* c, AstNode* site, bool write,
         MIR_reg_t value = 0, bool allow_missing = false, String* spelling = NULL, bool deleting = false,
@@ -4483,7 +4489,7 @@ static MIR_reg_t native_number_field(LmdCompiler* c, MIR_reg_t data, MIR_reg_t f
 }
 static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
         MIR_reg_t name, MIR_reg_t value, String* spelling, bool numeric,
-        const LmdValue* native_value, bool plain, unsigned owner_kind) {
+        const LmdValue* native_value, bool plain, unsigned owner_kind, bool computed_own) {
     if (plain && (operation == LMD_PROP_CREATE_DATA || (!c->program->receiver_abi &&
             (operation == LMD_PROP_SET || operation == LMD_PROP_DELETE)))) {
         // literal CreateDataProperty targets are fresh and unexposed, with default own descriptors.
@@ -4508,10 +4514,13 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
             active->id == active->home->constructor_id;
         // array/string length heads already cover the common path; keep their open miss compact.
         bool sequence_length = named(spelling, "length") && (owner_kind & (K_ARRAY | K_STRING));
+        // computed keys on known object carriers share the guarded own-data lookup; misses retain full semantics.
+        bool own_key = spelling ?
+            !(spelling->len && spelling->chars[0] >= '0' && spelling->chars[0] <= '9') :
+            computed_own && (owner_kind == K_OBJECT || owner_kind == K_MAP);
         bool own_read = operation == LMD_PROP_GET && (owner_kind & (K_OBJECT | K_MAP)) &&
             !sequence_length && repeated_execution(c) && !compact_property_dispatch(c) &&
-            spelling &&
-            !(spelling->len && spelling->chars[0] >= '0' && spelling->chars[0] <= '9');
+            own_key;
         MIR_reg_t joined = 0;
         MIR_label_t done = NULL, semantic_read = own_read ? label(c) : NULL;
         auto load_field = [&](MIR_reg_t data, MIR_reg_t field) {
@@ -5216,7 +5225,8 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         if (method) return boxed(c, constant(c, mvp_lmd_method_token(method)));
     }
     bool consume = numeric && c->program->receiver_abi;
-    if (c->program->library_active && c->program->primitives && c->program->receiver_abi &&
+    // cold host reads use the same complete reader without emitting every carrier arm.
+    if (c->program->library_active && (c->program->primitives || cold_host_operation(c)) && c->program->receiver_abi &&
             (!repeated_execution(c) || compact_property_dispatch(c)) &&
             (!k || (k & (k - 1))) && !ref.guarded && !ref.plan && !ref.shapes.count &&
             ref.name && !ref.deferred_name.reg && !ref.uncoerced_name) {
@@ -5411,8 +5421,14 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
             MIR_T_P, reg(c, data), MIR_T_P, reg(c, field), true);
         move(c, own_value, reg(c, item)); jump(c, own_done); put_label(c, missing);
     }
+    bool computed_own = false;
+    if (!ref.key_known && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)) {
+        auto* member = (AstFieldNode*)site;
+        // numeric keys retain their indexed path without an unrelated own-field head.
+        computed_own = member->computed && kind(c->program, member->property, c->inlining) != K_NUMBER;
+    }
     MIR_reg_t value = property_access(c, callee ? LMD_PROP_CALLEE : LMD_PROP_GET,
-        ref.owner.reg, name, 0, ref.spelling, consume, NULL, false, k);
+        ref.owner.reg, name, 0, ref.spelling, consume, NULL, false, k, computed_own);
     if (own_done) { move(c, own_value, reg(c, value)); put_label(c, own_done); value = own_value; }
     if (consume) { move(c, result, reg(c, value), true); put_label(c, done); return {result, K_NUMBER}; }
     unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
@@ -6790,6 +6806,27 @@ static bool inline_literal_callback(LmdCompiler* c, AstCallNode* n, LmdValue cal
     put_label(c, done); *result = boxed(c, joined); return true;
 }
 static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = NULL) {
+    if (!captured && c->program->direct_stdio &&
+            (n->callee->node_type == AST_NODE_MEMBER_EXPR || n->callee->node_type == AST_NODE_INDEX_EXPR)) {
+        auto* writer = (AstFieldNode*)n->callee;
+        AstNode* receiver = writer->object;
+        if (named(member_spelling(writer), "write") &&
+                (receiver->node_type == AST_NODE_MEMBER_EXPR || receiver->node_type == AST_NODE_INDEX_EXPR)) {
+            auto* stream = (AstFieldNode*)receiver;
+            LmdBinding* owner = stream->object->node_type == AST_NODE_IDENT
+                ? identifier_binding(c->program, (AstIdentNode*)stream->object) : NULL;
+            String* name = member_spelling(stream);
+            if (owner && owner->intrinsic == I_PROCESS && (named(name, "stdout") || named(name, "stderr"))) {
+                // the closed-stream proof excludes observable callee changes and evaluates the argument once.
+                LmdValue value = box(c, expression(c, n->arguments));
+                MIR_reg_t result = em_call_1(&c->em, named(name, "stderr")
+                    ? "js_process_stderr_write" : "js_process_stdout_write", MIR_T_I64,
+                    MIR_T_I64, reg(c, value.reg), true);
+                check_error(c, result);
+                return stable_item(c, result);
+            }
+        }
+    }
     if (!captured && c->inlining && n->callee->node_type == AST_NODE_IDENT) {
         LmdBinding* binding = identifier_binding(c->program, (AstIdentNode*)n->callee);
         for (LmdInlineFrame* consumer = c->inlining; consumer; consumer = consumer->parent) {
@@ -7143,11 +7180,19 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     }
     bool native = direct && direct->native;
     bool direct_args = direct && direct->direct_args;
-    // open entries already have real intrinsic functions. Beyond the existing
-    // expansion budget, share invocation instead of cloning every ABI branch.
-    bool compact_call = !direct && !captured && compact_property_dispatch(c) &&
-        c->program->receiver_abi && c->program->primitives &&
-        c->program->iterators && c->program->typed_storage;
+    bool cold_host_call = !direct && !captured && cold_host_operation(c);
+    if (cold_host_call && member) {
+        String* name = member_spelling((AstFieldNode*)n->callee);
+        // an unmaterialized builtin token still needs its existing receiver dispatch.
+        cold_host_call = name != NULL;
+        for (int i = 0; cold_host_call && i < mvp_lmd_builtin_method_count; i++)
+            if (named(name, mvp_lmd_builtin_methods[i].name)) cold_host_call = false;
+    }
+    // cold host calls and oversized open entries reuse the complete invocation;
+    // repeated operations retain their native, sequence and guarded call heads.
+    bool compact_call = c->program->receiver_abi && (cold_host_call ||
+        (!direct && !captured && compact_property_dispatch(c) && c->program->primitives &&
+            c->program->iterators && c->program->typed_storage));
     LmdReference method = {};
     LmdValue callee = captured ? captured->callee : member ? capture_member_callee(c, n->callee, (AstNode*)n, &method, !compact_call) : direct && (!b->observed || b->closed_global) ? boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED)
         : box(c, expression(c, n->callee, false, false, n->source_span.start_byte == n->callee->source_span.start_byte));
@@ -9676,6 +9721,8 @@ static const LmdImport imports[] = {
     {"fn_string_freeze", (void*)fn_string_freeze, AUDIT(JIT_EFFECT_NO_GC, GC_PTR, ARG(0,GC_PTR))},
     {"mvp_lmd_string_compare", (void*)mvp_lmd_string_compare, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,ITEM))},
     {"js_string_equal", (void*)js_string_equal, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,ITEM))},
+    {"js_process_stdout_write", (void*)js_process_stdout_write, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
+    {"js_process_stderr_write", (void*)js_process_stderr_write, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
     {"mvp_lmd_string_at", (void*)mvp_lmd_string_at, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR))},
     {"mvp_lmd_string_range", (void*)mvp_lmd_string_range, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR)|ARG(3,SCALAR))},
     {"mvp_lmd_string_search", (void*)mvp_lmd_string_search, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR)|ARG(3,SCALAR))},
@@ -13260,6 +13307,15 @@ static void plan_native_host_uses(MvpLmdProgram* p) {
     // its unescaped native carriers reachable in unrelated functions.
     p->closed_stdio = process_stdio_only(p, program_has_existing_global(p), p->execution_owner->host, false);
     if (!p->closed_stdio) return;
+    // unobserved direct writes share the canonical kernel without allocating the process namespace.
+    p->direct_stdio = process_stdio_only(p, program_has_existing_global(p), p->execution_owner->host);
+    if (p->direct_stdio) {
+        int argc = 0;
+        const char* const* argv = js_process_bootstrap_arguments(&argc);
+        const MvpLmdHost* host = p->execution_owner->host;
+        // custom embedder arguments still require publication into the canonical process state.
+        p->direct_stdio = host->argc == argc && host->argv == argv;
+    }
     // the stream proof forbids escaping host values. Only functions containing
     // those source reads need native carrier/call guards, including when inlined.
     const AstIndex* tree = &p->frontend->ast_index;
@@ -13271,6 +13327,8 @@ static void plan_native_host_uses(MvpLmdProgram* p) {
         while (owner && !(active = function(p, owner))) owner = ast_index_parent(tree, owner);
         if (!active) active = (LmdFunction*)p->functions->data[0];
         active->uses_process = true;
+        // an escaping writer must observe later mutations of the canonical stream.
+        if (active->ast && !active->closed_calls) p->direct_stdio = false;
     }
 }
 static int lower_pass(void* opaque) {
@@ -13856,7 +13914,7 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
         p->host.timers = p->timers ? p->slots + p->timer_slot : NULL;
         p->host.global = p->global_receiver ? p->slots + p->global_slot : NULL;
         for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++)
-            if (p->intrinsic_uses[i] && p->intrinsic_uses[i]->intrinsic == I_PROCESS)
+            if (!p->direct_stdio && p->intrinsic_uses[i] && p->intrinsic_uses[i]->intrinsic == I_PROCESS)
                 p->host.process_requested = true;
         p->host.process_stdio_only = p->host.process_requested && process_stdio_only(p, existing_global, host);
         Item result = mvp_lmd_host_initialize(p, &p->host, p->roots[0], host);

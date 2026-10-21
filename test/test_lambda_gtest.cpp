@@ -375,6 +375,20 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWritesJit) {
         "test/mir/lambda/typed_path_store.txt", true, "jit");
 }
 
+// LR07-49: `string(f())`, where f returns an annotated i64/u64 local, reached
+// print as a bare String* on the JIT (the call's carrier was the boxed lane but
+// the raw return was never boxed). The MIR check and the stress run never read
+// this fixture's values, so pin them on the default tier and the JIT.
+TEST(LambdaTypedPathTests, WideIntNativeLaneValues) {
+    test_lambda_script_against_file("test/mir/lambda/wide_int_native_lane.ls",
+        "test/mir/lambda/wide_int_native_lane.txt", true);
+}
+
+TEST(LambdaTypedPathTests, WideIntNativeLaneValuesJit) {
+    test_lambda_script_against_file("test/mir/lambda/wide_int_native_lane.ls",
+        "test/mir/lambda/wide_int_native_lane.txt", true, "jit");
+}
+
 TEST(LambdaTypedPathTests, ReopensBoxedTypedAdapterResultForNativeConsumer) {
     test_lambda_script_against_file(
         "test/mir/lambda/result47_untyped_native_adapter.ls",

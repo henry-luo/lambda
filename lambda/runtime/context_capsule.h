@@ -59,6 +59,8 @@ typedef enum ContextCapsuleId {
     // dom and CSSOM weak identity follows the evaluator across quiescent handoff.
     CONTEXT_CAPSULE_DOM_WRAPPER_CACHE,
     CONTEXT_CAPSULE_DOM_WEBGL,
+    // core map transitions use this owner on every type-changing store.
+    CONTEXT_CAPSULE_RUNTIME_SHAPE_TREE,
     CONTEXT_CAPSULE_COUNT
 } ContextCapsuleId;
 

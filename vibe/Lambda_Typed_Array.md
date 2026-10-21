@@ -1,907 +1,621 @@
-# Proposal: Enhanced Typed Arrays for Lambda
+# Lambda Typed Arrays (`ArrayNum`)
 
-## Summary
+> **Status:** Consolidated design record, 2026-10-21. It merges the four earlier typed-array proposals — Typed Array 1 (one `ArrayNum` type with compact lanes, 2026-04), 2 (N-D arrays, views, vectorized math, masks, 2026-06), 3 (LambdaJS storage unification, 2026-06) and 4 (image processing, SIMD auto-vectorization, mutable views, 2026-06) — and brings them in line with the rulings ratified since: the number model, `T[]` contracts, copy-on-write values and views, and keyword element-wise comparison. The body states the current design only. Superseded wording is kept, struck through, in [Appendix S](#appendix-s--superseded-rulings). Updated the same day with two rulings by the user, now S9.3.2 (construction preserves each element's type and precision) and S10.2.4 (array arithmetic promotes as scalar arithmetic does). Implementation status and the few implementation notes are in [Appendix A](#appendix-a--implementation-notes-and-status).
+>
+> **Scope:** Lambda's homogeneous numeric array: element kinds, contracts, construction, indexing and selection, N-D shape, arithmetic, views and mutation, the byte-storage substrate shared with LambdaJS, the image-processing library, and the performance model. Non-numeric typed arrays (`string[]`, record arrays) share the contract model but are native-lane `Array`s, covered by the [impl plan](impl/Lambda_Impl_Typed_Array.md). The JS spec layer is covered by [JS_12_TypedArrays](../doc/dev/js/JS_12_TypedArrays.md).
+>
+> **Authority:** the formal specs win wherever they speak (`doc/Doc_Convention.md` §2). This record is normative only where no `S#`/`D#` ruling covers the point. Where the code disagrees with either, the code is the defect; Appendix A.7 lists the known gaps.
 
-Unify Lambda's three typed array types (`LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT`) into a single `LMD_TYPE_ARRAY_NUM` with an `elem_type` discriminator that supports all numeric element types — from the existing `int` and `float` through compact sized types (i8–u64, f16–f64). Add NumPy/JS-inspired APIs for typed array construction, manipulation, and conversion. Extend vectorized arithmetic to operate natively on all element widths.
+**Spec linkage**
 
-## Motivation
+| Topic | Rulings | Section |
+|---|---|---|
+| Three physical array forms; `ArrayNum` null-free and observably an `Array` | D2.6.1v3, D2.6.2, DI8, S5.3.1 | §1, §2 |
+| `int` lane is the i64 lane with poison | D2.6.3, S4.4.1 | §2 |
+| Lanes never hold errors | DI20, D2.8.1, S7.8.2 | §3.4 |
+| `T[]`, `T[n]`, rank | S11.1.1v3 | §3.1 |
+| Covariance, `var` invariance | S9.2.1 | §3.2 |
+| Contract admission, value-aware numeric admission | S11.4.1v3, S11.4.5 | §3.3 |
+| Representation certificate | D3.3.3v3, D3.1.1v5 | §3.3 |
+| Unproven indexed read is `T?` | D2.5.3 | §3.5 |
+| Invalid reads are `null`; no negative indices; `last` | S7.1.1v3, S7.2.1, S7.2.2 | §5 |
+| Positional selection is NumPy's: range, mask, index array | S8.2.4v3 | §5 |
+| Promotion lattice, division and modulo | S4.4.1–S4.4.4, S4.5.1–S4.5.3 | §7.2 |
+| Vectorized arithmetic; kind preservation | S10.2.1, S2.5.7v4 | §7.1 |
+| Element-wise arithmetic promotes as scalar arithmetic does | S10.2.4 | §7.2 |
+| Element-wise comparison keywords; mask consumption | S10.2.2v2, S10.2.3 | §7.4 |
+| Vectorized system functions | S7.10.5v3 | §7.5 |
+| Construction preserves each element's type and precision | S9.3.2 | §4 |
+| Read views are snapshots; write-through views are borrows | S9.2.2, S9.2.4v2, S9.3.1 | §8 |
 
-### Current State
-
-Lambda has three typed array types with fixed element widths:
-
-| Type | Element | Item Size | Storage |
-|------|---------|-----------|---------|
-| `LMD_TYPE_ARRAY_INT` | int56 (as int64) | 8 bytes | `int64_t*` |
-| `LMD_TYPE_ARRAY_INT64` | int64 | 8 bytes | `int64_t*` |
-| `LMD_TYPE_ARRAY_FLOAT` | float64 | 8 bytes | `double*` |
-
-All three use 8 bytes per element. There are no compact arrays for smaller types.
-
-### Gaps
-
-1. **No compact storage for sized types** — A `u8[]` array of 1000 bytes should use ~1KB, not 8KB. Current arrays waste 7× memory for byte-sized data.
-2. **No unsigned array support** — Binary data (images, audio, network packets) needs `u8[]`, `u16[]`, `u32[]`.
-3. **No float32/float16 arrays** — ML model weights, GPU interop, and sensor data typically use `f32[]` or `f16[]`.
-4. **~420 triplicated dispatch points** — Every array operation has 3 nearly-identical `case` branches across 16 files. Adding a new element type means adding a 4th case everywhere.
-5. **Vector arithmetic ignores sized scalars** — `NUM_SIZED` and `UINT64` values don't participate in vectorized operations.
-6. **No typed array construction APIs** — Users can't explicitly create typed arrays; they rely on compiler type inference.
-
-### Why Merge All Three
-
-| Metric | `ARRAY_INT` | `ARRAY_INT64` | `ARRAY_FLOAT` |
-|--------|:-----------:|:-------------:|:--------------:|
-| Total references | 139 | 137 | 141 |
-| case/if dispatch branches | 57 | 99 | 94 |
-| Files with dispatch points | 16 | 15 | 15 |
-
-The three types share identical struct layouts (`type_id`, `flags`, `items*`, `length`, `extra`, `capacity`) and appear in the same `switch` statements. `array_float_new` alone has 38 call sites (21 in lambda-vector.cpp, 14 in lambda-eval-num.cpp). A unified `array_num_new(elem, len)` replaces all three factory functions and collapses ~420 case branches into ~140.
-
-**Performance cost: negligible.** The JIT transpiler tracks `elem_type` statically and emits the same direct memory loads it does today. The interpreter adds one predicted branch (`switch(elem_type)` inside `case ARRAY_NUM:`). Vector loop bodies are identical — dispatched by `elem_type` once before the loop.
-
-### Design Goals
-
-- **Code simplification** — One type ID, one struct, one set of dispatch logic for all numeric arrays
-- **Memory efficiency** — Pack elements at their natural width (1/2/4/8 bytes)
-- **Zero-copy interop** — Typed arrays can serve as views over binary data
-- **Transparent vectorization** — Arithmetic on typed arrays operates at native width
-- **API parity** — Functional equivalents of JS TypedArray and NumPy operations
-- **Backward compatibility** — Existing `int[]` and `float[]` syntax and semantics preserved via `ELEM_INT` / `ELEM_FLOAT`
+**Related records:** [Number Model](Lambda_Semantics_Number_Model.md) (lane semantics, §3.3–§3.5), [Runtime COW](Lambda_Design_Runtime_COW.md) (CW16, views as borrows), [Type Enforcement](Lambda_Design_Type_Enforcement.md) (TE-1..TE-9), [Binary type §11](Lambda_Type_Binary.md) (`ByteStorage` / `ByteBufferHandle`), [Expr_Query §4.1](Lambda_Expr_Query.md) (subscript worlds), [DataFrame](Lambda_Design_DataFrame.md) (future consumer). Implementation records: [Lambda_Impl_Typed_Array.md](impl/Lambda_Impl_Typed_Array.md) (`T[]` contracts, certificates), [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) (byte substrate). Detailed design: [LR_05 §4–§8](../doc/dev/lambda/LR_05_Strings_and_Vectors.md) (the `ArrayNum` engine), [LR_03 §4](../doc/dev/lambda/LR_03_Value_and_Type_Model.md) (layout), [LR_08](../doc/dev/lambda/LR_08_Memory_and_GC.md) (GC), [LR_11](../doc/dev/lambda/LR_11_Mark_Data_API.md) (readers).
 
 ---
 
-## Design
+## 0. Summary
 
-### 1. Replace Three Type IDs with `LMD_TYPE_ARRAY_NUM`
-
-Merge the three existing typed array type IDs into a single `LMD_TYPE_ARRAY_NUM` that carries a sub-type discriminator:
-
-```c
-// Before:
-LMD_TYPE_ARRAY_INT,     // int56 array (8 bytes/element)
-LMD_TYPE_ARRAY_INT64,   // int64 array (8 bytes/element)
-LMD_TYPE_ARRAY_FLOAT,   // float64 array (8 bytes/element)
-
-// After:
-LMD_TYPE_ARRAY_NUM,     // unified numeric array (element width varies by elem_type)
-```
-
-The `EnumTypeId` becomes:
-
-```c
-enum EnumTypeId {
-    // ... existing types ...
-    LMD_TYPE_RANGE,
-    LMD_TYPE_ARRAY_NUM,     // all numeric typed arrays (elem_type determines element kind)
-    LMD_TYPE_ARRAY,         // generic Item array — unchanged
-    // ...
-};
-```
-
-This frees two enum slots and reduces `LMD_TYPE_COUNT` by 2.
-
-### 2. `ArrayNum` Struct
-
-A single struct covers all numeric element types. The element sub-type is stored in `elem_type`, reusing `Container.flags` byte position (since typed arrays don't use the existing flag bits):
-
-```c
-// Element type enum — covers Lambda's existing types + all sized types
-enum EnumArrayNumElemType {
-    // Lambda's standard numeric types (8 bytes/element each):
-    ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64, current ARRAY_INT behavior
-    ELEM_FLOAT = 0x10,   // 8 bytes  — double, current ARRAY_FLOAT behavior
-
-    // Sized integer types (compact storage):
-    ELEM_INT8   = 0x20,  // 1 byte   — maps to NUM_INT8
-    ELEM_INT16  = 0x30,  // 2 bytes  — maps to NUM_INT16
-    ELEM_INT32  = 0x40,  // 4 bytes  — maps to NUM_INT32
-    ELEM_INT64  = 0x50,  // 8 bytes  — current ARRAY_INT64 behavior
-
-    ELEM_UINT8  = 0x60,  // 1 byte   — maps to NUM_UINT8
-    ELEM_UINT16 = 0x70,  // 2 bytes  — maps to NUM_UINT16
-    ELEM_UINT32 = 0x80,  // 4 bytes  — maps to NUM_UINT32
-    ELEM_UINT64 = 0x90,  // 8 bytes
-
-    // Sized float types (compact storage):
-    ELEM_FLOAT16 = 0xA0, // 2 bytes  — maps to NUM_FLOAT16
-    ELEM_FLOAT32 = 0xB0, // 4 bytes  — maps to NUM_FLOAT32
-    ELEM_FLOAT64 = 0xC0, // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT, distinct type)
-
-    ELEM_NUM_COUNT
-};
-typedef uint8_t ArrayNumElemType;
-```
-
-```c
-// C struct (for MIR JIT)
-struct ArrayNum {
-    TypeId type_id;         // LMD_TYPE_ARRAY_NUM
-    uint8_t elem_type;     // ArrayNumElemType — element sub-type
-    //---------------------
-    void* items;            // raw buffer (cast to int8_t*, uint16_t*, float*, int64_t*, double*, etc.)
-    int64_t length;         // number of elements
-    int64_t extra;          // extra elements at end
-    int64_t capacity;       // allocated capacity (in elements)
-};
-```
-
-```cpp
-// C++ struct
-struct ArrayNum : Container {
-    uint8_t elem_type;     // ArrayNumElemType
-    void* items;
-    int64_t length;
-    int64_t extra;
-    int64_t capacity;
-};
-```
-
-The `elem_type` field occupies the same offset as `Container.flags` (byte 1). This is safe because typed arrays don't use the `is_content`/`is_spreadable` flag bits — those are only relevant for generic `Array` and `Element`. The struct remains naturally aligned.
-
-### 3. Element Width Table
-
-```c
-// Bytes per element, indexed by (elem_type >> 4)
-static const uint8_t ELEM_TYPE_SIZE[16] = {
-    8, // 0x00 ELEM_INT     — int64_t (int56 stored as int64)
-    8, // 0x10 ELEM_FLOAT   — double
-    1, // 0x20 ELEM_INT8
-    2, // 0x30 ELEM_INT16
-    4, // 0x40 ELEM_INT32
-    8, // 0x50 ELEM_INT64
-    1, // 0x60 ELEM_UINT8
-    2, // 0x70 ELEM_UINT16
-    4, // 0x80 ELEM_UINT32
-    8, // 0x90 ELEM_UINT64
-    2, // 0xA0 ELEM_FLOAT16
-    4, // 0xB0 ELEM_FLOAT32
-    8, // 0xC0 ELEM_FLOAT64
-    0, // 0xD0 reserved
-    0, // 0xE0 reserved
-    0, // 0xF0 reserved
-};
-```
-
-Memory usage: `length × ELEM_TYPE_SIZE[elem_type >> 4]` bytes.
-
-| Array Type | Element Size | 1000 elements | vs. generic `Array` |
-|-----------|-------------|--------------|---------------------|
-| `u8[]` / `i8[]` | 1 byte | 1 KB | 8× smaller |
-| `i16[]` / `u16[]` / `f16[]` | 2 bytes | 2 KB | 4× smaller |
-| `i32[]` / `u32[]` / `f32[]` | 4 bytes | 4 KB | 2× smaller |
-| `int[]` / `float[]` / `i64[]` / `u64[]` / `f64[]` | 8 bytes | 8 KB | same |
-| Generic `Array` (Item) | 8 bytes | 8 KB | baseline |
-
-### 4. Backward Compatibility: Migration Strategy
-
-All three existing typed arrays map cleanly to `ArrayNum` with specific `elem_type` values:
-
-| Old Type | New Representation | `elem_type` | Storage |
-|----------|-------------------|-------------|---------|
-| `LMD_TYPE_ARRAY_INT` | `LMD_TYPE_ARRAY_NUM` | `ELEM_INT` | `int64_t*` (8 bytes) |
-| `LMD_TYPE_ARRAY_INT64` | `LMD_TYPE_ARRAY_NUM` | `ELEM_INT64` | `int64_t*` (8 bytes) |
-| `LMD_TYPE_ARRAY_FLOAT` | `LMD_TYPE_ARRAY_NUM` | `ELEM_FLOAT` | `double*` (8 bytes) |
-
-**Phase 1 shims** — Old names alias to new:
-
-```c
-// Type aliases for incremental migration
-#define ArrayInt    ArrayNum   // ELEM_INT
-#define ArrayInt64  ArrayNum   // ELEM_INT64
-#define ArrayFloat  ArrayNum   // ELEM_FLOAT
-
-// Factory shims — delegate to unified constructor
-ArrayNum* array_int_new(int64_t len)    { return array_num_new(ELEM_INT, len); }
-ArrayNum* array_int64_new(int64_t len)  { return array_num_new(ELEM_INT64, len); }
-ArrayNum* array_float_new(int64_t len)  { return array_num_new(ELEM_FLOAT, len); }
-
-// Accessor shims — delegate to unified getter
-Item    array_int_get(ArrayNum* a, int64_t i)    { return array_num_get(a, i); }
-Item    array_int64_get(ArrayNum* a, int64_t i)  { return array_num_get(a, i); }
-Item    array_float_get(ArrayNum* a, int64_t i)  { return array_num_get(a, i); }
-int64_t array_int_get_raw(ArrayNum* a, int64_t i)   { return ((int64_t*)a->items)[i]; }
-int64_t array_int64_get_raw(ArrayNum* a, int64_t i) { return ((int64_t*)a->items)[i]; }
-double  array_float_get_value(ArrayNum* a, int64_t i){ return ((double*)a->items)[i]; }
-```
-
-**Phase 2** — Collapse `case` branches file by file:
-
-```c
-// Before (3 cases in every switch):
-case LMD_TYPE_ARRAY_INT:   return array_int_get(arr, i);
-case LMD_TYPE_ARRAY_INT64: return array_int64_get(arr, i);
-case LMD_TYPE_ARRAY_FLOAT: return array_float_get(arr, i);
-
-// After (1 case):
-case LMD_TYPE_ARRAY_NUM:   return array_num_get(arr, i);
-```
-
-**Element get behavior per elem_type** — `array_num_get()` returns the same Item types as the old accessors:
-- `ELEM_INT` → returns `LMD_TYPE_INT` Item (int56, same as old `array_int_get`)
-- `ELEM_FLOAT` → returns `LMD_TYPE_FLOAT` Item (boxed double, same as old `array_float_get`)
-- `ELEM_INT64` → returns `LMD_TYPE_INT64` Item (same as old `array_int64_get`)
-- `ELEM_UINT8` → returns `LMD_TYPE_NUM_SIZED` Item (u8 packed inline)
-- etc.
-
-### 5. Literal Syntax & Type Annotations
-
-```lambda
-// Standard typed arrays (same as today, now routed through ARRAY_NUM)
-let nums = [1, 2, 3]                   // int[] (ELEM_INT) — inferred from int literals
-let vals = [1.0, 2.0, 3.0]             // float[] (ELEM_FLOAT) — inferred from float literals
-
-// Sized typed array literals (element type inferred from suffix)
-let bytes = [255u8, 128u8, 0u8]       // u8[] — 3 bytes storage
-let weights = [0.5f32, 0.3f32, 0.2f32] // f32[] — 12 bytes storage
-let coords = [100i16, 200i16, -50i16]  // i16[] — 6 bytes storage
-let ids = [1000u64, 2000u64]           // u64[] — 16 bytes storage
-
-// Explicit type annotation
-let data: u8[] = [1, 2, 3, 4]          // coerce int literals to u8
-let matrix: f32[] = [1.0, 2.0, 3.0]    // coerce float literals to f32
-var buffer: i32[] = fill(1024, 0)       // fill returns i32[]
-
-// Type syntax — all resolve to ARRAY_NUM with different elem_type
-int[]  float[]                          // ELEM_INT, ELEM_FLOAT (Lambda standard)
-i8[]  i16[]  i32[]  i64[]              // ELEM_INT8..ELEM_INT64
-u8[]  u16[]  u32[]  u64[]              // ELEM_UINT8..ELEM_UINT64
-f16[]  f32[]  f64[]                    // ELEM_FLOAT16..ELEM_FLOAT64
-```
-
-**Inference rules for array literals:**
-1. If all elements are plain int literals → `int[]` (ELEM_INT, same as today)
-2. If all elements are plain float literals → `float[]` (ELEM_FLOAT, same as today)
-3. If all elements share the same sized suffix → typed array of that size (e.g., `[1u8, 2u8]` → `u8[]`)
-4. If annotation present → coerce elements to annotated type (e.g., `let x: i16[] = [1, 2]`)
-5. Mixed sizes or standard types → fall back to generic `Array` (Items)
+- **A typed array is an array.** `ArrayNum` is one of three physical array forms. Equality, `type()`, iteration and formatting cannot tell it apart from a boxed `Array` holding the same values (D2.6.2, S5.3.1).
+- **One container, many element kinds.** A single `ArrayNum` type carries a one-byte element kind: `int`, `float`, the sized integers and floats `i8`…`u64`, `f16`, `f32`, and `bool`, plus a JS-only clamped byte. Elements are packed at their natural width (1, 2, 4 or 8 bytes).
+- **Contract first, representation second.** `T[]` is a homogeneous-array contract enforced at every boundary (S11.1.1v3, S11.4.1v3). The representation follows the admitted contract, and an enforced contract leaves a certificate that makes later boundaries O(1) (D3.3.3v3).
+- **Lanes hold only values.** No lane holds a null (DI8) or an error (DI20). Admitting a null into a nullable contract demotes the array to a native `Array<T?>`.
+- **The positional world is NumPy's.** N-D shape with strides, broadcasting, axis reductions, multi-axis subscripts `m[i, j]`, boolean masks, index arrays and zero-copy views (S8.2.4v3).
+- **Arithmetic is the scalar lattice, applied lane by lane.** Same-lane `+ - *` wraps in the lane, mixed sized lanes meet in the smallest containing lane, and true division leaves the sized lanes (S4.4, S4.5).
+- **Values stay values.** A read view behaves as a snapshot. Writing through to a base is legal only as a `var`-parameter borrow (S9.2.2). Masked and element writes are procedural statements on the owner.
+- **Libraries, not types.** An image is a 2-D or 3-D `ArrayNum`. The image toolkit is a set of functions over it, built on one stencil engine.
+- **One byte substrate with LambdaJS.** A JS typed array's storage is a generation-aware `ArrayNum` view over a non-moving `ByteBufferHandle`. JS spec semantics stay in the JS layer.
 
 ---
 
-## API Design
+## 1. Principles
 
-### 6. Construction Functions
-
-Inspired by JS `TypedArray.of()`, `TypedArray.from()`, and NumPy `zeros()`, `ones()`, `arange()`, `linspace()`.
-
-#### 6.1 Fill-based Construction
-
-```lambda
-// fill(count, value) — already exists, extend to infer typed array from value
-fill(1000, 0u8)         // u8[] of 1000 zeros
-fill(256, 0.0f32)       // f32[] of 256 zeros
-fill(100, 0i16)         // i16[] of 100 zeros
-
-// zeros(count, type) — explicit type, zero-filled
-zeros(1000, u8)         // u8[] of 1000 zeros
-zeros(256, f32)         // f32[] of 256 zeros
-
-// ones(count, type) — explicit type, filled with 1
-ones(100, i32)          // i32[] of 100 ones
-ones(50, f16)           // f16[] of 50 ones
-```
-
-**Implementation note:** `zeros()` and `ones()` are thin wrappers around `fill()` with explicit type coercion. The typed `fill()` path calls `heap_data_calloc()` for the compact buffer.
-
-#### 6.2 Range-based Construction
-
-```lambda
-// arange(start, stop, step, type?) — NumPy-style evenly spaced values
-arange(0, 256, 1, u8)          // u8[]: [0, 1, 2, ..., 255]
-arange(0.0, 1.0, 0.1, f32)     // f32[]: [0.0, 0.1, 0.2, ..., 0.9]
-arange(0, 100)                  // int[]: [0, 1, ..., 99] (default: int array)
-
-// linspace(start, stop, count, type?) — evenly spaced over interval
-linspace(0.0, 1.0, 11, f32)    // f32[]: [0.0, 0.1, ..., 1.0]
-linspace(-1.0, 1.0, 5)          // float[]: [-1.0, -0.5, 0.0, 0.5, 1.0]
-```
-
-#### 6.3 Conversion / Casting
-
-```lambda
-// Convert between typed arrays (like JS TypedArray constructor and NumPy astype)
-let floats: f32[] = [1.1f32, 2.5f32, 3.9f32]
-let ints = i32(floats)          // i32[]: [1, 2, 3] (truncate)
-let bytes = u8(floats)          // u8[]: [1, 2, 3] (truncate + clamp)
-
-// From generic array
-let arr = [10, 20, 30]
-let typed = i16(arr)            // i16[]: [10, 20, 30]
-
-// From binary data (like JS DataView / NumPy frombuffer)
-let raw = b'\x01\x02\x03\x04'
-let view = u8(raw)              // u8[]: [1, 2, 3, 4] — zero-copy view
-let shorts = i16(raw)           // i16[]: [0x0201, 0x0403] — native endian
-
-// To binary
-let buf = binary(typed)         // binary: raw bytes of the typed array
-```
-
-**Coercion rules when existing conversion functions receive typed arrays:**
-
-| Function | Input | Output |
-|----------|-------|--------|
-| `i8(arr)` | any array | `i8[]` (truncate + wrap) |
-| `u8(arr)` | any array | `u8[]` (truncate + wrap) |
-| `i16(arr)` | any array | `i16[]` |
-| `f32(arr)` | any array | `f32[]` |
-| `int(arr)` | any array | `int[]` (ELEM_INT) |
-| `float(arr)` | any array | `float[]` (ELEM_FLOAT) |
-
-### 7. Access & Slicing
-
-Typed arrays support the same indexing and slicing syntax as regular arrays:
-
-```lambda
-let arr: u8[] = [10u8, 20u8, 30u8, 40u8, 50u8]
-
-// Single element access — returns sized scalar
-arr[0]              // 10u8 (returns u8, not boxed Item)
-arr[last]           // 50u8
-arr[-1]             // null
-
-// Range slicing — returns new typed array of same type
-arr[1 to 3]         // u8[]: [20, 30, 40]
-
-// Length
-len(arr)            // 5
-```
-
-**JIT fast-path:** When the compiler knows `arr` is `ARRAY_NUM` with a compile-time known `elem_type`, element access compiles to a single native memory load at the correct width — no boxing, no function call.
-
-### 8. Collection Operations (Functional)
-
-All existing Lambda collection operations extend to typed arrays. Results preserve the typed array type when possible:
-
-```lambda
-let data: f32[] = [1.0f32, 2.5f32, 3.7f32, 0.5f32, 4.2f32]
-
-// Pipe map — result is typed array when transform preserves type
-data | ~ * 2.0f32        // f32[]: [2.0, 5.0, 7.4, 1.0, 8.4]
-
-// Filter with that — result is typed array
-data that (~ > 2.0)      // f32[]: [2.5, 3.7, 4.2]
-
-// Aggregation (returns scalar)
-sum(data)                 // 11.9 (float)
-avg(data)                 // 2.38 (float)
-min(data)                 // 0.5 (float)
-max(data)                 // 4.2 (float)
-
-// Sorting — returns new typed array
-sort(data)                // f32[]: [0.5, 1.0, 2.5, 3.7, 4.2]
-
-// Reverse
-reverse(data)             // f32[]: [4.2, 0.5, 3.7, 2.5, 1.0]
-
-// Slice/take/drop
-take(data, 3)             // f32[]: [1.0, 2.5, 3.7]
-drop(data, 2)             // f32[]: [3.7, 0.5, 4.2]
-slice(data, 1, 3)         // f32[]: [2.5, 3.7]
-
-// Concatenation
-data ++ [5.0f32, 6.0f32]  // f32[]: [1.0, 2.5, 3.7, 0.5, 4.2, 5.0, 6.0]
-
-// For expressions
-(for (x in data) x * x)   // f32[]: [1.0, 6.25, 13.69, 0.25, 17.64]
-```
-
-**Type preservation rules:**
-- Operations that produce elements of the same type → same typed array
-- Same-lane sized integer operations wrap in that lane; they do not widen merely
-  to avoid overflow.
-- Mixed-sized integer operations select the scalar model's common sized lane.
-  A result falls back to a generic array only when the scalar operation exits
-  the sized domain (for example, full-width true division to decimal).
-
-### 9. Properties
-
-Typed arrays expose metadata through member properties:
-
-```lambda
-let arr: u8[] = zeros(100, u8)
-
-len(arr)               // 100 — number of elements
-type(arr)              // u8[] 
-arr.bytes              // 100 — byte size of data buffer
-arr.elem_type          // 'u8' — element type as symbol
-```
+1. **Representation invariance.** `ArrayNum` is storage, not a language type. A program cannot observe whether `[1, 2, 3]` is a boxed `Array`, a native-lane `Array` or an `ArrayNum` — not through `==`, `type()`, `is`, iteration, printing or serialization (D2.6.2). Unboxed numeric arrays are representation only, and equality is never layout-based (S5.3.1).
+2. **One numeric array type.** The original three types (`ARRAY_INT`, `ARRAY_INT64`, `ARRAY_FLOAT`) shared one layout and appeared in the same `switch` statements: about 420 triplicated dispatch points across 16 files. Adding a fourth element width would have added a fourth branch everywhere. One type ID with an element-kind byte collapses that to one branch, and the JIT still emits a single native load because it tracks the element kind statically.
+3. **The contract is authoritative.** The element kind is a storage fact; it never proves a language contract. The full `Type*` graph does (D3.1.1v5). An annotation may drive representation only if its boundary is enforced (S11.4.1v3).
+4. **Lanes are total.** Native lanes cannot encode null or error, so neither is ever stored. The ruled alternatives — an in-band error sentinel, a side table of errors — are rejected (D2.8.1).
+5. **NumPy for positions, XPath for types.** A positional key (integer, range, mask, index array) selects a window whose shape follows the key; a type key walks content (S8.2.4v3). Typed arrays live in the positional world.
+6. **Value semantics by construction.** Pure `fn` code has no assignment statement, so it cannot mutate. Procedural code mutates owners it holds as `var`; aliasing is admitted only as a scoped, checked borrow (S9.2.2).
+7. **No hidden widening.** Construction never converts an element: it keeps each element's type and precision, and packs only elements that already share one exact type (S9.3.2). A declared contract admits a value only when it embeds exactly (S11.4.5). Arithmetic promotes as scalar arithmetic does, and a result that overflows a sized lane wraps in that lane, as Go does (S10.2.4, S4.4.4).
+8. **Zero cost when unused.** A 1-D owned array pays nothing for N-D, views or JS sharing. The flags live in the existing 8-byte header, and the shape side-table is allocated only for N-D arrays and views.
+9. **Libraries over types.** Images, and later data frames, are conventions and function sets over `ArrayNum`, not new containers. scikit-image and NumPy stand in the same relationship.
 
 ---
 
-## Vectorized Arithmetic Enhancements
+## 2. Element kinds
 
-### 10. Typed Array Arithmetic
+| Lambda element type | Lane tag | Bytes | Read back as | Notes |
+|---|---|---|---|---|
+| `int` | `ELEM_INT` | 8 | `int` | The i64 lane: finite values plus the int poison encodings (D2.6.3). Distinct from `i64` because `int ∥ i64` (S4.4.1): a finite `int` embeds in `i64`, poison does not. |
+| `float` (= `f64`) | `ELEM_FLOAT64` | 8 | `float` | One tag per representation: `float[]` and `f64[]` are one array type (Number Model §3.5). |
+| `i8` `i16` `i32` `i64` | `ELEM_INT8` … `ELEM_INT64` | 1 / 2 / 4 / 8 | the sized scalar | Two's-complement storage. |
+| `u8` `u16` `u32` `u64` | `ELEM_UINT8` … `ELEM_UINT64` | 1 / 2 / 4 / 8 | the sized scalar | |
+| `f16` `f32` | `ELEM_FLOAT16`, `ELEM_FLOAT32` | 2 / 4 | the sized scalar | IEEE half and single precision. |
+| `bool` | `ELEM_BOOL` | 1 | `bool` | Masks. |
+| — (JS `Uint8ClampedArray`) | `ELEM_UINT8_CLAMPED` | 1 | `u8` | JS storage kind only; it has no Lambda spelling. |
 
-Extend `vec_add`, `vec_sub`, `vec_mul`, `vec_div`, `vec_mod`, `vec_pow` to handle `ARRAY_NUM` with all elem_types:
+**Why the sized kinds exist.** `i8`…`f64` are fixed-width storage and interop types: wire formats, native-module struct fields, GPU and model weights, and JS and Arrow interop. They are not hidden tiers of `int` and `float`; size is semantic at the storage level (Number Model §3). A `u8[]` of 1000 elements takes 1 KB where a boxed array takes 8 KB:
 
-```lambda
-// Element-wise operations between typed arrays
-let a: i16[] = [100i16, 200i16, 300i16]
-let b: i16[] = [10i16, 20i16, 30i16]
+| Lane width | Kinds | 1000 elements | vs. boxed `Array` |
+|---|---|---|---|
+| 1 byte | `i8` `u8` `bool` | 1 KB | 8× smaller |
+| 2 bytes | `i16` `u16` `f16` | 2 KB | 4× smaller |
+| 4 bytes | `i32` `u32` `f32` | 4 KB | 2× smaller |
+| 8 bytes | `int` `float` `i64` `u64` | 8 KB | same |
 
-a + b      // i16[]: [110, 220, 330]
-a - b      // i16[]: [90, 180, 270]
-a * b      // i16[]: [1000, 4000, 9000]  — same lane; wraps if it overflows
-a / b      // f32[]: [10.0, 10.0, 10.0]  — this compact typed-array path exits to f32
+**Why `bool` is its own kind and not `u8`.** `any`/`all` and `sum(mask)` have Boolean meaning (S10.2.3), formatters print `true`/`false`, and admission differs: only Boolean values enter a `bool[]`.
 
-// Scalar broadcast with typed arrays
-let data: f32[] = [1.0f32, 2.0f32, 3.0f32]
-data * 2.0f32    // f32[]: [2.0, 4.0, 6.0]
-data + 1.0f32    // f32[]: [2.0, 3.0, 4.0]
-10i16 - b        // i16[]: [0, -10, -20]
+**Why the clamp is a kind and not a flag.** Clamping (NaN → 0, saturate to [0, 255], round half to even) is a write-coercion difference, not a storage or read difference. A flag would put a branch into every hot store loop and muddy width lookup. As a kind, the clamp lives in one place — the JS store path — and every other operation treats the lane exactly as `u8`.
 
-// Mixed width
-let x: i8[] = [1i8, 2i8, 3i8]
-let y: i16[] = [100i16, 200i16, 300i16]
-x + y            // i16[]: [101, 202, 303]  — widened to i16
-```
-
-#### Arithmetic Promotion Rules (Array Context)
-
-When two typed arrays are combined, the result element type follows these rules:
-
-| Operation | Same integer type | Different integer types | Integer + sized float | Full-width integer + float |
-|-----------|-------------------|-------------------------|-----------------------|----------------------------|
-| `+` `-` `*` `div` `%` | same lane, Go-style wrap | scalar model's containing sized lane | float domain for compact integers | decimal domain; generic/decimal-capable result storage |
-| `/` | compact lane → float; `i64/u64` → decimal | map each lane to `int`/`integer`, then true-divide | float domain for compact integers | decimal domain |
-| `**` | follow the scalar power rule selected by `Lambda_Impl_Numbers.md` | same | same | same |
-
-Examples of the shared integer-lane selection are `i8 + u8 → i16`,
-`i32 + u32 → i64`, and `i64 + u64 → u64`. Once selected, the lane is used for
-multiplication as well as addition and subtraction; `i16 * i16` therefore
-remains `i16` and wraps instead of widening to avoid overflow.
-
-### 11. Sized Scalar Support in Vector Ops
-
-Currently `is_scalar_numeric()` only recognizes `INT`, `INT64`, `FLOAT`, `DECIMAL`. Extend to include `NUM_SIZED` and `UINT64`:
-
-```c
-static inline bool is_scalar_numeric(TypeId type) {
-    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL ||
-           type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64;
-}
-```
-
-This enables:
-
-```lambda
-let arr: f32[] = [1.0f32, 2.0f32, 3.0f32]
-arr * 2.0f32       // f32[]: scalar broadcast
-arr + 100i16       // f32[]: sized scalar promotes to f32
-
-let ints: i16[] = [10i16, 20i16, 30i16]
-ints + 5u8         // i16[]: [15, 25, 35] — u8 scalar widens to i16
-```
-
-### 12. `item_to_double` Extension
-
-Currently `item_to_double` handles `INT`, `INT64`, `FLOAT`. Extend for sized types:
-
-```c
-static double item_to_double(Item item) {
-    TypeId type = get_type_id(item);
-    switch (type) {
-        case LMD_TYPE_INT:       return (double)item.get_int56();
-        case LMD_TYPE_INT64:     return (double)item.get_int64();
-        case LMD_TYPE_FLOAT:     return item.get_double();
-        case LMD_TYPE_UINT64:    return (double)item.get_uint64();
-        case LMD_TYPE_NUM_SIZED: {
-            NumSizedType st = NUM_SIZED_SUBTYPE(item.item);
-            switch (st) {
-                case NUM_INT8:    return (double)item_to_i8(item.item);
-                case NUM_INT16:   return (double)item_to_i16(item.item);
-                case NUM_INT32:   return (double)item_to_i32(item.item);
-                case NUM_UINT8:   return (double)item_to_u8(item.item);
-                case NUM_UINT16:  return (double)item_to_u16(item.item);
-                case NUM_UINT32:  return (double)item_to_u32(item.item);
-                case NUM_FLOAT16: return (double)item_to_f16(item.item);
-                case NUM_FLOAT32: return (double)item_to_f32(item.item);
-            }
-        }
-        default: return NAN;
-    }
-}
-```
-
-### 13. Native-Width Fast Paths
-
-For same-type operations on compact arrays, the runtime operates directly on the native buffer without converting to `double`:
-
-```c
-// Example: u8[] + u8[] → u8[] (wrapping)
-static Item vec_add_u8(ArrayNum* a, ArrayNum* b) {
-    int64_t len = a->length;
-    ArrayNum* result = array_num_new(ELEM_UINT8, len);
-    uint8_t* pa = (uint8_t*)a->items;
-    uint8_t* pb = (uint8_t*)b->items;
-    uint8_t* pr = (uint8_t*)result->items;
-    for (int64_t i = 0; i < len; i++) {
-        pr[i] = pa[i] + pb[i];  // native u8 wrapping add
-    }
-    return { .container = (Container*)result };
-}
-```
-
-**SIMD opportunity:** These tight loops with fixed-width elements are ideal candidates for auto-vectorization by the C compiler (via `-O2 -ftree-vectorize`). No explicit SIMD intrinsics needed initially — the compiler can generate SSE/NEON instructions automatically for aligned buffers.
-
-### 14. Math Module Extensions for Typed Arrays
-
-NumPy-style element-wise math functions should return typed arrays when given typed array input:
-
-```lambda
-let data: f32[] = [1.0f32, 4.0f32, 9.0f32, 16.0f32]
-
-math.sqrt(data)     // f32[]: [1.0, 2.0, 3.0, 4.0]
-math.log(data)      // f32[]: [0.0, 1.386, 2.197, 2.773]
-math.sin(data)      // f32[]: [0.841, -0.757, 0.412, -0.288]
-math.exp(data)      // f32[]: [2.718, 54.598, 8103.08, ...]
-
-// Statistical operations
-math.mean(data)      // 7.5 (scalar)
-math.variance(data)  // 31.25 (scalar)
-math.deviation(data) // 5.59 (scalar)
-math.cumsum(data)    // f32[]: [1.0, 5.0, 14.0, 30.0]
-math.cumprod(data)   // f32[]: [1.0, 4.0, 36.0, 576.0]
-
-// Vector operations
-let a: f32[] = [1.0f32, 0.0f32, 0.0f32]
-let b: f32[] = [0.0f32, 1.0f32, 0.0f32]
-math.dot(a, b)       // 0.0 (scalar)
-math.norm(a)         // 1.0 (scalar)
-```
+**What is not a kind.** There are no nullable, `decimal`, `integer`, `complex`, string or union lanes. Their arrays are native-lane or boxed `Array`s, chosen by the representation table in §3.3.
 
 ---
 
-## Runtime Implementation
+## 3. Types and contracts
 
-### 15. Factory Functions
+### 3.1 Spelling and rank
 
-```c
-// Primary constructor
-ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length);
+`T[]` is the homogeneous-array contract: every logical element satisfies `T`, at any length (S11.1.1v3). It applies to every element kind — `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]`, `bool[]` — and to non-numeric elements alike. `T[n]` fixes the length. Repeated postfixes preserve rank: `float[][]` is an array of `float[]`, and `int[2][3]` is three arrays of two. `[T]` is a structural pattern for exactly one `T`, never an alternative spelling of `T[]`.
 
-// Compatibility wrappers (Phase 1 — delegate to array_num_new)
-ArrayNum* array_int_new(int64_t length);    // → array_num_new(ELEM_INT, length)
-ArrayNum* array_int64_new(int64_t length);  // → array_num_new(ELEM_INT64, length)
-ArrayNum* array_float_new(int64_t length);  // → array_num_new(ELEM_FLOAT, length)
+A rectangular `int[][]` may be stored as one 2-D `ArrayNum`. That is a representation of `int[][]`, never a licence to treat a row as an `int`.
 
-// Element access (boxed — returns Item)
-Item array_num_get(ArrayNum* arr, int64_t index);
+### 3.2 Relations
 
-// Element access (raw — returns native type, skip boxing)
-int64_t array_num_get_int(ArrayNum* arr, int64_t index);
-double  array_num_get_float(ArrayNum* arr, int64_t index);
+Value positions are covariant: `S[] ⊑ T[]` when every `S` embeds exactly into `T` (S9.2.1, S4.4.1). So `i8[] is int[]`, `u8[] is u16[]` and `f32[] is float[]` are true, while `i8[] is u8[]` and `float[] is f32[]` are false. This is sound because those channels copy, so the covariant-array hole cannot arise. Representation widening (i8 lanes to int lanes, or unboxed to boxed) happens lazily at copy time.
 
-// Element write
-void array_num_set_int(ArrayNum* arr, int64_t index, int64_t value);
-void array_num_set_float(ArrayNum* arr, int64_t index, double value);
+A `var` parameter is the only aliasing channel, so it is invariant: passing `var xs: i8[]` to `pn f(var a: int[])` is a compile error (S9.2.1). Invariance includes rank, nullability, sized kind and named-record layout.
 
-// Coercion
-ArrayNum* array_num_from_array(Array* arr, ArrayNumElemType target_type);
-ArrayNum* array_num_cast(ArrayNum* src, ArrayNumElemType target_type);
-```
+### 3.3 Admission and representation
 
-### 16. `array_num_get` Implementation
+An annotation is a contract, with three outcomes and never a fourth: statically proven, statically rejected, or a deferred runtime check whose failure is a rich error naming the boundary, expected type, actual value and location (S11.4.1v3). A `T[]` boundary validates every logical element before it publishes the representation; failure never establishes the binding and never leaves a half-built array.
 
-```c
-Item array_num_get(ArrayNum* arr, int64_t index) {
-    if (!arr || index < 0 || index >= arr->length) return ItemNull;
-    
-    switch (arr->elem_type) {
-        case ELEM_INT:     return i2it(((int64_t*)arr->items)[index]);  // int56 → LMD_TYPE_INT
-        case ELEM_FLOAT:   return push_d(((double*)arr->items)[index]); // double → LMD_TYPE_FLOAT
-        case ELEM_INT8:    return { .item = i8_to_item(((int8_t*)arr->items)[index]) };
-        case ELEM_INT16:   return { .item = i16_to_item(((int16_t*)arr->items)[index]) };
-        case ELEM_INT32:   return { .item = i32_to_item(((int32_t*)arr->items)[index]) };
-        case ELEM_UINT8:   return { .item = u8_to_item(((uint8_t*)arr->items)[index]) };
-        case ELEM_UINT16:  return { .item = u16_to_item(((uint16_t*)arr->items)[index]) };
-        case ELEM_UINT32:  return { .item = u32_to_item(((uint32_t*)arr->items)[index]) };
-        case ELEM_FLOAT16: return { .item = f16_to_item(((uint16_t*)arr->items)[index]) };
-        case ELEM_FLOAT32: return { .item = f32_to_item(((float*)arr->items)[index]) };
-        case ELEM_INT64:   return push_l(((int64_t*)arr->items)[index]);
-        case ELEM_UINT64:  { uint64_t* p = (uint64_t*)heap_calloc(8, LMD_TYPE_UINT64);
-                             *p = ((uint64_t*)arr->items)[index];
-                             return { .item = u64_to_item(p) }; }
-        case ELEM_FLOAT64: return push_d(((double*)arr->items)[index]);
-        default:           return ItemNull;
-    }
-}
-```
+Numeric admission is value-aware (S11.4.5): a dynamic element that embeds exactly passes and is re-represented, and an inexact one fails. A computed `[1, 2]` crossing into `u8[]` becomes `u8` lanes; `[300]` is rejected, never wrapped to `[44]`. Static positions reject a class that does not embed, so sized literals are written with their suffix (`[1u8, 2u8]`).
 
-### 17. `ensure_typed_array` Extension
+The representation follows the admitted leaf contract:
 
-Extend the existing `ensure_typed_array()` to handle `ARRAY_NUM` coercion:
+| Contract | Representation |
+|---|---|
+| non-null `int`, `float`, `i8`…`u64`, `f16`, `f32`, `bool` | `ArrayNum` of the exact kind |
+| nullable numeric or `bool` | native-lane `Array` with the ruled sentinel lane |
+| nullable `i64?`, `u64?` | destination-owned `TypedItem` slots (D2.6.4v3) |
+| rectangular nested numeric rank | N-D `ArrayNum`; nested arrays when ragged |
+| union, `any`, error-admitting, heterogeneous | boxed `Array` |
 
-```c
-void* ensure_typed_array(Item item, TypeId element_type_id) {
-    TypeId item_tid = get_type_id(item);
-    
-    // All typed array annotations now resolve to ARRAY_NUM
-    // Determine target elem_type from the annotation
-    ArrayNumElemType target = annotation_to_elem_type(element_type_id, sub_type);
-    
-    if (item_tid == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* src = (ArrayNum*)item.container;
-        if (src->elem_type == target) return src;  // already correct
-        return array_num_cast(src, target);         // cross-cast (e.g., int[] → f32[])
-    }
-    // Convert from generic Array
-    if (item_tid == LMD_TYPE_ARRAY) {
-        return array_num_from_array((Array*)item.container, target);
-    }
-    return NULL;  // incompatible type
-}
-```
+A successful boundary attaches an immutable, interned **representation certificate** proving rank, leaf contract and physical carrier. It is reused only while both the target contract and the current carrier still match; a transform that does not materialize the matching carrier clears it, and the next checked boundary re-admits (D3.3.3v3). The first dynamic crossing costs O(n); repeated same-contract crossings cost O(1); nothing is checked per read. A certificate is never inferred from an element kind or byte width.
+
+A typed empty array still has a typed carrier: `[]` under `u8[]` is an empty `u8` `ArrayNum`, and an unannotated `[]` stays an open boxed array.
+
+### 3.4 Null and error
+
+`ArrayNum` is strictly non-null (D2.6.2, DI8). Storing null into `int[]` is rejected. Storing null into `int?[]` atomically demotes the carrier to a native `Array<int?>` before the write. `nan` is a float value, not an error, so a float lane may hold it.
+
+No lane holds an error (DI20). The type decides the representation: `[f(x) ^ { 0 } for x in xs]` is `int[]` with its lane preserved, while `[f(x) for x in xs]` is `(int | error)[]`, boxed, keeping each element's error (S7.8.2).
+
+### 3.5 Indexed read types and reflection
+
+An unproven scalar read `a[i]` from `T[]` has public type `T?` (D2.5.3); a bounds proof may use `T` privately in the emitter but never changes the public type. Reads are rank-aware: for `m: int[][]`, `m[i]` is `int[]?` and `m[i, j]` is `int?`. `flatten` and `ravel` return `int[]`, `transpose` keeps rank, a static `reshape(xs, [r, c])` gives `T[][]`, and a dynamic reshape gives the open `array` type plus a certificate.
+
+`type(x)` is `array` for every physical form (D2.6.2). `x is u8[]` and `case u8[]:` test the structural contract, not the lane tag — and because of covariance a `u8[]` also matches `case int[]:`, so match arms go narrowest first.
 
 ---
 
-## JIT Compilation
+## 4. Construction
 
-### 18. Transpiler Changes
+### 4.1 Literals
 
-#### Literal Detection
+Construction preserves each element's literal type and precision (S9.3.2, ruled by the user 2026-10-21). A literal is packed into an `ArrayNum` only when every element already has the same exact type; any mix stays a boxed `Array` holding the elements as written. Elements are never promoted to a common numeric type, even when the promotion would be exact, because the element's type is part of its value: `type([1, 2.5][0])` must be `int`, as it is in a boxed array (D2.6.2).
 
-When the transpiler encounters an array literal where all elements are sized literals of the same type:
+| Literal | Result |
+|---|---|
+| `[1, 2, 3]` | `int` lanes |
+| `[1.0, 2.5]` | `float` lanes |
+| `[1, 2.5]`, `[1, 2i64]` | boxed `Array`; `1` stays `int` |
+| `[255u8, 0u8]`, `[0.5f32, 0.3f32]` | that sized lane |
+| `[true, false]` | `bool` lanes |
+| mixed sized kinds, or sized with plain numbers | boxed `Array` |
+| `[2^53 + 1 as i64, 2.5]` | boxed `Array`; the `i64` keeps every digit |
+| anything non-numeric | boxed `Array` |
 
-```c
-// In transpile_array():
-if (all_elements_same_sized_type(mt, node)) {
-    ArrayNumElemType elem = get_common_elem_type(mt, node);
-    int64_t count = count_elements(node);
-    
-    // Emit: ArrayNum* arr = array_num_new(elem, count)
-    MIR_reg_t arr = emit_call_2(mt, "array_num_new", MIR_T_P,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, elem),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, count));
-    
-    // Emit element writes at native width
-    // ...
-    return arr;  // with var_tid = LMD_TYPE_ARRAY_NUM
-}
-```
+An unannotated mixed literal has an open element type; nothing is inferred from a least upper bound. Under an annotation the literal is admitted by the target's contract (§3.3): `let xs: float[] = [1, 2.5]` stores `1.0`, because the declared contract asks for `float` and `1` embeds exactly (S11.4.5).
 
-Note: Existing int-literal and float-literal array paths now also emit `array_num_new(ELEM_INT, count)` and `array_num_new(ELEM_FLOAT, count)` respectively, replacing the old `array_int_new()` / `array_float_new()` calls.
+### 4.2 Nested literals are N-D
 
-#### Inline Element Access
+`[[1, 2], [3, 4]]` becomes one 2-D `ArrayNum`. There is no `tensor(...)` builtin and no separate syntax. Detection happens in two places:
 
-When `obj_tid == LMD_TYPE_ARRAY_NUM` and `elem_type` is known at compile time:
+- **Statically**, when the builder sees a rectangular nested literal of one numeric kind. It allocates one contiguous buffer and fills it directly; no row arrays are built.
+- **Dynamically**, when an array is finished from runtime rows — `[r1, r2, r3]` where each row is an `ArrayNum` of one kind and equal length, or an N-D array of equal shape (giving N+1 dimensions). Promotion is eager: one new contiguous buffer, one copy per row.
 
-```c
-// Direct memory load at native width (no function call)
-// For ELEM_UINT8:
-//   uint8_t val = ((uint8_t*)arr->items)[index]
-//   Item result = u8_to_item(val)
-// → 2 MIR instructions (load + pack), zero overhead
-//
-// For ELEM_INT (same as old ARRAY_INT fast path):
-//   int64_t val = ((int64_t*)arr->items)[index]
-//   Item result = i2it(val)
-// → identical codegen to current ARRAY_INT path
-//
-// For ELEM_FLOAT (same as old ARRAY_FLOAT fast path):
-//   double val = ((double*)arr->items)[index]
-//   Item result = push_d(val)
-// → identical codegen to current ARRAY_FLOAT path
-```
+Rows must have the same exact element type. Ragged rows, rows of different types (`int` with `float`, `i64` with `float`, `int` with `i64`) and rows mixed with scalars stay a nested `Array` whose rows keep their own types (S9.3.2). Either way the observable value is the same under indexing and iteration. A nested array is not a tensor, so `shape`, `ndim` and the whole-array reductions do not treat it as one (§13, Q7).
 
-#### Vector Operation Dispatch
+Dynamic promotion costs O(N) and briefly about twice the data size, until the old rows are collected. NumPy's `np.array([r1, r2])` has the same cost for the same reason: strides can only address one contiguous block. Static literals avoid it, and the downstream payoff — vectorized arithmetic, broadcasting and reductions over contiguous memory instead of per-row dispatch — is large. Lazy promotion (defer the copy until the first vectorized operation) is deferred.
 
-```c
-// In transpile_binary_expr when both sides are ARRAY_NUM:
-if (left_tid == LMD_TYPE_ARRAY_NUM && right_tid == LMD_TYPE_ARRAY_NUM) {
-    // If both elem_types are known and same → emit type-specialized native loop
-    // Otherwise → emit call to vec_add etc. (dispatches by elem_type at runtime)
-}
-```
+### 4.3 Typed results from pipes and comprehensions
+
+Functions and pipes return arrays for any sequence input (S2.5.7v4). When every produced element has the same exact numeric or Boolean type, the result is packed: `xs |> ~ * 2`, `[for (x in xs) x * 10]` and `[for (x in xs where x > 2) x]` all yield `ArrayNum`s that feed `sum`, `reshape` and broadcasting without re-boxing. The packing is done once, where every array builder finishes (Appendix A.4), so pipes, comprehensions and filters share it. A result of mixed types stays generic: `[for (x in [1, 2, 3]) if (x == 2) 2.5 else x]` holds two `int`s and a `float`. A bare `for` expression is a list and stays one, because it must splice where it lands (S2.5.2v2).
+
+### 4.4 `fill` and planned construction functions
+
+`fill(n, v)` builds an array of `n` copies of `v`; with a numeric or Boolean `v` it is typed by `v`'s lane.
+
+NumPy-style constructors — `zeros(n, T)`, `ones(n, T)`, `arange(start, stop, step, T?)`, `linspace(start, stop, count, T?)` — and array forms of the sized conversions (`u8(xs)`, `f32(xs)`) were proposed but are neither built nor ruled. Their conversion semantics must be reconciled with value-aware admission first (§13, Q2).
 
 ---
 
-## Type System Integration
+## 5. Indexing and selection
 
-### 19. Type Annotations
+- **Positions.** Indexing is 0-based. Negative indices carry no meaning: `a[-1]` is out of range and reads `null`, exactly like `a[len(a)]` (S7.2.1). Every invalid read is `null`; none raises (S7.1.1v3). `last` is `len − 1` of the innermost enclosing subscript's container, so `a[last]`, `a[last - 1]` and `a[5 to last]` work; on an N-D array `last` counts the leading axis (S7.2.2).
+- **Multi-axis subscripts.** `m[i, j, k]` takes one key per axis and reads the element at `offset + Σ keyᵢ · strideᵢ` with no allocation. With fewer keys than axes, each key steps one leading axis, so `t[1, 3]` equals `t[1][3]` and is a view of rank `ndim − keys`. More keys than axes, or any out-of-range key, reads `null`. Multi-axis tail access uses `last` per axis or ordinary length arithmetic.
+- **Ranges.** `a[i to j]` clamps to the array and is `[]` when empty (S8.2.4v3). It may share storage as a view, which is unobservable under S9.2.2.
+- **Masks.** `a[mask]` with a `bool[]` of the same shape selects the true lanes in row-major order as a 1-D array. A 1-D mask whose length is `shape[0]` selects leading-axis rows, giving shape `(k, …trailing)`. The result keeps the source lane. A mask selection is always a copy, since a non-contiguous selection cannot alias.
+- **Index arrays.** `a[[0, 2, 5]]` is a gather. The result has the index array's own length and shape (`a[[[0, 1], [2, 3]]]` is 2-D), and an out-of-range or negative position contributes `null` (S8.2.4v3). A gather with a `null` result cannot stay in a non-null lane (§3.4).
+- **Positional selections always yield arrays**, whatever the count: shape follows the key, not the data (S8.2.4v3).
+
+Why first-class `m[i, j, k]`. Chained `m[i][j][k]` on a 3-D array allocates two intermediate views per scalar read. `m[i, j, k]` is one offset computation. More importantly, it is the only way to write one element of an N-D owner (§8.3). NumPy, Julia, R, C#, Swift and — after 30 years of `[i][j][k]` — C++23 all have the form; the prior-art table is in [Appendix C](#appendix-c--prior-art).
+
+---
+
+## 6. N-dimensional arrays
+
+### 6.1 Model
+
+An N-D `ArrayNum` is a flat element buffer plus a shape side-table: `ndim` (at most 32), `shape[ndim]`, `strides[ndim]` in elements (not bytes), an element `offset`, and contiguity bits. `length` is the product of the shape. A 1-D owned array has no side-table and runs the unchanged 1-D path. The side-table costs `sizeof(header) + 16 · ndim` bytes, regardless of data size.
+
+### 6.2 Iteration
+
+`for x in m` walks the leading axis: each `x` is a view of rank `ndim − 1`, as in NumPy. Scalar iteration over an N-D array is `for x in flatten(m)`. A 1-D array yields scalars.
+
+### 6.3 Structural operations
+
+| Operation | Meaning |
+|---|---|
+| `shape(a)`, `ndim(a)` | shape as `int[]`; rank |
+| `reshape(a, shape)` | same elements, new shape; total count must match; a view when the source is C-contiguous |
+| `transpose(a)` | reversed axes, as a strided view; a permutation argument is designed (Appendix A.7) |
+| `flatten(a)` | 1-D copy in row-major order |
+| `ravel(a)` | 1-D view when contiguous, else a copy |
+| `concat(a, b)` | join along axis 0 |
+| `stack(a, b)` | join along a new leading axis |
+| `split(a, n[, axis])` | `n` equal parts along an axis, which must divide evenly; dispatches on the first argument, so string `split` is unaffected |
+| `matmul(a, b)`, `math.dot(a, b)` | matrix and vector products, result kind by §7.2 |
+
+Variadic `concat`/`stack` and an explicit `axis` argument are deferred; until then the nested-literal promotion `[a, b, c]` serves as an n-ary stack. `expand_dims` and `squeeze` are deferred view operations.
+
+### 6.4 Broadcasting
+
+Every element-wise operation broadcasts with NumPy's rules: shapes align from the right, a size-1 axis stretches, and missing leading axes count as 1. A shape mismatch is an error, never a silent truncation. When both operands are 1-D, contiguous and of equal length, the operation takes the plain 1-D loop, so N-D support adds nothing to that case.
+
+### 6.5 Axis reductions
+
+`sum`, `avg`, `min`, `max`, `math.mean` and `math.prod` take an optional axis (`sum(m, 1)`, `min(m, axis: 0)`) and return an array with that axis removed. `math.cumsum` and `math.cumprod` run along the axis and keep the shape. Negative axes count from the end, and non-contiguous (transposed) sources work. The one-argument forms reduce the whole array. `min(a, b)` on two scalars keeps its pairwise meaning: an array first argument selects the axis form.
+
+### 6.6 Output
+
+Formatters see an N-D array as nested arrays, through the same reader interface as any other array (Appendix B). Serialization stays clean for round-tripping. A NumPy-style debug repr annotating kind, shape and view-ness (`<f32 shape=(2,3) …>`) is deferred: it is developer ergonomics only, and `shape()`/`ndim()` already expose the facts.
+
+---
+
+## 7. Arithmetic, comparison and math
+
+### 7.1 Vectorized operators
+
+`+ - * /` (and `div`, `%`, `**`) are element-wise with broadcasting; vector arithmetic is mathematics (S10.2.1). Operators keep the operand kind: a scalar operand leaves the kind alone, and an array or range operand gives an array (S2.5.7v4). `++` concatenates; `+` never appends.
+
+### 7.2 Result element kind
+
+Array arithmetic promotes exactly as scalar arithmetic does (S10.2.4, ruled by the user 2026-10-21): the type of each result element is the scalar result type of the same operation on that pair of elements, and arrays add no promotion rules of their own (S4.4, S4.5). A packed result follows when the result elements share one type; otherwise the result is generic, like any construction (S9.3.2): `[1, 2.5] + 1` is `[2, 3.5]` holding an `int` and a `float`.
+
+| Operands | `+ - *`, bitwise, shifts | `/` | `div`, `%` |
+|---|---|---|---|
+| same sized lane | same lane; overflow wraps (`[255u8, 1u8] + [1u8, 2u8]` is `[0u8, 3u8]`) | leaves the lane: `i8`…`u32` → `float`; `i64`/`u64` → `decimal` | enters the non-sized domain: `i8`…`u32` → `int`; `i64`/`u64` → `integer` |
+| different sized lanes | smallest containing lane: `i8 + u8 → i16`, `i32 + u32 → i64`, `i64 + u64 → u64`; it then wraps | as above | as above |
+| sized with non-sized | leaves the machine domain: `i8`…`u32` → `int`; `i64`/`u64` → `integer` | domain rule | domain rule |
+| bounded integer with `float` | `float` (S4.4.3) | `float` | `float` |
+
+Consequences worth stating: `i16[] * i16[]` stays `i16[]` and wraps rather than widening to avoid overflow — at run time; a constant expression built only from sized literals that leaves its lane (`200u8 + 100u8`, `-1u8`) is a compile error, as `256u8` is (S4.1.5); `int[] / int[]` is `float[]`; `u8[] / u8[]` is `float[]`. A computed zero divisor never raises: `/` follows IEEE, and `div`/`%` yield the domain's poison (S4.5.1–S4.5.3). When the result type has no lane (`decimal`, `integer`), the result is a boxed array — representation follows the contract.
+
+### 7.3 Equality
+
+`==` on arrays is deep, element-wise numeric equality, exact across lanes (`[1u8] == [1]`), with N-D shape compared structurally. It is never layout-based (S5.3.1, D2.6.2).
+
+### 7.4 Element-wise comparison and masks
+
+The bare comparisons `< <= > >=` are scalar-only. Element-wise comparison has its own keyword operators, **`eq ne lt le gt ge`**, which broadcast and yield `bool[]` masks; `nan` lanes compare false (S10.2.2v2). The reason: a mask is a container, containers are truthy, and `if (a > 0)` must not silently mean "always".
 
 ```lambda
-// Variable annotations
-let a: i8[] = [1, 2, 3]
-let b: u32[] = fill(100, 0)
-var c: f32[] = zeros(256, f32)
-
-// Function parameter types
-fn dot_product(a: f32[], b: f32[]) f32 {
-    sum(a * b)
-}
-
-// Return types
-fn normalize(v: f32[]) f32[] {
-    v / math.norm(v)
-}
+let a = [1, -2, 3, -4, 5]
+a[a gt 0]          // [1, 3, 5] — the filter idiom
+sum(a lt 0)        // 2 — sum of a mask counts true lanes
+all(a ne 0)        // true
 ```
 
-### 20. Type Checking
+Masks are consumed explicitly: `sum(mask)` counts, `a[mask]` selects, and `any`/`all` reduce. `and`/`or` stay scalar short-circuit operators and never combine masks (S10.2.3).
+
+### 7.5 Vectorized functions
+
+Unary numeric system functions accept arrays and ranges and return arrays (S7.10.5v3). An array or list in gives an array out; one lane never collapses to a scalar, zero lanes give a typed `[]`, `null` in gives `null` out, and a lane exception produces a lane value (`nan`, `inf`), never a change of shape.
+
+- **Float-valued** (`sqrt`, `cbrt`, `log`, `log2`, `log10`, `log1p`, `exp`, `exp2`, `expm1`, trigonometric and hyperbolic functions) return `float[]`.
+- **Kind-preserving** (`abs`, `sign`, `floor`, `ceil`, `round`, `trunc`, and unary `-`) keep the input lane.
+- **`clip(a, lo, hi)`** clamps element-wise; `lo` and `hi` broadcast as scalars or arrays.
+- **Binary** float functions (`pow`, `atan2`, `hypot`, `fmod`) broadcast like operators.
+
+### 7.6 Reductions
+
+`sum`, `avg`, `min`, `max`, `math.prod`, `math.mean`, `math.variance`, `math.deviation`, `math.norm`, `argmin`, `argmax`, `all` and `any` reduce to a scalar; `math.cumsum`/`math.cumprod` return arrays. `argmin([])` and `argmax([])` are `null`. Reductions widen rather than wrap (S10.2.4, ruled by the user 2026-10-21, after `avg([200u8, 100u8])` was seen to return `22.0`). `sum`, `math.prod`, `math.cumsum` and `math.cumprod` accumulate a narrow sized integer lane (`i8`…`u32`) in `int`, and an `i64`/`u64` lane in itself, whole-array or along an axis: `sum([200u8, 100u8])` is `300` and `math.cumsum` of it is `[200, 300]`. `avg`, `math.mean`, `math.variance` and `math.deviation` accumulate every bounded number in `float`, so `avg([200u8, 100u8])` is `150.0` and an `i64` mean is a `float`, not a `decimal`. `min` and `max` keep the lane. `sum([1, 2.5])` is `3.5` (`int + float`), and float lanes keep their own type (`sum` of `f32[]` is `f32`).
+
+Why widening, when element-wise operators wrap: this is the line NumPy, Julia and R all draw. An element-wise operation on a `u8` image is the machine operation the user asked for, and its result is still one byte per pixel; a reduction produces a new number whose magnitude grows with the array length, and no reader of `sum(pixels)` means a byte. Go is no counter-example: it has no `sum` at all, and its idiom declares a wider accumulator (`var s int`). R goes furthest, giving its byte type `raw` no arithmetic at all. `math.dot` and `matmul` follow NumPy instead (user ruling 2026-10-21): every product and sum is element arithmetic in the operands' common lane, so `math.dot([200u8, 1u8], [2u8, 1u8])` wraps to `145u8`, `u8 @ u8` is a wrapped `u8` matrix, `int @ int` is `int`, `f32 @ f32` stays `f32`, and `int @ float` is `float`. NumPy, Julia and PyTorch all compute products in the element type; only R converts to `double`. To multiply without wrapping, widen an operand first (`matmul(a |> int(~), b)`).
+
+Float reductions may reassociate (pairwise or SIMD order), so results can differ from a left fold in the last ULP, as NumPy's do.
+
+---
+
+## 8. Views and mutation
+
+### 8.1 What a view is
+
+A view is an `ArrayNum` whose elements alias another array's storage. It has the base's element kind and a shape side-table carrying its offset, shape, strides and a reference to its base, which keeps the base alive. No element is copied. Views come from `subview(a, start, end)`, `reshape` of a contiguous source, `transpose`, `ravel` of a contiguous source, a partial N-D subscript (`m[i]`), and possibly a range slice.
+
+A view is a storage fact, like the element kind: it is never observable as a distinct type.
+
+### 8.2 Read views are snapshots
+
+A read view is a first-class value with snapshot semantics: it behaves as a copy taken at creation, so the zero-copy slice is an optimization nobody can observe (S9.2.2). Binding a view and then writing through that binding detaches the binding into an owned array; the base never changes. Writing the base after a view was taken does not show through the view.
+
+### 8.3 Writing in place
+
+Procedural code needs in-place updates: a 4K RGBA frame is about 33 MB, and copying it per operation is ruinous. Lambda allows in-place writes in three forms, all procedural statements:
+
+| Form | Meaning |
+|---|---|
+| `a[i] = v`, `m[i, j] = v` | element write on an owner held as `var` |
+| `a[mask] = v`, `a[mask] = values` | masked write: a scalar fill, or one value per true lane in row-major order |
+| `img[r0 to r1, c0 to c1] = patch` | region write: a scalar fill or a shape-matched block (designed, not yet built) |
+
+Every form admits its right-hand side under the destination contract and preflights all positions before writing anything; a later failure leaves the owner unchanged (S11.4.1v3). The right-hand side is a value — a range or view on the right is a snapshot — so overlapping region copies (`a[1 to 3] = a[2 to 4]`) behave as if the source were copied first, which is `memmove` semantics.
+
+**Write-through views are borrows, never values** (S9.2.2). A view that writes through to its base is legal only as an argument in `var`-parameter position. The borrow is exclusivity-checked (overlapping mutable borrows are rejected before the call; whole-base rejection is acceptable until a disjoint-range proof exists), it cannot escape, be returned, be captured or be stored, and creating it over shared storage un-shares first. A view-state `var` may not itself be passed as a `var` argument (S9.2.4v2).
 
 ```lambda
-let arr: u8[] = [1u8, 2u8, 3u8]
+pn write_row(var row) {
+    row[0] = 99          // writes m[1][0]
+}
 
-type(arr)            // u8[]
-arr is u8[]          // true
-arr is array         // true  (typed arrays are arrays)
-arr is i8[]          // false (different element type)
-arr is u16[]         // true  (covariant exact widening)
-```
-
-### 21. `is` and Pattern Matching
-
-```lambda
-match data {
-    case u8[]:    "byte array"
-    case i32[]:   "int32 array"
-    case f32[]:   "float32 array"
-    case int[]:   "standard int array"
-    case float[]: "standard float array"
-    case array:   "generic array"
-    default:      "not an array"
+pn main() {
+    var m = [[1, 2, 3], [4, 5, 6]]
+    write_row(m[1])      // the row is borrowed; no copy
 }
 ```
 
-Note: All typed array `case` arms check `type_id == LMD_TYPE_ARRAY_NUM` then match on `elem_type`. The `case array:` arm matches `LMD_TYPE_ARRAY` (generic Item array) only.
+**The purity boundary holds by construction.** `fn` code has no assignment statement, so no write path is reachable from functional code. Mutability belongs to the context (a `var` owner, a `var`-parameter borrow), never to the array value.
+
+### 8.4 Lifetime
+
+The view's shape side-table holds its base as a garbage-collector edge, so a live view keeps its base alive. A view over GC-owned data does not pin the base. When compaction moves the base's data, the collector recomputes the view's data pointer from the base and the element offset. Views over non-moving byte storage resolve or retain that storage instead (§9).
+
+A view over an arena-backed array (parser output, `is_heap == 0`) is rejected with an explicit error. The input arena dies independently of the collector, and silently turning `view` into `copy` would hide the cost and break the "views share storage" model.
 
 ---
 
-## Prior Art
+## 9. Storage backings and LambdaJS
 
-### JavaScript TypedArray
+### 9.1 Backings
 
-Lambda's typed arrays draw from JS TypedArray for:
-- **Type-specific constructors** — JS has `Int8Array`, `Uint8Array`, etc. Lambda uses `i8[]`, `u8[]` syntax.
-- **Underlying buffer** — JS uses `ArrayBuffer`; Lambda uses raw `void*` buffer with `elem_type` discriminator.
-- **Element access** — Both support `arr[i]` indexing.
-- **Conversion** — JS `TypedArray.from()` maps to Lambda's casting functions `u8(arr)`, `i16(arr)`.
+An owned `ArrayNum` keeps its elements in the collector's data zone, which compaction moves. This is the measured fast path, and it stays the default. A view's side-table records which kind of storage it aliases; ownership is never inferred from the base pointer.
 
-**Differences from JS:**
-- Lambda typed arrays are **immutable by default** (functional paradigm). Mutation requires `pn` context.
-- No `ArrayBuffer`/`DataView` abstraction — Lambda typed arrays own their buffer directly.
-- No `byteOffset` views — Lambda creates new arrays rather than buffer views (may add in future).
+| Backing | Bytes live in | Lifetime | Used by |
+|---|---|---|---|
+| GC owned | the GC data zone (moving) | the array | every owned array |
+| GC view | another array's GC data | base edge; the data pointer is rebased after compaction | Lambda views |
+| External borrowed | a stable, non-moving raw pointer | owned by `base` | reserved for FFI |
+| Buffer handle | a replaceable `ByteBufferHandle` | handle generation; reads re-resolve when it changes | JS typed arrays |
+| Byte storage | a refcounted `ByteStorage` | the view holds a reference | FFI, mmap, cross-isolate (tests only so far) |
 
-### NumPy ndarray
+`ByteStorage` and `ByteBufferHandle` are the shared byte substrate designed in [Binary type §11](Lambda_Type_Binary.md): a refcounted allocation, and a stable identity over it whose generation advances on copy-on-write, resize, detach and transfer.
 
-Lambda's typed arrays draw from NumPy for:
-- **`dtype` parameter** — NumPy `np.zeros(100, dtype=np.uint8)` maps to Lambda `zeros(100, u8)`.
-- **Element-wise arithmetic** — NumPy `a + b` broadcasts; Lambda `a + b` does the same.
-- **Mathematical functions** — NumPy `np.sqrt(arr)` maps to Lambda `math.sqrt(arr)`.
-- **Statistical functions** — NumPy `np.mean(arr)` maps to Lambda `math.mean(arr)`.
+### 9.2 Why JS bytes do not live in the GC data zone
 
-**Differences from NumPy:**
-- Lambda is 1-dimensional only (no ndarray shape/strides). Multi-dimensional data uses nested arrays or maps.
-- No broadcasting rules beyond scalar-vector — Lambda requires explicit reshaping.
-- No in-place operations in functional context.
+JS hands raw element pointers to JIT code and bulk `memcpy`/`memmove` paths, and those consumers are not updated by the collector. Bytes in the moving data zone would dangle after the first compaction. So the substrate is the non-moving byte buffer, and `ArrayNum` is a typed window over it — the roles reversed from the naive "JS typed array wraps an `ArrayNum` that owns its bytes". Pinning data-zone buffers instead was rejected: every JS-backed array would fragment the zone permanently.
 
-### Rust `Vec<T>` and Slices
+### 9.3 The JS typed array
 
-Lambda's compact storage model is similar to Rust's `Vec<u8>`, `Vec<f32>`, etc. — contiguous memory at native element width. The key difference is Lambda's typed arrays are GC-managed, not owner-based.
+A JS `ArrayBuffer` is a `ByteBufferHandle`. Each JS typed array is a separate `ArrayNum` view, with its own element kind and byte offset, over that handle; one buffer seen as a `Float64Array`, a `Uint8Array` and a `DataView` is N views sharing one base. Element kinds map one to one:
 
----
+| JS | `ArrayNum` | Note |
+|---|---|---|
+| `Int8Array` … `Uint32Array` | `ELEM_INT8` … `ELEM_UINT32` | exact |
+| `Float32Array`, `Float64Array` | `ELEM_FLOAT32`, `ELEM_FLOAT64` | exact |
+| `BigInt64Array`, `BigUint64Array` | `ELEM_INT64`, `ELEM_UINT64` | storage only; see below |
+| `Uint8ClampedArray` | `ELEM_UINT8_CLAMPED` | clamp on store |
 
-## Open Questions
+What `ArrayNum` provides: element typing and sizing, raw indexed load and store, and the byte mechanics of `set`, `copyWithin`, `fill`, `slice`, `subarray` and `reverse`. Same-type copies are raw byte copies, which preserve NaN payloads and signed zeros. What stays in the JS layer is every spec-observable behavior: write coercion (wrap, clamp, `ToNumber`, `ToBigInt`, BigInt rejecting Number), detach, transfer, resizable and length-tracking buffers, out-of-bounds rules (typed arrays read `undefined` and ignore writes; `DataView` throws), `DataView` endianness and heterogeneous access, Atomics and `SharedArrayBuffer`, Node `Buffer`, the exotic property gate, and `.buffer` identity. The JS wrapper owns mutable buffer state and refreshes the cheap view descriptor per operation; `ArrayNum` owns element typing and the byte poke. `ArrayNumShape` gains no resize concept; the buffer stays the source of truth.
 
-### Q1: Wrapping vs. clamping vs. error on overflow in array operations?
+**BigInt lanes are lossless.** A `BigInt64Array` element is, by ECMAScript definition, exactly a 64-bit lane; a wider BigInt is wrapped on store by `BigInt.asIntN(64, v)`. The value layer is different: a JS BigInt in LambdaJS is a Lambda `decimal`. The conversion stays at the JS boundary, and loading a `BigUint64Array` lane must be unsigned-aware — a lane above `INT64_MAX` reconstructs the full unsigned value, not a negative one.
 
-When `u8[] + u8[]` produces a value > 255, should it:
-- (a) Wrap (modular arithmetic) — consistent with scalar sized type behavior
-- (b) Clamp to 255 — like JS `Uint8ClampedArray`
-- (c) Promote to wider type — like the `*` promotion table above
+### 9.4 Lambda ↔ JS interop
 
-**Suggestion:** Default to wrapping for `+`, `-`, `%` (matching scalar behavior) and promote for `*` (to prevent silent data loss from multiplication overflow). Provide explicit `saturating_add()` etc. as opt-in.
+Sharing the substrate makes interop expressible, with different costs in each direction:
 
-### Q2: Zero-copy views over binary data?
+- **JS → Lambda** is naturally zero-copy: a JS typed array already is an `ArrayNum` view over non-moving bytes. Lambda receives it read-only, respecting JS ownership, and Lambda's arithmetic, math, broadcasting and reshape run on it directly.
+- **Lambda → JS** copies by default into a fresh non-moving buffer: O(n), safe and simple. A Lambda array's bytes live in the moving zone, so a zero-copy route needs storage that never moves (§13, Q3).
 
-Should `u8(binary_data)` create a zero-copy view (sharing the binary buffer) or always copy?
+The asymmetry is part of the design and is documented, not hidden. The bridge entry points themselves are not built yet (Appendix A.7).
 
-**Suggestion:** Zero-copy when the binary is immutable (which it always is in Lambda). The `ArrayNum.items` pointer points directly into the Binary's char buffer. This enables efficient binary protocol parsing without allocation.
+### 9.5 Other external buffers
 
-### Q3: SIMD acceleration?
-
-Should the proposal include explicit SIMD intrinsics or rely on compiler auto-vectorization?
-
-**Suggestion:** Phase 1 relies on auto-vectorization (`-O2`). The tight loops over aligned `uint8_t*` / `float*` buffers are ideal for auto-vectorization. Phase 2 can add explicit NEON/SSE intrinsics for critical paths (e.g., dot product, element-wise multiply-accumulate).
-
-### Q4: Multi-dimensional arrays (future)?
-
-NumPy's power comes from multi-dimensional arrays with shape/strides. Should Lambda eventually support `f32[3][4]` or `f32[,]` (2D) syntax?
-
-**Suggestion:** Out of scope for this proposal. Lambda's data model is tree-structured (arrays of arrays), not tensor-structured. If needed, a separate `Tensor` type with shape metadata could be added in the future without changing the 1D typed array design.
+The byte-storage backing — a refcounted allocation with a release callback — is the intended form for FFI buffers, memory-mapped files and Arrow columns. It exists and is tested, but no producer uses it yet. The DataFrame proposal is the expected first consumer.
 
 ---
 
-## Implementation Phases
+## 10. Image processing
 
-### Phase 1: Core `ArrayNum` Infrastructure ✅ COMPLETED
-- ✅ Define `ArrayNumElemType` enum and `ArrayNum` struct
-- ✅ Replace `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` → `LMD_TYPE_ARRAY_NUM`
-- ✅ Implement `array_num_new()`, `array_num_get()`, `array_num_set_*()`
-- ✅ Add compatibility shims: `array_int_new()` → `array_num_new(ELEM_INT, ...)`, etc.
-- ✅ Migrate existing `ArrayInt`/`ArrayInt64`/`ArrayFloat` code to `ArrayNum` with `ELEM_INT`/`ELEM_INT64`/`ELEM_FLOAT`
-- ✅ Collapse triplicated `case` branches across 16 files into single `case LMD_TYPE_ARRAY_NUM:`
-- ✅ Update `get_type_name()` to return `"int[]"`, `"float[]"`, `"i8[]"`, `"u8[]"`, etc. based on `elem_type`
-- ✅ Register new functions in `sys_func_registry.c`
-- ✅ Update GC heap (`gc_heap.c`) to handle single `ARRAY_NUM` type
+### 10.1 An image is an array
 
-**Files modified (~22):** lambda.h, lambda.hpp, lambda-data.cpp, lambda-data-runtime.cpp, lambda-eval.cpp, lambda-eval-num.cpp, lambda-vector.cpp, lambda-mem.cpp *(not listed but touched)*, print.cpp, transpile.cpp, transpile-mir.cpp, transpile-call.cpp, build_ast.cpp, mark_builder.cpp, mark_editor.cpp, mark_reader.cpp *(not listed but touched)*, input/input.cpp, js/js_runtime.cpp, validator/validate.cpp, validator/validate_pattern.cpp, template_registry.cpp, lib/gc_heap.c
+There is no image type. A grayscale image is a 2-D `ArrayNum` `(H, W)`; a colour image is 3-D `(H, W, C)` with the channel as the last axis (HWC, as in scikit-image, Pillow and OpenCV) and `C` 3 or 4. Rows are contiguous, which is the axis SIMD likes. `u8` is the storage kind (values 0–255); `float` or `f32` is the processing kind (0–1). `as_float` and `as_ubyte` convert, scaling and clipping. Functions take and return arrays, and the shape and kind convention is validated at the boundary.
 
-**Key design decisions during implementation:**
-- `EnumArrayNumElemType` values stored in upper nibble of `Container::flags` byte using contiguous high-nibble tags in declaration order: `ELEM_INT=0x00`, `ELEM_FLOAT=0x10`, `ELEM_INT8=0x20`, ..., `ELEM_FLOAT64=0xC0`. Lower nibble preserves `is_content`/`is_spreadable`/`is_heap`/`is_data_migrated` flag bits.
-- `get_elem_type()` = `(ArrayNumElemType)(flags & 0xF0)` — masks upper nibble only.
-- Enum shift: `LMD_TYPE_ARRAY_NUM=16` occupies the old `ARRAY_INT` slot. `ARRAY` and all subsequent types shifted down by 2 (old `ARRAY_INT64=17` and `ARRAY_FLOAT=18` slots freed).
-- `ELEM_INT` arrays from literal `[1,2,3]` behave as "content" in `take`/`drop`/`slice`/`reverse` (returning generic Lists with `is_content=1`), matching old `ARRAY_INT` fallback behavior. `ELEM_INT64`/`ELEM_FLOAT` arrays from `sort`/arithmetic return typed `ArrayNum` (value types, displayed with brackets).
-- MIR transpiler's runtime type-check path for `arr[i] = int_val` checks `flags` upper nibble at runtime to avoid storing raw int64 bits into `ELEM_FLOAT` arrays (would corrupt float storage).
-- MIR transpiler's specialized ArrayInt/ArrayFloat literal paths now unbox captured closure variables and for-loop key variables (`LMD_TYPE_ANY`) before storing into typed arrays.
+### 10.2 What is free
 
-**Test results: 565/565 baseline tests passing.**
+Much of image processing is ordinary array code:
 
-### Phase 2: Literal Parsing & Type Annotations ✅ COMPLETED
-- ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_INT, ...)` for int literals (via `array_int_new` shim)
-- ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_FLOAT, ...)` for float literals (via `array_float_new` shim)
-- ✅ Detect homogeneous sized literals → `array_num_new(ELEM_*, ...)` for i8/u8/i16/u16/i32/u32/f16/f32
-- ✅ Extend `ensure_sized_array()` for `ARRAY_NUM` coercion from generic arrays
-- ✅ Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
-- ✅ Extend `build_base_type()` to recognize all numeric array types
-- ✅ `EnumArrayNumElemType` expanded to 13 element tags with compact storage (1/2/4 bytes per element)
-- ✅ `ELEM_TYPE_SIZE[16]` lookup table for byte widths
-- ✅ `array_num_get()` handles all 13 elem_types including compact types
-- ✅ `array_num_set_item()` generic setter with dispatch on elem_type
-- ✅ `item_to_int_value()` / `item_to_float_value()` helpers for NUM_SIZED extraction
-- ✅ `fn_join` (concat) updated to use `ELEM_TYPE_SIZE` and `data` pointer for compact arrays
-- ✅ `print.cpp` updated with `read_compact_elem()` helper for compact type printing
+| Operation | Expressed as |
+|---|---|
+| threshold | `img gt t` → mask |
+| brightness, contrast, gamma, invert | `img * a + b`, `img ** g`, `255 - img` |
+| clip | `clip(img, lo, hi)` |
+| crop | `img[r0 to r1]`, multi-axis subscripts |
+| channel statistics, naive gray | axis reductions over axis 2 |
+| transpose, rot90 | `transpose` |
+| masked selection and update | `img[mask]`, `img[mask] = 0` |
 
-**Files modified:** lambda.h, lambda.hpp, lambda-data-runtime.cpp, lambda-eval.cpp, print.cpp, transpile.cpp, transpile-mir.cpp, build_ast.cpp
+### 10.3 The stencil engine
 
-**Test results: 566/566 baseline tests passing** (565 original + 1 new `compact_typed_arrays`).
+Almost every other operation is a windowed neighbourhood computation: at each output position, gather a `Kh × Kw` window and reduce it. One N-D stencil primitive covers the family, with a reducer (dot product, min, max, median or mean), a border mode (constant, edge, reflect or wrap) and an output stride:
 
-### Phase 3: Vectorized Arithmetic ✅ COMPLETED
-- ✅ Extend `is_scalar_numeric()` for `NUM_SIZED`, `UINT64` — sized scalars now route to vector ops
-- ✅ Extend `item_to_double()` for `NUM_SIZED` (via `get_num_sized_as_double()`), `UINT64`, `DECIMAL`
-- ✅ Extend `vector_get()` from 3 elem_type branches to 13, covering all compact types
-- ✅ Extend `needs_float_result()` for `NUM_SIZED` float scalars and compact float elem types (f16/f32/f64)
-- ✅ Add `compact_elem_to_double()` helper — reads compact array elements as double without boxing to Item
-- ✅ Add `is_float_elem_type()` helper — identifies float-variant elem types
-- ✅ Add `ELEM_INT` fast path in `vec_scalar_op` (packed int56 arrays)
-- ✅ Add `ELEM_FLOAT32` native-width fast path in `vec_scalar_op` (native `float` arithmetic, no double conversion)
-- ✅ Add `ELEM_INT` × `ELEM_INT` fast path in `vec_vec_op`
-- ✅ Add `ELEM_FLOAT32` × `ELEM_FLOAT32` native-width fast path in `vec_vec_op`
-- ✅ Add `ARRAY_NUM` + non-`ARRAY_NUM` integer fast path in `vec_vec_op` (uses `compact_elem_to_double`)
-- ✅ Update float paths in `vec_scalar_op` / `vec_vec_op` to use `compact_elem_to_double` instead of `vector_get` + `item_to_double`
-- ✅ Fix `fn_math_prod`, `fn_math_cumsum`, `fn_math_cumprod` for compact typed arrays
-- Arithmetic promotion table (Section 10 widening rules) — deferred to future work
+| Operation | Stencil |
+|---|---|
+| `convolve`, `blur` (box, Gaussian), sharpen, edge kernels | dot with the kernel |
+| `median_filter` | median |
+| `erode`, `dilate`, and open/close/top-hat as compositions | min / max over the structuring element |
+| `maxpool`, `avgpool` | max / mean with stride > 1 |
+| adaptive threshold | mean, then compare |
 
-**Files modified:** lambda-vector.cpp
+This one primitive carries convolution, morphology, rank filters and pooling, and its contiguous inner loop is exactly what the vector kernels accelerate (§11).
 
-**Key design decisions during implementation:**
-- Integer modulo-by-zero now consistently returns 0 across all array types (previously returned NAN when going through float fallback path for generic lists).
-- `ELEM_FLOAT32` fast paths operate directly on `float*` buffers with `fmodf`/`powf` — compiler can auto-vectorize these loops.
-- Mixed-type compact array arithmetic (e.g., `i8[] + i16[]`) falls through to the generic float path via `compact_elem_to_double`, producing `float[]` result. Same-type fast paths avoid double conversion entirely.
+### 10.4 The rest of the toolkit
 
-**Test results: 567/567 baseline tests passing** (566 + 1 new `typed_array_vector_ops`).
+`histogram` (a scatter-add, the basis of `otsu`, equalization and channel statistics); `otsu`; `label` (connected components by union-find, the basis of region measurement); `resize` (nearest and bilinear); `flip`, `rot90`, `rotate`, `affine_warp` (coordinate gathers); `grayscale` and other colour-space transforms (channel-axis `matmul` or per-pixel maps); `crop`, `invert`, `gamma`, `threshold`. `load` and `save` bridge to Radiant's raster codecs, yielding and accepting `(H, W, C)` `u8` arrays.
 
-### Phase 4: Construction APIs
-- `zeros(count, type)`, `ones(count, type)` — new system functions
-- `arange(start, stop, step, type?)` — new system function
-- `linspace(start, stop, count, type?)` — new system function
-- Extend `fill()` to infer typed array from sized fill value
+The functions are global system functions over `ArrayNum`. The `lmd/package/image.ls` package is a separate, layered raster-document package and not part of this toolkit.
 
-### Phase 5: Conversion & Binary Interop
-- Extend `i8()`, `u8()`, ... conversion functions to accept arrays → typed array result
-- `u8(binary)` → zero-copy view over binary data
-- `binary(typed_array)` → raw bytes
-- Cross-type array casting: `array_num_cast()`
+### 10.5 Non-goals
 
-### Phase 6: JIT Optimization
-- Compile-time `elem_type` tracking through the transpiler
-- Inline element access at native width (no function call)
-- Type-specialized vector operation emission
-- Loop optimization for typed array iteration
+Not a computer-vision suite (no SIFT, ORB, optical flow or neural networks — those belong in bindings). Eager and in-memory, not a libvips-style streaming tile pipeline; gigapixel and bounded-memory streaming are future work. No ICC colour management, EXIF or animation. Canny, corner detection, watershed and registration are later additions on the same primitives.
 
-### Phase 7: Type System & Pattern Matching
-- `is u8[]`, `is f32[]`, `is int[]`, `is float[]` type checks
-- Pattern matching `case u8[]:` / `case int[]:` arms
-- `type()` returns specific typed array type
-- Typed array subtype relations: `u8[] <: array`, `int[] <: array`
+---
+
+## 11. Performance model
+
+- **Static element kind, single load.** When the compiler knows an array's carrier from a certificate, an element read is one native load at the right width plus packing, with no call and no boxing. The certificate guard is the only per-boundary check (D3.3.3v3).
+- **Kernels the compiler can vectorize.** Contiguous same-kind kernels are written so auto-vectorization succeeds: the operator switch is hoisted out of the loop (one straight-line loop per operator and element type, generated from one template), pointers are `__restrict`, loops carry vectorize pragmas, and non-vectorizable operators (`%`, `pow`, `fmod`) run in separate loops so they cannot poison the hot ones. `u8` and `float` are the priority types: they are the common image kinds and the widest SIMD lanes.
+- **One general fallback.** Mixed kinds, broadcasting and non-contiguous views go through a strided walker that is correct for every case. Fast kernels are gated on "contiguous, same kind, vectorizable operator".
+- **Built from source.** Release builds use `-O3` and the host architecture, so auto-vectorization targets the running machine's best instruction set with no runtime dispatch. Verification uses the compiler's vectorization reports; a loop that quietly falls back to scalar is a regression. Performance is measured on release builds only.
+- **Deferred.** A portable SIMD library (Highway, xsimd) with runtime ISA dispatch, adopted only with measurements and mainly if prebuilt binaries ship. Native `f16` SIMD (hardware support is uneven; `f16` widens to `f32`). JIT-emitted SIMD (MIR is a lightweight IR; SIMD belongs in the ahead-of-time kernels).
+- **Allocation.** `m[i, j]` allocates nothing; chained `m[i][j]` allocates intermediate views. Static N-D literals allocate once; dynamic promotion copies once (§4.2).
+
+---
+
+## 12. Non-goals and deferred work
+
+Non-goals: lazy or fused evaluation graphs (numexpr, JAX); GPU and accelerator interop; sparse arrays; a general mutable-array model or mutable views as values; dependent-shape types and rank-polymorphic signatures; N-D typed arrays in JS; streaming image pipelines.
+
+Deferred, designed but not built: region assignment (§8.3); `transpose` with a permutation; `expand_dims` and `squeeze`; variadic `concat`/`stack` with an `axis` argument; strided slicing as `slice(a, range, step)` (a view whose stride is greater than one — the view machinery already supports it, and no grammar change is needed); views over generic `Array`s, reusing the same side-table (its `base` is typed as a generic container for this reason); lazy N-D promotion; a debug repr with shape; complex element kinds (they compose with this design but need their own proposal); a first-class memory-mapped file API (it falls out of byte-storage views); `DataView` subsumed into an `ArrayNum` byte reader; a Lambda primitive for `SharedArrayBuffer`/Atomics.
+
+---
+
+## 13. Open questions
+
+1. ~~`dot` and `matmul` over sized lanes.~~ Resolved 2026-10-21: they follow NumPy and compute in the operands' common lane (S10.2.4, §7.6).
+2. **Construction and conversion functions.** Are `zeros`/`ones`/`arange`/`linspace` and array-form sized conversions (`u8(xs)`) wanted, and what do the conversions do with inexact elements? Value-aware admission (S11.4.5) rejects; a conversion function could truncate, wrap or clamp. The original proposal itself was inconsistent (truncate-and-clamp in one place, truncate-and-wrap in another). Related: whether `u8(binary)` should be a zero-copy byte-storage view and `binary(xs)` a raw lane-byte reinterpretation.
+3. **Zero-copy Lambda → JS.** The original opt-in was to pin the Lambda array's data; pinning is retired. The remaining route is a Lambda array whose bytes live in `ByteStorage`. Whether that is worth a second owned representation needs evidence.
+4. **`f32` input to float-valued functions.** They return `float[]` for predictability; staying in `f32` would halve memory for image pipelines. Unruled.
+5. **`abs` and unary `-` at the lane minimum** (`abs(-128i8)`), and unary `-` on unsigned lanes. Unruled for arrays; the scalar rule should decide.
+6. **Stencil API surface.** Whether border modes and named kernels (`sobel`, `gaussian`) are exposed to scripts, and in what form.
+7. **Tensor functions on nested arrays.** A rectangular nested array whose rows have different types (`[[1, 2, 3], [4.5, 5.5, 6.5]]`) stays nested under S9.3.2, so today `ndim` returns `0`, `shape` errors and `sum` errors, where the widened tensor used to answer `2`, `[2, 3]` and `22.5`. Under D2.6.2 these functions arguably should answer by value — treating any rectangular nested numeric array as N-D, with arithmetic per S10.2.4 — rather than by storage. Unruled.
+
+---
+
+## Appendix A — Implementation notes and status
+
+Detailed design lives in [LR_05](../doc/dev/lambda/LR_05_Strings_and_Vectors.md), [LR_03 §4](../doc/dev/lambda/LR_03_Value_and_Type_Model.md) and [LR_08](../doc/dev/lambda/LR_08_Memory_and_GC.md). These notes cover only what the design above depends on.
+
+### A.1 Layout
+
+`ArrayNum` shares the 64-byte `List` layout (D2.6.6v2): the 8-byte container header, the map face, then `items`/`float_items`/`data` (one union over the element buffer), `length`, `extra`, `capacity` and `rep_cert`. In the header, byte 1 holds lifecycle flags (including `is_heap`), byte 2 (`array_flags`) holds bit 0 `is_ndim`, bit 1 `is_view`, bit 2 the retired `is_pinned`, bit 3 `is_mutable_view` and bit 4 `is_native_lane_array` — bits 5–7 belong to LambdaJS's elements kind and are not free — and byte 3, the map-kind byte, holds the element kind. Element kinds are high-nibble tags; `ELEM_TYPE_SIZE[kind >> 4]` gives the width. `0xC0` is the retired duplicate double tag and stays unavailable.
+
+### A.2 Shape side-table
+
+`ArrayNumShape`, pointed to by `extra` when `is_ndim` or `is_view` is set: `ndim`, contiguity bits, `backing_kind`, element `offset`, `base` (the GC edge), `backing` (the non-GC `ByteStorage`/`ByteBufferHandle`), `resolved_generation`, then `shape[ndim]` and `strides[ndim]`. Derived views inherit the source's backing; a byte-storage child takes its own reference.
+
+### A.3 GC
+
+Marking traces `shape->base` for views; `backing` is not a GC edge. Compaction promotes an N-D side-table out of the nursery and, for a GC view, promotes the base's data and recomputes `view->data = base->data + offset · width`. Nothing sets or reads `is_pinned`. Byte-storage views release their reference in the sweep finalizer. The collector's own byte offsets are pinned by static asserts in both `lambda.hpp` and the C mirror in `lambda.h`.
+
+### A.4 Construction choke points
+
+Every array builder finishes in `array_end`, which tries N-D promotion of rows that share one element type and length, and then 1-D packing of scalars that share one exact type (`uniform_scalar_elem_type`); nothing is widened (S9.3.2). Spreadable (list) results are never packed. Admission goes through `runtime_type_admit_array` (`type_contract.cpp`), which roots every intermediate, admits transactionally and installs the interned certificate. Exact element stores go through `array_num_store_admitted`, which has no catch-all arm and never coerces.
+
+### A.5 Kernels and views
+
+Element-wise arithmetic classifies each operation with the scalar numeric classifier (`lambda_numeric_classify`), so arrays cannot drift from scalar semantics. The vectorizable kernels are templates over element type and operator with `__restrict` and an `LMD_VEC_LOOP` pragma. The view constructors (`subview`, `reshape`, `transpose`, `ravel`, the N-D row view) share `array_num_init_derived_view`. The image functions and the stencil engine are in `lambda-vector.cpp`.
+
+### A.6 Source map
+
+| Area | Files |
+|---|---|
+| Structs, element kinds, shape, backings | `lambda/lambda.h`, `lambda/lambda.hpp` |
+| Construction, `array_end`, views, N-D subscripts | `lambda/runtime/lambda-data-runtime.cpp` |
+| Kernels, N-D operations, masks, stencil, image toolkit | `lambda/runtime/lambda-vector.cpp` |
+| Contracts, admission, certificates | `lambda/runtime/type_contract.{hpp,cpp}` |
+| Numeric classifier | `lambda/runtime/lambda-number.hpp` |
+| GC tracing and compaction | `lambda/runtime/gc/gc_heap.c`, `lambda/runtime/lambda-mem.cpp` |
+| Byte substrate | `lib/byte_storage.{h,c}` |
+| JS typed arrays | `lambda/js/js_typed_array.{h,cpp}` |
+| Readers and formatters | `lambda/core/mark_reader.{hpp,cpp}` |
+| System-function registry | `lambda/runtime/sys_func_registry.c` |
+| Tests | `test/lambda/typed_array_*.ls`, `test/lambda/compact_typed_arrays.ls`, `test/lambda/proc/*typed*`, `proc_view_mutable.ls`, `proc_mask_assign.ls`, `proc_ndim_index_write.ls`, `array_view_*.ls`, `test/js/typed_arrays.js` |
+
+### A.7 Status (2026-10-21)
+
+| Area | Status |
+|---|---|
+| Unified `ArrayNum`, 14 element kinds, compact lanes, `float`/`f64` merge | built |
+| `T[]` contracts, value-aware admission, certificates, typed empty carriers (§3) | built 2026-09-09/10 ([impl plan §12–§14](impl/Lambda_Impl_Typed_Array.md)) |
+| Exact-lane literal and pipe packing (§4.1, §4.3) | built |
+| Exact construction (§4.1–§4.3, S9.3.2) | built 2026-10-21: 1-D packing, generic-row detection and N-D row promotion require one exact element type; mixed `int`/`float`/`i64` rows stay nested (`typed_array_construction_exact.ls`) |
+| Scalar type on read (S9.3.2) | fixed 2026-10-21: reading an in-band `i64`/`u64` from a generic array, list, closure capture or frame returned an `int` (a JS-motivated shortcut in `scalar_storage_read`, added 2026-08-13); Lambda reads now keep the stored type, and the JS call sites use `js_scalar_storage_read` |
+| `fill` typing (§4.4) | `int`, `u64`, `float`, `bool` only; a `u8` fill value gives a boxed array |
+| `zeros`/`ones`/`arange`/`linspace`, array-form `u8(xs)`, `u8(binary)` views, `.bytes`/`.elem_type` | not built (§13, Q2) |
+| `binary(xs)` | copies element values in 0–255; does not reinterpret lane bytes |
+| Multi-axis subscripts, partial-index views, `last` (§5) | built (LR07-35 fixed 2026-09-26) |
+| Masks and index-array gathers (§5) | built |
+| Structural operations (§6.3) | built; **missing:** `transpose` permutation, `expand_dims`, `squeeze`, variadic `concat`/`stack`, `copy()` (which several error messages tell the user to call) |
+| Broadcasting, axis reductions (§6.4–§6.5) | built |
+| Lattice-driven arithmetic (§7.2) | built, including sized `div`/`%` entering the non-sized domain per S4.5.3 (Number Model §3.3 synced 2026-10-21); reductions widen per S10.2.4 since 2026-10-21: `sum`/`prod`/`cumsum`/`cumprod` (whole and axis) accumulate narrow lanes in `int`, `avg`/`mean` in `float` (`lambda_reduction_element`, `lambda_statistic_element`); `dot` wraps in the common lane as ruled; `matmul` realigned 2026-10-21 from the legacy `i64`/`float` result and `double` accumulation to the same per-cell lane rule, with native kernels for machine lanes (`matmul_store_cell`), so `i64` products are exact (`typed_array_construction_exact.ls`, `typed_array_reduce.ls`) |
+| Constant overflow (S4.1.5) | enforced 2026-10-21: a sized constant expression that leaves its lane (`200u8 + 100u8`, `-1u8`, `127i8 + 1i8`) is E108, and two literal holes are closed — a bare `128i8` (read as -128) and decimal `i64` literals above 2^63 (read as raw bits); run-time values still wrap (`negative/semantic/sized_constant_*.ls`, `sized_literal_*.ls`) |
+| `ArrayNum ==` (§7.3) | fixed (Number Model ledger row 8) |
+| Keyword comparisons `eq … ge`, scalar-only `<` (§7.4) | built (`typed_array_mask.ls`); formal-spec status row synced 2026-10-21 (S10.2.3 complete; S10.2.2v2 keeps its mark for SO50 error shapes) |
+| Vectorized unary functions, `clip`, `all`/`any` (§7.5) | built; `all`/`any`/`argmin`/`argmax` take no axis |
+| Read views as snapshots (§8.2) | **not enforced.** The view constructors set `is_mutable_view` unconditionally, and `proc_view_mutable.ls` asserts write-through via a `var`-bound `subview`. View-borrow confinement is the open Stage 2 item of S9.2.2 |
+| `var`-parameter view borrows (§8.3) | built for leading-axis rows |
+| Element and masked writes (§8.3) | built (`proc_ndim_index_write.ls`, `proc_mask_assign.ls`) |
+| Region writes (§8.3) | not built; rejected with "range slice-assignment is not supported" |
+| Pinning (§8.4) | retired; the collector rebases views (LR_03, LR_05, the d05 diagram, [Binary §11.2](Lambda_Type_Binary.md), [DataFrame](Lambda_Design_DataFrame.md), Concurrency, Runtime_Structs and code comments synced 2026-10-21) |
+| Arena-backed views (§8.4) | rejected, as designed (`ravel` copies instead) |
+| JS substrate (§9.3) | built: `JsArrayBuffer` is a `ByteBufferHandle`; JS typed arrays are buffer-handle views; the old duplicated storage fields are deleted (test262 typed-array pages green at the 2026-06-30 cut) |
+| Lambda ↔ JS bridge (§9.4) | not built; `new Float64Array(lambdaArray)` copies |
+| External-borrowed and byte-storage backings (§9.5) | built; tests only |
+| Image toolkit and stencil engine (§10) | built as global system functions; no `sobel`/`gaussian`; every wrapper uses the edge border mode |
+| Vectorizable kernels (§11) | built: templated `__restrict` kernels with `LMD_VEC_LOOP`; release `-O3` and native architecture |
+
+---
+
+## Appendix B — Mark Reader guidelines
+
+The readers (`ItemReader`, `ArrayReader`, `MapReader`, `ElementReader`) are how formatters and validators see typed arrays. The guidelines were first recorded in Typed Array 2 and should move to a Mark Reader design record when one exists; [LR_11](../doc/dev/lambda/LR_11_Mark_Data_API.md) describes the readers as built.
+
+- **G1 — Four logical shapes only.** Consumers see arrays, maps, items and scalars. A typed `ArrayNum` (1-D, N-D, compact, or a view) answers `isArray()`/`asArray()` like any array; its elements arrive as ordinary scalars or, for N-D, nested arrays. No element kind, shape or stride leaks into consumer code, so one code path serves every representation, and new representations need no consumer changes.
+- **G2 — Traversal allocates nothing.** Readers are small stack values; an N-D sub-tensor is an inline `{base, offset, axis}` cursor, not a heap view. Leaf scalars are packed inline or point into the live buffer. The one exception is an explicit request to materialize a sub-tensor as a standalone value, which is documented as leaving the zero-allocation path; formatters never make it.
+- **G3 — The tree is static during a read.** A reader may hand out items that point into a live buffer because the tree does not move, mutate or get freed mid-traversal. Concurrent mutation of a tree being read is a usage error.
+
+Conformance: the element-kind dispatch lives in one place in the reader; the per-formatter copies (JSON, YAML, TOML) were deleted; every `isArray()` call site iterates through the reader interface. `print.cpp` keeps its own fast walker for logging.
+
+---
+
+## Appendix C — Prior art
+
+| Source | Taken | Not taken |
+|---|---|---|
+| JS TypedArray | type-specific element kinds; one buffer, many typed views; `subarray` views vs `slice` copies | mutation everywhere; `byteOffset` arithmetic in user code |
+| NumPy `ndarray` | `dtype`; shape and strides; broadcasting; axis reductions; masks and index arrays; views with a base reference; pairwise float sums | mutable aliasing everywhere (the pandas `SettingWithCopyWarning` problem) |
+| scikit-image | an image is an array; HWC; `img_as_float`/`img_as_ubyte`; a function library over the array type | — |
+| Rust `Vec<T>` | contiguous storage at native width | ownership-based lifetime (Lambda arrays are GC-managed) |
+| Go | wrapping fixed-width integer arithmetic | — |
+| R `data.table` | opt-in reference semantics confined to a scoped channel | — |
+
+Multi-axis subscript syntax across languages:
+
+| Language | Syntax |
+|---|---|
+| Python + NumPy, Julia, R, C#, Swift, Kotlin, D | `a[i, j, k]` |
+| C++23 (P2128) | `a[i, j, k]`, after decades of `a[i][j][k]` |
+| MATLAB, Octave, Fortran | `a(i, j, k)` |
+| Mathematica | `a[[i, j, k]]` |
+| Rust `ndarray` | `a[(i, j, k)]` |
+
+---
+
+## Appendix S — Superseded rulings
+
+Wording from the four earlier records that the body above no longer holds, with what replaced it.
+
+**Representation and layout**
+
+- ~~`ELEM_FLOAT` (`0x10`) and `ELEM_FLOAT64` (`0xC0`) are distinct types with the same storage.~~ → One double tag, `ELEM_FLOAT64` at `0x10`; `ELEM_FLOAT` is a source alias; `0xC0` is retired (Number Model §3.5, W8).
+- ~~`elem_type` lives in the upper nibble of `Container.flags`.~~ then ~~the view, N-D and pin bits live in the upper nibble of `flags`.~~ → The element kind is the map-kind byte (byte 3); the layout bits are the separate `array_flags` byte (byte 2) (Appendix A.1).
+- ~~`ELEM_INT` stores int56-as-int64.~~ → The i64 lane with poison encodings (D2.6.3).
+- ~~Lambda typed arrays are one-dimensional only; multi-dimensional data uses nested arrays.~~ → N-D `ArrayNum` (§6).
+
+**Types and admission**
+
+- ~~`type(arr)` returns `u8[]`.~~ → `type()` is `array` for every physical form (D2.6.2).
+- ~~An annotation coerces elements to the annotated type (`let x: i16[] = [1, 2]`); mixed sizes fall back to a generic array.~~ → Admission is a contract with value-aware numeric embedding; inexact values are rejected, never coerced (S11.4.1v3, S11.4.5).
+- ~~`ensure_typed_array` casts an `ArrayNum` of another kind to the annotated kind.~~ → Certificate-backed admission; lossy casts are not admission (D3.3.3v3).
+
+**Indexing**
+
+- ~~Negative N-D indices wrap per axis (`< 0 ? len + idx : idx`), matching 1-D `arr[i]`.~~ → Negative indices read `null` on every axis; `last` reaches from the end (S7.2.1, S7.2.2).
+
+**Arithmetic**
+
+- ~~Accumulating reductions are the repeated scalar operation: `sum([200u8, 100u8])` is `44u8` (user ruling earlier on 2026-10-21).~~ → Reductions widen: narrow lanes accumulate in `int`, statistical reductions in `float` (S10.2.4 as revised the same day, after `avg([200u8, 100u8])` returned `22.0`).
+- ~~Wrap for `+ - %` but promote for `*` to prevent silent loss (Typed Array 1, Q1).~~ → `+ - *` all stay in the selected sized lane and wrap (S4.4.4).
+- ~~Mixed-type compact arithmetic (`i8[] + i16[]`) falls back to the float path and produces `float[]`.~~ → The smallest containing sized lane (`i16[]`) (S4.4.4).
+- ~~Result element type is the wider of the two operands, with int → float when mixed.~~ → The scalar lattice per lane (§7.2).
+- ~~`dot`/`matmul`: `int · int → int64`, otherwise float.~~ → The scalar classifier per multiply and add (§7.2).
+- ~~Full-width integer with float → decimal domain.~~ → Every bounded integer type, `i64`/`u64` included, meets `float` in `float`; only `integer` meets `float` in `decimal` (S4.4.3).
+- ~~`a / b` on `i16[]` produces `f32[]`.~~ → `float[]`: compact lanes enter `int`, then `/` gives `float` (S4.5.2).
+
+**Comparison**
+
+- ~~Vectorized ordering comparisons `a > 0` produce masks; `a[a > 0]` is the filter idiom; a bare `a > 0` statement needs parentheses.~~ → `< <= > >=` are scalar-only; masks come from `eq ne lt le gt ge`; the idiom is `a[a gt 0]` (S10.2.2v2).
+
+**Views and mutation**
+
+- ~~Views are read-only, period; mutation through a view raises.~~ and ~~success criterion: writes to the source are visible through the view.~~ → Read views are snapshot values; write-through is a `var`-parameter borrow (S9.2.2).
+- ~~A view is created mutable iff it is produced inside a procedural function over a mutable base; `let v = img[2]; v[0] = 9` mutates row 2 of `img`.~~ → Binding a view gives a snapshot; only a `var`-parameter borrow writes through, exclusivity-checked and non-escaping (S9.2.2).
+- ~~Pin the base with `is_pinned` when a view is first created; never clear it; the compactor skips view and pinned data.~~ → Pinning retired; compaction rebases GC views from their base (§8.4).
+- ~~Lambda → JS zero-copy by opt-in pin-on-cross.~~ → Pinning is retired; the zero-copy route is open (§13, Q3).
+- ~~JS typed arrays carry `data`, `length`, `byte_length` and `byte_offset`, and standalone typed arrays own their bytes.~~ → Every JS typed array is a buffer-handle view; `JsArrayBuffer` is a `ByteBufferHandle` (§9.3).
+
+**Construction**
+
+- ~~1-D packing of a numeric result widens to `float` if any element is a float, else to `i64`.~~ then ~~packing only into a lane that holds every element exactly; `[1, 2.5]` packs into `float` lanes (`int ⊑ float`); an unannotated literal takes the normalized least upper bound of its elements.~~ → Packing only when every element already has one exact type; no promotion at construction (S9.3.2, user ruling 2026-10-21).
+- ~~Mixed-kind rows of an N-D literal widen to `float` if any row is float, else to `i64`.~~ → Rows of different types are never widened; they stay nested (S9.3.2, §4.2).
+- ~~Image functions live in an `image.` namespace (`image.blur(sigma: 2.0)`).~~ → Global system functions over `ArrayNum` (§10.4).

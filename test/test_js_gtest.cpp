@@ -1013,6 +1013,31 @@ TEST(JavaScriptBasic, CommandInterface) {
     free(output);
 }
 
+TEST(JavaScriptBasic, RemovedRuntimeSelectorIsRejected) {
+    const char* source = "console.log('unexpected runtime selector execution')";
+    const char* cases[][7] = {
+        {LAMBDA_EXE, "js", "--runtime=mvp-lmd", "-e", source, NULL},
+        {LAMBDA_EXE, "js", "-e", source, "--runtime=mvp-lmd", NULL},
+        {LAMBDA_EXE, "js-test-batch", "--runtime=mvp-lmd", NULL},
+    };
+    ShellOptions options = {};
+    options.merge_stderr = true;
+    options.timeout_ms = 10000;
+    for (auto& args : cases) {
+        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        EXPECT_EQ(result.exit_code, 9) << (result.stdout_buf ? result.stdout_buf : "");
+        EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "invalid value for --runtime"), nullptr);
+        EXPECT_EQ(strstr(result.stdout_buf ? result.stdout_buf : "", "unexpected runtime selector execution"), nullptr);
+        shell_result_free(&result);
+    }
+
+    const char* help_args[] = {LAMBDA_EXE, "js", "--help", NULL};
+    ShellResult help = shell_exec(LAMBDA_EXE, help_args, &options);
+    EXPECT_EQ(help.exit_code, 0);
+    EXPECT_EQ(strstr(help.stdout_buf ? help.stdout_buf : "", "--runtime="), nullptr);
+    shell_result_free(&help);
+}
+
 TEST(JavaScriptRegression, ModuleEntryPrelinksOwnAndImportNameTables) {
     const char* source_path = "test/js/module_main.js";
     char manifest_path[256];
@@ -1140,6 +1165,16 @@ TEST(JavaScriptRegression, ArrayNumLoopResizeInvalidatesHoist) {
 TEST(JavaScriptRegression, Jscu29DynamicGlobalEnvironmentAndJobs) {
     test_js_script_against_file("test/js/jscu29_dynamic_global_environment.js",
         "test/js/jscu29_dynamic_global_environment.txt");
+}
+
+TEST(JavaScriptRegression, PrivateEnvironmentStorageKeepsLexicalIdentityAndGcRoots) {
+    for (JsExecutionBackend backend : {JS_BACKEND_AST, JS_BACKEND_MIR}) {
+        char* output = execute_js_script_configured("test/js/private_environment_storage.js",
+            false, NULL, backend);
+        ASSERT_NE(output, nullptr);
+        EXPECT_STREQ(output, "private environment: PASS\n");
+        free(output);
+    }
 }
 
 TEST(JavaScriptRegression, Jscu31TimerResourceTable) {

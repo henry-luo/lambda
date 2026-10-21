@@ -1,9 +1,6 @@
 {
   "schema_version": 1,
   "description": "D8.4.1v2: reflective own data reads guard the ordinary carrier, nominal owner and descriptor, reuse Lambda lookup/decoding, and retain full JS Get on a miss. The already loaded Map shape supplies ownership without a general Item helper call.",
-  "args": [
-    "--runtime=mvp-lmd"
-  ],
   "checks": [
     {
       "in_func": "mvp_lmd_f1",
