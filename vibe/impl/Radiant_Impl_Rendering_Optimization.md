@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-21
 
-**Status:** committed core pass and continuations through §26; §§27–28 complete
+**Status:** committed core pass and continuations through §30 (`b32046f25`); §§27–28 complete
 with release/ASan, SVG and Radiant qualification, 2026-10-21.
 §29 implements bounded automatic placement reuse for empty atomic solid HTML
 boxes, with release/ASan, SVG, movement and Radiant qualification complete for
@@ -12,6 +12,10 @@ are outside that qualification; see §29.
 release/ASan, SVG and Radiant qualification. Its scoped movement comparison
 reduces requested placement-copy bytes by 71.8%; speed and memory improvement
 are not established.
+§31 implements pixel-exact opaque rectangle rasterization without added native barriers;
+focused pixel/boundary, release/ASan and SVG checks pass. The selected repeated
+repaint comparison improves; repeated-PNG capture is slower at 2×. Required
+aggregate qualification has missing-fixture and CSS-memory limits; see §31.
 The committed checkpoint and its qualification limits are in §7. Subsequent
 sections record serial/recording reuse, shared paint buffers, native batching,
 chunk references, resource summaries, the SVG producer boundary, validated
@@ -3171,3 +3175,163 @@ visit source commands; the cursor keeps its largest scratch descriptor and
 native shape construction is unchanged. Broader HTML admission, non-leaf
 foreign capture, finer inherited/reference dependencies and the full M0–M7
 backend/performance envelope remain open.
+
+## 31. Rasterize pixel-exact opaque rectangles without extra native barriers
+
+**Priority / outcome, 2026-10-21:** §30 still constructs 512 native shapes per
+steady rectangle frame. The existing direct rectangle path already implements
+pixel-exact source-over for translucent fills, but excludes opaque fills.
+Extend that path to opaque rectangles only when no native scene or sealed root
+is pending. Reuse the existing rectangle/clip/tile intersection proof and raster
+writer; retain native rendering for fractional coverage, nonrectangular clips
+and pending native work (**D4.5.3v2 / D4.2.4 / D4.2.6**).
+
+Acceptance: admitted integer intersections create no native shape and match an
+explicit native rectangle path byte-for-byte. Exercise 1×/2×, negative/fractional
+coordinates, integer/fractional tile displacement and rectangular/curved clips.
+Opaque admission must introduce no CPU flush ahead of either an active native
+segment or a sealed root. Existing translucent behavior, painter order, target
+ownership and serial/dirty/tile replay remain intact. The context-level
+`RADIANT_TVG_RECT_RASTER=off` control disables only the new opaque admission.
+
+Scope: the existing pixel-exact rectangle subset; no new sampler, compound
+geometry, persistent native cache or renderer API. Verification budget: focused
+work/pixel/clip/barrier checks, affected native release/ASan, SVG paint, the
+versioned benchmark's paired release rectangle comparison, and one required
+Radiant aggregate. Artifacts belong under `temp/rendering-opaque-rectangles/`
+(**D4.2.5v3**).
+
+### Rejected compound-path experiment
+
+The first candidate combined equal-color disjoint rectangles into one native
+shape. Eight shapes became one, but fractional-coordinate controls failed:
+the vendored software renderer recognizes a lone axis-aligned rectangle and
+rasterizes its snapped bounds, whereas a compound path uses antialiased RLE
+coverage. Restricting coalescing to integral device edges preserves pixels,
+but the quiet same-binary release comparison is slower: 1× wall medians
+142.716 → 154.155 ms and 2× 465.017 → 521.133 ms, approximately 8% / 12% worse.
+Losing the rectangle fast path outweighs fewer native objects.
+
+That implementation is removed. Its source patch, frozen CLI and raw comparison
+remain under `temp/rendering-rect-batches/`. A concurrent `build_ast.cpp` edit
+landed after that CLI was compiled; those on/off samples use one identical
+binary and do not qualify the newer workspace runtime. No vendor source is
+modified. M6's instruction to retain the measured better path applies here.
+
+### Implemented behavior
+
+`vector_raster_fill_rect` now permits opaque fills when its context switch is
+enabled and both `batch_scene` and `batch_root` are empty. The existing
+`vector_raster_clip_rect` must produce an integral device-space intersection,
+including active clips, tile displacement and target bounds. The ordinary
+raster rectangle writer then draws directly into the borrowed target. Pending
+native paints retain their original vector submission, so the new path adds no
+synchronization barrier or native lifetime. Existing translucent admission and
+its required flush are unchanged.
+
+The shared intersection helper also rejects non-finite tile displacement before
+`fmin`/`fmax` can turn a NaN into finite target edges. The deferred-submission
+regression checks that neither opaque nor translucent admission writes pixels
+for that invalid displacement, then restores finite placement before native
+submission. This is part of the pixel-exact admission proof.
+
+The native clip-mask regression now uses an explicit rectangle path, keeping
+its native mask-composition assertions meaningful while ordinary rectangles can
+use the CPU path. Separate controls compare ordinary opaque rectangles with
+that same native geometry, including fractional fallback and active versus
+sealed native work. No pixel assertion or baseline threshold is relaxed.
+
+The versioned benchmark adds the `rectangles` fixture and
+`--warm-control opaque-rectangles`. Both modes disable whole-frame reuse; its
+environment-contract test prevents the feature-on sample from silently reusing
+an entire frame. Existing default recording-cache comparisons are unchanged.
+
+### Release measurement and limits
+
+`measurement/results.json` records five alternating normal on/off children at
+each scale, 12 captures per child, with separate instrumented profiles. Both
+variants use one frozen release CLI, one rendering thread and whole-frame reuse
+disabled. All output PNG hashes agree. The native paint count per steady frame
+falls from 514 to zero, with no CPU flush added. Median replay time falls from
+0.3485 to 0.2125 ms at 1× and 0.342 to 0.217 ms at 2×.
+
+| Normal capture process | Control / opaque off | Opaque on |
+|---|---:|---:|
+| 1× wall median | 142.783 ms | 141.332 ms |
+| 2× wall median | 450.479 ms | 507.207 ms |
+| 1× peak RSS median | 33,128,448 B | 32,751,616 B |
+| 2× peak RSS median | 38,895,616 B | 38,617,088 B |
+
+The 2× capture process is **12.6% slower** despite faster replay. Its profile is
+dominated by PNG encoding (33.718 / 34.594 ms median per capture, off / on).
+This does not explain the full normal-process difference; a capture speedup is
+not established. The 1× first control child also has a 742 ms cold-start outlier;
+raw samples and paired distributions remain in the receipt. Do not infer a
+general memory reduction from the small process high-water differences
+(**D4.2.5v3**).
+
+To isolate repeated paint from repeated encoding, `repaint_probe.py` and
+`repaint-isolation/` preserve a bounded follow-up: five alternating normal
+2× pairs, each with 240 forced repaint/pixel checks and one final PNG, plus a
+separate profile per mode. Every pixel assertion and final PNG hash agrees;
+profiled frames report zero whole-frame reuses. Normal wall medians improve
+190.866 → 168.931 ms (11.5%), CPU medians 201.054 → 165.249 ms (17.8%). Profiled
+steady repaint scope improves 1.634 → 1.507 ms, with replay 0.359 → 0.232 ms.
+This supports the selected repaint workload; repeated-PNG capture performance
+remains unresolved. M6's broader end-to-end acceptance stays open. No density
+special case, timing delay or vendor modification is introduced.
+
+### Qualification
+
+The frozen release build passes all affected native suites: display list 104,
+retained list 66, vector 227 and state 28. The vector suite includes the final
+finite-displacement admission regression. The SVG paint gate passes its final
+CLI's 680 pixel assertions across 12 scenario/scale/policy combinations. The
+same 425 native tests pass under AddressSanitizer in the isolated build; vendor
+internals are not instrumented and leak detection is disabled. The 14 Python
+benchmark receipt/environment contracts, Radiant integer-cast lint, scoped diff
+checks and Markdown fence/local-file checks pass.
+
+Unrelated runtime, parser, URL and test sources changed after the CLI and 22
+release runners were frozen. Their original modified inputs are preserved under
+`build-source/`; `candidate.json` pins the HEAD, input hashes, binaries, DSO and
+runtime assets. `workspace-drift.json` records the later changes. The scoped
+adapter, tests and benchmark sources still match the frozen build. Release
+qualification applies to those preserved inputs, not to later concurrent edits;
+ASan receives its own source/build receipt. The first ASan build detected source
+changes during compilation and is invalidated, even though compilation exited
+successfully. A private `asan-tree/` is built from the pinned HEAD plus the
+preserved modified inputs; its complete source hashes are checked before and
+after compilation. No live source is temporarily reverted or overwritten.
+
+The required Radiant aggregate completes with **6,052 passes, 34 failures, 146
+partial results and two skips out of 6,234 cases**. Its exit code is 2; this is
+not a green milestone gate. UI automation passes 662/662, paged media 502/502,
+DOM UI 160/160 and layout keeps 3,152 full passes with 142 partial results.
+
+Two native harnesses launch `./lambda.exe` directly despite the selected private
+CLI. A concurrent build briefly removes that workspace executable, producing
+32 CSS-syntax failures and a CSS-memory child-launch failure. A separate
+`aggregate-tree/` supplies the frozen CLI and node-core DSO at the expected
+relative paths, keeps external corpus links, and reruns those two unchanged
+harnesses. CSS syntax then passes all 44 cases.
+
+CSS-memory launch succeeds in that directory but its existing live-byte budgets
+fail: jqueryui 392,754 / 373,940 B, linuxmint 682,643 / 667,901 B, and bschool
+744,776 / 731,361 B (actual / allowed), both initially and after recascade.
+`css-memory-control-off.log` reproduces the **same six byte pairs** with opaque
+admission disabled. This excludes the new opaque route as the cause; the
+CSS-memory baseline/environment discrepancy remains open. No budget is raised.
+
+The view suite passes 215 cases with one skip and one failure:
+`DemoCommandLaunchesCatalogAndPreservesViewerOptions`. The frozen concurrent
+demo registration expects `test/demo/readability/readability.ls`, which is no
+longer present after the unrelated readability changes were withdrawn. That
+untracked `.ls` fixture was not part of the native source manifest. Its absence
+limits aggregate qualification; no substitute fixture or test exclusion is
+introduced.
+
+`qualification.json` records **limited** status, the failed original aggregate
+and the isolated rerun. Both remaining qualification issues and the 2× capture
+performance regression stay outstanding. The adapter implementation and its
+focused release/ASan/SVG checks are complete; full §31/M6 acceptance is not.

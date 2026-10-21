@@ -291,6 +291,20 @@ compose their clip mask once. Clip transitions seal segments; CPU operations,
 target changes and the batch end synchronize and release the native submission.
 A single segment is submitted directly, avoiding an extra wrapper scene.
 
+Opaque rectangles can bypass native shape construction when no native scene or
+sealed root is pending and the existing clip/tile/target intersection is
+pixel-exact. They share the direct raster writer already used for admitted
+translucent rectangles. Pending native paints, fractional coverage and curved
+clips retain the vector route, preserving its batching boundaries. The
+`RADIANT_TVG_RECT_RASTER=off` context setting disables opaque admission only;
+translucent behavior is unchanged. No compound rectangle path or persistent
+native vector prototype is introduced (**D4.5.3v2 / D4.2.4 / D4.2.6**).
+The scoped release comparison removes all native paints from the rectangle
+fixture and improves repeated repaint time. Repeated-PNG capture has a slower
+2× process result despite faster replay; broader capture performance remains
+open. See [the implementation plan, §31](../impl/Radiant_Impl_Rendering_Optimization.md#31-rasterize-pixel-exact-opaque-rectangles-without-extra-native-barriers)
+for samples and qualification limits (**D4.2.5v3**).
+
 ThorVG's public API owns its temporary command/point arrays. Zero temporary
 native geometry is impossible through that API. Radiant's persistent native
 **vector paint prototype cache has been removed**: shapes and gradients have

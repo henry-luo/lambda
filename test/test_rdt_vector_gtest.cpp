@@ -4470,6 +4470,108 @@ TEST(RdtVectorTest, TranslucentRectanglesKeepOpaqueAlphaWithinNestedRectClips) {
     rdt_engine_term();
 }
 
+TEST(RdtVectorTest, OpaqueRectanglesUseExactRasterAndPreserveNativeCoverageFallback) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (bool fractional : {false, true}) for (bool negative : {false, true})
+    for (float offset : {0.0f, 5.0f, 5.5f}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(fractional);
+        SCOPED_TRACE(negative);
+        SCOPED_TRACE(offset);
+        uint32_t actual[128 * 64] = {}, expected[128 * 64] = {};
+        auto draw = [&](uint32_t* pixels, bool native) {
+            RdtVector vector = {}; rdt_vector_init(&vector, pixels, 128, 64, 128);
+            rdt_vector_set_tile_offset_x(&vector, offset); rdt_vector_set_tile_offset_y(&vector, offset);
+            rdt_vector_begin_batch(&vector);
+            for (unsigned index = 0; index < 8; index++) {
+                float x = ((negative ? -3 : 3) + (fractional ? .25f : 0) + (float)index * 7) * density;
+                float y = (4 + (fractional ? .5f : 0)) * density;
+                float w = (fractional ? 3.5f : 3) * density, h = (fractional ? 4.5f : 4) * density;
+                if (native) test_radiant_fill_native_rect(&vector, x, y, w, h, Color{0xff2040e0u});
+                else rdt_fill_rect(&vector, x, y, w, h, Color{0xff2040e0u});
+            }
+            rdt_vector_end_batch(&vector); rdt_vector_destroy(&vector);
+        };
+        draw(expected, true);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); draw(actual, false); }
+        if (!fractional && offset != 5.5f) {
+            EXPECT_EQ(counters.native_shapes, 0u); EXPECT_EQ(counters.batch_flushes, 0u);
+        } else EXPECT_GT(counters.native_shapes, 0u);
+        EXPECT_EQ(counters.flush_cpu, 0u);
+        test_radiant_expect_pixels_equal(actual, expected, 128 * 64);
+        size_t painted = 0;
+        for (uint32_t pixel : actual) painted += pixel != 0;
+        EXPECT_GT(painted, 0u);
+    }
+    rdt_engine_term();
+}
+
+TEST(RdtVectorTest, OpaqueRectangleRasterKeepsClipAndPendingNativeBatchBoundaries) {
+    enum Case { PLAIN, RECT_CLIP, CURVED_CLIP, FRACTIONAL_CLIP, PENDING, SEALED_PENDING };
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (Case kind : {PLAIN, RECT_CLIP, CURVED_CLIP, FRACTIONAL_CLIP, PENDING, SEALED_PENDING}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(kind);
+        uint32_t actual[128 * 64] = {}, expected[128 * 64] = {};
+        auto draw = [&](uint32_t* pixels, bool native) {
+            RdtVector vector = {}; rdt_vector_init(&vector, pixels, 128, 64, 128);
+            rdt_vector_begin_batch(&vector);
+            if (kind == PENDING || kind == SEALED_PENDING)
+                rdt_fill_rounded_rect(&vector, 0, 0, 48 * density, 28 * density, 3 * density, 3 * density, Color{0xffff0000u});
+            RdtPath* clip = nullptr;
+            if (kind == RECT_CLIP || kind == CURVED_CLIP || kind == FRACTIONAL_CLIP || kind == SEALED_PENDING) {
+                clip = rdt_path_new(); ASSERT_NE(clip, nullptr);
+                if (kind == CURVED_CLIP) rdt_path_add_circle(clip, 24 * density, 14 * density, 22 * density, 12 * density);
+                else rdt_path_add_rect(clip, (kind == FRACTIONAL_CLIP ? 3.25f : 0) * density, 0,
+                    48 * density, 28 * density, 0, 0);
+                rdt_push_clip(&vector, clip, nullptr);
+            }
+            for (unsigned index = 0; index < 4; index++) {
+                float x = (2 + (float)index * 8) * density;
+                if (native) test_radiant_fill_native_rect(&vector, x, 10 * density, 4 * density, 4 * density, Color{0xff0000ffu});
+                else rdt_fill_rect(&vector, x, 10 * density, 4 * density, 4 * density, Color{0xff0000ffu});
+            }
+            if (clip) { rdt_pop_clip(&vector); rdt_path_free(clip); }
+            rdt_vector_end_batch(&vector); rdt_vector_destroy(&vector);
+        };
+        draw(expected, true);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); draw(actual, false); }
+        if (kind == PLAIN || kind == RECT_CLIP) EXPECT_EQ(counters.native_shapes, 0u);
+        else EXPECT_GT(counters.native_shapes, 0u);
+        EXPECT_EQ(counters.flush_cpu, 0u); // opaque admission must not split an existing native submission.
+        test_radiant_expect_pixels_equal(actual, expected, 128 * 64);
+        size_t painted = 0;
+        for (uint32_t pixel : actual) painted += pixel != 0;
+        EXPECT_GT(painted, 0u);
+    }
+    rdt_engine_term();
+}
+
+TEST(RdtVectorTest, RectangleRasterRejectsNonFiniteDisplacementBeforeClamping) {
+    rdt_engine_init(0);
+    for (float offset : {NAN, INFINITY, -INFINITY}) for (bool vertical : {false, true})
+    for (Color color : {Color{0xff2040e0u}, Color{0x802040e0u}}) {
+        uint32_t pixels[32 * 32] = {};
+        RdtVector vector = {}; rdt_vector_init(&vector, pixels, 32, 32, 32);
+        if (vertical) rdt_vector_set_tile_offset_y(&vector, offset);
+        else rdt_vector_set_tile_offset_x(&vector, offset);
+        rdt_vector_begin_batch(&vector);
+        RenderPipelineMetrics counters;
+        { RenderPipelineMetricsScope probe(&counters); rdt_fill_rect(&vector, 4, 4, 8, 8, color); }
+        EXPECT_EQ(counters.native_shapes, 1u);
+        size_t changed = 0;
+        for (uint32_t pixel : pixels) changed += pixel != 0;
+        EXPECT_EQ(changed, 0u);
+        // check admission without passing non-finite placement to the native renderer at submission.
+        rdt_vector_set_tile_offset_x(&vector, 0); rdt_vector_set_tile_offset_y(&vector, 0);
+        rdt_vector_end_batch(&vector); rdt_vector_destroy(&vector);
+        EXPECT_NE(pixels[6 * 32 + 6], 0u);
+    }
+    rdt_engine_term();
+}
+
 TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
     rdt_engine_init(0);
 
@@ -4493,9 +4595,9 @@ TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
 
     rdt_vector_begin_batch(&vector);
     rdt_push_clip(&vector, outer, nullptr);
-    // Many paints under one unchanged clip must share one composed mask.
+    // explicit paths keep this a native clip-mask test; exact rectangles can use the CPU fast path.
     for (int x = 0; x < 24; x += 2) {
-        rdt_fill_rect(&vector, (float)x, 0.0f, 2.0f, 12.0f, red);
+        test_radiant_fill_native_rect(&vector, (float)x, 0.0f, 2.0f, 12.0f, red);
     }
     EXPECT_EQ(rdt_vector_clip_mask_count(&vector), 0u);
     rdt_vector_flush_batch(&vector);
@@ -4504,7 +4606,7 @@ TEST(RdtVectorTest, ComposesOneClipMaskPerStableBatch) {
     EXPECT_EQ(pixels[4 * 24 + 0], 0u);
 
     rdt_push_clip(&vector, inner, nullptr);
-    rdt_fill_rect(&vector, 0.0f, 0.0f, 24.0f, 12.0f, blue);
+    test_radiant_fill_native_rect(&vector, 0.0f, 0.0f, 24.0f, 12.0f, blue);
     rdt_pop_clip(&vector);
     EXPECT_EQ(rdt_vector_clip_mask_count(&vector), 2u);
 

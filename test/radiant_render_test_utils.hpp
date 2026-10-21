@@ -33,3 +33,17 @@ inline void test_radiant_expect_surface_pixel(const ImageSurface* surface,
         EXPECT_LE(difference, tolerance) << "pixel " << x << "," << y << " channel " << channel;
     }
 }
+
+inline void test_radiant_expect_pixels_equal(const uint32_t* actual, const uint32_t* expected, size_t count) {
+    for (size_t pixel = 0; pixel < count; pixel++) if (actual[pixel] != expected[pixel]) {
+        EXPECT_EQ(actual[pixel], expected[pixel]) << "pixel index " << pixel;
+        return;
+    }
+}
+
+inline void test_radiant_fill_native_rect(RdtVector* vector, float x, float y, float w, float h, Color color) {
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, x, y, w, h, 0, 0);
+    rdt_fill_path(vector, path, color, RDT_FILL_WINDING, nullptr);
+    rdt_path_free(path);
+}
