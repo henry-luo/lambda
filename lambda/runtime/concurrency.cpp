@@ -16,6 +16,7 @@
 #include "../../lib/queue.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/shell.h"
+#include "../../lib/time_util.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -40,7 +41,7 @@ typedef enum LambdaParkKind {
     LAMBDA_PARK_SELECT,
     LAMBDA_PARK_SLEEP,
     LAMBDA_PARK_FILE_READ,
-    LAMBDA_PARK_PROCESS,
+    LAMBDA_PARK_OFFLOAD,
 } LambdaParkKind;
 
 typedef struct LambdaMailbox {
@@ -84,9 +85,26 @@ typedef struct LambdaTaskObserver {
     struct LambdaTaskObserver* next;
 } LambdaTaskObserver;
 
-struct LambdaProcess {
+// A blocking job on the libuv thread pool while its task parks: io.exec, and
+// io.fetch (AR-E3v2). The worker thread sees only `data` and this record;
+// progress reaches Lambda on the task's own stack, between parks, through
+// ops->progress — the runtime itself never sends a message (AR-O11).
+struct LambdaOffload {
     uv_work_t work;
+    uv_async_t wake;
     LambdaTask* task;
+    const LambdaOffloadOps* ops;
+    void* data;
+    int64_t progress_ms;
+    uint64_t last_notify_ms;   // worker thread, atomic
+    int cancel_flag;           // atomic
+    bool progress_pending;     // loop thread
+    bool done;
+    bool wake_closed;
+    bool free_on_close;
+};
+
+struct LambdaProcess {
     char** args;
     int arg_count;
     ShellEnvEntry* env;
@@ -94,8 +112,20 @@ struct LambdaProcess {
     char* cwd;
     ShellOptions options;
     ShellResult result;
-    int cancel_flag;
-    bool done;
+    // io.exec {progress} (AR-E5v2): the capture thread keeps the latest
+    // complete stdout line; the task delivers it between parks
+    LambdaOffload* job;
+    Item progress_item;         // the option as given; rooted by pn_io_exec3
+    Rooted<Item>* callback;     // non-NULL once the option named a function
+    int64_t progress_ms;
+    uv_mutex_t lock;
+    bool lock_ready;
+    char* line;                 // guarded by lock
+    size_t line_len;
+    bool line_fresh;
+    char* partial;              // bytes after the last newline (capture thread only)
+    size_t partial_len;
+    size_t partial_cap;
 };
 
 struct LambdaTaskScope {
@@ -148,10 +178,13 @@ struct LambdaTask {
     LambdaWaitGroup* wait_group;
     LambdaTaskTimer* timer;
     LambdaFileRead* file_read;
-    LambdaProcess* process;
+    LambdaOffload* offload;
     LambdaTaskScope* scope_top;
     LambdaTaskScope* owner_scope;
     LambdaTask* next_scope_child;
+    // S13.3.1v2: the document that owns this task (`start(..., {owner:
+    // 'document'})`), an opaque token from the document probe; null otherwise
+    void* owner_document;
     LambdaTaskObserver* observers;
     LambdaTask* next_all;
     QueueNode run_link;
@@ -169,6 +202,9 @@ struct LambdaScheduler {
     uint64_t event_sequence;
     int mailbox_capacity;
     int live_count;
+    // the live tasks a document owns, with their descendants (S13.3.1v2): the
+    // document joins them, so a script run's end-of-run drain does not wait
+    int document_live;
     // weakly registered JS async activations (JSCU25), and this scheduler's
     // serial, which their tokens name
     int weak_count;
@@ -182,12 +218,17 @@ struct LambdaScheduler {
 
 static char task_handle_brand;
 static LambdaScheduler* attached_scheduler;
+// The UI layer's answer to "which document is running Lambda code now", null
+// when none is (a script, the REPL); S13.3.1v2's `owner: 'document'` needs one.
+static void* (*document_probe)(void);
 static uint64_t scheduler_serial_next = 1;
 static LambdaPromiseIsFn promise_is;
 static LambdaPromiseWaitFn promise_wait;
 static LambdaHandleToPromiseFn handle_to_promise;
 static bool scheduler_has_heap(void);
 static LambdaTask* lambda_current_task(void);
+static void offload_cancel(LambdaOffload* job);
+static void offload_release(LambdaOffload* job, bool free_on_close);
 
 static void task_handle_invalidate(LambdaTask* task) {
     if (!task || get_type_id(task->handle) != LMD_TYPE_VMAP ||
@@ -397,12 +438,6 @@ static void task_resume_with(LambdaTask* task, Item value) {
     scheduler_enqueue(task);
 }
 
-static void process_cancel(LambdaProcess* process) {
-    if (!process || process->done) return;
-    __atomic_store_n(&process->cancel_flag, 1, __ATOMIC_RELEASE);
-    uv_cancel((uv_req_t*)&process->work);
-}
-
 static void process_release(LambdaProcess* process) {
     if (!process) return;
     for (int i = 0; process->args && i < process->arg_count; i++) mem_free(process->args[i]);
@@ -413,8 +448,15 @@ static void process_release(LambdaProcess* process) {
     mem_free(process->args);
     mem_free(process->env);
     mem_free(process->cwd);
+    if (process->lock_ready) uv_mutex_destroy(&process->lock);
+    mem_free(process->line);
+    mem_free(process->partial);
     shell_result_free(&process->result);
     mem_free(process);
+}
+
+static void process_release_orphan(void* data) {
+    process_release((LambdaProcess*)data);
 }
 
 static void file_read_release(LambdaFileRead* read) {
@@ -687,7 +729,7 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
         if (task->file_read && !task->file_read->done) {
             uv_cancel((uv_req_t*)&task->file_read->request);
         }
-        process_cancel(task->process);
+        offload_cancel(task->offload);
     }
     // File-system requests retain their task pointer through the libuv
     // callback. Finish cancellation before releasing task records.
@@ -696,7 +738,7 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
         pending_file_read = false;
         for (LambdaTask* pending = scheduler->all_tasks; pending; pending = pending->next_all) {
             if ((pending->file_read && !pending->file_read->done) ||
-                    (pending->process && !pending->process->done)) {
+                    (pending->offload && !pending->offload->done)) {
                 pending_file_read = true;
                 break;
             }
@@ -729,7 +771,21 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
             observer = next_observer;
         }
         file_read_release(task->file_read);
-        process_release(task->process);
+        if (task->offload) {
+            // the task never resumes, so free the job's data for it and let
+            // libuv release the wake handle before the record goes
+            LambdaOffload* job = task->offload;
+            if (job->ops->release) job->ops->release(job->data);
+            offload_release(job, false);
+            while (!job->wake_closed) {
+                if (!scheduler_poll_teardown(teardown_owner, UV_RUN_NOWAIT)) {
+                    job->free_on_close = true;
+                    job = NULL;
+                    break;
+                }
+            }
+            mem_free(job);
+        }
         mem_free(task->mailbox.items);
         mem_free(task);
         task = next;
@@ -895,10 +951,15 @@ static void scheduler_drain_watchdog_cb(uv_timer_t* timer) {
     state->fired = true;
 }
 
+// the live tasks a drain waits for: those no document owns
+static int scheduler_drain_live(const LambdaScheduler* scheduler) {
+    return scheduler->live_count - scheduler->document_live;
+}
+
 static bool scheduler_run_satisfied(const LambdaScheduler* scheduler,
                                     const LambdaTask* awaited) {
     return awaited ? awaited->state != LAMBDA_TASK_PARKED
-        : scheduler->live_count == 0 && scheduler->weak_count == 0;
+        : scheduler_drain_live(scheduler) == 0 && scheduler->weak_count == 0;
 }
 
 // Whether anything other than `watchdog` keeps the loop alive.
@@ -914,7 +975,7 @@ static bool scheduler_loop_busy(uv_loop_t* loop, uv_timer_t* watchdog) {
 // jobs their checkpoint, then collect, so a carrier nobody can reach any more
 // leaves. True if either made progress.
 static bool scheduler_settle_weak(LambdaScheduler* scheduler) {
-    if (scheduler->live_count != 0 || scheduler->weak_count == 0) return false;
+    if (scheduler_drain_live(scheduler) != 0 || scheduler->weak_count == 0) return false;
     int before = scheduler->weak_count;
     lambda_uv_checkpoint();
     if (scheduler->weak_count != before || scheduler->run_queue.first) return true;
@@ -944,7 +1005,7 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
         if (!loop) break;
         // Only weak registrations remain: wait for the loop only while
         // something besides this drain's own watchdog keeps it alive.
-        if (!awaited && scheduler->live_count == 0 &&
+        if (!awaited && scheduler_drain_live(scheduler) == 0 &&
                 !scheduler_loop_busy(loop, watchdog_started ? &watchdog : NULL)) {
             if (scheduler_settle_weak(scheduler)) continue;
             break;
@@ -966,6 +1027,16 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
         }
         uv_run(loop, UV_RUN_ONCE);
         if (scheduler_run_satisfied(scheduler, awaited)) break;
+        // A root task's wait is stuck only when nothing but this watchdog
+        // keeps the loop alive. A timer, an offloaded job or a child process
+        // still pending will wake a task however long it takes, so a sleep or
+        // download past 5 s failed with E502. The end-of-run drain (awaited
+        // == NULL) keeps its documented bound (Lambda_Design_Concurrency §12.4).
+        if (awaited && watchdog_state.fired && scheduler_loop_busy(loop, &watchdog)) {
+            watchdog_state.fired = false;
+            watchdog_state.grace_turn = false;
+            uv_timer_start(&watchdog, scheduler_drain_watchdog_cb, 5000, 0);
+        }
         if (step == 0 && !uv_loop_alive(loop) && !scheduler->run_queue.first) break;
     }
     if (watchdog_initialized) {
@@ -976,14 +1047,14 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
         uv_run(loop, UV_RUN_NOWAIT);
     }
     // Weak registrations that nothing can settle never fail a drain.
-    if (!awaited && scheduler->live_count == 0 && scheduler->weak_count > 0) {
+    if (!awaited && scheduler_drain_live(scheduler) == 0 && scheduler->weak_count > 0) {
         log_debug("concurrency scheduler: drain left %d unsettled JS activation(s)",
             scheduler->weak_count);
         return ran;
     }
     if (!scheduler_run_satisfied(scheduler, awaited)) {
         log_error("concurrency scheduler: %s stopped with %d live task(s)%s",
-            awaited ? "root wait" : "drain", scheduler->live_count,
+            awaited ? "root wait" : "drain", awaited ? scheduler->live_count : scheduler_drain_live(scheduler),
             watchdog_state.fired ? " after watchdog timeout" : " without runnable work");
         return -1;
     }
@@ -1131,6 +1202,7 @@ extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     task->state = LAMBDA_TASK_DONE;
     task->park_kind = LAMBDA_PARK_NONE;
     task->scheduler->live_count--;
+    if (task->owner_document) task->scheduler->document_live--;
     wake_waiters(task);
     LambdaTaskObserver* observer = task->observers;
     task->observers = NULL;
@@ -1278,12 +1350,80 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
         launch_root.get());
     if (!task) return task_error(ERR_OUT_OF_MEMORY, "task creation failed");
     LambdaTask* parent = lambda_current_task();
+    // a document-owned task's descendants belong to that document too
+    if (parent && parent->owner_document) {
+        task->owner_document = parent->owner_document;
+        context->scheduler->document_live++;
+    }
     if (!escapes && parent && parent->scope_top) {
         task->owner_scope = parent->scope_top;
         task->next_scope_child = parent->scope_top->children;
         parent->scope_top->children = task;
     }
     return lambda_task_handle(task);
+}
+
+extern "C" void lambda_set_document_probe(void* (*probe)(void)) {
+    document_probe = probe;
+}
+
+// S13.3.1v2: a task the running document owns. No block joins it, whatever
+// scope starts it; the document cancels then joins it when it is discarded
+// (lambda_document_tasks_release). Outside a document there is no owner.
+extern "C" Item lambda_task_start_document(Item function, List* args) {
+    void* document = document_probe ? document_probe() : NULL;
+    if (!document) {
+        return task_error(ERR_INVALID_OPERATION,
+            "start: owner 'document' needs a running document (a view's handler or template)");
+    }
+    Item handle = lambda_task_start_function_scoped(function, args, true);
+    LambdaTask* task = lambda_task_from_handle(handle);
+    if (task && !task->owner_document) context->scheduler->document_live++;
+    if (task) task->owner_document = document;
+    return handle;
+}
+
+static bool document_tasks_pending(LambdaScheduler* scheduler, void* document) {
+    for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
+        if (task->owner_document == document && task->state != LAMBDA_TASK_DONE) return true;
+    }
+    return false;
+}
+
+// Cancels every task `document` owns, then drives the loop until they have
+// finished: their cleanup (a child process stopped, a staging folder removed)
+// runs while the document's state and DOM still exist. Bounded, so a task that
+// ignores cancellation cannot hold the window open; it is reported and left to
+// the scheduler's teardown. Returns the number of tasks released.
+extern "C" int lambda_document_tasks_release(void* document) {
+    LambdaScheduler* scheduler = context ? context->scheduler : NULL;
+    if (!scheduler || !document) return 0;
+    int released = 0;
+    for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
+        if (task->owner_document != document || task->state == LAMBDA_TASK_DONE) continue;
+        lambda_task_cancel(task);
+        released++;
+    }
+    if (!released) return 0;
+    uv_loop_t* loop = lambda_uv_loop();
+    uint64_t deadline = time_now_ms() + 5000;
+    while (document_tasks_pending(scheduler, document) && time_now_ms() < deadline) {
+        int ran = lambda_scheduler_run_ready(scheduler);
+        if (!document_tasks_pending(scheduler, document)) break;
+        if (scheduler->run_queue.first) continue;
+        if (!loop || (!ran && !uv_loop_alive(loop))) break;
+        uv_run(loop, ran > 0 ? UV_RUN_NOWAIT : UV_RUN_ONCE);
+    }
+    for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
+        if (task->owner_document != document) continue;
+        if (task->state != LAMBDA_TASK_DONE) {
+            log_error("concurrency document: task %llu did not finish after cancellation",
+                (unsigned long long)task->id);
+            scheduler->document_live--;  // ownerless now: the scheduler's teardown frees it
+        }
+        task->owner_document = NULL;
+    }
+    return released;
 }
 
 static LambdaTask* lambda_current_task(void) {
@@ -1557,6 +1697,225 @@ extern "C" Item pn_io_read(Item target) {
     return file_read_result(task, read);
 }
 
+// ---------------------------------------------------------------------------
+// Offload: a blocking job on the thread pool while the task parks (AR-E3v2)
+// ---------------------------------------------------------------------------
+
+static void offload_cancel(LambdaOffload* job) {
+    if (!job || job->done) return;
+    __atomic_store_n(&job->cancel_flag, 1, __ATOMIC_RELEASE);
+    uv_cancel((uv_req_t*)&job->work);
+}
+
+// Closes the wake handle; the record is freed once libuv lets go of it.
+static void offload_release(LambdaOffload* job, bool free_on_close) {
+    if (!job) return;
+    job->free_on_close = free_on_close;
+    if (uv_is_closing((uv_handle_t*)&job->wake)) return;
+    uv_close((uv_handle_t*)&job->wake, [](uv_handle_t* handle) {
+        LambdaOffload* job = (LambdaOffload*)handle->data;
+        job->wake_closed = true;
+        if (job->free_on_close) mem_free(job);
+    });
+}
+
+extern "C" const int* lambda_offload_cancel_flag(const LambdaOffload* job) {
+    return job ? &job->cancel_flag : NULL;
+}
+
+// Worker thread. Progress is a level, not a queue: a tick inside the rate
+// window is dropped, and the next one carries the latest counters.
+extern "C" void lambda_offload_notify(LambdaOffload* job) {
+    if (!job) return;
+    uint64_t now = time_now_ms();
+    if (!now) now = 1;
+    uint64_t last = __atomic_load_n(&job->last_notify_ms, __ATOMIC_RELAXED);
+    if (last && job->progress_ms > 0 && now - last < (uint64_t)job->progress_ms) return;
+    __atomic_store_n(&job->last_notify_ms, now, __ATOMIC_RELAXED);
+    uv_async_send(&job->wake);
+}
+
+// Only a task parked on this job may be woken: parked anywhere else (its
+// progress callback sleeping, say) it finds `done` or `progress_pending`
+// when it returns to the offload loop.
+static void offload_wake_task(LambdaOffload* job) {
+    LambdaTask* task = job->task;
+    if (task && task->state == LAMBDA_TASK_PARKED && task->park_kind == LAMBDA_PARK_OFFLOAD)
+        lambda_task_resume(task);
+}
+
+extern "C" Item lambda_task_offload(const LambdaOffloadOps* ops, void* data, int64_t progress_ms) {
+    LambdaTask* task = lambda_current_task();
+    if (!task || !ops || !ops->run) {
+        return task_error(ERR_INVALID_OPERATION, "offload requires a running procedure");
+    }
+    if (task_cancel_pending(task)) return task_cancelled_error();
+    if (!lambda_uv_loop() && lambda_uv_init() != 0) {
+        return task_error(ERR_INVALID_STATE, "offload requires the event loop");
+    }
+    LambdaOffload* job = (LambdaOffload*)mem_calloc(1, sizeof(LambdaOffload), MEM_CAT_EVAL);
+    if (!job) return task_error(ERR_OUT_OF_MEMORY, "offload allocation failed");
+    job->task = task;
+    job->ops = ops;
+    job->data = data;
+    job->progress_ms = progress_ms;
+    job->work.data = job;
+    job->wake.data = job;
+    if (uv_async_init(lambda_uv_loop(), &job->wake, [](uv_async_t* handle) {
+            LambdaOffload* job = (LambdaOffload*)handle->data;
+            if (!job || job->done) return;
+            job->progress_pending = true;
+            offload_wake_task(job);
+        }) != 0) {
+        mem_free(job);
+        return task_error(ERR_INVALID_STATE, "offload wake handle failed");
+    }
+    // the work request keeps the loop alive; the wake handle must not outlast it
+    uv_unref((uv_handle_t*)&job->wake);
+    int status = uv_queue_work(lambda_uv_loop(), &job->work, [](uv_work_t* request) {
+        LambdaOffload* job = (LambdaOffload*)request->data;
+        job->ops->run(job, job->data);
+    }, [](uv_work_t* request, int status) {
+        LambdaOffload* job = (LambdaOffload*)request->data;
+        job->done = true;
+        if (status == UV_ECANCELED) __atomic_store_n(&job->cancel_flag, 1, __ATOMIC_RELEASE);
+        offload_wake_task(job);
+    });
+    if (status < 0) {
+        offload_release(job, true);
+        return task_error(ERR_INVALID_STATE, uv_strerror(status));
+    }
+    task->offload = job;
+    RootFrame roots(1);
+    Rooted<Item> abort_error(roots, ItemNull);
+    while (!job->done) {
+        if (job->progress_pending && ops->progress && abort_error.get().item == ITEM_NULL &&
+                !task_cancel_pending(task)) {
+            job->progress_pending = false;
+            // on the task's own stack: the callback may allocate, send, or park
+            Item outcome = ops->progress(data, false);
+            if (get_type_id(outcome) == LMD_TYPE_ERROR) {
+                // the callback refused: stop the work and raise its error (AR-E3v2)
+                abort_error.set(outcome);
+                offload_cancel(job);
+            }
+            continue;
+        }
+        task->park_kind = LAMBDA_PARK_OFFLOAD;
+        (void)lambda_task_suspend(task);
+        if (task_cancel_pending(task)) offload_cancel(job);
+    }
+    task->offload = NULL;
+    Item result = ItemNull;
+    if (task_cancel_pending(task)) result = task_cancelled_error();
+    else if (abort_error.get().item != ITEM_NULL) result = abort_error.get();
+    else if (ops->progress) result = ops->progress(data, true);   // the final level
+    if (get_type_id(result) != LMD_TYPE_ERROR) result = ItemNull;
+    offload_release(job, true);
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// io.exec
+// ---------------------------------------------------------------------------
+
+#define PROCESS_LINE_CAP ((size_t)64 * 1024)
+
+// Capture thread (AR-E5v2): keep the latest complete stdout line and ask for
+// a tick. Bytes after the last newline wait in `partial` for the next chunk.
+static void process_on_chunk(const char* data, size_t len, bool is_stderr, void* user_data) {
+    LambdaProcess* process = (LambdaProcess*)user_data;
+    if (is_stderr || !process->job || !len) return;
+    const char* end = data + len;
+    const char* last_nl = NULL;
+    for (const char* p = end; p > data;) {
+        if (*--p == '\n') { last_nl = p; break; }
+    }
+    if (last_nl) {
+        const char* start = last_nl;
+        while (start > data && start[-1] != '\n') start--;
+        size_t tail = (size_t)(last_nl - start);
+        size_t head = start == data ? process->partial_len : 0;   // the line began in an earlier chunk
+        if (head + tail > PROCESS_LINE_CAP) { head = head > PROCESS_LINE_CAP ? PROCESS_LINE_CAP : head; tail = PROCESS_LINE_CAP - head; }
+        char* line = (char*)mem_alloc(head + tail + 1, MEM_CAT_EVAL);
+        if (line) {
+            if (head) memcpy(line, process->partial, head);
+            memcpy(line + head, start, tail);
+            size_t total = head + tail;
+            if (total && line[total - 1] == '\r') total--;
+            line[total] = '\0';
+            uv_mutex_lock(&process->lock);
+            mem_free(process->line);
+            process->line = line;
+            process->line_len = total;
+            process->line_fresh = true;
+            uv_mutex_unlock(&process->lock);
+        }
+        process->partial_len = 0;
+        data = last_nl + 1;
+        len = (size_t)(end - data);
+    }
+    if (len && process->partial_len < PROCESS_LINE_CAP) {
+        size_t keep = len < PROCESS_LINE_CAP - process->partial_len ? len : PROCESS_LINE_CAP - process->partial_len;
+        if (process->partial_len + keep > process->partial_cap) {
+            size_t cap = process->partial_cap ? process->partial_cap * 2 : 4096;
+            while (cap < process->partial_len + keep) cap *= 2;
+            char* grown = (char*)mem_realloc(process->partial, cap, MEM_CAT_EVAL);
+            if (!grown) return;
+            process->partial = grown;
+            process->partial_cap = cap;
+        }
+        memcpy(process->partial + process->partial_len, data, keep);
+        process->partial_len += keep;
+    }
+    if (last_nl) lambda_offload_notify(process->job);
+}
+
+static void process_run(LambdaOffload* job, void* data) {
+    LambdaProcess* process = (LambdaProcess*)data;
+    process->job = job;
+    process->options.cancel_flag = lambda_offload_cancel_flag(job);
+    process->result = shell_exec(process->args[0], (const char**)process->args, &process->options);
+}
+
+// Loop thread, on the task's stack: hand the callback `{line}`. At the end a
+// trailing unterminated line counts as complete.
+static Item process_progress(void* data, bool final) {
+    LambdaProcess* process = (LambdaProcess*)data;
+    if (!process->callback) return ItemNull;
+    char* text = NULL;
+    size_t length = 0;
+    uv_mutex_lock(&process->lock);
+    if (final && process->partial_len) {
+        text = mem_dup_n(process->partial, process->partial_len, MEM_CAT_EVAL);
+        length = process->partial_len;
+        process->partial_len = 0;
+        process->line_fresh = false;
+    } else if (process->line_fresh) {
+        text = mem_dup_n(process->line, process->line_len, MEM_CAT_EVAL);
+        length = process->line_len;
+        process->line_fresh = false;
+    }
+    uv_mutex_unlock(&process->lock);
+    if (!text) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> line(roots, ItemNull);
+    Rooted<Map*> record(roots, (Map*)NULL);
+    String* string = heap_strcpy(text, (int64_t)length);
+    mem_free(text);
+    if (!string) return ItemNull;
+    line.set((Item){.item = s2it(string)});
+    static const char* names[] = {"line"};
+    static const TypeId types[] = {LMD_TYPE_STRING};
+    record.set(map_alloc_for_type(runtime_result_shape(names, types, 1), NULL, 0));
+    if (!record.get()) return ItemNull;
+    Item values[] = {line.get()};
+    map_fill_items(record.get(), values, 1);
+    Item callback = process->callback->get();
+    Item outcome = fn_call1((Function*)(uintptr_t)callback.item, (Item){.map = record.get()});
+    return get_type_id(outcome) == LMD_TYPE_ERROR ? outcome : ItemNull;
+}
+
 static char* process_argument(Item value) {
     TypeId type = get_type_id(value);
     const char* chars = NULL;
@@ -1640,12 +1999,32 @@ static LambdaProcess* process_create(Item program, Item arguments, Item options,
     process->options.env = process->env;
     process->options.timeout_ms = (int)timeout;
     process->options.max_output_bytes = (size_t)limit;
-    process->options.cancel_flag = &process->cancel_flag;
 #ifdef _WIN32
     process->options.stdin_path = "NUL";
 #else
     process->options.stdin_path = "/dev/null";
 #endif
+    // AR-E5v2: progress is a callback; the capture thread only splits lines
+    process->progress_item = io_fs_option_get(&opts, "progress");
+    process->progress_ms = 250;
+    TypeId progress_type = get_type_id(process->progress_item);
+    if ((progress_type != LMD_TYPE_NULL && progress_type != LMD_TYPE_FUNC) ||
+            !io_fs_option_count(&opts, "progress_ms", &process->progress_ms, error)) {
+        if (progress_type != LMD_TYPE_NULL && progress_type != LMD_TYPE_FUNC)
+            *error = io_fs_error(ERR_TYPE_MISMATCH, "io.exec: option 'progress' must be a function");
+        process_release(process);
+        return NULL;
+    }
+    if (progress_type == LMD_TYPE_FUNC) {
+        if (uv_mutex_init(&process->lock) != 0) {
+            *error = io_fs_error(ERR_INVALID_STATE, "io.exec: progress lock allocation failed");
+            process_release(process);
+            return NULL;
+        }
+        process->lock_ready = true;
+        process->options.on_chunk = process_on_chunk;
+        process->options.user_data = process;
+    }
     return process;
 }
 
@@ -1675,36 +2054,24 @@ extern "C" Item pn_io_exec3(Item program, Item arguments, Item options) {
         LambdaProcess fabricated = {};
         return process_result(&fabricated);
     }
-    RootFrame roots(3);
+    RootFrame roots(4);
     Rooted<Item> rooted_program(roots, program), rooted_arguments(roots, arguments), rooted_options(roots, options);
+    Rooted<Item> rooted_callback(roots, ItemNull);
     LambdaTask* task = lambda_current_task();
     if (!task) return task_error(ERR_INVALID_OPERATION, "io.exec requires a running procedure");
     if (task_cancel_pending(task)) return task_cancelled_error();
     Item error = ItemError;
     LambdaProcess* process = process_create(program, arguments, options, &error);
     if (!process) return error;
-    process->task = task;
-    process->work.data = process;
-    if (!lambda_uv_loop() && lambda_uv_init() != 0) { process_release(process); return ItemError; }
-    int status = uv_queue_work(lambda_uv_loop(), &process->work, [](uv_work_t* request) {
-        LambdaProcess* process = (LambdaProcess*)request->data;
-        process->result = shell_exec(process->args[0], (const char**)process->args, &process->options);
-    }, [](uv_work_t* request, int status) {
-        LambdaProcess* process = (LambdaProcess*)request->data;
-        process->done = true;
-        if (status == UV_ECANCELED) process->result.cancelled = true;
-        if (process->task && process->task->state != LAMBDA_TASK_DONE) lambda_task_resume(process->task);
-    });
-    if (status < 0) { process_release(process); return task_error(ERR_INVALID_STATE, uv_strerror(status)); }
-    task->process = process;
-    while (!process->done) {
-        task->park_kind = LAMBDA_PARK_PROCESS;
-        (void)lambda_task_suspend(task);
-        if (task_cancel_pending(task)) process_cancel(process);
+    if (get_type_id(process->progress_item) == LMD_TYPE_FUNC) {
+        // the callback is read through this root at each call: the heap may move it while the task parks
+        rooted_callback.set(process->progress_item);
+        process->callback = &rooted_callback;
     }
-    task->process = NULL;
+    static const LambdaOffloadOps ops = {process_run, process_progress, process_release_orphan};
+    Item outcome = lambda_task_offload(&ops, process, process->progress_ms);
     // cancellation waits for the worker/pipe owners before releasing their request memory.
-    Item result = task_cancel_pending(task) ? task_cancelled_error() : process_result(process);
+    Item result = get_type_id(outcome) == LMD_TYPE_ERROR ? outcome : process_result(process);
     process_release(process);
     return result;
 }

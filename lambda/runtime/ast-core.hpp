@@ -872,6 +872,9 @@ typedef struct AstStartNode : AstNode {
     NameScope* owner_scope;
     StartMode mode;
     bool escapes;
+    // S13.3.1v2 `owner: 'document'`: the running document owns the task, so no
+    // block joins it; the document cancels then joins it when it is discarded
+    bool document_owner;
 } AstStartNode;
 
 typedef enum AstPrimaryLiteralValueKind : uint8_t {

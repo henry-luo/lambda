@@ -1,0 +1,67 @@
+[]
+[["video", "media"], ["file", "file"], ["gallery", "gallery"], [null, null]]
+[2, 0, ["html", "readable", "markdown"]]
+[true, true, false]
+[true, true]
+true
+[["b", "a", "c"], "b", true]
+[{
+    kind: "all",
+    label: "All",
+    count: 3
+  }, {
+    kind: "page",
+    label: "Pages",
+    count: 2
+  }, {
+    kind: "video",
+    label: "Video",
+    count: 1
+  }]
+[{
+    site: "Local files",
+    count: 1
+  }, {
+    site: "The Meridian Ledger",
+    count: 2
+  }]
+["a", "c"]
+["b"]
+[["HTML", "R"], ["HTML"]]
+[{
+    output: "html",
+    status: "ok",
+    message: null
+  }, {
+    output: "pdf",
+    status: "failed",
+    message: "render export: …"
+  }]
+{
+  op: 'add',
+  url: "file:///work/test/lambda/archive/site/short.html",
+  tag: "job-1",
+  options: {
+    formats: ["html", "readable", "markdown"],
+    kind: "page"
+  }
+}
+["", 1]
+"Type a URL or a path to archive."
+{
+  op: 'refresh',
+  id: "b",
+  tag: "job-1",
+  formats: ["pdf"]
+}
+["https://a.example/x", "file:///abs/p.html", null]
+[["html", "readable", "markdown", "pdf"], ["html", "markdown"]]
+["running", "2 KB of 8 KB · 1 KB/s", 0.25]
+"assets 2/5"
+[0, "d", "d"]
+"b"
+["failed", "archive: HTTP 404", 0]
+[["b"], "…the harbour wakes…", null]
+["b", null]
+[["a", "c"], "a", null]
+["21 Oct 2026", "", "1.5 KB", "5 MB", "12 B"]

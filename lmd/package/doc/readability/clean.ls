@@ -11,8 +11,6 @@ type share = \(!("\a" | "\d") ("share" | "sharedaddy") !("\a" | "\d"))
 type image_list = \(... "." ("jpg" | "jpeg" | "png" | "webp") ws+ "\d" ...)
 type image_url = \(ws* (!ws)+ "." ("jpg" | "jpeg" | "png" | "webp") (!ws)* ws*)
 type base64_head = \("data:" ws* (!(ws | ";" | ","))+ ws* ";" ws* "base64" ws* ",")
-// one srcset candidate; a trailing NUL stands in for the regex's $
-type srcset_item = \((!ws)+ (ws+ ("\d" | ".")+ ("x" | "w"))? ws* ("," | "\u0000"))
 
 let PRESENTATIONAL = ["align","background","bgcolor","border","cellpadding","cellspacing","frame","hspace",
     "rules","style","valign","vspace"]
@@ -188,7 +186,7 @@ fn srcset_part(m, cx) {
     absolute(slice(core, 0, url_end), cx) ++ slice(body, url_end) ++ slice(m, len(m) - 1)
 }
 fn fix_srcset(srcset, cx) {
-    let fixed = n.replace_with(srcset ++ "\u0000", srcset_item, (m) => srcset_part(m, cx));
+    let fixed = n.replace_with(srcset ++ "\u0000", n.srcset_item, (m) => srcset_part(m, cx));
     slice(fixed, 0, len(fixed) - 1)
 }
 fn fix_media(e, cx) {

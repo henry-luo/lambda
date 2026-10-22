@@ -1,0 +1,10 @@
+[{
+    caught: true,
+    code: 401
+  }, {
+    caught: true,
+    value: null
+  }, {
+    caught: true,
+    notes: ["seen"]
+  }, "boom2"]

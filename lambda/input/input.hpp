@@ -227,7 +227,24 @@ typedef struct {
     bool enable_compression;
     struct CookieJar* cookie_jar;  // optional profile jar for browser Fetch/XHR
     size_t max_response_bytes;     // 0 uses the shared HTTP response limit
+    // io.fetch {to, resume, progress} (AR-E3v2): stream the body into
+    // sink_path (appended after resume_from bytes, a Range request) instead
+    // of memory, and report transfer progress; both hooks run on the
+    // transfer thread and must not touch managed values (D5.3.3)
+    const char* sink_path;
+    int64_t resume_from;
+    int (*progress)(void* data, int64_t received, int64_t total);  // nonzero aborts
+    void* progress_data;
+    const int* cancel_flag;        // atomic; nonzero aborts the transfer
 } FetchConfig;
+
+// Why a transfer produced no FetchResponse (http_fetch2).
+typedef struct FetchFailure {
+    int curl_code;        // CURLcode, 0 when the failure is not curl's
+    bool aborted;         // the progress hook or cancel flag stopped it
+    bool over_limit;      // the body exceeded max_response_bytes
+    char message[160];
+} FetchFailure;
 
 typedef struct FetchResponse {
     char* data;
@@ -258,6 +275,8 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
 Input* input_from_http_with_name_parent(const char* url, const char* type,
     const char* flavor, const char* cache_dir, NamePool* name_parent);
 FetchResponse* http_fetch(const char* url, const FetchConfig* config);
+// http_fetch that also says why it returned NULL (failure may be NULL).
+FetchResponse* http_fetch2(const char* url, const FetchConfig* config, FetchFailure* failure);
 void free_fetch_response(FetchResponse* response);
 const char* content_type_to_extension(const char* content_type);
 

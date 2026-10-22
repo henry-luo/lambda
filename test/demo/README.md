@@ -23,6 +23,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
 | `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
 | `readability` | `readability/readability.ls` | [Reader View](readability/README.md) |
+| `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
 | `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
 
 Paths in the table are relative to `test/demo/`. Viewer options follow the name:
@@ -52,6 +53,10 @@ Lambda and played through the music package's SoundFont. Generate the model with
 ## Reader View
 
 `./lambda.exe demo readability` opens a small browser window with three cluttered articles and a newspaper front page. The page icon at the right of the address bar switches a tab to the article that [`lambda.doc.readability`](../../doc/Lambda_Packages.md#21-docreadability--article-extraction) extracts, a port of Mozilla's Readability.js. The icon is disabled on the front page, which fails the package's `readerable` check. See [Reader View](readability/README.md).
+
+## Archive
+
+`./lambda.exe demo archive` is a personal web archive built on [`lambda.archive`](../../doc/Lambda_Packages.md): paste a URL or a local path, watch the job's progress, then browse, filter and search the library and view each snapshot, its readable page, Markdown and record. Pages, video and audio (direct files, HLS streams, subtitle tracks), galleries and files are archived by Lambda code alone. A first run archives a small local sample. See [Archive](archive/README.md).
 
 ## Interactive Tetris
 

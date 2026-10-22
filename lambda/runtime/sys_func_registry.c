@@ -1229,8 +1229,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_CANCEL, "cancel", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "pn_cancel", PROFILE_TASKS_FPTR(pn_cancel), NULL, NULL, false, 0, false},
 
-    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_fetch", PROFILE_NETWORK_FPTR(pn_fetch), NULL, NULL, false, 0},
+    // fetch parks the task while the transfer runs on the thread pool (AR-E1)
+    {SYSPROC_FETCH, "fetch", 2, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_fetch", PROFILE_NETWORK_FPTR(pn_fetch), NULL, NULL, false, 0, true},
 
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_output2", PROFILE_FILE_IO_FPTR(pn_output2), NULL, NULL, false, 0},
@@ -1248,7 +1249,7 @@ SysFuncInfo sys_func_defs[] = {
     // IO module procedures — all can_raise=true for I/O errors
     // ========================================================================
     {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_copy", PROFILE_FILE_IO_FPTR(pn_io_copy), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_copy", PROFILE_FILE_IO_FPTR(pn_io_copy), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_read", PROFILE_FILE_IO_FPTR(pn_io_read), NULL, NULL, false, 0, true},
@@ -1278,11 +1279,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_rename", PROFILE_FILE_IO_FPTR(pn_io_rename), NULL, NULL, false, 0},
 
-    {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_fetch1", PROFILE_NETWORK_FPTR(pn_io_fetch1), NULL, NULL, false, 0},
+    {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_fetch1", PROFILE_NETWORK_FPTR(pn_io_fetch1), NULL, NULL, false, 0, true},
 
-    {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, NULL, "pn_io_fetch2", PROFILE_NETWORK_FPTR(pn_io_fetch2), NULL, NULL, false, 0},
+    {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_fetch2", PROFILE_NETWORK_FPTR(pn_io_fetch2), NULL, NULL, false, 0, true},
 
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
@@ -3511,6 +3512,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_task_scope_unwind", FPTR(lambda_task_scope_unwind)},
     {"lambda_task_start_function", FPTR(lambda_task_start_function)},
     {"lambda_task_start_function_scoped", FPTR(lambda_task_start_function_scoped)},
+    {"lambda_task_start_document", FPTR(lambda_task_start_document)},
 
     // ========================================================================
     // Trampolines for calling _b boxed wrappers from MIR Direct
@@ -3921,12 +3923,19 @@ static const char* const output_option_names[] = {
     "max_entries", "max_name_bytes", "max_path_depth", "max_nesting_depth", NULL
 };
 const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
-    static const char* const exec_options[] = {"cwd", "env", "timeout_ms", "max_output_bytes", NULL};
+    static const char* const exec_options[] = {"cwd", "env", "timeout_ms", "max_output_bytes",
+        "progress", "progress_ms", NULL};
+    static const char* const fetch_options[] = {"method", "body", "headers", "timeout", "user_agent",
+        "follow_redirects", "verify_tls", "max_bytes", "to", "resume", "progress", "progress_ms", NULL};
     static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};
     switch (fn) {
     case SYSPROC_IO_EXEC:
         if (options_arg_index) *options_arg_index = 2;
         return exec_options;
+    case SYSPROC_FETCH:
+    case SYSPROC_IO_FETCH:
+        if (options_arg_index) *options_arg_index = 1;
+        return fetch_options;
     case SYSFUNC_PHYSICS_SIMULATE:
         if (options_arg_index) *options_arg_index = 1;
         return physics_options;

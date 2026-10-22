@@ -7,6 +7,7 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "radiant.hpp"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/module/radiant/radiant_history.hpp"
 #include "rdt_video.h"
 #include "../lib/tagged.hpp"
@@ -3040,8 +3041,16 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
     return ItemNull;
 }
 
+// S13.3.1v2: the document a `start(..., {owner: 'document'})` binds to is the
+// one whose Lambda code is running (bound for handlers, templates and the tasks
+// the window loop advances between frames)
+static void* radiant_running_document(void) {
+    return dom_get_document();
+}
+
 void radiant_register_event_hooks() {
     lambda_radiant_event_register(dispatch_emit);
+    lambda_set_document_probe(radiant_running_document);
 }
 
 /**

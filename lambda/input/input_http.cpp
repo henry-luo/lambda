@@ -6,6 +6,12 @@
 #include "../network/curl_trust.h"
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include "../../lib/mem.h"
 #include "../../lib/byte_builder.h"
 #include "input.hpp"
@@ -29,6 +35,12 @@ typedef struct {
     char* content_language;
     bool capture_language;
     size_t max_bytes;
+    // io.fetch {to}: the body streams here instead of `body` (AR-E3v2)
+    FILE* sink;
+    int64_t resume_from;      // bytes the sink already held when a Range request was sent
+    int64_t sink_written;     // bytes this transfer wrote to the sink
+    bool sink_checked;        // the resume response status has been examined
+    bool over_limit;
 } HttpResponse;
 
 // HttpConfig is now defined in input.h
@@ -88,13 +100,68 @@ static size_t write_response_callback(void* contents, size_t size, size_t nmemb,
     if (nmemb && size > SIZE_MAX / nmemb) return 0;
     size_t total_size = size * nmemb;
     size_t limit = http_input_byte_limit(response && response->max_bytes ? response->max_bytes : HTTP_MAX_RESPONSE_SIZE);
+    if (response && response->sink) {
+        if (response->resume_from > 0 && !response->sink_checked) {
+            // a server that ignores the Range request answers 200 with the whole
+            // body: start the sink over instead of appending a second copy
+            long status = 0;
+            curl_easy_getinfo(response->curl, CURLINFO_RESPONSE_CODE, &status);
+            if (status == 200) {
+                if (fseek(response->sink, 0, SEEK_SET) != 0) return 0;
+#ifdef _WIN32
+                if (_chsize_s(_fileno(response->sink), 0) != 0) return 0;
+#else
+                if (ftruncate(fileno(response->sink), 0) != 0) return 0;
+#endif
+                response->resume_from = 0;
+            }
+            response->sink_checked = true;
+        }
+        if ((uint64_t)response->sink_written + total_size > limit) {
+            response->over_limit = true;
+            log_error("HTTP: Response exceeds maximum size (%zu bytes), aborting download", limit);
+            return 0;
+        }
+        if (total_size && fwrite(contents, 1, total_size, response->sink) != total_size) {
+            log_error("HTTP: writing the download failed: %s", strerror(errno));
+            return 0;
+        }
+        response->sink_written += (int64_t)total_size;
+        return total_size;
+    }
     if (!response || !byte_builder_append_limited(&response->body, contents,
                                                    total_size, limit)) {
+        if (response) response->over_limit = true;
         log_error("HTTP: Response exceeds maximum size (%zu bytes), aborting download",
                   limit);
         return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
     }
     return total_size;
+}
+
+// io.fetch {progress}: curl's transfer callback, on the transfer thread. It
+// only forwards counters and the abort decision; Lambda code never runs here.
+static int fetch_xferinfo_callback(void* user_data, curl_off_t dltotal, curl_off_t dlnow,
+                                   curl_off_t ultotal, curl_off_t ulnow) {
+    (void)ultotal; (void)ulnow;
+    const FetchConfig* config = (const FetchConfig*)user_data;
+    if (!config) return 0;
+    if (config->cancel_flag && __atomic_load_n(config->cancel_flag, __ATOMIC_ACQUIRE) != 0) return 1;
+    if (config->progress) {
+        int64_t base = config->resume_from > 0 ? config->resume_from : 0;
+        int64_t total = dltotal > 0 ? (int64_t)dltotal + base : -1;
+        return config->progress(config->progress_data, (int64_t)dlnow + base, total);
+    }
+    return 0;
+}
+
+static void fetch_failure_set(FetchFailure* failure, int curl_code, bool aborted,
+                              bool over_limit, const char* message) {
+    if (!failure) return;
+    failure->curl_code = curl_code;
+    failure->aborted = aborted;
+    failure->over_limit = over_limit;
+    snprintf(failure->message, sizeof(failure->message), "%s", message ? message : "");
 }
 
 static size_t write_document_header_callback(char* buffer, size_t size, size_t nmemb,
@@ -578,17 +645,27 @@ void free_fetch_response(FetchResponse* response) {
 
 // Perform HTTP request with full fetch-like functionality
 FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
-    if (!init_curl()) { return NULL; }
+    return http_fetch2(url, config, NULL);
+}
+
+FetchResponse* http_fetch2(const char* url, const FetchConfig* config, FetchFailure* failure) {
+    if (failure) memset(failure, 0, sizeof(*failure));
+    if (!init_curl()) {
+        fetch_failure_set(failure, 0, false, false, "libcurl initialization failed");
+        return NULL;
+    }
 
     CURL* curl = curl_easy_init();
     if (!curl) {
         log_error("HTTP: Failed to initialize curl handle\n");
+        fetch_failure_set(failure, 0, false, false, "curl handle allocation failed");
         return NULL;
     }
 
     FetchResponse* response = (FetchResponse*)mem_calloc(1, sizeof(FetchResponse), MEM_CAT_INPUT_OTHER);
     if (!response) {
         curl_easy_cleanup(curl);
+        fetch_failure_set(failure, 0, false, false, "out of memory");
         return NULL;
     }
     HttpFetchHeaderContext header_context = {
@@ -597,10 +674,32 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     // the download callback owns a ByteBuilder, not the FetchResponse layout.
     HttpResponse capture = {};
     capture.max_bytes = config ? config->max_response_bytes : 0;
+    capture.curl = curl;
     if (!byte_builder_init(&capture.body, 0, MEM_CAT_INPUT_OTHER, true)) {
         free_fetch_response(response);
         curl_easy_cleanup(curl);
+        fetch_failure_set(failure, 0, false, false, "out of memory");
         return NULL;
+    }
+    if (config && config->sink_path) {
+        // a Range continuation appends to what the sink already holds
+        bool resume = config->resume_from > 0;
+        capture.sink = fopen(config->sink_path, resume ? "ab" : "wb");
+        if (!capture.sink) {
+            log_error("HTTP: cannot open download sink %s: %s", config->sink_path, strerror(errno));
+            byte_builder_destroy(&capture.body);
+            free_fetch_response(response);
+            curl_easy_cleanup(curl);
+            fetch_failure_set(failure, 0, false, false, strerror(errno));
+            return NULL;
+        }
+        capture.resume_from = resume ? config->resume_from : 0;
+        if (resume) curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)config->resume_from);
+    }
+    if (config && (config->progress || config->cancel_flag)) {
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, fetch_xferinfo_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void*)config);
     }
 
     CURLcode res;
@@ -675,8 +774,21 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         log_error("HTTP: failed to persist Fetch/XHR response cookies");
     }
 
+    if (capture.sink) {
+        bool flushed = fclose(capture.sink) == 0;
+        capture.sink = NULL;
+        if (res == CURLE_OK && !flushed) {
+            log_error("HTTP: closing the download sink failed: %s", strerror(errno));
+            res = CURLE_WRITE_ERROR;
+        }
+    }
+
     if (res != CURLE_OK) {
-        log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
+        bool aborted = res == CURLE_ABORTED_BY_CALLBACK;
+        // an abort or a write refusal is the caller's own decision, not a network fault
+        if (!aborted) log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
+        fetch_failure_set(failure, (int)res, aborted, capture.over_limit,
+            capture.over_limit ? "response exceeds the byte limit" : curl_easy_strerror(res));
         byte_builder_destroy(&capture.body);
         free_fetch_response(response);
         curl_easy_cleanup(curl);
@@ -684,7 +796,14 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         return NULL;
     }
 
-    response->data = (char*)byte_builder_take(&capture.body, &response->size);
+    if (config && config->sink_path) {
+        // the body lives in the sink; size reports what the file now holds
+        byte_builder_destroy(&capture.body);
+        response->data = NULL;
+        response->size = (size_t)(capture.resume_from + capture.sink_written);
+    } else {
+        response->data = (char*)byte_builder_take(&capture.body, &response->size);
+    }
 
     // Get HTTP response code
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);

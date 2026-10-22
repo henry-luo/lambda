@@ -79,7 +79,7 @@ A started handle is owned by the nearest lexical block (S13.3.1v2):
 - **Normal exit joins.** When the block ends, it waits for its children.
 - **Error exit cancels, then joins.** When an error leaves the block, its children are cancelled first.
 - **Returning a handle transfers it** to the caller. Storing or sending a handle grants the capability to wait on it or send to it, not ownership.
-- **A document can own a task.** In a document's handlers and templates, `start(target, args, {owner: 'document'})` makes the document the owner, so the task outlives the handler that started it; the document cancels it, then joins it, when the window closes or navigates away. To reach the task later, keep its handle in the view's state. Not yet implemented (see [Implementation Status](#implementation-status)).
+- **A document can own a task.** In a document's handlers and templates, `start(target, args, {owner: 'document'})` makes the document the owner, so the task outlives the handler that started it; the document cancels it, then joins it, when the window closes or navigates away. To reach the task later, keep its handle in the view's state. The tasks it starts belong to the document too. Outside a document (a script, the REPL) the start is error 312, *start: owner 'document' needs a running document*. A document-owned task reports to its view by calling `dom.dispatch` on one of the view's elements: the window advances tasks between frames inside the document's evaluator, so the handler runs and the view re-renders; the handler must not park. `lambda demo archive` is the worked example.
 
 ```lambda
 pn noisy(n) {
@@ -128,7 +128,7 @@ caught: boom
 "done"
 ```
 
-At the end of a run, `lambda run` drains any task still pending; `--no-drain` returns without waiting.
+At the end of a run, `lambda run` drains any task still pending; `--no-drain` returns without waiting. The drain does not wait for tasks a document owns: their document joins them. A procedure's own wait (`sleep`, `wait`, `io.fetch`, `io.exec`) may take as long as the work does; it fails with error 502, *nothing else can run*, only when nothing left in the loop can wake it.
 
 ## Messages
 
@@ -241,7 +241,7 @@ pn main() {
 [310, "task wait timed out", "late"]
 ```
 
-`cancel(handle)` requests cancellation. Any holder of the handle may cancel, and cancelling twice is harmless. Cancellation is cooperative: the task observes it at its next park point (`sleep`, `wait`, `receive`, `select`, `io.read`), and waiting on it yields error 319, *task cancelled*.
+`cancel(handle)` requests cancellation. Any holder of the handle may cancel, and cancelling twice is harmless. Cancellation is cooperative: the task observes it at its next park point (`sleep`, `wait`, `receive`, `select`, `io.read`, `io.exec`, `io.fetch`), and waiting on it yields error 319, *task cancelled*.
 
 ```lambda
 pn forever() { sleep(10000)^; return 1 }
@@ -360,7 +360,7 @@ See [Lambda_Modules.md](Lambda_Modules.md) for importing JavaScript modules and 
 
 | Function | Result | Behavior |
 |----------|--------|----------|
-| `start(target, args = [], options = {})` | handle | Start a child procedure without blocking. `target` is a `pn`, `args` an array. `options.mode` is `'task'` (default); `'thread'` and `'process'` are compile error E501, *not implemented yet*. `options.owner: 'document'` (S13.3.1v2) is also *not implemented yet*. |
+| `start(target, args = [], options = {})` | handle | Start a child procedure without blocking. `target` is a `pn`, `args` an array. `options.mode` is `'task'` (default); `'thread'` and `'process'` are compile error E501, *not implemented yet*. `options.owner: 'document'` (S13.3.1v2) makes the running document the owner; outside a document it is error 312. |
 | `wait(handle)` | `T^E` | Park until the task finishes; yield its value or its error. |
 | `wait(handle, timeout: ms)` | `T^E` | As above, but give up after `ms` with error 310; the task keeps running. |
 | `select(h1, h2, …, timeout: ms)` | `handle^E` | Park until one handle completes and yield it. |
@@ -370,6 +370,8 @@ See [Lambda_Modules.md](Lambda_Modules.md) for importing JavaScript modules and 
 | `self()` | handle | The current task's handle. |
 | `cancel(handle)` | `null` | Request cancellation; idempotent. The task observes it at its next park point. |
 | `io.read(target)` | `string^E` | Read a local file without blocking other tasks. |
+| `io.exec(program, args, options?)` | `map^E` | Run a process on the thread pool while the task parks; `progress` receives the latest stdout line on the task's own stack. |
+| `io.fetch(url, options?)` | `map^E` | HTTP request or local read on the thread pool while the task parks; `to` streams to disk, `progress` receives `{url, received, total, rate}` on the task's own stack (AR-E3v2). |
 | `toPromise(handle)` | JS Promise | Adapt a handle for JavaScript; needs a JavaScript runtime (error 502 otherwise). |
 
 Error codes: 310 *task wait timed out*, 319 *task cancelled*, 320 *task mailbox full* (see [Lambda_Error_Handling.md](Lambda_Error_Handling.md#error-code-categories)).
@@ -384,4 +386,4 @@ Error codes: 310 *task wait timed out*, 319 *task cancelled*, 320 *task mailbox 
 | Parallel stream pipelines | Not yet implemented; streams themselves are pending (S13.4.2, S14.3) |
 | Value-producing handler over a procedure call | Should be a compile error (S7.6.7v4); currently compiles and yields `null` |
 | Capture rule for procedure arrows passed to `start` | Not yet enforced (S13.1.4) |
-| Document-owned tasks, `start(…, {owner: 'document'})` | Not yet implemented (S13.3.1v2); the option is rejected as an unknown name |
+| Document-owned tasks, `start(…, {owner: 'document'})` | Implemented (S13.3.1v2): cancelled then joined when the document is discarded, bounded at 5 s |

@@ -53,6 +53,9 @@ typedef struct {
     void* user_data;                // passed to callbacks
     size_t max_output_bytes;        // per stream; 0 uses SHELL_DEFAULT_MAX_OUTPUT_BYTES
     const int* cancel_flag;         // caller-owned until completion; read/set with atomic operations
+    // streaming chunk hook: runs on the capturing thread as bytes arrive, before
+    // they reach the buffered result (NULL = none); the hook must not block
+    void (*on_chunk)(const char* data, size_t len, bool is_stderr, void* user_data);
 } ShellOptions;
 
 #define SHELL_DEFAULT_MAX_OUTPUT_BYTES ((size_t)16 * 1024 * 1024)

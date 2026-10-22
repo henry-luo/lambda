@@ -1,0 +1,49 @@
+{
+  "name": "Archive demo: the sample library, archive a page, search, tabs, re-run, delete, close",
+  "html": "test/demo/archive/archive.ls",
+  "viewport": {"width": 1280, "height": 820},
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-loaded","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-records","equals":"5","assert_timeout":60000},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-jobs","equals":"0","assert_timeout":30000},
+    {"type":"assert_count","target":{"selector":".rail-row"},"min":6},
+    {"type":"capture_surface","source":"page","file":"temp/archive_demo/library.png"},
+
+    {"type":"type","target":{"selector":"#url"},"text":"test/lambda/archive/site/short.html","clear":true},
+    {"type":"click","target":{"selector":"#archive-button"}},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-records","equals":"6","assert_timeout":30000},
+    {"type":"assert_text","target":{"selector":".row[aria-current=\"true\"] .row-title"},"equals":"Short notice"},
+    {"type":"assert_count","target":{"selector":"#snapshot-frame[src$=\"short-notice/index.html\"]"},"count":1},
+    {"type":"capture_surface","source":"page","file":"temp/archive_demo/archived.png"},
+
+    {"type":"type","target":{"selector":"#search"},"text":"lamp house","clear":true},
+    {"type":"assert_attribute","target":{"selector":"#list"},"attribute":"data-rows","equals":"1","assert_timeout":5000},
+    {"type":"assert_text","target":{"selector":"#list .row-title"},"equals":"Harbour at dawn — Harbour Notes"},
+    {"type":"assert_count","target":{"selector":"#list .snippet"},"count":1},
+    {"type":"click","target":{"selector":"#list .row"}},
+    {"type":"click","target":{"selector":"#clear-search"}},
+    {"type":"assert_attribute","target":{"selector":"#list"},"attribute":"data-rows","equals":"6"},
+
+    {"type":"click","target":{"selector":"#tab-markdown"}},
+    {"type":"assert_attribute","target":{"selector":"#viewer-body"},"attribute":"data-tab","equals":"markdown"},
+    {"type":"assert_count","target":{"selector":"#markdown"},"count":1},
+    {"type":"click","target":{"selector":"#tab-info"}},
+    {"type":"assert_count","target":{"selector":"#info .outputs tr"},"min":5},
+    {"type":"capture_surface","source":"page","file":"temp/archive_demo/info.png"},
+
+    {"type":"click","target":{"selector":"#rerun-all"}},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-jobs","equals":"1","assert_timeout":5000},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-jobs","equals":"0","assert_timeout":30000},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-records","equals":"6"},
+
+    {"type":"click","target":{"selector":"#delete"}},
+    {"type":"assert_count","target":{"selector":"#confirm-delete"},"count":1},
+    {"type":"click","target":{"selector":"#confirm-delete"}},
+    {"type":"assert_attribute","target":{"selector":"#archive"},"attribute":"data-records","equals":"5"},
+    {"type":"click","target":{"selector":"#tab-snapshot"}},
+    {"type":"capture_surface","source":"page","file":"temp/archive_demo/after-delete.png"},
+
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":true}
+  ]
+}

@@ -1433,7 +1433,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.symlink(target, link)` | Create symbolic link | `io.symlink(/.src, /.link)` |
 | `io.chmod(path, mode)` | Change file permissions | `io.chmod(/.'script.sh', "755")` |
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(/.'a.txt', /.'b.txt')` |
-| `io.fetch(url, options?)` | HTTP fetch; `fetch(url, options)` is the bare spelling | `io.fetch(https.'api.example.com', {method: 'POST'})` |
+| `io.fetch(url, options?)` | HTTP request to a response map `{status, ok, url, headers, body, bytes}`; `to` streams to disk, `progress` is a callback; `fetch(url, options)` is the bare spelling | `io.fetch(https.'api.example.com', {method: 'POST'})` |
 | `io.grep(source, pattern, options?)` | Search files line by line, like grep | `io.grep(/.src, "TODO", {line: true})` |
 | `io.cell_width(codepoint)` | Terminal cell width from Unicode metadata; `null` for an invalid scalar | `io.cell_width(ord("界"))` |
 | `io.unicode_category(codepoint)` | Two-letter Unicode general category; `null` for an invalid scalar | `io.unicode_category(ord("界"))` |
@@ -1450,7 +1450,7 @@ under the module path rules of D7.2.4.
 
 #### print(args...)
 
-Prints values to the console (stdout). Arguments are stringified and joined with a single space separator. **No newline is added**: end a line with `"\n"` yourself.
+Prints values to the console (stdout). Arguments are stringified and joined with a single space separator. **No newline is added**: end a line with `"\n"` yourself. Output is line-buffered wherever stdout goes: each newline makes the line visible at once, so a parent process reading a Lambda child's output (`io.exec` with `progress`) sees each line as it is printed.
 
 ```lambda
 pn main() {                  // print is a pn: only a pn may call it
@@ -1558,7 +1558,9 @@ The `io` module provides procedural functions for file system operations.
 
 ##### io.copy(source, destination)
 
-Copy a file to a new location.
+Copy a file to a new location. A remote `source` (`http`, `https`) is downloaded
+straight to `destination` through `io.fetch` with `to`, parking the task while
+the bytes arrive.
 
 ```lambda
 pn backup_config() {
@@ -1642,17 +1644,21 @@ pn rename_file() {
 }
 ```
 
-##### io.fetch(url, options)
+##### io.fetch(url, options?)
 
-Perform HTTP requests with full control over method, headers, and body.
+Performs an HTTP request, or reads a local file through the same path, and returns one response map, like a JavaScript `Response` that has already been read. The transfer runs off the loop thread while the calling task parks, so other tasks and a window keep running (S13.1.1v3, D5.3.3). The result is `{status, ok, url, headers, body, bytes}`: `status` is the HTTP status (200 for a local file; 206 or 416 when a local read carries a single `Range: bytes=a-b` header, which it honours as a server would), `ok` is true for a 2xx status, `url` is the final URL after redirects (a `file:` URL for a local source), `headers` maps lowercased header names to values (a repeated name keeps its last value), `body` is a string for text content types (`text/*`, JSON, XML, YAML, CSV, JavaScript, HLS playlists and the like) and `binary` otherwise (`null` when the body is empty bytes or was written to disk), and `bytes` is the body's size. A 4xx or 5xx response is a result, not an error; a connection, TLS or timeout failure raises one (405 *network error*, 406 *network timeout*), and a missing local file raises 401.
+
+Options: `method` (default "GET"), `body` (text or binary), `headers` (a map of text values), `timeout` (seconds, default 30), `user_agent`, `follow_redirects` (default true), `verify_tls` (default true), `max_bytes` (the body may not exceed it), `to` (a local path: the body streams into `<path>.part` and is renamed to `path` on success, and `body` is `null`), `resume` (with `to`: continue an existing `.part` with a Range request), `progress` (a function, `fn` or `pn`) and `progress_ms` (default 250).
+
+The `progress` callback receives `{url, received, total, rate}` — `total` is `null` while unknown, `rate` is bytes per second — on the calling task's own stack, between parks: at most once per `progress_ms`, with the latest level (ticks inside the window are not queued), and once more with the final counters. What it does with the level is its business: `send` it to another task, print it, or update a view. If it raises, the transfer is aborted and `io.fetch` raises that error; cancelling the task aborts the transfer the same way, and the `.part` file is removed unless `resume` is set. A local file as the source is read, or with `to` copied in chunks, with the same progress calls, which is how offline tests exercise the path.
 
 ```lambda
 pn api_operations() {
     // GET request
     let data = io.fetch(https.'api.example.com'.users, {
-        method: 'GET',
         headers: {Authorization: "Bearer token123"}
     })^
+    if (data.ok) print(data.headers.'content-type', " ", len(data.body))
 
     // POST request
     let result = io.fetch(https.'api.example.com'.users, {
@@ -1660,6 +1666,14 @@ pn api_operations() {
         headers: {'Content-Type': "application/json"},
         body: format({name: "Alice", email: "alice@example.com"}, 'json')
     })^
+    print(result.status)
+}
+
+pn download(url, logger) {
+    // bytes go straight to disk; the callback forwards each level to a logging task
+    let saved = io.fetch(url, {to: "temp/talk.mp4",
+        progress: pn (p) => { send(logger, {received: p.received, total: p.total}) ^ { null } }})^
+    saved.bytes
 }
 ```
 
@@ -1732,7 +1746,12 @@ Lambda error. Invalid arguments/options raise errors.
 
 Options are `cwd` (local path or raw path bytes), `env` (map of string/byte values,
 with `null` removing a variable), `timeout_ms` (default 30000; zero disables the
-deadline), and positive `max_output_bytes` (default 16777216 per stream). The
+deadline), positive `max_output_bytes` (default 16777216 per stream), and
+`progress` with `progress_ms` (default 250): the callback receives `{line}`, the
+most recent complete stdout line, on the calling task's own stack under the same
+rate limit as `io.fetch`, and the trailing unterminated line when the process
+ends; the full output is still captured in the result. If the callback raises,
+the process is terminated and `io.exec` raises that error. The
 child receives closed/empty standard input. Output exceeding the capture bound
 is drained and marked `truncated`; it does not become a partial success silently.
 Timeout terminates the process group and returns `timed_out: true`. Task
@@ -2156,7 +2175,7 @@ channels continue to process pixel-array input. See the
 | `io.rename` | 2 | Rename file/directory |
 | `io.read` | 1 | Asynchronously read a local file (proc) |
 | `io.exec` | 2-3 | Capture a local process with argument arrays (proc) |
-| `io.fetch` | 1-2 | HTTP request (`fetch` is the bare spelling) |
+| `io.fetch` | 1-2 | HTTP request or local read, parking the task; response map (`fetch` is the bare spelling) |
 | `cmd` | 1-2 | Shell command; arguments as one array |
 | `clock` | 0 | Monotonic clock (seconds) |
 

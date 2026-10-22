@@ -4290,6 +4290,10 @@ static Item eval_start(InterpFrame* f, AstStartNode* start_node) {
     } else {
         args.set(interp_ptr_item(list()));
     }
+    if (start_node->document_owner) {
+        // S13.3.1v2: the running document owns it; no scope registers it
+        return lambda_task_start_document(function.get(), (List*)(uintptr_t)args.get().item);
+    }
     return lambda_task_start_function_scoped(function.get(),
         (List*)(uintptr_t)args.get().item, start_node->escapes);
 }
@@ -5760,6 +5764,17 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (decl && (decl->node_type == AST_NODE_STRING_PATTERN ||
                 decl->node_type == AST_NODE_SYMBOL_PATTERN)) {
             TypePattern* pattern = (TypePattern*)decl->type;
+            // An imported pattern's index names a slot in its declaring
+            // module's type list, not this one's: reading it through
+            // f->module->type_list returned another pattern or none. Its
+            // declaring module compiled and published it before this import
+            // resolved, so the declaration-owned TypePattern is the value.
+            if (entry->import) {
+                if (pattern && pattern->re2) return interp_ptr_item(pattern);
+                log_error("interp: imported pattern '%.*s' was never compiled", entry->name
+                    ? (int)entry->name->len : 0, entry->name ? entry->name->chars : "");
+                return ItemError;
+            }
             // Direct multi-declaration reductions can leave a later pattern
             // unindexed even though its TypePattern AST is valid. Materialize
             // that deferred identity at first use so T0 and MIR share the

@@ -102,7 +102,9 @@ pub fn normalize(raw, snapshot = null) {
 
 // callers may start this procedure as a structured task (S13.1.1v2–S13.1.5).
 pub pn load(request, options = {}) {
-    let result=io.fetch(request.url,{timeout:max(1,int(ceil(c.option(request,"timeout",30000)/1000.0))),*:options}) ^ { ^ };
+    // io.fetch answers with a response map (AR-E1): the body is the resource, a non-2xx status a failure
+    let response=io.fetch(request.url,{timeout:max(1,int(ceil(c.option(request,"timeout",30000)/1000.0))),*:options}) ^ { ^ };
+    let problem=if (response is error) response else if (not response.ok) error("HTTP " ++ string(response.status)) else null;
     {type:"resource_result",id:request.id,token:request.token,revision:request.revision,
-        result:if (result is error) null else result,error:if (result is error) result else null}
+        result:if (problem is null) response.body else null,error:problem}
 }
