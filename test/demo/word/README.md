@@ -29,6 +29,18 @@ at a caret sets the marks for subsequent typing.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.
+  The Pages group adds an editable cover (title, subtitle, author) at the start,
+  a blank page at the caret, or a page break. A blank page splits a body paragraph
+  or heading and isolates a new editable paragraph between two page boundaries.
+  The Symbol dialog offers punctuation, mathematics, currencies, Greek letters,
+  and arrows, plus custom text of 1–64 printable Unicode characters.
+- Bookmarks: name the current paragraph, list targets, Go to, delete, or move an
+  existing name to another paragraph. Names use up to 40 ASCII letters, digits,
+  or underscores and cannot start with a digit. Each paragraph has one bookmark.
+  The link dialog's **Place in this document** inserts an internal link to a
+  bookmark; **Go to bookmark** follows it from the ribbon. Bookmark targets and
+  links survive editable snapshots and HTML export/import. Read mode permits
+  bookmark navigation while disabling insertion and deletion.
 - Contextual Table ribbon: rows above/below, columns left/right, row/column/table
   deletion, four table styles, and nine cell alignments. Tab/Shift+Tab move
   between cells; Tab at the final cell adds a row.
@@ -76,6 +88,9 @@ RTF/ODT, spell/grammar checking, tracked changes, comment replies, collaboration
 mail merge, equations, section/header/footer editing, and Word-compatible
 pagination in the editing canvas are outside this demo. Font substitution follows the installed
 fonts available to Radiant. Search does not span paragraph boundaries.
+Bookmarks target paragraphs rather than arbitrary text ranges; deleting a
+bookmarked paragraph removes its target, leaving any links for the author to
+repair. Cover insertion prepends a new cover; it does not replace an earlier one.
 PDF text is currently painted as glyph outlines rather than selectable text.
 DOCX bookmarks and retained raw HTML are rejected as unsupported nodes; source
 documents remain untouched. Imported image paths should be absolute or data URLs.
@@ -107,6 +122,7 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 | `crates/engine/src/cmd/find_pattern.rs` | Literal paragraph search mapped back to source positions; wildcard/regex language is not ported |
 | `crates/engine/src/cmd/{table,table_style,insert,para}.rs` | Reused structural commands plus table presentation, embedded pictures, link editing, and paragraph settings in `mod_model.ls` |
 | `crates/engine/src/cmd/{page,review}.rs` | `mod_page.ls` document-owned paper settings and `mod_review.ls` comment metadata with text-mark anchors |
+| `crates/engine/src/cmd/insert.rs` | `mod_insert.ls` cover/blank pages, paragraph bookmarks, and Unicode symbols; internal links reuse the editor's link transaction |
 | `crates/ui-egui/src/{ribbon,canvas}.rs` | `mod_ui.ls`, `mod_surface.ls`, `word.css`; native HTML/CSS layout and caret geometry |
 | `crates/engine/src/sample.rs` | Adapted studio handbook in `mod_document.ls` |
 | `crates/{docx,formats,pdf}` and `engine/src/io.rs` | Existing Lambda format adapters, conflict-aware `lambda.edit.session`, and Radiant PDF export through `mod_io.ls` |
@@ -125,6 +141,13 @@ exports carry this metadata in a named meta element. Comments use IDs on span
 marks, allowing overlapping anchors without a second offset-mapping system.
 Case-insensitive search maps folded Unicode characters back to original UTF-8
 byte positions, including lowercase expansions (**S17.7.2**).
+
+Bookmark targets use paragraph IDs prefixed with `word-bookmark-`. The shared
+editor already retains `id` on the original paragraph when Enter splits it,
+so the new paragraph never duplicates the target. Moving a bookmark removes
+the old target and assigns the new one in one transaction; imported unrelated
+IDs are preserved. Covers, blank pages, symbols, and bookmark mutations all
+use the same editor history (**S1.4**, **D7.2.5**).
 
 Toolbar pointer events carry a hit position for the button as well as an
 optional document selection. The controller accepts document selections but
@@ -170,6 +193,8 @@ Caret and selection geometry use viewport coordinates throughout (**D7.2.5**).
 The pointer's block origin already includes scrolling; saving that scroll again
 as an iframe translation shifted the caret above the clicked line. The scroll
 regression verifies the caret's painted pixels as well as focus and typing.
+It also checks ribbon pixels above the document viewport: outer-shadow replay
+must retain the ancestor overflow clip when the paper scrolls behind the ribbon.
 
 ## Verification
 
@@ -184,12 +209,16 @@ python3 test/demo/word/run_tests.py --model-only
 The runner checks model, snapshot, and HTML/Markdown/text/DOCX import goldens on
 interpreter, auto, and JIT tiers; then replays typing/history/save,
 formatting/search/table, open/export/dirty-guard/focus, table-caret, scrolled-caret,
-table navigation/settings, pictures/links, paragraph/search, page setup, and comments
+table navigation/settings, pictures/links, paragraph/search, page setup, comments,
+cover/blank pages, bookmarks/internal links, and symbols
 in headless Radiant. It checks the result records and exported file contents,
 including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are
 `temp/word-initial.png` and `temp/word-edited.png`. Test reruns replace only
 their own named files under `temp/word/`.
+The Insert replay additionally verifies a three-page PDF containing an explicit
+blank page and a four-page PDF after prepending a cover. Its screenshot is
+`temp/word-insert-cover.png`.
 
 WordCraft's original sample text and command vocabulary are used under its
 MIT license, included as [LICENSE-MIT](LICENSE-MIT). The workspace styling is

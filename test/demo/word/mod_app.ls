@@ -10,6 +10,7 @@ import document: .mod_document
 import model: .mod_model
 import storage: .mod_io
 import page: .mod_page
+import insert: .mod_insert
 import controller: lambda.edit.controller
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
@@ -83,6 +84,25 @@ pn dialog_command(st,action,node) {
         let values = {author:field(node,"comment-author"),text:field(node,"comment-text")}
         return dialog_model(st,"review.addComment",values,values,node)
     }
+    if (action == "cover") {
+        let values = {title:field(node,"cover-title"),subtitle:field(node,"cover-subtitle"),author:field(node,"cover-author")}
+        return dialog_model(st,"insert.coverPage",values,values,node)
+    }
+    if (action == "bookmark") {
+        let values = {name:field(node,"bookmark-name")}
+        return dialog_model(st,"insert.bookmark",values,values,node)
+    }
+    if (action == "symbol") {
+        let values = {char:field(node,"symbol-text")}
+        return dialog_model(st,"insert.symbol",values,values,node)
+    }
+    if (action == "internal_link") {
+        let name = field(node,"link-bookmark")
+        let values = {href:insert.bookmark_href(name),label:field(node,"link-label")}
+        let target = [for (b in insert.bookmarks(st.editor.doc) where b.name==name) b][0]
+        if (target==null) { return {*:st,dialog:{*:st.dialog,values:values,error:"Choose an existing bookmark."}} }
+        return dialog_model(st,"insert.link",values,values,node)
+    }
     if (action == "paragraph") {
         let values = {align:field(node,"paragraph-align"),lines:field(node,"paragraph-lines"),before:field(node,"paragraph-before"),
             after:field(node,"paragraph-after"),indent:field(node,"paragraph-indent"),first:field(node,"paragraph-first")}
@@ -127,6 +147,31 @@ pn dialog_command(st,action,node) {
 pub pn command(st,id,params,node) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
     if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or params.tab=="Review"} }
+    if (id == "ui.cover") {
+        if (st.read_only) { return st }
+        return {*:st,dialog:{kind:"cover",values:{title:st.file_state.envelope.title,subtitle:"Document subtitle",author:"Me"}}}
+    }
+    if (id == "ui.bookmarks") {
+        return {*:st,dialog:{kind:"bookmarks",values:{name:insert.bookmark_name(model.current_block(st.editor).node) or ""}}}
+    }
+    if (id == "ui.symbol") {
+        if (st.read_only) { return st }
+        return {*:st,dialog:{kind:"symbol",values:{char:"©"}}}
+    }
+    if (id == "ui.chooseSymbol") {
+        if (st.dialog==null or st.dialog.kind!="symbol") { return st }
+        return {*:st,dialog:{*:st.dialog,values:{char:params.char},error:null}}
+    }
+    if (id == "ui.bookmarkText" or id == "ui.followLink") {
+        let href = attrs_get(model.current_node(st.editor,'a').node.attrs,'href') or ""
+        let name = if (id=="ui.bookmarkText") params.name else insert.link_bookmark(href)
+        let selection = insert.bookmark_selection(st.editor.doc,name)
+        if (selection==null) { return {*:st,status:"This bookmark is no longer in the document."} }
+        focus_document(node)
+        let target = dom.get_element_by_id(dom.root_node(node),insert.bookmark_id(name))
+        if (target!=null) dom.scroll_into_view(target)
+        return {*:st,dialog:null,editor:edit_set_selection(mounted(st.editor,node),selection),status:"Bookmark: " ++ name}
+    }
     if (id == "ui.comments") { return {*:st,review:not st.review} }
     if (id == "ui.resolvedComments") { return {*:st,show_resolved:not st.show_resolved} }
     if (id == "ui.comment") {

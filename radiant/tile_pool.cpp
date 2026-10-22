@@ -524,7 +524,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_OUTER_SHADOW: {
             rdt_vector_flush_batch(vec);
             const DlOuterShadow* o = &item->outer_shadow;
-            dl_replay_outer_shadow_at_offset(scratch, tile_surface, o, tile_x, tile_y);
+            dl_replay_outer_shadow_at_offset(scratch, tile_surface, o, tile_x, tile_y, vec);
             break;
         }
 

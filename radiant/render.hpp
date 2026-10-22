@@ -2801,11 +2801,11 @@ void dl_replay_box_blur_inset_at_offset(ScratchArena* scratch,
                                         float offset_x, float offset_y);
 void dl_replay_outer_shadow(ScratchArena* scratch,
                             ImageSurface* surface,
-                            const DlOuterShadow* shadow);
+                            const DlOuterShadow* shadow, RdtVector* vector = nullptr);
 void dl_replay_outer_shadow_at_offset(ScratchArena* scratch,
                                       ImageSurface* surface,
                                       const DlOuterShadow* shadow,
-                                      float offset_x, float offset_y);
+                                      float offset_x, float offset_y, RdtVector* vector = nullptr);
 
 // ===== display_list_replay.hpp =====
 // Replay the entire display list to the given vector context.
@@ -4279,7 +4279,7 @@ void render_outer_shadow_blur_composite(
     float sr_tl, float sr_tr, float sr_br, float sr_bl,
     Color shadow_color, float blur_radius,
     int exclude_type, const float* exclude_params,
-    int clip_type, const float* clip_params);
+    int clip_type, const float* clip_params, RdtVector* vector = nullptr);
 
 // ===== render_border.hpp =====
 // CSS border shading/dashing belongs to geometry, without a raster context.

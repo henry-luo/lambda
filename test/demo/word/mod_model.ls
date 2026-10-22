@@ -14,6 +14,7 @@ import image: lambda.editor.mod_image
 import document: .mod_document
 import page: .mod_page
 import review: .mod_review
+import insert: .mod_insert
 
 // The same IDs drive the ribbon, shortcuts, and headless model tests.
 pub let registry = [
@@ -34,6 +35,11 @@ pub let registry = [
     {id:"para.set",label:"Paragraph settings"},
     {id:"layout.pageSetup",label:"Page setup"},
     {id:"insert.pageBreak",label:"Page break"},
+    {id:"insert.blankPage",label:"Blank page"},
+    {id:"insert.coverPage",label:"Cover page"},
+    {id:"insert.bookmark",label:"Bookmark"},
+    {id:"insert.deleteBookmark",label:"Delete bookmark"},
+    {id:"insert.symbol",label:"Symbol"},
     {id:"para.alignLeft",label:"Align left",property:"text-align",value:"left"},
     {id:"para.alignCenter",label:"Center",property:"text-align",value:"center"},
     {id:"para.alignRight",label:"Align right",property:"text-align",value:"right"},
@@ -297,6 +303,11 @@ fn comment_transaction(editor,id,p) map^ {
 pub fn execute(editor,id,params={}) map^ {
     let s = spec(id)
     if (s == null) raise error("Word: unknown command " ++ id)
+    else if (id == "insert.coverPage") edit_apply(editor,insert.cover_transaction(editor,params)^)
+    else if (id == "insert.blankPage") edit_apply(editor,insert.blank_page_transaction(editor)^)
+    else if (id == "insert.symbol") edit_apply(editor,insert.symbol_transaction(editor,params)^)
+    else if (id == "insert.bookmark" or id == "insert.deleteBookmark")
+        edit_apply(editor,insert.bookmark_transaction(editor,id,params,current_block(editor))^)
     else if (id == "edit.replaceAll") {
         let hits = search(editor.doc,params.find or "",params.match_case != false)
         if (len(hits)==0) editor else edit_apply(editor,

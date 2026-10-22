@@ -1,0 +1,459 @@
+{
+  "name": "Word bookmarks_symbols",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Introduction",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Introduction"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 12,
+      "end": 12
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-bookmark"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#bookmark-name"
+      },
+      "text": "1bad",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-bookmarks .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#bookmark-name"
+      },
+      "text": "Intro",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-bookmarks .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "attribute": "id",
+      "equals": "word-bookmark-Intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-symbol"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#symbol-1-0"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#symbol-text"
+      },
+      "attribute": "value",
+      "equals": "\u00b1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-symbol .primary"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Introduction\u00b1"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Introduction"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-symbol"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#symbol-text"
+      },
+      "text": "",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-symbol .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape",
+      "mods_str": ""
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 14,
+      "end": 14
+    },
+    {
+      "type": "key_combo",
+      "key": "Enter",
+      "mods_str": ""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "text": "Read more",
+      "clear": false
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [id=\"word-bookmark-Intro\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "start": 0,
+      "end": 9
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-link"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#link-bookmark"
+      },
+      "value": "Intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-internal_link"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "contains": "Read more"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "attribute": "title",
+      "equals": "#word-bookmark-Intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#follow-link"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Bookmark: Intro"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface [id=\"word-bookmark-Intro\"]"
+      },
+      "text": "Hello ",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [id=\"word-bookmark-Intro\"]"
+      },
+      "contains": "Hello Introduction\u00b1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/bookmarks.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/bookmarks.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-bookmark"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#bookmark-go-Intro"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bookmark-delete-Intro"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [id=\"word-bookmark-Intro\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [id=\"word-bookmark-Intro\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-bookmark"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bookmark-go-Intro"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Bookmark: Intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/bookmarks.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [id=\"word-bookmark-Intro\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "attribute": "title",
+      "equals": "#word-bookmark-Intro"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-bookmark"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#bookmark-name"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#bookmark-delete-Intro"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bookmark-go-Intro"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    }
+  ]
+}

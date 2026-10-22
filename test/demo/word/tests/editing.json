@@ -186,6 +186,12 @@
     {
       "type": "click",
       "target": {
+        "selector": "#tab-table"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
         "selector": "[id=\"table.insertRowBelow\"]"
       }
     },

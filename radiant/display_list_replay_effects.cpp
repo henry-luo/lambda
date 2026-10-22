@@ -120,7 +120,7 @@ void dl_replay_box_blur_inset_at_offset(ScratchArena* scratch,
 
 void dl_replay_outer_shadow(ScratchArena* scratch,
                             ImageSurface* surface,
-                            const DlOuterShadow* shadow) {
+                            const DlOuterShadow* shadow, RdtVector* vector) {
     if (!shadow) return;
     render_outer_shadow_blur_composite(
         scratch, surface,
@@ -128,13 +128,13 @@ void dl_replay_outer_shadow(ScratchArena* scratch,
         shadow->sr_tl, shadow->sr_tr, shadow->sr_br, shadow->sr_bl,
         shadow->color, shadow->blur_radius,
         shadow->exclude_type, shadow->exclude_params,
-        shadow->clip_type, shadow->clip_params);
+        shadow->clip_type, shadow->clip_params, vector);
 }
 
 void dl_replay_outer_shadow_at_offset(ScratchArena* scratch,
                                       ImageSurface* surface,
                                       const DlOuterShadow* shadow,
-                                      float offset_x, float offset_y) {
+                                      float offset_x, float offset_y, RdtVector* vector) {
     if (!shadow) return;
     DlOuterShadow shifted = *shadow;
     shifted.shadow_x = shadow->shadow_x - offset_x;
@@ -147,5 +147,5 @@ void dl_replay_outer_shadow_at_offset(ScratchArena* scratch,
         dl_replay_offset_clip_params(shadow->clip_type, shadow->clip_params,
                                      shifted.clip_params, offset_x, offset_y);
     }
-    dl_replay_outer_shadow(scratch, surface, &shifted);
+    dl_replay_outer_shadow(scratch, surface, &shifted, vector);
 }

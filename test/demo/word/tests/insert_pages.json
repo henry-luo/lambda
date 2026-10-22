@@ -1,0 +1,361 @@
+{
+  "name": "Word insert_pages",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "BeforeAfter",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "BeforeAfter"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 6,
+      "end": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"insert.blankPage\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-page-break=true]"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "attribute": "data-word-blank-page",
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "text": "Middle page",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "contains": "Middle page"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "count": 3
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "BeforeAfter"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/blank-pages.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/insert-pages.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-cover"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cover-title"
+      },
+      "text": " ",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cover .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cover-title"
+      },
+      "text": "Studio journal",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cover-subtitle"
+      },
+      "text": "Ideas for autumn",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cover-author"
+      },
+      "text": "Alex",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cover .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cover]"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h1"
+      },
+      "contains": "Studio journal"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p:nth-child(4)"
+      },
+      "attribute": "data-word-page-break",
+      "equals": "true"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cover]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cover]"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/cover-pages.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/insert-pages.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word-insert-cover.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-cover"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[id=\"insert.blankPage\"]"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-symbol"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    }
+  ]
+}
