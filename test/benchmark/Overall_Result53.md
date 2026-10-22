@@ -14,6 +14,7 @@
 - **Range notation:** repeated-run timing cells are `median [minimum–maximum]`; single-run cells show the one measured value; the complete ordered sample set is retained in the result JSON's status detail.
 - **Engines in this report:** MIR (untyped), MIR (typed), LambdaJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v53.json`
+- **Separately measured:** MIR (untyped), MIR (typed), MIR (typed, auto) measured on 2026-10-23, 3 run(s) from `test/benchmark/benchmark_results_v53_mir_fix.json` on Lambda commit `f3515ebcf3`. Repaired three failed cells: awfy/queens MIR untyped workload time, and text/jq_bf MIR typed workload and auto-tier process times. Queens now preserves boxed equality errors in logical consumers (S3.4, D2.4.1-D2.4.3); jq_bf2 declares and propagates slice errors (S7.5.3v2, S7.6.3v2). Release archive `test/benchmark/exe/lambda-v53-f3515ebcf3` has SHA-256 `67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290` and includes the uncommitted repair recorded in `test/benchmark/exe/lambda-v53-f3515ebcf3-sources.patch` (SHA-256 `b4ca93ff90e6adc02b38d6c0a759810ae345943d2afb8d44b400bc24d41223bc`). The focused capture retains fresh Node controls and both MIR variants after a 45-second cooldown; VS Code's C++ indexer was observed using about one core during the pre-gate. All original successful measurements retain their original provenance.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.
@@ -29,14 +30,14 @@ Each engine's own `__TIMING__` figure: the timed workload only, with process sta
 | Suite | Total | Timed MIR (untyped) | Timed MIR (typed) | Timed LambdaJS | Timed Node.js | MIR (untyped)/Node geo | MIR (typed)/Node geo | LambdaJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 0.38x | 0.29x | 0.28x |
-| AWFY | 14 | 13 | 14 | 14 | 14 | 1.46x | 0.49x | 2.57x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 1.30x | 0.49x | 2.57x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 0.26x | 0.18x | 1.52x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 1.22x | 0.58x | 0.51x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 0.75x | 0.61x | 0.76x |
 | Julia microbenchmarks | 4 | 4 | 4 | 4 | 4 | 1.60x | 1.47x | 2.11x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 4.14x | 2.22x | 4.06x |
-| Text | 11 | 11 | 10 | 11 | 11 | 2.37x | 1.40x | 11.9x |
-| **Overall** | 71 | 70 | 70 | 71 | 71 | 1.04x | 0.60x | 1.63x |
+| Text | 11 | 11 | 11 | 11 | 11 | 2.37x | 1.03x | 11.9x |
+| **Overall** | 71 | 71 | 71 | 71 | 71 | 1.02x | 0.58x | 1.63x |
 
 ### Population Accounting
 
@@ -44,8 +45,8 @@ The first population is the only one comparable with Result38; the complete-suit
 
 | Population | Rows | MIR (typed)/Node geo | MIR (untyped)/Node geo | MIR (typed)/C2MIR geo | C2MIR matched rows |
 |---|---:|---:|---:|---:|---:|
-| v38-comparable (without the four text extensions) | 67 | 0.56x | 0.94x | --- | 0 |
-| complete current suite | 71 | 0.60x | 1.04x | --- | 0 |
+| v38-comparable (without the four text extensions) | 67 | 0.54x | 0.92x | --- | 0 |
+| complete current suite | 71 | 0.58x | 1.02x | --- | 0 |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -54,9 +55,7 @@ The first population is the only one comparable with Result38; the complete-suit
 
 ### Notable Results
 
-- Missing timings: **2** cells
-- MIR (untyped) missing: awfy/queens (exit_-6)
-- MIR (typed) missing: text/jq_bf (exit_1)
+- Missing timings: **0** cells
 
 #### Largest LambdaJS / Node.js Ratios
 
@@ -105,7 +104,7 @@ The first population is the only one comparable with Result38; the complete-suit
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | sieve | micro | 0.031 [0.029–0.041] | 0.024 [0.024–0.025] | 0.083 [0.083–0.084] | 0.397 [0.392–2.08] | 0.08x | 0.06x | 0.21x |
 | permute | micro | 0.260 [0.258–0.498] | 0.063 [0.061–0.067] | 1.01 [0.999–1.01] | 0.811 [0.809–0.826] | 0.32x | 0.08x | 1.24x |
-| queens | micro | --- | 0.062 [0.061–0.063] | 0.503 [0.479–0.969] | 0.638 [0.637–0.639] | --- | 0.10x | 0.79x |
+| queens | micro | 0.173 [0.172–0.174] | 0.062 [0.061–0.063] | 0.503 [0.479–0.969] | 0.638 [0.637–0.639] | 0.27x | 0.10x | 0.79x |
 | towers | micro | 0.533 [0.467–0.719] | 0.209 [0.208–0.217] | 2.12 [2.06–2.13] | 1.10 [1.10–1.10] | 0.48x | 0.19x | 1.92x |
 | bounce | micro | 0.066 [0.064–0.068] | 0.054 [0.052–0.055] | 0.671 [0.667–0.689] | 0.560 [0.545–0.842] | 0.12x | 0.10x | 1.20x |
 | list | micro | 0.785 [0.783–0.786] | 0.118 [0.117–0.127] | 0.501 [0.484–0.504] | 0.487 [0.480–0.490] | 1.61x | 0.24x | 1.03x |
@@ -192,7 +191,7 @@ The first population is the only one comparable with Result38; the complete-suit
 | log_pipeline | log-processing | 4.35s [4.35s–4.73s] | 1.05s [1.04s–1.05s] | 4.47s [4.46s–4.50s] | 942.2 [942.2–943.4] | 4.62x | 1.11x | 4.74x |
 | jq_mix | jq-breadth | 44.85s [44.81s–44.92s] | 44.61s [44.54s–44.62s] | 260.29s [257.07s–260.44s] | 3.92s [3.92s–3.94s] | 11.4x | 11.4x | 66.3x |
 | jq_records | jq-data | 350.5 [348.5–350.6] | 398.9 [397.7–402.4] | 53.38s [53.12s–53.63s] | 2.00s [1.99s–2.01s] | 0.17x | 0.20x | 26.6x |
-| jq_bf | jq-interpreter | 191.6 [191.2–192.1] | --- | 247.54s [247.38s–249.50s] | 2.91s [2.88s–2.95s] | 0.07x | --- | 85.1x |
+| jq_bf | jq-interpreter | 191.6 [191.2–192.1] | 147.5 [145.6–148.0] | 247.54s [247.38s–249.50s] | 2.91s [2.88s–2.95s] | 0.07x | 0.05x | 85.1x |
 | jq_tree | jq-paths | 1.96s [1.89s–1.96s] | 1.59s [1.58s–1.59s] | 400.39s [399.87s–400.92s] | 5.76s [5.76s–5.76s] | 0.34x | 0.28x | 69.5x |
 
 ---
@@ -218,8 +217,8 @@ Same processes, where possible: the reference engines report their wall and `__T
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 0.92x | 0.64x | 4.63x |
 | Julia microbenchmarks | 4 | 4 | 4 | 4 | 4 | 1.86x | 0.97x | 37.1x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 2.96x | 2.90x | 24.0x |
-| Text | 11 | 11 | 10 | 7 | 11 | 2.38x | 1.95x | 31.8x |
-| **Overall** | 71 | 71 | 70 | 67 | 71 | 1.08x | 0.84x | 6.54x |
+| Text | 11 | 11 | 11 | 7 | 11 | 2.38x | 1.43x | 31.8x |
+| **Overall** | 71 | 71 | 71 | 67 | 71 | 1.08x | 0.81x | 6.54x |
 
 > Ratio < 1.0 means the engine finished the whole run faster than Node.js.
 
@@ -331,6 +330,6 @@ Same processes, where possible: the reference engines report their wall and `__T
 | log_pipeline | log-processing | 5.75s [5.74s–5.78s] | 1.32s [1.30s–1.35s] | 31.06s [31.04s–31.10s] | 994.9 [994.6–996.1] | 5.78x | 1.32x | 31.2x |
 | jq_mix | jq-breadth | 44.98s [44.96s–45.02s] | 44.66s [44.62s–44.71s] | --- [600.00s–600.00s] | 4.00s [3.98s–4.06s] | 11.3x | 11.2x | --- |
 | jq_records | jq-data | 2.74s [2.73s–2.75s] | 2.53s [2.51s–2.74s] | --- [600.00s–600.00s] | 2.06s [2.05s–2.06s] | 1.33x | 1.23x | --- |
-| jq_bf | jq-interpreter | 252.6 [252.4–253.7] | --- [10.4–11.5] | --- [600.00s–600.00s] | 2.96s [2.93s–3.00s] | 0.09x | --- | --- |
+| jq_bf | jq-interpreter | 252.6 [252.4–253.7] | 192.4 [192.4–192.8] | --- [600.00s–600.00s] | 2.96s [2.93s–3.00s] | 0.09x | 0.07x | --- |
 | jq_tree | jq-paths | 2.17s [2.15s–2.20s] | 1.72s [1.71s–1.73s] | --- [600.00s–600.00s] | 5.81s [5.81s–5.82s] | 0.37x | 0.30x | --- |
 
