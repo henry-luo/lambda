@@ -4,7 +4,7 @@
 retouch/actions, editable artwork/styles, channels, tabs, batch, incremental brush
 previews, export options, arrangement, crop drafts, transform handles, editable
 Levels/Curves, group geometry, guides/snapping, straightening, masked adjustment
-layers and smooth curves. The original worktree was
+layers, smooth curves, crop presets, canvas anchors and layer snapping. The original worktree was
 merged and removed; subsequent work takes place in the main checkout. Aggregate
 gates retain the qualification limits recorded below.
 
@@ -1199,4 +1199,186 @@ Lambda log, library attempts/final summary, native processor and AUTO/JIT/GC
 logs, UI replays and release build logs. The retained release host SHA-256 is
 `e9bf7b2c73e725730e3e25b05833017487841a8645503b4670a3c42f1485ee39`.
 Documentation links, paired goldens and `git diff --check` pass. Changes remain
+uncommitted in the current workspace; no worktree or remote publication.
+
+
+## Crop presets, canvas anchors and layer snapping — 2026-10-22
+
+Implement in the current workspace: free/original/common portrait/landscape crop
+ratios, nine canvas resize anchors and move snapping to other visible layer/group
+bounds. Reuse crop drafts, the resize/reframe commands, guide snapping and
+immutable history (**S9.1.2 / S9.2.2 / S12.1.3**). Group translation currently
+moves descendant artwork while leaving document-space group masks behind;
+repair the shared helper before using it for anchored resize/crop.
+
+Acceptance: constrained crops stay inside the canvas in every drag direction,
+are within one pixel of the ratio, retain free-crop behavior and preserve
+Apply/Cancel/undo. Anchor resize translates artwork, local/group masks, guides,
+active/saved coverage consistently without resampling source pixels. Odd center
+offsets use floor rounding; default top-left behavior stays compatible.
+Snapping excludes selected roots/descendants/ancestors, hidden targets and empty
+geometry; it honors zoom, Alt bypass, deterministic ties and one-gesture undo.
+Candidates are frozen from the initial gesture snapshot. Settings are per-tab
+view/tool state without authored history.
+
+Scope excludes crop resize handles/custom ratios, ruler/grid/navigator UI, guide
+locking, gap distribution snapping, perspective/warp and broader M5 work.
+Verification budget: focused package goldens, Photos AUTO/JIT/forced-GC checks,
+native UI workflows and Lambda baseline, followed by release-host restoration.
+No native engine or vendor edits are planned; scratch records remain under
+`temp/photos-canvas-controls-20261022/`.
+
+
+### Delivered behavior and qualification
+
+Crop presets share one package catalogue with the UI and checked tool settings.
+Free crop keeps its existing outward rounding; constrained crops round the start
+to a pixel, clamp to the canvas and fit the selected ratio, with height rounded
+to the nearest pixel. All four directions work; clicks/lines remain empty.
+Shift constrains a free crop to square. Preset changes discard an obsolete draft
+without changing document/history. Apply/Cancel and one-edit undo remain intact
+(**S9.1.2 / S12.1.3**).
+
+Canvas resize uses one anchor offset for artwork and document-space group masks,
+active/saved coverage and guides. Local leaf masks and original samples remain
+unchanged; source geometry is translated, not resampled. The shared group
+translation repair also keeps group masks aligned during Move and Crop. The
+canvas origin shift is reversible through history/project persistence. Odd center
+offsets floor toward the left/top, and the default anchor remains top-left. UI
+size drafts retain text and reject fractional pixels before integer conversion
+(**S9.1.2 / S9.2.2**).
+
+Other-layer snapping derives visible geometric bounds, including affines/styles
+and visible group descendants. It excludes adjustment layers, zero-opacity/hidden
+ancestors, empty geometry and selected roots/descendants/ancestors. Reference
+geometry is cached once at pointer-down; per-sample nearest-target selection
+uses a linear scan and deterministic ties instead of sorting all matches. Canvas
+and guide targets retain priority, screen-distance tolerance and Alt bypass.
+Mask/alpha/clipping silhouettes, equal-gap smart guides, custom crop ratios/resize
+handles and ruler/grid/navigator controls remain outside this profile.
+
+Three new paired goldens cover **74 true results**, including directional/clipped
+aspect crops, all nine anchors, exact mask/coverage/guide origins, source retention,
+project/history restoration, target exclusions, snapshot reuse, zoom, Alt, ties
+and fractional transformed bounds. Photos AUTO checks pass **29/29**; the full
+Photos eager-JIT sweep with forced collection and poisoned frees also passes
+**29/29**.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` passes **8,023/8,023**: input
+**2,112/2,112**, runtime **5,911/5,911**, including **1,685** script checks and
+**322** MIR forced-GC checks. After `make build-release-compile JOBS=4`, the final
+complete Photos UI sweep passes **24 workflows / 449 assertions**. New crop,
+anchor and snapping workflows contribute **24**, **26** and **15** assertions;
+mouse drags qualify the live snap line, layer targets, cancellation/undo and
+mask/guide placement. The anchor reopening pixel check explicitly returns to
+100% zoom before comparing document-pixel positions. Native captures of the
+controls/composition and magenta layer snap reference were inspected.
+
+No shared native engine, library or vendor code changed, so no additional native
+Radiant/library aggregate or latency benchmark is claimed. The release host is
+restored, SHA-256
+`e9bf7b2c73e725730e3e25b05833017487841a8645503b4670a3c42f1485ee39`.
+Logs, summaries and captures stay in `temp/photos-canvas-controls-20261022/`.
+Paired goldens, local document links and `git diff --check` pass. This increment
+remains uncommitted in the current workspace, with no worktree or remote
+publication. Other canvas/navigation, typography/styles/PSD, background processing,
+project compression and M5 precision/color/scale work remain in the backlog.
+
+
+## Rulers, grid and navigator — 2026-10-22
+
+Implement pixel rulers with guide dragging, a configurable major/subdivision grid
+and move snapping, and a composite navigator with a visible viewport and captured
+click/drag panning. Reuse shared camera math, guide transactions and the retained
+composite. View settings/camera remain per-tab session state without authored
+history (**S9.1.2 / S9.2.2 / S12.1.3**); thumbnail transport follows **D4.5.2**.
+
+Acceptance: rulers/grid track pan, fit and zoom; grid work is bounded by the
+visible screen interval. Guide creation commits once on release and cancels
+without history. Navigator letterboxing, edge clamping and viewport clipping
+work for portrait/landscape images; camera gestures cancel and never dirty a
+document. Reuse thumbnails during live edits and refresh at commit. Existing
+brush preview, crop, transforms, tabs and snapping remain compatible.
+
+Scope: pixel units, integer guides and whole-pixel move placement; no physical
+units, guide locks/layout presets, equal-gap guides or workspace persistence.
+Verification budget: paired package goldens, Photos AUTO/eager-JIT forced-GC,
+focused native UI, Lambda baseline, then release restoration and full Photos UI.
+No native engine/vendor changes or latency benchmark planned. Records remain
+under `temp/photos-navigation-20261022/`.
+
+
+### Delivered navigation behavior
+
+`navigation.ls` provides one pure camera/visible-region mapping, aspect-fit
+thumbnail coordinates, adaptive pixel ticks and bounded grid line generation.
+`view.configure` validates independent ruler/grid/grid-snap toggles and integer
+spacing/subdivisions, retaining defaults and history. Move snapping derives only
+the nearest subdivision targets for the moving anchors; ties retain canvas,
+guides and layer priority. Fractional targets use the existing whole-pixel
+placement contract. Grid visibility does not gate snapping (**S12.1.3**).
+
+The optional view hosts use a visible-region SVG for the grid, stable ruler
+strips and a retained composite thumbnail/viewport outline. Grid SVG dimensions
+never grow with deep zoom. Thumbnail resize/upload and layout reads are skipped
+during live edit gestures, then refresh at completion/cancellation/undo. Camera
+gestures reuse thumbnail pixels; channel previews do not replace the composite
+thumbnail (**D4.5.2**).
+
+New ruler gestures override the artwork tool, show guides, derive drafts from
+the original snapshot and commit one guide command on a valid drop. Outside
+drops/Escape discard the draft. Navigator click/drag captures its stable parent,
+clamps letterbox/outside coordinates to the image, and restores the original pan
+on Escape/pointer cancellation. Arrow keys pan by 40 screen pixels and Home
+centers while navigator focus prevents layer nudging. Tabs retain independent
+settings/cameras. All camera/settings changes stay outside authored document
+history (**S9.1.2 / S9.2.2 / S12.1.3**).
+
+Pixel units/whole-pixel guide positions remain the supported profile. Guide
+locks/layout presets, physical ruler units, equal-gap snapping, crop custom
+ratios/resize handles, remaining typography/styles/PSD work, background
+processing, compression and M5 precision/color/scale work remain outstanding.
+
+
+### Qualification
+
+The new paired navigation golden covers **51 true results**: camera/fit and
+visible bounds, portrait/landscape letterboxing and clamping, adaptive ticks,
+bounded/dense/offscreen grids, settings validation/history, grid snapping and
+Alt/zoom bypass, guide transactions/cancellation/duplicates and navigator
+completion/cancellation while the brush tool has no pixel target. The complete
+Photos package sweep passes **30/30** in AUTO and **30/30** in eager JIT with
+forced collection and poisoned frees.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` passes **8,024/8,024**: input
+**2,112/2,112**, runtime **5,912/5,912**, including **1,686** script checks and
+**322** MIR forced-GC checks. The optimized host is restored with
+`make build-release-compile JOBS=4`; retained SHA-256:
+`e9bf7b2c73e725730e3e25b05833017487841a8645503b4670a3c42f1485ee39`.
+
+The first native fixture used document `scroll_to` for the nested dock; wheel
+events correctly reach that pane and its real mouse targets. An explicit-session
+argument repaired a helper's invalid read of handler-local view state. Visual
+review also corrected the vertical ruler label anchor. A final overlapped-image
+drop case reproduced a captured guide release committing back onto a ruler.
+The shell now queries the actual release hit before committing, rejecting
+rulers, crop controls and drops outside the stage without guessing coordinates.
+This demo-only repair is qualified by native replay; package/engine sources
+remain as baseline-qualified (**S12.1.3**).
+
+
+After the final demo-only release-hit repair, a fresh complete Photos native UI
+sweep passes **26 workflows / 513 assertions**. New navigation and grid/preview
+workflows contribute **46** and **18** assertions, including guide draft/undo/
+rejected ruler drops, settings validation/tab retention, captured navigator
+panning/Escape/keyboard control, Alt/grid snapping and zoomed overlays. Pixel
+checks prove the thumbnail keeps the preceding composite during a live stroke,
+refreshes on release and follows undo. Final native captures of rulers, grid,
+navigator/viewport and composition were visually inspected.
+
+No native engine/library/vendor code changed; no broader Radiant/library
+aggregate or latency benchmark is claimed. Documentation links, paired goldens,
+new-file whitespace checks and `git diff --check` pass. Logs, before/after edge
+replays, captures and `qualification.json` remain under
+`temp/photos-navigation-20261022/`. Release remains restored. Changes stay
 uncommitted in the current workspace; no worktree or remote publication.

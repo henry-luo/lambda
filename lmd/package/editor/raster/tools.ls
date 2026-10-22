@@ -1,5 +1,6 @@
 import model: .model
 import colors: lambda.slide.color
+import canvas: .canvas
 
 pub let catalog = [
     {id:"move",label:"Move",key:"v",icon:"↖"},{id:"pan",label:"Hand",key:"h",icon:"✥"},
@@ -21,15 +22,18 @@ pub fn configure(st,command) any^ {
     let tolerance = model.value(command.tolerance,st.tolerance)
     let requested = model.value(command.brush,{})
     let straighten = model.value(command.straighten_axis,st.straighten_axis)
+    let aspect = model.value(command.crop_aspect,st.crop_aspect)
     let limits = [{key:"size",low:0.5,high:4096},{key:"hardness",low:0,high:1},
         {key:"spacing",low:0.01,high:2},{key:"flow",low:0,high:1},{key:"opacity",low:0,high:1}]
     let brush = {*:st.brush,*:requested}
     if (not (tool in [for (entry in catalog) entry.id]) or not (mode in ["replace","add","subtract","intersect"]) or
-        not (gradient in ["linear","radial"]) or not (straighten in ["horizontal","vertical"]) or not model.finite(tolerance) or tolerance<0 or tolerance>1 or
+        not (gradient in ["linear","radial"]) or not (straighten in ["horizontal","vertical"]) or
+        not (aspect in [for (p in canvas.crop_presets) p.id]) or not model.finite(tolerance) or tolerance<0 or tolerance>1 or
         not (requested is map) or any([for (key,value in requested) not (string(key) in [for (limit in limits) limit.key])]) or
         not all([for (limit in limits) model.finite(brush[limit.key]) and brush[limit.key]>=limit.low and brush[limit.key]<=limit.high]))
         raise error("Raster: invalid tool setting")
-    else {*:st,tool:tool,crop:if (tool == st.tool) st.crop else null,brush:brush,selection_mode:mode,tolerance:tolerance,gradient_kind:gradient,straighten_axis:straighten,
+    else {*:st,tool:tool,crop:if (tool == st.tool and aspect == st.crop_aspect) st.crop else null,crop_aspect:aspect,
+        brush:brush,selection_mode:mode,tolerance:tolerance,gradient_kind:gradient,straighten_axis:straighten,
         foreground:colors.parse(model.value(command.foreground,st.foreground),"raster.foreground")^,
         background:colors.parse(model.value(command.background,st.background),"raster.background")^}
 }

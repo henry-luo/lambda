@@ -55,8 +55,14 @@ pub pn publish(owner,st) any^ {
         'data-y':if (bounds == null) "" else string(bounds.y),
         'data-bounds-width':if (bounds == null) "" else string(bounds.width),
         'data-bounds-height':if (bounds == null) "" else string(bounds.height),
+        'data-rulers':string(st.rulers_visible),'data-grid':string(st.grid_visible),'data-grid-spacing':string(st.grid_spacing),
+        'data-grid-subdivisions':string(st.grid_subdivisions),'data-grid-snap':string(st.snap_grid),
+        'data-pan-x':string(st.pan.x),'data-pan-y':string(st.pan.y),
         'data-guides':string(len(guides.items(st.doc))),'data-guides-visible':string(st.guides_visible),
         'data-snapping':string(st.snap_enabled),'data-snap-x':string(st.gesture.snapped.x),'data-snap-y':string(st.gesture.snapped.y),
+        'data-snap-layers':string(st.snap_layers),'data-canvas-anchor':st.canvas_anchor,'data-crop-aspect':st.crop_aspect,
+        'data-crop-x':string(st.crop.x),'data-crop-y':string(st.crop.y),
+        'data-crop-width':string(st.crop.width),'data-crop-height':string(st.crop.height),
         'data-curve-points':string(len(tone.points(curves,st.curve_channel))),
         'data-curve-mode':curve_mode,'data-adjustment':string(model.adjustment(active.node)),
         'data-dirty':string(editor.dirty(st)),'data-dialog':st.dialog,'data-tool':st.tool,
@@ -81,8 +87,15 @@ pub pn publish(owner,st) any^ {
         dom.set_inner_html(node(owner,"guide-list"),guide_html)
         dom.set_attribute(node(owner,"guide-list"),"data-items",guide_html)
     }
+    dom.set_text_content(node(owner,"rulers-toggle"),if (st.rulers_visible) "Hide rulers" else "Show rulers")
+    dom.set_text_content(node(owner,"grid-toggle"),if (st.grid_visible) "Hide grid" else "Show grid")
+    dom.set_text_content(node(owner,"grid-snap"),if (st.snap_grid) "Grid snapping on" else "Grid snapping off")
+    for (id,value in {'grid-spacing':st.grid_spacing,'grid-subdivisions':st.grid_subdivisions})
+        if (not dom.matches(node(owner,string(id)),":focus")) set_value(node(owner,string(id)),string(value))
     dom.set_text_content(node(owner,"guide-show"),if (st.guides_visible) "Hide guides" else "Show guides")
     dom.set_text_content(node(owner,"guide-snap"),if (st.snap_enabled) "Disable snapping" else "Enable snapping")
+    dom.set_text_content(node(owner,"guide-layers"),if (st.snap_layers) "Layer snapping on" else "Layer snapping off")
+    dom.set_text_content(node(owner,"crop-size"),if (st.crop == null) "Drag to crop" else string(st.crop.width) ++ " × " ++ string(st.crop.height))
     let layer_html = markup(scene.layer_rows(st))
     if (dom.get_attribute(node(owner,"layers"),"data-rows") != layer_html) {
         dom.set_inner_html(node(owner,"layers"),layer_html)
@@ -142,6 +155,7 @@ pub pn publish(owner,st) any^ {
         'brush-flow':st.brush.flow,'brush-opacity':st.brush.opacity,tolerance:st.tolerance,
         'selection-mode':st.selection_mode,'gradient-kind':st.gradient_kind,
         'straighten-axis':st.straighten_axis,
+        'crop-aspect':st.crop_aspect,'canvas-anchor':st.canvas_anchor,
         'channel-view':if (st.channel_view in ["r","g","b","a"]) st.channel_view else "composite",
         blend:model.value(active.node.blend,'normal'),
         'retouch-strength':st.retouch.strength,'retouch-radius':st.retouch.radius,'retouch-aligned':if (st.retouch.aligned) "aligned" else "reset",

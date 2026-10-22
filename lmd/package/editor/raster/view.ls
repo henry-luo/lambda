@@ -7,6 +7,7 @@ import channels: .channels
 import presentation: .render
 import transforms: .transform
 import guides: .guides
+import navigation: .navigation
 
 pub fn node(owner,selector) => dom.query_selector(owner,selector)
 pn place_box(target,box,scale) {
@@ -18,15 +19,89 @@ pub pn point(owner,x,y) {
     let root = dom.get_attribute(node(owner,".raster-stage"),"data-scale");
     return viewport.point(surface,float(root),x,y)
 }
+pub pn navigator_input(owner,st,x,y) {
+    let bounds = dom.bounding_box(node(owner,".raster-navigator"))
+    let box = navigation.thumbnail(st.doc,bounds);
+    return {viewport:dom.bounding_box(node(owner,".raster-stage")),
+        navigator:navigation.navigator_point(st.doc,box,{x:x-bounds.x,y:y-bounds.y})}
+}
+pn publish_navigation(owner,st,rendered,bounds,camera_box) any^ {
+    let grid = node(owner,".raster-grid")
+    let lines = navigation.grid_lines(st,bounds)
+    let grid_rect = navigation.visible(st,bounds)
+    let grid_scene = if (len(lines)==0) null else {lines:lines,rect:grid_rect,scale:camera_box.scale}
+    if (grid != null and (st.painted_doc == null or grid_scene != st.painted_grid)) {
+        // clip the SVG itself, so deep zoom never allocates a document-sized overlay bitmap.
+        if (len(lines)>0) place_box(grid,grid_rect,camera_box.scale)
+        dom.set_inner_html(grid,if (len(lines)==0) "" else format(<svg width:grid_rect.width*camera_box.scale,height:grid_rect.height*camera_box.scale,
+            viewBox:join([for (value in [grid_rect.x,grid_rect.y,grid_rect.width,grid_rect.height]) string(value)]," "), *[
+            for (major in [false,true]) <path fill:"none",stroke:if (major) "#b4bdce" else "#788293",
+                opacity:if (major) 0.65 else 0.35,'stroke-width':1/camera_box.scale,
+                d:join([for (line in lines where line.major == major)
+                    if (line.axis == "x") "M " ++ string(line.value) ++ " " ++ string(grid_rect.y) ++ " V " ++ string(grid_rect.y+grid_rect.height)
+                    else "M " ++ string(grid_rect.x) ++ " " ++ string(line.value) ++ " H " ++ string(grid_rect.x+grid_rect.width)]," ")>]>,'xml'))
+    }
+    let ruler_scene = if (not st.rulers_visible) ({visible:false}) else
+        ({visible:true,x:camera_box.x,y:camera_box.y,scale:camera_box.scale,width:bounds.width,height:bounds.height})
+    if (st.painted_doc == null or ruler_scene != st.painted_rulers) {
+        for (axis in ["x","y"]) {
+            let target = node(owner,".raster-ruler-" ++ axis)
+            if (target != null) {
+                dom.style_set_property(target,"display",if (st.rulers_visible) "block" else "none")
+                if (st.rulers_visible) {
+                    let horizontal = axis == "x"
+                    let length = if (horizontal) bounds.width else bounds.height
+                    let ticks = navigation.ticks(camera_box[axis],length,camera_box.scale)
+                    dom.set_inner_html(target,format(<svg width:if (horizontal) length else 22,height:if (horizontal) 22 else length,
+                        *[for (tick in ticks where tick.position>22) *[
+                            <path stroke:"#9299a5",d:if (horizontal) "M " ++ string(tick.position) ++ " 17 v 5"
+                                else "M 17 " ++ string(tick.position) ++ " h 5">,
+                            <text fill:"#c5cbd5",'font-size':9,x:if (horizontal) tick.position+3 else 12,
+                                y:if (horizontal) 12 else tick.position-3,
+                                *:if (horizontal) ({}) else ({transform:"rotate(-90 12 " ++ string(tick.position-3) ++ ")"}),string(tick.value)>]]>,'xml'))
+                }
+            }
+        }
+        let stage = node(owner,".raster-stage")
+        dom.set_attribute(stage,"data-rulers",string(st.rulers_visible))
+    }
+    let navigator = node(owner,".raster-navigator")
+    let navigation_cache = {painted_grid:grid_scene,painted_rulers:ruler_scene,navigator_raster:st.navigator_raster,
+        navigator_size:st.navigator_size,painted_navigator:st.painted_navigator}
+    let defer_thumbnail = st.gesture != null and not (st.gesture.mode in ["pan","navigator"])
+    if (navigator != null and defer_thumbnail and st.painted_doc != null) {
+        return navigation_cache
+    }
+    if (navigator != null) {
+        let nav_bounds = dom.bounding_box(navigator)
+        let thumb = navigation.thumbnail(st.doc,nav_bounds)
+        let size = {width:thumb.width,height:thumb.height}
+        // live strokes retain the last committed thumbnail; release refreshes it once.
+        let refresh = st.painted_doc == null or size != st.navigator_size or st.navigator_raster != rendered
+        if (refresh) {
+            dom.set_canvas_pixels(node(owner,".raster-navigator canvas"),img.resize(rendered,size.width,size.height)^.pixels)^
+        }
+        let rect = navigation.visible(st,bounds)
+        let scene = {thumb:thumb,rect:rect,width:st.doc.width,height:st.doc.height}
+        if (st.painted_doc == null or scene != st.painted_navigator) {
+            place_box(node(owner,".raster-navigator canvas"),thumb,1)
+            let target = node(owner,".raster-navigator-viewport")
+            place_box(target,{x:thumb.x+rect.x*thumb.width/st.doc.width,y:thumb.y+rect.y*thumb.height/st.doc.height,
+                width:rect.width*thumb.width/st.doc.width,height:rect.height*thumb.height/st.doc.height},1)
+            dom.style_set_property(target,"display",if (rect.width>0 and rect.height>0) "block" else "none")
+        }
+        return {*:navigation_cache,navigator_raster:if (refresh) rendered else st.navigator_raster,navigator_size:size,painted_navigator:scene}
+    }
+    return navigation_cache
+}
 pub pn publish(owner,st) any^ {
     let stage = node(owner,".raster-stage")
     let surface = node(owner,".raster-surface")
     let viewport_box = dom.bounding_box(stage)
     let size = {width:st.doc.width,height:st.doc.height}
-    let scale = if (st.zoom == 0) viewport.fit(size,viewport_box,40.0) else st.zoom
-    let geometry = {width:size.width*scale,height:size.height*scale,
-        left:(viewport_box.width-size.width*scale)/2+st.pan.x,
-        top:(viewport_box.height-size.height*scale)/2+st.pan.y}
+    let camera = navigation.camera(st,viewport_box)
+    let scale = camera.scale
+    let geometry = {width:camera.width,height:camera.height,left:camera.x,top:camera.y}
     // unchanged geometry must not invalidate layout before the next pointer sample.
     if (st.painted_doc == null or geometry != st.painted_geometry or scale != st.scale) {
         for (property,requested in geometry) dom.style_set_property(surface,string(property),string(requested) ++ "px")
@@ -94,7 +169,8 @@ pub pn publish(owner,st) any^ {
         }
         if (crop_box != null) place_box(crop,crop_box,scale)
     }
-    return {*:st,painted_doc:st.doc,painted_raster:rendered,painted_channel:st.channel_view,painted_selection:st.selection,
+    let navigation_state = publish_navigation(owner,st,rendered,viewport_box,camera)^
+    return {*:st,*:navigation_state,painted_doc:st.doc,painted_raster:rendered,painted_channel:st.channel_view,painted_selection:st.selection,
         painted_geometry:geometry,painted_bounds:box,painted_crop:crop_box,painted_handles:handles_visible,
         painted_guides:guide_scene,painted_reference:reference_scene,scale:scale}
 }

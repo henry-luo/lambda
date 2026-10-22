@@ -132,7 +132,8 @@ pub fn destination(st,parent=null) any^ {
 }
 pub fn translated(node,dx,dy) any^ {
     if (name(node) == 'stack') img.with_children(node,[for (child in content(node))
-        if (composition(child)) translated(child,dx,dy)^ else child])^
+        // group masks use document coordinates; leaf masks follow their owning layer instead.
+        if (composition(child) or name(child) == 'mask') translated(child,dx,dy)^ else child])^
     else img.with_properties(node,{position:[position(node)[0]+dx,position(node)[1]+dy]})^
 }
 pub fn selected_roots(st) any^ {
@@ -154,9 +155,11 @@ pub fn owns_hit(st,id) {
     hit != null and any([for (row in layers(st.doc) where row.id in st.selected)
         paths.path_is_prefix(row.path,hit.path)])
 }
-pub fn bounds(node) {
+pub fn bounds(node,visible_only=false) {
     if (name(node) == 'stack') {
-        let boxes = [for (child in content(node) where composition(child)) bounds(child)]
+        let candidates = [for (child in content(node) where composition(child) and
+            (not visible_only or (child.visible != false and value(child.opacity,1)>0 and not adjustment(child)))) bounds(child,visible_only)]
+        let boxes = if (visible_only) [for (box in candidates where box.width>0 and box.height>0) box] else candidates
         if (len(boxes) == 0) {x:0,y:0,width:0,height:0}
         else {
             let left = min([for (b in boxes) b.x])
@@ -176,8 +179,15 @@ pub fn bounds(node) {
             width:max([for (p in corners) p[0]])-left,height:max([for (p in corners) p[1]])-top}
     }
 }
+pub fn visible(row,rows) => all([for (ancestor in rows where paths.path_is_prefix(ancestor.path,row.path)) ancestor.node.visible != false])
+pub fn snap_boxes(st) {
+    let rows = layers(st.doc)
+    let chosen = [for (row in rows where row.id in st.selected) row.path];
+    [for (row in rows where visible(row,rows) and not adjustment(row.node) and
+        all([for (ancestor in rows where paths.path_is_prefix(ancestor.path,row.path)) value(ancestor.node.opacity,1)>0]) and
+        not any([for (path in chosen) paths.path_is_prefix(path,row.path) or paths.path_is_prefix(row.path,path)]))
+        for (box in [bounds(row.node,true)] where box.width>0 and box.height>0) {*:box,id:row.id}]
+}
 pub fn hit(image,point,mask_id=null) => [for (row in layers(image) where name(row.node) == 'layer' and
     (not adjustment(row.node) or row.id == mask_id) and
-    row.node.visible != false and all([for (ancestor in layers(image) where
-        ancestor.id != row.id and paths.path_is_prefix(ancestor.path,row.path))
-        ancestor.node.visible != false]) and geometry.rect_contains(bounds(row.node),point)) row.id][0]
+    visible(row,layers(image)) and geometry.rect_contains(bounds(row.node),point)) row.id][0]

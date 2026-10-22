@@ -1,6 +1,7 @@
 // S9.1.2 / S9.2.2: guides are authored metadata; snapping derives transient move offsets.
 import img: lambda.image
 import geometry: lambda.editor.draw.geometry
+import navigation: .navigation
 
 pub fn container(image) => [for (child in content(image) where name(child) == 'metadata' and child.role == 'photos_guides') child][0]
 pub fn items(image) => if (container(image) == null) [] else content(container(image))
@@ -26,10 +27,11 @@ pub fn run_command(st,command) any^ {
     let entries = items(st.doc)
     let guide = lookup(st.doc,command.guide)
     if (command.id == "guide.configure") {
-        if ((command.visible != null and not (command.visible is bool)) or (command.snap != null and not (command.snap is bool)))
+        if (any([for (key in ["visible","snap","layers"]) command[key] != null and not (command[key] is bool)]))
             raise error("Raster: guide view settings require booleans")
         else {*:st,guides_visible:if (command.visible == null) st.guides_visible else command.visible,
-            snap_enabled:if (command.snap == null) st.snap_enabled else command.snap}
+            snap_enabled:if (command.snap == null) st.snap_enabled else command.snap,
+            snap_layers:if (command.layers == null) st.snap_layers else command.layers}
     }
     else if (command.id == "guide.clear") (if (len(entries)==0) st else {*:st,doc:replace(st.doc,[])^})
     else if (command.id == "guide.add") {
@@ -46,21 +48,25 @@ pub fn run_command(st,command) any^ {
         else {*:st,doc:replace(st.doc,[for (g in entries) if (g.id == guide.id) img.with_properties(g,{position:command.position})^ else g])^})
     else raise error("Raster: unknown guide command")
 }
-fn snapped_axis(st,box,axis,delta,tolerance) {
-    let size = if (axis == "x") "width" else "height"
+fn anchors(box,axis) => [box[axis],box[axis]+box[if (axis == "x") "width" else "height"]/2,
+    box[axis]+box[if (axis == "x") "width" else "height"]]
+fn snapped_axis(st,box,axis,delta,tolerance,boxes) {
     let targets = [0,extent(st.doc,axis)/2,extent(st.doc,axis),
-        *if (st.guides_visible) [for (g in items(st.doc) where g.axis == axis) g.position] else []]
-    let matches = sort([for (target in targets) for (anchor in [box[axis],box[axis]+box[size]/2,box[axis]+box[size]])
-        {distance:abs(target-anchor-delta),offset:target-anchor,target:target}],(hit) => hit.distance)
-    let hit = matches[0];
+        *if (st.guides_visible) [for (g in items(st.doc) where g.axis == axis) g.position] else [],
+        *[for (other in boxes) *anchors(other,axis)],
+        *navigation.grid_targets(st,anchors(box,axis),delta,extent(st.doc,axis))]
+    // retain the first equally near target: canvas, authored guides, then foreground-first layers.
+    let hit = reduce([null,*[for (target in targets) for (anchor in anchors(box,axis))
+        {distance:abs(target-anchor-delta),offset:target-anchor,target:target}]],
+        (best,candidate) => if (best == null or candidate.distance<best.distance) candidate else best);
     if (hit.distance<=tolerance) {delta:int(round(hit.offset)),target:hit.target} else {delta:delta,target:null}
 }
-pub fn snap_move(st,box,dx,dy,scale=1,bypass=false) {
+pub fn snap_move(st,box,dx,dy,scale=1,bypass=false,boxes=[]) {
     if (not st.snap_enabled or bypass or box == null) {dx:dx,dy:dy,x:null,y:null}
     else {
         let tolerance = 6/(if (geometry.finite_number(scale) and scale>0) scale else 1)
-        let x = snapped_axis(st,box,"x",dx,tolerance)
-        let y = snapped_axis(st,box,"y",dy,tolerance);
+        let x = snapped_axis(st,box,"x",dx,tolerance,if (st.snap_layers) boxes else [])
+        let y = snapped_axis(st,box,"y",dy,tolerance,if (st.snap_layers) boxes else []);
         {dx:x.delta,dy:y.delta,x:x.target,y:y.target}
     }
 }

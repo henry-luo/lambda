@@ -31,7 +31,7 @@ fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 fn clear_error(st) => {*:st,error:"",status:if (st.error != "" and st.status == st.error) "Ready" else st.status}
 fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending:"",error:"",status:"Ready · Place images to build a composition",
     effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_mode:"linear",curve_channel:"rgb",curve_point:1,curve_drag:null,
-    painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
+    painted_doc:null,token:0,scale:1.0,canvas_anchor:"top-left",size_draft:{width:st.doc.width,height:st.doc.height}}
 pn publish(owner,st,workspace=null) {
     var next = st
     present.publish(owner,st) ^ { dom.set_attribute(owner,"data-error",^.message) } ~ { next = ~ }
@@ -95,8 +95,20 @@ pn command(owner,st,action) any^ {
         if (not model.finite(position) or position != floor(position)) raise error("Photos: guide position must be a whole pixel")
         return editor.exec(st,{id:"guide.add",axis:field(owner,"guide-axis"),position:int(position)})^
     }
+    if (action == "grid-configure") {
+        let spacing = float(field(owner,"grid-spacing"))
+        let subdivisions = float(field(owner,"grid-subdivisions"))
+        if (not all([for (value in [spacing,subdivisions]) model.finite(value) and value == floor(value)]))
+            raise error("Photos: grid settings require whole numbers")
+        return editor.exec(st,{id:"view.configure",spacing:int(spacing),subdivisions:int(subdivisions)})^
+    }
+    if (action in ["rulers-toggle","grid-toggle","grid-snap"]) {
+        return editor.exec(st,{id:"view.configure",[if (action == "rulers-toggle") "rulers" else if (action == "grid-toggle") "grid" else "snap"]:
+            not st[if (action == "rulers-toggle") "rulers_visible" else if (action == "grid-toggle") "grid_visible" else "snap_grid"]})^
+    }
     if (action == "guide-show") { return editor.exec(st,{id:"guide.configure",visible:not st.guides_visible})^ }
     if (action == "guide-snap") { return editor.exec(st,{id:"guide.configure",snap:not st.snap_enabled})^ }
+    if (action == "guide-layers") { return editor.exec(st,{id:"guide.configure",layers:not st.snap_layers})^ }
     if (action == "straighten-tool") { return editor.exec(st,{id:"tool.configure",tool:"straighten"})^ }
     if (action == "adjustment.insert") { return {*:editor.exec(st,{id:action})^,effect_index:0} }
     if (action in ["curve-reset","curve-remove"]) {
@@ -259,16 +271,24 @@ pn command(owner,st,action) any^ {
         return editor.exec(st,{id:"pixels.fill",color:if (st.target == "mask") [1.0] else [1.0,1.0,1.0,1.0]})^
     }
     if (action in ["resize-image","resize-canvas"]) {
+        let width = float(field(owner,"image-width"))
+        let height = float(field(owner,"image-height"))
+        if (not all([for (n in [width,height]) model.finite(n) and n == floor(n)]))
+            raise error("Photos: image and canvas sizes must be whole pixels")
         return editor.exec(st,{id:if (action == "resize-image") "document.resize_image" else "document.resize_canvas",
-            width:int(field(owner,"image-width")),height:int(field(owner,"image-height"))})^
+            width:int(width),height:int(height),*:if (action == "resize-canvas") ({anchor:st.canvas_anchor}) else ({})})^
     }
     return editor.exec(st,{id:action})^
 }
-pn pointer_input(owner,evt) {
+// view state is handler-local; coordinate helpers receive its snapshot explicitly.
+pn pointer_input(owner,st,evt) {
     let handle = dom.closest(evt.target,"[data-raster-handle]")
     let guide = dom.closest(evt.target,"[data-raster-guide]")
+    let ruler = dom.closest(evt.target,"[data-raster-ruler]")
+    let navigator = dom.closest(evt.target,".raster-navigator") != null or st.gesture.mode == "navigator"
     return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},handle:dom.get_attribute(handle,"data-raster-handle"),
-        guide:dom.get_attribute(guide,"data-raster-guide"),
+        guide:dom.get_attribute(guide,"data-raster-guide"),ruler:dom.get_attribute(ruler,"data-raster-ruler"),
+        *:if (navigator) surface.navigator_input(owner,st,evt.clientX,evt.clientY) else ({}),
         point:surface.point(owner,evt.clientX,evt.clientY),shift:evt.shiftKey,alt:evt.altKey}
 }
 pn curve_point(owner,evt) {
@@ -292,8 +312,11 @@ pn begin_curve(owner,st,evt) any^ {
     return {*:st,curve_draft:chosen.curves,curve_point:chosen.index,
         curve_drag:{pointer:evt.pointerId,index:chosen.index,before:curves}}
 }
+pn capture_node(owner,st) {
+    return present.node(owner,if (st.gesture.mode == "navigator") "navigator" else "stage")
+}
 pn cancel_preview(owner,st) {
-    if (st.gesture.pointer != null) dom.release_pointer_capture(present.node(owner,"stage"),st.gesture.pointer)
+    if (st.gesture.pointer != null) dom.release_pointer_capture(capture_node(owner,st),st.gesture.pointer)
     if (st.token > 0) dom.cancel_frame(owner,st.token)
     if (st.curve_drag != null) dom.release_pointer_capture(present.node(owner,"curve-editor"),st.curve_drag.pointer)
     return {*:interaction.cancel(st),token:0,curve_drag:null,
@@ -404,7 +427,11 @@ on change(evt) {
     let id = dom.get_attribute(evt.target,"id")
     if (id in ["image-width","image-height"]) {
         let key = if (id == "image-width") "width" else "height"
-        session = {*:session,size_draft:{*:session.size_draft,[key]:int(field(owner,id))}}
+        session = {*:session,size_draft:{*:session.size_draft,[key]:field(owner,id)}}
+        return 'handled'
+    }
+    if (id == "canvas-anchor") {
+        session = publish(owner,{*:clear_error(session),canvas_anchor:field(owner,id)},documents)
         return 'handled'
     }
     if (starts_with(id,"export-")) {
@@ -423,8 +450,13 @@ on change(evt) {
         return 'handled'
     }
     var next = clear_error(session)
-    if (id == "straighten-axis") {
-        editor.exec(next,{id:"tool.configure",straighten_axis:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    if (id in ["grid-spacing","grid-subdivisions"]) {
+        command(owner,next,"grid-configure") ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+        session = publish(owner,next,documents)
+        return 'handled'
+    }
+    if (id in ["straighten-axis","crop-aspect"]) {
+        editor.exec(next,{id:"tool.configure",[if (id == "straighten-axis") "straighten_axis" else "crop_aspect"]:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
         session = publish(owner,next,documents)
         return 'handled'
     }
@@ -481,18 +513,18 @@ on pointerdown(evt) {
         session = publish(owner,next,documents)
         return 'prevent-default'
     }
-    if (evt.button != 0 or session.dialog != "" or dom.closest(evt.target,"#stage") == null or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
-    dom.focus_set(present.node(owner,"stage"),false)
+    if (evt.button != 0 or session.dialog != "" or (dom.closest(evt.target,"#stage") == null and dom.closest(evt.target,"#navigator") == null) or dom.closest(evt.target,"#crop-controls") != null) { return 'pass' }
+    dom.focus_set(present.node(owner,if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage"),false)
     var next = clear_error(session)
-    interaction.begin(next,pointer_input(owner,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
-    if (next.gesture != null) dom.set_pointer_capture(present.node(owner,"stage"),evt.pointerId)
+    interaction.begin(next,pointer_input(owner,next,evt)) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    if (next.gesture != null) dom.set_pointer_capture(capture_node(owner,next),evt.pointerId)
     if (next.gesture.mode in ["brush","erase",*retouch.kinds]) { session = publish_preview(owner,next,documents) }
     else { session = publish(owner,next,documents) }
     return 'prevent-default'
 }
 on mousedown(evt) {
-    if (dom.closest(evt.target,"#stage") != null) {
-        dom.focus_set(present.node(owner_of(evt),"stage"),false)
+    if (dom.closest(evt.target,"#stage,#navigator") != null) {
+        dom.focus_set(present.node(owner_of(evt),if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage"),false)
         return 'prevent-default'
     }
     return 'pass'
@@ -506,7 +538,7 @@ on pointermove(evt) {
     }
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
-    session = interaction.sample(session,pointer_input(owner,evt))
+    session = interaction.sample(session,pointer_input(owner,session,evt))
     if (session.token == 0) { session = {*:session,token:dom.request_frame(owner,"photos_frame")} }
     return 'prevent-default'
 }
@@ -522,9 +554,15 @@ on pointerup(evt) {
     if (session.gesture == null or evt.pointerId != session.gesture.pointer) { return 'pass' }
     let owner = owner_of(evt)
     if (session.token > 0) dom.cancel_frame(owner,session.token)
-    var next = session
-    interaction.finish(interaction.preview(session,pointer_input(owner,evt))^) ^ { next = {*:interaction.cancel(session),error:^.message,status:^.message} } ~ { next = ~ }
-    dom.release_pointer_capture(present.node(owner,"stage"),evt.pointerId)
+    // capture retargets pointer-up to the stage; query the actual drop beneath it.
+    let drop = if (session.gesture.mode == "guide-new") dom.element_from_point(dom.root_node(owner),evt.clientX,evt.clientY) else null
+    let rejected = session.gesture.mode == "guide-new" and (dom.closest(drop,"#stage") == null or
+        dom.closest(drop,"[data-raster-ruler],#crop-controls") != null)
+    var next = if (rejected) interaction.cancel(session) else session
+    if (not rejected) {
+        interaction.finish(interaction.preview(session,pointer_input(owner,session,evt))^) ^ { next = {*:interaction.cancel(session),error:^.message,status:^.message} } ~ { next = ~ }
+    }
+    dom.release_pointer_capture(capture_node(owner,session),evt.pointerId)
     session = publish(owner,{*:next,token:0},documents)
     return 'prevent-default'
 }
@@ -561,6 +599,13 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (session.dialog != "") { return 'pass' }
+    if (dom.closest(evt.target,"#navigator") != null and evt.key in ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home"]) {
+        let before = cancel_preview(owner,session)
+        session = publish(owner,{*:before,pan:if (evt.key == "Home") ({x:0.0,y:0.0}) else
+            ({x:before.pan.x+(if (evt.key == "ArrowLeft") 40 else if (evt.key == "ArrowRight") -40 else 0),
+                y:before.pan.y+(if (evt.key == "ArrowUp") 40 else if (evt.key == "ArrowDown") -40 else 0)})},documents)
+        return 'prevent-default'
+    }
     if (typing) { return 'pass' }
     if (evt.key == "Enter" and session.tool == "crop") { action = "crop-apply" }
     else if (modifier and lower(evt.key) == "z") { action = if (evt.shiftKey) "history.redo" else "history.undo" }
