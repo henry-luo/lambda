@@ -612,7 +612,7 @@ The subsequent canvas milestone adds descendant-affine group/multiselection
 transforms, horizontal/vertical reference-line straightening and project guides
 with screen-distance move snapping. These use the same source-preserving edits
 and gesture history (**S9.1.2 / S9.2.2 / S12.1.3**). Masked/filtered groups remain
-outside this transform profile. Rulers/grids/navigator, other-layer snapping,
+outside this transform profile. Rulers/grids/navigator,
 perspective/warp and the larger M5 items remain outstanding. Actual
 verification is recorded in [the implementation record](impl/Lambda_Impl_Photos.md).
 
@@ -625,3 +625,51 @@ smooth curves keep the existing linear default and share processing with the
 graph preview (**S9.1.2 / S9.2.2 / D4.5.2**). Spatial backdrop filters, adjustment
 transforms/clipping/styles and native PSD adjustment interchange remain outside
 this profile. See [qualification and limits](impl/Lambda_Impl_Photos.md).
+
+
+The next canvas-controls increment delivers common crop aspect presets, nine
+canvas resize anchors and snapping to other visible layer/group bounds. Crop
+previews and per-tab settings stay outside authored history; applying a crop,
+anchored resize or completed move records one edit. Artwork, group masks, guides
+and active/saved coverage share document-origin shifts without resampling source
+samples (**S9.1.2 / S9.2.2 / S12.1.3**). Snapping caches initial target bounds
+for the drag and retains screen-distance/Alt behavior. Custom crop ratios/handles,
+rulers/grids/navigator and equal-gap smart guides remain outside this increment.
+
+
+### Pixel navigation and precision increment — 2026-10-22
+
+Photos now supplies adaptive pixel rulers with captured guide creation, a
+major/subdivision grid with independent visibility/snapping settings, and a
+composite navigator with viewport outline, captured panning and keyboard pan/
+center. These are per-tab view settings, outside authored history; new guides
+reuse authored guide transactions (**S9.1.2 / S9.2.2 / S12.1.3**). Shared pure
+camera geometry drives every overlay. Grid generation/rasterization is limited
+to the visible interval; navigator resizing/upload waits until live editing
+finishes and reuses the retained composite (**D4.5.2**). Rulers use pixels only,
+guide positions and Move placement retain whole-pixel semantics. Physical units,
+guide locks/layout presets, custom crop handles/ratios and equal-gap smart guides
+remain outside this profile, alongside the previously recorded typography, PSD,
+background-processing, project-compression and M5 limitations.
+
+
+### Editable crop and guide-layout increment — 2026-10-22
+
+The crop overlay now has eight resize handles, interior translation and thirds
+lines. Free/constrained geometry shares one fitting path and the transform handle
+catalogue; custom positive width:height ratios are tool settings. Edits derive
+from the pointer-down draft, keep valid canvas bounds and preserve Apply/Cancel/
+undo semantics. Escape restores an edited draft before discarding the whole
+crop (**S9.1.2 / S9.2.2 / S12.1.3**).
+
+Guide locking is per tab: authored guide commands are rejected, artwork remains
+hittable beneath guides, and snapping/document resizing still work. Center,
+thirds, quarters and custom equal-margin/gutter layouts replace or append
+integer guide coordinates atomically, retain unchanged IDs, deduplicate and
+respect the existing 64-guide limit. Guide/channel metadata now preserves block
+order so same-size canvas resizing stays outside history (**S9.1.2 / S9.2.2**).
+
+Remaining precision/canvas work includes physical ruler units, named user layout
+presets, equal-gap smart guides, perspective/warp and group-mask/filter affines.
+The previously recorded typography/styles/PSD, background processing, project
+compression and M5 precision/color/scale limits remain open.

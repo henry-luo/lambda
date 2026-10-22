@@ -3,11 +3,9 @@ import img: lambda.image
 import model: .model
 import affine: lambda.chart.svg_transform
 import geometry: lambda.editor.draw.geometry
+import canvas: .canvas
 pub let identity = affine.identity
-pub let handles = [
-    {id:"nw",x:0,y:0},{id:"n",x:0.5,y:0},{id:"ne",x:1,y:0},
-    {id:"w",x:0,y:0.5},{id:"e",x:1,y:0.5},
-    {id:"sw",x:0,y:1},{id:"s",x:0.5,y:1},{id:"se",x:1,y:1}]
+pub let handles = canvas.handles
 pub fn matrix(node) => model.value(node.transform,identity)
 fn supported(node) => (name(node) == 'layer' and not model.adjustment(node)) or (name(node) == 'stack' and
     not any([for (child in content(node)) name(child) in ['mask','effect','style']]) and

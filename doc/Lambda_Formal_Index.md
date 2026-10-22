@@ -753,36 +753,36 @@ in full — including lines too long for a viewer — run
 | D8.6.2 | 2345 | One artifact contract: the MIR dump path honored in release; |
 | D8.6.3 | 2349 | Liveness is verified by **dynamic oracles** |
 | D8.6.4v2* | 2354 | Unified-AST consolidation has three **hard, fail-closed exit ratchets**: at least 2,000 net physical C/C++ … |
-| DO1 | 2733 | Nullable-lane residue: boxed fallback for `any`/`number`/unions (confirm); |
-| DO25 | 2737 | Node-identity carrier and operations (S5.1.4v2, D2.6.8): where the identity lives (a header word costs every … |
-| DO2 | 2744 | Scalar-home audits: result-bearing dispatch-helper enumeration; |
-| DO3 | 2747 | Box/unbox: union params stay boxed (revisit?); |
-| DO4 | 2749 | ValueRep: `MirValue` size (measure first); |
-| DO5 | 2754 | Numeric GC-fallback end state: per-boundary inventory to zero, then delete `scalar_heap`; |
-| DO6 | 2758 | Side-root slot metadata (boxed-Item vs raw-pointer tag) |
-| DO7 | 2761 | Stack maps (KIV) |
-| DO8 | 2764 | CW4 shared-flag → saturating count/GC-refresh: blocked on CW5 counters from a live corpus; |
-| DO9 | 2767 | Memory Context Stage 2 opens, incl |
-| DO10 | 2770 | SF verification items: concat memcpy without tail-payload rebase (latent dangling wide scalars); |
-| DO11 | 2775 | Dual-func: O1 promotion-aware numeric inference and lowering (Stage-1 boundary only today); |
-| DO12 | 2779 | MIR cache: GC-root registry reset under L1 (verify before relying); |
-| DO13 | 2785 | Emission testing: guest-transpiler scope (no guest is hosted since `lang-python` was removed, 2026-10-07); |
-| DO14 | 2790 | Unified AST: the "views" fourth variance tier (adopt only when a real shared pass asks); |
-| DO15 | 2792 | *(resolved 2026-08-07)* Online exception-poll doc status conflict: verified landed in `52c0f3c02` (2026-07-24) |
-| DO25 | 2798 | Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module treatment under the MT7 … |
-| DO16 | 2810 | Name identity: temporal canonical accepted; |
-| DO17 | 2816 | Const pool: decimal sharing scope; |
-| DO18 | 2820 | Sys-func registry: the public mutation convention (owner- returning vs unit) and `splice`'s public result; |
-| DO19 | 2823 | Jube: `js_globals.cpp` allowlist audit; |
-| DO20 | 2833 | Cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
-| DO21 | 2836 | Static modules: Class F scheduling (the browser-style engine/bindings split is the eventual shape); |
-| DO22 | 2842 | First-class `Type*` representation needs its own design record: today the kind-discriminated layout is … |
-| DO23 | 2847 | Shape system opens: cross-`Input` type sharing |
-| DO24 | 2848 | Unnamed wide temporaries crossing a loop back edge, under D5.2.3's reclaim |
-| DO26 | 2860 | The D2.6.6v2 migration, **updated after phase 1 landed and phase 2 began, 2026-09-03** |
-| DO27 | 2882 | Representation of instance type alteration (S2.1.5): whether reconstruction reuses the old buffer when the … |
-| DO28 | 2886 | Tier carrier divergence for annotated module bindings: the eager module init keeps a trusted `let T: string[] … |
-| DO29 | 2896 | Typed `var` parameter rebind on the eager tier |
-| DO30 | 2925 | *(closed 2026-09-07 |
-| DO31 | 2937 | Whether an object declaration may name an element tag |
-| DO32 | 2939 | Virtual PDF output follow-up: extend pure-producer demand coverage, retained-child representation (SO48), … |
+| DO1 | 2736 | Nullable-lane residue: boxed fallback for `any`/`number`/unions (confirm); |
+| DO25 | 2740 | Node-identity carrier and operations (S5.1.4v2, D2.6.8): where the identity lives (a header word costs every … |
+| DO2 | 2747 | Scalar-home audits: result-bearing dispatch-helper enumeration; |
+| DO3 | 2750 | Box/unbox: union params stay boxed (revisit?); |
+| DO4 | 2752 | ValueRep: `MirValue` size (measure first); |
+| DO5 | 2757 | Numeric GC-fallback end state: per-boundary inventory to zero, then delete `scalar_heap`; |
+| DO6 | 2761 | Side-root slot metadata (boxed-Item vs raw-pointer tag) |
+| DO7 | 2764 | Stack maps (KIV) |
+| DO8 | 2767 | CW4 shared-flag → saturating count/GC-refresh: blocked on CW5 counters from a live corpus; |
+| DO9 | 2770 | Memory Context Stage 2 opens, incl |
+| DO10 | 2773 | SF verification items: concat memcpy without tail-payload rebase (latent dangling wide scalars); |
+| DO11 | 2778 | Dual-func: O1 promotion-aware numeric inference and lowering (Stage-1 boundary only today); |
+| DO12 | 2782 | MIR cache: GC-root registry reset under L1 (verify before relying); |
+| DO13 | 2788 | Emission testing: guest-transpiler scope (no guest is hosted since `lang-python` was removed, 2026-10-07); |
+| DO14 | 2793 | Unified AST: the "views" fourth variance tier (adopt only when a real shared pass asks); |
+| DO15 | 2795 | *(resolved 2026-08-07)* Online exception-poll doc status conflict: verified landed in `52c0f3c02` (2026-07-24) |
+| DO25 | 2801 | Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module treatment under the MT7 … |
+| DO16 | 2813 | Name identity: temporal canonical accepted; |
+| DO17 | 2819 | Const pool: decimal sharing scope; |
+| DO18 | 2823 | Sys-func registry: the public mutation convention (owner- returning vs unit) and `splice`'s public result; |
+| DO19 | 2826 | Jube: `js_globals.cpp` allowlist audit; |
+| DO20 | 2836 | Cross-isolate lifetime for shared graph Items (promote-on-share recommended) |
+| DO21 | 2839 | Static modules: Class F scheduling (the browser-style engine/bindings split is the eventual shape); |
+| DO22 | 2845 | First-class `Type*` representation needs its own design record: today the kind-discriminated layout is … |
+| DO23 | 2850 | Shape system opens: cross-`Input` type sharing |
+| DO24 | 2851 | Unnamed wide temporaries crossing a loop back edge, under D5.2.3's reclaim |
+| DO26 | 2863 | The D2.6.6v2 migration, **updated after phase 1 landed and phase 2 began, 2026-09-03** |
+| DO27 | 2885 | Representation of instance type alteration (S2.1.5): whether reconstruction reuses the old buffer when the … |
+| DO28 | 2889 | Tier carrier divergence for annotated module bindings: the eager module init keeps a trusted `let T: string[] … |
+| DO29 | 2899 | Typed `var` parameter rebind on the eager tier |
+| DO30 | 2928 | *(closed 2026-09-07 |
+| DO31 | 2940 | Whether an object declaration may name an element tag |
+| DO32 | 2942 | Virtual PDF output follow-up: extend pure-producer demand coverage, retained-child representation (SO48), … |

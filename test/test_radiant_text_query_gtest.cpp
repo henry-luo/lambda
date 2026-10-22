@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/layout_text_context.hpp"
 #include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/audio.hpp"
@@ -75,6 +76,46 @@ TEST(TextWhitespace, UnicodeCodepointsDoNotAliasAsciiWhitespace) {
     EXPECT_FALSE(is_space(0x200D));
     EXPECT_FALSE(is_space(0x2020));
     EXPECT_FALSE(is_space(0x300A));
+}
+
+TEST(TextShapingContext, EdgeSlicesPreserveUtf8AndStopAtTheNearestBoundary) {
+    struct Case { const char* text; bool cursive; const char* prefix; const char* suffix; };
+    const Case cases[] = {
+        {"", false, "", ""},
+        {"office", false, "office", "office"},
+        {"one two", false, "one", "two"},
+        {"one\n\ttwo", false, "one", "two"},
+        {" one ", false, "", ""},
+        {"abécd", false, "ab", "cd"},
+        {"عع عع", true, "عع", "عع"},
+        {"عع\xE2\x80\x8Dعع", true, "عع\xE2\x80\x8Dعع", "عع\xE2\x80\x8Dعع"},
+        {"عع\xE2\x80\x8Cعع", true, "عع\xE2\x80\x8Cعع", "عع\xE2\x80\x8Cعع"},
+        {"ab\x80" "cd", false, "ab", "cd"},
+        {"ab\xC3", false, "ab", ""},
+        {"عع\x80عع", true, "عع", "عع"},
+    };
+    const bool directions[] = {false, true};
+    for (const Case& entry : cases) {
+        for (bool forward : directions) {
+            size_t first, last;
+            size_t length = strlen(entry.text);
+            layout_text_shaping_context_slice(entry.text, length, forward, entry.cursive, &first, &last);
+            const char* expected = forward ? entry.prefix : entry.suffix;
+            ASSERT_LE(first, last);
+            ASSERT_LE(last, length);
+            ASSERT_EQ(last - first, strlen(expected));
+            EXPECT_EQ(memcmp(entry.text + first, expected, strlen(expected)), 0);
+            EXPECT_EQ(forward ? first : last, forward ? 0u : length);
+        }
+    }
+    char long_source[65536];
+    memset(long_source, 'x', sizeof(long_source));
+    const char* suffix = " tail";
+    memcpy(long_source + sizeof(long_source) - strlen(suffix), suffix, strlen(suffix));
+    size_t first, last;
+    layout_text_shaping_context_slice(long_source, sizeof(long_source), false, false, &first, &last);
+    EXPECT_EQ(first, sizeof(long_source) - strlen("tail"));
+    EXPECT_EQ(last, sizeof(long_source));
 }
 
 TEST(TextWhitespace, NativeLineBoundariesUseSourceBytesAndKeepTerminalEdgesClosed) {

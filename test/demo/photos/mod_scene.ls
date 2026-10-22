@@ -5,6 +5,8 @@ import effects: lambda.editor.raster.effects
 import styles: lambda.editor.raster.styles
 import transforms: lambda.editor.raster.transform
 import tone: lambda.editor.raster.tone
+import canvas: lambda.editor.raster.canvas
+import guides: lambda.editor.raster.guides
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -68,15 +70,27 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition">
                 <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">
                 <div class:"raster-crop-shade",*[for (edge in ["top","bottom","left","right"]) <div 'data-crop-shade':edge>]>
-                <div class:"raster-crop">
-                <div class:"raster-guides"> <div class:"raster-reference">
+                <div class:"raster-crop",'data-raster-crop':"move",'aria-label':"Move crop rectangle", *[
+                    *[for (axis in ["x","y"]) for (fraction in [1/3,2/3]) <span class:"crop-third crop-third-" ++ axis,
+                        style:(if (axis == "x") "left:" else "top:") ++ string(fraction*100) ++ "%">],
+                    *[for (handle in canvas.handles) <button type:"button",'data-raster-crop':handle.id,
+                        class:"crop-handle handle-" ++ handle.id,'aria-label':"Resize crop " ++ handle.id,
+                        style:"left:" ++ string(handle.x*100) ++ "%;top:" ++ string(handle.y*100) ++ "%">]]>
+                <div class:"raster-grid"> <div class:"raster-guides"> <div class:"raster-reference">
                 <div class:"raster-transform",'aria-label':"Layer transform controls", *[
                     *[for (handle in transforms.handles) <button type:"button",'data-raster-handle':handle.id,
                         class:"transform-handle handle-" ++ handle.id,title:"Resize " ++ handle.id,
                         'aria-label':"Resize " ++ handle.id,style:"left:" ++ string(handle.x*100) ++ "%;top:" ++ string(handle.y*100) ++ "%">],
                     <button type:"button",'data-raster-handle':"rotate",class:"transform-handle handle-rotate",title:"Rotate; Shift snaps to 15°",'aria-label':"Rotate layer","↻">]>>
+            <div class:"raster-ruler raster-ruler-x",'data-raster-ruler':"y",title:"Drag down to create a horizontal guide",'aria-label':"Horizontal pixel ruler">
+            <div class:"raster-ruler raster-ruler-y",'data-raster-ruler':"x",title:"Drag right to create a vertical guide",'aria-label':"Vertical pixel ruler">
             <div id:"crop-controls",class:"crop-controls",style:"display:none", *[
-                <span "Drag to crop">,button("crop-apply","crop-apply","Apply crop"),button("crop-cancel","crop-cancel","Cancel") ]>>,
+                <select id:"crop-aspect",'aria-label':"Crop aspect ratio",title:"Aspect ratio; Shift makes a free crop square",
+                    *[for (preset in canvas.crop_presets) <option value:preset.id,preset.label>]>,
+                <span id:"crop-custom",style:"display:none", *[
+                    <input id:"crop-ratio-width",type:"number",value:"1",'aria-label':"Custom crop ratio width">,
+                    <span ":">,<input id:"crop-ratio-height",type:"number",value:"1",'aria-label':"Custom crop ratio height">]>,
+                <span id:"crop-size","Drag to crop">,button("crop-apply","crop-apply","Apply crop"),button("crop-cancel","crop-cancel","Cancel") ]>>,
         <aside class:"dock", *[
             <section class:"properties", *[<h2 "Properties">,
                 <p id:"target-label","Select a layer">,
@@ -110,6 +124,7 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                     button("fill-white","fill-white","Fill white"),button("clear","pixels.clear","Clear target")]>]>,
             <section class:"image-size", *[<h2 "Image & canvas">,
                 <div class:"fields", *[field("image-width","Width",1024,"number"),field("image-height","Height",768,"number")]>,
+                <label "Canvas anchor" <select id:"canvas-anchor",*[for (anchor in canvas.anchors) <option value:anchor.id,anchor.label>]>>,
                 <div class:"button-grid", *[button("resize-image","resize-image","Resize image"),button("resize-canvas","resize-canvas","Resize canvas"),
                     button("flatten","document.flatten","Flatten")]>]>,
             <section class:"history-panel",<h2 "History"> <div id:"history"> >,
@@ -186,15 +201,32 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                     button("curves-add","curves-add","Add Curves"),button("curves-apply","curves-apply","Apply to effect"),
                     button("curves-layer","curves-layer","New Curves layer")]>]>,
             <section class:"guides-panel",*[<h2 "Guides & snapping">,
-                <p "Move drags snap to visible guides and canvas edges/centers. Alt temporarily bypasses snapping. Drag guides with Move.">,
+                <p "Move drags snap to canvas, visible guides and other visible layers. Alt temporarily bypasses snapping. Drag guides with Move.">,
                 <label "Guide axis" <select id:"guide-axis",<option value:"x","Vertical"> <option value:"y","Horizontal">>>,
                 field("guide-position","Position in pixels",100,"number"),
                 <div class:"button-grid",*[button("guide-add","guide-add","Add guide"),button("guide-show","guide-show","Hide guides"),
-                    button("guide-snap","guide-snap","Enable snapping"),button("guide-clear","guide.clear","Clear guides")]>,
+                    button("guide-snap","guide-snap","Enable snapping"),button("guide-layers","guide-layers","Layer snapping on"),
+                    button("guide-clear","guide.clear","Clear guides"),button("guide-lock","guide-lock","Lock guides")]>,
                 <div id:"guide-list">,
+                <h2 "Guide layout">,
+                <label "Preset" <select id:"guide-layout-preset",*[for (preset in guides.layouts) <option value:preset.id,preset.label>]>>,
+                <div id:"guide-layout-custom",style:"display:none",class:"fields", *[
+                    field("guide-columns","Columns",3,"number"),field("guide-rows","Rows",3,"number"),
+                    field("guide-margin","Margin (px)",0,"number"),field("guide-gutter","Gutter (px)",0,"number")]>,
+                <label "Existing guides" <select id:"guide-layout-mode",<option value:"replace","Replace"> <option value:"append","Keep and append">>>,
+                button("guide-layout","guide-layout","Apply layout"),
+                <p "Custom layouts use equal margins and gutters. Set a row or column count to zero to omit that axis.">,
                 <h2 "Straighten">,<p "Straighten (Q): draw along a horizon or upright edge on the selected layers. Release commits; Escape cancels. Canvas size stays unchanged.">,
                 <label "Align reference to" <select id:"straighten-axis",<option value:"horizontal","Horizontal"> <option value:"vertical","Vertical">>>,
-                button("straighten-tool","straighten-tool","Draw reference line")]>]>]>,
+                button("straighten-tool","straighten-tool","Draw reference line")]>,
+            <section class:"navigation-panel", *[<h2 "Navigator & precision">,
+                <div id:"navigator",class:"raster-navigator",tabindex:"0",role:"group",'aria-label':"Navigator; drag or use arrow keys to pan", *[
+                    <canvas width:1,height:1,'aria-label':"Composite thumbnail">,<div class:"raster-navigator-viewport">]>,
+                <p "Click or drag the thumbnail to center the view. Arrow keys pan; Home centers. Escape cancels a drag. Rulers use pixels; drag a ruler into the image to add a guide.">,
+                <div class:"button-grid",*[button("rulers-toggle","rulers-toggle","Show rulers"),button("grid-toggle","grid-toggle","Show grid"),
+                    button("grid-snap","grid-snap","Grid snapping off")]>,
+                <div class:"fields",*[field("grid-spacing","Grid every (px)",32,"number"),field("grid-subdivisions","Subdivisions",4,"number")]>,
+                <p "Grid snapping uses the subdivisions and the main snapping switch. Alt bypasses snapping during Move.">]>]>]>,
     <footer class:"statusbar",<output id:"status",role:"status",'aria-live':"polite","Opening sample…"> <span id:"dimensions","">>,
     <section id:"file-dialog",class:"dialog",style:"display:none",role:"dialog",'aria-modal':"true",'aria-label':"File operation", *[
         <h2 id:"file-title","Open image">,field("file-path","Path"),

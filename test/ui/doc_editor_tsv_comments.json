@@ -9,7 +9,7 @@
     {"type": "scroll", "target": {"selector": "#project-tree"}, "dx": 0, "dy": -200},
     {"type": "click", "target": {"selector": ".tree-hit-__test_css_cascade_memory_baseline_tsv .tree-label"}},
     {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "css_cascade_memory_baseline.tsv"},
-    {"type": "assert_count", "target": {"selector": ".csv-table thead th"}, "count": 15},
+    {"type": "assert_count", "target": {"selector": ".csv-table thead th"}, "count": 14},
     {"type": "assert_count", "target": {"selector": ".csv-table tbody tr"}, "count": 12},
     {"type": "assert_text", "target": {"selector": ".csv-table thead th:first-child"}, "equals": "fixture"},
     {"type": "assert_text", "target": {"selector": ".csv-table tbody tr:first-child td", "index": 0}, "equals": "jqueryui"},

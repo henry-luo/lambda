@@ -51,7 +51,6 @@ struct CssMemoryBaseline {
     uint64_t canonical_live;
     uint64_t canonical_live_delta;
     uint64_t entries;
-    uint64_t bound_refs;
     uint64_t payloads;
     uint64_t payload_refs;
     uint64_t bound_entries;
@@ -168,19 +167,18 @@ static bool css_memory_read_baseline(const char* case_name, const char* phase,
         unsigned long long canonical_live = 0;
         unsigned long long canonical_live_delta = 0;
         unsigned long long entries = 0;
-        unsigned long long bound_refs = 0;
         unsigned long long payloads = 0;
         unsigned long long payload_refs = 0;
         unsigned long long bound_entries = 0;
         unsigned long long cold_entries = 0;
         unsigned long long cold_bytes = 0;
         int field_count = sscanf(line,
-            "%95s %31s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
+            "%95s %31s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
             name, recorded_phase, &document_live, &document_live_delta,
             &work_live_delta, &css_live, &canonical_live, &canonical_live_delta,
-            &entries, &bound_refs, &payloads, &payload_refs, &bound_entries,
+            &entries, &payloads, &payload_refs, &bound_entries,
             &cold_entries, &cold_bytes);
-        if (field_count != 15 || strcmp(name, case_name) != 0 ||
+        if (field_count != 14 || strcmp(name, case_name) != 0 ||
             strcmp(recorded_phase, phase) != 0) {
             continue;
         }
@@ -191,7 +189,6 @@ static bool css_memory_read_baseline(const char* case_name, const char* phase,
         out_baseline->canonical_live = (uint64_t)canonical_live;
         out_baseline->canonical_live_delta = (uint64_t)canonical_live_delta;
         out_baseline->entries = (uint64_t)entries;
-        out_baseline->bound_refs = (uint64_t)bound_refs;
         out_baseline->payloads = (uint64_t)payloads;
         out_baseline->payload_refs = (uint64_t)payload_refs;
         out_baseline->bound_entries = (uint64_t)bound_entries;
@@ -246,8 +243,6 @@ static void css_memory_expect_within_baseline(const CssMemoryCase* test_case,
         << test_case->name << " " << phase << " canonical cascade delta";
     EXPECT_LE(actual->entries, baseline->entries)
         << test_case->name << " " << phase << " canonical recipe entries";
-    EXPECT_LE(actual->bound_refs, baseline->bound_refs)
-        << test_case->name << " " << phase << " canonical style bindings";
     EXPECT_LE(actual->payloads, baseline->payloads)
         << test_case->name << " " << phase << " immutable declaration payloads";
     EXPECT_LE(actual->payload_refs, baseline->payload_refs)
@@ -284,6 +279,11 @@ TEST(CssCascadeMemory, PageLoadAndRecascadeStayWithinBaseline) {
         CssMemorySample recascade = {};
         ASSERT_TRUE(css_memory_read_samples(&initial, &recascade))
             << test_case->name << " did not emit both CSS cascade memory samples";
+
+        // both cascades precede scripts, so the unchanged DOM must retain the same bindings.
+        EXPECT_GT(initial.bound_refs, 0u) << test_case->name << " initial canonical style bindings";
+        EXPECT_EQ(recascade.bound_refs, initial.bound_refs)
+            << test_case->name << " clean recascade must preserve initial canonical style bindings";
 
         CssMemoryBaseline initial_baseline = {};
         CssMemoryBaseline recascade_baseline = {};
