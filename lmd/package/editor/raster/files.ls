@@ -21,7 +21,7 @@ pub pn write_document(st,path,format,options={}) any^ {
     if (format in ["photos","psd"]) { let checked = img.checked_options(options,[])^ }
     if (format == "photos") {
         project.write(st.doc,path)^
-        return {snapshot:st.doc,report:{preserved:["pixels","layers","masks","effects","transforms","locks","artwork","fonts","styles","channels","guides"],omitted:[]}}
+        return {snapshot:st.doc,report:{preserved:["pixels","layers","masks","effects","adjustments","transforms","locks","artwork","fonts","styles","channels","guides"],omitted:[]}}
     }
     if (format == "psd" and any([for (row in editor.layers(st.doc)) row.node.locked == true]))
         raise error("Photos: unlock layers before saving this PSD profile; lock persistence is not supported yet")

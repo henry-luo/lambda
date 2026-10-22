@@ -1197,22 +1197,18 @@ TEST(JsScriptOwnership, PreservesClassFieldInitializerCaptureOverlay) {
     runtime_cleanup(&index_runtime);
 }
 
-TEST(JsMir, UnsetBackendSelectsMvpForSupportedScript) {
+TEST(JsInterpreter, UnsetBackendSelectsAutoForSupportedScript) {
+    JsExecutionBackendScope backend(NULL);
     Runtime runtime = {};
     runtime_init(&runtime);
-    const char* previous = getenv("JS_EXEC_BACKEND");
-    char saved_backend[32] = {};
-    if (previous) str_copy(saved_backend, sizeof(saved_backend), previous,
-        strlen(previous));
-    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
-    const char source[] = "var answer = 6 * 7; answer;";
-    Item result = transpile_js_to_mir(&runtime, source, "unset-mvp.js", NULL);
+    const char source[] = "function answer() { return 6 * 7; } answer();";
+    Item result = transpile_js_to_mir(&runtime, source, "unset-auto.js", NULL);
 
-    if (saved_backend[0]) ASSERT_EQ(setenv("JS_EXEC_BACKEND", saved_backend, 1), 0);
     ASSERT_FALSE(item_is_error(result));
-    EXPECT_FALSE(runtime.js_ast_backend);
-    EXPECT_NE(js_runtime_state.formal_mir_owner, nullptr);
+    EXPECT_TRUE(runtime.js_ast_backend);
+    EXPECT_TRUE(runtime.js_promotion_auto);
+    EXPECT_EQ(js_runtime_state.formal_mir_owner, nullptr);
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
     runtime_cleanup(&runtime);
 }
@@ -1648,12 +1644,22 @@ TEST(JsInterpreter, AutoMvpPromotedDefinitionsShareOneNativeRealm) {
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
     ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
+    // first promotion occurs inside an async activation; the next turn must find its realm.
     Item value = transpile_js_to_mir(&runtime,
         "function f(){return Math.max}function g(){return Math.min}"
-        "f();g();f();g();gc();if(f()!==Math.max||g()!==Math.min)throw 1;[f,g];",
+        "var completed=[];"
+        "async function warm(){f();g();f();g();gc();await 0;}"
+        "warm().then(async function(){"
+        "if(f()!==Math.max||g()!==Math.min)throw 1;completed.push(true);});"
+        "[f,g,completed];",
         "p2-mvp-shared-realm.js", NULL);
     unsetenv("JS_FUNC_JIT_THRESHOLD"); unsetenv("JS_EXEC_BACKEND");
     ASSERT_EQ(get_type_id(value), LMD_TYPE_ARRAY);
+    ASSERT_EQ(value.array->length, 3);
+    Item completed = value.array->items[2];
+    ASSERT_EQ(get_type_id(completed), LMD_TYPE_ARRAY);
+    ASSERT_EQ(completed.array->length, 1);
+    EXPECT_EQ(completed.array->items[0].item, ITEM_TRUE);
     for (int i = 0; i < 2; i++) {
         Item function = value.array->items[i];
         ASSERT_EQ(get_type_id(function), LMD_TYPE_FUNC);
@@ -2557,7 +2563,9 @@ TEST(JsInterpreter, RetainedTypedArrayAndPropertyHelpersKeepStrictnessAndIsolati
         ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, helpers, NULL)));
         heap_gc_collect();
         Item result = js_interp_execute_source(&runtime, test, sizeof(test) - 1, "test.js", NULL);
-        ASSERT_FALSE(item_is_error(result));
+        char diagnostic[512];
+        js_error_lane_format(result, diagnostic, sizeof(diagnostic));
+        ASSERT_FALSE(item_is_error(result)) << "iteration " << i << ": " << diagnostic;
         EXPECT_EQ(result.item, ITEM_TRUE);
         runtime_reset_heap(&runtime);
         runtime_release_script_generation(&runtime, checkpoint, module_checkpoint);

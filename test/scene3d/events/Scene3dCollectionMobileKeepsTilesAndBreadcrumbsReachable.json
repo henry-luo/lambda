@@ -9,7 +9,7 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "assert_script",
@@ -40,7 +40,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -67,7 +67,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -89,7 +89,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -111,7 +111,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     },
     {
       "type": "click",
@@ -133,7 +133,29 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===9 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".demo-tile[href=\"motion/pets.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#pets-view').getBoundingClientRect().right<=390 && document.querySelector('.scene3d-breadcrumbs').getBoundingClientRect().right<=390 && document.querySelector('#play-gesture-negative').getBoundingClientRect().right<=390"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===11 && document.querySelector('h1').textContent==='Scene3D' && !document.querySelector('.scene3d-breadcrumbs')"
     }
   ]
 }

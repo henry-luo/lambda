@@ -21,6 +21,8 @@ pub fn materialize(raster) element =>
 
 pub fn raster_of(layer) element? => [for (child in content(layer) where name(child) == 'raster') child][0]
 pub fn layer(raster, options = {}) element => <layer kind: 'raster', *: options, raster>
+pub fn adjustment_layer(options = {}, layer_options = {}) element =>
+    <layer kind:'adjustment',*:layer_options,<effect kind:'adjust',enabled:true,name:"Adjustment",options:options>>
 pub fn text_layer(text, options = {}, layer_options = {}) element =>
     <layer kind:'text',*:layer_options,<text *:options,text>>
 pub fn vector_layer(options, layer_options = {}) element =>

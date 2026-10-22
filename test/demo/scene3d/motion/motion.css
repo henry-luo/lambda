@@ -1,0 +1,12 @@
+html, body { margin: 0; background: #090f1a; color: #e7eef8; font-family: Arial, sans-serif; }
+.motion-page .eyebrow { margin: 0; color: #74ded3; font-size: 11px; font-weight: bold; letter-spacing: 2px; }
+.motion-page h1 { margin: 8px 0 10px; font-size: 34px; font-weight: 500; letter-spacing: -0.8px; }
+.motion-page .intro { max-width: 760px; margin: 0 0 16px; color: #a9bbd0; font-size: 14px; line-height: 1.55; }
+.motion-page .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.motion-page .toolbar button.active { border-color: #74ded3; color: #74ded3; }
+.motion-page .stage { border: 1px solid #2a3b52; border-radius: 12px; overflow: hidden; background: #101b2b; }
+.motion-page scene3d { display: block; width: 100%; height: 440px; touch-action: none; }
+.motion-page .caption { margin: 12px 0 0; color: #8096b1; font-size: 12px; line-height: 1.6; }
+.motion-page .missing { padding: 28px; color: #d1ddeb; font-size: 14px; line-height: 1.7; }
+.motion-page .missing code { color: #74ded3; }
+@media (max-width: 700px) { .motion-page h1 { font-size: 28px; } .motion-page scene3d { height: 340px; } }

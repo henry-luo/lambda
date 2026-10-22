@@ -1,18 +1,62 @@
 # JS MVP integration implementation
 
-**Date:** 2026-10-21  
-**Authority:** **D8.1.3v28**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
+**Date:** 2026-10-22
+
+**Authority:** **D8.1.3v29**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
 **Design:** [JS MVP integration](../jube/JS_MVP_Integration.md)  
 **Status:** implementation and qualification in progress; integration is not closed.
+
+## AUTO default checkpoint (2026-10-22)
+
+**D8.1.3v29** corrects the tier-policy interpretation: AUTO is the default;
+activated MIR uses fast MVP. The remaining AUTO failures had two lifetime causes
+(**D5.3.3**, **D5.4.2–D5.4.3**):
+
+- Retained AST definitions kept promoted callable Items after heap replacement.
+  Full realm reset now unregisters their precise roots and clears heap-derived
+  callable, shape and promotion state. Definition facts remain reusable. The
+  retained typed-array/property-helper case now completes both generations;
+  the complete Script Ownership suite passes 215/215.
+- An async activation could restore an empty MIR library cache saved before
+  the first promotion installed the context capsule. Library lookup now
+  refreshes an absent cache, and ambient snapshots capture the refreshed tuple.
+  The existing shared-realm regression now promotes inside one async activation
+  and verifies intrinsic identities from a later async activation.
+
+WPT input events pass 20 cases, with 12 existing skips and no failures. Typing
+completes 13/13 subtests; each non-collapsed selection variant completes 70/70.
+The final release run takes 48.3 s with the backend selector unset and default
+promotion thresholds (`temp/auto-wpt-final-release-provenance.json`).
+The earlier native Promise policy fix remains in place. Promotion thresholds
+and baseline expectations are unchanged.
+
+`make test-lambda-baseline` passes 8,018/8,018 (2,112 input and 5,906 runtime),
+including 215/215 Script Ownership, 840/840 MVP, 519/519 JS and 322/322 MIR
+forced-GC cases. `caffeinate -is make test262-baseline` exits successfully with
+40,260/40,261 fully passing cases, zero permanent failures and 2,652 skips in
+its configured AST/MIR lanes. `Grapheme_Base` exceeds the timing threshold in
+its MIR batch and passes on isolated retry (2.6 s). This is not zero-retry
+qualification; the existing timing limit remains a qualification caveat.
 
 ## Changes
 
 ### Common entry and ownership
 
-- `lambda/main.cpp` uses the ordinary JS command for MVP execution.
-  **D8.1.3v28** removes the redundant `--runtime=mvp-lmd` option from Script
-  and batch commands. File/eval/print, module selection, arguments and explicit
-  AST/AUTO policy use the same parser and execution path.
+- **D8.1.3v29** keeps AUTO as JavaScript's default tier policy. Unset, empty
+  and `auto` selectors start supported units in AST; whole-unit fallback,
+  eligible hot promotion and explicit `mir` use the fast MVP MIR engine.
+  `ast` forces the interpreter. The common backend helper applies this policy
+  to Script, module, document and batch entry points.
+- `lambda/main.cpp` retains removal of the redundant `--runtime=mvp-lmd`
+  option. File/eval/print, module selection and arguments use the same parser
+  and execution path. MIR performance checks explicitly select `mir`.
+- Historical captures below used the then-current MIR default. They remain
+  evidence for those binaries and are not measurements of the corrected AUTO
+  default.
+- AUTO satellites that adopt native Promise intrinsics retain the native job
+  policy. Installing MVP callbacks during promotion left suspended AST
+  activations with a null MVP job owner; preserving the existing policy fixes
+  that ownership mismatch (**D5.3–D5.4**, **D8.1.3v29**).
 - `-p` prints the actual Script completion after execution. It no longer
   changes the source grammar by wrapping the program in `console.log(...)`.
   The common entry uses the former explicit MVP value formatter, including

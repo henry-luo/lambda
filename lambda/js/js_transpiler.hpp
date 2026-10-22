@@ -209,6 +209,7 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script, JsFieldDefi
     JsStaticBlockNode* block = nullptr);
 Pool* js_script_execution_pool(JsScript* script);
 NamePool* js_script_execution_name_pool(JsScript* script);
+void js_script_reset_heap(JsScript* script);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size);

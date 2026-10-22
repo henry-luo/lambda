@@ -24,13 +24,13 @@ static inline bool js_ast_interpreter_requested(void) {
         (context && context->runtime && context->runtime->js_ast_backend);
 }
 
-// AUTO starts a supported unit in the retained AST executor. If the unit is
-// outside that executor's coverage, the caller keeps the established MIR
-// fallback rather than publishing a mixed-tier realm.
+// AUTO starts supported units in the retained AST executor by default. Units
+// outside that executor's coverage keep the established MIR fallback rather
+// than publishing a mixed-tier realm.
 static inline bool js_execution_auto_requested(void) {
     const char* backend = getenv("JS_EXEC_BACKEND");
-    // D8.1.3v25: normal execution uses MVP MIR; AUTO remains explicit.
-    return backend && strcmp(backend, "auto") == 0;
+    // D8.1.3v29: tier selection defaults to AUTO; activated MIR uses MVP.
+    return !backend || !backend[0] || strcmp(backend, "auto") == 0;
 }
 // Parse, bind, and retain a classic Script without evaluating it. Batch hosts
 // use this to keep a harness AST across fresh per-test realms.

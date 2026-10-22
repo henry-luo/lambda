@@ -235,8 +235,8 @@ struct FbxCharacter {
     bool skinned = false;
     Item resources = ItemNull;
     lam::ArrayList<double> key_time, key_value, key_right, key_left;  // a key's outgoing and incoming slopes
+    lam::ArrayList<double> key_reach_right, key_reach_left;  // their weights: fractions of the segment, 1/3 unweighted
     lam::ArrayList<uint8_t> key_mode;
-    bool weighted_warned = false;
     lam::ArrayList<Item> material_ids;  // per FBX material, once created
     Item default_material = ItemNull;
 
@@ -424,20 +424,31 @@ struct FbxCharacter {
     }
     // LimbNodes and skin-cluster links, with every ancestor model, in preorder
     bool select_joints() {
+        auto wanted = [&](int object) {
+            for (int m = object; m >= 0 && objects[m].joint != -2; m = objects[m].parent) objects[m].joint = -2;
+        };
+        bool skeleton = false, animated = false;
         for (size_t i = 0; i < objects.size(); i++) {
             int object = (int)i;  // INT_CAST_OK: object index
-            bool wanted = is(object, "Model") && sub(object, "LimbNode");
-            if (is(object, "Deformer") && sub(object, "Cluster")) {
+            if (is(object, "Model") && sub(object, "LimbNode")) { wanted(object); skeleton = true; }
+            else if (is(object, "Deformer") && sub(object, "Cluster")) {
                 int l = source(object, "Model");
-                if (l >= 0) { object = links[l].child; wanted = true; }
+                if (l >= 0) { wanted(links[l].child); skeleton = true; }
             }
-            if (!wanted) continue;
-            for (int m = object; m >= 0 && objects[m].joint != -2; m = objects[m].parent) objects[m].joint = -2;
+            animated |= is(object, "Model") && source(object, "AnimationCurveNode") >= 0;
+        }
+        // with neither but with animated models, the file is a rigid rig (Kenney's Cube Pets): every
+        // Null, Root and Mesh model is a joint, and each mesh rides its own as a rigid prop (§7.2)
+        if (!skeleton && animated) {
+            for (size_t i = 0; i < objects.size(); i++) {
+                int object = (int)i;  // INT_CAST_OK: object index
+                if (is(object, "Model") && (sub(object, "Null") || sub(object, "Root") || sub(object, "Mesh"))) wanted(object);
+            }
         }
         for (size_t i = 0; i < objects.size(); i++) {
             if (objects[i].joint == -2 && objects[i].parent < 0) visit((int)i, joints);  // INT_CAST_OK: object index
         }
-        if (joints.empty()) return fail("file has no skeleton (no LimbNode models or skin clusters)");
+        if (joints.empty()) return fail("file has no skeleton (no LimbNode models, skin clusters or animated models)");
         if (joints.size() > FBX_JOINT_LIMIT) return fail("skeleton exceeds 1024 joints");
         for (size_t j = 0; j < joints.size(); j++) {
             for (size_t k = 0; k < j; k++)
@@ -573,9 +584,17 @@ struct FbxCharacter {
         if (!uri) uri = fbx_child_string(node, "RelativeFilename");
         if (!uri) uri = fbx_child_string(node, "FileName");
         if (!uri) uri = fbx_child_string(video, "RelativeFilename");
+        // file names keep the writer's separators: Windows-written files (Kenney's Cube Pets) use '\'
+        StrBuf* path = strbuf_new();
+        if (uri && uri != data->str) {
+            strbuf_append_str(path, uri);
+            for (size_t i = 0; i < path->length; i++) if (path->str[i] == '\\') path->str[i] = '/';
+            uri = path->str;
+        }
         Item reference = ItemNull, element = ItemNull;
         if (uri) reference = a.texture(uri, nullptr, &element);
         else fail_named("texture has neither embedded content nor a file name:", objects[texture].name);
+        strbuf_free(path);
         strbuf_free(data);
         return reference;
     }
@@ -598,7 +617,11 @@ struct FbxCharacter {
             for (int l = objects[object].sources; l >= 0; l = links[l].next_source) {
                 if (!is(links[l].child, "Texture")) continue;
                 if (!asset_is(links[l].property, "DiffuseColor")) {
-                    a.ctx.addWarning("character: FBX %s textures are omitted", links[l].property ? links[l].property : "unnamed");
+                    // Blender writes a plain OO link beside the DiffuseColor one; only an unused texture is omitted
+                    bool diffuse_too = false;
+                    for (int k = objects[object].sources; k >= 0; k = links[k].next_source)
+                        diffuse_too |= links[k].child == links[l].child && asset_is(links[k].property, "DiffuseColor");
+                    if (!diffuse_too) a.ctx.addWarning("character: FBX %s textures are omitted", links[l].property ? links[l].property : "unnamed");
                     continue;
                 }
                 Item texture = texture_for(links[l].child);
@@ -913,8 +936,8 @@ struct FbxCharacter {
         out->first = key_time.size();
         out->count = times.size();
         size_t attribute = 0, used = 0, n = times.size();
-        // the previous key's attribute holds this key's incoming slope
-        double carried_left = 0;
+        // the previous key's attribute holds this key's incoming slope and weight
+        double carried_left = 0, carried_reach = 1.0 / 3;
         for (size_t k = 0; k < n; k++) {
             // KeyAttrRefCount runs give each attribute group a stretch of keys
             while (attribute < refs.size() && used >= refs[attribute]) { attribute++; used = 0; }
@@ -927,15 +950,21 @@ struct FbxCharacter {
             double t0 = has_prev ? times[k - 1] / FBX_TICKS : t, v0 = has_prev ? values[k - 1] : value;
             double t1 = has_next ? times[k + 1] / FBX_TICKS : t, v1 = has_next ? values[k + 1] : value;
             double left = carried_left, right = stored ? stored[0] : 0, next_left = stored ? stored[1] : 0;
+            double reach_left = carried_reach, reach_right = 1.0 / 3, next_reach = 1.0 / 3;
             uint8_t mode;
             if (bits & FBX_CONSTANT) {
                 mode = bits & FBX_CONSTANT_NEXT ? MODE_CONSTANT_NEXT : MODE_CONSTANT;
                 right = next_left = 0;
             } else if (bits & FBX_CUBIC) {
                 mode = MODE_CUBIC;
-                if ((bits & (FBX_WEIGHTED_RIGHT | FBX_WEIGHTED_NEXT_LEFT)) && !weighted_warned) {
-                    a.ctx.addWarning("character: FBX weighted tangents are evaluated as unweighted cubic segments");
-                    weighted_warned = true;
+                // weights are two 0.4 decimal fixed-point values packed into the bits of the
+                // third attribute float (after ufbx); Blender writes them (Kenney's Cube Pets)
+                if ((bits & (FBX_WEIGHTED_RIGHT | FBX_WEIGHTED_NEXT_LEFT)) && stored) {
+                    float packed_float = (float)stored[2];
+                    uint32_t packed;
+                    memcpy(&packed, &packed_float, sizeof(packed));
+                    if (bits & FBX_WEIGHTED_RIGHT) reach_right = (packed & 0xffff) * 0.0001;
+                    if (bits & FBX_WEIGHTED_NEXT_LEFT) next_reach = (packed >> 16) * 0.0001;
                 }
                 if (bits & FBX_TANGENT_TCB) {
                     // tension, continuity and bias in the stored data shape both slopes
@@ -945,13 +974,14 @@ struct FbxCharacter {
                     left = factor * (1 - tension) * ((1 + bias) * (1 - continuity) * incoming + (1 - bias) * (1 + continuity) * outgoing);
                     right = factor * (1 - tension) * ((1 + bias) * (1 + continuity) * incoming + (1 - bias) * (1 - continuity) * outgoing);
                     next_left = 0;
+                    next_reach = 1.0 / 3;
                 } else if (!(bits & FBX_TANGENT_USER)) {
                     // auto tangents are solved from the neighbours; the stored slopes act only as auto bias
                     if (has_prev && has_next) {
-                        if (fabs(left + right) <= 0.0001) left = right = auto_tangent(t0, t, t1, v0, value, v1, right, bits);
+                        if (fabs(left + right) <= 0.0001) left = right = auto_tangent(t0, t, t1, v0, value, v1, right, bits, reach_left, reach_right);
                         else {
-                            double solved_left = auto_tangent(t0, t, t1, v0, value, v1, -left, bits);
-                            right = auto_tangent(t0, t, t1, v0, value, v1, right, bits);
+                            double solved_left = auto_tangent(t0, t, t1, v0, value, v1, -left, bits, reach_left, reach_right);
+                            right = auto_tangent(t0, t, t1, v0, value, v1, right, bits, reach_left, reach_right);
                             left = solved_left;
                         }
                     } else if (has_prev) left = right = edge_tangent(t0, t, v0, value, -left, bits);
@@ -964,14 +994,17 @@ struct FbxCharacter {
             }
             key_time.append(times[k]); key_value.append(value); key_mode.append(mode);
             key_right.append(right); key_left.append(left);
+            key_reach_right.append(reach_right); key_reach_left.append(reach_left);
             carried_left = next_left;
+            carried_reach = next_reach;
         }
         return true;
     }
     // an auto tangent from the neighbouring keys (after ufbx's ufbxi_solve_auto_tangent,
     // which follows the FBX SDK): clamped keys flatten, time-dependent tangents blend
     // the one- and two-sided slopes and lean toward `bias` percent of a side
-    static double auto_tangent(double t0, double t, double t1, double v0, double v, double v1, double bias, int64_t bits) {
+    static double auto_tangent(double t0, double t, double t1, double v0, double v, double v1, double bias, int64_t bits,
+                               double reach_left, double reach_right) {
         if ((bits & FBX_CLAMP) && fmin(fabs(v0 - v), fabs(v1 - v)) <= 0) return 0;
         double slope = (v1 - v0) / (t1 - t0);
         if (!(bits & FBX_TIME_INDEPENDENT)) {
@@ -989,10 +1022,10 @@ struct FbxCharacter {
             }
         }
         if (bits & FBX_CLAMP_PROGRESSIVE) {
-            // never overshoot either neighbour within the tangents' one-third reach
+            // never overshoot either neighbour within the tangents' weighted reach
             double sign = slope >= 0 ? 1 : -1, magnitude = sign * slope;
-            double reach_left = (t - t0) / 3, reach_right = (t1 - t) / 3;
-            double max_left = reach_left > 0 ? sign * (v - v0) / reach_left : 0, max_right = reach_right > 0 ? sign * (v1 - v) / reach_right : 0;
+            double span_left = reach_left * (t - t0), span_right = reach_right * (t1 - t);
+            double max_left = span_left > 0 ? sign * (v - v0) / span_left : 0, max_right = span_right > 0 ? sign * (v1 - v) / span_right : 0;
             if (!(max_left > 0)) max_left = 0;
             if (!(max_right > 0)) max_right = 0;
             slope = sign * fmin(magnitude, fmin(max_left, max_right));
@@ -1008,6 +1041,18 @@ struct FbxCharacter {
         if (!(bits & FBX_TIME_INDEPENDENT) && excess > 0) slope += excess * excess * (bias > 0 ? 1 : -1) * 40;
         return slope;
     }
+    // the Bezier parameter whose time is x0, for inner control-point times p1 and p2:
+    // Newton steps as ufbx's ufbxi_find_cubic_bezier_t takes them
+    static double bezier_parameter(double p1, double p2, double x0) {
+        double a = 3 * p1 - 3 * p2 + 1, b = 3 * p2 - 6 * p1, c = 3 * p1, t = x0;
+        for (int i = 0; i < 11; i++) {
+            double x = ((a * t + b) * t + c) * t - x0;
+            t -= x / ((3 * a * t + 2 * b) * t + c);
+            // converged within 4 ULP of 1, tested after the third step and then every second
+            if (i >= 2 && i % 2 == 0 && fabs(x) <= 8.881784197001252e-16) break;
+        }
+        return t;
+    }
     double evaluate(const FbxCurve& c, double t) const {
         const double* time = key_time.data() + c.first;
         const double* value = key_value.data() + c.first;
@@ -1021,10 +1066,13 @@ struct FbxCharacter {
         case MODE_CONSTANT: return value[lo];
         case MODE_CONSTANT_NEXT: return value[hi];
         case MODE_CUBIC: {
-            // Hermite with slopes in value per second
-            double seconds = span / FBX_TICKS, m0 = key_right[c.first + lo] * seconds, m1 = key_left[c.first + hi] * seconds;
-            double u2 = u * u, u3 = u2 * u;
-            return (2 * u3 - 3 * u2 + 1) * value[lo] + (u3 - 2 * u2 + u) * m0 + (-2 * u3 + 3 * u2) * value[hi] + (u3 - u2) * m1;
+            // a Bezier whose inner control points sit at the tangents' weights along the segment, at
+            // heights the slopes give (after ufbx); weights of 1/3 make it the Hermite curve, u itself
+            double seconds = span / FBX_TICKS, x1 = key_reach_right[c.first + lo], x2 = 1 - key_reach_left[c.first + hi];
+            double y0 = value[lo], y3 = value[hi];
+            double y1 = y0 + key_right[c.first + lo] * x1 * seconds, y2 = y3 - key_left[c.first + hi] * (1 - x2) * seconds;
+            double s = bezier_parameter(x1, x2, u), r = 1 - s;
+            return r * r * r * y0 + 3 * (r * r * s * y1 + r * s * s * y2) + s * s * s * y3;
         }
         default: return value[lo] + (value[hi] - value[lo]) * u;
         }

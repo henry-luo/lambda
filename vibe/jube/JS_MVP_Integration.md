@@ -3,24 +3,26 @@
 **Date:** 2026-10-20
 
 **Status:** ratified by the user's implementation request; implementation and
-qualification in progress under **D8.1.3v28** (CLI refinement, 2026-10-21).
+qualification in progress under **D8.1.3v29** (AUTO-default clarification, 2026-10-21).
 
 Implementation progress and gate results:
 [JS MVP integration implementation](../impl/JS_MVP_Integration.md).
 
 **Source baseline:** `222fb3a494d31b08b0cbc0578a23fe2d1e8a91fa` and Result52.
 
-**Scope:** make the fast MVP-Lmd execution model the normal JavaScript path,
-unify its ownership and host environment with Lambda, and add complete dynamic
-behavior at the smallest boundary that requires it.
+**Scope:** make fast MVP-Lmd the engine used whenever JavaScript activates MIR,
+preserve AUTO as the default tier policy, unify ownership and host environment
+with Lambda, and add complete dynamic behavior at the smallest required boundary.
 
 ## 1. Priorities and acceptance contract
 
 The user directs this rework in the following order:
 
 1. **Preserve the performance of the rewritten JS MVP.** The fast
-   former explicit MVP behavior becomes the default for `lambda.exe js`;
-   **D8.1.3v28** removes the redundant runtime option.
+   former explicit MVP behavior becomes the MIR implementation for explicit
+   `mir`, AUTO fallback and hot promotion. JavaScript still defaults to AUTO;
+   **D8.1.3v29** clarifies the distinction and retains removal of the redundant
+   runtime option.
    Performance preservation is the first implementation milestone and a
    continuing acceptance gate for every subsequent milestone.
 2. **Make dynamic handling depend on actual semantic need.** Keep native
@@ -56,7 +58,7 @@ closure.
 
 | Contract | Formal authority |
 |---|---|
-| MVP-Lmd is the normal MIR compiler; explicit AST/AUTO policies remain; dynamic source uses the retained AST interpreter | **D8.1.3v26** |
+| AUTO is the default tier policy; activated MIR uses fast MVP-Lmd; dynamic source uses the retained AST interpreter | **D8.1.3v29** |
 | Shared Lambda host substrate and `Item` boundary; retain JS semantics | **D1.2v2**, **D1.3v3**, **S1.11** |
 | One canonical `EvalContext`, stable context storage and one event loop per context | **D5.4.1–D5.4.4** |
 | Precise roots and explicit ownership at every fallback/host boundary | **D1.5v2**, **D5.3.1–D5.3.6v2** |
@@ -117,14 +119,18 @@ After this rework, under the same backend policy:
 ./lambda.exe js app.js
 ```
 
-selects the integrated MVP compiler plan, runtime environment and host behavior.
-Under **D8.1.3v28** (2026-10-21), the redundant `--runtime=mvp-lmd` option is
-removed from Script and batch commands. There is one public engine entry and
-one heap, globals implementation and lifetime contract.
+selects AUTO under **D8.1.3v29**: supported units begin in the AST interpreter;
+unsupported units and eligible hot definitions use the integrated fast MVP MIR
+engine. An unset or empty `JS_EXEC_BACKEND` has the same policy as `auto`.
+Explicit `ast` forces the interpreter; explicit `mir` selects whole-unit MVP
+MIR. This policy applies at the common entry for Script, module, document and
+batch execution. The redundant `--runtime=mvp-lmd` option remains removed.
+There is one public execution entry and one heap, globals implementation and
+lifetime contract.
 
-With no backend override, normal JS execution uses native MVP MIR, as
-**D8.1.3v26** already requires. Preserve explicit `JS_EXEC_BACKEND=ast` and
-`auto` through `JS_EXEC_BACKEND`; apply that policy at the common entry.
+MIR performance qualification uses `JS_EXEC_BACKEND=mir`; default-entry checks
+exercise AUTO. Earlier captures below predate this clarification and record
+the then-current MIR default; they are not AUTO timing evidence.
 CLI coverage must verify the ordinary command, backend-policy precedence and
 rejection of the removed runtime option.
 
@@ -144,10 +150,13 @@ DOM, batch, module and preamble callers enter the same execution service.
 
 ```mermaid
 flowchart TD
-    cli["CLI: default or explicit MVP"] --> entry["One JS execution entry"]
+    cli["CLI: AUTO default, explicit AST or MIR"] --> entry["One JS execution entry"]
     host["Modules, document, batch, host calls"] --> entry
     entry --> owner["Canonical Lambda Runtime / EvalContext"]
-    entry --> plan["Bound AST and effects per function / region"]
+    entry --> tier["AUTO admission or explicit tier selection"]
+    tier --> ast["Retained AST interpreter"]
+    tier --> plan["Activated MIR: MVP plan and effects"]
+    ast -->|hot promotion| plan
     plan --> fast["Native MVP body"]
     plan --> guarded["Guarded native body"]
     guarded --> fast
@@ -156,6 +165,7 @@ flowchart TD
     slow --> dynamic["Dynamic source: retained AST interpreter"]
     owner --> realm["Shared realm bindings, intrinsics and host services"]
     fast --> realm
+    ast --> realm
     slow --> realm
     dynamic --> realm
 ```
@@ -370,9 +380,9 @@ Measure these comparisons:
 
 | Comparison | Purpose |
 |---|---|
-| Candidate default vs archived fast explicit MVP | Required performance preservation |
-| Candidate default and removed-selector rejection | **D8.1.3v28** CLI contract across unset/MIR/AST/AUTO policy |
-| Candidate default vs archived normal Result52 | Quantify the recovered integration loss |
+| Candidate explicit `mir` vs archived fast explicit MVP | Required MIR performance preservation |
+| Candidate AUTO default and removed-selector rejection | **D8.1.3v29** CLI contract across unset/empty/MIR/AST/AUTO policy |
+| Candidate explicit `mir` vs archived normal Result52 MIR | Quantify the recovered MIR integration loss |
 | Candidate Lambda untyped/typed vs archived release | Protect the shared Lambda substrate from the unification |
 
 ### Measurement and acceptance
@@ -439,7 +449,7 @@ them or establish that the rework passes.
 | Milestone | Deliverable | Exit gate |
 |---|---|---|
 | 0. Freeze evidence | Exact fast control, canonical source/output manifest, current failures, entry/MIR diagnostics and ownership inventory | Reproducible reference and fixed protection set |
-| 1. Recover the fast default | The ordinary CLI uses MVP's fast planning with the shared owner; replace blanket host flags with sufficient binding/effect facts and guards | Three diagnostic rows plus the full protected population preserve fast performance; existing correctness gates pass |
+| 1. Recover fast MIR | Activated MIR uses MVP's fast planning with the shared owner; AUTO remains the default; replace blanket host flags with sufficient binding/effect facts and guards | Three diagnostic rows plus the full protected population preserve fast MIR performance; existing correctness gates pass |
 | 2. Unify ownership and globals | Canonical context, realm cells, intrinsic identities and Script/code lifetime; remove standalone context/destructor and copy/import bridges | Identity, reentry and precise-GC checks pass; performance gates remain green |
 | 3. Unify host execution | One service path for modules, document callbacks, timers, jobs, preambles and explicit AST/AUTO integration | Shared-state and callback/lifetime tests pass without fast-path loss |
 | 4. Broaden dynamic behavior | Fix concrete unsupported/incorrect cases with local complete fallbacks, ordered by real usage and failures | Each feature has semantic, fallback and unaffected-performance evidence |
@@ -457,8 +467,9 @@ repair the shared design before proceeding.
 
 Final closure requires all of the following:
 
-- The ordinary command uses the integrated MVP entry, preserves backend policy
-  overrides, and rejects the removed runtime option (**D8.1.3v28**).
+- The ordinary command defaults to AUTO, activated MIR uses the integrated fast
+  MVP engine, explicit backend choices are honored, and the removed runtime
+  option is rejected (**D8.1.3v29**).
 - Fast MVP performance survives normal CLI and host integration.
 - Each semantic binding/intrinsic has one owner and authoritative storage per
   realm; standalone and public execution no longer maintain parallel sets.

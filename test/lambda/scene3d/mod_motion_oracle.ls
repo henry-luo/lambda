@@ -50,3 +50,16 @@ pub fn skin_drift(c, clip_name, seconds, want, stride) {
 pub fn agrees(drifts) => all([for (d in drifts) d != null and d < close]);
 pub fn within(d) => d < close;
 pub fn id_of(cs) => cs[0] ++ (if (cs[1] == null) "" else "#" ++ cs[1])
+
+// the largest distance from a rigid mesh's posed vertex to the nearest vertex ufbx places for
+// that model, over every `stride`th vertex (meshes are unwelded per corner, so orders differ)
+pub fn rigid_drift(c, clip_name, seconds, want, stride) {
+    let world = world_at(c, clip_name, seconds)
+    let js = motion.joints(c);
+    max([for (m in content(motion.body_of(c)) where name(m) == 'mesh' and want[m.name] != null)
+        for (g in content(m) where name(g) == 'geometry') for (v in 0 to len(g.positions) div 3 - 1 where v % stride == 0)
+            (let p = [g.positions[3 * v], g.positions[3 * v + 1], g.positions[3 * v + 2]],
+             let j = js[int(g["skin-indices"][4 * v])],
+             let q = t.point(t.multiply(world[j.name], j.inverse_bind)^, p)^,
+             min([for (w in want[m.name]) gap(q, w)]))])
+}

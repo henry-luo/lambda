@@ -524,6 +524,7 @@ static void js_script_destroy_extension(Script* base_script) {
         script->type_registry = NULL;
     }
     if (script->ast_callables) {
+        js_script_reset_heap(script);
         hashmap_free(script->ast_callables);
         script->ast_callables = NULL;
     }
@@ -614,6 +615,26 @@ struct JsAstCallableEntry {
 typedef TypedHashMap<JsAstCallableEntry,
     HashMapIntegralMemberKeyOps<JsAstCallableEntry, &JsAstCallableEntry::function_id>>
     JsAstCallableMap;
+
+void js_script_reset_heap(JsScript* script) {
+    if (!script || !script->ast_callables) return;
+    size_t cursor = 0;
+    JsAstCallableEntry* entry = NULL;
+    while (JsAstCallableMap::next(script->ast_callables, &cursor, &entry)) {
+        JsCallableCode* code = entry->code;
+        if (code->compiled_body.item) heap_unregister_gc_root(&code->compiled_body.item);
+        if (code->compiled_loop_body.item) heap_unregister_gc_root(&code->compiled_loop_body.item);
+        // retained definitions outlive the realm's heap and its compiled callables (D5.4).
+        code->compiled_body = {};
+        code->compiled_loop_body = {};
+        code->func_ptr = NULL;
+        code->runtime_context = NULL;
+        code->source_text = NULL;
+        code->instance_shape = NULL;
+        code->body_kind = JS_FUNCTION_BODY_AST;
+        code->p2_promotion = {};
+    }
+}
 
 static bool js_callable_elides_function_environment(AstFuncNode* function,
         const JsAstFunctionFacts& facts) {

@@ -1664,7 +1664,7 @@ test-lambda-full: test-lambda-baseline
 test-gc-rooting-core: build
 	@mkdir -p temp
 	@echo "Running LambdaJS JIT exact-root forced-GC gate..."
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 JS_EXEC_BACKEND=mir \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
 	@echo "Running LambdaJS AST functional RegExp replacement exact-root gate..."
