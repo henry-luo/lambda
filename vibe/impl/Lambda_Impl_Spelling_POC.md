@@ -374,13 +374,15 @@ also decode correctly. No Lambda package reader or engine code changed.
 
 ## 8. Lambda front-coded lookup and paragraph timing
 
-**Implemented 2026-10-22:** `lambda.doc.spelling.front_coded` reads the adopted
+**Initial implementation, 2026-10-22:** `lambda.doc.spelling.front_coded` reads the adopted
 uncompressed text resource and retains its binary bytes plus a compact `u32[]`
 line-offset index. It binary-searches restart keys by comparing bytes in place,
 then decodes only the selected line until a match or a greater word is found.
 Lookup returns the zero-based entry ID, or null for an absent word. Query copies
 are normalized to NFC; case remains exact. Prefix lengths follow
 **S2.5.8/S17.4.1** and byte comparisons follow **S6.2.2v3**.
+The lookup path described here is superseded by direct byte comparison in §9;
+these timings and regression records describe the initial implementation.
 
 Implemented entry points in `lmd/package/doc/spelling/front_coded.ls`:
 
@@ -523,3 +525,137 @@ Generated resources and records under `temp/spelling_vocab_poc/front/`:
 - `regression-retries.json`, `retry-*.json`, `retry-*.log`: affected-suite reruns.
 - `prelim-correct.json` and `.log`: the bounded `--prelim` runner-contract gate.
 - `baseline-result.json`: original failure, isolated recoveries and combined coverage.
+
+## 9. Direct byte comparison during lookup
+
+**Implemented 2026-10-22 (USER):** lookup compares the target directly with the
+front-coded UTF-8 stream. It creates neither intermediate dictionary-word
+strings nor a selected-line copy. The dictionary resource, entry IDs, restart
+search, exact case behavior and NFC query normalization are unchanged. This is
+Lambda Script code; the native release executable is unchanged.
+
+### 9.1 Comparison state
+
+After selecting a line, `compare_word` advances an absolute dictionary byte
+position and a target byte position together while their bytes match. It stops
+with an entry ID if both words end together, or with null if the dictionary word
+is greater. When a word is smaller, the matched target-byte count is sufficient
+to interpret following entries without reconstructing that word:
+
+| Following token | Action |
+|---|---|
+| `;suffix`, preceding word ended as a complete target prefix | Compare the suffix starting at the matched target position |
+| `;suffix`, preceding word differed from the target | Skip the suffix; the inherited mismatch is still smaller |
+| `;N,suffix` | Find target byte boundary `p` after `N` code points; compare the suffix there if `p` is within the matched prefix, otherwise skip it |
+| `|word` | Compare the complete literal starting at target position zero |
+
+The matched-byte count may end *inside* a UTF-8 scalar: for example, `è` and `é`
+share their first encoded byte. Explicit prefix counts still refer to complete
+code points (**S2.5.8/S17.4.1**). Walking only the target to the requested
+code-point boundary ensures that retaining a differing scalar cannot be mistaken
+for retaining a matching prefix. Byte comparisons follow the dictionary's
+UTF-8 order (**S6.2.2v3**). An offset beyond the target's length is treated as a
+retained mismatch. Numeric suffixes with no comma remain ordinary text, even
+when their digit sequences are too large to represent as an integer.
+
+Load-time validation and source-oracle verification still reconstruct words
+using the original decoder. This change removes word construction from lookup;
+it does not optimize full validation or add token/line caches.
+
+### 9.2 Qualification and timing method
+
+`test/lambda/proc/spelling_front_coded.ls` now has 48 golden checks, including
+prefix retreat after skipped appends, mismatches within two- and four-byte
+scalars, offsets beyond a short target, multi-digit offsets, numeric suffixes,
+and an 80-digit appended suffix. `test/lambda/spelling/_front_full.ls` now checks
+lookup of **every source word**, replacing its earlier block-boundary sweep,
+and checks every generated negative word.
+
+The final-source focused gate passes **8/8 fixtures in each of interpreter and
+JIT**. The complete source sequence verifies, all **109,902 positive lookups**
+return their exact entry IDs, and all **6,465 synthetic negative lookups** return
+null under JIT. The independent UTF-8 fixtures and malformed-resource checks
+remain in the focused gate. No C/C++ runtime source changed, so this update uses
+the focused package gates rather than repeating the engine aggregate baseline.
+
+`utils/spelling_lookup_bench.py` compares the committed reader at `9a2f257b4`
+with the current reader. It snapshots separate package trees, the identical
+100-word paragraph harness/fixture, and the same raw dictionary and manifest.
+The only differing package source is `doc/spelling/front_coded.ls`. Both lanes
+use the same privately copied, release-qualified executable and forced JIT.
+Each process uses the unchanged five warmups, nine samples and three paragraphs
+per sample from §8.1, with no result or decoded-line cache.
+
+Three process pairs run in **A/B, B/A, A/B order**. The reported comparison uses
+the median of the three process medians for each lane; individual samples,
+pair ratios, host loads, peak RSS, output checks and source/input/executable
+hashes are retained. A failed or timed-out measurement aborts without retry.
+Dictionary loading/full validation is measured separately and excluded from
+paragraph samples. This is a fresh source A/B comparison on one executable,
+distinct from comparing against §8's historical timing.
+
+### 9.3 Observed results
+
+All six measured processes passed the paragraph golden, found exactly `teh`,
+`recieve`, `speling`, and produced checksum 96. No process failed, timed out or
+needed a retry. Snapshot source/input hashes and the executable hash verified
+after the last run. The executable is §8's pinned release host, SHA-256
+`02a4444635d86948c8bb4895eafe88d69ebec260e45f08530a33ed54b6decc6a`;
+the candidate module is SHA-256
+`6bda6eb10e31a65fdf21568cf2cb3606435ec95aad99d51b498ac40ff59ae79d`.
+
+| Process pair | Original decoder, median ms/paragraph | Direct comparison, median ms/paragraph | Speedup |
+|---|---:|---:|---:|
+| 0, A/B | 3,839.543 | 9.733 | 394.50× |
+| 1, B/A | 1,392.569 | 9.051 | 153.85× |
+| 2, A/B | 3,080.983 | 15.043 | 204.81× |
+| Median of process medians | **3,080.983** | **9.733** | **316.56×** |
+
+The ratio of the lane medians is **316.56×**, a **99.684%** reduction in observed
+warm paragraph time. Individual pair ratios range from **153.85× to 394.50×**.
+The host was heavily loaded; recorded one-minute load averages ranged from
+approximately 21.5 to 36.3 on eight logical CPUs. Individual batch means ranged
+from 1,285.064–8,941.268 ms for the original reader and 7.283–69.403 ms for direct
+comparison. The absolute timings remain host-dependent; the benefit is large
+in every pair. These are wall-time measurements, not a claim about isolated CPU
+cycles or a comparison with a native spelling engine.
+
+| Other process measurements, median across three runs | Original decoder | Direct comparison |
+|---|---:|---:|
+| First paragraph after loading | 1,506.717 ms | 8.829 ms |
+| Dictionary read/index/full validation | 28.479 s | 31.611 s |
+| Whole-process peak RSS | 894.2 MiB | 700.3 MiB |
+
+Cold checks remain dominated by loading/full validation, whose implementation
+was unchanged and was not tuned here. The different observed load medians are
+not evidence of a lookup-induced loading improvement. Peak RSS includes that
+phase, JIT/runtime state and temporary allocations; it is not dictionary payload
+size or steady-state lookup memory. Both representations retain the same
+532,865-byte logical dictionary/index payload from §8.2.
+
+### 9.4 Reproduction and artifacts
+
+With the pinned resources prepared and a release executable available (§8.4):
+
+```bash
+LAMBDA_EXEC_BACKEND=jit temp/spelling_vocab_poc/lambda-front-release.exe --no-log run test/lambda/spelling/_front_full.ls
+python3 utils/spelling_lookup_bench.py --executable temp/spelling_vocab_poc/lambda-front-release.exe --control-ref 9a2f257b4 --pairs 3
+```
+
+The A/B utility creates its own directory below `temp/`, snapshots the executable
+and package sources, and records the hashes for that run. This qualification's
+artifacts are under `temp/spelling-pointer-ab-33i7sqmh/`:
+
+- `results.json`: all six process measurements, samples, output checks and summary.
+- `provenance.json`: executable, benchmark utility, input and package-source hashes.
+- `pair-<n>-<variant>.log`: stable paragraph golden output for each process.
+- `control/`, `candidate/`: private package/fixture/resource snapshots and each
+  lane's most recent raw Lambda timing output.
+- `lambda-release.exe`: the identical host used for both lanes.
+
+Focused and exhaustive qualification records are under `temp/spelling_pointer/`:
+`focused-{interp,jit}.json` and `.log`, `focused-workspace.json`, and
+`full-final-jit.json` and `.log`. The full result pins the same candidate source
+hash as the timing comparison. The implementation remains a raw UTF-8-resource
+POC; XZ loading, complete prose tokenization, case admission, suggestions and
+load/allocation tuning remain pending.

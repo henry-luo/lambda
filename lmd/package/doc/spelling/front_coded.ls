@@ -15,7 +15,7 @@ fn token_text(raw: binary, at: int, end: int) string^ {
     value
 }
 
-// validation and lookup share the same decoder, retaining only the current word.
+// load-time validation and oracle verification share the word decoder.
 fn next_word(raw: binary, at: int, end: int, previous: string, delta: bool) string^ {
     let token = token_text(raw,at,end)^
     let comma = index_of(token,",");
@@ -84,13 +84,55 @@ pub fn from_bytes(source, expected_count = null) map^ {
     {format_version:1,bytes:source,offsets:offsets,count:count}
 }
 
-fn find_in_line(raw: binary, at: int, limit: int, key: string, previous: string,
-    delta: bool, id: int) int?^ {
-    let end = token_end(raw,at,limit)
-    let word = next_word(raw,at,end,previous,delta)^;
-    if (word == key) id
-    else if (word > key or end == limit) null
-    else find_in_line(raw,end + 1,limit,key,word,raw[end] == 59,id + 1)^
+// prefix counts are code points; only the target needs walking to their byte boundary.
+fn prefix_offset(key: binary, count: int, at: int = 0) int {
+    if (count == 0) at
+    else if (at == len(key)) at + 1
+    else {
+        let head = key[at]
+        let width = if (head < 128) 1 else if (head < 224) 2 else if (head < 240) 3 else 4;
+        prefix_offset(key,count - 1,at + width)
+    }
+}
+
+fn skip_word(raw: binary, key: binary, limit: int, at: int, matched: int, id: int) int? =>
+    next_token(raw,key,limit,token_end(raw,at,limit),matched,false,id)
+
+fn suffix_prefix(raw: binary, key: binary, limit: int, start: int, at: int,
+    keep: int, matched: int, extend: bool, id: int) int? {
+    let b = if (at == limit) 10 else raw[at];
+    if (b >= 48 and b <= 57) {
+        // numeric suffixes without a comma can be arbitrarily long; cap an unusable offset.
+        let retained = if (keep > len(key)) keep else keep * 10 + b - 48;
+        suffix_prefix(raw,key,limit,start,at + 1,retained,matched,extend,id)
+    }
+    else if (b == 44) {
+        let prefix = prefix_offset(key,keep);
+        // a retained mismatch stays smaller; a shorter prefix permits comparison again.
+        if (prefix > matched) skip_word(raw,key,limit,at + 1,matched,id)
+        else compare_word(raw,key,limit,at + 1,prefix,id)
+    }
+    else if (extend) compare_word(raw,key,limit,start,matched,id)
+    else skip_word(raw,key,limit,at,matched,id)
+}
+
+fn next_token(raw: binary, key: binary, limit: int, at: int, matched: int,
+    extend: bool, id: int) int? {
+    if (at == limit) null
+    else if (raw[at] == 124) compare_word(raw,key,limit,at + 1,0,id + 1)
+    else suffix_prefix(raw,key,limit,at + 1,at + 1,0,matched,extend,id + 1)
+}
+
+// compare the suffix in place; matched may end inside a UTF-8 scalar on a mismatch.
+fn compare_word(raw: binary, key: binary, limit: int, at: int, matched: int, id: int) int? {
+    let b = if (at == limit) 10 else raw[at];
+    if (b == 59 or b == 124 or b == 10) {
+        if (matched == len(key)) id
+        else next_token(raw,key,limit,at,matched,true,id)
+    }
+    else if (matched == len(key) or b > key[matched]) null
+    else if (b < key[matched]) skip_word(raw,key,limit,at + 1,matched,id)
+    else compare_word(raw,key,limit,at + 1,matched + 1,id)
 }
 
 // exact NFC membership; case admission and suggestions remain separate package work.
@@ -105,8 +147,8 @@ pub fn lookup(vocabulary: map, word: string) int?^ {
     else if (at == 0) null
     else {
         let line = at - 1
-        let raw = line_bytes(vocabulary,line)^;
-        find_in_line(raw,0,len(raw),key,"",false,line * 64)^
+        let start = int(vocabulary.offsets[line]);
+        compare_word(raw,bytes,line_end(vocabulary,line),start,0,line * 64)
     }
 }
 

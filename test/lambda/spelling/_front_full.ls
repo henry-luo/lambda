@@ -9,8 +9,8 @@ pn main() {
         len(dictionary.offsets) == manifest.lines,
         len(dictionary.bytes) == manifest.bytes,
         front.verify(dictionary,oracle.words)^,
-        all([for (i,word in oracle.words where i % 64 == 0 or i % 64 == 63 or i == len(oracle.words) - 1)
+        all([for (i,word in oracle.words)
             front.lookup(dictionary,word)^ == i]),
-        all([for (i,word in oracle.negatives where i % 16 == 0) front.lookup(dictionary,word)^ == null])
+        all([for (word in oracle.negatives) front.lookup(dictionary,word)^ == null])
     ]
 }

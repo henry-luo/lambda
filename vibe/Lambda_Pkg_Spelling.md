@@ -309,9 +309,14 @@ remains deferred under [K29c](Lambda_Design_Concurrency.md).
 #### 4.3.4 Loading and lookup
 
 Build or load a compact line-offset table and binary-search each line's first
-complete word to select a block. Decode at most 64 words in that block for exact
-lookup. Keep the vocabulary compact instead of expanding it into one map per
-word or duplicating the full spelling list in suggestion resources.
+complete word to select a block. Compare the target directly against at most
+64 encoded entries in that block, without constructing intermediate dictionary
+words. Track the matched target-byte prefix: an inherited mismatch remains
+smaller, while a shorter retained prefix permits suffix comparison again.
+Convert token prefix counts to target UTF-8 byte boundaries (**S2.5.8/S17.4.1**);
+compare bytes in the dictionary's sort order (**S6.2.2v3**). Keep the vocabulary
+compact instead of expanding it into one map per word or duplicating the full
+spelling list in suggestion resources.
 
 Offsets into the UTF-8 file are byte positions; prefix lengths inside tokens
 remain code-point counts. A 32-bit line-offset table for the measured US pack
@@ -343,10 +348,13 @@ The [storage POC, §7](impl/Lambda_Impl_Spelling_POC.md#7-semicolon-text-format-
 records the encoder, complete word-for-word and independent-line round trips,
 hashes and compression measurements. The
 [lookup POC, §8](impl/Lambda_Impl_Spelling_POC.md#8-lambda-front-coded-lookup-and-paragraph-timing)
-implements `lambda.doc.spelling.front_coded`: a retained binary buffer, a `u32[]`
-line-offset index, binary search of restart keys, and decoding confined to the
-selected line. Lookup returns a zero-based word ID or null. The earlier JSON
-reader remains available for its original fixture.
+implements `lambda.doc.spelling.front_coded`: retained UTF-8 bytes, a `u32[]`
+line-offset index, and binary search of restart keys. The
+[pointer comparison update, §9](impl/Lambda_Impl_Spelling_POC.md#9-direct-byte-comparison-during-lookup)
+compares the target against the selected line directly. Lookup creates no
+dictionary-word strings or line slice and returns a zero-based word ID or null.
+Load-time validation still reconstructs words. The earlier JSON reader remains
+available for its original fixture.
 
 The POC reads the uncompressed `.dict` produced by the preparation utility;
 in-process standalone XZ loading and a complete manifest/policy loader remain
