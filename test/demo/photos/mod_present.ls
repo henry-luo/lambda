@@ -22,6 +22,13 @@ pub pn set_value(control,value) {
     } else dom.set_state(control,"value",value)
 }
 pub fn node(owner,id) => dom.get_element_by_id(owner,id)
+pn set_disabled(control,value) {
+    let current = dom.get_attribute(control,"disabled") != null
+    if (current != value) {
+        if (value) dom.set_attribute(control,"disabled","")
+        else dom.remove_attribute(control,"disabled")
+    }
+}
 // these nodes are non-void markup fragments; the HTML document formatter adds a shell.
 fn markup(nodes) => join([for (child in nodes) format(child,'xml')],"")
 pub pn publish(owner,st) any^ {
@@ -55,8 +62,15 @@ pub pn publish(owner,st) any^ {
         'data-y':if (bounds == null) "" else string(bounds.y),
         'data-bounds-width':if (bounds == null) "" else string(bounds.width),
         'data-bounds-height':if (bounds == null) "" else string(bounds.height),
+        'data-rulers':string(st.rulers_visible),'data-grid':string(st.grid_visible),'data-grid-spacing':string(st.grid_spacing),
+        'data-grid-subdivisions':string(st.grid_subdivisions),'data-grid-snap':string(st.snap_grid),
+        'data-pan-x':string(st.pan.x),'data-pan-y':string(st.pan.y),
+        'data-guides-locked':string(st.guides_locked),'data-crop-ratio':join([for (v in st.crop_ratio) string(v)],":"),
         'data-guides':string(len(guides.items(st.doc))),'data-guides-visible':string(st.guides_visible),
         'data-snapping':string(st.snap_enabled),'data-snap-x':string(st.gesture.snapped.x),'data-snap-y':string(st.gesture.snapped.y),
+        'data-snap-layers':string(st.snap_layers),'data-canvas-anchor':st.canvas_anchor,'data-crop-aspect':st.crop_aspect,
+        'data-crop-x':string(st.crop.x),'data-crop-y':string(st.crop.y),
+        'data-crop-width':string(st.crop.width),'data-crop-height':string(st.crop.height),
         'data-curve-points':string(len(tone.points(curves,st.curve_channel))),
         'data-curve-mode':curve_mode,'data-adjustment':string(model.adjustment(active.node)),
         'data-dirty':string(editor.dirty(st)),'data-dialog':st.dialog,'data-tool':st.tool,
@@ -75,14 +89,28 @@ pub pn publish(owner,st) any^ {
         'data-selection':if (st.selection == null) "none" else "active",
         'data-drag':if (st.gesture == null) "" else st.gesture.mode})
         dom.set_attribute(owner,string(key),requested)
-    let guide_html = markup([for (g in guides.items(st.doc)) <button type:"button",'data-action':"guide-remove",'data-guide':g.id,
+    let guide_html = markup([for (g in guides.items(st.doc)) <button type:"button",'data-action':"guide-remove",'data-guide':g.id,*:if (st.guides_locked) ({disabled:""}) else ({}),
         (if (g.axis == "x") "Vertical " else "Horizontal ") ++ string(g.position) ++ " px · Remove">])
     if (dom.get_attribute(node(owner,"guide-list"),"data-items") != guide_html) {
         dom.set_inner_html(node(owner,"guide-list"),guide_html)
         dom.set_attribute(node(owner,"guide-list"),"data-items",guide_html)
     }
+    dom.set_text_content(node(owner,"rulers-toggle"),if (st.rulers_visible) "Hide rulers" else "Show rulers")
+    dom.set_text_content(node(owner,"grid-toggle"),if (st.grid_visible) "Hide grid" else "Show grid")
+    dom.set_text_content(node(owner,"grid-snap"),if (st.snap_grid) "Grid snapping on" else "Grid snapping off")
+    for (id,value in {'grid-spacing':st.grid_spacing,'grid-subdivisions':st.grid_subdivisions})
+        if (not dom.matches(node(owner,string(id)),":focus")) set_value(node(owner,string(id)),string(value))
+    dom.set_text_content(node(owner,"guide-lock"),if (st.guides_locked) "Unlock guides" else "Lock guides")
+    for (id in ["guide-add","guide-clear","guide-layout"]) set_disabled(node(owner,id),st.guides_locked)
+    dom.style_set_property(node(owner,"crop-custom"),"display",if (st.crop_aspect == "custom") "inline-flex" else "none")
+    // keep rejected text editable; replacing it with the old value would suppress the correcting change event.
+    let crop_ratio_draft = model.value(st.crop_ratio_draft,st.crop_ratio)
+    for (i,id in ["crop-ratio-width","crop-ratio-height"])
+        if (not dom.matches(node(owner,id),":focus")) set_value(node(owner,id),string(crop_ratio_draft[i]))
     dom.set_text_content(node(owner,"guide-show"),if (st.guides_visible) "Hide guides" else "Show guides")
     dom.set_text_content(node(owner,"guide-snap"),if (st.snap_enabled) "Disable snapping" else "Enable snapping")
+    dom.set_text_content(node(owner,"guide-layers"),if (st.snap_layers) "Layer snapping on" else "Layer snapping off")
+    dom.set_text_content(node(owner,"crop-size"),if (st.crop == null) "Drag to crop" else string(st.crop.width) ++ " × " ++ string(st.crop.height))
     let layer_html = markup(scene.layer_rows(st))
     if (dom.get_attribute(node(owner,"layers"),"data-rows") != layer_html) {
         dom.set_inner_html(node(owner,"layers"),layer_html)
@@ -103,9 +131,7 @@ pub pn publish(owner,st) any^ {
     if (dom.get_state(node(owner,"curve-channel"),"value") != st.curve_channel)
         set_value(node(owner,"curve-channel"),st.curve_channel)
     if (dom.get_state(node(owner,"curve-mode"),"value") != curve_mode) set_value(node(owner,"curve-mode"),curve_mode)
-    if (st.curve_point<=0 or st.curve_point>=len(tone.points(curves,st.curve_channel))-1)
-        dom.set_attribute(node(owner,"curve-remove"),"disabled","")
-    else dom.remove_attribute(node(owner,"curve-remove"),"disabled")
+    set_disabled(node(owner,"curve-remove"),st.curve_point<=0 or st.curve_point>=len(tone.points(curves,st.curve_channel))-1)
     let style_html = markup(scene.style_rows(st))
     if (dom.get_attribute(node(owner,"styles"),"data-items") != style_html) {
         dom.set_inner_html(node(owner,"styles"),style_html)
@@ -142,6 +168,7 @@ pub pn publish(owner,st) any^ {
         'brush-flow':st.brush.flow,'brush-opacity':st.brush.opacity,tolerance:st.tolerance,
         'selection-mode':st.selection_mode,'gradient-kind':st.gradient_kind,
         'straighten-axis':st.straighten_axis,
+        'crop-aspect':st.crop_aspect,'canvas-anchor':st.canvas_anchor,
         'channel-view':if (st.channel_view in ["r","g","b","a"]) st.channel_view else "composite",
         blend:model.value(active.node.blend,'normal'),
         'retouch-strength':st.retouch.strength,'retouch-radius':st.retouch.radius,'retouch-aligned':if (st.retouch.aligned) "aligned" else "reset",
@@ -158,8 +185,7 @@ pub pn publish(owner,st) any^ {
     for (tool in tools.catalog) dom.set_attribute(node(owner,"tool-" ++ tool.id),"class",if (st.tool == tool.id) "active" else "")
     dom.set_text_content(node(owner,"tool-label"),[for (tool in tools.catalog where tool.id == st.tool) tool.label][0])
     for (entry in [{id:"undo",disabled:not editor.can_undo(st)^},{id:"redo",disabled:not editor.can_redo(st)^}]) {
-        if (entry.disabled) dom.set_attribute(node(owner,entry.id),"disabled","")
-        else if (dom.get_attribute(node(owner,entry.id),"disabled") != null) dom.remove_attribute(node(owner,entry.id),"disabled")
+        set_disabled(node(owner,entry.id),entry.disabled)
     }
     let history_html = markup([for (tx in reverse(st.hist.undo)) <p (tx.meta[0].value)>])
     if (dom.get_attribute(node(owner,"history"),"data-items") != history_html) {

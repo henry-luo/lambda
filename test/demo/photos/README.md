@@ -51,8 +51,14 @@ Paths resolve from the launch directory; bundled assets resolve from the entry.
   or crop the canvas to their bounds. Selection edits have history without
   marking image pixels unsaved. Ctrl/Cmd+A selects all; Ctrl/Cmd+D deselects.
 - Crop (C) draws a bounded canvas rectangle without changing pixels. Apply crop
-  (or Enter while the stage has focus) commits one edit; Cancel/Escape discards
-  the draft. Undo restores the canvas, layer offsets and saved coverage channels.
+  (or Enter while the stage has focus) commits one edit; Cancel discards the
+  draft. Drag its eight handles to resize or its interior to move. Escape during
+  editing restores the preceding rectangle; a second Escape discards the draft. Undo restores the canvas, layer/group-mask offsets and saved coverage
+  channels. The crop bar offers Free, Original, Square and common portrait/landscape
+  aspect ratios, plus Custom width:height fields for any finite positive ratio.
+  Changing ratio/preset clears the old draft. Shift makes a Free crop
+  square. Constrained crops stay inside the canvas and round to whole pixels,
+  within half a vertical pixel of the chosen ratio.
 - Align selected layer roots to the canvas or their combined bounds in the lower
   Align & distribute dock. Distribute three or more roots with equal horizontal
   or vertical gaps. Locked roots reject the entire edit; selected parents and
@@ -76,6 +82,15 @@ The package's 16-million-pixel/64-MiB per-raster and aggregate PSD budgets apply
 this demo makes no photo-scale performance claim. The host receives copied pixels,
 never borrowed GC pointers (**D4.5.2 / D5.3.3**), and views retain their canvas and
 focus owners while procedures publish edits (**S12.1.3**).
+
+Image & canvas offers nine canvas anchors. Top left keeps the previous behavior;
+Center adds/removes space around the content, while corners/edges keep their
+chosen side fixed. An odd center pixel goes to the right/bottom on expansion and
+is removed from the left/top on shrink. Canvas resize moves artwork, group masks
+and guides, reframes active/saved selections, and retains source samples and local
+layer masks. Undo restores the previous placement and coverage. Image resize
+continues to resample. Size fields reject fractional pixels. Anchor and crop
+choices are per-tab settings rather than project edits.
 
 Focused verification:
 
@@ -129,9 +144,39 @@ Image exports omit this editor metadata. Hide guides and enable snapping
 independently; these view settings do not dirty the document. Enabled move drags
 snap selected bounds' edges/centers to canvas edges/centers or visible guides
 within six screen pixels. Alt bypasses snapping. Magenta lines show snap targets.
-Placement rounds to whole pixels, including fractional transformed bounds.
-Guide drags reuse the composition and histogram. Rulers, grids, guide locking,
-snapping to other layers and navigator remain outstanding.
+Layer snapping can be toggled separately. It targets other visible layers/groups
+and excludes selected relatives, hidden/zero-opacity content and empty bounds.
+Targets use authored geometry, including transforms/styles, rather than pixel
+alpha or clipping silhouettes. Candidates freeze at drag start; equally close
+targets prefer canvas, guides, layers, then grid subdivisions. Placement rounds to whole pixels,
+including fractional transformed bounds.
+Guide drags reuse the composition and histogram.
+
+Navigator & precision adds pixel rulers, grid spacing/subdivisions and a
+composite thumbnail. Drag the top ruler into the image for a horizontal guide,
+or the left ruler for a vertical guide. Release commits one guide edit; Escape
+or a drop outside the canvas cancels it. Grid visibility and grid snapping are
+independent; snapping also uses the main Guides & snapping switch. Dense grid
+lines hide at small zoom, and whole-pixel layer placement rounds fractional
+subdivision targets. Rulers/grid follow Fit, zoom and pan without changing the
+stage size (**S9.1.2 / S12.1.3**).
+
+Click/drag the navigator to center the camera; Escape restores the previous pan.
+With navigator focus, arrow keys pan by 40 screen pixels and Home centers the
+view. The red box shows the visible document region. Thumbnail updates wait
+until a live edit finishes, then refresh from the cached composite. View controls
+are retained per tab and do not dirty the document or add undo entries.
+Lock guides prevents guide edits and ruler creation while retaining visibility
+and snapping; Move reaches artwork beneath locked guides. Lock is per tab and
+stays outside project/history. Document crop/resize still updates guide geometry.
+
+Guide layout supplies Center, Rule of thirds, Quarters and Custom. Custom takes
+columns/rows (zero omits an axis), equal pixel margins and gutters. Choose Replace
+or Keep and append, then Apply layout. Coordinates round to pixels, duplicates
+are removed, and the existing 64-guide limit is checked before publication. An
+unchanged layout adds no undo entry; a changed layout is one reversible edit.
+Physical ruler units, named user layout presets and equal-gap smart guides
+remain outstanding (**S9.1.2 / S9.2.2 / S12.1.3**).
 
 The lower Levels dock sets input black/white, midtone gamma and output black/white.
 Curves offers RGB master and separate red/green/blue channels. Click its graph to

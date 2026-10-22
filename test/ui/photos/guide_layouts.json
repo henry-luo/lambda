@@ -1,0 +1,711 @@
+{
+  "name": "Photos guide layouts, append/replace, locking, artwork hit-through, snapping and undo",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "320",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "240",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-fill"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-shape"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "154",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-y"
+      },
+      "text": "30",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-position"
+      },
+      "text": "50",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#guide-layout-preset"
+      },
+      "value": "thirds"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-layout"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-raster-guide=\"guide-1\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Vertical guide at 107"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-layout"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "6"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#guide-layout-preset"
+      },
+      "value": "center"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#guide-layout-mode"
+      },
+      "value": "append"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-layout"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#guide-layout-preset"
+      },
+      "value": "custom"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-columns"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-rows"
+      },
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-margin"
+      },
+      "text": "16",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-gutter"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#guide-layout-mode"
+      },
+      "value": "replace"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-layout"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-lock"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides-locked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#guide-add"
+      },
+      "attribute": "disabled",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#guide-clear"
+      },
+      "attribute": "disabled",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#guide-layout"
+      },
+      "attribute": "disabled",
+      "present": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-action=\"guide-remove\"]"
+      },
+      "attribute": "disabled",
+      "present": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-clear"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "8"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 156,
+        "offset_y": 34
+      },
+      "dx": 20,
+      "dy": 0,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "174"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "9"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "154"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides-locked",
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "46",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-snap"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 48,
+        "offset_y": 34
+      },
+      "dx": -27,
+      "dy": 0,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "16"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "46"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-lock"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-gutter"
+      },
+      "text": "400",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-layout"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": "Raster: guide layout needs at least one pixel per cell"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "9"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#guide-gutter"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-layout"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "9"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "154"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-lock"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides-locked",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"document-1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides-locked",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "4"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".dock",
+        "offset_x": 4,
+        "offset_y": 100
+      },
+      "dx": 0,
+      "dy": -1000
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".dock",
+        "offset_x": 4,
+        "offset_y": 100
+      },
+      "dx": 0,
+      "dy": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-crop-guides-20261022/guide-layouts.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}
