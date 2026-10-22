@@ -15,7 +15,7 @@ fn token_text(raw: binary, at: int, end: int) string^ {
     value
 }
 
-// load-time validation and oracle verification share the word decoder.
+// preparation validation and oracle verification share the word decoder.
 fn next_word(raw: binary, at: int, end: int, previous: string, delta: bool) string^ {
     let token = token_text(raw,at,end)^
     let comma = index_of(token,",");
@@ -63,15 +63,22 @@ fn first_compare(raw: binary, at: int, key: binary, i: int = 0) int {
     else first_compare(raw,at,key,i + 1)
 }
 
+// prepared resources need only a byte buffer and restart index; count is trusted metadata.
 pub fn from_bytes(source, expected_count = null) map^ {
     let valid = require(source is binary and len(source) > 0 and len(source) <= 4294967295,
         "expected nonempty bytes within the u32 offset range")^
-    let terminated = require(source[len(source) - 1] == 10 and not (0 in source) and not (13 in source) and
+    let terminated = require(source[len(source) - 1] == 10,"missing final LF")^
+    let offsets: u32[] = [0u32,*[for (i,b in source where b == 10 and i + 1 < len(source)) u32(i + 1)]];
+    {format_version:1,bytes:source,offsets:offsets,count:expected_count}
+}
+
+// explicit preparation operation; reconstruct and check the complete vocabulary once.
+pub fn validate(source, expected_count = null) map^ {
+    let indexed = from_bytes(source,expected_count)^
+    let valid = require(not (0 in source) and not (13 in source) and
         slice(source,0,3) != b'\xEFBBBF',
-        "missing final LF or reserved control byte")^
-    let offsets: u32[] = [0u32,*[for (i,b in source where b == 10 and i + 1 < len(source)) u32(i + 1)]]
-    let indexed = {bytes:source,offsets:offsets}
-    // load-time validation streams each block; decoded words are never kept in the checker.
+        "reserved control byte or BOM")^
+    let offsets = indexed.offsets
     let summaries = [for (i,at in offsets) {
         let raw = line_bytes(indexed,i)^;
         inspect_line(raw,0,len(raw))^
@@ -81,7 +88,7 @@ pub fn from_bytes(source, expected_count = null) map^ {
         (i == 0 or summaries[i - 1].last < row.first)]),"invalid line count or block order")^
     let count = (len(offsets) - 1) * 64 + summaries[len(summaries) - 1].count
     let counted = require(expected_count == null or expected_count == count,"entry count mismatch")^;
-    {format_version:1,bytes:source,offsets:offsets,count:count}
+    {*:indexed,count:count}
 }
 
 // prefix counts are code points; only the target needs walking to their byte boundary.
@@ -137,7 +144,7 @@ fn compare_word(raw: binary, key: binary, limit: int, at: int, matched: int, id:
 
 // exact NFC membership; case admission and suggestions remain separate package work.
 pub fn lookup(vocabulary: map, word: string) int?^ {
-    // construction validates the index once; a structural array contract here would revisit it per word.
+    // a structural array contract here would revisit the entire offset index per word.
     let raw: binary = vocabulary.bytes
     let key = normalize(word,"nfc")
     let bytes = binary(key)^

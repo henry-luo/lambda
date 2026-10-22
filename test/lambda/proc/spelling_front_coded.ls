@@ -1,6 +1,6 @@
 import front: lambda.doc.spelling.front_coded
 
-fn rejected(value, count = null) => (front.from_bytes(value,count) ^ { ^.code }) == 7821
+fn rejected(value, count = null) => (front.validate(value,count) ^ { ^.code }) == 7821
 fn word_at(i) => "word" ++ slice("0000" ++ string(i),len(string(i)))
 fn matches(text, words, missing) bool^ {
     let dictionary = front.from_bytes(binary(text),len(words))^;
@@ -76,6 +76,11 @@ pn main() {
             ["foo" ++ digits ++ "0","foozz"])^,
         matches("abcdefghij;a;10,b;10,c\n",
             ["abcdefghij","abcdefghija","abcdefghijb","abcdefghijc"],
-            ["abcdefgh","abcdefghijaa","abcdefghijd"])^
+            ["abcdefgh","abcdefghijaa","abcdefghijd"])^,
+        // preparation verifies actual counts; the normal reader preserves supplied metadata.
+        front.validate(raw)^.count == 5,
+        front.from_bytes(raw)^.count == null,
+        front.from_bytes(raw,99)^.count == 99,
+        (front.from_bytes(binary("cat")) ^ { ^.code }) == 7821
     ]
 }

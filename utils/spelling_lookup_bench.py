@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare spelling lookup sources with one pinned release host and identical inputs."""
+"""Compare spelling loading and lookup with one pinned release host and identical inputs."""
 
 import argparse
 import json
@@ -29,7 +29,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path,
                         default=Path("temp/spelling_vocab_poc/lambda-front-release.exe"))
-    parser.add_argument("--control-ref", default="9a2f257b4")
+    parser.add_argument("--control-ref", default="0febb9623")
     parser.add_argument("--pairs", type=int, default=3)
     args = parser.parse_args()
     if args.pairs < 1:
@@ -71,7 +71,7 @@ def main():
     report = {"output": str(output.relative_to(repo)), "control_ref": args.control_ref,
               "executable_sha256": provenance["executable_sha256"],
               "backend": "jit", "platform": platform.platform(), "cpu_count": os.cpu_count(),
-              "scope": "uncached 100-word paragraph; tokenization and lookup; loading excluded",
+              "scope": "read/from_bytes phases plus uncached 100-word checks; loading excluded from paragraph samples",
               "runs": []}
     print(f"Artifacts: {output.relative_to(repo)}", flush=True)
     expected = (repo / SCRIPT.with_suffix(".txt")).read_text().strip()
@@ -113,6 +113,10 @@ def main():
                for r in report["runs"])
     before = statistics.median(r["median_ms"] for r in control_runs)
     after = statistics.median(r["median_ms"] for r in candidate_runs)
+    phases = {variant: {phase: statistics.median(r[field] for r in runs)
+                       for phase, field in [("read", "read_ms"), ("from_bytes", "index_ms"),
+                                            ("total_load", "load_ms")]}
+              for variant, runs in [("control", control_runs), ("candidate", candidate_runs)]}
     report["summary"] = {
         "pairs": args.pairs, "control_median_ms": before, "candidate_median_ms": after,
         "speedup": before / after, "reduction_percent": (1 - after / before) * 100,
@@ -123,6 +127,8 @@ def main():
         "candidate_sample_range_ms": [min(x for r in candidate_runs for x in r["samples_ms"]),
                                       max(x for r in candidate_runs for x in r["samples_ms"])],
         "source_and_input_hashes_verified": True,
+        "phase_medians_ms": phases,
+        "load_speedup": phases["control"]["total_load"] / phases["candidate"]["total_load"],
     }
     result_path.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["summary"], indent=2), flush=True)

@@ -533,6 +533,8 @@ front-coded UTF-8 stream. It creates neither intermediate dictionary-word
 strings nor a selected-line copy. The dictionary resource, entry IDs, restart
 search, exact case behavior and NFC query normalization are unchanged. This is
 Lambda Script code; the native release executable is unchanged.
+The load-time validation described in this section is subsequently separated
+from normal loading in §10; its measurements describe the earlier loading path.
 
 ### 9.1 Comparison state
 
@@ -659,3 +661,120 @@ Focused and exhaustive qualification records are under `temp/spelling_pointer/`:
 hash as the timing comparison. The implementation remains a raw UTF-8-resource
 POC; XZ loading, complete prose tokenization, case admission, suggestions and
 load/allocation tuning remain pending.
+
+## 10. Read-and-index loading with explicit preparation validation
+
+**Implemented 2026-10-22 (USER):** normal spelling-check loading reads the
+prepared UTF-8 bytes and builds the LF restart-offset index. It does not visit
+dictionary entries, decode suffixes, reconstruct words, normalize vocabulary or
+check its ordering. The pointer lookup from §9 is unchanged, including
+code-point prefix semantics (**S2.5.8/S17.4.1**) and UTF-8 byte order
+(**S6.2.2v3**).
+
+The full validation code is retained as an explicit preparation operation:
+
+| Entry point | Current behavior |
+|---|---|
+| `from_bytes(bytes, expected_count?)` | Retain bytes and build `u32[]` line offsets; copy the supplied count as trusted prepared metadata, or null when omitted |
+| `read(path, expected_count?)` | Read bytes and call the lightweight index builder (**S12.1.1v3**) |
+| `validate(bytes, expected_count?)` | Build the index, reconstruct all entries, check UTF-8/token syntax/prefix bounds/NFC/order/block sizes, compute the actual count and compare any supplied count |
+| `verify(dictionary, source_words)` | Independently compare decoded entries with the source oracle during preparation/qualification |
+
+The normal index builder keeps constant-time nonempty/type/u32-size/final-LF
+guards needed by byte slicing. Global NUL/CR/BOM checks and complete decoded-word
+validation remain inside `validate()`. Lookup does not use the optional count;
+entry IDs still derive from the line index and position. The prepared dictionary
+and index payload remain 525,993 and 6,872 bytes respectively.
+
+### 10.1 Qualification and measurement method
+
+All existing malformed-resource checks now exercise `validate()`. The reader
+fixture has 52 golden checks, including actual-count computation by preparation,
+unknown count on a metadata-free read, preservation of a supplied count without
+verification, and the final-LF guard. The full preparation/lookup helper calls
+`validate()` explicitly, compares its index/count with the lightweight reader,
+verifies the source sequence, and checks all source and negative lookups.
+
+The paragraph harness now reports `read_ms`, `index_ms` and `load_ms` separately.
+`utils/spelling_lookup_bench.py --control-ref 0febb9623` compares the committed
+full-validation loader with the lightweight reader using the same release host,
+dictionary, current timing harness, and 100-word paragraph. Both lanes retain
+the pointer lookup. In the control lane, the phase labeled `index_ms` still
+includes its legacy full validation; in the candidate lane it measures only
+index construction and the constant-time guards. Validation is never timed as
+part of the candidate's normal loading or paragraph checks.
+
+The final-source gates pass **8/8 focused fixtures in each of interpreter and
+JIT**, including all preserved malformed-resource checks. Explicit preparation
+validation and source verification pass on the complete English pack; all
+**109,902 positive lookups** return the expected entry IDs and all **6,465
+synthetic negative lookups** return null. No native runtime source changed.
+
+### 10.2 Observed loading time
+
+Three A/B process pairs, in A/B, B/A, A/B order, completed without failure,
+timeout or retry. Both lanes used the pinned release executable from §8 and
+forced JIT; only the package reader differed. All six processes produced the
+expected three misspellings and checksum 96. Source, input and executable
+hashes verified after the runs.
+
+| Pair | Full-validation load, ms | Read-and-index load, ms |
+|---|---:|---:|
+| 0 | 59,969.452 | 42.949 |
+| 1 | 27,248.246 | 39.532 |
+| 2 | 27,976.355 | 42.909 |
+| Median | **27,976.355** | **42.909** |
+
+The new median load time is **42.909 ms**, with a range of **39.532–42.949 ms**;
+the ratio of load medians is **651.99×**. The process with the median total
+provides this additive breakdown:
+
+| Loading phase | Time |
+|---|---:|
+| Read the 525,993-byte UTF-8 resource | 0.478 ms |
+| Build the 1,718-entry `u32[]` line-offset index | 42.431 ms |
+| Total read and index | **42.909 ms** |
+
+The benchmark records each phase separately. Medians of separate phases need
+not add to the median total; `results.json` also retains those independent phase
+medians. These are load-phase wall times, excluding process/module startup and
+paragraph checks. Filesystem caches were not cleared. The host remained heavily
+loaded: recorded one-minute load averages ranged from about 63.3 to 98.8 on eight
+logical CPUs. Absolute timings remain host-dependent.
+
+| Other observations, median across three processes | Full-validation load | Read-and-index load |
+|---|---:|---:|
+| Warm 100-word paragraph check | 9.551 ms | 7.899 ms |
+| Whole-process peak RSS | 700.1 MiB | 67.9 MiB |
+| Complete benchmark process, including startup and 33 paragraph checks | 28.804 s | 0.563 s |
+
+The lookup algorithm was not changed in this update; the observed warm-check
+timings do not establish another algorithmic lookup improvement. Peak RSS is a
+whole-process measurement and includes runtime/JIT/temporary allocation state.
+Both lanes retain the same **520.4 KiB logical dictionary/index payload**. Full
+preparation validation remains an explicit operation and retains its decoding,
+normalization and ordering checks; its work is excluded from normal loading.
+
+### 10.3 Reproduction and artifacts
+
+Prepare the resource with `python3 utils/spelling_front_poc.py`, then run explicit
+preparation qualification separately from normal-load timing:
+
+```bash
+LAMBDA_EXEC_BACKEND=jit temp/spelling_vocab_poc/lambda-front-release.exe --no-log run test/lambda/spelling/_front_full.ls
+python3 utils/spelling_lookup_bench.py --executable temp/spelling_vocab_poc/lambda-front-release.exe --control-ref 0febb9623 --pairs 3
+```
+
+The recorded comparison is under `temp/spelling-pointer-ab-rzwu313t/`:
+`results.json`, `provenance.json`, the six pair logs, private package/input
+snapshots and the identical release host. The executable SHA-256 remains
+`02a4444635d86948c8bb4895eafe88d69ebec260e45f08530a33ed54b6decc6a`;
+the candidate module SHA-256 is
+`7d3adc958bdbca88cdc12a6c148bbdf9f38e2b4c18caadfb00ab4cb5af28c99f`.
+
+`temp/spelling_loading/` retains `focused-{interp,jit}.json` and `.log`, their
+`*-process.json` records, and `full-jit.log` / `full-jit-process.json` for explicit
+preparation, source verification and exhaustive lookups. `pilot.json` and
+`pilot.log` preserve the preliminary candidate-only run; the three-pair
+comparison above is the final qualification. Allocation tuning, standalone XZ
+loading and the complete prose checker remain separate work.

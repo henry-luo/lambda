@@ -324,12 +324,15 @@ requires 6,872 bytes and can be rebuilt by scanning LF boundaries, so storing
 it is optional. Whole-file XZ must be decompressed before arbitrary line access;
 independently compressed blocks are not part of version 1.
 
-Validate the declared version, UTF-8, token syntax, prefix bounds, nonempty
-words/suffixes, line word counts, NFC, strict global order/uniqueness, entry
-count, hashes and metadata/posting bounds. Reject malformed or truncated packs
-as errors, not empty dictionaries. Bound loading by the declared sizes and host
-resource limits. Keep personal overlays separate so adding a word does not
-require rebuilding the base resource.
+**Adopted loading policy, 2026-10-22 (USER):** fully validate dictionaries during
+preparation. Check the declared version, UTF-8, token syntax, prefix bounds,
+nonempty words/suffixes, line word counts, NFC, strict global order/uniqueness,
+entry count, hashes and metadata/posting bounds there. Reject malformed or
+truncated packs as preparation errors. For spelling checks, read the prepared
+UTF-8 bytes and build the LF line-offset index; full word reconstruction and
+validation are explicit preparation operations. A supplied entry count is
+prepared metadata, not recomputed by the normal reader. Keep personal overlays
+separate so adding a word does not require rebuilding the base resource.
 
 #### 4.3.5 Size and implementation status
 
@@ -353,15 +356,17 @@ line-offset index, and binary search of restart keys. The
 [pointer comparison update, §9](impl/Lambda_Impl_Spelling_POC.md#9-direct-byte-comparison-during-lookup)
 compares the target against the selected line directly. Lookup creates no
 dictionary-word strings or line slice and returns a zero-based word ID or null.
-Load-time validation still reconstructs words. The earlier JSON reader remains
-available for its original fixture.
+The [loading update, §10](impl/Lambda_Impl_Spelling_POC.md#10-read-and-index-loading-with-explicit-preparation-validation)
+moves full reconstruction/checking into explicit `validate()` for preparation;
+normal `read()`/`from_bytes()` only retain bytes and build offsets. The earlier
+JSON reader remains available for its original fixture.
 
 The POC reads the uncompressed `.dict` produced by the preparation utility;
 in-process standalone XZ loading and a complete manifest/policy loader remain
 implementation work. Its 100-word paragraph harness has a deliberately limited
 ASCII punctuation/lowercase policy; it is not the full prose tokenizer or case
-admission engine. Timing records separate loading/full validation from checks
-against the already loaded dictionary.
+admission engine. Current timing records separate file reading, index building
+and checks against the loaded dictionary; preparation validation is excluded.
 
 ### 4.4 Correction algorithm
 

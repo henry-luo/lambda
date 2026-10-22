@@ -148,12 +148,12 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
 - **Front-coded spelling POC:** `python3 utils/spelling_front_poc.py` prepares
   the adopted English text/XZ resource and source oracle from the same pinned data.
   `./lambda.exe run test/lambda/proc/spelling_front_coded.ls` checks the reader;
-  `./lambda.exe run test/lambda/spelling/_front_full.ls` checks the full decoder
+  `./lambda.exe run test/lambda/spelling/_front_full.ls` checks preparation validation, the decoder
   and all source/negative lookups. With a release executable, run
   `./lambda.exe --no-log run test/lambda/spelling/_front_bench.ls` for the fixed
   100-word paragraph; timings are written to `temp/spelling_vocab_poc/front/benchmark.json`.
   `python3 utils/spelling_lookup_bench.py --executable <release-executable>`
-  compares the original decoder with direct byte lookup in isolated alternating runs.
+  compares full-validation loading with read-and-index loading in isolated alternating runs.
 - **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`, `semantics-verify` (the semantics model as a second oracle over `test/lambda`, see §4; also the last step of `test-lambda-full`).
 
 The shared image codec suite is `./test/test_image_io_gtest.exe` (library

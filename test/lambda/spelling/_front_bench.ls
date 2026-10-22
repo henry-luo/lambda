@@ -42,7 +42,7 @@ pn main() {
         warmup_paragraphs:5,paragraphs_per_sample:repeats,samples_ms:samples,
         first_paragraph_ms:(first_end - first_start) * 1000.0,
         read_ms:(read_end - read_start) * 1000.0,
-        index_validation_ms:(load_end - read_end) * 1000.0,
+        index_ms:(load_end - read_end) * 1000.0,
         load_ms:(load_end - read_start) * 1000.0,
         dictionary_bytes:len(dictionary.bytes),offsets:len(dictionary.offsets),
         offset_payload_bytes:len(dictionary.offsets) * 4,cache:false
