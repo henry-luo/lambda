@@ -37,6 +37,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 21. [doc.readability — Article extraction](#21-docreadability--article-extraction)
 22. [scene3d.motion — Character animation](#22-scene3dmotion--character-animation)
 23. [archive — Web archiving](#23-archive--web-archiving)
+24. [mail — Mail sync and store](#24-mail--mail-sync-and-store)
+25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
 
 ---
 
@@ -2087,3 +2089,64 @@ A page whose media cannot be taken (an encrypted stream, a player that loads by 
 | `snapshot_html(capture)`, `readable(capture)`, `markdown(capture)` | the pure derivations over a capture |
 
 Each snapshot folder's `snapshot.json` is the record and `index.json` a cache rebuilt from the folders. Outputs succeed or fail on their own, each with its status. `lambda demo archive` is the interactive front end ([demo guide](../test/demo/archive/README.md)).
+
+## 24. mail — Mail sync and store
+
+`lambda.mail` is the Lambda side of the mail demo: it turns what `lambda.io.mail` returns into mailboxes and messages, and keeps them in a store of raw `.eml` files with one Mark index per mailbox (design: [Lambda_Demo_Mail.md](../vibe/Lambda_Demo_Mail.md) §5.4, ML7v3). The protocol stays in [`lambda.io.mail`](Lambda_Sys_Func.md#lambdaiomail).
+
+```lambda no-run
+import wire: lambda.io.mail
+import sync: lambda.mail.sync
+
+pn main() {
+    let s = wire.open("imaps://imap.example.com", {user: "ada@example.com", password: "app-password"})^
+    for (box in sync.mailboxes(s)^) { print(box.name, " ", box.role, "\n") }
+    let index = sync.sync_mailbox(s, "temp/mail-store", "b01", "INBOX", false)^
+    for (e in index.entries) { print(e.uid, " ", e.subject, "\n") }
+}
+```
+
+| Module | Contents |
+|---|---|
+| `lambda.mail.imap` | `mailbox_name` (modified UTF-7), `list_entry`, `select_state`, `fetch_items`, `uid_set`, and the `is_list`/`is_fetch` tests over response tokens |
+| `lambda.mail.mime` | `text_body` (format=flowed unwrapped), `html_body`, `attachments`, `cid_parts`, `snippet`, `search_text` over a message read with `input(…, 'eml')` |
+| `lambda.mail.store` | store paths, `safe_name` (distinct file names, case-insensitive file systems included), `server_id`, `load_index`, `save_index` (atomic), and the index updates `merge_entries`, `refresh_entries`, `with_files` |
+| `lambda.mail.sync` | `capabilities`, `mailboxes`, `sync_mailbox` (headers of new messages, flags of known ones, expunges, UIDVALIDITY resets), `fetch_message` (the body and its search sidecar), and the shared `file_message` and `header_entry` |
+| `lambda.mail.pop3` | A POP3 account as a download source (ML9): `sync_inbox(session, root, progress)` downloads each message the server lists by UIDL that the local Inbox lacks, once, and leaves mail on the server; `mark_seen` keeps read state in the store; `listing`, `missing`, `message_id`, `octets` |
+| `lambda.mail.sanitize` | `clean(html, {remote, cids})` → `{html, blocked}`: a standalone document for a message frame, with scripts, `on*` attributes, embedded documents, forms and frame navigation removed, remote loads dropped unless `remote` (`blocked` counts them), `cid:` URLs inlined, and `<noscript>` content parsed and cleaned; `cid_urls`, `data_url`, `clean_css` |
+| `lambda.mail.providers` | `PRESETS` (Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com, Yahoo, with POP3 servers where the host offers them), `preset_for(address)`, `imap_url`, `pop3_url`, `smtp_url`, `session_options` for `lambda.io.mail`, and `autoconfig(address)` / `from_autoconfig(doc, address)` for Mozilla's ISPDB |
+
+An index entry is `{uid, file, flags, date, internaldate, from, to, subject, message_id, size, thread, has_file}`. List rows come from each message's header block, fetched with `BODY.PEEK[HEADER.FIELDS (…)]` and decoded by the `eml` reader, so subjects and names arrive decoded.
+
+The sanitizer is the second layer of ML5v2. The first is the frame itself: a `sandbox` frame loads with scripting disabled in Radiant. Blocking is best-effort for CSS written with escapes or `image-set()` strings, which is why the engine-level policy stays the goal (MQ14).
+
+## 25. oauth — Sign-in for native apps
+
+`lambda.oauth` signs a person in with an OAuth 2.0 provider the way native apps do (RFC 8252), with PKCE (RFC 7636). The system browser shows the provider's own sign-in page; a [`lambda.io.loopback`](Lambda_Sys_Func.md#lambdaioloopback) listener on 127.0.0.1 receives the redirect; and the code is exchanged for tokens, so the app never sees the person's password. The mail demo signs in to Gmail and Outlook.com this way (design: [Lambda_Demo_Mail.md](../vibe/Lambda_Demo_Mail.md) M4).
+
+```lambda no-run
+import oauth: lambda.oauth
+
+pn main() {
+    let google = {authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_url: "https://oauth2.googleapis.com/token", scope: "https://mail.google.com/ openid email",
+        userinfo_url: "https://openidconnect.googleapis.com/v1/userinfo",
+        params: {access_type: "offline", prompt: "consent"}}
+    let client = {id: "….apps.googleusercontent.com", secret: "…"}
+    let tokens = oauth.sign_in(google, client, {})^
+    // who signed in: {email, name, …}
+    let me = oauth.userinfo(google, tokens.access_token)^
+    // later: a fresh access token without the browser
+    let renewed = oauth.refresh(google, client, tokens.refresh_token)^
+}
+```
+
+| Function | Contents |
+|---|---|
+| `sign_in(provider, client, options)` | Opens the provider's page in the system browser and returns `{access_token, refresh_token, expires_in, scope}`. Options: `login_hint`, `seconds` (the wait for the person, default 300), and `open`, a `pn` that shows the URL instead of the system browser. A refusal, a mismatched `state` or a failed exchange raises with the provider's reason |
+| `userinfo(provider, access_token)` | Who signed in, from the provider's OpenID Connect userinfo endpoint (`provider.userinfo_url`): `{email, name, …}` as the provider sends it. The token's scope must include `openid` and `email` |
+| `refresh(provider, client, refresh_token)` | New tokens. Google omits `refresh_token` and keeps the old one valid; Microsoft rotates it |
+| `open_browser(url)` | Opens a URL in the system browser: `open` on macOS, `start` on Windows, `xdg-open` elsewhere |
+| `code_challenge`, `base64url`, `form`, `authorize_url`, `tokens_of`, `query_value` | The pure parts: the S256 challenge, URL and body encoding, and token replies |
+
+A provider is `{authorize_url, token_url, scope, params}`, plus `userinfo_url` for `userinfo`, where `params` are extra authorization parameters. A client is `{id, secret}`, the app's registration with the provider. Google requires a secret even for desktop clients, while a Microsoft public client has none; a null secret is not sent. The verifier and `state` come from `uuid()`, and the challenge from `hash`. Keep refresh tokens in [`lambda.io.secret`](Lambda_Sys_Func.md#lambdaiosecret).

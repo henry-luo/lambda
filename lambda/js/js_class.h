@@ -483,10 +483,12 @@ static inline Item js_error_as_object(LambdaError* error) {
     return error ? (Item){.map = (Map*)error} : ItemNull;
 }
 
-// Error's standard fields live outside the ordinary shape table. The helper
-// also consults the carrier's backing Map for arbitrary JS own properties.
+// default Error fields live on the carrier; explicit descriptors and other
+// own properties use its backing Map without changing the carrier's identity.
 bool js_error_own_property(Item obj, const char* name, int len, Item* out);
 bool js_error_delete_own_property(Item obj, const char* name, int len);
+// retire the default field after its descriptor moves to the backing Map.
+void js_error_clear_standard_own_property(Item obj, const char* name, int len);
 Item js_error_properties_map(Item obj, bool create);
 
 // Unified class-identity resolver. Class identity is carried only by the typed

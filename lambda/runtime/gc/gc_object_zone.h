@@ -130,6 +130,9 @@ typedef struct gc_object_zone {
     unsigned page_index_bits;
     unsigned page_shift;
     bool page_index_disabled;       // an allocation failure retired the index
+    // ranges and their owners live until zone destruction; mark walks cluster in one range.
+    gc_slab_range_t recent_range;
+    gc_range_owner_t recent_owner;
 } gc_object_zone_t;
 
 /**

@@ -1,0 +1,15 @@
+const host = document.createElement('div');
+host.append('alpha', document.createElement('b'));
+const parsed = host.firstChild;
+console.log(parsed instanceof Text, parsed instanceof CharacterData, parsed instanceof Node);
+console.log(Object.getPrototypeOf(Text.prototype) === CharacterData.prototype);
+console.log(typeof parsed.replaceWith, typeof parsed.before, typeof parsed.after, typeof parsed.remove);
+const text = new Text('beta');
+parsed.replaceWith(text);
+text.before('left');
+text.after('right');
+console.log(host.textContent);
+text.remove();
+console.log(host.textContent);
+console.log(new Text().data, new Text(null).data);
+console.log('TEXT_PROTOTYPE_DONE');

@@ -1,0 +1,44 @@
+From: Shop <shop@example.com>
+To: ada@example.org
+Subject: Order receipt
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=?outer?="
+
+This is a multi-part message in MIME format.
+--=?outer?=
+Content-Type: multipart/related; boundary="rel-1"
+
+--rel-1
+Content-Type: multipart/alternative; boundary="alt-1"
+
+--alt-1
+Content-Type: text/plain; charset=windows-1252
+Content-Transfer-Encoding: quoted-printable
+
+Price: 5 =80 =97 =93quoted=94
+Line two.
+--alt-1
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+UHJpY2U6IDUg4oKsPC9wPjxpbWcgc3JjPSJjaWQ6bG9nb0BleGFtcGxl
+Ij48L2JvZHk+PC9odG1sPg0K
+--alt-1--
+--rel-1
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <logo@example>
+Content-Disposition: inline
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAF/gL+Dcjy
+qwAAAABJRU5ErkJggg==
+--rel-1--
+--=?outer?=
+Content-Type: application/pdf; name="fallback.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment;
+ filename*0*=UTF-8''Re%C3%A7u;
+ filename*1*=%20n%C2%B0%2042.pdf
+
+JVBERi0xLjQKJSB0aW55CiUlRU9GCg==
+--=?outer?=--

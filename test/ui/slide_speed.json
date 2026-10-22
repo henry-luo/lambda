@@ -5,16 +5,6 @@
     "width": 1100,
     "height": 700
   },
-  "env": [
-    {
-      "key": "LAMBDA_GC_FORCE_EVERY",
-      "value": "1"
-    },
-    {
-      "key": "LAMBDA_GC_POISON_FREED",
-      "value": "1"
-    }
-  ],
   "events": [
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "1"},
     {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "1×"},

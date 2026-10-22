@@ -24,6 +24,7 @@ bundled document viewer with its startup splash (D7.2.4).
 | `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
 | `readability` | `readability/readability.ls` | [Reader View](readability/README.md) |
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
+| `mail` | `mail/mail.ls` | [Mail](mail/README.md) |
 | `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
 
 Paths in the table are relative to `test/demo/`. Viewer options follow the name:
@@ -57,6 +58,10 @@ Lambda and played through the music package's SoundFont. Generate the model with
 ## Archive
 
 `./lambda.exe demo archive` is a personal web archive built on [`lambda.archive`](../../doc/Lambda_Packages.md): paste a URL or a local path, watch the job's progress, then browse, filter and search the library and view each snapshot, its readable page, Markdown and record. Pages, video and audio (direct files, HLS streams, subtitle tracks), galleries and files are archived by Lambda code alone. A first run archives a small local sample. See [Archive](archive/README.md).
+
+## Mail
+
+`./lambda.exe demo mail` is a mail client in the spirit of macOS Mail. It reads IMAP accounts (Gmail, iCloud, Fastmail and Yahoo with app passwords, or Proton Mail Bridge) through [`lambda.io.mail`](../../doc/Lambda_Sys_Func.md#lambdaiomail) and keeps passwords in the Keychain. The window has a sidebar of mailboxes, a message list that mounts only the rows in view, and a viewer that shows HTML mail in a sandboxed, script-free frame with remote content blocked until you load it. See [Mail](mail/README.md).
 
 ## Interactive Tetris
 

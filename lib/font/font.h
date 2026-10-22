@@ -554,6 +554,7 @@ void font_cache_trim(FontContext* ctx);
 
 // get cache statistics for diagnostics
 typedef struct FontCacheStats {
+    uint64_t text_measure_requests, text_measure_hits; // short-run measurement reuse
     int    face_count;             // currently loaded faces
     int    glyph_cache_count;      // cached glyph entries
     int    loaded_glyph_count;     // cached loaded-glyph entries

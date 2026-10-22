@@ -2473,6 +2473,38 @@ TEST_F(DomRetirementTest, FocusValidationUsesOwnedRootAfterReflow) {
     state->transition_depth--;
 }
 
+TEST_F(DomRetirementTest, InteractionGraphsRejectFlagsOnUnrelatedSiblings) {
+    DomElement* owned_root = root();
+    DomElement* focused = element("button");
+    DomElement* sibling = element("button");
+    ASSERT_TRUE(attach(owned_root, focused));
+    ASSERT_TRUE(attach(owned_root, sibling));
+    owned_root->view_type = focused->view_type = sibling->view_type = RDT_VIEW_BLOCK;
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    DocState* state = doc.state;
+    state->transition_depth++;
+    focus_set_programmatic(state, focused);
+    struct InvalidFlag { const char* name; const char* message; } cases[] = {
+        {STATE_FOCUS, "focus pseudo-state does not match focus target"},
+        {STATE_FOCUS_WITHIN, ":focus-within ancestry is inconsistent"},
+        {STATE_FOCUS_VISIBLE, ":focus-visible state is inconsistent"},
+        {STATE_HOVER, ":hover ancestry chain is inconsistent"},
+        {STATE_ACTIVE, ":active ancestry chain is inconsistent"},
+    };
+    for (const InvalidFlag& test : cases) {
+        SCOPED_TRACE(test.name);
+        StateValidationReport report{};
+        ASSERT_TRUE(radiant_state_validate_interaction(state, &report)) << report.message;
+        // validation must still find stray positive flags outside every target path.
+        state_set_bool(state, sibling, test.name, true);
+        EXPECT_FALSE(radiant_state_validate_interaction(state, &report));
+        EXPECT_STREQ(report.message, test.message);
+        state_set_bool(state, sibling, test.name, false);
+    }
+    EXPECT_TRUE(radiant_state_validate_interaction(state, nullptr));
+    state->transition_depth--;
+}
+
 class DomGcBackingTest : public DomRetirementTest {
 protected:
     Runtime runtime = {};

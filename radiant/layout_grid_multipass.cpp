@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "event.hpp"
+#include "grid_enhanced_adapter.hpp"
 #include "../lib/tagged.hpp"
 
 extern "C" {
@@ -296,7 +297,19 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     {
         GridContainerLayout* gl = lycon->grid_container;
         bool rows_changed = false;
+        bool definite_rows = !layout_block_has_automatic_height(grid_container);
         for (int r = 0; r < gl->computed_row_count; r++) {
+            const radiant::grid::EnhancedGridTrack& track = (*gl->computed_rows)[r];
+            // CSS Grid §11.7: in a definite container an fr row takes its size
+            // from the free space; content raises it only as an item's automatic
+            // minimum (§6.6), which a fixed track minimum such as minmax(0, 1fr)
+            // never takes and a scroll container or min-height:0 zeroes
+            bool flexed = definite_rows &&
+                track.max_track_sizing_function.type == radiant::grid::SizingFunctionType::Fr;
+            radiant::grid::SizingFunctionType min_type = track.min_track_sizing_function.type;
+            if (flexed && min_type != radiant::grid::SizingFunctionType::Auto &&
+                min_type != radiant::grid::SizingFunctionType::MinContent &&
+                min_type != radiant::grid::SizingFunctionType::MaxContent) continue;
             float max_content_h = 0;
             for (int i = 0; i < gl->item_count; i++) {
                 ViewBlock* item = gl->grid_items[i];
@@ -314,6 +327,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                         bb_max = layout_floor_border_box_axis(item, bb_max, false);
                     }
                     if (h > bb_max) h = bb_max;
+                }
+                if (flexed) {
+                    bool scrolls = item->scroller && item->scroll()->overflow_y != CSS_VALUE_VISIBLE;
+                    h = radiant::grid_adapter::grid_item_minimum_contribution(item, false, h, h, scrolls);
                 }
                 if (h > max_content_h) max_content_h = h;
             }

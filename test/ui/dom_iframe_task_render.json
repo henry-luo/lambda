@@ -1,0 +1,13 @@
+{
+  "name": "A frame rendered from a task's dom.dispatch loads at the next quiescent host turn",
+  "html": "test/ui/dom_iframe_task_render.ls",
+  "viewport": {"width": 640, "height": 400},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#app"}, "attribute": "data-ready", "equals": "true",
+      "assert_timeout": 5000, "assert_interval": 50},
+    {"type": "wait", "ms": 200},
+    {"type": "switch_frame", "selector": "#frame"},
+    {"type": "assert_text", "target": {"selector": "#x"}, "equals": "from task"},
+    {"type": "switch_frame"}
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "Mail demo: the account sheet offers Google sign-in when oauth.mark registers a client, and a pin for Proton Mail Bridge",
+  "html": "test/demo/mail/mail.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-loaded", "equals": "true"},
+    {"type": "type", "target": {"selector": "#setup-email"}, "text": "ada@gmail.com"},
+    {"type": "assert_attribute", "target": {"selector": "#setup"}, "attribute": "data-auth", "equals": "oauth"},
+    {"type": "assert_count", "target": {"selector": "#setup-auth"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#setup-password"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#setup-save"}, "equals": "Sign in with Google"},
+    {"type": "capture_surface", "source": "page", "file": "temp/mail/shots/signin.png"},
+    {"type": "select_option", "target": {"selector": "#setup-auth"}, "value": "password"},
+    {"type": "assert_attribute", "target": {"selector": "#setup"}, "attribute": "data-auth", "equals": "password"},
+    {"type": "assert_count", "target": {"selector": "#setup-password"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#setup-save"}, "equals": "Add Account"},
+    {"type": "type", "target": {"selector": "#setup-email"}, "text": "ada@proton.me", "clear": true},
+    {"type": "assert_count", "target": {"selector": "#setup-auth"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#setup-pin"}, "count": 1},
+    {"type": "click", "target": {"selector": "#setup-cancel"}},
+    {"type": "assert_count", "target": {"selector": "#setup"}, "count": 0}
+  ]
+}

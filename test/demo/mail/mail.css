@@ -1,0 +1,100 @@
+/* The mail demo: three panes in the manner of macOS Mail. The list's row
+   height matches ROW_HEIGHT in mod_model.ls, which windows the rows. */
+:root {
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #d9d9de;
+  --rail: #eceef1;
+  --accent: #0a66d8;
+  --selected: #d6e6fb;
+  --unread: #0a84ff;
+}
+html, body { margin: 0; height: 100%; }
+body { font: 13px -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); background: #fff; }
+/* one bounded row: the list scrolls inside it instead of growing the grid */
+main#mail { display: grid; grid-template-columns: 230px 360px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; overflow: hidden; }
+
+/* sidebar */
+.sidebar { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+.toolbar { display: flex; gap: 6px; padding: 10px; border-bottom: 1px solid var(--line); }
+.tool { flex: 1; padding: 5px 6px; border: 1px solid #c7c9ce; border-radius: 6px; background: #fff; font: inherit; color: var(--ink); }
+.accounts { flex: 1; overflow-y: auto; padding: 6px 0 12px; }
+.account-name { margin: 10px 12px 2px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.account-status { margin: 0 12px 6px; font-size: 11px; color: var(--muted); }
+.account-status.failed { color: #c4321b; }
+.account-status.online { color: #2f7d32; }
+.box { display: flex; align-items: center; width: 100%; padding: 5px 12px; border: 0; background: transparent; font: inherit; color: var(--ink); text-align: left; }
+.box[aria-current="true"] { background: var(--selected); }
+.box.depth-1 { padding-left: 26px; }
+.box.depth-2 { padding-left: 40px; }
+.box.depth-3 { padding-left: 54px; }
+.box-name { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.count { min-width: 18px; padding: 0 6px; border-radius: 9px; background: #c9ccd3; font-size: 11px; text-align: center; }
+.note { margin: 8px 12px; padding: 6px 8px; border-radius: 6px; background: #fff4d6; font-size: 12px; }
+
+/* message list: every row is exactly 64px tall */
+.list { overflow-y: auto; border-right: 1px solid var(--line); background: #fff; }
+.spacer { width: 100%; }
+.row { display: flex; box-sizing: border-box; height: 64px; padding: 8px 12px 8px 4px; border-bottom: 1px solid #ececf0; }
+.row.selected { background: var(--selected); }
+.dot { flex: none; width: 8px; height: 8px; margin: 5px 6px 0 4px; border-radius: 4px; }
+.row.unread .dot { background: var(--unread); }
+.row-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.row-top { display: flex; }
+.sender { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.row.unread .sender { font-weight: 700; }
+.date { flex: none; margin-left: 8px; color: var(--muted); font-size: 12px; }
+.subject { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.meta { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* viewer */
+.viewer { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.viewer.empty { align-items: center; justify-content: center; }
+.placeholder { color: var(--muted); }
+.message-header { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); }
+.message-subject { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.header-line { display: flex; gap: 8px; margin: 2px 0; }
+.header-label { flex: none; width: 44px; color: var(--muted); text-align: right; }
+.header-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-bar { display: flex; align-items: center; gap: 12px; padding: 7px 20px; background: #f4f4f6; border-bottom: 1px solid var(--line); color: var(--muted); }
+.text-button { border: 0; background: transparent; color: var(--accent); font: inherit; padding: 2px 4px; }
+.message-frame { flex: 1; width: 100%; border: 0; }
+.text-body { flex: 1; overflow-y: auto; padding: 16px 20px; white-space: pre-wrap; font-family: Menlo, monospace; font-size: 12px; line-height: 1.45; }
+.quote { white-space: pre-wrap; }
+.quote.depth-1, .quote.depth-2, .quote.depth-3 { margin: 4px 0; padding-left: 10px; border-left: 2px solid #8fb3e8; color: #33507a; }
+.quote.depth-2, .quote.depth-3 { border-left-color: #94c18f; color: #3b6a37; }
+.attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--line); }
+.attachment { display: flex; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fafafb; font: inherit; color: var(--ink); }
+.attachment-size { color: var(--muted); }
+
+/* sheets */
+.sheet-backdrop { position: fixed; left: 0; top: 0; right: 0; bottom: 0; display: flex; align-items: flex-start; justify-content: center; background: rgba(0, 0, 0, 0.22); }
+.sheet { width: 420px; margin-top: 70px; padding: 18px 20px; border-radius: 10px; background: #fff; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); }
+.sheet h2 { margin: 0 0 12px; font-size: 15px; }
+.field { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.field span { flex: none; width: 110px; color: var(--muted); text-align: right; }
+.field input, .field select { flex: 1; padding: 4px 6px; border: 1px solid #c7c9ce; border-radius: 5px; font: inherit; }
+.manual { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.hint { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.error { margin: 8px 0; color: #c4321b; }
+.sheet-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.primary { padding: 5px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; }
+.preview { display: flex; flex-direction: column; width: 70vw; height: 76vh; margin-top: 50px; border-radius: 10px; background: #fff; overflow: hidden; }
+.preview-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.preview-name { flex: 1; font-weight: 600; }
+.preview-image { max-width: 100%; max-height: 100%; margin: auto; }
+.preview-text { flex: 1; margin: 0; padding: 14px; overflow: auto; }
+.preview-frame { flex: 1; border: 0; }
+
+/* Login with Gmail, Google setup, account removal */
+.login-gmail { margin: 4px 0 10px; }
+.google-change { display: block; margin: 4px auto 0; font-size: 12px; }
+.google-button { width: 100%; padding: 8px 12px; border: 1px solid #c7c9ce; border-radius: 6px; background: #fff;
+  font: inherit; font-weight: 600; color: var(--ink); }
+.divider { margin: 10px 0 4px; color: var(--muted); font-size: 12px; text-align: center; }
+.steps { margin: 6px 0 10px; padding-left: 20px; color: var(--ink); font-size: 12px; line-height: 1.5; }
+.account-head { display: flex; align-items: baseline; padding-right: 8px; }
+.account-head .account-name { flex: 1; }
+.remove-account { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; }
+.confirm-remove { display: flex; align-items: center; gap: 4px; margin: 0 12px 4px; font-size: 12px; }
+.danger { color: #c4321b; }

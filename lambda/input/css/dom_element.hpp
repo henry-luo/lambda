@@ -370,6 +370,10 @@ struct DomDocument : DomDocumentResourceData {
     lam::Up<DomElement> root;       // Root element of DOM tree (optional); owned by the node chain
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
     bool html_scripting_enabled; // HTML parser scripting mode for special elements
+    // No script of this document runs: <script>, on* attributes, Lambda
+    // documents, <webview>. Set by a sandboxed frame (MQ11), inherited by
+    // every document nested in it, and never cleared.
+    bool scripting_disabled;
     bool xml_document;          // document factories preserve case in XML documents.
     uint32_t next_node_id;        // next DomNode id for event/state logs (0 reserved)
 
@@ -526,7 +530,7 @@ struct DomDocument : DomDocumentResourceData {
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
-                    html_scripting_enabled(false), xml_document(false),
+                    html_scripting_enabled(false), scripting_disabled(false), xml_document(false),
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     font_faces_processed(false),
@@ -1557,6 +1561,7 @@ inline const Element* dom_element_render_source(const DomElement* de) {
 
 // equal template results retain live DOM storage while adopting the new result keys.
 void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current);
+DomElement* element_dom_map_lookup(struct hashmap* map, Element* elem);
 
 // Resolve a parsed/template Element to its live DOM wrapper. The lifecycle
 // registry preserves source identity even when a DomElement owns a copied one.

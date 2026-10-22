@@ -1,0 +1,47 @@
+"=== listing ==="
+[{
+    number: 1,
+    uidl: "uid-alpha"
+  }, {
+    number: 2,
+    uidl: "uid-beta"
+  }]
+[{
+    number: 4,
+    uidl: "only-four"
+  }]
+[]
+"=== missing ==="
+[{
+    number: 2,
+    uidl: "b"
+  }]
+[{
+    number: 1,
+    uidl: "a"
+  }, {
+    number: 2,
+    uidl: "b"
+  }, {
+    number: 3,
+    uidl: "c"
+  }]
+[]
+"=== ids and sizes ==="
+["pop-uid-alpha", "pop-_a_b_47_cd_43__61__61__46_1", 1234, null, null]
+"=== the local Inbox ==="
+{
+  version: 1,
+  path: "INBOX",
+  uidvalidity: null,
+  uidnext: 1,
+  highestmodseq: null,
+  entries: []
+}
+[{
+    path: "INBOX",
+    name: "INBOX",
+    delimiter: null,
+    role: 'inbox',
+    selectable: true
+  }]

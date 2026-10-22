@@ -2963,10 +2963,24 @@ static const char* registered_jube_module_name(StrView* name) {
 #endif
 }
 
+// D7.2.4v4: the built-in lambda.io.<leaf> modules. Each answers to its full
+// path only, and its members are the io_<leaf>_* rows.
+static const struct { const char* path; const char* module; } io_leaf_modules[] = {
+    {"lambda.io.mail", "io_mail"},
+    {"lambda.io.secret", "io_secret"},
+    {"lambda.io.loopback", "io_loopback"},
+};
+
+static const char* io_leaf_module_path(const char* module) {
+    for (const auto& leaf : io_leaf_modules) if (!strcmp(leaf.module, module)) return leaf.path;
+    return NULL;
+}
+
 // Check if an identifier matches a built-in or descriptor-backed module name,
 // or a registered alias for one. Returns the real module name if matched.
 static const char* builtin_module_name(StrView name) {
     static const char* const modules[] = {"math", "io", "mcp"};
+    for (const auto& leaf : io_leaf_modules) if (strview_equal(&name, leaf.path)) return leaf.module;
     if (name.length > 7 && !memcmp(name.str, "lambda.", 7)) {
         name.str += 7;
         name.length -= 7;
@@ -3002,6 +3016,17 @@ static bool resolve_builtin_module_member(StrView path, const char** module,
             path.str[path.length - 1] == '\r' ||
             path.str[path.length - 1] == '\n')) {
         path.length--;
+    }
+    // lambda.io.<leaf>. precedes lambda.io.: a member of a leaf module (D7.2.4v4)
+    for (const auto& leaf : io_leaf_modules) {
+        size_t leaf_len = strlen(leaf.path);
+        if (path.length <= leaf_len + 1 || memcmp(path.str, leaf.path, leaf_len) != 0 ||
+                path.str[leaf_len] != '.') continue;
+        StrView suffix = {path.str + leaf_len + 1, path.length - leaf_len - 1};
+        if (memchr(suffix.str, '.', suffix.length)) return false;
+        *module = leaf.module;
+        *member = suffix;
+        return true;
     }
     for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
         size_t prefix_len = strlen(prefixes[i]);
@@ -13470,6 +13495,13 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     if (builtin_module && strcmp(builtin_module, "io") == 0) {
         if (node->alias) tp->builtin_alias_io = node->alias;
         else tp->builtin_import_io = true;
+        return import_resolves_to_marker(node);
+    }
+    if (builtin_module && io_leaf_module_path(builtin_module) && !node->alias) {
+        // a global import would put members such as open, send or get over the built-in ones
+        const char* path = io_leaf_module_path(builtin_module);
+        record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
+            "import %s needs an alias, as in 'import %s: %s'", path, path + strlen("lambda.io."), path);
         return import_resolves_to_marker(node);
     }
     if (builtin_module) {

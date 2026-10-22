@@ -12,6 +12,7 @@
 #include "font_gpos.h"
 
 #include "../hashmap_helpers.h"
+#include "../hash.h"
 #include "../memtrack.h"
 #include "../utf.h"
 #include <math.h>
@@ -1016,7 +1017,7 @@ bool font_measure_text_range(FontHandle* handle, const char* text, int byte_len,
 #endif
 }
 
-TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len) {
+static TextExtents font_measure_text_uncached(FontHandle* handle, const char* text, int byte_len) {
     TextExtents ext = {0};
     if (!handle || !text || byte_len <= 0) return ext;
     size_t len = (size_t)byte_len;
@@ -1102,6 +1103,38 @@ TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len
     }
 
     return ext;
+}
+
+TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len) {
+    if (!handle || !text || byte_len <= 0 || byte_len > FONT_TEXT_MEASURE_MAX_BYTES)
+        return font_measure_text_uncached(handle, text, byte_len);
+    FontContext* ctx = handle->ctx;
+    if (ctx) ctx->text_measure_requests++;
+    uint64_t generation = font_context_resource_generation(ctx);
+    if (!handle->text_measure_cache) {
+        handle->text_measure_cache = (FontTextMeasureEntry*)mem_calloc(
+            FONT_TEXT_MEASURE_CACHE_SIZE, sizeof(FontTextMeasureEntry), MEM_CAT_FONT);
+    } else if (handle->text_measure_generation != generation) {
+        // a newly available face can change platform fallback for an existing handle.
+        memset(handle->text_measure_cache, 0,
+            FONT_TEXT_MEASURE_CACHE_SIZE * sizeof(FontTextMeasureEntry));
+    }
+    handle->text_measure_generation = generation;
+    if (!handle->text_measure_cache) return font_measure_text_uncached(handle, text, byte_len);
+    uint32_t hash = hash_fnv1a_32(text, (size_t)byte_len);
+    FontTextMeasureEntry* entry = &handle->text_measure_cache[hash % FONT_TEXT_MEASURE_CACHE_SIZE];
+    if (entry->hash == hash && entry->length == byte_len &&
+            memcmp(entry->text, text, (size_t)byte_len) == 0) {
+        if (ctx) ctx->text_measure_hits++;
+        return entry->extents;
+    }
+    TextExtents extents = font_measure_text_uncached(handle, text, byte_len);
+    // own the short key: layout frequently measures temporary or subsequently edited buffers.
+    memcpy(entry->text, text, (size_t)byte_len);
+    entry->length = (uint8_t)byte_len;
+    entry->hash = hash;
+    entry->extents = extents;
+    return extents;
 }
 
 float font_measure_char(FontHandle* handle, uint32_t codepoint) {

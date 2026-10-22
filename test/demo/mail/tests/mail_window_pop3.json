@@ -1,0 +1,47 @@
+{
+  "name": "Mail demo: a POP3 account downloads its Inbox once, keeps read state locally, leaves mail on the server",
+  "html": "test/demo/mail/mail.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-loaded", "equals": "true"},
+    {"type": "type", "target": {"selector": "#setup-email"}, "text": "ada@fake.test"},
+    {"type": "type", "target": {"selector": "#setup-password"}, "text": "secret"},
+    {"type": "select_option", "target": {"selector": "#setup-provider"}, "value": "manual"},
+    {"type": "select_option", "target": {"selector": "#setup-protocol"}, "value": "pop3"},
+    {"type": "type", "target": {"selector": "#setup-host"}, "text": "127.0.0.1"},
+    {"type": "type", "target": {"selector": "#setup-port"}, "text": "{POP3_PORT}", "clear": true},
+    {"type": "select_option", "target": {"selector": "#setup-security"}, "value": "plain"},
+    {"type": "type", "target": {"selector": "#setup-user"}, "text": "ada"},
+    {"type": "click", "target": {"selector": "#setup-save"}},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-rows", "equals": "2",
+      "assert_timeout": 20000, "assert_interval": 200},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-status", "equals": "online",
+      "assert_timeout": 10000, "assert_interval": 200},
+    {"type": "assert_count", "target": {"selector": ".box"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".box.role-inbox .count"}, "equals": "2"},
+    {"type": "assert_text", "target": {"selector": "#list .row[data-value=\"1\"] .subject"}, "equals": "pop"},
+
+    {"type": "click", "target": {"selector": "#list .row[data-value=\"1\"]"}},
+    {"type": "assert_attribute", "target": {"selector": "#viewer"}, "attribute": "data-uid", "equals": "1"},
+    {"type": "assert_text", "target": {"selector": "#text-body"}, "contains": ".hidden dot line"},
+    {"type": "assert_text", "target": {"selector": ".box.role-inbox .count"}, "equals": "1",
+      "assert_timeout": 10000, "assert_interval": 200},
+    {"type": "assert_count", "target": {"selector": "#list .row.unread"}, "count": 1},
+    {"type": "capture_surface", "source": "page", "file": "temp/mail/shots/pop3.png"},
+
+    {"type": "click", "target": {"selector": "#get-mail"}},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-status", "equals": "syncing",
+      "assert_timeout": 5000, "assert_interval": 50},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-status", "equals": "online",
+      "assert_timeout": 10000, "assert_interval": 200},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-rows", "equals": "2"},
+    {"type": "assert_count", "target": {"selector": "#list .row.unread"}, "count": 1},
+
+    {"type": "click", "target": {"selector": ".remove-account"}},
+    {"type": "assert_count", "target": {"selector": "#remove-account-confirm"}, "count": 1},
+    {"type": "click", "target": {"selector": "#remove-account-confirm"}},
+    {"type": "assert_count", "target": {"selector": ".account"}, "count": 0},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-account", "equals": ""},
+    {"type": "wait", "ms": 500}
+  ]
+}

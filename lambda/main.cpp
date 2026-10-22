@@ -2472,6 +2472,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"slides", "test/demo/slides/northstar.slides"},
     {"readability", "test/demo/readability/readability.ls"},
     {"archive", "test/demo/archive/archive.ls"},
+    {"mail", "test/demo/mail/mail.ls"},
     {"wordcloud", "test/demo/wordcloud.ls"},
 };
 

@@ -581,6 +581,13 @@ static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
         bool include_error_fields) {
     TypeId t = get_type_id(object);
     if (include_error_fields && js_is_resting_error(object)) {
+        Item properties = js_error_properties_map(object, false);
+        if (get_type_id(properties) == LMD_TYPE_MAP &&
+                (name_id != NAME_ID_NONE
+                    ? js_props_desc_from_storage_name_id(properties, properties.map, name_id, out)
+                    : js_props_desc_from_storage(properties, properties.map, name, name_len, out))) {
+            return true;
+        }
         Item value = ItemNull;
         if (js_props_error_standard_field(name, name_len)) {
             if (!js_error_own_property(object, name, name_len, &value)) return false;
@@ -592,13 +599,7 @@ static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
             out->value = value;
             return true;
         }
-        Item properties = js_error_properties_map(object, false);
-        return get_type_id(properties) == LMD_TYPE_MAP &&
-            (name_id != NAME_ID_NONE
-                ? js_props_desc_from_storage_name_id(properties, properties.map,
-                    name_id, out)
-                : js_props_desc_from_storage(properties, properties.map,
-                    name, name_len, out));
+        return false;
     }
     if (t == LMD_TYPE_MAP) {
         return name_id != NAME_ID_NONE
@@ -933,15 +934,40 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
                                                         bool existing_accessor) {
     if (!pd) return js_status_ok();
     if (name_len < 0) return js_status_ok();
-    if (js_is_resting_error(object) &&
-        !js_props_error_standard_field(name, name_len)) {
-        // Error carriers store ordinary user properties in a side Map; writing
-        // descriptor flags to the carrier's LambdaError header loses the
-        // non-configurable state needed by a later DefineProperty call.
-        Item properties = js_error_properties_map(object, true);
-        if (get_type_id(properties) != LMD_TYPE_MAP) return js_status_ok();
-        return js_define_own_property_from_descriptor_impl(properties, name_item,
-            name, name_len, pd, is_new_property, existing_accessor);
+    if (js_is_resting_error(object)) {
+        RootFrame roots(7);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> error_root(roots, object);
+        Rooted<Item> name_root(roots, name_item);
+        Rooted<Item> old_value_root(roots, ItemNull);
+        Rooted<Item> value_root(roots, (pd->flags & JS_PD_HAS_VALUE) ? pd->value : ItemNull);
+        Rooted<Item> getter_root(roots, (pd->flags & JS_PD_HAS_GET) ? pd->getter : ItemNull);
+        Rooted<Item> setter_root(roots, (pd->flags & JS_PD_HAS_SET) ? pd->setter : ItemNull);
+        Rooted<Item> properties_root(roots, js_error_properties_map(error_root.get(), true));
+        if (get_type_id(properties_root.get()) != LMD_TYPE_MAP) return js_status_ok();
+        // D8.4.3v2: the Error carrier is not a full Map. Move a standard field
+        // into its property Map before changing descriptors, preserving its defaults.
+        Item old_value = ItemNull;
+        if (js_props_error_standard_field(name, name_len) &&
+                !js_find_shape_entry(properties_root.get(), name, name_len) &&
+                js_error_own_property(error_root.get(), name, name_len, &old_value)) {
+            old_value_root.set(js_get_key_default(error_root.get(), name_root.get()));
+            if (item_is_error(old_value_root.get())) return old_value_root.get();
+            JsPropertyDescriptor initial = {};
+            initial.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+                JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+            js_pd_set_configurable(&initial, true);
+            initial.value = old_value_root.get();
+            JS_RETURN_IF_ERROR(js_define_own_property_from_descriptor_impl(
+                properties_root.get(), name_root.get(), name, name_len, &initial, true, false));
+            js_error_clear_standard_own_property(error_root.get(), name, name_len);
+        }
+        JsPropertyDescriptor rooted_pd = *pd;
+        rooted_pd.value = value_root.get();
+        rooted_pd.getter = getter_root.get();
+        rooted_pd.setter = setter_root.get();
+        return js_define_own_property_from_descriptor_impl(properties_root.get(), name_root.get(),
+            name, name_len, &rooted_pd, is_new_property, existing_accessor);
     }
     JsPropertyDescriptor data_update;
     if (existing_accessor && js_pd_is_data(pd) && !(pd->flags & JS_PD_HAS_VALUE)) {

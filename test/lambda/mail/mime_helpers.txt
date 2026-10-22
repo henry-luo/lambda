@@ -1,0 +1,22 @@
+{
+  multipart: {
+    text: "Price: 5 € — “quoted”\r\nLine two.",
+    html: "<html><body><p>Price: 5 €</p><img src=\"cid:logo@example\"></body></html>\r\n",
+    attachments: [{
+        filename: "Reçu n° 42.pdf",
+        type: "application/pdf",
+        size: 22
+      }],
+    cids: [{
+        cid: "logo@example",
+        type: "image/png"
+      }],
+    snippet: "Price: 5 € — “quoted” Line two."
+  },
+  flowed: {
+    text: "This paragraph is wrapped by the sender and should join.\n> quoted line\n",
+    snippet: "This paragraph is wrapped by the sender and should join."
+  },
+  search_text: "Élise Dupré elise@example.fr, Doe, John john@example.com, Ada Lovelace ada@example.org, bob@example.com, Carol \"CJ\" Jones carol@example.com\nCafé crème and 日本語\nBonjour à tous.\r\n",
+  unflow: ["one two\n-- \nsig", "joinedwords"]
+}

@@ -1,0 +1,26 @@
+From: =?ISO-2022-JP?B?GyRCOzNFRBsoQg==?= <yamada@example.jp>
+To: ada@example.org
+Subject: =?ISO-2022-JP?B?GyRCN29MPiVGJTklSBsoQg==?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="lc"
+
+--lc
+Content-Type: text/plain; charset=ISO-2022-JP
+Content-Transfer-Encoding: 7bit
+
+こんにちは
+--lc
+Content-Type: text/plain; charset=GB2312
+Content-Transfer-Encoding: base64
+
+xOO6w6OsysC95w==
+--lc
+Content-Type: text/plain; charset=Shift_JIS
+Content-Transfer-Encoding: base64
+
+gqCC6IKqgsaCpA==
+--lc
+Content-Type: text/plain; charset=x-unknown-charset
+
+plain ascii under an unknown label
+--lc--

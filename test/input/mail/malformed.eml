@@ -1,0 +1,13 @@
+From: broken@example.com
+Subject: =?UTF-8?Q?unterminated
+Content-Type: multipart/alternative; boundary="b"
+
+--b
+Content-Type: text/plain
+
+first part
+--b
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+!!!not base64!!!

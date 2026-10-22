@@ -1,0 +1,58 @@
+"=== modified UTF-7 mailbox names ==="
+["INBOX", "日本語", "Entwürfe", "a&b", "😀", "[Gmail]/Входящие"]
+"=== LIST ==="
+{
+  path: "[Gmail]/Sent Mail",
+  name: "[Gmail]/Sent Mail",
+  delimiter: "/",
+  role: 'sent',
+  selectable: true
+}
+{
+  path: "[Gmail]",
+  name: "[Gmail]",
+  delimiter: "/",
+  role: null,
+  selectable: false
+}
+{
+  path: "INBOX",
+  name: "INBOX",
+  delimiter: ".",
+  role: 'inbox',
+  selectable: true
+}
+true
+false
+"=== SELECT ==="
+{
+  uidvalidity: 1700000001,
+  uidnext: 5,
+  highestmodseq: 912377,
+  exists: 4,
+  read_only: false
+}
+{
+  uidvalidity: null,
+  uidnext: null,
+  highestmodseq: null,
+  exists: null,
+  read_only: true
+}
+"=== FETCH ==="
+true
+{
+  seq: 12,
+  uid: 48213,
+  flags: ["\\Seen", "$Junk"],
+  size: 48210,
+  internaldate: "21-Oct-2026 09:14:00 +0200",
+  modseq: 912370,
+  header: b'\x5375626A6563743A2068690D0A0D0A',
+  body: null,
+  gm_msgid: 1278455344230334865,
+  gm_thrid: null,
+  gm_labels: ["\\Important", "Work"]
+}
+"=== UID sets ==="
+["1:3,7", "4:5,9:11", "42", ""]

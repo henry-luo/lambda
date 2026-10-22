@@ -1063,11 +1063,20 @@ $(eval $(call release_node_module,fs))
 $(eval $(call release_node_module,net))
 $(eval $(call release_node_module,crypto))
 
+# Publish a fresh inode: overwriting a mapped executable can leave macOS using
+# stale code-signature pages, killing or stalling the next package launch.
+define publish_package_executable
+	@mkdir -p temp
+	@package_exe_temp=$$(mktemp ./temp/package-executable.XXXXXX) || exit 1; \
+	trap 'rm -f "$$package_exe_temp"' 0 1 2 15; \
+	cp -p "$(1)" "$$package_exe_temp" && mv -f "$$package_exe_temp" "$(2)"
+endef
+
 # Standard and full Jube packages deliberately reuse the identical host.  The
 # full package adds language modules; it never recompiles a second runtime.
 package-standard: release-node-core release-node-fs release-node-net release-node-crypto
 	@mkdir -p release-standard
-	@cp release/lambda release-standard/lambda
+	$(call publish_package_executable,release/lambda,release-standard/lambda)
 	@mkdir -p release-standard/modules
 	@cp modules/module-set.json release-standard/modules/module-set.json
 	# The module set advertises node-core, node-fs, node-net, and node-crypto, so their images must ship
@@ -1098,7 +1107,7 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 
 package-jube: package-standard release-rdb-drivers
 	@mkdir -p release-jube
-	@cp release-standard/lambda release-jube/lambda
+	$(call publish_package_executable,release-standard/lambda,release-jube/lambda)
 	@rm -rf release-jube/modules/rdb-drivers
 	@mkdir -p release-jube/modules
 	@cp -R release/modules/rdb-drivers release-jube/modules/rdb-drivers
@@ -1108,7 +1117,7 @@ package-jube: package-standard release-rdb-drivers
 # recompiling the shared host binary.
 package-node-reduced: release-node-core
 	@mkdir -p release-node-reduced/modules
-	@cp release/lambda release-node-reduced/lambda
+	$(call publish_package_executable,release/lambda,release-node-reduced/lambda)
 	@cp modules/module-set-reduced.json release-node-reduced/modules/module-set.json
 	@mkdir -p release-node-reduced/modules/node-core
 	@cp release/modules/node-core/module.json release-node-reduced/modules/node-core/module.json
@@ -1127,7 +1136,7 @@ package-node-reduced: release-node-core
 # keeps node-core inactive while the same host binary remains usable for plain JS.
 package-minimal: release
 	@mkdir -p release-minimal
-	@cp release/lambda release-minimal/lambda
+	$(call publish_package_executable,release/lambda,release-minimal/lambda)
 
 verify-jube-package: package-jube
 	@shasum -a 256 release-standard/lambda release-jube/lambda
@@ -2475,6 +2484,11 @@ test-js-opt: build-test
 .PHONY: test-mcp
 test-mcp: build
 	@python3 test/mcp/test_mcp.py
+
+# lambda.io.mail against scripted loopback IMAP/POP3/SMTP servers (no network)
+.PHONY: test-mail
+test-mail: build
+	@python3 test/mail/test_mail.py
 
 test-library: build
 	@echo "Running library test suite..."

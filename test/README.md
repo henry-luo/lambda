@@ -39,6 +39,7 @@ Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 | Validator: `lambda/validator/` | `make test-validator` (validator suite, part of test-all-baseline) | `./test/test_validator_gtest.exe --gtest_filter='ValidatorTest.*'`; `./test/test_validator_input_gtest.exe` |
 | `lib/` utilities | `make test-library` (library suite, part of test-all-baseline) | `./test/test_str_gtest.exe`, `./test/test_arena_gtest.exe`, … (source `test/lib/test_<name>_gtest.cpp`) |
 | HTTP server: `lambda/serve/` | `make test-lambda-baseline` | `./test/test_serve_gtest.exe --gtest_filter='SchemaValidationTest.*:ValidationResultJson.*'`; the consolidated runner also covers routing, middleware, requests/responses, cookies, MIME, static helpers and the backend registry |
+| Mail and OAuth: `lambda/runtime/io_mail.cpp`, `io_secret.cpp`, `io_loopback.cpp`, `sys_crypto.cpp`, `lmd/package/oauth.ls`, `lib/mail_imap.*`, `lib/mail_mime.*`, `lib/secret_store.*`, the `eml` reader, `lmd/package/mail/`, `test/demo/mail/` | `make test-mail` (scripted loopback IMAP/POP3/SMTP servers, the Keychain round trip and the demo window's replay; needs socket permission, and on macOS writes test-only Keychain items it removes again) + `./test/test_mail_imap_gtest.exe` + `./test/test_mail_mime_gtest.exe` + the `test/lambda/mail` and `test/demo/mail/tests` goldens (in `test-lambda-baseline`) | `python3 test/mail/test_mail.py DemoWindowTests`; servers in [mail/fake_mail.py](mail/fake_mail.py), design in `vibe/Lambda_Demo_Mail.md` |
 | MCP client/server: `lambda/io/mcp*`, `lambda/serve/mcp_server*`, `lambda/runtime/mcp_module.cpp` | `make test-mcp` (real stdio and loopback HTTP; needs socket permission) + `make test-lambda-baseline` for runtime changes | `python3 test/mcp/test_mcp.py ClientTests`; transport contract and current scope: [mcp/README.md](mcp/README.md) |
 | Jube / Node modules: `lambda/jube/`, `lambda/module/node_*` | **`make test-lambda-baseline`** (builds node-core/node-fs) + `make node-regression-gate` | `make node-baseline`; `make test-jube-module-integrity`; `make check-host-exports` |
 | Release-only checks (perf, JIT timing) | n/a | `make release` first (rule 10). Never run it in a worktree. |
@@ -60,6 +61,18 @@ Case logs and individual GTest reports are under `test_output/test_radiant_view_
 A test that stops producing output is killed after the idle timeout; a log write error also terminates its process group. The runner pauses both output pipes while the log sink drains, keeping buffered log data bounded. With `--category=baseline` the runner passes `--baseline` to `test_js_gtest`, `test_wpt_html_parser_gtest` and `test_markdown_gtest`.
 
 UI automation uses a memory-weighted queue. Manifest suites and individual fixtures can set `worker_mb`; baseline/DTNA/timeline reserve 1024 MiB, and the indexed-math editor fixture reserves 1536 MiB. Other suites retain the 2048 MiB default for large editor/JS bundles. These budgets follow a full release profile: the indexed-math case peaked at 1179 MiB, all other cases below 900 MiB. Reservations collectively use at most half of physical RAM, with at least one case admitted on smaller hosts. `LAMBDA_UI_TEST_JOBS` and `LAMBDA_TEST_MAX_CONCURRENT` cap workers; `LAMBDA_UI_TEST_WORKER_MB` overrides reservations. Subprocess durations and per-view phase timings are retained in the shared report. A separate `<gtest-json-path>.timings.json` file supplies scheduling hints for later runs; every fixture still executes and produces a fresh result. `RADIANT_TEST_EXECUTABLE` selects an alternate host executable for isolated release comparisons.
+
+Keep every-allocation GC and freed-memory poisoning on focused lifetime regressions
+(D5.3.3). Full speed, presenter and archive replays run with normal GC;
+`slide_gc_lifetimes.json` covers collecting input dispatch, independent player state
+and cached previews, while `finder/archives_gc.json` covers captured nested ZIP
+members across navigation callbacks. The handler-allocation fixture retains four
+publication/retention turns with a small allocation batch: every allocation already
+collects. Mouse, iframe retirement, drag and thumbnail ownership probes retain their
+forced-GC settings. `slide_northstar.json` visits only the first four demo slides,
+including group geometry/pixels, a click reveal, push/fade transitions, intermediate
+and completed donut pixels, Previous/Restart and bounded autoplay. The demo remains
+18 slides; the replay asserts that only four audience layers were mounted.
 
 Headless assertion retries give pending native document and media work wall time to complete, including AVFoundation loading and playback transitions.
 
@@ -199,7 +212,7 @@ run `node test/test_layout_reference_controls.js` to check the oracle contract.
 | `test_node_gtest` | `ref/node/test/parallel` | `test/node/official_{baseline,skip_list,serial_list,slow_list}.txt` | Exit 0 and no `Uncaught` | `make node-update-baseline` |
 | `test_wpt_*_gtest` (sources in `test/wpt/`) | `ref/wpt/<area>`; `test_wpt_html_parser_gtest` reads `test/html/wpt/` | Per-runner | Most runners use a `test/wpt/wpt_<area>_baseline.txt` passing list | `WPT_<AREA>_UPDATE_BASELINE=1` (env name defined at the top of each runner) |
 | `test_validator_gtest` | `test/lambda/validator` (`schema_*.ls` + `.json/.xml/.yaml/.md/.html/...` data) | None. Explicit `TEST_F(ValidatorTest, …)` per (data, schema) pair. | Assertions on `ValidationResult` | Add files plus a `TEST_F` |
-| `test_ui_automation_gtest` | `test/ui/**`, `test/view/*.json`. Suites `baseline`, `dom`, `editor`, `hit-test`, `edit`, `view`, `native-gui` are defined by globs in `test/ui/ui_test_manifest.json`. | Manifest globs. The id is the path under `test/ui/` or `test/view/` with `/ - .` → `_`. | JSON `{name, html, events:[click, assert_text, wait, …]}` | Add the `.json` (+ `.html`). Check that the baseline suite's `exclude` list doesn't drop it. |
+| `test_ui_automation_gtest` | `test/ui/**`, `test/view/*.json`. Suites `baseline`, `dom`, `editor`, `hit-test`, `edit`, `view`, `native-gui` are defined by globs in `test/ui/ui_test_manifest.json`. | Manifest globs. The id is the path under `test/ui/` or `test/view/` with `/ - .` → `_`. | JSON `{name, html, events:[click, assert_text, wait, …]}`. Pixel assertions refresh pending visual changes; `force_render:true` repaints unconditionally and `false` observes existing pixels. | Add the `.json` (+ `.html`). Check that the baseline suite's `exclude` list doesn't drop it. |
 | `test_page_load_gtest`, `test_layout_fuzzy_gtest` | `test/layout/data/{page,markdown}`, `test/layout/data/fuzzy` | Every `*.html` (non-recursive) | Loads without crash | Drop in an `.html` file |
 | `test/layout/test_radiant_layout.js` (`make layout`) | `test/layout/data/<suite>/` | Per-suite `baseline.txt` lists the files that must pass | Browser reference JSON in `test/layout/reference/` (flat; nested fixtures are keyed `dir__name`) | `make capture-layout test=<name>` |
 | `test/render/test_radiant_render.js` (`make test-render`) | `test/render` | Script-defined | Reference PNGs | `make capture-render test=<name>` |

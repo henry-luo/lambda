@@ -150,6 +150,7 @@ pub fn render(value) map^ {
     let output_headers = [*selected,*if (raw or find(selected,"mime-version") != null) [] else [{name:"mime-version",value:"1.0"}],*mime.headers]
     let issues = mime.diagnostics ++ [for (name in ["from","date"] where find(output_headers,name) == null) c.issue("missing-header",value,"Email requires " ++ name)] ++
         (if (replaced_multipart) [c.issue("mime-source-unavailable",value,"Rebuilding the display HTML does not retain the original multipart attachments")] else []) ++
-        c.unknown(value,["headers","header_entries","body","raw_body","attachments","from","to","cc","bcc","reply_to","subject","date","message_id"],"email field");
+        // the reader's `addresses` and `mime` are views of the headers and raw_body, never serialized
+        c.unknown(value,["headers","header_entries","body","raw_body","attachments","from","to","cc","bcc","reply_to","subject","date","message_id","addresses","mime"],"email field");
     c.result(header_lines(output_headers)^ ++ "\r\n" ++ mime.body ++ (if (ends_with(mime.body,"\r\n")) "" else "\r\n"),issues)
 }

@@ -706,6 +706,31 @@ TEST_F(GCHeapTest, ObjectInteriorPointerNotManaged) {
     EXPECT_FALSE(gc_is_managed(gc, (uint8_t*)ptr + 8));
 }
 
+TEST_F(GCHeapTest, OwnershipTracksFreshSlotsAfterRepeatedRangeQueries) {
+    gc_object_zone_t* zone = gc->object_zone;
+    void* first = gc_object_zone_alloc(zone, 32, LMD_TYPE_STRING, &gc->all_objects);
+    ASSERT_NE(first, nullptr);
+    gc_object_slab_t* slab = zone->fresh_slabs[gc_object_zone_class_index(32)];
+    ASSERT_NE(slab, nullptr);
+    uint8_t* next = slab->base + slab->next_fresh * slab->slot_size + sizeof(gc_header_t);
+    EXPECT_TRUE(gc_object_zone_owns(zone, first));
+    EXPECT_FALSE(gc_object_zone_owns(zone, next));
+    EXPECT_FALSE(gc_object_zone_owns(zone, (uint8_t*)first + 1));
+
+    // a remembered range must still consult the current allocation watermark.
+    ASSERT_EQ(gc_object_zone_alloc(zone, 32, LMD_TYPE_STRING, &gc->all_objects), next);
+    EXPECT_TRUE(gc_object_zone_owns(zone, next));
+    EXPECT_FALSE(gc_object_zone_owns(zone, next - sizeof(gc_header_t)));
+    EXPECT_FALSE(gc_object_zone_owns(zone, next + 1));
+
+    void* foreign = nullptr;
+    ASSERT_NE(gc->bump_blocks, nullptr);
+    EXPECT_FALSE(gc_object_zone_owns_or_foreign(zone,
+        gc->bump_blocks->base + sizeof(gc_header_t), &foreign));
+    EXPECT_EQ(foreign, gc->bump_blocks);
+    EXPECT_TRUE(gc_object_zone_owns(zone, first));
+}
+
 TEST_F(GCHeapTest, BumpAllocationBitmapMarksOnlyExactAllocatedSlots) {
     int small_cls = gc_object_zone_class_index(32);
     int large_cls = gc_object_zone_class_index(GC_LARGE_OBJECT_THRESHOLD);

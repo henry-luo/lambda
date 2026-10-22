@@ -455,126 +455,170 @@ static void validate_transient_ui_target(View* view, const char* name,
     }
 }
 
-static void validate_focus_node(DocState* state, View* node, View* focused,
-                                StateValidationReport* report,
-                                uint32_t* focus_count) {
-    if (!state || !node) return;
+enum InteractionGraphMask {
+    INTERACTION_GRAPH_FOCUS = 1,
+    INTERACTION_GRAPH_HOVER = 2,
+    INTERACTION_GRAPH_ACTIVE = 4,
+};
 
-    bool expected_focus = node == focused;
-    bool expected_within = focused && view_geometry_is_descendant(focused, node);
-    bool expected_visible = expected_focus && state->focus && state->focus->focus_visible;
+struct InteractionGraphRule {
+    SmInvariantId invariant;
+    const char* ancestor_flag;
+    const char* ancestor_message;
+    const char* detached_message;
+    const char* inactive_message;
+};
 
-    bool store_focus = state_get_bool(state, node, STATE_FOCUS);
-    bool store_within = state_get_bool(state, node, STATE_FOCUS_WITHIN);
-    bool store_visible = state_get_bool(state, node, STATE_FOCUS_VISIBLE);
+static const InteractionGraphRule interaction_graph_rules[] = {
+    {SM_INV_FOCUS_GRAPH, STATE_FOCUS_WITHIN, ":focus-within ancestry is inconsistent",
+        "focused target is detached", "inactive focus document still has :focus target"},
+    {SM_INV_HOVER_GRAPH, STATE_HOVER, ":hover ancestry chain is inconsistent",
+        "hover target is detached", "inactive hover document still has :hover target"},
+    {SM_INV_ACTIVE_GRAPH, STATE_ACTIVE, ":active ancestry chain is inconsistent",
+        "active target is detached", "inactive document still has :active target"},
+};
+static constexpr unsigned INTERACTION_GRAPH_COUNT =
+    sizeof(interaction_graph_rules) / sizeof(interaction_graph_rules[0]);
 
-    if (store_focus) (*focus_count)++;
-    if (store_focus != expected_focus) {
-        report_fail(report, "focus pseudo-state does not match focus target");
-    }
-    if (store_within != expected_within) {
-        report_fail(report, ":focus-within ancestry is inconsistent");
-    }
-    if (store_visible != expected_visible) {
-        report_fail(report, ":focus-visible state is inconsistent");
-    }
-
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        DomNode* child = element->first_child;
-        while (child) {
-            validate_focus_node(state, static_cast<View*>(child), focused, report, focus_count);
-            child = child->next_sibling;
-        }
-    }
+static uint8_t interaction_graph_mask(SmInvariantId invariant) {
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i)
+        if (interaction_graph_rules[i].invariant == invariant) return (uint8_t)(1u << i);
+    return 0;
 }
 
-static void validate_focus_invariants(DocState* state,
-                                      StateValidationReport* report) {
-    if (!state || !state->focus) return;
+struct InteractionGraphValidation {
+    View* targets[INTERACTION_GRAPH_COUNT];
+    uint32_t stored_counts[INTERACTION_GRAPH_COUNT];
+};
 
-    View* focused = state->focus->current;
-    if (focused && !view_has_document_root(focused)) {
-        report_fail(report, "focused target is detached");
+static uint8_t validate_interaction_graph_node(DocState* state, View* node, uint8_t mask,
+        InteractionGraphValidation* graph, StateValidationReport* report) {
+    uint8_t descendants = 0;
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i)
+        if (node == graph->targets[i]) descendants |= (uint8_t)(1u << i);
+    // collect ancestry once from the child walk, rather than walking each target's parents per node.
+    if (node->is_element()) {
+        for (DomNode* child = node->as_element()->first_child; child; child = child->next_sibling) {
+            if (child->parent != node) report_fail(report, "interaction tree parent link is inconsistent");
+            descendants |= validate_interaction_graph_node(state, child, mask, graph, report);
+        }
     }
-    View* root = interaction_validation_root(state,
-        focused ? focused : state->focus->previous);
-    if (!root) return;
+    const ViewState* stored = view_state_get(state, node);
+    bool flags[] = {stored && stored->flags.focused, stored && stored->flags.hovered,
+                    stored && stored->flags.active};
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i) {
+        uint8_t bit = (uint8_t)(1u << i);
+        if (!(mask & bit)) continue;
+        bool expected = i == 0 ? node == graph->targets[0] : (descendants & bit) != 0;
+        if (flags[i]) graph->stored_counts[i]++;
+        if (flags[i] != expected) report_fail(report, i == 0
+            ? "focus pseudo-state does not match focus target" : interaction_graph_rules[i].ancestor_message);
+    }
+    if (mask & INTERACTION_GRAPH_FOCUS) {
+        if (state_get_bool(state, node, STATE_FOCUS_WITHIN) !=
+                ((descendants & INTERACTION_GRAPH_FOCUS) != 0))
+            report_fail(report, ":focus-within ancestry is inconsistent");
+        bool visible = node == graph->targets[0] && state->focus->focus_visible;
+        if (state_get_bool(state, node, STATE_FOCUS_VISIBLE) != visible)
+            report_fail(report, ":focus-visible state is inconsistent");
+    }
+    return descendants;
+}
 
-    uint32_t focus_count = 0;
-    validate_focus_node(state, root, focused, report, &focus_count);
-    if (focused && focus_count != 1) {
+static bool validate_registered_interaction_graphs(DocState* state, View** roots, uint8_t requested,
+        InteractionGraphValidation* graph, StateValidationReport* report) {
+    DomDocument* doc = state->owner_store ? state->owner_store->document : nullptr;
+    if (!doc || !doc->root) return false;
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i)
+        if ((requested & (1u << i)) && roots[i] && roots[i] != doc->root) return false;
+    // absent flags are false: check required ancestor flags, then every stored positive flag.
+    // this covers the same graph without visiting the document's stateless nodes.
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i) {
+        View* target = graph->targets[i];
+        if (!(requested & (1u << i)) || !roots[i] || !target ||
+            !view_geometry_is_descendant(target, roots[i])) continue;
+        for (View* node = target; node; node = node->parent) {
+            if (!state_get_bool(state, node, interaction_graph_rules[i].ancestor_flag))
+                report_fail(report, interaction_graph_rules[i].ancestor_message);
+            if (node == roots[i]) break;
+        }
+        if (i == 0) {
+            if (!view_state_get_focused(state, target))
+                report_fail(report, "focus pseudo-state does not match focus target");
+            if (state->focus->focus_visible && !state_get_bool(state, target, STATE_FOCUS_VISIBLE))
+                report_fail(report, ":focus-visible state is inconsistent");
+        }
+    }
+    size_t iterator = 0;
+    void* value = nullptr;
+    while (state->view_state_map && hashmap_iter(state->view_state_map, &iterator, &value)) {
+        const ViewStateEntry* entry = (const ViewStateEntry*)value;
+        if (!entry->state) continue; // the registry invariant reports malformed entries.
+        const ViewState* stored = entry->state;
+        if (!stored->flags.focused && !stored->flags.hovered && !stored->flags.active) continue;
+        View* node = view_state_entry_resolve_view(state, entry);
+        if (!node || !view_geometry_is_descendant(node, doc->root)) continue;
+        // multiple kinds may share a node; flags come from its canonical primary state.
+        if (view_state_get(state, node) != stored) continue;
+        bool flags[] = {stored->flags.focused != 0, stored->flags.hovered != 0, stored->flags.active != 0};
+        for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i) {
+            if (!(requested & (1u << i)) || !roots[i] || !flags[i]) continue;
+            graph->stored_counts[i]++;
+            bool expected = i == 0 ? node == graph->targets[0]
+                : graph->targets[i] && view_geometry_is_descendant(graph->targets[i], node);
+            if (!expected) report_fail(report, i == 0
+                ? "focus pseudo-state does not match focus target" : interaction_graph_rules[i].ancestor_message);
+        }
+    }
+    if ((requested & INTERACTION_GRAPH_FOCUS) && roots[0]) {
+        iterator = 0;
+        while (state->state_map && hashmap_iter(state->state_map, &iterator, &value)) {
+            const StateEntry* entry = (const StateEntry*)value;
+            if (get_type_id(entry->value) != LMD_TYPE_BOOL || !entry->value.bool_val) continue;
+            bool within = strcmp(entry->key.name, STATE_FOCUS_WITHIN) == 0;
+            bool visible = strcmp(entry->key.name, STATE_FOCUS_VISIBLE) == 0;
+            if (!within && !visible) continue;
+            View* node = (View*)entry->key.node;
+            // generic state keys need not be DOM nodes; never dereference an unregistered key.
+            if (!dom_node_registry_owns(doc, node) || !view_geometry_is_descendant(node, roots[0])) continue;
+            bool expected = within
+                ? graph->targets[0] && view_geometry_is_descendant(graph->targets[0], node)
+                : node == graph->targets[0] && state->focus->focus_visible;
+            if (!expected) report_fail(report, within ? interaction_graph_rules[0].ancestor_message : ":focus-visible state is inconsistent");
+        }
+    }
+    return true;
+}
+
+static void validate_interaction_graphs(DocState* state, uint8_t requested,
+                                         StateValidationReport* report) {
+    InteractionGraphValidation graph = {{state->focus ? state->focus->current : nullptr,
+        state->hover_target, state->active_target}, {0, 0, 0}};
+    View* roots[] = {state->focus ? interaction_validation_root(state,
+        graph.targets[0] ? graph.targets[0] : state->focus->previous) : nullptr,
+        interaction_validation_root(state, graph.targets[1]),
+        interaction_validation_root(state, graph.targets[2])};
+    bool registered = validate_registered_interaction_graphs(state, roots, requested, &graph, report);
+    uint8_t remaining = registered ? 0 : requested;
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i) {
+        uint8_t bit = (uint8_t)(1u << i);
+        if (!(requested & bit)) continue;
+        if (graph.targets[i] && !view_has_document_root(graph.targets[i]))
+            report_fail(report, interaction_graph_rules[i].detached_message);
+        if (!(remaining & bit) || !roots[i]) continue;
+        uint8_t shared = 0;
+        for (unsigned j = i; j < INTERACTION_GRAPH_COUNT; ++j)
+            if (roots[j] == roots[i]) shared |= remaining & (uint8_t)(1u << j);
+        validate_interaction_graph_node(state, roots[i], shared, &graph, report);
+        remaining &= (uint8_t)~shared;
+    }
+    for (unsigned i = 0; i < INTERACTION_GRAPH_COUNT; ++i) {
+        if (!(requested & (1u << i)) || !roots[i]) continue;
+        if (!graph.targets[i] && graph.stored_counts[i]) report_fail(report, interaction_graph_rules[i].inactive_message);
+    }
+    if ((requested & INTERACTION_GRAPH_FOCUS) && roots[0] && graph.targets[0] &&
+            graph.stored_counts[0] != 1)
         report_fail(report, "focused document does not have exactly one :focus target");
-    }
-    if (!focused && focus_count != 0) {
-        report_fail(report, "inactive focus document still has :focus target");
-    }
-}
-
-static void validate_ancestor_state_node(DocState* state, View* node, View* target,
-                                          const char* state_flag, const char* message,
-                                          StateValidationReport* report,
-                                          uint32_t* target_count) {
-    if (!state || !node) return;
-
-    bool expected = target && view_geometry_is_descendant(target, node);
-    bool stored = state_get_bool(state, node, state_flag);
-    if (stored) (*target_count)++;
-    if (stored != expected) {
-        report_fail(report, message);
-    }
-
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        DomNode* child = element->first_child;
-        while (child) {
-            validate_ancestor_state_node(state, static_cast<View*>(child), target,
-                                          state_flag, message, report, target_count);
-            child = child->next_sibling;
-        }
-    }
-}
-
-static void validate_hover_invariants(DocState* state,
-                                      StateValidationReport* report) {
-    if (!state) return;
-
-    View* hovered = state->hover_target;
-    if (hovered && !view_has_document_root(hovered)) {
-        report_fail(report, "hover target is detached");
-    }
-
-    View* root = interaction_validation_root(state, hovered);
-    if (!root) return;
-
-    uint32_t hover_count = 0;
-    validate_ancestor_state_node(state, root, hovered, STATE_HOVER,
-                                  ":hover ancestry chain is inconsistent",
-                                  report, &hover_count);
-    if (!hovered && hover_count != 0) {
-        report_fail(report, "inactive hover document still has :hover target");
-    }
-}
-
-static void validate_active_invariants(DocState* state,
-                                       StateValidationReport* report) {
-    if (!state) return;
-
-    View* active = state->active_target;
-    if (active && !view_has_document_root(active)) {
-        report_fail(report, "active target is detached");
-    }
-
-    View* root = interaction_validation_root(state, active);
-    if (!root) return;
-
-    uint32_t active_count = 0;
-    validate_ancestor_state_node(state, root, active, STATE_ACTIVE,
-                                  ":active ancestry chain is inconsistent",
-                                  report, &active_count);
-    if (!active && active_count != 0) {
-        report_fail(report, "inactive document still has :active target");
-    }
 }
 
 static void validate_drag_invariants(DocState* state,
@@ -1058,15 +1102,6 @@ static void validate_schema_invariant_primitive(DocState* state,
         case SM_INV_FOCUSED_TARGET:
             validate_focused_target_state(state, report);
             break;
-        case SM_INV_FOCUS_GRAPH:
-            validate_focus_invariants(state, report);
-            break;
-        case SM_INV_HOVER_GRAPH:
-            validate_hover_invariants(state, report);
-            break;
-        case SM_INV_ACTIVE_GRAPH:
-            validate_active_invariants(state, report);
-            break;
         case SM_INV_DRAG_GRAPH:
             validate_drag_invariants(state, report);
             break;
@@ -1114,10 +1149,22 @@ static bool radiant_state_validate_interaction_schema(DocState* state,
     report_init(report);
     if (!state) return true;
     selection_refresh_presentation(state);
+    uint8_t graphs = 0;
+    for (uint32_t i = 0; i < RADIANT_INVARIANT_COUNT; ++i) {
+        const StateInvariantBinding* binding = &RADIANT_INVARIANTS[i];
+        if (schema_invariant_binding_applies(state, binding))
+            graphs |= interaction_graph_mask(binding->invariant);
+    }
+    bool graphs_validated = false;
     for (uint32_t i = 0; i < RADIANT_INVARIANT_COUNT; i++) {
         const StateInvariantBinding* binding = &RADIANT_INVARIANTS[i];
         if (!schema_invariant_binding_applies(state, binding)) continue;
-        validate_schema_invariant_primitive(state, binding->invariant, report);
+        if (interaction_graph_mask(binding->invariant)) {
+            if (!graphs_validated) validate_interaction_graphs(state, graphs, report);
+            graphs_validated = true;
+        } else {
+            validate_schema_invariant_primitive(state, binding->invariant, report);
+        }
     }
     return !report || report->ok;
 }
@@ -1399,7 +1446,15 @@ void state_end_event_cascade(DocState* state,
     if (state) {
         state_end_batch(state);
     }
-    radiant_state_settle(state, log, cascade_id);
+#ifndef NDEBUG
+    // retain orphan pruning and the debug assertion without validating twice.
+    if (state && state->state_batch_depth == 0) view_state_prune_orphans(state);
+#endif
+    if (!radiant_state_settle(state, log, cascade_id)) {
+#ifndef NDEBUG
+        assert((!state || state->state_batch_depth > 0) && "DocState interaction invariant failed");
+#endif
+    }
     event_state_log_end_cascade(log, cascade_id);
     if (state && state->active_cascade_depth > 0) {
         state->active_cascade_depth--;

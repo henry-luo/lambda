@@ -482,7 +482,7 @@ Runtime work: each document gets a task scope that the reactive host joins at te
 
 **AR-E6 — Rendered DOM readback.** WebScrape E6: load a page with scripts on, settle, and return the live DOM, for single-page apps.
 
-**AR-E7 — Digest.** WebScrape E7's `hash`, with SHA-256 for the store and SHA-384/SHA-512 for comparing `integrity` values. Required in Phase 2; in Phase 1 the manifest leaves `digest` empty. The first AR-E9 function.
+**AR-E7 — Digest.** WebScrape E7's `hash`, with SHA-256 for the store and SHA-384/SHA-512 for comparing `integrity` values. Required in Phase 2; in Phase 1 the manifest leaves `digest` empty. The first AR-E9 function. *Exists since 2026-10-22:* the mail demo's OAuth work added `hash(value, 'sha256' | 'sha384' | 'sha512')`, returning binary (vibe/Lambda_Demo_Mail.md M4).
 
 **AR-E9 — Small C system functions where script cannot do the work (AR4v2).** Added one at a time, each an ordinary system function with its own tests, never a linked library for the archiver's sake: `hash(bytes, 'sha256' | 'sha384' | 'sha512')` (= AR-E7); `crypto.aes_cbc_decrypt(bytes, key, iv)` for AES-128 HLS segments (optional, after M3). Nothing else is foreseen: HTML, JSON, m3u8 and WebVTT parsing, byte appends and PNG/PDF rendering exist in Lambda already. A proposed function is listed here before it is written.
 

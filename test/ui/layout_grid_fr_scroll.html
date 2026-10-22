@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- An fr row of a definite-height grid takes its size from the free space; an
+     item only floors it through its automatic minimum, which a scroll container
+     or min-height:0 zeroes (CSS Grid §6.6, §11.7, §12.5.4). Browsers report
+     300/300/300/5000/300 below. -->
+<html><head><meta charset="utf-8"><style>
+body { margin: 0; }
+.g { display: grid; grid-template-columns: 100px 100px; height: 300px; margin-bottom: 10px; }
+.zero { grid-template-rows: minmax(0, 1fr); }
+.one { grid-template-rows: 1fr; }
+.s { overflow-y: auto; }
+.tall { height: 5000px; }
+</style></head><body>
+<div class="g zero"><div id="zero-scroll" class="s"><div class="tall"></div></div><div id="zero-visible"><div class="tall"></div></div></div>
+<div class="g one"><div id="one-scroll" class="s"><div class="tall"></div></div></div>
+<div class="g one"><div id="one-visible"><div class="tall"></div></div></div>
+<div class="g one"><div id="one-min-zero" style="min-height:0"><div class="tall"></div></div></div>
+<p id="out"></p>
+</body></html>

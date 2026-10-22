@@ -19,6 +19,7 @@ extern "C" Item dom_document_fragment_ctor(void);
 
 /** `new Comment(data)` — a detached CharacterData comment on the current document. */
 extern "C" Item dom_comment_ctor(Item data);
+extern "C" Item dom_text_ctor(Item data);
 
 /** `new XPathEvaluator()` — the evaluator object with its methods bound. */
 extern "C" Item dom_xpath_evaluator_ctor(void);

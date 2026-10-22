@@ -250,6 +250,7 @@ typedef struct Html5Parser {
 // Parse options for html5_parse_ex
 typedef struct Html5ParseOptions {
     bool track_source_lines;    // store __source_line attribute on elements
+    bool scripting_disabled;    // HTML §13.2.1 scripting flag off: <noscript> content is markup
 } Html5ParseOptions;
 
 // Parser lifecycle
