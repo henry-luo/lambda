@@ -61,6 +61,18 @@ A test that stops producing output is killed after the idle timeout; a log write
 
 UI automation uses a memory-weighted queue. Manifest suites and individual fixtures can set `worker_mb`; baseline/DTNA/timeline reserve 1024 MiB, and the indexed-math editor fixture reserves 1536 MiB. Other suites retain the 2048 MiB default for large editor/JS bundles. These budgets follow a full release profile: the indexed-math case peaked at 1179 MiB, all other cases below 900 MiB. Reservations collectively use at most half of physical RAM, with at least one case admitted on smaller hosts. `LAMBDA_UI_TEST_JOBS` and `LAMBDA_TEST_MAX_CONCURRENT` cap workers; `LAMBDA_UI_TEST_WORKER_MB` overrides reservations. Subprocess durations and per-view phase timings are retained in the shared report. A separate `<gtest-json-path>.timings.json` file supplies scheduling hints for later runs; every fixture still executes and produces a fresh result. `RADIANT_TEST_EXECUTABLE` selects an alternate host executable for isolated release comparisons.
 
+Keep every-allocation GC and freed-memory poisoning on focused lifetime regressions
+(D5.3.3). Full speed, presenter and archive replays run with normal GC;
+`slide_gc_lifetimes.json` covers collecting input dispatch, independent player state
+and cached previews, while `finder/archives_gc.json` covers captured nested ZIP
+members across navigation callbacks. The handler-allocation fixture retains four
+publication/retention turns with a small allocation batch: every allocation already
+collects. Mouse, iframe retirement, drag and thumbnail ownership probes retain their
+forced-GC settings. `slide_northstar.json` visits only the first four demo slides,
+including group geometry/pixels, a click reveal, push/fade transitions, intermediate
+and completed donut pixels, Previous/Restart and bounded autoplay. The demo remains
+18 slides; the replay asserts that only four audience layers were mounted.
+
 Headless assertion retries give pending native document and media work wall time to complete, including AVFoundation loading and playback transitions.
 
 **XHTML (D2.10.1):** `test/html/xhtml_feature_gallery.xhtml` is a viewable

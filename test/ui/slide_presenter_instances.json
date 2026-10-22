@@ -5,16 +5,6 @@
     "width": 1000,
     "height": 1500
   },
-  "env": [
-    {
-      "key": "LAMBDA_GC_FORCE_EVERY",
-      "value": "1"
-    },
-    {
-      "key": "LAMBDA_GC_POISON_FREED",
-      "value": "1"
-    }
-  ],
   "events": [
     {
       "type": "click",
