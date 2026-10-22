@@ -61,6 +61,18 @@ A test that stops producing output is killed after the idle timeout; a log write
 
 UI automation uses a memory-weighted queue. Manifest suites and individual fixtures can set `worker_mb`; baseline/DTNA/timeline reserve 1024 MiB, and the indexed-math editor fixture reserves 1536 MiB. Other suites retain the 2048 MiB default for large editor/JS bundles. These budgets follow a full release profile: the indexed-math case peaked at 1179 MiB, all other cases below 900 MiB. Reservations collectively use at most half of physical RAM, with at least one case admitted on smaller hosts. `LAMBDA_UI_TEST_JOBS` and `LAMBDA_TEST_MAX_CONCURRENT` cap workers; `LAMBDA_UI_TEST_WORKER_MB` overrides reservations. Subprocess durations and per-view phase timings are retained in the shared report. A separate `<gtest-json-path>.timings.json` file supplies scheduling hints for later runs; every fixture still executes and produces a fresh result. `RADIANT_TEST_EXECUTABLE` selects an alternate host executable for isolated release comparisons.
 
+Keep every-allocation GC and freed-memory poisoning on focused lifetime regressions
+(D5.3.3). Full speed, presenter and archive replays run with normal GC;
+`slide_gc_lifetimes.json` covers collecting input dispatch, independent player state
+and cached previews, while `finder/archives_gc.json` covers captured nested ZIP
+members across navigation callbacks. The handler-allocation fixture retains four
+publication/retention turns with a small allocation batch: every allocation already
+collects. Mouse, iframe retirement, drag and thumbnail ownership probes retain their
+forced-GC settings. `slide_northstar.json` visits only the first four demo slides,
+including group geometry/pixels, a click reveal, push/fade transitions, intermediate
+and completed donut pixels, Previous/Restart and bounded autoplay. The demo remains
+18 slides; the replay asserts that only four audience layers were mounted.
+
 Headless assertion retries give pending native document and media work wall time to complete, including AVFoundation loading and playback transitions.
 
 **XHTML (D2.10.1):** `test/html/xhtml_feature_gallery.xhtml` is a viewable
@@ -199,7 +211,7 @@ run `node test/test_layout_reference_controls.js` to check the oracle contract.
 | `test_node_gtest` | `ref/node/test/parallel` | `test/node/official_{baseline,skip_list,serial_list,slow_list}.txt` | Exit 0 and no `Uncaught` | `make node-update-baseline` |
 | `test_wpt_*_gtest` (sources in `test/wpt/`) | `ref/wpt/<area>`; `test_wpt_html_parser_gtest` reads `test/html/wpt/` | Per-runner | Most runners use a `test/wpt/wpt_<area>_baseline.txt` passing list | `WPT_<AREA>_UPDATE_BASELINE=1` (env name defined at the top of each runner) |
 | `test_validator_gtest` | `test/lambda/validator` (`schema_*.ls` + `.json/.xml/.yaml/.md/.html/...` data) | None. Explicit `TEST_F(ValidatorTest, …)` per (data, schema) pair. | Assertions on `ValidationResult` | Add files plus a `TEST_F` |
-| `test_ui_automation_gtest` | `test/ui/**`, `test/view/*.json`. Suites `baseline`, `dom`, `editor`, `hit-test`, `edit`, `view`, `native-gui` are defined by globs in `test/ui/ui_test_manifest.json`. | Manifest globs. The id is the path under `test/ui/` or `test/view/` with `/ - .` → `_`. | JSON `{name, html, events:[click, assert_text, wait, …]}` | Add the `.json` (+ `.html`). Check that the baseline suite's `exclude` list doesn't drop it. |
+| `test_ui_automation_gtest` | `test/ui/**`, `test/view/*.json`. Suites `baseline`, `dom`, `editor`, `hit-test`, `edit`, `view`, `native-gui` are defined by globs in `test/ui/ui_test_manifest.json`. | Manifest globs. The id is the path under `test/ui/` or `test/view/` with `/ - .` → `_`. | JSON `{name, html, events:[click, assert_text, wait, …]}`. Pixel assertions refresh pending visual changes; `force_render:true` repaints unconditionally and `false` observes existing pixels. | Add the `.json` (+ `.html`). Check that the baseline suite's `exclude` list doesn't drop it. |
 | `test_page_load_gtest`, `test_layout_fuzzy_gtest` | `test/layout/data/{page,markdown}`, `test/layout/data/fuzzy` | Every `*.html` (non-recursive) | Loads without crash | Drop in an `.html` file |
 | `test/layout/test_radiant_layout.js` (`make layout`) | `test/layout/data/<suite>/` | Per-suite `baseline.txt` lists the files that must pass | Browser reference JSON in `test/layout/reference/` (flat; nested fixtures are keyed `dir__name`) | `make capture-layout test=<name>` |
 | `test/render/test_radiant_render.js` (`make test-render`) | `test/render` | Script-defined | Reference PNGs | `make capture-render test=<name>` |

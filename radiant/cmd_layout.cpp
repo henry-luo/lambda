@@ -258,7 +258,6 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
-DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child);
 
 static HtmlVersion classify_html_doctype_identifiers(const char* name,

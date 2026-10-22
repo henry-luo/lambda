@@ -96,6 +96,7 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `build-dependency DEP=<name> ARGS=...` | Compile and optionally install a source dependency through its JSON/Premake recipe; source and install overrides are `--source` and `--prefix`. |
 | `build-typemeta-extract` | Build the optional Clang metadata utility using `llvm-config` to locate LLVM headers and libraries. |
 | `test-build-dependencies` | Check config imports, feature probes, header templates, and execution of a consumer linked to a freshly built dependency archive. |
+| `test-build-summary` | Check diagnostic counts, error links, and build exit status; also runs with `test-premake-generator`. |
 | `clean-premake` | Clean Premake build artifacts and generated Lua files. |
 | `build-test` | Build all test executables using Premake (debug mode). Also builds `lambda-input` DLLs. If a release build was active, restores the release `lambda.exe` after building tests. |
 | `build-lambda-input` | Build lambda-input DLLs (prerequisite for `build-test`). |

@@ -67,6 +67,16 @@ FontFormat font_detect_format_ext(const char* path);
 // FontHandle — internal layout (public API sees opaque pointer)
 // ============================================================================
 
+// bounded per-face cache of scalar measurements, with owned short text keys.
+#define FONT_TEXT_MEASURE_CACHE_SIZE 1024
+#define FONT_TEXT_MEASURE_MAX_BYTES 64
+typedef struct FontTextMeasureEntry {
+    TextExtents extents;
+    uint32_t hash;
+    uint8_t length;
+    char text[FONT_TEXT_MEASURE_MAX_BYTES];
+} FontTextMeasureEntry;
+
 struct FontHandle {
     FontBackendKind backend_kind;        // preferred native/platform backend
     void*       platform_font_ref;       // platform native font face (CTFont/DWrite/etc.)
@@ -111,6 +121,8 @@ struct FontHandle {
 
     // per-face CoreText kerning cache: (left_cp, right_cp) → kerning value
     struct hashmap* kern_cache;
+    FontTextMeasureEntry* text_measure_cache;
+    uint64_t text_measure_generation;
 
 #ifdef __APPLE__
     // CoreText font reference for GPOS kerning when table kerning is insufficient
@@ -317,6 +329,7 @@ struct FontContext {
     // Phase 17: full LoadedGlyph cache for font_load_glyph (persistent across frames)
     struct hashmap*  loaded_glyph_cache;
     uint64_t         glyph_cache_generation;
+    uint64_t         text_measure_requests, text_measure_hits;
 
     // codepoint → fallback handle cache (for font_find_codepoint_fallback)
     struct hashmap*  codepoint_fallback_cache;

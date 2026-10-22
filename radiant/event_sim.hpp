@@ -376,6 +376,7 @@ struct SimEvent {
     int pixel_max_r, pixel_max_g, pixel_max_b, pixel_max_a;
     float pixel_search_radius;  // logical pixels around a glyph sample point
     bool pixel_force_render;
+    bool pixel_render_if_dirty; // default refresh; explicit force_render keeps its override
     // assert_damage_parity: verified presentation frames, of which at least this many selective
     int damage_min_frames;
     int damage_min_selective;

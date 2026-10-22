@@ -1,0 +1,29 @@
+{
+  "name": "Collecting input dispatch retains event names, player state and cached previews",
+  "html": "test/ui/slide_features.ls",
+  "viewport": {"width": 1000, "height": 1500},
+  "env": [
+    {"key": "LAMBDA_GC_FORCE_EVERY", "value": "1"},
+    {"key": "LAMBDA_GC_POISON_FREED", "value": "1"}
+  ],
+  "events": [
+    {"type": "click", "target": {"selector": "#first-player .slide-controls [data-slide-tool=console]"}},
+    {"type": "assert_count", "target": {"selector": "#first-player .slide-preview-canvas > .slide-layer"}, "equals": 1},
+    {"type": "focus", "target": {"selector": "#first-player-speed"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_value", "target": {"selector": "#first-player-speed"}, "equals": "4"},
+    {"type": "assert_attribute", "target": {"selector": "#first-player"}, "attribute": "data-slide-rate", "equals": "4"},
+    {"type": "assert_text", "target": {"selector": "#first-player .slide-speed-value"}, "equals": "4×"},
+    {"type": "assert_value", "target": {"selector": "#second-player-speed"}, "equals": "1"},
+    {"type": "assert_text", "target": {"selector": "#second-player .slide-speed-value"}, "equals": "1×"},
+    {"type": "click", "target": {"selector": "#first-player .slide-controls [data-slide-tool=console]"}},
+    {"type": "assert_attribute", "target": {"selector": "#first-player"}, "attribute": "data-slide-console", "equals": "false"},
+    {"type": "click", "target": {"selector": "#first-player .slide-controls [data-slide-tool=console]"}},
+    {"type": "assert_attribute", "target": {"selector": "#first-player"}, "attribute": "data-slide-console", "equals": "true"},
+    {"type": "assert_count", "target": {"selector": "#first-player .slide-preview-canvas > .slide-layer"}, "equals": 1},
+    {"type": "assert_style", "target": {"selector": "#second-player .slide-console"}, "property": "display", "equals": "none"},
+    {"type": "assert_count", "target": {"selector": "#second-player .slide-preview-canvas > .slide-layer"}, "equals": 0},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true}
+  ]
+}

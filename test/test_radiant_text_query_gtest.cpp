@@ -23,6 +23,7 @@
 #include "radiant_render_test_utils.hpp"
 #include "../lib/str.h"
 #include "../lib/font/font.h"
+#include "../lib/font/font_internal.h"
 #include "../lib/hash.h"
 #include "../lib/file.h"
 
@@ -30,6 +31,48 @@ extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
 void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
+
+
+TEST(FontTextMeasurement, TextMeasurementsOwnKeysAndInvalidateWhenFontResourcesChange) {
+    FontContextConfig config = {};
+    config.pixel_ratio = 1.0f;
+    FontContext* ctx = font_context_create(&config);
+    ASSERT_NE(ctx, nullptr);
+    FontStyleDesc style = {};
+    style.size_px = 16.0f;
+    style.weight = FONT_WEIGHT_NORMAL;
+    FontHandle* handle = font_load_from_file(ctx,
+        "test/lambda/math/fonts/NotoSansMath-Regular.ttf", &style);
+    ASSERT_NE(handle, nullptr);
+    char text[] = "office";
+    TextExtents original = font_measure_text(handle, text, 6);
+    ASSERT_GT(original.width, 0.0f);
+    uint64_t hits = font_get_cache_stats(ctx).text_measure_hits;
+    text[0] = 'a';
+    font_measure_text(handle, text, 6);
+    EXPECT_FLOAT_EQ(font_measure_text(handle, "office", 6).width, original.width);
+    EXPECT_EQ(font_get_cache_stats(ctx).text_measure_hits, hits + 1);
+
+    // even an occupied slot with a colliding hash must compare the complete bytes.
+    FontTextMeasureEntry* entry = &handle->text_measure_cache[
+        hash_fnv1a_32("office", 6) % FONT_TEXT_MEASURE_CACHE_SIZE];
+    entry->text[0] = 'x';
+    entry->extents.width = -1.0f;
+    EXPECT_FLOAT_EQ(font_measure_text(handle, "office", 6).width, original.width);
+    EXPECT_EQ(font_get_cache_stats(ctx).text_measure_hits, hits + 1);
+    entry->extents.width = -1.0f;
+    ctx->resource_generation++;
+    EXPECT_FLOAT_EQ(font_measure_text(handle, "office", 6).width, original.width);
+    EXPECT_EQ(font_get_cache_stats(ctx).text_measure_hits, hits + 1);
+#ifdef __APPLE__
+    entry->extents.width = -1.0f;
+    font_backend_use_ct_font(handle, handle->ct_raster_ref);
+    EXPECT_FLOAT_EQ(font_measure_text(handle, "office", 6).width, original.width);
+    EXPECT_EQ(font_get_cache_stats(ctx).text_measure_hits, hits + 1);
+#endif
+    font_handle_release(handle);
+    font_context_destroy(ctx);
+}
 
 TEST(LayoutAnonymousText, BorrowsTheResolvedFontBeforeIntrinsicMeasurement) {
     LayoutContext layout = {};
@@ -1101,6 +1144,41 @@ static uint64_t retained_subtree_geometry(DomElement* root) {
         return true;
     }, &digest);
     return digest.hash;
+}
+
+TEST_F(RadiantTextQuery, CompletedFlexReplayRetainsContentInNextCleanPass) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    ui.viewport_width = 320;
+    ui.viewport_height = 240;
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    auto* block = lam::view_require_block(item);
+    radiant::flex_measured_flow_invalidate(item);
+    flex_retained_item_begin(&flow.layout, block, 320.0f, 240.0f);
+    float height = 0.0f;
+    ASSERT_TRUE(flex_measure_completed_flow(&flow.layout, block, &flow.parent, item->width, &height));
+    layout_flex_item_content(&flow.layout, block);
+    ASSERT_EQ(flow.layout.profiler.flex_flow_reuses, 1u);
+    uint64_t geometry = retained_subtree_geometry(item);
+    int64_t retained = g_layout_flex_retained_count;
+    auto* ancestor = radiant::layout_flow_result_capture(&flow.layout, item->parent);
+    ASSERT_NE(ancestor, nullptr);
+    flex_retained_forget_content(item);
+    ASSERT_TRUE(radiant::layout_flow_result_apply(&flow.layout, ancestor));
+    radiant::layout_flow_result_release(document->view_tree->prop_pool, ancestor);
+
+    // the owned query expires at the pass boundary; its live committed result remains reusable.
+    document->view_tree->measurement_cache_generation++;
+    document->incremental_layout = true;
+    ASSERT_TRUE(flex_retained_item_begin(&flow.layout, block, 320.0f, 240.0f));
+    layout_flex_item_content(&flow.layout, block);
+    EXPECT_EQ(g_layout_flex_retained_count, retained + 1);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+    EXPECT_FLOAT_EQ(item->height, height);
+    document->incremental_layout = false;
 }
 
 TEST_F(RadiantTextQuery, AncestorReplayExpiresDescendantLiveAssociation) {

@@ -1,7 +1,6 @@
 {
   "name":"Finder ZIPs retain file details and browse read-only members in all views",
   "html":"test/demo/finder/finder.ls",
-  "env":[{"key":"LAMBDA_GC_FORCE_EVERY","value":"1"},{"key":"LAMBDA_GC_POISON_FREED","value":"1"}],
   "viewport":{"width":1200,"height":760},
   "events":[
     {"type":"click","target":{"selector":"#go"}},

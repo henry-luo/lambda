@@ -516,6 +516,8 @@ void font_handle_release(FontHandle* handle) {
             hashmap_free(handle->kern_cache);
             handle->kern_cache = NULL;
         }
+        mem_free(handle->text_measure_cache);
+        handle->text_measure_cache = NULL;
         // free font file data: decrement ref in file_data_cache, or free directly
         if (handle->file_data_path) {
             if (handle->ctx && handle->ctx->file_data_cache) {
@@ -681,6 +683,8 @@ FontCacheStats font_get_cache_stats(FontContext* ctx) {
     stats.face_count = ctx->face_cache ? (int)hashmap_count(ctx->face_cache) : 0;
     stats.glyph_cache_count = ctx->bitmap_cache ? (int)hashmap_count(ctx->bitmap_cache) : 0;
     stats.loaded_glyph_count = ctx->loaded_glyph_cache ? (int)hashmap_count(ctx->loaded_glyph_cache) : 0;
+    stats.text_measure_requests = ctx->text_measure_requests;
+    stats.text_measure_hits = ctx->text_measure_hits;
     stats.database_font_count = font_get_font_count(ctx);
     stats.database_family_count = font_get_family_count(ctx);
 
