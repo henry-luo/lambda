@@ -147,7 +147,10 @@ to the editor.
   `test/lambda/handler_raise_in_branch.ls`.
 * **Block split cloned `id`.** Splitting a block copied all its attributes to
   the new half, so an HTML paragraph's `id` appeared twice; the new half now
-  drops `id` (`lambda.editor` `split_right_attrs`).
+  drops `id` (`lambda.editor` `split_right_attrs`). Hosts can also mark schema
+  attributes `keep_on_split:false` for boundaries such as Word's page starts;
+  ordinary Enter retains the boundary only on the original block (D7.2.5).
+  Regression: `test/lambda/editor/split_boundary_attrs.ls`.
 * **Flex relayout.** A nested flex item's intrinsic contribution read its
   children's content-box FlexItemProp cache, which a relayout retains from the
   previous pass, so the toolbar collapsed after a reflow; contributions are

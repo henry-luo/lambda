@@ -50,6 +50,21 @@
     {
       "type": "assert_count",
       "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\".word-page\").getBoundingClientRect().height >= 1123"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\".word-page[data-page=\\\"2\\\"]\").getBoundingClientRect().top - document.querySelector(\".word-page\").getBoundingClientRect().bottom >= 23"
+    },
+    {
+      "type": "assert_count",
+      "target": {
         "selector": "#edit-surface p"
       },
       "count": 3
@@ -64,7 +79,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface p:nth-child(2)"
+        "selector": "#edit-surface [data-word-blank-page=true]"
       },
       "attribute": "data-word-blank-page",
       "equals": "true"
@@ -72,7 +87,7 @@
     {
       "type": "type",
       "target": {
-        "selector": "#edit-surface p:nth-child(2)"
+        "selector": "#edit-surface [data-word-blank-page=true]"
       },
       "text": "Middle page",
       "clear": false
@@ -80,7 +95,7 @@
     {
       "type": "assert_text",
       "target": {
-        "selector": "#edit-surface p:nth-child(2)"
+        "selector": "#edit-surface [data-word-blank-page=true]"
       },
       "contains": "Middle page"
     },
@@ -242,7 +257,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface p:nth-child(4)"
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
       },
       "attribute": "data-word-page-break",
       "equals": "true"

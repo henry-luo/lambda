@@ -1,0 +1,407 @@
+{
+  "name": "Word changes",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Hello world",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-review"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tracking-options"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#tracking-author"
+      },
+      "text": "Alex",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#tracking-enabled"
+      },
+      "value": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-tracking .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#track-changes"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 6,
+      "end": 11
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "team",
+      "clear": false
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "contains": "Alex"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".revision-deleted"
+      },
+      "equals": "world"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".revision-inserted"
+      },
+      "equals": "team"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-word-change-kind=\"delete\"]"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-word-change-kind=\"insert\"]"
+      },
+      "attribute": "data-word-change",
+      "equals": "r1"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "structural edit"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-change-markup"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#word\").className.indexOf(\"hide-changes\") >= 0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-change-markup"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#revision-reject-r1"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello world"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#revision-accept-r1"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello team"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tracked-changes.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/changes.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/changes.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/changes.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/changes.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-review"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".revision-deleted"
+      },
+      "equals": "world"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"review.acceptAll\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello team"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"review.rejectAll\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello world"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".revision-card"
+      },
+      "count": 0
+    }
+  ]
+}
