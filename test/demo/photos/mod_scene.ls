@@ -12,7 +12,7 @@ pub fn layer_rows(st) => [for (row in editor.layers(st.doc))
     <div class:if (row.id in st.selected) "layer-row selected" else "layer-row",style:("padding-left:" ++ string(8+row.depth*16) ++ "px"),
         <button class:"visibility",'data-visibility':row.id,title:"Toggle visibility",if (row.node.visible == false) "○" else "●">
         <button class:"layer-name",'data-layer':row.id,title:row.node.name,
-            <span class:"layer-kind",if (name(row.node) == 'stack') "▤" else if (name(model.primary(row.node)) == 'text') "T"
+            <span class:"layer-kind",if (model.adjustment(row.node)) "A" else if (name(row.node) == 'stack') "▤" else if (name(model.primary(row.node)) == 'text') "T"
                 else if (name(model.primary(row.node)) == 'vector') "◇" else "▧"> <span (row.node.name)>>
         if (model.mask(row.node) != null) <button class:if (st.target == "mask" and row.id in st.selected) "mask selected" else "mask",
             'data-mask':row.id,title:"Edit layer mask","M">
@@ -37,10 +37,10 @@ fn histogram_channel(counts,c) {
 }
 pub fn histogram_chart(counts) => <svg viewBox:"0 0 256 72",width:256,height:72,'aria-label':"RGB histogram",
     *[for (c in [0,1,2]) histogram_channel(counts,c)]>
-pub fn curve_chart(curves,channel,selected=1) {
+pub fn curve_chart(curves,channel,selected=1,mode="linear") any^ {
     let points = tone.points(curves,channel)
     let color = {rgb:"#e8e9ec",r:"#ef7777",g:"#6acb8b",b:"#72a7ed"}[channel]
-    let path = join([for (i,p in points) (if (i == 0) "M " else "L ") ++ string(p[0]*256) ++ " " ++ string((1-p[1])*160)]," ");
+    let path = join([for (i,p in tone.graph_points(curves,channel,mode)^) (if (i == 0) "M " else "L ") ++ string(p[0]*256) ++ " " ++ string((1-p[1])*160)]," ");
     <svg id:"curve-chart",viewBox:"0 0 256 160",width:256,height:160,preserveAspectRatio:"none",'aria-label':"Editable " ++ upper(channel) ++ " curve", *[
         <path d:join([for (v in [0.25,0.5,0.75]) "M " ++ string(v*256) ++ " 0 V 160 M 0 " ++ string(v*160) ++ " H 256"]," "),stroke:"#41444a",fill:"none">,
         <path d:"M 0 160 L 256 0",stroke:"#626976",fill:"none">,
@@ -162,6 +162,8 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 <div class:"button-grid", *[button("style-add","style-add","Add style"),button("style-edit","style-edit","Apply style"),
                     button("style-toggle","style.toggle","Toggle style"),button("style-remove","style.remove","Remove style")]>]>,
             <section class:"effects-panel", *[<h2 "Editable effects">,<div id:"effects">,
+                button("add-adjustment","adjustment.insert","New adjustment layer"),
+                <p "Adjustment layers grade lower layers. Paint their mask to limit coverage; use Levels or Curves below to edit them.">,
                 <div class:"fields", *[for (control in effects.controls) field("effect-" ++ control.key,control.label,control.value,"number")]>,
                 <div class:"button-grid", *[button("effect-add","effect-add","Add effect"),button("effect-toggle","effect.toggle","Toggle effect"),
                     button("effect-remove","effect.remove","Remove effect"),button("effect-up","effect-up","Move effect up"),button("effect-down","effect-down","Move effect down")]>]>,
@@ -173,13 +175,16 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <section class:"levels-panel", *[<h2 "Levels">,
                 <p "Set input endpoints, midtone gamma and output endpoints. Apply updates the selected effect.">,
                 <div class:"fields",*[for (control in tone.levels) field("levels-" ++ control.key,control.label,control.value*control.scale,"number")]>,
-                <div class:"button-grid",*[button("levels-add","levels-add","Add Levels"),button("levels-apply","levels-apply","Apply to effect")]>]>,
+                <div class:"button-grid",*[button("levels-add","levels-add","Add Levels"),button("levels-apply","levels-apply","Apply to effect"),
+                    button("levels-layer","levels-layer","New Levels layer")]>]>,
             <section id:"curve-editor",class:"curves-panel",tabindex:"0", *[<h2 "Curves">,
                 <label "Channel" <select id:"curve-channel",*[for (channel in tone.channels) <option value:channel,upper(channel)>]>>,
-                <div id:"curve-graph",curve_chart({},"rgb")>,<p "Input → · Output ↑. Click adds a point; drag to adjust. Curves use straight segments.">,
+                <label "Interpolation" <select id:"curve-mode",<option value:"linear","Linear"> <option value:"smooth","Smooth">>>,
+                <div id:"curve-graph",curve_chart({},"rgb")^>,<p "Input → · Output ↑. Click adds a point; drag to adjust. Smooth curves preserve each segment's range.">,
                 <label "Points [input,output], from 0 to 1" <textarea id:"curve-points",rows:3,"[[0,0],[1,1]]">>,
                 <div class:"button-grid",*[button("curve-reset","curve-reset","Reset channel"),button("curve-remove","curve-remove","Remove point"),
-                    button("curves-add","curves-add","Add Curves"),button("curves-apply","curves-apply","Apply to effect")]>]>,
+                    button("curves-add","curves-add","Add Curves"),button("curves-apply","curves-apply","Apply to effect"),
+                    button("curves-layer","curves-layer","New Curves layer")]>]>,
             <section class:"guides-panel",*[<h2 "Guides & snapping">,
                 <p "Move drags snap to visible guides and canvas edges/centers. Alt temporarily bypasses snapping. Drag guides with Move.">,
                 <label "Guide axis" <select id:"guide-axis",<option value:"x","Vertical"> <option value:"y","Horizontal">>>,

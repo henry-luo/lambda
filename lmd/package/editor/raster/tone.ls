@@ -1,9 +1,19 @@
 // S9.1.2 / S12.1.3: tone-curve drafts are plain data until an effect command applies them.
 import model: .model
 import sequence: lambda.editor.mod_doc
+import img: lambda.image
 
 pub let channels = ["rgb","r","g","b"]
 pub let identity = [[0,0],[1,1]]
+// reuse the processing kernel for the smooth graph, keeping preview and export in agreement.
+pub fn graph_points(curves,channel,mode="linear") any^ {
+    if (mode == "linear") points(curves,channel)
+    else {
+        let ramp = img.from_array(reshape([for (x in 0 to 255) for (c in 0 to 3) u8(if (c == 3) 255 else x)],[1,256,4]))^
+        let mapped = img.adjust(ramp,{curves:{rgb:points(curves,channel)},curve_mode:mode})^;
+        [for (x in 0 to 255) [x/255,mapped.r[0,x]/255]]
+    }
+}
 pub let levels = [
     {key:"black",label:"Input black (0–255)",value:0,scale:255},
     {key:"white",label:"Input white (0–255)",value:1,scale:255},

@@ -80,6 +80,11 @@ bool lambda_image_options(Item options, ImageProcessOptions* out) {
             if (!isfinite(out->matrix[i]) || fabs(out->matrix[i])>16) return false;
         }
     }
+    auto mode=map.get("curve_mode");
+    if (!mode.isNull()) {
+        if (!mode.isString() || (strcmp(mode.asString()->chars,"linear") && strcmp(mode.asString()->chars,"smooth"))) return false;
+        out->smooth_curves=!strcmp(mode.asString()->chars,"smooth");
+    }
     auto curves=map.get("curves");
     if (!curves.isNull()) {
         if (!curves.isMap()) return false;

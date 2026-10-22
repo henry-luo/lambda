@@ -13,6 +13,7 @@ pub fn composition(node) => name(node) in ['layer','stack']
 pub fn position(node) => value(node.position,[0,0])
 // an empty or multi-layer inspector has no single content owner.
 pub fn primary(node) => if (node == null) null else [for (child in content(node) where name(child) in ['raster','text','vector']) child][0]
+pub fn adjustment(node) => node != null and node.kind in ['adjustment',"adjustment"]
 pub fn render_layers(image,nodes,width=null,height=null) any^ {
     let doc = img.document(img.stack(nodes),{width:value(width,image.width),height:value(height,image.height)})
     let scoped = img.with_children(doc,[*if (img.assets(image) == null) [] else [img.assets(image)],img.stack(nodes)])^;
@@ -84,14 +85,20 @@ pub fn active(st) any^ {
     if (len(st.selected) != 1) raise error("Raster: select one layer")
     else lookup(st.doc,st.selected[0])
 }
-pub fn source_target(st,writing=true) any^ {
+pub fn mask_target(st,writing=true) any^ {
     let row = active(st)^
-    let mask_node = if (st.target == "mask") mask(row.node) else null
-    let raster = if (st.target == "mask") mask_node[0] else primary(row.node)
-    if (name(row.node) != 'layer' or raster == null) raise error("Raster: select a layer or mask")
+    if (name(row.node) != 'layer') raise error("Raster: select a layer")
     else if (row.node.transform != null and row.node.transform != affine.identity)
         raise error("Raster: rasterize the transformed layer before editing source pixels in canvas coordinates")
     else if (writing and locked(st.doc,[row.path])) raise error("Raster: target layer is locked")
+    else {row:row,raster:primary(row.node),position:position(row.node)}
+}
+pub fn source_target(st,writing=true) any^ {
+    let owner = mask_target(st,writing)^
+    let row = owner.row
+    let mask_node = if (st.target == "mask") mask(row.node) else null
+    let raster = if (st.target == "mask") mask_node[0] else primary(row.node)
+    if (name(row.node) != 'layer' or raster == null) raise error("Raster: select a layer or mask")
     else {row:row,raster:raster,position:[position(row.node)[0]+value(mask_node.position,[0,0])[0],
         position(row.node)[1]+value(mask_node.position,[0,0])[1]]}
 }
@@ -158,17 +165,19 @@ pub fn bounds(node) {
                 height:max([for (b in boxes) b.y+b.height])-top}
         }
     } else {
-        let raster = primary(node)
+        let raster = if (adjustment(node)) mask(node)[0] else primary(node)
         let m = value(node.transform,affine.identity)
         let pad = sum([0,*[for (style in content(node) where name(style) == 'style' and style.enabled != false) style.outset]])
         let corners = [for (x in [-pad,value(raster.width,0)+pad]) for (y in [-pad,value(raster.height,0)+pad]) affine.project(m,[x,y])]
         let left = min([for (p in corners) p[0]])
         let top = min([for (p in corners) p[1]]);
-        {x:position(node)[0]+left,y:position(node)[1]+top,
+        let offset = if (adjustment(node)) position(mask(node)) else [0,0];
+        {x:position(node)[0]+offset[0]+left,y:position(node)[1]+offset[1]+top,
             width:max([for (p in corners) p[0]])-left,height:max([for (p in corners) p[1]])-top}
     }
 }
-pub fn hit(image,point) => [for (row in layers(image) where name(row.node) == 'layer' and
+pub fn hit(image,point,mask_id=null) => [for (row in layers(image) where name(row.node) == 'layer' and
+    (not adjustment(row.node) or row.id == mask_id) and
     row.node.visible != false and all([for (ancestor in layers(image) where
         ancestor.id != row.id and paths.path_is_prefix(ancestor.path,row.path))
         ancestor.node.visible != false]) and geometry.rect_contains(bounds(row.node),point)) row.id][0]

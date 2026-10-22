@@ -613,6 +613,15 @@ transforms, horizontal/vertical reference-line straightening and project guides
 with screen-distance move snapping. These use the same source-preserving edits
 and gesture history (**S9.1.2 / S9.2.2 / S12.1.3**). Masked/filtered groups remain
 outside this transform profile. Rulers/grids/navigator, other-layer snapping,
-perspective/warp, smooth curves, dedicated adjustment layers and the larger M5
-items remain outstanding. Actual
+perspective/warp and the larger M5 items remain outstanding. Actual
 verification is recorded in [the implementation record](impl/Lambda_Impl_Photos.md).
+
+
+The 2026-10-22 adjustment milestone adds independent pointwise color-adjustment
+layers with selection-derived/paintable masks, scoped lower-sibling processing,
+masked opacity and project persistence. Levels and Curves can create new
+adjustment layers or edit existing retained effects. Optional shape-preserving
+smooth curves keep the existing linear default and share processing with the
+graph preview (**S9.1.2 / S9.2.2 / D4.5.2**). Spatial backdrop filters, adjustment
+transforms/clipping/styles and native PSD adjustment interchange remain outside
+this profile. See [qualification and limits](impl/Lambda_Impl_Photos.md).

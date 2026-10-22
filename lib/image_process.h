@@ -21,7 +21,7 @@ enum { IMAGE_TONE_CHANNELS = 4, IMAGE_TONE_POINTS = 32 };
 
 struct ImageProcessOptions {
     int turns = 0;
-    bool flip_x = false, flip_y = false, compare = false, uncropped = false;
+    bool flip_x = false, flip_y = false, compare = false, uncropped = false, smooth_curves = false;
     double angle = 0, crop[4] = {0, 0, 1, 1};
     double exposure = 0, brightness = 0, contrast = 1, saturation = 1;
     double temperature = 0, gamma = 1, black = 0, white = 1;

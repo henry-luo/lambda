@@ -1,0 +1,752 @@
+{
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "Photos masked adjustment layers and smooth curve drafts, undo and project reopening",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "64",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "48",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#404040",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 64,
+      "max_g": 64,
+      "min_b": 64,
+      "max_b": 64
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#curve-points"
+      },
+      "text": "[[0,0],[0.5,1],[1,0]]",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#curve-mode"
+      },
+      "value": "smooth"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-mode",
+      "equals": "smooth"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 64,
+      "max_g": 64,
+      "min_b": 64,
+      "max_b": 64
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-layer"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-adjustment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-mode",
+      "equals": "smooth"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#effect-toggle"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 64,
+      "max_g": 64,
+      "min_b": 64,
+      "max_b": 64
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-mask=\"raster-2\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-target",
+      "equals": "mask"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#000000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-brush"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 25,
+        "offset_y": 22
+      },
+      "dx": 10,
+      "dy": 0,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-target",
+      "equals": "mask"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 64,
+      "max_g": 64,
+      "min_b": 64,
+      "max_b": 64
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-move"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 64,
+      "max_g": 64,
+      "min_b": 64,
+      "max_b": 64
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mask-invert"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 64,
+      "max_r": 64,
+      "min_g": 64,
+      "max_g": 64,
+      "min_b": 64,
+      "max_b": 64
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-layer=\"raster-1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-adjustment",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-layer=\"raster-2\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-adjustment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-mode",
+      "equals": "smooth"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#curve-mode"
+      },
+      "value": "linear"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curves-apply"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 128,
+      "max_r": 128,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 128,
+      "max_b": 128
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-mode",
+      "equals": "smooth"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/adjustments-ui.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/photos/adjustments-ui.photos",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-adjustment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-curve-mode",
+      "equals": "smooth"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#levels-output_white"
+      },
+      "text": "128",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#levels-layer"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-layers",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-adjustment",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 96,
+      "max_r": 96,
+      "min_g": 96,
+      "max_g": 96,
+      "min_b": 96,
+      "max_b": 96
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-adjustment"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-layers",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-effects",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 30,
+        "offset_y": 22
+      },
+      "min_r": 192,
+      "max_r": 192,
+      "min_g": 192,
+      "max_g": 192,
+      "min_b": 192,
+      "max_b": 192
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-adjustments-20261022/adjustments.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

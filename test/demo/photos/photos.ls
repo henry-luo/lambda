@@ -30,7 +30,7 @@ fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
 // clearing a recovered error must also retire the same text from the status bar.
 fn clear_error(st) => {*:st,error:"",status:if (st.error != "" and st.status == st.error) "Ready" else st.status}
 fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending:"",error:"",status:"Ready · Place images to build a composition",
-    effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_channel:"rgb",curve_point:1,curve_drag:null,
+    effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_mode:"linear",curve_channel:"rgb",curve_point:1,curve_drag:null,
     painted_doc:null,token:0,scale:1.0,size_draft:{width:st.doc.width,height:st.doc.height}}
 pn publish(owner,st,workspace=null) {
     var next = st
@@ -98,21 +98,23 @@ pn command(owner,st,action) any^ {
     if (action == "guide-show") { return editor.exec(st,{id:"guide.configure",visible:not st.guides_visible})^ }
     if (action == "guide-snap") { return editor.exec(st,{id:"guide.configure",snap:not st.snap_enabled})^ }
     if (action == "straighten-tool") { return editor.exec(st,{id:"tool.configure",tool:"straighten"})^ }
+    if (action == "adjustment.insert") { return {*:editor.exec(st,{id:action})^,effect_index:0} }
     if (action in ["curve-reset","curve-remove"]) {
         let curves = if (action == "curve-reset") tone.with_points(st.curve_draft,st.curve_channel,tone.identity)^
             else tone.remove(st.curve_draft,st.curve_channel,st.curve_point)^;
         if (action == "curve-reset") present.set_value(present.node(owner,"curve-points"),format(tone.identity,'mark'))
         return {*:st,curve_draft:curves,curve_point:1}
     }
-    if (action in ["levels-add","levels-apply","curves-add","curves-apply"]) {
-        let adding = ends_with(action,"add")
-        let current = effects.items(model.active(st)^.node)[st.effect_index]
+    if (action in ["levels-add","levels-apply","curves-add","curves-apply","levels-layer","curves-layer"]) {
+        let layer = ends_with(action,"layer")
+        let adding = layer or ends_with(action,"add")
+        let current = if (layer) null else effects.items(model.active(st)^.node)[st.effect_index]
         if (not adding and current == null) raise error("Photos: select an effect to update")
         let initial = if (adding) ({}) else current.options
         let options = if (starts_with(action,"levels-")) reduce([initial,*[for (control in tone.levels)
             {[control.key]:float(field(owner,"levels-" ++ control.key))/control.scale}]],(result,entry) => {*:result,*:entry})
-            else {*:initial,curves:read_curves(owner,st)^}
-        let changed = editor.exec(st,{id:if (adding) "effect.add" else "effect.update",options:options,
+            else {*:initial,curves:read_curves(owner,st)^,curve_mode:st.curve_mode}
+        let changed = editor.exec(st,{id:if (layer) "adjustment.insert" else if (adding) "effect.add" else "effect.update",options:options,
             *:if (adding) ({}) else ({index:st.effect_index}),
             name:if (adding) (if (starts_with(action,"levels-")) "Levels" else "Curves") else current.name})^;
         return {*:changed,effect_index:if (adding) len(effects.items(model.active(changed)^.node))-1 else st.effect_index}
@@ -426,10 +428,11 @@ on change(evt) {
         session = publish(owner,next,documents)
         return 'handled'
     }
-    if (id in ["curve-channel","curve-points"]) {
+    if (id in ["curve-channel","curve-points","curve-mode"]) {
         // switching channels must retain text drafts even before a native blur/change arrives.
         read_curves(owner,next) ^ { next = {*:next,error:^.message,status:^.message} }
-            ~ { next = {*:next,curve_draft:~,curve_channel:if (id == "curve-channel") field(owner,id) else next.curve_channel,curve_point:1} }
+            ~ { next = {*:next,curve_draft:~,curve_mode:if (id == "curve-mode") field(owner,id) else next.curve_mode,
+                curve_channel:if (id == "curve-channel") field(owner,id) else next.curve_channel,curve_point:1} }
         session = publish(owner,next,documents)
         return 'handled'
     }

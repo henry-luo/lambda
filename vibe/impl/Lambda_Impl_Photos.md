@@ -3,7 +3,8 @@
 **Started:** 2026-10-19. **Status:** layered editor with tiled painting, retained composition/projects,
 retouch/actions, editable artwork/styles, channels, tabs, batch, incremental brush
 previews, export options, arrangement, crop drafts, transform handles, editable
-Levels/Curves, group geometry, guides/snapping and straightening. The original worktree was
+Levels/Curves, group geometry, guides/snapping, straightening, masked adjustment
+layers and smooth curves. The original worktree was
 merged and removed; subsequent work takes place in the main checkout. Aggregate
 gates retain the qualification limits recorded below.
 
@@ -27,15 +28,15 @@ The demo owns shell/file dialogs; generic commands and gestures live under
 Verification budget: focused package goldens across execution tiers, PSD data
 round trips and independent reader checks, one native event replay covering
 retained controls/canvas and file failure, then required package baseline.
-This package/demo increment uses the current checkout and existing host; native
-rendering edits already present in the checkout are outside its scope.
+Current work uses this checkout. The newest adjustment milestone extends the
+shared native image compositor and color processor; qualification is recorded below.
 
 | Milestone | State |
 |---|---|
 | M0 reuse and measurement | Complete for the bounded initial profile; optimized timings below |
 | M1 layered workspace | Implemented; focused qualification passed; broader failures below |
 | M2 tiles, selections and painting | Implemented; native/package/UI and aggregate results recorded below |
-| M3 transforms, reversible effects and rich persistence | Implemented core: affine and canvas handles including group/multiselection, straightening, project guides and move snapping, eight blends, clipping/pass-through, effects including Levels/channel Curves, histogram and versioned project data; focused checks below |
+| M3 transforms, reversible effects and rich persistence | Implemented core: affine and canvas handles including group/multiselection, straightening, project guides and move snapping, eight blends, clipping/pass-through, effects including Levels/channel Curves, masked adjustment layers and smooth interpolation, histogram and versioned project data; focused checks below |
 | M4 retouch, type/shapes, channels and actions | Bounded core implemented: retouch/actions, embedded-font multiline text, shapes/basic paths, three layer styles, saved coverage channels, tabs and sequential file batches; long-tail exclusions below |
 | M5 high depth/color and scale qualification | Pending |
 
@@ -1119,3 +1120,83 @@ The retained release host SHA-256 is
 Documentation links and `git diff --check` pass. No latency benchmark, high-depth
 support or larger-scene performance claim is added. This increment remains
 uncommitted in the current checkout; no worktree or remote publication is involved.
+
+
+## Adjustment layers and smooth curves — 2026-10-22
+
+Implement backdrop color-adjustment layers, paintable masks and optional smooth
+RGB/channel curves directly in the current checkout. Source layers and history
+remain immutable snapshots (**S9.1.2 / S9.2.2**); native pixels stay owned outside
+the GC heap and borrowed only during synchronous evaluation (**D4.5.2**).
+No formal semantics/design ruling changes are required.
+
+Acceptance: foreground-first order, isolated/pass-through group scope, masked
+opacity with unchanged alpha, lower-source retention, mask painting/inversion,
+selection-derived masks, undo/redo, project reopening and strict PSD rejection.
+Smooth curves retain linear defaults, interpolate knots without overshoot, match
+the native graph/export path and invalidate color caches when their mode changes.
+
+The first adjustment profile accepts pointwise color effects only, normal blend
+and no affine/clipping/style metadata. Moving its layer moves its local mask;
+transforming a containing group, standalone rasterization, direct merging and
+ungrouping an isolated adjustment scope reject rather than change the backdrop.
+Spatial backdrop filters and broader PSD interchange remain later work.
+
+Verification budget: focused package and native image-processing tests; Photos UI
+including masked adjustment editing, smooth drafts and persistence; forced-GC/JIT
+checks; Lambda baseline and library gate. No shared native Radiant changes are
+planned. Scratch records stay under `temp/photos-adjustments-20261022/`.
+
+
+### Delivered behavior and qualification
+
+`adjustment.insert` creates an independent adjustment above the selected sibling,
+with current-selection coverage or an all-white mask. The reusable compositor
+applies its ordered pointwise color effects to lower siblings and interpolates
+masked opacity in linear light with unchanged backdrop alpha. Isolated and
+pass-through groups keep their distinct scopes. Existing effect commands and
+mask tools, captured mask movement, one-gesture painting history and project
+snapshots share the established command path (**S9.1.2 / S9.2.2 / S12.1.3**).
+The UI offers new Levels/Curves layers and a neutral adjustment layer.
+
+`curve_mode:"smooth"` selects shape-preserving cubic Hermite interpolation; absent
+mode retains existing linear behavior. The master/channel order, original samples
+and alpha remain intact. The graph samples the same processing kernel rather
+than maintaining a second interpolation implementation. Mode changes invalidate
+color/filter caches while preserving reusable geometry.
+
+The new adjustment/curve fixtures cover **53 true results**: lower-source and
+alpha retention, opacity/masks, selection conversion, captured mask movement,
+layer order/group scope, project/crop/resize/action round trips, region/full
+agreement and atomic rejection of unsupported edits. Photos AUTO checks pass
+**26/26**; the Photos eager-JIT sweep with forced collection and poisoned frees
+also passes **26/26**, followed by final forced-GC/JIT checks of the new fixtures
+and existing interaction fixture (**3/3**) after the mask-picking extension.
+Native image-processing checks pass **10/10**, including an independent parabola
+reference, nonuniform segment bounds, alpha and color-cache invalidation.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` passes **8,020/8,020**: input
+**2,112/2,112**, runtime **5,908/5,908**, including **1,682** script checks and
+**322** MIR forced-GC checks. The library runner passes **1,675/1,675** in its
+final isolated run. The initial sandboxed library run failed five local-server
+checks and platform-root loading; all six pass with local socket/system trust
+access. A concurrent unrestricted run then failed one scheduling self-test;
+the isolated run passes without source changes. Both attempts remain in the
+qualification logs rather than being counted as successful gates.
+
+After `make build-release-compile JOBS=4`, the final complete Photos UI sweep
+passes **21 workflows / 384 assertions**. The adjustment workflow contributes
+**46 assertions**, including a captured native mouse stroke on its mask, undo,
+mode drafts/application, new Levels/neutral layers and project reopening. The
+smooth graph, new controls and composition were visually inspected. No native
+Radiant source changed; native processor checks and the full Photos UI qualify
+the changed image path. No broader Radiant aggregate or latency benchmark is
+claimed. Remaining canvas/navigation, typography/styles/PSD, project compression,
+background processing and M5 color/scale work stay in the backlog.
+
+Records/captures live in `temp/photos-adjustments-20261022/`, including the full
+Lambda log, library attempts/final summary, native processor and AUTO/JIT/GC
+logs, UI replays and release build logs. The retained release host SHA-256 is
+`e9bf7b2c73e725730e3e25b05833017487841a8645503b4670a3c42f1485ee39`.
+Documentation links, paired goldens and `git diff --check` pass. Changes remain
+uncommitted in the current workspace; no worktree or remote publication.

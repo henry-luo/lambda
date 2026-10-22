@@ -117,23 +117,24 @@ fn edit_node(st,command) any^ {
             raise error("Raster: opacity must be between zero and one")
         else img.with_properties(node,{opacity:command.opacity})^)
     else if (command.id == "layer.clipping") (
-        if (name(node) != 'layer') raise error("Raster: clip one layer to its lower sibling")
+        if (name(node) != 'layer' or model.adjustment(node)) raise error("Raster: clip one content layer to its lower sibling")
         else img.with_properties(node,{clipping:model.value(command.clipping,node.clipping != true)})^)
     else if (command.id == "layer.isolation") (
         if (name(node) != 'stack') raise error("Raster: select a group")
         else img.with_properties(node,{isolation:model.value(command.isolation,
             if (model.value(node.isolation,'isolated') in ['isolated',"isolated"]) 'pass_through' else 'isolated')})^)
     else if (command.id == "layer.blend") (
-        if (not (command.blend in ['normal','multiply','screen','overlay','darken','lighten','difference','exclusion',
+        if (model.adjustment(node) and not (command.blend in ['normal',"normal"])) raise error("Raster: adjustment layers require normal blend")
+        else if (not (command.blend in ['normal','multiply','screen','overlay','darken','lighten','difference','exclusion',
             "normal","multiply","screen","overlay","darken","lighten","difference","exclusion"])) raise error("Raster: unsupported blend mode")
         else img.with_properties(node,{blend:command.blend})^)
     else if (command.id == "layer.rasterize") (
         if (name(node) != 'layer') raise error("Raster: rasterize one layer") else transforms.rasterize(st,node)^)
     else if (command.id == "mask.add") (
-        if (name(node) != 'layer' or model.mask(node) != null or model.primary(node) == null)
+        if (name(node) != 'layer' or model.mask(node) != null or (model.primary(node) == null and not model.adjustment(node)))
             raise error("Raster: add a mask to an unmasked layer")
-        else img.with_children(node,[*content(node),img.mask(img.blank({width:model.primary(node).width,
-            height:model.primary(node).height,channels:1,color:[model.value(command.coverage,1.0)]})^,
+        else img.with_children(node,[*content(node),img.mask(img.blank({width:if (model.adjustment(node)) st.doc.width else model.primary(node).width,
+            height:if (model.adjustment(node)) st.doc.height else model.primary(node).height,channels:1,color:[model.value(command.coverage,1.0)]})^,
             {position:[0,0],default:1.0,enabled:true,invert:false})])^)
     else if (command.id == "mask.remove") img.with_children(node,[for (child in content(node) where name(child) != 'mask') child])^
     else if (command.id == "mask.toggle") (
@@ -157,6 +158,14 @@ pub fn apply_command(st,command) any^ {
     else if (id == "tool.configure") tools.configure(st,command)^
     else if (id == "font.embed") artwork.embed_font(st,command)^
     else if (id in ["text.insert","vector.insert"]) insert(st,artwork.layer_for(st,command)^,command.parent)^
+    else if (id == "adjustment.insert") {
+        let label = model.value(command.name,"Adjustment")
+        let effect = effects.checked(model.value(command.options,{}),label,true)^
+        let coverage = if (st.selection == null) img.blank({width:st.doc.width,height:st.doc.height,channels:1,color:[1.0]})^ else st.selection
+        let node = <layer kind:'adjustment',id:model.fresh_id(st.doc),name:label,position:[0,0],visible:true,opacity:1.0,
+            *[effect,img.mask(coverage,{position:[0,0],default:if (st.selection == null) 1.0 else 0.0,enabled:true,invert:false})]>;
+        insert(st,node,command.parent)^
+    }
     else if (id in ["text.update","vector.update"]) artwork.update(st,command)^
     else if (starts_with(id,"selection.") or id in ["mask.from_selection","mask.invert","mask.apply"]) selection.run_command(st,command)^
     else if (starts_with(id,"paint.") or id in ["pixels.fill","pixels.clear","pixels.adjust"]) paint.run_command(st,command)^
@@ -229,9 +238,9 @@ pub fn apply_command(st,command) any^ {
         let last_index = siblings.rows[last].index
         let adjacent = all([for (i,child in content(siblings.node) where model.composition(child) and i>=first and i<=last_index) child.id in chosen])
         if (not adjacent) raise error("Raster: select adjacent sibling layers to merge")
-        else if (any([for (row in siblings.rows) not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or row.node.clipping == true or
+        else if (any([for (row in siblings.rows) model.adjustment(row.node) or not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or row.node.clipping == true or
             row.node.isolation in ['pass_through',"pass_through"]]))
-            raise error("Raster: merge requires normal, unclipped, isolated selected layers")
+            raise error("Raster: merge requires normal, unclipped, isolated layers without backdrop adjustments")
         else {
             let raster = model.render_layers(st.doc,[for (row in siblings.rows) row.node])^;
             replace_selected(st,siblings,img.layer(raster,{id:model.fresh_id(st.doc),name:model.value(command.name,"Merged"),position:[0,0]}))^
@@ -243,7 +252,7 @@ pub fn apply_command(st,command) any^ {
         if (name(row.node) != 'stack' or model.value(row.node.opacity,1)!=1 or row.node.visible == false or
             not (model.value(row.node.blend,'normal') in ['normal',"normal"]) or
             (model.value(row.node.isolation,'isolated') in ['isolated',"isolated"] and any([for (descendant in model.rows(row.node))
-                not (model.value(descendant.node.blend,'normal') in ['normal',"normal"]) or descendant.node.clipping == true])) or
+                model.adjustment(descendant.node) or not (model.value(descendant.node.blend,'normal') in ['normal',"normal"]) or descendant.node.clipping == true])) or
             model.mask(row.node) != null or any([for (c in content(row.node)) name(c) in ['effect','style']]))
             raise error("Raster: ungroup requires a visible, unmasked, full-opacity group")
         else {
