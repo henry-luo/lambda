@@ -1922,19 +1922,37 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
     return result;
 }
 
-static Item uri_error(const char* message) {
+static Item library_throw_error(MvpLmdErrorKind kind, const char* message, const char* code = nullptr) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
     if (!state || !state->errors) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    RootFrame roots(2);
+    RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     String* message_text = heap_create_name(message, strlen(message));
     if (!message_text) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    Rooted<Item> text(roots, Item{.item = s2it(message_text)}), error(roots, ItemNull);
-    Item constructor = state->errors[LMD_ERROR_URI].values[0];
+    Rooted<Item> text(roots, Item{.item = s2it(message_text)}), error(roots, ItemNull), code_value(roots, ItemNull);
+    Item constructor = state->errors[kind].values[0];
     Item argument = text.get();
-    error.set(mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, &argument, 1, constructor));
+    error.set(mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, &argument, 1,
+        Item{.item = ITEM_JS_UNDEFINED}));
+    if (!item_is_error(error.get()) && code) {
+        String* code_text = heap_create_name(code, strlen(code));
+        if (!code_text) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        code_value.set(Item{.item = s2it(code_text)});
+        // host cancellation must define its own code without invoking an inherited setter.
+        Item written = mvp_lmd_named_set(error.get(), "code", code_value.get(), 0);
+        if (item_is_error(written)) return written;
+    }
     return item_is_error(error.get()) ? error.get() : mvp_lmd_throw(error.get(), 0);
 }
+
+extern "C" Item mvp_lmd_execution_interrupt_status(void) {
+    // the standalone/hosted MVP realm owns its Error objects, not the classic JS realm.
+    return js_execution_interrupt_pending()
+        ? library_throw_error(LMD_ERROR_BASE, "Script execution timed out", "ERR_SCRIPT_EXECUTION_TIMEOUT")
+        : Item{.item = ITEM_JS_UNDEFINED};
+}
+
+static Item uri_error(const char* message) { return library_throw_error(LMD_ERROR_URI, message); }
 
 static Item uri_call(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         Item self, Item, Item) {

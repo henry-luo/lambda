@@ -1,8 +1,9 @@
 // D4.5.2: exercise copied worker input and transient result arrays under forced GC.
 import dom
 import radiant
-let RED = resize(as_ubyte([[[255,0,0,255]]]),640,480)
-let BLUE = resize(as_ubyte([[[0,0,255,255]]]),640,480)
+// retain downsampling and cache/ownership checks with a small source under forced GC.
+let RED = resize(as_ubyte([[[255,0,0,255]]]),128,96)
+let BLUE = resize(as_ubyte([[[0,0,255,255]]]),128,96)
 let PATH = "temp/finder-job-source.png"
 fn owner(evt) => dom.get_element_by_id(dom.root_node(evt.target),"probe")
 view <thumbnail_probe> state session:{job:0,frame:0,label:""} { ~.rendered }

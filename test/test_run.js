@@ -10,7 +10,7 @@ const { finished: streamFinished } = require('stream');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { createWorkspace } = require('./test_workspace.js');
+const { createWorkspace, snapshotExecutable } = require('./test_workspace.js');
 
 // ─── CLI argument parsing ──────────────────────────────────────────────────────
 
@@ -381,6 +381,7 @@ function discoverTests(config) {
                     caseBatchSizeEnv: t.case_batch_size_env,
                     caseWorkerArgs: t.case_worker_args || [],
                     isolatedCwd: t.isolated_cwd === true,
+                    pinExecutables: t.pin_executables === true,
                     artifactDirs: t.artifact_dirs || [],
                     workerSlots: t.worker_slots || t.case_workers || 1,
                     workerSlotsEnv: t.worker_slots_env || t.case_workers_env,
@@ -1123,7 +1124,21 @@ function testWorkerSlots(testInfo) {
 async function runTimedTest(testInfo) {
     const startMs = Date.now();
     let result;
+    let executableDirectory;
     try {
+        if (testInfo.pinExecutables) {
+            ensureDir(path.join(ROOT_DIR, 'temp'));
+            executableDirectory = fs.mkdtempSync(path.join(ROOT_DIR, 'temp', `${testInfo.baseName}-executables-`));
+            const executable = snapshotExecutable(testInfo.exePath,
+                path.join(executableDirectory, path.basename(testInfo.exePath)));
+            const viewer = snapshotExecutable(path.resolve(ROOT_DIR,
+                testInfo.env?.RADIANT_TEST_EXECUTABLE || process.env.RADIANT_TEST_EXECUTABLE || 'lambda.exe'),
+                path.join(executableDirectory, `${testInfo.baseName}-viewer.exe`));
+            fs.writeFileSync(path.join(TEST_OUTPUT_DIR, `${testInfo.baseName}_executables.json`),
+                JSON.stringify({ executable, viewer }, null, 2));
+            testInfo = { ...testInfo, exePath: executable.path,
+                env: { ...testInfo.env, RADIANT_TEST_EXECUTABLE: viewer.path } };
+        }
         // replace suite-owned artifacts once, before any case workers start.
         for (const dir of (testInfo.artifactDirs || [])) {
             const directory = path.resolve(TEST_OUTPUT_DIR, dir);
@@ -1136,6 +1151,8 @@ async function runTimedTest(testInfo) {
     } catch (error) {
         result = { passed: 0, failed: 1, total: 1, status: '❌ ERROR', timedOut: false,
             failedTests: [`[${testInfo.baseName}] runner error: ${error.message}`] };
+    } finally {
+        if (executableDirectory) fs.rmSync(executableDirectory, { recursive: true, force: true });
     }
     const endMs = Date.now();
     return { ...result, startMs, endMs, durationMs: endMs - startMs, testInfo };

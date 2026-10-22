@@ -68,6 +68,10 @@ const path = require('path');
 const name = path.basename(process.argv[1], '.exe');
 const requestedScenario = name === process.env.FAKE_TEST ? process.env.FAKE_SCENARIO : 'pass';
 if (process.argv.includes('--gtest_list_tests')) {
+    if (process.env.FAKE_REPLACE_EXECUTABLE) {
+        fs.writeFileSync(process.env.FAKE_REPLACE_EXECUTABLE, '#!/usr/bin/env node\\nprocess.exit(9);\\n');
+        fs.writeFileSync(process.env.FAKE_REPLACE_VIEWER, 'replacement viewer');
+    }
     if (requestedScenario !== 'list-empty') {
         const names = process.env.FAKE_CASE_NAMES ? JSON.parse(process.env.FAKE_CASE_NAMES) :
             ['Case0', 'Case1', 'Case2', 'Case3', 'DISABLED_Off'];
@@ -94,6 +98,8 @@ const data = { tests: scenario === 'empty' ? 0 : 4, failures: 0,
     skipped: scenario === 'skip' ? 1 : 0, args: process.argv.slice(2),
     testsuites: [{ name: 'Fixture', testsuite: [{ name: 'Case', time: '0.001s' }] }] };
 if (workerCase) {
+    if (process.env.FAKE_PINNED_VIEWER &&
+        fs.readFileSync(process.env.RADIANT_TEST_EXECUTABLE, 'utf8') !== process.env.FAKE_PINNED_VIEWER) process.exit(9);
     if (scenario !== 'empty') data.tests = workerCases.length;
     data.testsuites[0].testsuite = workerCases.map(c => ({ name: scenario === 'wrong-case' && c === workerCase ? 'Other' : c,
         status: 'RUN', result: scenario === 'skip' && c === workerCase ? 'SKIPPED' : 'COMPLETED', time: '0.001s' }));
@@ -146,6 +152,10 @@ if (scenario === 'log-io') {
     process.stdout.end(Buffer.alloc(1024 * 1024, 'o'));
     process.stderr.end(Buffer.alloc(1024 * 1024, 'e'));
 } else if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
+else if (name === process.env.FAKE_WAIT_TEST) setInterval(() => {
+    if (fs.existsSync(process.env.FAKE_WAIT_FILE)) process.exit(0);
+    process.stdout.write('waiting for scheduled peer\\n');
+}, 20);
 else if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
 else if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
 else if (scenario === 'timeout') setInterval(() => {}, 1000);
@@ -246,7 +256,9 @@ try {
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*'));
-        assert.equal(view.caseWorkers, 3);
+        assert.equal(view.caseWorkers, 6);
+        assert.equal(view.exclusive, true);
+        assert.equal(view.pinExecutables, true);
         assert.deepEqual(view.artifactDirs, ['radiant_view']);
         assert.ok(view.caseWorkerArgs.includes('--radiant-case-worker'));
         for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
@@ -254,6 +266,27 @@ try {
             assert.equal(check.exclusive, false);
             assert.equal(check.workerSlots, name === 'test_radiant_page_snapshot' ? 2 : 3);
         }
+    });
+    check('View workers keep the discovered executables across a concurrent relink', () => {
+        const viewer = path.join(fixture, 'relink-viewer.exe');
+        const native = path.join(fixture, 'test_radiant_view_gtest.exe');
+        fs.writeFileSync(viewer, 'pinned viewer');
+        try {
+            const { child, output } = runSelected(['test_radiant_view_gtest'], 'pass', [], {
+                RADIANT_TEST_EXECUTABLE: viewer, FAKE_REPLACE_EXECUTABLE: native,
+                FAKE_REPLACE_VIEWER: viewer, FAKE_PINNED_VIEWER: 'pinned viewer',
+            }, true);
+            assert.equal(child.status, 0, child.stdout + child.stderr);
+            const data = JSON.parse(fs.readFileSync(path.join(output, 'test_radiant_view_gtest_results.json')));
+            assert.equal(data.tests, 4);
+            assert.equal(data.failures, 0);
+            const pins = JSON.parse(fs.readFileSync(path.join(output, 'test_radiant_view_gtest_executables.json')));
+            assert.equal(pins.executable.source, native);
+            assert.equal(pins.viewer.source, viewer);
+            assert.equal(pins.viewer.sha256.length, 64);
+            assert.equal(fs.existsSync(path.dirname(pins.viewer.path)), false);
+            assert.equal(fs.readFileSync(viewer, 'utf8'), 'replacement viewer');
+        } finally { fs.writeFileSync(native, fake, { mode: 0o755 }); }
     });
     check('Native build targets deduplicate runner aliases', () => {
         const actual = invoke(['--target=radiant', '--category=baseline', '--list-build-targets']).stdout.trim().split(/\s+/);
@@ -534,6 +567,8 @@ try {
         const { child, summary } = runSelected(names, 'pass', [], {
             LAMBDA_TEST_MAX_CONCURRENT: String(budget), FAKE_SUITE_TRACE_DIR: trace,
             LAMBDA_LOG_LEVEL: 'DEBUG',
+            LAMBDA_UI_TEST_JOBS: String(Math.max(1, Math.min(budget,
+                Math.max(1, Math.floor(os.cpus().length * 1.25))) - 1)),
         }, true);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, names.length);
@@ -550,17 +585,19 @@ try {
         }
         assert.equal(active, 0);
         const ceiling = Math.min(budget, Math.max(1, Math.floor(os.cpus().length * 1.25)));
-        assert.equal(peak, ceiling, `peak reserved workers: ${peak}`);
+        assert.ok(peak <= ceiling, `peak reserved workers: ${peak}`);
         assert.ok(parallelPeak <= ceiling);
-        if (ceiling >= 5) {
+        if (ceiling > summary.level2_c_tests.find(row => row.test === 'test_ui_automation_gtest').worker_slots) {
             // slots are reserved during discovery too; short jobs may finish before the first case starts.
             const pools = summary.level2_c_tests;
             const light = pools.find(row => row.test === 'test_rdt_vector_gtest');
             assert.ok(pools.some(row => ['test_ui_automation_gtest', 'test_radiant_view_gtest'].includes(row.test) &&
                 row.start_ms < light.end_ms && light.start_ms < row.end_ms));
         }
-        const graphics = rows.find(row => row.name === 'test_map_gtest');
-        assert.ok(rows.filter(row => row !== graphics).every(row => row.end <= graphics.start));
+        for (const exclusive of rows.filter(row => ['test_map_gtest', 'test_radiant_view_gtest'].includes(row.name))) {
+            assert.ok(rows.filter(row => row.name !== exclusive.name).every(row =>
+                row.end <= exclusive.start || row.start >= exclusive.end));
+        }
         const suite = summary.level1_test_suites[0];
         assert.ok(suite.duration_ms < suite.work_duration_ms);
         assert.ok(summary.duration_ms >= suite.duration_ms);
@@ -659,6 +696,7 @@ process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
         const { child, summary } = runSelected(['test_ui_automation_gtest', 'test_radiant_layout_baseline'],
             'pass', [], { PATH: fixture + path.delimiter + process.env.PATH, FAKE_LAYOUT: 'pass',
                 FAKE_LAYOUT_WORKSPACE: workspaceTrace, FAKE_SUITE_TRACE_DIR: trace,
+                FAKE_WAIT_TEST: 'test_ui_automation_gtest', FAKE_WAIT_FILE: workspaceTrace,
                 LAMBDA_TEST_MAX_CONCURRENT: '12' }, true);
         assert.equal(child.status, 0, child.stderr);
         const layout = summary.level2_c_tests.find(t => t.test === 'test_radiant_layout_baseline');

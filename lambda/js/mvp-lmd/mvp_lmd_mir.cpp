@@ -311,6 +311,7 @@ struct MvpLmdProgram {
     MvpLmdHostState host;
     MvpLmdLibraryState* library;
     bool library_active;
+    bool library_runtime;
     uint32_t library_slot;
     uint32_t iterator_family_slot;
     uint32_t regexp_iterator_slot;
@@ -786,7 +787,7 @@ const char* mvp_lmd_program_reference(MvpLmdProgram* program) {
     return program && program->frontend ? program->frontend->reference : NULL;
 }
 MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program) {
-    if (program) return program->library_active ? program->library : NULL;
+    if (program) return program->library_runtime ? program->library : NULL;
     // derived TLS points into the owning context capsule; teardown clears it.
     // an activation may restore an empty cache saved before another turn's first promotion.
     if (context != mvp_lmd_library_context || !mvp_lmd_library_slot) {
@@ -878,13 +879,17 @@ static const ActivationAmbientHook mvp_lmd_realm_ambient = {
     sizeof(MvpLmdRealmAmbient), mvp_lmd_realm_save, mvp_lmd_realm_save, mvp_lmd_realm_load, NULL};
 [[maybe_unused]] static const bool mvp_lmd_realm_ambient_registered =
     activation_register_ambient_hook(&mvp_lmd_realm_ambient);
-static void activate_library(MvpLmdProgram* p, AstNode* site, bool observes_object_mutation = true) {
-    if (observes_object_mutation) p->immutable_objects = false;
-    if (p->library_active) return;
+static void require_library(MvpLmdProgram* p, AstNode* site) {
+    if (p->library_runtime) return;
     if (!p->library) p->library = (MvpLmdLibraryState*)pool_calloc(p->frontend->pool, sizeof(MvpLmdLibraryState));
     if (!p->library) { diagnostic(p, site, "builtin metadata allocation"); return; }
-    p->library_active = p->receiver_abi = true;
+    p->library_runtime = true;
     p->library_slot = p->slot_count; p->slot_count += LMD_LIBRARY_COUNT;
+}
+static void activate_library(MvpLmdProgram* p, AstNode* site, bool observes_object_mutation = true) {
+    if (observes_object_mutation) p->immutable_objects = false;
+    p->library_active = p->receiver_abi = true;
+    require_library(p, site);
 }
 static void admit_shared_realm(MvpLmdProgram* p, AstNode* site) {
     // external source and host callbacks can observe all Script bindings.
@@ -1007,8 +1012,11 @@ static void walk(AstNode* n, LmdWalk* state) {
         break;
     }
     case AST_NODE_LOOP:
+        // host errors need intrinsic storage without enabling observable object coercion.
+        require_library(p, n); p->errors = true;
         collect_scope(p, state->owner, ((AstLoopControlNode*)n)->vars); break;
     case AST_NODE_FOR_IN_STAM: case AST_NODE_FOR_OF_STAM: {
+        require_library(p, n); p->errors = true;
         JsForOfNode* loop = (JsForOfNode*)n;
         collect_scope(p, state->owner, loop->vars);
         if (loop->init && n->node_type != AST_NODE_FOR_IN_STAM) diagnostic(p, n, "for-of initializer");
@@ -3141,6 +3149,23 @@ static void check_error(LmdCompiler* c, MIR_reg_t result) {
     branch(c, MIR_BNE, ok, reg(c, tag), integer(c, LMD_TYPE_ERROR));
     return_error(c, result); put_label(c, ok);
 }
+
+struct LmdLoopInterrupt {
+    LmdCompiler* compiler;
+    MIR_reg_t remaining;
+    explicit LmdLoopInterrupt(LmdCompiler* c)
+        : compiler(c), remaining(constant(c, 1024)) {}
+    void poll() {
+        LmdCompiler* c = compiler;
+        MIR_label_t ready = label(c);
+        move(c, remaining, reg(c, op(c, MIR_SUB, reg(c, remaining), integer(c, 1))));
+        branch(c, MIR_BNE, ready, reg(c, remaining), integer(c, 0));
+        move(c, remaining, integer(c, 1024));
+        // D8.4.3v2: pure compiled loops need a completion boundary after SIGPROF too.
+        check_error(c, em_call_0(&c->em, "mvp_lmd_execution_interrupt_status", MIR_T_I64, true));
+        put_label(c, ready);
+    }
+};
 static MIR_reg_t payload(LmdCompiler* c, MIR_reg_t value) {
     return op(c, MIR_AND, reg(c, value), integer(c, ITEM_INT_PAYLOAD_MASK));
 }
@@ -8939,7 +8964,8 @@ static void integer_loop_node(AstNode* node, void* opaque) {
     js_ast_visit_children(node, integer_loop_node, opaque);
 }
 static void integer_loop(LmdCompiler* c, AstLoopControlNode* node, MIR_label_t done) {
-    if (c->integer_bail || node->form != LOOP_FORM_WHILE || node->init || node->update || !node->cond) return;
+    // a catch can observe induction variables when the interrupt completion exits the loop.
+    if (c->completion || c->integer_bail || node->form != LOOP_FORM_WHILE || node->init || node->update || !node->cond) return;
     LmdIntegerLoopPlan plan = {}; plan.compiler = c; plan.allowed = true;
     plan.frame.parent = c->inlining; plan.frame.function = c->inlining ? c->inlining->function : c->function;
     if (!plan.frame.function->id) return;
@@ -8955,8 +8981,10 @@ static void integer_loop(LmdCompiler* c, AstLoopControlNode* node, MIR_label_t d
         plan.frame.slots[i].range = finite_range(1, INT53_MAX); plan.frame.slots[i].written = true;
         snapshots[i] = em_new_reg(&c->em, "iteration_snapshot", MIR_T_I64);
     }
+    LmdLoopInterrupt interrupt(c);
     c->inlining = &plan.frame; c->integer_bail = bail;
     put_label(c, head);
+    interrupt.poll();
     for (int i = 0; i < plan.frame.count; i++) move(c, snapshots[i], reg(c, plan.frame.slots[i].value.reg));
     branch_condition(c, node->cond, finished, false);
     statement(c, node->body); jump(c, head);
@@ -9161,8 +9189,10 @@ static void loop(LmdCompiler* c, AstLoopControlNode* n, const char* name, int le
         if (outer->loop_target == (AstNode*)n) { outer->next = next; outer->stop = done; }
     }
     integer_loop(c, n, done);
+    LmdLoopInterrupt interrupt(c);
     if (n->form != LOOP_FORM_DO_WHILE) jump(c, test);
     put_label(c, start);
+    interrupt.poll();
     LmdNumberFacts facts = {}; facts.parent = c->number_facts;
     // eval only invalidates these facts when it can observe this function's bindings.
     if (!c->inlining && !c->function->eval_environment && n->form != LOOP_FORM_DO_WHILE &&
@@ -9328,7 +9358,9 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
     LmdControl control = {c->control, done, next, name, length, (AstNode*)loop, owner.reg, active, record, loop->is_await}; c->control = &control;
     for (LmdControl* outer = control.parent; outer; outer = outer->parent)
         if (outer->loop_target == (AstNode*)loop) { outer->next = next; outer->stop = done; }
+    LmdLoopInterrupt interrupt(c);
     put_label(c, test);
+    interrupt.poll();
     if (protocol) {
         MIR_label_t native = label(c);
         branch(c, MIR_BEQ, native, reg(c, record), integer(c, ITEM_NULL));
@@ -9676,6 +9708,10 @@ struct LmdImport { const char* name; void* address; JitImportMetadata audit; };
     {#name, (void*)name, REENTRY(JIT_EFFECT_MAY_GC, ITEM, args)}, \
     {#name "_fixed", (void*)name, AUDIT(JIT_EFFECT_MAY_GC, ITEM, args)}
 static const LmdImport imports[] = {
+    {"mvp_lmd_execution_interrupt_status", (void*)mvp_lmd_execution_interrupt_status,
+        {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, ITEM, 0,
+         JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE) | JIT_IMPORT_NUMBER_STACK_PRESERVES |
+         JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_MAY_SET, 0}},
     // the TS-only type() call uses this shared helper in the active MIR engine.
     {"ts_type_info", (void*)ts_type_info, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
     {"lambda_recovery_publish_fault_item", (void*)lambda_recovery_publish_fault_item,
@@ -11368,7 +11404,7 @@ static int admission_pass(void* opaque) {
     // parameter and receiver kinds are still seeds here; decide storage from their solved domains below.
     p->typed_storage |= p->buffers || p->global_reflection || (p->typed_explicit && p->property_callbacks);
     plan_typed_storage(p);
-    if (p->library_active) plan_library_shapes(p);
+    if (p->library_runtime) plan_library_shapes(p);
     if (p->global_reflection) plan_global_bindings(p);
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i]; b->seed_kinds = b->kinds;
@@ -13829,7 +13865,7 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
             }
         }
     }
-    if (p->library_active) {
+    if (p->library_runtime) {
         p->library->native_callable_values = existing_global;
         p->library->values = p->slots + p->library_slot;
         if (p->library->iterator_base)
@@ -13924,8 +13960,8 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
         if (item_is_error(initialized)) return initialized;
         p->slots[p->eval_slot] = initialized;
     }
-    if (existing_global && p->library_active) p->library->default_realm = p->library;
-    if (p->library_active) p->library->intrinsics_ready = true;
+    if (existing_global && p->library_runtime) p->library->default_realm = p->library;
+    if (p->library_runtime) p->library->intrinsics_ready = true;
     if (p->host_active || p->timers) {
         p->host.values = p->host_active ? p->slots + p->host_slot : NULL;
         p->host.timers = p->timers ? p->slots + p->timer_slot : NULL;
@@ -14518,7 +14554,7 @@ static MvpLmdExecution* mvp_lmd_execute_owned(const char* source, size_t length,
         }
         else if (options->namespace_result) result = js_module_namespace_create(module);
     }
-    if (p->library_active && p->library->abort_kind)
+    if (p->library_runtime && p->library->abort_kind)
         result = mvp_lmd_fail(p->library->abort_kind - 1, p->library->abort_site);
     if (host && host->test262 && p->global_receiver && !item_is_error(result)) {
         // a script-defined setTimeout must not bypass host async completion.

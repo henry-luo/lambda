@@ -40,6 +40,7 @@ void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer)
 // Host cancellation is checked at guest boundaries and returned in the Item lane.
 typedef bool (*JsExecutionInterruptCheck)(void);
 void js_set_execution_interrupt_check(JsExecutionInterruptCheck check);
+bool js_execution_interrupt_pending(void);
 LAMBDA_RT_API Item js_execution_interrupt_status(void);
 
 void js_map_promote_descriptor_kind(Map* m);

@@ -420,6 +420,7 @@ Item mvp_lmd_template_object(MvpLmdProgram* program, JsTemplateLiteralNode* lite
 const JsTemplateObjectOps* mvp_lmd_template_object_ops();
 Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix);
 Item mvp_lmd_fail(int64_t kind, int64_t site, const char* detail = NULL);
+Item mvp_lmd_execution_interrupt_status(void);
 double mvp_lmd_string_to_number(String* string);
 double mvp_lmd_parse_number(String* string, int64_t prefix);
 Item mvp_lmd_number_to_string(double value);

@@ -1,7 +1,8 @@
 import dom
 import radiant
-let RED=resize(as_ubyte([[[255,0,0,255]]]),1024,1024)
-let BLUE=resize(as_ubyte([[[0,0,255,255]]]),1024,1024)
+// ownership needs copied buffers, not megapixel processing under every-allocation GC.
+let RED=resize(as_ubyte([[[255,0,0,255]]]),128,128)
+let BLUE=resize(as_ubyte([[[0,0,255,255]]]),128,128)
 view <jobs_probe> state session:{job:0,frame:0,color:"",channel:"preview"} { ~.rendered }
 on click(evt) {
     let button=dom.closest(evt.target,"button")

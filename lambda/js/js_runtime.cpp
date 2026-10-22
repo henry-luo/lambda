@@ -63,9 +63,13 @@ extern "C" void js_set_execution_interrupt_check(JsExecutionInterruptCheck check
     js_execution_interrupt_check = check;
 }
 
+extern "C" bool js_execution_interrupt_pending(void) {
+    return js_execution_interrupt_check && js_execution_interrupt_check();
+}
+
 extern "C" Item js_execution_interrupt_status(void) {
     // D8.4.3v2: unwind guest frames normally, including suspended-stack owners.
-    if (js_execution_interrupt_check && js_execution_interrupt_check()) {
+    if (js_execution_interrupt_pending()) {
         return js_throw_error_with_code("ERR_SCRIPT_EXECUTION_TIMEOUT",
             "Script execution timed out");
     }

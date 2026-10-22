@@ -2,6 +2,21 @@
 
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
+
+// a relink must not replace the executable between GTest discovery and its workers.
+function snapshotExecutable(source, destination) {
+    const before = fs.statSync(source);
+    fs.copyFileSync(source, destination, fs.constants.COPYFILE_FICLONE);
+    const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    const sha256 = digest(destination);
+    const after = fs.statSync(source);
+    if (before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
+        sha256 !== digest(source)) {
+        throw new Error(`executable changed while taking snapshot: ${source}`);
+    }
+    return { source, path: destination, sha256 };
+}
 
 // legacy harnesses write fixed relative paths; isolate scratch without copying corpora.
 function createWorkspace(root, prefix) {
@@ -21,4 +36,4 @@ function createWorkspace(root, prefix) {
     return workspace;
 }
 
-module.exports = { createWorkspace };
+module.exports = { createWorkspace, snapshotExecutable };

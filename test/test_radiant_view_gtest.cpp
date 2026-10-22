@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cstddef>
+#include <errno.h>
+#include "../lib/log.h"
 
 #include "../radiant/script_timeout.hpp"
 #include "test_radiant_view_helpers.hpp"
@@ -3725,7 +3727,11 @@ int main(int argc, char** argv) {
         g_radiant_view_executable = file_realpath(executable ? executable : "./lambda.exe");
         const char* home = getenv("LAMBDA_HOME");
         g_radiant_view_home = file_realpath(home && home[0] ? home : "./lmd");
-        if (!g_radiant_view_root || !g_radiant_view_executable || !g_radiant_view_home) return 1;
+        if (!g_radiant_view_root || !g_radiant_view_executable || !g_radiant_view_home) {
+            log_error("radiant_view_setup: cannot resolve root/viewer/home (viewer=%s, error=%s)",
+                executable ? executable : "./lambda.exe", strerror(errno));
+            return 1;
+        }
 #ifdef _WIN32
         int process_id = _getpid();
 #else
@@ -3733,12 +3739,19 @@ int main(int argc, char** argv) {
 #endif
         snprintf(g_radiant_view_run_id, sizeof(g_radiant_view_run_id), "%d-%llu",
             process_id, (unsigned long long)time_now_ns());
-        if (!test_radiant_view_prepare_run()) return 1;
+        if (!test_radiant_view_prepare_run()) {
+            log_error("radiant_view_setup: cannot prepare artifacts/workspace under %s: %s",
+                g_radiant_view_root, strerror(errno));
+            return 1;
+        }
         if (case_worker) {
             // legacy cases use relative temp paths; isolate their entire harness before launching any child.
             RadiantViewLaunch launch = {};
             launch.label = "case";
-            if (!test_radiant_view_prepare_launch(&launch)) return 1;
+            if (!test_radiant_view_prepare_launch(&launch)) {
+                log_error("radiant_view_setup: cannot prepare case workspace %s: %s", launch.cwd, strerror(errno));
+                return 1;
+            }
 #ifdef _WIN32
             if (_chdir(launch.cwd) != 0) return 1;
 #else

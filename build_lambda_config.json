@@ -4131,13 +4131,15 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
+            "parallel": false,
+            "pin_executables": true,
             "artifact_dirs": [
               "radiant_view"
             ],
             "additional_sources": [
               "test/test_radiant_view_scene3d.cpp"
             ],
-            "case_workers": 3,
+            "case_workers": 6,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"
