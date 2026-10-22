@@ -123,4 +123,5 @@ DOM_ELEMENT_OP(GET_TARGET_ELEMENT, get_target_element)
 DOM_ELEMENT_OP(SET_POINTER_CAPTURE, set_pointer_capture)
 DOM_ELEMENT_OP(RELEASE_POINTER_CAPTURE, release_pointer_capture)
 DOM_ELEMENT_OP(HAS_POINTER_CAPTURE, has_pointer_capture)
+DOM_ELEMENT_OP(REPLACE_CHILDREN, replace_children)
 #undef DOM_ELEMENT_OP

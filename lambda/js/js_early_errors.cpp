@@ -879,7 +879,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_TAGGED_TEMPLATE: {
             JsAstNode* tag = ((JsTaggedTemplateNode*)node)->tag;
             // grouping ends an optional chain; the outer tagged span then starts before its tag node.
-            if (tag && node->source_span.start_byte == tag->source_span.start_byte && js_ast_has_optional_chain(tag))
+            if (js_ast_chain_continues(node, tag) && js_ast_has_optional_chain(tag))
                 ee_error(ctx, node, "An optional chain cannot be a template tag");
             walk_expression(ctx, tag);
             // tagged quasis allow invalid escapes; their substitutions still

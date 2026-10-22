@@ -489,9 +489,9 @@ struct NameScope {
     AstScopeId scope_id;
     NameEntry* first;
     NameEntry* last;
-    // Declaration order remains in first/last/next. The optional table is a
-    // pointer-identity index for construction-time name resolution: it makes
-    // wide module scopes linear to build without changing iteration order.
+    // Declaration order remains in first/last/next. The optional name index
+    // supports identity and spelling queries without changing
+    // declaration order, including names arriving from a linked script.
     NameEntry** name_index;
     uint32_t name_index_capacity;
     uint32_t name_index_count;
@@ -741,9 +741,10 @@ AstBindingId ast_index_find_binding_entry(const AstIndex* index,
                                           const NameEntry* entry);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
-// NameScope owns the shared pointer-identity lookup table. Both front ends
+// NameScope owns the shared name lookup table. Both front ends
 // retain declaration order in first/last/next while wide scopes probe here.
 NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
+NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name);
 bool name_scope_index_add(Pool* pool, NameScope* scope, NameEntry* entry);
 bool name_scope_plan_binding_slots(NameScope* scope);
 #ifdef __cplusplus

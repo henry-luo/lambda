@@ -46,10 +46,12 @@ typedef enum JubeMemberKind {
 } JubeMemberKind;
 
 typedef struct JubeMemberRecord JubeMemberRecord;
+struct JubePrototypePublication;
 struct JubeMemberRecord {
     struct JubeTypeRecord* declaring_type;
     JubeMemberRecord* canonical_record; // inherited methods share their declaring interface
     bool (*prototype_receiver)(Item); // adapter-owned WebIDL receiver brand
+    JubePrototypePublication* publications; // declaring interfaces share dispatch, never mutable brands
     const JubeMemberBind* bind;   // NULL for constants
     char* snake_name;             // declared spelling (owned copy)
     char* camel_name;             // derived or js_name override (owned copy)
@@ -67,6 +69,12 @@ struct JubeMemberRecord {
     bool method_fn_rooted;
     Context* method_root_owner;   // heap that owns the cached root
     uint64_t method_root_generation;
+};
+
+struct JubePrototypePublication {
+    JubeMemberRecord member;
+    char* interface_name;
+    JubePrototypePublication* next;
 };
 
 typedef struct JubeTypeRecord {
@@ -318,7 +326,7 @@ static bool jube_prototype_member(const JubeMemberRecord* rec) {
     if (!rec) return false;
     const JubeMemberRecord* canonical = rec->canonical_record
         ? rec->canonical_record : rec;
-    return canonical->prototype_receiver ||
+    return canonical->prototype_receiver || canonical->publications ||
         (rec->bind && (rec->bind->flags & JUBE_MEMBER_PROTOTYPE));
 }
 
@@ -330,6 +338,13 @@ static bool jube_prototype_member_for(const JubeMemberRecord* rec, Item receiver
     // legacy projections outside the interface that publishes this member.
     // Methods follow the receiver's actual interface chain; shared host storage
     // must not make Element-only operations appear on DocumentFragment.
+    if (canonical->publications) {
+        if (rec->kind == JUBE_MEMBER_METHOD) return true;
+        for (JubePrototypePublication* publication = canonical->publications;
+             publication; publication = publication->next) {
+            if (publication->member.prototype_receiver(receiver)) return true;
+        }
+    }
     return (canonical->prototype_receiver &&
         (rec->kind == JUBE_MEMBER_METHOD || canonical->prototype_receiver(receiver))) ||
         (rec->bind && (rec->bind->flags & JUBE_MEMBER_PROTOTYPE));
@@ -440,6 +455,19 @@ static Item jube_tramp_invoke(Item fn_item, Item this_value, Item* args,
     return out;
 }
 
+static void jube_member_clear_method_cache(JubeMemberRecord* rec) {
+    jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
+        &rec->method_root_owner, &rec->method_root_generation);
+    if (!rec->canonical_record || rec->canonical_record == rec) {
+        for (JubePrototypePublication* publication = rec->publications;
+             publication; publication = publication->next) {
+            JubeMemberRecord* member = &publication->member;
+            jube_cached_root_drop(&member->method_fn, &member->method_fn_rooted,
+                &member->method_root_owner, &member->method_root_generation);
+        }
+    }
+}
+
 static Item jube_member_js_method_item(JubeMemberRecord* rec) {
     if (jube_cached_root_is_current(rec->method_fn_rooted,
                                     rec->method_root_owner,
@@ -448,8 +476,7 @@ static Item jube_member_js_method_item(JubeMemberRecord* rec) {
     }
     // A runtime can replace its heap without reaching the normal reset hook.
     // Drop the stale cache before publishing a function into the new realm.
-    jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
-                          &rec->method_root_owner, &rec->method_root_generation);
+    jube_member_clear_method_cache(rec);
     const JubeHostAPI* host = jube_internal_host_api();
     int arity = rec->bind && (rec->bind->flags & JUBE_MEMBER_HAS_REQUIRED_ARGS)
         ? (int)(rec->bind->flags >> 8) : rec->arity;
@@ -807,6 +834,10 @@ static void jube_install_member_accessor(Item prototype, JubeMemberRecord* rec) 
 }
 
 static void jube_install_prototype_member(Item prototype, JubeMemberRecord* rec) {
+    // adapter publications already live on their declaring interface; a host-type
+    // seed must not overwrite them with a broader native-storage brand (D7.4.4).
+    const JubeMemberRecord* canonical = rec->canonical_record ? rec->canonical_record : rec;
+    if (canonical->publications) return;
     if (rec->kind == JUBE_MEMBER_FIELD) {
         if (jube_prototype_member(rec)) jube_install_member_accessor(prototype, rec);
     } else if (rec->kind == JUBE_MEMBER_METHOD) {
@@ -819,19 +850,38 @@ static void jube_install_prototype_member(Item prototype, JubeMemberRecord* rec)
 }
 
 extern "C" bool jube_publish_prototype_member(const JubeTypeDef* type,
-        Item prototype, const char* name, bool (*accepts_receiver)(Item)) {
+        Item prototype, const char* name, bool (*accepts_receiver)(Item),
+        const char* interface_name) {
+    JubeCatalogLock lock;
     JubeTypeRecord* trec = jube_record_for_type(type);
-    if (!trec || !name || !accepts_receiver || get_type_id(prototype) != LMD_TYPE_MAP)
+    if (!trec || !name || !accepts_receiver || !interface_name || get_type_id(prototype) != LMD_TYPE_MAP)
         return false;
     JubeMemberIndexEntry probe = {name, (uint32_t)strlen(name), NULL};
     const JubeMemberIndexEntry* found = JubeMemberIndex::get(trec->index, probe);
     if (!found || !found->rec->bind) return false;
     JubeMemberRecord* rec = found->rec->canonical_record
         ? found->rec->canonical_record : found->rec;
-    // Native brands are process-lifetime metadata; only the published Items
-    // belong to the current realm (D6.2.2v2, D5.4.1).
-    rec->prototype_receiver = accepts_receiver;
-    jube_install_prototype_member(prototype, rec);
+    JubePrototypePublication* publication = rec->publications;
+    while (publication && (publication->member.prototype_receiver != accepts_receiver ||
+            strcmp(publication->interface_name, interface_name))) publication = publication->next;
+    if (!publication) {
+        publication = (JubePrototypePublication*)mem_calloc(1, sizeof(JubePrototypePublication), MEM_CAT_JS_RUNTIME);
+        if (!publication) return false;
+        publication->interface_name = mem_strdup(interface_name, MEM_CAT_JS_RUNTIME);
+        if (!publication->interface_name) { mem_free(publication); return false; }
+        publication->member = *rec;
+        publication->member.canonical_record = &publication->member;
+        publication->member.publications = nullptr;
+        publication->member.prototype_receiver = accepts_receiver;
+        publication->member.method_fn = ItemNull;
+        publication->member.method_fn_rooted = false;
+        publication->member.method_root_owner = nullptr;
+        publication->member.method_root_generation = 0;
+        publication->next = rec->publications;
+        rec->publications = publication;
+    }
+    // metadata is stable; each declaring interface caches its own realm-owned callable (D6.2.2v2 / D5.4.1).
+    jube_install_prototype_member(prototype, &publication->member);
     return true;
 }
 
@@ -906,9 +956,7 @@ extern "C" void jube_interface_runtime_reset(void) {
         trec->prototype_absent = false;
         for (int j = 0; j < trec->member_count; j++) {
             JubeMemberRecord* rec = &trec->members[j];
-            jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
-                                  &rec->method_root_owner,
-                                  &rec->method_root_generation);
+            jube_member_clear_method_cache(rec);
         }
     }
 }
@@ -2181,9 +2229,7 @@ static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_
                               &trec->prototype_root_generation);
         for (int j = 0; j < trec->member_count; j++) {
             JubeMemberRecord* rec = &trec->members[j];
-            jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
-                                  &rec->method_root_owner,
-                                  &rec->method_root_generation);
+            jube_member_clear_method_cache(rec);
         }
     }
     // The index stores borrowed member-name pointers; release it before the
@@ -2194,6 +2240,14 @@ static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_
     }
     for (int j = 0; j < trec->member_count; j++) {
         JubeMemberRecord* rec = &trec->members[j];
+        if (!rec->canonical_record || rec->canonical_record == rec) {
+            while (rec->publications) {
+                JubePrototypePublication* publication = rec->publications;
+                rec->publications = publication->next;
+                mem_free(publication->interface_name);
+                mem_free(publication);
+            }
+        }
         if (rec->snake_name) free(rec->snake_name);
         if (rec->camel_name) free(rec->camel_name);
         if (rec->const_str) free(rec->const_str);

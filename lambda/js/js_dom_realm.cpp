@@ -590,11 +590,9 @@ static bool _attribute_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 2;
 }
 
-static bool _parent_node_receiver(Item receiver) {
+static bool _fragment_receiver(Item receiver) {
     Item kind = dom_core_node_type(receiver);
-    if (get_type_id(kind) != LMD_TYPE_INT) return false;
-    int type = it2i(kind);
-    return type == 1 || type == 9 || type == 11;
+    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 11;
 }
 
 static bool _child_node_receiver(Item receiver) {
@@ -615,6 +613,14 @@ static Item _window_closed_getter(Item /*callee*/, Item receiver, Item* /*args*/
         return js_throw_type_error("Illegal Window.closed receiver");
     return (Item){.item = b2it(jube_internal_host_api()->dom_catalog->window_is_closed(
         dom_get_ui_context()))};
+}
+
+static Item _window_self_getter(Item /*callee*/, Item receiver, Item* /*args*/,
+        int /*argc*/, uint64_t* /*result_home*/) {
+    Item global = js_get_global_this();
+    if (receiver.item != global.item)
+        return js_throw_type_error("Illegal Window.window receiver");
+    return global;
 }
 
 static Item _media_can_play_type(Item /*callee*/, Item receiver, Item* args,
@@ -663,7 +669,7 @@ static void _install_node_interface_members(Item global) {
         "value", "nodeValue", "textContent", NULL};
     static const char* const parent_node_members[] = {
         "children", "childElementCount", "firstElementChild", "lastElementChild",
-        "querySelector", "querySelectorAll", NULL};
+        "querySelector", "querySelectorAll", "append", "prepend", "replaceChildren", NULL};
     static const char* const child_node_members[] = {
         "before", "after", "replaceWith", "remove", NULL};
     static const char* const document_members[] = {
@@ -690,8 +696,9 @@ static void _install_node_interface_members(Item global) {
         {"Element", "html_element", _element_receiver, element_members},
         {"Element", "html_element", _element_receiver, attribute_node_members},
         {"Attr", "attr", _attribute_receiver, attr_members},
-        {"Element", "html_element", _parent_node_receiver, parent_node_members},
-        {"DocumentFragment", "html_element", _parent_node_receiver, parent_node_members},
+        {"Element", "html_element", _element_receiver, parent_node_members},
+        {"DocumentFragment", "html_element", _fragment_receiver, parent_node_members},
+        {"Document", "html_element", _document_receiver, parent_node_members},
         {"Element", "dom_node", _child_node_receiver, child_node_members},
         {"CharacterData", "dom_node", _child_node_receiver, child_node_members},
         {"DocumentType", "dom_node", _child_node_receiver, child_node_members},
@@ -713,10 +720,16 @@ static void _install_node_interface_members(Item global) {
             strlen(interface.host_name));
         for (const char* const* member = interface.members; *member; ++member) {
             if (!jube_publish_prototype_member(type, prototype_root.get(), *member,
-                    interface.receiver)) {
+                    interface.receiver, interface.interface_name)) {
                 log_error("dom-interface-publication: missing %s.%s binding",
                     interface.interface_name, *member);
             }
+        }
+        if (interface.members == parent_node_members) {
+            // variadic ParentNode methods have no required arguments on each declaring interface.
+            dom_set_interface_method_metadata(prototype_root.get(), "append", 0);
+            dom_set_interface_method_metadata(prototype_root.get(), "prepend", 0);
+            dom_set_interface_method_metadata(prototype_root.get(), "replaceChildren", 0);
         }
     }
 }
@@ -745,6 +758,12 @@ extern "C" void dom_install_collection_globals(void) {
         js_set_function_name(getter.get(), js_name_item("get closed"));
         js_install_native_accessor(global_root.get(), js_name_item("closed"),
             getter.get(), ItemNull, 0);
+        // Window.window is an unforgeable readonly accessor, not a writable
+        // alias; libraries capture the getter to identify browser realms.
+        getter.set(js_new_native_payload_function(_window_self_getter, 0, 0));
+        js_set_function_name(getter.get(), js_name_item("get window"));
+        js_install_native_accessor(global_root.get(), js_name_item("window"),
+            getter.get(), ItemNull, JSPD_NON_CONFIGURABLE);
     }
     Item window_proto = _iface_proto(global, "Window");
     if (get_type_id(window_proto) == LMD_TYPE_MAP) {

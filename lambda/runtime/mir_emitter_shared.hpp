@@ -2249,8 +2249,8 @@ static inline bool em_reg_is_read(MirEmitter* em, MIR_reg_t reg, MIR_insn_t def)
 //
 // Only a MOV whose destination is the register is a candidate: anything with
 // side effects stays regardless of whether its result is read.
-static inline void em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
-    if (!reg || !em->func) return;
+static inline bool em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
+    if (!reg || !em->func) return false;
     for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
             insn = DLIST_NEXT(MIR_insn_t, insn)) {
         if (insn->code != MIR_MOV || insn->nops != 2 ||
@@ -2259,9 +2259,11 @@ static inline void em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
         }
         if (!em_reg_is_read(em, reg, insn)) {
             MIR_remove_insn(em->ctx, em->func_item, insn);
+            return true;
         }
-        return;
+        return false;
     }
+    return false;
 }
 
 // JC23: entry guards must not allocate temporary registers before lowering a

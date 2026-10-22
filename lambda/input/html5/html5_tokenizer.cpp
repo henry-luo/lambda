@@ -526,9 +526,10 @@ static void html5_append_char_reference_or_literal(Html5Parser* parser, char c,
 
 // helper: recover an invalid RCDATA/RAWTEXT end tag as literal text
 static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
-                                                Html5TokenizerState state) {
+                                                Html5TokenizerState state, bool is_eof) {
     parser->current_token = nullptr;
-    if (!html5_is_eof(parser)) {
+    // the last real delimiter still needs reconsuming even when it advanced to EOF.
+    if (!is_eof) {
         html5_reconsume(parser);
     }
     html5_switch_tokenizer_state(parser, state);
@@ -1086,7 +1087,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_END_TAG_OPEN);
                 } else {
                     // Not an end tag, emit '<' and reconsume
-                    html5_reconsume(parser);
+                    if (!is_eof) html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
                     return html5_token_create_character(parser->token_arena, '<');
                 }
@@ -1101,7 +1102,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_END_TAG_NAME);
                 } else {
                     // Not a valid end tag, emit '</' and reconsume
-                    html5_reconsume(parser);
+                    if (!is_eof) html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
                     return html5_token_create_character_string(parser->token_arena, "</", 2);
                 }
@@ -1145,7 +1146,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // Not a valid end tag name character
                     rcdata_emit_as_text:
                     // Emit '</' + temp_buffer contents as text
-                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RCDATA);
+                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RCDATA, is_eof);
                 }
                 break;
             }
@@ -1168,7 +1169,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_clear_temp_buffer(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_END_TAG_OPEN);
                 } else {
-                    html5_reconsume(parser);
+                    if (!is_eof) html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
                     return html5_token_create_character(parser->token_arena, '<');
                 }
@@ -1181,7 +1182,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_END_TAG_NAME);
                 } else {
-                    html5_reconsume(parser);
+                    if (!is_eof) html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
                     return html5_token_create_character_string(parser->token_arena, "</", 2);
                 }
@@ -1221,7 +1222,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_append_to_temp_buffer(parser, c);
                 } else {
                     rawtext_emit_as_text:
-                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RAWTEXT);
+                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RAWTEXT, is_eof);
                 }
                 break;
             }

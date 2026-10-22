@@ -31,6 +31,13 @@ typedef struct MirLinkSelection {
     unsigned int optimize_level;
 } MirLinkSelection;
 
+// oversized native bodies keep native execution without paying for O2's global passes.
+static inline unsigned int mir_native_optimize_level(
+        uint64_t largest_function_insns, unsigned int optimize_level) {
+    return largest_function_insns > MIR_LARGE_FUNCTION_O1_THRESHOLD && optimize_level > 1
+        ? 1 : optimize_level;
+}
+
 // The code generator is vendored; policy selects its interface before it is
 // invoked. A cold document and an oversized module use the interpreter ABI,
 // while a single large native body gives up only the expensive O2 pass.
@@ -47,10 +54,7 @@ static inline MirLinkSelection mir_select_link_interface(
         selection.interface_kind = MIR_LINK_INTERP;
         return selection;
     }
-    if (largest_function_insns > MIR_LARGE_FUNCTION_O1_THRESHOLD &&
-            selection.optimize_level > 1) {
-        selection.optimize_level = 1;
-    }
+    selection.optimize_level = mir_native_optimize_level(largest_function_insns, optimize_level);
     return selection;
 }
 

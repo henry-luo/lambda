@@ -175,6 +175,7 @@ const char radiant_dom_interface_decl[] =
     "    append_child: pn(a0: any) any, remove_child: pn(a0: any) any,\n"
     "    insert_before: pn(a0: any, a1: any) any, replace_child: pn(a0: any, a1: any) any,\n"
     "    normalize: pn() any, append: pn(a0: any) any, prepend: pn(a0: any) any,\n"
+    "    replace_children: pn(a0: any) any,\n"
     "    insert_adjacent_element: pn(a0: any, a1: any) any,\n"
     "    insert_adjacent_html: pn(a0: any, a1: any) any,\n"
     "    insert_adjacent_text: pn(a0: any, a1: any) any,\n"
@@ -1267,6 +1268,7 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL_JS("ms_matches_selector", "msMatchesSelector", radiant_dom_m4d_matches),
     BIND_CALL("append", radiant_dom_m4d_append),
     BIND_CALL("prepend", radiant_dom_m4d_prepend),
+    BIND_CALL_JS("replace_children", "replaceChildren", radiant_dom_m4d_replace_children),
     BIND_CALL_JS("get_bounding_client_rect", "getBoundingClientRect", radiant_dom_m4d_get_bounding_client_rect),
     BIND_CALL_JS("get_client_rects", "getClientRects", radiant_dom_m4d_get_client_rects),
     BIND_CALL("scroll", radiant_dom_m4d_scroll),

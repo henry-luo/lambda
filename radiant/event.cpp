@@ -6544,7 +6544,7 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
-    bool include_structural = false);
+    bool include_structural = false, DomNode* changed_subtree = nullptr);
 
 struct FrameCommitProfile {
     double cascade_ms, layout_ms, repaint_ms;
@@ -7174,6 +7174,7 @@ static bool dom_js_document_has_relational_mutation_target_dependency(
 
 struct DomJsChildListDependency {
     DomNode* parent;
+    DomNode* changed_subtree;
     SelectorMatcher matcher;
     bool include_structural;
 };
@@ -7189,6 +7190,36 @@ static bool dom_js_compound_can_match_anchor(CssCompoundSelector* compound,
         if (stable && !selector_matcher_matches_simple(matcher, simple, element)) return false;
     }
     return true;
+}
+
+struct DomJsSubtreeSelectorMatch {
+    CssCompoundSelector* compound;
+    SelectorMatcher* matcher;
+};
+
+static bool dom_js_subtree_selector_misses(DomNode* node, void* context) {
+    auto* query = (DomJsSubtreeSelectorMatch*)context;
+    return !node->is_element() || !dom_js_compound_can_match_anchor(
+        query->compound, node->as_element(), query->matcher);
+}
+
+static bool dom_js_has_argument_can_match_subtree(CssSelector* argument,
+        DomJsChildListDependency* dependency) {
+    if (!dependency->changed_subtree || !argument ||
+        argument->compound_selector_count != 1 ||
+        argument->leading_combinator >= CSS_COMBINATOR_NEXT_SIBLING) return true;
+    CssCompoundSelector* compound = argument->compound_selectors[0];
+    if (!compound) return true;
+    for (size_t i = 0; i < compound->simple_selector_count; i++) {
+        CssSimpleSelector* simple = compound->simple_selectors[i];
+        // positions/states/functions may change existing candidates outside the moved subtree.
+        if (!simple || (simple->type != CSS_SELECTOR_TYPE_ELEMENT &&
+            simple->type != CSS_SELECTOR_TYPE_CLASS && simple->type != CSS_SELECTOR_TYPE_ID &&
+            simple->type != CSS_SELECTOR_TYPE_UNIVERSAL)) return true;
+    }
+    DomJsSubtreeSelectorMatch query = {compound, &dependency->matcher};
+    return !view_geometry_walk_dom_tree(dependency->changed_subtree,
+        dom_js_subtree_selector_misses, &query);
 }
 
 static bool dom_js_selector_prefix_can_match_anchor(CssSelector* selector, size_t index,
@@ -7286,6 +7317,14 @@ static bool dom_js_selector_has_child_list_dependency(CssSelector* selector, voi
         for (size_t i = 0; i < compound->simple_selector_count; i++) {
             CssSimpleSelector* simple = compound->simple_selectors[i];
             if (!dom_js_simple_selector_has_relational_mutation_target_dependency(simple, nullptr)) continue;
+            if (simple->type == CSS_SELECTOR_PSEUDO_HAS) {
+                bool can_change = false;
+                for (size_t f = 0; f < simple->function_selector_count; f++) {
+                    if (dom_js_has_argument_can_match_subtree(
+                            simple->function_selectors[f], dependency)) can_change = true;
+                }
+                if (!can_change) continue;
+            }
             // sibling/column arguments can reach anchors outside the parent's
             // ancestry. Descendant/child arguments require an enclosing anchor.
             for (size_t f = 0; f < simple->function_selector_count; f++) {
@@ -7306,11 +7345,17 @@ static bool dom_js_rule_has_child_list_dependency(CssRule* rule, void* context) 
 }
 
 static bool dom_js_document_has_child_list_dependency(DomDocument* doc, DomNode* parent,
-        bool include_structural) {
+        bool include_structural, DomNode* changed_subtree) {
     if (!doc || !parent) return true;
     if (dom_js_document_has_column_css_dependency(doc)) return true;
     DomJsChildListDependency dependency = {};
     dependency.parent = parent;
+    dependency.changed_subtree = changed_subtree;
+    // a later attribute edit can hide a formerly matching class/id on a moved node.
+    for (int i = 0; dependency.changed_subtree && i < doc->js.mutation_record_count; i++) {
+        if (doc->js.mutation_records[i].kind == DOM_JS_MUTATION_ATTRIBUTE)
+            dependency.changed_subtree = nullptr;
+    }
     dependency.include_structural = include_structural;
     selector_matcher_init(&dependency.matcher, doc->document_pool);
     return dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_child_list_dependency, &dependency);
@@ -7357,9 +7402,7 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
         }
-        if (has_direction_css && (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
-            record->kind == DOM_JS_MUTATION_TEXT || record->kind == DOM_JS_MUTATION_CONTROL_VALUE ||
-            record->kind == DOM_JS_MUTATION_CHILD_INSERT || record->kind == DOM_JS_MUTATION_CHILD_REMOVE)) {
+        if (has_direction_css && record->direction_sensitive) {
             // first-strong isolation and inherited direction can change matches outside the edited subtree.
             if (reason) *reason = "direction-sensitive-selector";
             return false;
@@ -7415,7 +7458,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
                 checked_broad_structural_css = true;
             }
             if (!has_broad_structural_css ||
-                !dom_js_document_has_child_list_dependency(doc, record->parent)) continue;
+                !dom_js_document_has_child_list_dependency(doc, record->parent,
+                    false, record->target)) continue;
             // :has() can change matching ancestors outside the child-list
             // subtree. Local sibling and position selectors use the parent as
             // their cascade root above, so they retain incremental layout.
@@ -8112,6 +8156,10 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
                                               mutations, &fallback_reason)) {
         dom_js_mutation_reset_records(doc);
         return;
+    }
+    if (debug.enabled_categories & radiant::LAYOUT_DEBUG_CACHE) {
+        log_notice("[LAYOUT_PROFILE] mutation-fallback: reason=%s",
+            fallback_reason ? fallback_reason : "unknown");
     }
     if (fallback_reason && strcmp(fallback_reason, "stylesheet-mutation") == 0) {
         // A <style>/<link> structural edit changes global selector inputs even

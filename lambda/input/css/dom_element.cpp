@@ -358,7 +358,7 @@ bool dom_node_is_inert(DomNode* node) {
     return false;
 }
 
-static CssEnum dom_html_direction_state(DomElement* element) {
+CssEnum dom_html_direction_state(DomElement* element) {
     if (!element) return CSS_VALUE__UNDEF;
     // most elements carry no dir attribute; test it before the namespace walk.
     const char* value = dom_element_attribute_value_ns(element, "", "dir");
@@ -1183,6 +1183,28 @@ void dom_element_clear(DomElement* element) {
 enum CssCustomSelection { CSS_CUSTOM_INLINE, CSS_CUSTOM_CASCADED,
     CSS_CUSTOM_PRESENTATION, CSS_CUSTOM_ANIMATION, CSS_CUSTOM_ALL };
 
+struct CssCustomPropertyIndexEntry {
+    StrView name;
+    CssCustomProp* property;
+    size_t order;
+};
+
+struct CssCustomPropertyIndex {
+    lam::Up<CssCustomProp> source;
+    lam::OwnArr<CssCustomPropertyIndexEntry> entries;
+    size_t count;
+};
+
+void dom_element_invalidate_custom_property_index(DomElement* element) {
+    CssCustomPropertyIndex* index = element && element->ext
+        ? element->ext->custom_property_index.get() : nullptr;
+    if (!index) return;
+    // names and candidates borrow declaration storage; retire before recascade frees it (D4.5.1v4).
+    pool_free(element->storage_pool(), index->entries);
+    pool_free(element->storage_pool(), index);
+    element->ext->custom_property_index = nullptr;
+}
+
 static bool dom_element_custom_property_selected(const CssCustomProp* prop,
     CssCustomSelection selection, const char* name = nullptr, const void* effect = nullptr) {
     const CssDeclaration* declaration = prop->declaration;
@@ -1208,6 +1230,7 @@ static bool dom_element_clear_custom_properties(DomElement* element,
             slot = &prop->next;
             continue;
         }
+        if (!removed) dom_element_invalidate_custom_property_index(element);
         *slot = prop->next;
         if (prop->declaration && prop->declaration->tree_owned_record)
             css_declaration_destroy_owned(prop->declaration,
@@ -1435,6 +1458,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_release_cached_classes(element);
     dom_element_clear_synthetic_attributes(element);
     dom_element_clear_custom_properties(element, CSS_CUSTOM_ALL);
+    dom_element_invalidate_custom_property_index(element);
     style_epoch_selection_clear_element(element);
     // retirement releases both the authored pool and its document resource registration (D4.5.1v4).
     if (element->ext && element->ext->inline_declarations)
@@ -2569,16 +2593,91 @@ bool dom_element_remove_inline_styles(DomElement* element) {
     return removed_attr || removed_decl;
 }
 
+static StrView css_custom_property_key(const char* name, size_t length = (size_t)-1) {
+    if (!name) return strview_init(nullptr, 0);
+    StrView key = strview_init(name, length == (size_t)-1 ? strlen(name) : length);
+    if (key.length >= 2 && key.str[0] == '-' && key.str[1] == '-') {
+        key.str += 2;
+        key.length -= 2;
+    }
+    return key;
+}
+
+static int css_custom_property_key_compare(StrView a, StrView b) {
+    size_t length = a.length < b.length ? a.length : b.length;
+    int order = length ? memcmp(a.str, b.str, length) : 0;
+    return order ? order : a.length < b.length ? -1 : a.length > b.length ? 1 : 0;
+}
+
+static int css_custom_property_index_compare(const void* first, const void* second) {
+    const auto* a = (const CssCustomPropertyIndexEntry*)first;
+    const auto* b = (const CssCustomPropertyIndexEntry*)second;
+    int order = css_custom_property_key_compare(a->name, b->name);
+    // retain list order for equal cascade priorities and legacy declaration-less entries.
+    return order ? order : a->order < b->order ? -1 : a->order > b->order ? 1 : 0;
+}
+
+static CssCustomPropertyIndex* css_custom_property_index(DomElement* element) {
+    if (!element->css_variables || !element->css_variables->next || !element->doc) return nullptr;
+    DomElementExt* ext = element->ensure_ext();
+    if (!ext) return nullptr;
+    CssCustomPropertyIndex* index = ext->custom_property_index;
+    if (index && index->source == element->css_variables) return index;
+    dom_element_invalidate_custom_property_index(element);
+    size_t count = 0;
+    for (CssCustomProp* entry = element->css_variables; entry; entry = entry->next) count++;
+    auto* entries = (CssCustomPropertyIndexEntry*)pool_alloc(element->storage_pool(),
+        count * sizeof(CssCustomPropertyIndexEntry));
+    index = (CssCustomPropertyIndex*)pool_calloc(element->storage_pool(), sizeof(CssCustomPropertyIndex));
+    if (!entries || !index) {
+        pool_free(element->storage_pool(), entries);
+        pool_free(element->storage_pool(), index);
+        return nullptr;
+    }
+    size_t order = 0;
+    for (CssCustomProp* entry = element->css_variables; entry; entry = entry->next) {
+        StrView name = entry->declaration ? css_declaration_name(entry->declaration)
+            : strview_from_cstr(entry->name);
+        entries[order] = {css_custom_property_key(name.str, name.length), entry, order};
+        order++;
+    }
+    qsort(entries, count, sizeof(CssCustomPropertyIndexEntry), css_custom_property_index_compare);
+    index->source = lam::up(element->css_variables.get());
+    index->entries = lam::own_arr(entries);
+    index->count = count;
+    ext->custom_property_index = lam::own(index);
+    return index;
+}
+
 static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     const char* name, const CssDeclaration* ceiling = nullptr,
     const CssRollbackFilter* filters = nullptr, size_t name_length = (size_t)-1,
-    bool exclude_animations = false) {
+    bool exclude_animations = false, const CssCustomPropertyIndex* index = nullptr) {
+    StrView key = css_custom_property_key(name, name_length);
+    size_t position = 0;
+    if (index) {
+        size_t end = index->count;
+        while (position < end) {
+            size_t middle = position + (end - position) / 2;
+            if (css_custom_property_key_compare(index->entries[middle].name, key) < 0)
+                position = middle + 1;
+            else end = middle;
+        }
+    }
     CssCustomProp* winner = nullptr;
-    for (CssCustomProp* variable = variables; variable; variable = variable->next) {
+    for (CssCustomProp* variable = variables; index ? position < index->count : variable != nullptr;
+         index ? (void)position++ : (void)(variable = variable->next)) {
+        if (index) {
+            const CssCustomPropertyIndexEntry& entry = index->entries[position];
+            if (css_custom_property_key_compare(entry.name, key)) break;
+            variable = entry.property;
+        }
         if (exclude_animations && variable->animation_owner) continue;
-        StrView stored = variable->declaration ? css_declaration_name(variable->declaration)
-            : strview_from_cstr(variable->name);
-        if (!css_custom_property_name_matches(stored.str, name, stored.length, name_length)) continue;
+        if (!index) {
+            StrView stored = variable->declaration ? css_declaration_name(variable->declaration)
+                : strview_from_cstr(variable->name);
+            if (css_custom_property_key_compare(css_custom_property_key(stored.str, stored.length), key)) continue;
+        }
         if (variable->declaration &&
             !css_declaration_cascade_eligible(variable->declaration, ceiling, filters)) continue;
         if (!winner || !winner->declaration || !variable->declaration ||
@@ -2588,7 +2687,7 @@ static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
     }
     if (winner && css_declaration_is_rollback(winner->declaration)) {
         CssRollbackFilter filter = {winner->declaration, filters};
-        return css_custom_property_winner(variables, name, winner->declaration, &filter, name_length, exclude_animations);
+        return css_custom_property_winner(variables, name, winner->declaration, &filter, name_length, exclude_animations, index);
     }
     return winner;
 }
@@ -2596,8 +2695,8 @@ static CssCustomProp* css_custom_property_winner(CssCustomProp* variables,
 // typed computation and authored serialization use the same rollback winner.
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
     const char* name, size_t name_length, bool exclude_animations) {
-    return element ? css_custom_property_winner(element->css_variables,
-        name, nullptr, nullptr, name_length, exclude_animations) : nullptr;
+    return element && name ? css_custom_property_winner(element->css_variables,
+        name, nullptr, nullptr, name_length, exclude_animations, css_custom_property_index(element)) : nullptr;
 }
 
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element, const char* name,
@@ -2617,7 +2716,7 @@ const CssValue* dom_element_lookup_custom_property(DomElement* element,
     while (element) {
         // Check if this element has CSS variables
         if (element->css_variables) {
-            CssCustomProp* winner = css_custom_property_winner(element->css_variables, var_name);
+            const CssCustomProp* winner = dom_element_lookup_own_custom_property_entry(element, var_name);
             if (winner) {
                 CssEnum keyword = winner->value && winner->value->type == CSS_VALUE_TYPE_KEYWORD
                     ? winner->value->data.keyword : CSS_VALUE_NONE;
@@ -2638,12 +2737,8 @@ const CssValue* dom_element_lookup_custom_property(DomElement* element,
 bool css_custom_property_name_matches(const char* stored_name,
     const char* lookup_name, size_t stored_length, size_t lookup_length) {
     if (!stored_name || !lookup_name) return false;
-    StrView stored = strview_init(stored_name, stored_length == (size_t)-1 ? strlen(stored_name) : stored_length);
-    StrView lookup = strview_init(lookup_name, lookup_length == (size_t)-1 ? strlen(lookup_name) : lookup_length);
-    if (stored.length >= 2 && stored.str[0] == '-' && stored.str[1] == '-')
-        stored = strview_sub(&stored, 2, stored.length);
-    if (lookup.length >= 2 && lookup.str[0] == '-' && lookup.str[1] == '-')
-        lookup = strview_sub(&lookup, 2, lookup.length);
+    StrView stored = css_custom_property_key(stored_name, stored_length);
+    StrView lookup = css_custom_property_key(lookup_name, lookup_length);
     return strview_eq(&stored, &lookup);
 }
 
@@ -2678,6 +2773,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         prop->value_text = lam::up(declaration->value_text);
         prop->value_text_len = declaration->value_text_len;
         prop->declaration = lam::up(declaration);
+        dom_element_invalidate_custom_property_index(element);
         prop->next = element->css_variables;
         element->css_variables = lam::own(prop);
 
