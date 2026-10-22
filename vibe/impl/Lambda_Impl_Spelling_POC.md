@@ -1,13 +1,19 @@
 # Spelling Vocabulary Storage POC
 
 > **Date:** 2026-10-22.
-> **Scope:** the positional vocabulary format requested for `lambda.doc.spelling`;
-> dictionary preparation, actual file sizes, and Lambda load/lookup validation.
+> **Scope:** vocabulary storage experiments for `lambda.doc.spelling`, from the
+> positional JSON lookup POC to the adopted semicolon/offset text resource (§7).
+> **Status:** text dictionary format adopted 2026-10-22 (USER); a Lambda text
+> lookup POC is implemented (§8). In-process standalone XZ loading is pending.
 > **Design:** [Lambda_Pkg_Spelling.md](../Lambda_Pkg_Spelling.md), §4.3.
 > **Spec linkage:** D7.2.4v3/D7.2.6 for source-module paths; S12.1.1v3 for
-> procedural loading; S2.5.8/S17.4.1 for text; K29c for deferred binary Mark.
+> procedural loading; S2.5.8/S17.4.1 for text; S6.2.2v3 for ordering. The general
+> binary-Mark design remains deferred under K29c.
 
 ## 1. Implemented scope
+
+The following list describes the original JSON milestone. The adopted text
+reader and paragraph benchmark are recorded separately in §8.
 
 - `utils/spelling_vocab_poc.py` verifies pinned source hashes, prepares four
   English profiles, serializes three comparable JSON shapes plus a plain-wordlist
@@ -78,12 +84,14 @@ optional restrictions, and the separate source/license manifest. The copied
 upstream notices and README add 4,863 and 1,705 bytes respectively. The measurement
 manifest has its own generated size. JSON file size is not loaded-memory size.
 
-The final distribution must migrate to **Lambda/Mark binary packing when
-supported**, preserving the logical array schema and IDs. The current design
-defers the encoding under [K29c](../Lambda_Design_Concurrency.md); no binary-Mark
-size is claimed. The original package POC loader consumes uncompressed JSON.
-The later storage experiments in §5 are independent measurement prototypes,
-not shipping substitute formats or a binary-Mark implementation.
+The original JSON milestone contemplated migration to Lambda/Mark binary
+packing; that resource requirement is superseded by the adopted text format in
+§7 and [design §4.3](../Lambda_Pkg_Spelling.md#43-adopted-dictionary-resource-format).
+The general binary-Mark encoding remains deferred under
+[K29c](../Lambda_Design_Concurrency.md), and no binary-Mark size is claimed.
+The original package POC loader still consumes uncompressed JSON. The storage
+probes in §§5–7 measured alternatives; the subsequent Lambda text reader is in
+§8. No standalone XZ reader is implemented by this POC.
 
 ## 3. Reproduction and artifacts
 
@@ -174,7 +182,8 @@ data and suggestion indexes are extra. Default `ordinary` metadata can be stored
 once rather than repeated for every entry. Codec levels differ explicitly in the
 table; these are measured storage alternatives, not a runtime speed comparison.
 
-**Smallest measured download:** front coding. Store each sorted spelling as
+**Smallest measured download at this comparison stage:** front coding. Store
+each sorted spelling as
 the number of shared prefix bytes plus the new suffix bytes. A 64-word restart
 index is included in the 160.5 KiB figure; it allows a reader to binary-search
 blocks and reconstruct at most 64 words within the selected block. The 146.8 KiB
@@ -182,7 +191,7 @@ sequential control has no useful intermediate restart points. Whole-file Brotli
 or XZ compression must be decoded before arbitrary block access; the figures
 do not include an independently compressed-block distribution experiment.
 
-**Recommended direction for a full checker:** evaluate a compact minimal
+**Suggestion-engine research direction:** evaluate a compact minimal
 acyclic word graph (DAWG / DAFSA), or an FST when word IDs or weights are needed.
 Prefixes and equivalent suffix continuations are shared. Near-word search can
 traverse the same graph with edit-distance state, avoiding a separately expanded
@@ -206,12 +215,12 @@ would be needed to consume that specific format.
 [MARISA implementation](https://github.com/s-yata/marisa-trie),
 [key-ID and storage interface](https://marisa-trie.readthedocs.io/en/latest/tutorial.html)
 
-The ultimate Mark-binary resource should carry the chosen compact structure as
-typed arrays/binary data plus small metadata. A generic binary encoding of the
-original duplicated word arrays alone does not provide dictionary-specific
-prefix/suffix sharing. JSON rows remain useful as an inspectable source form.
-The production storage/suggestion choice remains open; this comparison does
-not replace the implemented JSON reader or ratify a private wire format.
+At this comparison stage, a future Mark-binary resource carrying compact arrays
+or binary payloads was considered. Generic serialization of the original
+duplicated word arrays would not provide prefix/suffix sharing. The vocabulary
+storage choice is now adopted in §7; suggestion-engine choices remain proposed.
+These earlier comparisons did not replace the implemented JSON reader. JSON
+rows remain available for inspection and interchange.
 
 All experimental code and results are under `temp/spelling_vocab_poc/`:
 
@@ -228,3 +237,289 @@ round-trips and every restart-table offset is checked. All three MARISA variants
 enumerate the same complete word set and pass 109,902 ID/reverse-lookup checks
 each. No native Lambda code or package implementation changed for these tests;
 the aggregate result in §4 belongs to the earlier JSON-loader milestone.
+
+## 6. Comma/pipe text format, 64 words per line
+
+The user's next storage proposal uses a dedicated text format, outside Mark
+notation. This experiment interprets it as follows:
+
+```text
+cat,s|dog,s
+```
+
+This expands to `cat`, `cats`, `dog`, `dogs`. The first token on a line and each
+token after `|` is a complete dictionary word and becomes the current anchor.
+Each token after `,` is a suffix appended to that anchor; it does not change the
+anchor. For example, `cat,ch,s` means `cat`, `catch`, `cats`. Partial reuse of an
+anchor, such as replacing its final letter, needs a new complete word after `|`.
+There is no implied inflection rule or generation of words absent from the source.
+
+Spellings remain sorted and case-preserving UTF-8. Each line contains **64
+expanded words**, except the final shorter line; its first word always resets
+the anchor. Output uses LF, including a final LF, with no optional spaces.
+Comma and pipe are reserved delimiters: none of these four pinned wordlists
+contains them, so this experiment needs no escape syntax. Case-policy exceptions,
+frequency data, restrictions, headers, notices and indexes are outside the text
+payload measured here.
+
+| Profile | Words | Text bytes | Gzip 9 bytes | XZ 6 bytes | Zstd 19 bytes | Brotli 11 bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| US, level 60 | 109,902 | 632,498 | 220,400 | 181,736 | 187,004 | 185,434 |
+| British `-ise`, level 60 | 109,550 | 630,981 | 220,001 | 181,104 | 186,273 | 184,691 |
+| US, level 70 | 168,211 | 1,000,693 | 347,498 | 285,444 | 292,908 | 290,503 |
+| British, level 70 | 171,326 | 1,026,263 | 354,183 | 290,236 | 298,197 | 295,508 |
+
+For the standard US dictionary this is **617.7 KiB raw**, **215.2 KiB gzip**,
+**177.5 KiB XZ**, or **181.1 KiB Brotli**. Raw size is 38.8% below the original
+1,033,485-byte wordlist. It has 1,718 lines: 31,012 full-word anchors and 78,890
+comma suffixes; the last line has 14 words.
+
+The earlier binary front-coded 64-word format can share an arbitrary prefix of
+the previous word by recording its length. It is smaller: 494,314 bytes raw or
+164,488 bytes with XZ, compared with 632,498 and 181,736 for this text format.
+The latter remains directly readable and needs only delimiter-based expansion.
+No parse/lookup latency comparison was performed.
+
+An optional 32-bit line-offset table adds **6,872 bytes (6.7 KiB)** for the US
+dictionary. A loader can instead build that table by scanning newlines, keeping
+the distributed file at the measured size. The first complete word on each line
+provides a block search key without another duplicated word array. As with §5,
+the measured whole-file compression must be decoded before arbitrary line
+access; independently compressed lines were not measured.
+
+Reproduce with `python3 temp/spelling_vocab_poc/delimited_compare.py`. It reuses
+the existing codec-measurement helper and verifies the pinned input hashes.
+Artifacts under `temp/spelling_vocab_poc/compact/` are:
+
+- `<profile>.prefix-lines-64.txt`: the complete custom text dictionary.
+- `<profile>.prefix-lines-64.offsets.u32`: optional little-endian line offsets.
+- `<profile>.prefix-lines-64.{raw,gzip9,xz6,zstd19,brotli11}`: measured payloads.
+- `delimited_measurements.json`: counts, byte sizes, hashes and validation results.
+
+All four profiles decode to exactly their original word sequences. Every line
+is also decoded independently and checked against its corresponding source
+slice: **8,736 line checks** across **558,989 spellings**. All **20 compressed
+or raw payload variants** recover the exact text bytes and match recorded hashes.
+The Lambda package loader still consumes the positional JSON format; this is
+a storage measurement, with no new Lambda reader or engine changes.
+
+## 7. Semicolon text format with prefix offsets
+
+**Adopted 2026-10-22 (USER)** as Lambda's spelling vocabulary resource format.
+The current format definition is
+[design §4.3](../Lambda_Pkg_Spelling.md#43-adopted-dictionary-resource-format),
+including canonical preparation, reserved characters, manifests, entry IDs and
+reader validation. This section records the storage proof and measured sizes;
+the subsequent Lambda text reader is in §8. Standalone XZ loading remains pending.
+
+The adopted format adds explicit prefix lengths:
+
+```text
+catalog;ue;5,yst|dog;s
+```
+
+For this measurement, `;suffix` appends to the **previous decoded word**;
+`;N,suffix` keeps its first `N` Unicode code points and appends the suffix;
+`|word` replaces it with a complete word. The example decodes to `catalog`,
+`catalogue`, `catalyst`, `dog`, `dogs`. Offsets count code points rather than
+UTF-8 bytes, consistent with the text-position model in **S2.5.8/S17.4.1**.
+Every line starts with a complete word and contains 64 decoded words except the
+last line. Semicolon, comma and pipe are reserved; none occurs inside the source
+spellings. No spaces, quotes or Mark wrapper are added.
+
+The adopted encoder shares the longest common prefix with the previous word.
+It omits the offset when that prefix is the complete previous word, and uses
+`|word` when there is no common prefix. The unchanged 109,902-entry US level-60
+dictionary gives:
+
+| Storage | Bytes | KiB |
+|---|---:|---:|
+| UTF-8 text | 525,993 | 513.7 |
+| Gzip 9 | 167,205 | 163.3 |
+| XZ / LZMA2 preset 6 (adopted distribution compression) | **145,056** | **141.7** |
+| Zstd 19 | 147,536 | 144.1 |
+| Brotli 11 | 144,685 | 141.3 |
+
+With XZ 6 this is **20.2% smaller** than the previous comma/pipe text format's
+181,736 bytes. It is also below the earlier binary front-code file's 164,488
+bytes with XZ. These measurements show that a binary encoding is not by itself
+a guarantee of the smallest compressed file. The binary file includes its
+restart-offset table; both text formats omit a stored table and can construct
+one by scanning newlines. An optional US text line-offset table remains 6,872
+bytes before compression. Metadata, headers, notices and suggestions remain
+outside these vocabulary measurements.
+
+The text contains 1,769 complete words, including the 1,718 line starts;
+36,295 appended suffixes; and 71,838 suffixes with explicit prefix lengths.
+A control encoder chooses a full word instead whenever that individual token
+is shorter. Its raw file falls slightly to 524,937 bytes, but its XZ size grows
+to 145,780 bytes. Thus shortening individual tokens did not improve whole-file
+compression in this comparison.
+
+`python3 temp/spelling_vocab_poc/offset_text_compare.py` reproduces both variants,
+reusing the existing prefix-length and codec helpers. Artifacts under
+`temp/spelling_vocab_poc/compact/` are:
+
+- `en-US.offset-lines-64.max-prefix.txt`: the primary custom text dictionary.
+- `en-US.offset-lines-64.shortest-token.txt`: the shorter-token control.
+- Matching `.offsets.u32` files and `.raw`, `.gzip9`, `.xz6`, `.zstd19`,
+  `.brotli11` representations.
+- `offset_text_measurements.json`: exact sizes, hashes, token counts and checks.
+
+Both encodings decode to the exact original 109,902-word sequence, including
+case and accents. Each of the 1,718 lines also decodes independently to its
+corresponding source slice. All ten raw/compressed variants recover the exact
+text bytes and match recorded hashes. The example and a non-ASCII prefix fixture
+also decode correctly. No Lambda package reader or engine code changed.
+
+## 8. Lambda front-coded lookup and paragraph timing
+
+**Implemented 2026-10-22:** `lambda.doc.spelling.front_coded` reads the adopted
+uncompressed text resource and retains its binary bytes plus a compact `u32[]`
+line-offset index. It binary-searches restart keys by comparing bytes in place,
+then decodes only the selected line until a match or a greater word is found.
+Lookup returns the zero-based entry ID, or null for an absent word. Query copies
+are normalized to NFC; case remains exact. Prefix lengths follow
+**S2.5.8/S17.4.1** and byte comparisons follow **S6.2.2v3**.
+
+Implemented entry points in `lmd/package/doc/spelling/front_coded.ls`:
+
+| Entry point | Contract |
+|---|---|
+| `from_bytes(source, expected_count?)` | Validate/index the resource, retaining bytes and offsets, with no full decoded-word array |
+| `read(path, expected_count?)` | Procedurally read uncompressed bytes and construct the dictionary (**S12.1.1v3**) |
+| `lookup(dictionary, word)` | Exact NFC lookup, returning an entry ID or null; at most one line is decoded |
+| `verify(dictionary, source_words)` | Qualification-only streaming comparison against an independent complete word sequence |
+
+`utils/spelling_front_poc.py` checks the pinned US source hash, prepares the
+canonical text and XZ files, and writes a separate source/negative-word oracle
+for qualification. The generated text is byte-for-byte identical to §7's
+525,993-byte measurement. No dictionary-specific C/C++ code was added.
+
+The existing `doc.diff.common::lower_bound` helper now accepts an optional key
+projection, so the reader can search restart keys without duplicating the search
+algorithm or allocating a parallel key array. UTF-8 scalar decoding/validation
+was extracted from `io.terminal.protocol` into shared `lambda.io.utf8` helpers.
+The token decoder constructs GC-managed strings rather than creating an entire
+document-parser `Input` for each token. ASCII tokens have a direct character-join
+path. Validation and lookup share the word decoder.
+
+### 8.1 Paragraph and method
+
+`test/input/spelling/paragraph_100.txt` is a fixed, independently counted
+**100-word paragraph**. It contains **97 known words** and three intentional
+unknown spellings: `teh`, `recieve`, `speling`. The paragraph helper removes its
+ASCII punctuation and lowercases the text before exact lookup. This is a
+fixture-specific token policy, not a qualified Unicode prose tokenizer or a
+full spelling-case policy.
+
+`test/lambda/spelling/_front_bench.ls` uses Lambda's monotonic `clock()` and
+measures file reading, construction/full validation, and paragraph checks
+separately. After the first check, it performs five warmup paragraphs and nine
+timed batches of three paragraphs each. Every token is looked up on every pass:
+there is no word-result or decoded-line cache. The result list and a checksum
+are checked against the golden. Timed checks include tokenization and lookups;
+they exclude dictionary loading, manifest/paragraph reads and standalone XZ
+decompression. The oracle is never loaded by the benchmark.
+
+The qualified final-source timing is one process with nine batch means, using
+MIR Direct with `LAMBDA_EXEC_BACKEND=jit`, on macOS 26.5.2 / arm64, eight logical
+CPUs. The executable was built with `make build-release-compile JOBS=4`, checked
+for the absence of the debug validator marker, and copied privately before any
+regression build could replace `lambda.exe`:
+
+`temp/spelling_vocab_poc/lambda-front-release.exe`, SHA-256
+`02a4444635d86948c8bb4895eafe88d69ebec260e45f08530a33ed54b6decc6a`.
+
+### 8.2 Observed performance and memory limits
+
+| Phase | Measured wall time |
+|---|---:|
+| Read the uncompressed dictionary | 1.213 ms |
+| Build index and fully validate all decoded words | 24,223.890 ms |
+| Total dictionary load/validation | **24.225 s** |
+| First 100-word check after loading | **1.023 s** |
+| Median warmed 100-word check, nine batch means | **1.152 s** |
+| Range of warmed batch means per paragraph | 1.054–1.345 s |
+
+This POC is correct on the checks below but remains slow. The host was busy:
+the one-minute load average was approximately 9.39 before and 9.14 after the
+measurement on eight logical CPUs. These are observed wall times on that host,
+not latency guarantees or an A/B comparison with an expanded-word array. The
+machine-readable record includes individual samples, process CPU time, host
+load, executable hash and source/fixture hashes.
+
+Logical retained resource payload is **532,865 bytes (520.4 KiB)**: 525,993 text
+bytes plus 6,872 bytes of used line offsets. This excludes object headers,
+capacity slack, allocator state, runtime/JIT memory and temporary allocations.
+**The timed process peaked at 912.0 MiB RSS.** Thus the compact representation
+does not yet demonstrate an overall resident-memory improvement: allocation
+behavior during validation/checking still needs profiling and reduction. Do
+not report the logical dictionary payload as the process memory footprint.
+
+### 8.3 Correctness and remaining scope
+
+- The focused golden gate passes **8/8 fixtures in each of interpreter and JIT**,
+  including the original JSON lookup, diff search, terminal protocol/rendering,
+  the new reader's 40 checks and the UTF-8 decoder's 22 checks. The reader fixture
+  also exercises all 130 entries across three blocks, code-point prefix lengths,
+  NFC queries, exact case, missing words and malformed packs.
+- The complete **109,902-word decoded sequence** matches the independently
+  prepared pinned-source oracle in Lambda. This streams words during
+  qualification; the checker does not retain the oracle or decoded-word array.
+- **3,436 positive lookups** cover every block's first and last word, including
+  the final partial block. **405 synthetic negative lookups** also pass. This is
+  a block-boundary lookup sweep, not an exhaustive lookup invocation per word.
+- The timed paragraph returns exactly the three expected misspellings and
+  passes its checksum; the recorded executable/source/resource hashes match.
+- Aggregate `make test-lambda-baseline JOBS=4 TEST_JOBS=3` exited 2: input
+  parsers passed **2,112/2,112**; the runtime runner reported **3,172/5,005**.
+  Four subprocess suites lost access to the shared `lambda.exe` and reported
+  `ENOENT`/spawn failures: the main golden suite, structured tests, Test262
+  preflight and math corpus. The executable later reappeared as a release build,
+  consistent with a concurrent shared-build replacement. Original failure logs
+  are preserved under `initial-*.log`; this is not recorded as a clean baseline.
+  Private host/test-executable snapshots and separate scratch space recovered
+  the affected suites: main goldens **1,689/1,691** initially, structured tests
+  **141/141**, Test262 preflight **1/1**, and math corpus **921/921**. The main
+  suite's two residual cases then passed: `input_markdown_emoji` needed the
+  isolated workspace's missing `lib/` fixture link; `latex_test_latex_phase3_corpus`
+  exceeded the 60-second limit under load but passed alone in 44.170 seconds
+  under the unchanged limit. No test expectations or timeouts were relaxed.
+  All **8,037 cases** were eventually covered successfully across the original
+  run and these recoveries (**2,112 input + 5,925 runtime**). This combines
+  debug native suites and private release-host subprocess reruns, and remains
+  distinct from a clean single invocation of the aggregate command.
+
+The POC does not load standalone `.xz` in-process; the build-time utility writes
+the corresponding `.dict` for Lambda to read. XZ/manifest-policy integration,
+runtime artifact-hash verification, complete prose tokenization, case admission,
+suggestions, allocation tuning and latency qualification remain separate work.
+
+### 8.4 Reproduction and artifacts
+
+From the repository root, with the pinned source files from §3 available:
+
+```bash
+python3 utils/spelling_front_poc.py
+make build-release-compile JOBS=4
+cp lambda.exe temp/spelling_vocab_poc/lambda-front-release.exe
+LAMBDA_EXEC_BACKEND=jit temp/spelling_vocab_poc/lambda-front-release.exe --no-log run test/lambda/proc/spelling_front_coded.ls
+LAMBDA_EXEC_BACKEND=jit temp/spelling_vocab_poc/lambda-front-release.exe --no-log run test/lambda/spelling/_front_full.ls
+LAMBDA_EXEC_BACKEND=jit temp/spelling_vocab_poc/lambda-front-release.exe --no-log run test/lambda/spelling/_front_bench.ls
+```
+
+Generated resources and records under `temp/spelling_vocab_poc/front/`:
+
+- `manifest.json`, `en-US.dict`, `en-US.dict.xz`: resource identity and bytes.
+- `oracle.json`: qualification input, excluded from the benchmark/checker state.
+- `benchmark.json`: Lambda timing output from the most recent paragraph run.
+- `benchmark-results.json`: qualified final-source samples and process/host provenance.
+- `full-validation.json` and `.log`: full-decoder and boundary/negative results.
+- `focused-interp.log`, `focused-jit-final.log`: focused golden gates.
+- `lambda-baseline.log`: aggregate regression output.
+- `initial-baseline-failures.json`, `initial-*.log`: preserved spawn-failure evidence.
+- `regression-workspace.json`: isolated host/test-executable paths and hashes.
+- `regression-retries.json`, `retry-*.json`, `retry-*.log`: affected-suite reruns.
+- `prelim-correct.json` and `.log`: the bounded `--prelim` runner-contract gate.
+- `baseline-result.json`: original failure, isolated recoveries and combined coverage.

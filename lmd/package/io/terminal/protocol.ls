@@ -1,5 +1,6 @@
 // Terminal byte protocol. The OS host supplies chunks and deadlines; key
 // meaning and incomplete UTF-8/CSI decoder remain in Lambda (S12.1.3).
+import utf8: lambda.io.utf8
 
 pub fn new_state() =>
   {pending: [], utf_expected: 0, saw_cr: false, paste: false,
@@ -60,20 +61,6 @@ fn modified_key(key_name, modifier) =>
   else if (modifier == 1) key(key_name)
   else unknown([])
 
-fn utf8_value(bytes) {
-  if (len(bytes) == 2) (bytes[0] - 192) * 64 + (bytes[1] - 128)
-  else if (len(bytes) == 3)
-    (bytes[0] - 224) * 4096 + (bytes[1] - 128) * 64 + (bytes[2] - 128)
-  else
-    (bytes[0] - 240) * 262144 + (bytes[1] - 128) * 4096 +
-    (bytes[2] - 128) * 64 + (bytes[3] - 128)
-}
-
-fn valid_scalar(cp, byte_count) {
-  let minimum = if (byte_count == 2) 128 else if (byte_count == 3) 2048 else 65536
-  cp >= minimum and cp <= 1114111 and not (cp >= 55296 and cp <= 57343)
-}
-
 fn csi_event(params, final_byte) {
   let values = csi_params(params)
   let first = if (values == null or len(values) == 0) 0 else values[0]
@@ -112,9 +99,9 @@ fn utf_step(decoder, byte) {
     if (len(pending) < decoder.utf_expected)
       result({*: decoder, pending: pending}, [])
     else {
-      let cp = utf8_value(pending)
+      let cp = utf8.scalar_value(pending)
       result(clear_sequence(decoder),
-             [text(if (valid_scalar(cp, len(pending))) chr(cp) else chr(65533))])
+             [text(if (utf8.valid_scalar(cp, len(pending))) chr(cp) else chr(65533))])
     }
   }
 }
