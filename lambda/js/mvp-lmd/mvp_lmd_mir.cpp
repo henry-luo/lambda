@@ -19,6 +19,7 @@
 #include "../../dom/dom.h"
 #include "../../jube/jube_registry.h"
 #include "../../runtime/mir_emitter_shared.hpp"
+#include "../../runtime/mir_policy.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/lambda-root-frame.hpp"
@@ -9914,7 +9915,7 @@ static void emit_return(LmdCompiler* c, bool unentered = false) {
     em_emit_insn(&c->em, pair ? MIR_new_ret_insn(c->em.ctx, 2, reg(c, result), reg(c, companion))
         : MIR_new_ret_insn(c->em.ctx, 1, reg(c, result)));
 }
-static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
+static bool compile_function(MvpLmdProgram* p, LmdFunction* f, uint32_t* instruction_count) {
     LmdCompiler c = {}; c.program = p; c.function = f;
     c.em.ctx = p->mir; c.em.call_owner = &c; c.em.root_call_value = root_value;
     c.em.lookup_import_metadata = import_metadata; c.em.import_cache = p->import_cache;
@@ -10200,6 +10201,7 @@ static bool compile_function(MvpLmdProgram* p, LmdFunction* f) {
     // reservation/stack failure has no frame to unwind and allocates nothing.
     emit_return(&c, true);
     em_finalize_function_metadata(&c.em);
+    *instruction_count = c.em.last_function.mir_instruction_count;
     if (p->frontend->pass_timing.enabled) {
         // correlate the shared MIR telemetry/address map with immutable source spans.
         String* name = f->ast ? f->ast->name : NULL;
@@ -13618,10 +13620,14 @@ static int lower_pass(void* opaque) {
         }
     }
     bool ok = true;
+    uint32_t largest_function_insns = 0;
     for (int i = 0; i < p->functions->length && ok; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i];
         uint64_t before = timing ? time_now_us() : 0;
-        ok = compile_function(p, f);
+        uint32_t instruction_count = 0;
+        ok = compile_function(p, f, &instruction_count);
+        // reuse emission telemetry so link policy never rescans the MIR instruction lists.
+        if (instruction_count > largest_function_insns) largest_function_insns = instruction_count;
         if (timing) log_notice("js-mvp-emit: function=%s us=%llu", f->name,
             (unsigned long long)(time_now_us() - before));
     }
@@ -13649,7 +13655,12 @@ static int lower_pass(void* opaque) {
     }
     if (cached) log_debug("js-mvp-code-cache: realm metadata changed emitted MIR; compile fresh code");
     MIR_load_module(p->mir, p->module); MIR_gen_init(p->mir); p->linked = true;
-    MIR_gen_set_optimize_level(p->mir, 2);
+    // D8.1.3v29: first hot-entry satellites favor compile latency; large units share Lambda's bound.
+    unsigned int optimize_level = mir_native_optimize_level(largest_function_insns,
+        p->satellite_script ? 1 : 2);
+    MIR_gen_set_optimize_level(p->mir, optimize_level);
+    if (timing) log_notice("js-mvp-link: optimize_level=%u largest_function_insns=%llu",
+        optimize_level, (unsigned long long)largest_function_insns);
     // MIR's eager link interface generates code here; later MIR_gen calls only retrieve it.
     MIR_link(p->mir, timing ? timed_codegen_interface : MIR_set_gen_interface, import_resolver);
     uint64_t linked = timing ? time_now_us() : 0;

@@ -1528,6 +1528,12 @@ TEST(JsInterpreter, AutoMvpPromotionsPreserveRealmBindingsAndCallableIdentity) {
         "for(let i=0;i<3;i++){try{f(null)}catch(e){"
         "if(!(e instanceof TypeError)||e.name!=='TypeError'||e.constructor!==TypeError)throw 1;errors++;}}"
         "if(errors!==3)throw 2;f;",
+        // promoted getters may collect between scalar reads or throw an existing object.
+        "let marker={tag:1};let fail=false;"
+        "function f(o){let tiny=o.tiny;let value=o.value;return tiny+value}"
+        "let o={get tiny(){return 5e-324},get value(){gc();if(fail)throw marker;return 1e-323}};"
+        "if(f(o)!==1.5e-323||f(o)!==1.5e-323)throw 1;"
+        "fail=true;let caught;try{f(o)}catch(e){caught=e}if(caught!==marker)throw 2;f;",
         "function f(){return [Math.max,{method:Math.max}]}let a=f(),b=f();"
         "if(a[0]!==b[0]||b[0]!==Math.max||b[1].method!==Math.max||b.indexOf(Math.max)!==0)throw 1;f;",
         "function f(){return Math.max}let a=f(),b=f();if(a!==b||b!==Math.max)throw 1;f;",
