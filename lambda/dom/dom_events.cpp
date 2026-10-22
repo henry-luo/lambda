@@ -25,6 +25,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
+#include "../runtime/gc/gc_heap.h"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -354,6 +355,7 @@ struct EventListener {
     char*   type;       // event type string (owned copy)
     uint64_t* callback_root; // stable GC root for function/object callback
     uint64_t* signal_root;   // stable GC root for AbortSignal, when present
+    void* gc_owner;    // wrapper-traced native target, otherwise external roots
     uint64_t order;     // registration order, including on<type> handlers
     bool    capture;    // capture phase listener
     bool    once;       // remove after first invocation
@@ -445,6 +447,14 @@ static const int _window_sentinel = 0;
 static const int _document_sentinel = 0;
 JS_FORWARD_STATIC_EXPRESSION(Item, event_listener_root_item, (uint64_t* root), (root ? (Item){.item = *root} : ItemNull))
 
+// native GC owners trace stable slots; ordinary DOM listeners retain external roots.
+static uint64_t* event_listener_slot(Item value, void* gc_owner) {
+    if (!gc_owner) return heap_gc_root_slot_new(value.item);
+    auto* slot = (uint64_t*)mem_calloc(1, sizeof(uint64_t), MEM_CAT_JS_RUNTIME);
+    if (slot) *slot = value.item;
+    return slot;
+}
+
 static void event_listener_release_roots(EventListener* listener) {
     if (!listener) return;
     if (listener->callback_root) {
@@ -508,7 +518,7 @@ static bool event_target_needs_root(Item target, void* key, DomNodeRef node_ref)
         key == (void*)&_window_sentinel || key == (void*)&_document_sentinel) {
         return false;
     }
-    if (dom_unwrap_element(target)) return false;
+    if (dom_unwrap_element(target) || dom_broadcast_channel_native(target)) return false;
     TypeId type = get_type_id(target);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
@@ -651,6 +661,7 @@ static void tombstone_listener(EventListener* listener) {
     if (!listener || listener->removed) return;
     listener->removed = true;
     note_listener_type(listener->type, -1);
+    if (listener->gc_owner) dom_broadcast_channel_listeners_changed(listener->gc_owner);
 }
 
 static void nl_push(NodeListeners* nl, EventListener listener) {
@@ -695,7 +706,7 @@ static bool event_handler_target_supported(Item target) {
     Item global = dom_realm_global();
     if (target.item != 0 && target.item == global.item) return true;
     if (dom_event_is_document_target(target)) return true;
-    if (dom_unwrap_element(target)) return true;
+    if (dom_unwrap_element(target) || dom_broadcast_channel_native(target)) return true;
     return get_type_id(target) == LMD_TYPE_MAP &&
            (js_class_id(target) == JS_CLASS_EVENT_TARGET || js_class_id(target) == JS_CLASS_FILE_READER);
 }
@@ -734,7 +745,8 @@ static void event_handler_property_set_for_key(void* key, Item target,
     }
 
     char* type_copy = mem_strdup(stack_type, MEM_CAT_JS_RUNTIME);
-    uint64_t* callback_root = heap_gc_root_slot_new(value.item);
+    void* gc_owner = dom_broadcast_channel_native(target);
+    uint64_t* callback_root = event_listener_slot(value, gc_owner);
     if (!type_copy || !callback_root) {
         if (type_copy) mem_free(type_copy);
         if (callback_root) {
@@ -747,10 +759,12 @@ static void event_handler_property_set_for_key(void* key, Item target,
     EventListener listener = {};
     listener.type = type_copy;
     listener.callback_root = callback_root;
+    listener.gc_owner = gc_owner;
     listener.order = ++_event_registration_order;
     listener.is_idl_handler = true;
     nl_push(listeners, listener);
     note_listener_type(listener.type, 1);
+    if (listener.gc_owner) dom_broadcast_channel_listeners_changed(listener.gc_owner);
 }
 
 extern "C" void dom_event_handler_property_set(Item target,
@@ -987,9 +1001,10 @@ Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
     // Listener storage lives outside the traced heap and can outlive the
     // registration turn. Stable root slots keep callbacks alive and receive
     // forwarding-pointer updates when a later event triggers collection.
-    listener.callback_root = heap_gc_root_slot_new(cb_item.item);
+    listener.gc_owner = dom_broadcast_channel_native(elem_item);
+    listener.callback_root = event_listener_slot(cb_item, listener.gc_owner);
     listener.signal_root = signal.item != 0 && get_type_id(signal) != LMD_TYPE_NULL
-        ? heap_gc_root_slot_new(signal.item) : nullptr;
+        ? event_listener_slot(signal, listener.gc_owner) : nullptr;
     if (!listener.callback_root ||
         (signal.item != 0 && get_type_id(signal) != LMD_TYPE_NULL && !listener.signal_root)) {
         event_listener_release_roots(&listener);
@@ -1004,6 +1019,7 @@ Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
 
     nl_push(nl, listener);
     note_listener_type(listener.type, 1);
+    if (listener.gc_owner) dom_broadcast_channel_listeners_changed(listener.gc_owner);
     log_debug("dom_add_event_listener: added '%s' listener (capture=%d, once=%d, passive=%d) on %p",
               type, (int)capture, (int)once, (int)passive, key);
     return ItemNull;
@@ -2803,25 +2819,58 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 // Lifecycle
 // ============================================================================
 
+static void event_listener_entry_release(NodeListenerEntry* entry) {
+    NodeListeners* nl = &entry->listeners;
+    for (int j = 0; j < nl->count; j++) {
+        if (!nl->items[j].removed) note_listener_type(nl->items[j].type, -1);
+        if (nl->items[j].type) mem_free(nl->items[j].type);
+        event_listener_release_roots(&nl->items[j]);
+    }
+    if (nl->items) mem_free(nl->items);
+    if (entry->owner_doc && entry->node_ref.address) {
+        dom_node_unpin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    if (entry->target_root) {
+        heap_unregister_gc_root(entry->target_root);
+        mem_free(entry->target_root);
+    }
+    *entry = {};
+}
+
+void dom_events_trace_gc_target(void* key, gc_heap* gc) {
+    if (!dom_event_runtime_state_get()) return;
+    NodeListeners* listeners = find_listeners(key);
+    if (!listeners) return;
+    for (int i = 0; i < listeners->count; i++) {
+        EventListener* listener = &listeners->items[i];
+        if (!listener->gc_owner || listener->removed) continue;
+        if (listener->callback_root) gc_mark_item(gc, *listener->callback_root);
+        if (listener->signal_root) gc_mark_item(gc, *listener->signal_root);
+    }
+}
+
+bool dom_events_target_has_listener(void* key, const char* type) {
+    if (!dom_event_runtime_state_get()) return false;
+    NodeListeners* listeners = find_listeners(key);
+    if (listeners) for (int i = 0; i < listeners->count; i++) {
+        EventListener* listener = &listeners->items[i];
+        if (!listener->removed && strcmp(listener->type, type) == 0) return true;
+    }
+    return false;
+}
+
+void dom_events_forget_gc_target(void* key) {
+    if (!dom_event_runtime_state_get()) return;
+    int slot = find_listener_entry_slot(key);
+    if (slot < 0) return;
+    EventTargetIndexEntry lookup = {key, slot};
+    if (_entry_index) EventTargetIndexMap::erase(_entry_index, lookup);
+    event_listener_entry_release(&_entries[slot]);
+}
+
 void dom_events_reset(void) {
     if (!dom_event_runtime_state_get()) return;
-    for (int i = 0; i < _entry_count; i++) {
-        NodeListeners* nl = &_entries[i].listeners;
-        for (int j = 0; j < nl->count; j++) {
-            if (nl->items[j].type) mem_free(nl->items[j].type);
-            event_listener_release_roots(&nl->items[j]);
-        }
-        if (nl->items) mem_free(nl->items);
-        if (_entries[i].owner_doc && _entries[i].node_ref.address) {
-            dom_node_unpin(_entries[i].owner_doc, _entries[i].node_ref,
-                           DOM_NODE_PIN_EVENT_QUEUE);
-        }
-        if (_entries[i].target_root) {
-            heap_unregister_gc_root(_entries[i].target_root);
-            mem_free(_entries[i].target_root);
-            _entries[i].target_root = nullptr;
-        }
-    }
+    for (int i = 0; i < _entry_count; i++) event_listener_entry_release(&_entries[i]);
     if (_entries) {
         mem_free(_entries);
         _entries = nullptr;

@@ -143,6 +143,27 @@ initial descriptor and brand checks agree with Chromium. Surface:
 
 **History state cloning (verified 2026-10-09).** Recursive `structuredClone` destinations, enumerated keys, and child values stay precisely rooted until publication (**D5.3.5, D5.4.1**). Array clones append into an empty destination rather than creating leading holes. `JsStructuredClone.RetainsRecursiveDestinationsAcrossEveryAllocation` checks distinct nested objects and array contents under forced collection and poisoned frees in both AST and MIR; the History interface fixture verifies state after `replaceState` under the same stress.
 
+**BroadcastChannel core (verified 2026-10-22).** A declared Jube host interface
+shares the EventTarget dispatcher (**D7.4.4**). Same-name document peers in one
+evaluator receive asynchronous MessageEvents in creation order, excluding the
+sender. Sending snapshots the data once; delivery clones it independently for
+each destination. Shared cloning preserves cycles/aliases and rejects callable,
+proxy and unsupported host values. Open channels with message listeners retain
+their wrappers; closed listener cycles are traced and collectable rather than
+permanently rooted (**D5.3.3, D5.4.2–D5.4.3**). Closing cancels pending delivery and
+later sends raise InvalidStateError. AST/MIR document fixtures cover messaging
+and GC; the messaging output agrees with Chromium 148. Cross-evaluator/worker
+routing is deferred. See the [implementation milestone](../../../vibe/impl/Radiant_Impl_Broadcast_Channel.md).
+
+**Browser global publication (verified 2026-10-22).** Browser document realms
+exclude Node-only globals during catalog admission, lazy lookup and Jube module
+activation; module records declare that exposure (**D7.3.3–D7.3.4**). CLI Node
+compatibility and explicit imports remain available in their existing profiles.
+This prevents browser bundles with empty server imports from selecting their
+Node branch merely because a host `process` object exists. The DOM integration
+fixture checks reflection, `typeof`, dynamic Function and late activation under
+forced collection.
+
 **Autofocus dispatch (verified 2026-10-09).** The existing package policy selects the candidate (**ES30**), then `radiant_run_autofocus` receives the enclosing host's `UiContext` for the public focus/focusin dispatch. An author listener can insert a stylesheet and trigger retained layout through that same context; a document-only event context cannot supply its viewport or layout services. Window and document-rebuild callers pass their current host explicitly. `test/ui/js_autofocus_listener_relayout` reproduces the former null-context crash and checks focused identity and geometry after the listener's full recascade.
 
 **Web Animation cancellation (verified 2026-10-09).** `Animation.prototype.cancel` operates on the receiver's native effect through an ordinary shared method (**D6.2.2v2**). Cancellation makes `currentTime` unresolved, excludes the effect from sampling/computed-style queries, and requests layout without a DOM mutation. The existing CSS-animation transform-restoration helper also clears a retained sample when the cascade has no transform declaration. Effect state remains document-owned (**D4.5.1v4**); a later numeric seek reactivates it, including the preceding timestamp, and recaptures underlying values after intervening style changes. Current-time conversion keeps its receiver/input rooted and preserves thrown values (**D5.3.5, D5.4.1**). `test/ui/dom/animation_cancel` checks sizing, opacity, transforms, repeat cancellation, shared-method metadata, receiver rejection, and neutral-keyframe resampling across host event commits; its 13 script checks agree with Chromium, and all 17 native UI assertions pass under forced collection. This implements cancellation of the existing explicitly sampled effects following [Web Animations cancellation](https://www.w3.org/TR/web-animations-1/#canceling-an-animation); automatic playback, finished promises, and playback-event dispatch remain incomplete.

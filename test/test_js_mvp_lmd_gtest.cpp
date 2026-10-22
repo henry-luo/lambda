@@ -894,6 +894,16 @@ TEST_F(JsFormalMir, PublicRedeclarationFailsBeforeExecutingAndKeepsRealm) {
 
 TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
     ASSERT_FALSE(item_is_error(run("let oldValue=42;Array.prototype.oldMarker=1")));
+    // JS imports from Lambda register base records, without the AST extension.
+    Script* bridge = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_EVAL);
+    ASSERT_NE(bridge, nullptr);
+    bridge->profile = &js_profile;
+    runtime_register_script(&runtime, bridge);
+    EXPECT_EQ(js_script_from_script(bridge), nullptr);
+    JsTranspiler* ast = js_transpiler_create(&runtime);
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(js_script_from_script(ast), ast);
+    js_transpiler_destroy(ast);
     runtime_reset_heap(&runtime);
     Item result = run("typeof oldValue==='undefined'&&Array.prototype.oldMarker===undefined");
     ASSERT_FALSE(item_is_error(result));

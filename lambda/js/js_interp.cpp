@@ -514,10 +514,10 @@ static JsScript* js_interp_script_for_reference(Runtime* runtime,
         const char* reference) {
     if (!runtime || !runtime->scripts || !reference) return NULL;
     for (int index = 0; index < runtime->scripts->length; index++) {
-        Script* candidate = (Script*)runtime->scripts->data[index];
-        if (candidate && candidate->profile == &js_profile && candidate->reference &&
+        JsScript* candidate = js_script_from_script((Script*)runtime->scripts->data[index]);
+        if (candidate && candidate->reference &&
                 strcmp(candidate->reference, reference) == 0) {
-            return (JsScript*)candidate;
+            return candidate;
         }
     }
     return NULL;
@@ -537,8 +537,8 @@ static void js_interp_propagate_reexports(Runtime* runtime, const char* source_r
         String* source_name, Item value, int depth) {
     if (!runtime || !source_ref || !source_name || depth > 64) return;
     for (int index = 0; runtime->scripts && index < runtime->scripts->length; index++) {
-        JsScript* candidate = (JsScript*)runtime->scripts->data[index];
-        if (!candidate || candidate->profile != &js_profile || !candidate->is_es_module ||
+        JsScript* candidate = js_script_from_script((Script*)runtime->scripts->data[index]);
+        if (!candidate || !candidate->is_es_module ||
                 !candidate->reference) continue;
         ModuleDescriptor* module = module_get_for_runtime(runtime, candidate->reference);
         if (!module) continue;

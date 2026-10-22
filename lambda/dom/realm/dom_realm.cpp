@@ -10,6 +10,7 @@
 #include "../../js/js_property_attrs.h"
 #include "../../js/js_event_loop.h"
 #include "../../js/js_response.h"
+#include "../../runtime/lambda-root-frame.hpp"
 
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
@@ -74,6 +75,19 @@ Item dom_realm_promise_reject(Item r) { return js_promise_reject(r); }
 Item dom_realm_promise_then(Item p, Item f, Item r) { return js_promise_then(p, f, r); }
 Item dom_realm_promise_all(Item it) { return js_promise_all(it); }
 void dom_realm_microtask_flush(void) { js_microtask_flush(); }
+Item dom_realm_structured_clone(Item value) {
+    return js_structured_clone_with_ops(value, nullptr);
+}
+Item dom_realm_queue_task(DomRealmFn1 callback, Item value) {
+    RootFrame roots(2);
+    Rooted payload(roots, value);
+    Rooted task(roots, js_new_native_closure(callback, 0,
+        js_alloc_env1(payload.get()), 1));
+    return js_setTimeout(task.get(), (Item){.item = i2it(0)});
+}
+Item dom_realm_closure_value(Item environment) {
+    return ((Item*)environment.item)[0];
+}
 
 #define DOM_REALM_DEFINE_NATIVE(arity) \
     Item dom_realm_new_function(DomRealmFn##arity t) { return js_new_native_function(t); } \

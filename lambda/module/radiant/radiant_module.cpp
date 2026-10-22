@@ -4858,6 +4858,10 @@ static void radiant_module_shutdown(void) {
 }
 
 #define RADIANT_READONLY_INDEXED (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_INDEXED_READONLY)
+static void radiant_broadcast_destroy(void* data) {
+    radiant_host_api->dom_catalog->broadcast_destroy(data);
+}
+
 static const JubeTypeDef radiant_types[] = {
     {"dom_node", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
@@ -4923,6 +4927,7 @@ static const JubeTypeDef radiant_types[] = {
 #include "../../input/css/css_declaration_interfaces.def"
 #undef CSS_DECLARATION_INTERFACE
     {"validity_state", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"broadcast_channel", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_broadcast_destroy},
     {"attr", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
      JUBE_CARRIER_VELMT},
 };

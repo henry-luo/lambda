@@ -301,8 +301,8 @@ static Item node_core_buffer_global(void* session) {
 }
 
 static const JubeGlobalDef node_core_globals[] = {
-    {"os", 0, node_core_os_global},
-    {"Buffer", 0, node_core_buffer_global},
+    {"os", JUBE_GLOBAL_NODE_ONLY, node_core_os_global},
+    {"Buffer", JUBE_GLOBAL_NODE_ONLY, node_core_buffer_global},
 };
 
 static const char* const node_core_path_specifiers[] = {

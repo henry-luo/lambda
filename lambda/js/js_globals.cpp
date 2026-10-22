@@ -110,6 +110,7 @@ struct JsLazyGlobalSpec {
     JsLazyGlobalBuilder build;
     bool requires_node_core;
     bool formal_only = false;
+    uint32_t exposure = 0;
 };
 
 enum JsHostGlobalGroup {
@@ -159,8 +160,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
 static Item js_install_host_global_group(Item target, JsHostGlobalGroup group);
 
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
-    {"process", 7, js_get_profiled_process_object, false},
-    {"Buffer", 6, js_get_jube_buffer_namespace, true},
+    {"process", 7, js_get_profiled_process_object, false, false, JUBE_GLOBAL_NODE_ONLY},
+    {"Buffer", 6, js_get_jube_buffer_namespace, true, false, JUBE_GLOBAL_NODE_ONLY},
     {"crypto", 6, js_get_jube_crypto_namespace, false},
     {"Math", 4, js_get_math_object_value, false},
     {"JSON", 4, js_get_json_object_value, false},
@@ -173,7 +174,7 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
         MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
         const char* reference = library ? mvp_lmd_program_reference(library->object.program) : NULL;
         return js_module_create_require(reference ? js_name_item(reference) : make_js_undefined());
-    }, false, true},
+    }, false, true, JUBE_GLOBAL_NODE_ONLY},
 };
 
 static Item js_publish_lazy_global(Item object, Item key, Item value) {
@@ -194,9 +195,11 @@ static Item js_publish_lazy_global(Item object, Item key, Item value) {
 enum JsHostSlotKind { JS_HOST_SLOT_ALIAS, JS_HOST_SLOT_UNDEFINED, JS_HOST_SLOT_LAZY };
 template<typename Visitor>
 static bool js_visit_host_namespace(bool constructors, Visitor visit) {
-    const char* aliases[] = {"globalThis", "self", "window", "parent", "top", "global"};
+    const char* aliases[] = {"globalThis", "self", "window", "parent", "top"};
     for (const char* name : aliases)
         if (!visit(name, strlen(name), JS_HOST_SLOT_ALIAS)) return false;
+    if (jube_global_profile_allows(JUBE_GLOBAL_NODE_ONLY) &&
+            !visit("global", 6, JS_HOST_SLOT_ALIAS)) return false;
     if (!visit("event", 5, JS_HOST_SLOT_UNDEFINED)) return false;
     if (constructors) for (int i = 0; i < js_builtin_global_count(); i++) {
         const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
@@ -208,6 +211,7 @@ static bool js_visit_host_namespace(bool constructors, Visitor visit) {
             i < sizeof(js_lazy_host_globals) / sizeof(js_lazy_host_globals[0]);
             i++) {
         const JsLazyGlobalSpec* spec = &js_lazy_host_globals[i];
+        if (!jube_global_profile_allows(spec->exposure)) continue;
         // retained AST calls already resolve implicit require against their source environment.
         if (spec->formal_only && !constructors) continue;
         if (spec->requires_node_core && !jube_node_core_module_enabled()) continue;
@@ -224,6 +228,7 @@ static bool js_visit_host_namespace(bool constructors, Visitor visit) {
         for (int j = 0; globals && j < global_count; j++) {
             const JubeGlobalDef* global_def = &globals[j];
             if (!global_def || !global_def->build) continue;
+            if (!jube_global_profile_allows(global_def->flags)) continue;
             const char* name = global_def->name;
             if (!name || !name[0]) continue;
             // Keep Jube globals as ordinary writable data properties while
@@ -307,6 +312,7 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
             i < sizeof(js_lazy_host_globals) / sizeof(js_lazy_host_globals[0]);
             i++) {
         const JsLazyGlobalSpec* spec = &js_lazy_host_globals[i];
+        if (!jube_global_profile_allows(spec->exposure)) continue;
         if (name->len != spec->name_length ||
                 memcmp(name->chars, spec->name, spec->name_length) != 0) {
             continue;
@@ -3344,14 +3350,32 @@ static bool js_message_port_transfer_list_has_marked(Item transfer_list);
 static Item js_message_port_clone_for_transfer(Item port);
 extern "C" Item js_message_port_new(void);
 
-static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth,
-        const JsStructuredCloneOps* ops = NULL) {
-    if (depth > 100) return value; // prevent infinite recursion
+static Item structured_clone_error() {
+    return js_throw_value(js_domexception_new(js_name_item("Value cannot be cloned"),
+        js_name_item("DataCloneError")));
+}
+
+static void structured_clone_remember(Item memo, Item source, Item destination) {
+    // the memo is an exact GC edge, including cyclic graphs and aliased children.
+    RootFrame roots(3);
+    Rooted<Item> memo_root(roots, memo), source_root(roots, source), destination_root(roots, destination);
+    js_array_push(memo_root.get(), source_root.get());
+    js_array_push(memo_root.get(), destination_root.get());
+}
+
+static Item structured_clone_graph(Item value, Item transfer_list, int depth,
+    const JsStructuredCloneOps* ops, Item memo);
+
+static Item structured_clone_body(Item value, Item transfer_list, int depth,
+        const JsStructuredCloneOps* ops, Item memo) {
+    if (depth > 100) return js_throw_value(js_domexception_new(
+        js_name_item("Structured clone nesting limit exceeded"), js_name_item("DataCloneError")));
     TypeId tid = get_type_id(value);
 
     // primitives: return as-is
     if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
         tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT ||
+        tid == LMD_TYPE_INT64 || tid == LMD_TYPE_UINT64 || js_is_bigint(value) ||
         tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_STRING) {
         return value;
     }
@@ -3359,18 +3383,22 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         result_root, ItemNull, keys_root, ItemNull, key_root, ItemNull,
         element_root, ItemNull);
 
+    if (js_is_callable(value_root.get()) || js_is_proxy(value_root.get()))
+        return structured_clone_error();
+
     // arrays: deep clone each element
     if (js_is_js_array(value_root.get())) {
         int64_t len = js_array_length(value_root.get());
         // append into an empty array; js_array_new(len) would prepend len holes.
         result_root.set(ops ? ops->arrays->create(0) : js_array_new(0));
         JS_RETURN_IF_ERROR(result_root.get());
+        structured_clone_remember(memo, value_root.get(), result_root.get());
         for (int64_t i = 0; i < len; i++) {
             element_root.set(ops ? ops->arrays->index(value_root.get(), i, ItemNull, JS_ARRAY_INDEX_GET)
                 : js_elements_get_int(value_root.get(), i));
             JS_RETURN_IF_ERROR(element_root.get());
-            element_root.set(structured_clone_transfer_impl(element_root.get(),
-                transfer_root.get(), depth + 1, ops));
+            element_root.set(structured_clone_graph(element_root.get(),
+                transfer_root.get(), depth + 1, ops, memo));
             JS_RETURN_IF_ERROR(element_root.get());
             JS_RETURN_IF_ERROR(ops ? ops->arrays->index(result_root.get(), i,
                 element_root.get(), JS_ARRAY_INDEX_CREATE)
@@ -3462,6 +3490,7 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         // unpublished destinations need exact roots until stored (D5.4.1).
         result_root.set(ops ? ops->object() : js_new_object());
         JS_RETURN_IF_ERROR(result_root.get());
+        structured_clone_remember(memo, value_root.get(), result_root.get());
         keys_root.set(ops ? ops->keys(value_root.get()) : js_object_keys(value_root.get()));
         JS_RETURN_IF_ERROR(keys_root.get());
         int64_t count = js_array_length(keys_root.get());
@@ -3470,8 +3499,8 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
             element_root.set(ops ? ops->get(value_root.get(), key_root.get())
                 : js_get_key_default(value_root.get(), key_root.get()));
             JS_RETURN_IF_ERROR(element_root.get());
-            element_root.set(structured_clone_transfer_impl(element_root.get(),
-                transfer_root.get(), depth + 1, ops));
+            element_root.set(structured_clone_graph(element_root.get(),
+                transfer_root.get(), depth + 1, ops, memo));
             JS_RETURN_IF_ERROR(element_root.get());
             JS_RETURN_IF_ERROR(ops ? ops->create(result_root.get(), key_root.get(), element_root.get())
                 : js_set_key_default(result_root.get(), key_root.get(), element_root.get()));
@@ -3479,14 +3508,31 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         return result_root.get();
     }
 
-    // Callable exotics carry runtime capability state just like functions;
-    // treating a callable Proxy as a plain MAP would clone away [[Call]]
-    // (D6.2.2v2).
-    if (js_is_callable(value_root.get())) {
-        return value_root.get();
+    return structured_clone_error();
+}
+static Item structured_clone_graph(Item value, Item transfer_list, int depth,
+        const JsStructuredCloneOps* ops, Item memo) {
+    // native arrays are private to this operation; lookups invoke no author code.
+    int64_t length = js_array_length(memo);
+    for (int64_t i = 0; i < length; i += 2) {
+        if (js_elements_get_int(memo, i).item == value.item)
+            return js_elements_get_int(memo, i + 1);
     }
+    RootFrame roots(4);
+    Rooted<Item> source(roots, value), transfers(roots, transfer_list), seen(roots, memo);
+    Rooted<Item> result(roots, structured_clone_body(source.get(), transfers.get(), depth, ops, seen.get()));
+    if (get_type_id(result.get()) == LMD_TYPE_ERROR) return result.get();
+    // arrays and objects publish before recursion; leaf objects publish here.
+    if (js_is_object_value(source.get()) && js_array_length(seen.get()) == length)
+        structured_clone_remember(seen.get(), source.get(), result.get());
+    return result.get();
+}
 
-    return value_root.get();
+static Item structured_clone_transfer_impl(Item value, Item transfer_list, int depth,
+        const JsStructuredCloneOps* ops = NULL) {
+    RootFrame roots(3);
+    Rooted<Item> source(roots, value), transfers(roots, transfer_list), memo(roots, js_array_new(0));
+    return structured_clone_graph(source.get(), transfers.get(), depth, ops, memo.get());
 }
 JS_FORWARD_STATIC_ITEM(structured_clone_impl, (Item value, int depth), structured_clone_transfer_impl, (value, ItemNull, depth))
 JS_FORWARD_ITEM(js_structuredClone, (Item value), structured_clone_impl, (value, 0))

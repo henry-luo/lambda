@@ -15,6 +15,7 @@
  */
 
 #include "../lambda.h"
+#include "dom_broadcast_channel.h"
 
 struct DomDocument;
 

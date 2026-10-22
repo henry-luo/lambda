@@ -144,12 +144,11 @@ extern "C" void js_dom_install_interface(Item global, const char* name) {
     js_set_key_default(global_root.get(), key_root.get(), ctor_root.get());
 }
 
-template <typename Target>
-static void dom_install_value_constructor(Item global, const char* name,
-        Target target, bool set_string_tag) {
+static void dom_publish_value_constructor(Item global, const char* name,
+        Item constructor, bool set_string_tag) {
     JS_ROOTS(roots,
         global_root, global,
-        ctor_root, js_new_distinct_native_constructor(target),
+        ctor_root, constructor,
         proto_root, js_new_object());
     Item name_key = js_name_item(name);
     js_set_function_name(ctor_root.get(), name_key);
@@ -158,6 +157,29 @@ static void dom_install_value_constructor(Item global, const char* name,
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
     js_set_key_default(global_root.get(), name_key, ctor_root.get());
+}
+
+template <typename Target>
+static void dom_install_value_constructor(Item global, const char* name,
+        Target target, bool set_string_tag) {
+    dom_publish_value_constructor(global, name, js_new_distinct_native_constructor(target), set_string_tag);
+}
+
+static Item broadcast_call(Item, Item, Item*, int, uint64_t*) {
+    return js_throw_type_error("BroadcastChannel requires new");
+}
+static Item broadcast_construct(Item, Item* args, int argc, Item new_target, uint64_t*) {
+    if (argc < 1) return js_throw_type_error("BroadcastChannel requires a name");
+    RootFrame roots(4);
+    Rooted<Item> target(roots, new_target), name(roots, js_to_string(args[0]));
+    if (get_type_id(name.get()) == LMD_TYPE_ERROR) return name.get();
+    // subclass prototype lookup can collect before the wrapper reaches its caller.
+    Rooted<Item> channel(roots, dom_broadcast_channel_create(name.get()));
+    if (get_type_id(channel.get()) == LMD_TYPE_ERROR) return channel.get();
+    Rooted<Item> prototype(roots, js_get_key_cstr(target.get(), "prototype"));
+    if (get_type_id(prototype.get()) == LMD_TYPE_ERROR) return prototype.get();
+    if (js_is_object_value(prototype.get())) js_set_prototype(channel.get(), prototype.get());
+    return channel.get();
 }
 
 JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), dom_install_value_constructor, (global, "DocumentFragment", dom_document_fragment_ctor, true))
@@ -751,6 +773,10 @@ extern "C" void dom_install_collection_globals(void) {
     }
     js_dom_install_interface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
+    dom_publish_value_constructor(global, "BroadcastChannel",
+        js_new_native_body_constructor(broadcast_call, broadcast_construct, 1), true);
+    _link_iface_proto(global, "BroadcastChannel", "EventTarget");
+    _publish_interface_records("broadcast_channel", 17);
     {
         RootFrame roots(2);
         Rooted<Item> global_root(roots, global);

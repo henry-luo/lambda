@@ -161,6 +161,9 @@ struct JubeNamespaceDef {
 
 // Import specifiers and globals are intentionally independent: declaring a
 // namespace must not silently publish an observable globalThis property.
+enum JubeGlobalFlags {
+    JUBE_GLOBAL_NODE_ONLY = 1u << 0,
+};
 struct JubeGlobalDef {
     const char* name;
     uint32_t flags;

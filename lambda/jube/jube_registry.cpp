@@ -2557,6 +2557,12 @@ bool jube_specifier_index_names(JubeSpecifierNameCallback callback, void* user) 
     return true;
 }
 
+bool jube_global_profile_allows(uint32_t flags) {
+    Runtime* runtime = context ? context->runtime : nullptr;
+    // document module resolution identifies a browser realm before globals exist.
+    return !(flags & JUBE_GLOBAL_NODE_ONLY) || !runtime || !runtime->js_document_base_url;
+}
+
 static void jube_install_module_globals(const JubeModuleDef* module, void* session) {
     if (!module || !session || !jube_host_node_session_is_live(session) ||
             !jube_host_api.node || !jube_host_api.node->roots || !jube_host_api.value ||
@@ -2585,6 +2591,7 @@ static void jube_install_module_globals(const JubeModuleDef* module, void* sessi
     for (int i = 0; i < global_count; i++) {
         const JubeGlobalDef* global_def = &globals[i];
         if (!global_def || !global_def->name || !global_def->name[0] || !global_def->build) continue;
+        if (!jube_global_profile_allows(global_def->flags)) continue;
         Item key = jube_host_api.value->string_from_utf8_n(global_def->name,
             strlen(global_def->name));
         *key_root = key.item;
@@ -2814,6 +2821,7 @@ bool jube_resolve_global(const char* name, size_t name_length, Item* out_value) 
         const JubeGlobalDef* globals = jube_module_globals(module, &global_count);
         for (int j = 0; globals && j < global_count; j++) {
             const JubeGlobalDef* global_def = &globals[j];
+            if (!jube_global_profile_allows(global_def->flags)) continue;
             if (!global_def->name || strlen(global_def->name) != name_length ||
                     memcmp(global_def->name, name, name_length) != 0) {
                 continue;
