@@ -272,6 +272,7 @@ Item dom_owner_document_for_node(void* node);
  * @return true if item is a wrapped DomElement
  */
 bool dom_is_node(Item item);
+bool dom_is_element(Item item);
 
 /**
  * Check if an Item is a document proxy object.

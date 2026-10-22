@@ -1542,10 +1542,10 @@ static bool map_put_via_shape_transition(Map** mp_ref, TypeMap* parent,
 
 // Internal helper function - not exported in header but accessible to mark_builder.cpp
 void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
-        MapDataGrowFn grow, void* grow_context) {
+        MapDataGrowFn grow, void* grow_context, bool dynamic_values) {
     // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
-    TypeId type_id = get_type_id(value);
+    TypeId type_id = dynamic_values ? LMD_TYPE_ANY : get_type_id(value);
     bool array_index_shape = map_kind_is_array_props(mp->map_kind) &&
         map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {

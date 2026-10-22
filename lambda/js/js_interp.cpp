@@ -3,6 +3,7 @@
 #include "../runtime/activation.h"
 #include "js_execution_internal.hpp"
 #include "../core/lambda-decimal.hpp"
+#include "../jube/jube_registry.h"
 
 #include <limits.h>
 
@@ -15,6 +16,7 @@
 #include "js_event_loop.h"
 #include "js_property_attrs.h"
 #include "js_props.h"
+#include "js_typed_array.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/heap_api.h"
 #include "../runtime/module_registry.h"
@@ -209,11 +211,14 @@ struct JsInterpFrame {
     // and if/loop/switch/try/with reset it to undefined (UpdateEmpty).
     // Function frames leave it null.
     uint64_t* completion_home = NULL;
+    const JsAstNode* discarded_expression = NULL;
     // D8.1.3v22: the back-edge counter of the handoff loop this activation is
     // inside; nested loops count toward it. Null outside a handoff loop.
     uint32_t* handoff_backedges = NULL;
     JsInterpEnv* this_cell_env = NULL;
     uint64_t* class_constructor_home = NULL;
+    const Item* numeric_parameters = NULL;
+    NameScope* numeric_parameter_scope = NULL;
     uint32_t host_context = 0;
 };
 
@@ -533,6 +538,22 @@ void js_resolve_script_module_path(Runtime* runtime,
     }
 }
 
+static Item js_interp_store_export(Item namespace_obj, String* name, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, namespace_obj), stored(roots, value), key(roots, ItemNull);
+    key.set(js_interp_name_key(name));
+    if (get_type_id(owner.get()) == LMD_TYPE_MAP && js_input && name &&
+            !js_find_shape_entry(owner.get(), name->chars, (int)name->len)) {
+        String* canonical = heap_create_name(name->chars, name->len);
+        if (!canonical) return ItemError;
+        key.set((Item){.item = s2it(canonical)});
+        // live exports change kinds; a packed undefined lane rebuilt the entire namespace per function.
+        map_put_heap(owner.get().map, it2s(key.get()), stored.get(), js_input, true);
+        return stored.get();
+    }
+    return js_set_key_default(owner.get(), key.get(), stored.get());
+}
+
 static void js_interp_propagate_reexports(Runtime* runtime, const char* source_ref,
         String* source_name, Item value, int depth) {
     if (!runtime || !source_ref || !source_name || depth > 64) return;
@@ -551,8 +572,7 @@ static void js_interp_propagate_reexports(Runtime* runtime, const char* source_r
             js_resolve_script_module_path(runtime, candidate->reference, binding->source->chars,
                 (int)binding->source->len, resolved, (int)sizeof(resolved));
             if (strcmp(resolved, source_ref) != 0) continue;
-            js_set_key_default(module->namespace_obj,
-                js_interp_name_key(binding->export_name), value);
+            js_interp_store_export(module->namespace_obj, binding->export_name, value);
             js_interp_propagate_reexports(runtime, candidate->reference,
                 binding->export_name, value, depth + 1);
         }
@@ -617,7 +637,7 @@ static void js_interp_publish_export_bindings(JsInterpFrame* frame,
     Rooted<Item> namespace_obj(roots, module->namespace_obj), value_root(roots, value);
     for (JsInterpModuleBinding* binding = first; binding; binding = binding->next) {
         if (!binding->source && binding->entry == entry) {
-            js_set_key_default(namespace_obj.get(), js_interp_name_key(binding->export_name), value_root.get());
+            js_interp_store_export(namespace_obj.get(), binding->export_name, value_root.get());
             js_interp_propagate_reexports(context ? context->runtime : NULL,
                 frame->script->reference, binding->export_name, value_root.get(), 0);
         }
@@ -626,7 +646,7 @@ static void js_interp_publish_export_bindings(JsInterpFrame* frame,
 
 static Item js_interp_publish_export_value(JsInterpFrame* frame,
         Item namespace_obj, String* export_name, Item value) {
-    Item stored = js_set_key_default(namespace_obj, js_interp_name_key(export_name), value);
+    Item stored = js_interp_store_export(namespace_obj, export_name, value);
     if (item_is_error(stored)) return stored;
     js_interp_propagate_reexports(context ? context->runtime : NULL,
         frame && frame->script ? frame->script->reference : NULL, export_name, value, 0);
@@ -1266,10 +1286,12 @@ static JsInterpLookup js_interp_lookup_name(const JsInterpFrame* frame,
 
 // hosted mapped arguments alias these owned cells, not a snapshot of a
 // parameter slot; lexical access keeps using that cell after detachment.
-static Item js_interp_binding_slot_read(JsInterpEnv* env, NameEntry* entry) {
+static Item js_interp_binding_slot_read(JsInterpEnv* env, NameEntry* entry,
+        bool publish = true) {
     if (env->source_module)
         return js_module_environment_binding(env->source_module, entry, ItemNull, false);
-    Item value = js_interp_env_slot_read(env, entry->slot, js_interp_host != NULL);
+    Item value = publish ? js_interp_env_slot_read(env, entry->slot, js_interp_host != NULL)
+        : js_interp_env_slot_borrow(env, entry->slot, js_interp_host != NULL);
     if (!js_interp_host) return value;
     return ((env->host_cells & JS_INTERP_CELL_ALL) ||
         ((env->host_cells & JS_INTERP_CELL_PARAMETERS) && entry->is_parameter))
@@ -1328,7 +1350,7 @@ static Item js_interp_env_binding_write(JsInterpFrame* frame, JsInterpEnv* env,
     }
     Item refused = ItemNull;
     if (!initialize && js_interp_binding_write_refused(frame, entry,
-            js_interp_binding_slot_read(env, entry), &refused)) {
+            js_interp_binding_slot_read(env, entry, false), &refused)) {
         return refused;
     }
     Item written = js_interp_binding_slot_store(env, entry, value);
@@ -1513,6 +1535,9 @@ static Item js_interp_delete_identifier(JsInterpFrame* frame,
 static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         String* unresolved_name) {
     if (!frame) return ItemError;
+    if (frame->numeric_parameter_scope && entry &&
+            entry->scope == frame->numeric_parameter_scope)
+        return frame->numeric_parameters[entry->slot];
     if (unresolved_name && js_interp_name_equals(unresolved_name, "this")) {
         return js_interp_frame_this(frame);
     }
@@ -2341,10 +2366,7 @@ static JsInterpCompletion js_interp_property_key(JsInterpFrame* frame,
     return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
 }
 
-// `dense_read`: a plain read may stop at a numeric index into an existing own
-// dense array element, as MIR's js_get_reference does. ToPropertyKey of a
-// Number and that element read are unobservable, so the canonical string key
-// is never built; on a hit the completion carries the element value.
+// numeric element reads reuse the element kernels without allocating a property-name string.
 static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
         JsMemberNode* member, Item base, bool require_object,
         bool defer_property_reference, uint64_t* key_home,
@@ -2369,16 +2391,22 @@ static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
     }
     JsInterpCompletion raw_key = js_interp_eval(frame, (JsAstNode*)member->property);
     if (raw_key.kind != JS_INTERP_NORMAL) return raw_key;
-    if (!js_interp_host && dense_read && get_type_id(base) == LMD_TYPE_ARRAY) {
+    if (!js_interp_host && dense_read) {
         TypeId key_type = get_type_id(raw_key.value);
         uint32_t index = 0;
         Item element = ItemNull;
-        if ((key_type == LMD_TYPE_INT || key_type == LMD_TYPE_INT64 ||
-                key_type == LMD_TYPE_FLOAT) &&
-                js_property_key_to_array_index(raw_key.value, &index) &&
-                js_array_try_get_existing_own_dense_no_gc(base, index, &element)) {
-            *dense_read = true;
-            return js_interp_normal(element);
+        if ((key_type == LMD_TYPE_INT || key_type == LMD_TYPE_INT64 || key_type == LMD_TYPE_FLOAT) &&
+                js_property_key_to_array_index(raw_key.value, &index)) {
+            if (get_type_id(base) == LMD_TYPE_ARRAY &&
+                    js_array_try_get_existing_own_dense_no_gc(base, index, &element)) {
+                *dense_read = true;
+                return js_interp_normal(element);
+            }
+            if (js_is_typed_array(base)) {
+                *dense_read = true;
+                element = js_elements_get_int(base, index);
+                return item_is_error(element) ? js_interp_throw(element) : js_interp_normal(element);
+            }
         }
     }
     RootFrame roots(1);
@@ -2560,6 +2588,20 @@ static Item js_interp_reference_write(JsInterpFrame* frame,
     Rooted<Item> key_root(roots, js_interp_reference_key(reference));
     Rooted<Item> value_root(roots, value);
     JsPropertyLane property_lane = reference->property_lane;
+    if (!js_interp_host && reference->property && reference->property_key_deferred &&
+            !reference->super_property) {
+        TypeId key_type = get_type_id(key_root.get());
+        uint32_t index = 0;
+        if ((key_type == LMD_TYPE_INT || key_type == LMD_TYPE_INT64 || key_type == LMD_TYPE_FLOAT) &&
+                js_property_key_to_array_index(key_root.get(), &index)) {
+            if (get_type_id(object_root.get()) == LMD_TYPE_ARRAY &&
+                    js_array_try_set_existing_own_dense_no_gc(object_root.get(), index, value_root.get()))
+                return value_root.get();
+            // primitive Number keys have no observable conversion; the shared setter rechecks after coercion.
+            if (js_is_typed_array(object_root.get()))
+                return js_typed_array_set_numeric(object_root.get(), (double)index, false, value_root.get());
+        }
+    }
     if (reference->property && reference->property_key_deferred) {
         key_root.set(js_interp_property_key_value(key_root.get()));
         if (item_is_error(key_root.get())) return key_root.get();
@@ -2692,6 +2734,45 @@ static Item js_interp_assignment_value(Operator op, Item old_value, Item value) 
     case OPERATOR_JS_URSHIFT_ASSIGN: return js_unsigned_right_shift(old_value, value);
     default: return js_throw_type_error("unsupported interpreted assignment operator");
     }
+}
+
+// old_root owns the non-moving string while RHS calls may append to the same binding.
+class JsInterpStringAppendBorrow {
+    uint64_t* home_;
+public:
+    explicit JsInterpStringAppendBorrow(uint64_t* home, bool enabled)
+        : home_(enabled && get_type_id((Item){.item = *home}) == LMD_TYPE_STRING &&
+              it2s((Item){.item = *home})->is_buffer ? home : NULL) {
+        if (!home_) return;
+        String* string = it2s((Item){.item = *home_});
+        // parked async/generator appends can resume out of order; saturation freezes ownership.
+        if (string->buffer_borrows == 31) {
+            fn_string_freeze(string);
+            home_ = NULL;
+        } else string->buffer_borrows++;
+    }
+    void release() {
+        if (home_) it2s((Item){.item = *home_})->buffer_borrows--;
+        home_ = NULL;
+    }
+    ~JsInterpStringAppendBorrow() { release(); }
+};
+
+static JsInterpEnv* js_interp_string_append_env(JsInterpFrame* frame,
+        const JsInterpReference* reference, JsAssignmentNode* assignment) {
+    NameEntry* entry = reference->entry;
+    if (js_interp_host || frame->discarded_expression != (JsAstNode*)assignment ||
+            assignment->op != OPERATOR_JS_ADD_ASSIGN || reference->property ||
+            reference->by_name || reference->with_binding || reference->arguments_env ||
+            reference->binding_uses_eval || !entry || entry->is_const ||
+            entry->is_parameter || entry->is_function_name_binding ||
+            entry->scope == frame->script->global_scope || js_interp_entry_in_slab(frame, entry))
+        return NULL;
+    JsInterpEnv* env = js_interp_find_binding_env(frame->env, entry);
+    return env && !env->host_cells && !env->source_module && entry->slot >= 0 &&
+        (uint32_t)entry->slot < env->slot_count &&
+        (env->binding_role == JS_INTERP_ENV_ORDINARY || env->binding_role == JS_INTERP_ENV_BODY_VARS)
+        ? env : NULL;
 }
 
 static bool js_interp_is_nullish(Item value) {
@@ -3346,6 +3427,8 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         js_interp_identifier_is((JsAstNode*)call->function, "require") &&
         ((JsIdentifierNode*)call->function)->entry == NULL &&
         !js_with_depth_active() &&
+        // browser realms must resolve a missing loader as ReferenceError (D7.4.4).
+        jube_global_profile_allows(JUBE_GLOBAL_NODE_ONLY) &&
         // A browser bundle can publish an AMD loader as window.require. Only
         // an unbound identifier is Lambda's implicit CommonJS require.
         !js_global_binding_exists(js_interp_name_key(
@@ -4345,15 +4428,22 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             assignment->op == OPERATOR_ASSIGN,
             super_base_root.home());
         if (ref.kind != JS_INTERP_NORMAL) return ref;
+        JsInterpEnv* append_env = js_interp_string_append_env(frame, &reference, assignment);
         Rooted<Item> old_root(roots, ItemNull);
         if (assignment->op != OPERATOR_ASSIGN) {
-            old_root.set(js_interp_reference_read(frame, &reference));
+            // only a discarded private-binding append borrows; ordinary reads freeze aliases.
+            old_root.set(append_env
+                ? js_interp_binding_slot_read(append_env, reference.entry, false)
+                : js_interp_reference_read(frame, &reference));
+            if (append_env && old_root.get().item == ITEM_JS_TDZ)
+                return js_interp_throw(js_interp_tdz_error(reference.entry->name));
             if (item_is_error(old_root.get())) return js_interp_throw(old_root.get());
             if (js_interp_is_logical_assignment(assignment->op) &&
                     js_interp_logical_assignment_keeps_old(assignment->op, old_root.get())) {
                 return js_interp_normal(old_root.get());
             }
         }
+        JsInterpStringAppendBorrow append_borrow(old_root.home(), append_env != NULL);
         Rooted<Item> right_root(roots, ItemNull);
         String* inferred_name = !assignment->lhs_is_parenthesized && assignment->left &&
                 assignment->left->node_type == AST_NODE_IDENT
@@ -4362,9 +4452,23 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             (JsAstNode*)assignment->right, inferred_name);
         if (right.kind != JS_INTERP_NORMAL) return right;
         right_root.set(right.value);
-        Rooted<Item> result_root(roots, js_interp_is_logical_assignment(assignment->op)
-            ? right_root.get() : js_interp_assignment_value(assignment->op,
-                old_root.get(), right_root.get()));
+        append_borrow.release();
+        Rooted<Item> result_root(roots, ItemNull);
+        if (append_env && get_type_id(old_root.get()) == LMD_TYPE_STRING &&
+                get_type_id(right_root.get()) == LMD_TYPE_STRING) {
+            String* joined = fn_strcat(it2s(old_root.get()), it2s(right_root.get()));
+            if (!joined) return js_interp_throw(ItemError);
+            if (joined == &STR_ERROR)
+                return js_interp_throw(js_throw_range_error("Invalid string length"));
+            result_root.set((Item){.item = s2it(joined)});
+        } else {
+            // coercion can reenter this binding after GetValue captured its old string.
+            if (append_env && get_type_id(old_root.get()) == LMD_TYPE_STRING)
+                fn_string_freeze(it2s(old_root.get()));
+            result_root.set(js_interp_is_logical_assignment(assignment->op)
+                ? right_root.get() : js_interp_assignment_value(assignment->op,
+                    old_root.get(), right_root.get()));
+        }
         if (item_is_error(result_root.get())) return js_interp_throw(result_root.get());
         if (!assignment->lhs_is_parenthesized && (assignment->op == OPERATOR_ASSIGN ||
                 js_interp_is_logical_assignment(assignment->op))) {
@@ -5257,8 +5361,13 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
     case AST_NODE_BLOCK:
         return js_interp_exec_block(frame, (JsBlockNode*)node);
     case AST_NODE_EXPR_STMT: {
+        const JsAstNode* previous = frame->discarded_expression;
+        JsAstNode* expression = (JsAstNode*)((JsExpressionStatementNode*)node)->expression;
+        // script/eval completion values are observable; function statement values are discarded.
+        frame->discarded_expression = frame->completion_home ? NULL : expression;
         JsInterpCompletion value = js_interp_eval(frame,
-            (JsAstNode*)((JsExpressionStatementNode*)node)->expression);
+            expression);
+        frame->discarded_expression = previous;
         if (value.kind == JS_INTERP_NORMAL && frame && frame->completion_home) {
             *frame->completion_home = value.value.item;
         }
@@ -6519,6 +6628,99 @@ static Item js_interp_initialize_function_parameters(JsInterpFrame* frame, JsFun
     return make_js_undefined();
 }
 
+struct JsNumericLeafScan {
+    NameScope* parameters;
+    int parameter_count;
+    bool supported;
+};
+
+static void js_interp_check_numeric_leaf(JsAstNode* node, void* opaque) {
+    JsNumericLeafScan* scan = (JsNumericLeafScan*)opaque;
+    if (!node || !scan->supported) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+        scan->supported = entry && entry->is_parameter && entry->scope == scan->parameters &&
+            entry->slot >= 0 && entry->slot < scan->parameter_count;
+        break;
+    }
+    case AST_NODE_LITERAL: {
+        JsLiteralNode* literal = (JsLiteralNode*)node;
+        scan->supported = (literal->literal_type == AST_LITERAL_NUMBER && !literal->bigint_str) ||
+            literal->literal_type == AST_LITERAL_BOOLEAN;
+        break;
+    }
+    case AST_NODE_BINARY:
+        switch (((JsBinaryNode*)node)->op) {
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
+        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+        case OPERATOR_AND: case OPERATOR_OR:
+            break;
+        default: scan->supported = false; break;
+        }
+        break;
+    case AST_NODE_UNARY:
+        scan->supported = ((JsUnaryNode*)node)->op == OPERATOR_NOT;
+        break;
+    case AST_NODE_CONDITIONAL_EXPR:
+        break;
+    default:
+        scan->supported = false;
+        break;
+    }
+    if (scan->supported) js_ast_visit_children(node, js_interp_check_numeric_leaf, scan);
+}
+
+static bool js_interp_call_numeric_leaf(JsFunction* function, Item* args,
+        int arg_count, Item* result) {
+    if (js_interp_host) return false;
+    JsCallableCode* code = function->code;
+    if (!code || code->numeric_leaf_state == 1) return false;
+    AstFuncNode* definition = js_fn_ast_function(function);
+    JsAstNode* expression = (JsAstNode*)definition->body;
+    if (expression && expression->node_type == AST_NODE_BLOCK) {
+        JsAstNode* first = (JsAstNode*)((JsBlockNode*)expression)->statements;
+        expression = first && !first->next && first->node_type == AST_NODE_RETURN_STAM
+            ? (JsAstNode*)((JsReturnNode*)first)->value : NULL;
+    }
+    if (!code->numeric_leaf_state) {
+        code->numeric_leaf_state = 1;
+        if (!expression || definition->is_async || definition->is_generator ||
+                (definition->node_type != AST_NODE_FUNC && definition->node_type != AST_NODE_FUNC_EXPR) ||
+                code->has_non_simple_params || code->eval_initializer_context || !definition->vars)
+            return false;
+        int count = 0;
+        for (JsAstNode* param = (JsAstNode*)definition->params; param; param = (JsAstNode*)param->next) {
+            if (param->node_type != AST_NODE_IDENT) return false;
+            NameEntry* entry = ((JsIdentifierNode*)param)->entry;
+            if (!entry || !entry->is_parameter || entry->scope != definition->vars || entry->slot != count++)
+                return false;
+        }
+        if (count != code->param_count) return false;
+        JsNumericLeafScan scan = {definition->vars, count, true};
+        js_interp_check_numeric_leaf(expression, &scan);
+        if (!scan.supported) return false;
+        code->numeric_leaf_state = 2;
+    }
+    if (arg_count < code->param_count || (code->param_count && !args) || js_with_depth_active()) return false;
+    for (int index = 0; index < code->param_count; index++) {
+        TypeId type = get_type_id(args[index]);
+        if (type != LMD_TYPE_INT && type != LMD_TYPE_INT64 && type != LMD_TYPE_FLOAT) return false;
+    }
+    // the call activation owns the numeric arguments and callee across literal-cache GC.
+    // this expression cannot capture or mutate bindings; reuse the ordinary AST kernels (D5.3.3).
+    JsInterpFrame frame = {};
+    frame.script = js_fn_ast_script(function);
+    frame.env = js_fn_ast(function)->env;
+    frame.strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
+    frame.active_function = function;
+    frame.numeric_parameters = args;
+    frame.numeric_parameter_scope = definition->vars;
+    JsInterpCompletion completion = js_interp_eval(&frame, expression);
+    *result = completion.value;
+    return true;
+}
+
 static Item js_interp_call_function_impl(JsFunction* function, Item* args, int arg_count,
         uint64_t* result_home, Item* host_callee, Item* host_receiver, Item* host_target) {
     if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
@@ -6526,6 +6728,8 @@ static Item js_interp_call_function_impl(JsFunction* function, Item* args, int a
     // D7.2.3/D8.5.1: queued callbacks execute with their defining script's
     // origin, so relative dynamic imports retain the enclosing module path.
     RuntimeCurrentFileScope current_file(context, js_interp_script_origin(js_fn_ast_script(function)));
+    Item numeric_result = ItemNull;
+    if (js_interp_call_numeric_leaf(function, args, arg_count, &numeric_result)) return numeric_result;
     // JC20: this activation borrows the call activation a kernel instance
     // pushed for `function` (generic body entry or the AST direct instance).
     // That activation roots the callee and holds `this` and `new.target`; the

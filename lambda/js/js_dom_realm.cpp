@@ -584,8 +584,7 @@ static bool _node_receiver(Item receiver) {
 }
 
 static bool _element_receiver(Item receiver) {
-    Item kind = dom_core_node_type(receiver);
-    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 1;
+    return dom_is_element(receiver);
 }
 
 static bool _input_receiver(Item receiver) {
@@ -645,27 +644,183 @@ static Item _window_self_getter(Item /*callee*/, Item receiver, Item* /*args*/,
     return global;
 }
 
-static Item _media_can_play_type(Item /*callee*/, Item receiver, Item* args,
-        int argc, uint64_t* /*result_home*/) {
+static void* _media_receiver(Item receiver) {
     void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
     const char* name = element ? dom_html_interface_name(element) : nullptr;
-    if (!name || !_html_element_receiver(receiver) ||
-            (strcmp(name, "HTMLVideoElement") && strcmp(name, "HTMLAudioElement")))
-        return js_throw_type_error("Illegal HTMLMediaElement receiver");
+    return name && _html_element_receiver(receiver) &&
+        (!strcmp(name, "HTMLVideoElement") || !strcmp(name, "HTMLAudioElement")) ? element : nullptr;
+}
+
+static Item _media_can_play_type(Item, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!_media_receiver(receiver)) return js_throw_type_error("Illegal HTMLMediaElement receiver");
     if (!argc) return js_throw_type_error("canPlayType requires a MIME type");
     RootFrame roots(1);
-    Rooted<Item> type_root(roots, js_to_string(args[0]));
-    JS_RETURN_IF_ERROR(type_root.get());
-    String* type = it2s(type_root.get());
-    return make_string_item(dom_platform_can_play_type(type->chars, type->len));
+    Rooted<Item> type(roots, js_to_string(args[0]));
+    JS_RETURN_IF_ERROR(type.get());
+    String* text = it2s(type.get());
+    return make_string_item(dom_platform_can_play_type(text->chars, text->len));
+}
+
+static Item _media_exception(const char* name, const char* message) {
+    return js_domexception_new(js_name_item(message), js_name_item(name));
+}
+
+static Item _media_timer_tick(void) {
+    js_runtime_state.dom.media_poll_timer = ItemNull;
+    return js_dom_media_poll_pending();
+}
+
+extern "C" Item js_dom_media_poll_pending(void) {
+    if (!js_active_runtime_state || js_runtime_state.dom.media_poll_running ||
+            get_type_id(js_runtime_state.dom.media_play_requests) != LMD_TYPE_ARRAY) return ItemNull;
+    struct PollScope {
+        bool& running;
+        PollScope(bool& value) : running(value) { running = true; }
+        ~PollScope() { running = false; }
+    } scope(js_runtime_state.dom.media_poll_running);
+    RootFrame roots(5);
+    Rooted<Item> request(roots, ItemNull), owner(roots, ItemNull), promise(roots, ItemNull);
+    Rooted<Item> info(roots, ItemNull), error(roots, ItemNull);
+    bool waiting = false;
+    for (int64_t i = 0; i < js_array_length(js_runtime_state.dom.media_play_requests); i++) {
+        request.set(js_elements_get_int(js_runtime_state.dom.media_play_requests, i));
+        if (get_type_id(request.get()) != LMD_TYPE_ARRAY) continue;
+        owner.set(js_elements_get_int(request.get(), 0));
+        promise.set(js_elements_get_int(request.get(), 1));
+        info.set(dom_engine_media_info(owner.get()));
+        JS_RETURN_IF_ERROR(info.get());
+        const char* failure = nullptr;
+        bool played = false;
+        if (!js_is_object_value(info.get())) failure = "AbortError";
+        else {
+            Item generation = js_get_key_cstr(info.get(), "generation");
+            int64_t expected = it2i(js_elements_get_int(request.get(), 2));
+            int64_t code = it2i(js_get_key_cstr(info.get(), "play_error"));
+            if (it2i(generation) != expected) failure = "AbortError";
+            else if (code) failure = code == 1 ? "NotAllowedError" : "NotSupportedError";
+            else if (js_string_equals(js_get_key_cstr(info.get(), "state"), "playing")) played = true;
+            else if (js_is_truthy(js_get_key_cstr(info.get(), "paused"))) failure = "AbortError";
+            else if (js_is_truthy(js_get_key_cstr(info.get(), "has_source"))) {
+                if (!js_is_truthy(js_get_key_cstr(info.get(), "supported_source"))) failure = "NotSupportedError";
+                else waiting = true;
+            }
+        }
+        if (!failure && !played) continue;
+        // release the registry edge before reactions run; the exact local roots own settlement.
+        JS_RETURN_IF_ERROR(js_elements_set_int(js_runtime_state.dom.media_play_requests, i, ItemNull));
+        if (played) js_promise_fulfill_existing(promise.get(), make_js_undefined());
+        else {
+            error.set(_media_exception(failure, !strcmp(failure, "AbortError") ?
+                "The play() request was interrupted" : !strcmp(failure, "NotAllowedError") ?
+                "Playback requires document activation" : "The media source could not be played"));
+            JS_RETURN_IF_ERROR(error.get());
+            js_promise_reject_existing(promise.get(), error.get());
+        }
+    }
+    if (waiting && (!js_runtime_state.dom.media_poll_timer.item || js_runtime_state.dom.media_poll_timer.item == ITEM_NULL)) {
+        if (get_type_id(js_runtime_state.dom.media_poll_function) != LMD_TYPE_FUNC)
+            js_runtime_state.dom.media_poll_function = js_new_native_function(_media_timer_tick);
+        // this polls actual decoder/network readiness; source-less requests wait for a later task.
+        js_runtime_state.dom.media_poll_timer = js_setTimeout(js_runtime_state.dom.media_poll_function,
+            (Item){.item = i2it(10)});
+        JS_RETURN_IF_ERROR(js_runtime_state.dom.media_poll_timer);
+    }
+    return ItemNull;
+}
+
+static Item _media_play(Item, Item receiver, Item*, int, uint64_t*) {
+    if (!_media_receiver(receiver))
+        return js_promise_from_completion(js_throw_type_error("Illegal HTMLMediaElement receiver"));
+    RootFrame roots(5);
+    Rooted<Item> owner(roots, receiver), promise(roots, js_promise_create_pending());
+    if (!js_promise_is(promise.get())) return ItemError;
+    Rooted<Item> info(roots, dom_engine_media_command(owner.get(), js_name_item("play"), ItemNull));
+    if (item_is_error(info.get())) return js_promise_from_completion(info.get());
+    info.set(dom_engine_media_info(owner.get()));
+    if (item_is_error(info.get())) return js_promise_from_completion(info.get());
+    if (!js_is_object_value(info.get())) return js_promise_from_completion(
+        js_throw_value(_media_exception("NotSupportedError", "Media backend is unavailable")));
+    Rooted<Item> request(roots, js_array_new(0)), generation(roots, js_get_key_cstr(info.get(), "generation"));
+    js_set_prototype(request.get(), ItemNull);
+    js_array_push(request.get(), owner.get()); js_array_push(request.get(), promise.get());
+    js_array_push(request.get(), generation.get());
+    if (!js_root_vector_ensure_registered(&js_runtime_state.dom)) return ItemError;
+    if (get_type_id(js_runtime_state.dom.media_play_requests) != LMD_TYPE_ARRAY) {
+        js_runtime_state.dom.media_play_requests = js_array_new(0);
+        js_set_prototype(js_runtime_state.dom.media_play_requests, ItemNull);
+    }
+    int64_t reusable = -1;
+    for (int64_t i = 0; i < js_array_length(js_runtime_state.dom.media_play_requests); i++)
+        if (js_elements_get_int(js_runtime_state.dom.media_play_requests, i).item == ITEM_NULL) { reusable = i; break; }
+    if (reusable >= 0) JS_RETURN_IF_ERROR(js_elements_set_int(js_runtime_state.dom.media_play_requests, reusable, request.get()));
+    else JS_RETURN_IF_ERROR(js_array_push(js_runtime_state.dom.media_play_requests, request.get()));
+    JS_RETURN_IF_ERROR(js_dom_media_poll_pending());
+    return promise.get();
+}
+
+static Item _media_control(Item callee, Item receiver, Item*, int, uint64_t*) {
+    if (!_media_receiver(receiver)) return js_throw_type_error("Illegal HTMLMediaElement receiver");
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, receiver);
+    const char* action = js_fn_native((JsFunction*)callee.function)->target.bits ? "load" : "pause";
+    JS_RETURN_IF_ERROR(dom_engine_media_command(owner.get(), js_name_item(action), ItemNull));
+    JS_RETURN_IF_ERROR(js_dom_media_poll_pending());
+    return make_js_undefined();
+}
+
+struct JsMediaField { const char* name; const char* key; const char* command; bool video; };
+static const JsMediaField media_fields[] = {
+    {"paused", "paused", nullptr, false}, {"muted", "muted", "muted", false},
+    {"volume", "volume", "volume", false}, {"currentTime", "current_time", "seek", false},
+    {"duration", "duration", nullptr, false}, {"readyState", "ready_state", nullptr, false},
+    {"ended", "ended", nullptr, false}, {"videoWidth", "width", nullptr, true}, {"videoHeight", "height", nullptr, true}
+};
+static Item _media_field(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    uintptr_t bits = js_fn_native((JsFunction*)callee.function)->target.bits;
+    const JsMediaField& field = media_fields[bits >> 1];
+    void* element = _media_receiver(receiver);
+    if (!element || (field.video && strcmp(dom_html_interface_name(element), "HTMLVideoElement")))
+        return js_throw_type_error("Illegal HTMLMediaElement receiver");
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, receiver), value(roots, argc ? args[0] : make_js_undefined()), info(roots, ItemNull);
+    if (!(bits & 1)) {
+        info.set(dom_engine_media_info(owner.get())); JS_RETURN_IF_ERROR(info.get());
+        return js_get_key_cstr(info.get(), field.key);
+    }
+    if (!strcmp(field.command, "muted")) value.set((Item){.item = b2it(js_is_truthy(value.get()))});
+    else {
+        value.set(js_to_number(value.get())); JS_RETURN_IF_ERROR(value.get());
+        double number = 0; item_try_to_double(value.get(), &number);
+        if (!isfinite(number)) return js_throw_type_error("Media value must be finite");
+        if (!strcmp(field.command, "volume") && (number < 0 || number > 1))
+            return js_throw_value(_media_exception("IndexSizeError", "Volume must be within [0, 1]"));
+        if (!strcmp(field.command, "seek") && number < 0) value.set((Item){.item = i2it(0)});
+    }
+    JS_RETURN_IF_ERROR(dom_engine_media_command(owner.get(), js_name_item(field.command), value.get()));
+    return make_js_undefined();
 }
 
 static void _install_media_interface(Item global) {
-    RootFrame roots(2);
-    Rooted<Item> prototype_root(roots, _iface_proto(global, "HTMLMediaElement"));
-    Rooted<Item> method_root(roots, js_new_native_payload_function(_media_can_play_type, 0, 1));
-    js_set_function_name(method_root.get(), js_name_item("canPlayType"));
-    js_set_key_cstr(prototype_root.get(), "canPlayType", method_root.get());
+    RootFrame roots(5);
+    Rooted<Item> prototype(roots, _iface_proto(global, "HTMLMediaElement"));
+    Rooted<Item> video(roots, _iface_proto(global, "HTMLVideoElement"));
+    Rooted<Item> method(roots, ItemNull), getter(roots, ItemNull), setter(roots, ItemNull);
+    const struct { const char* name; JsNativeCallBody body; uint64_t data; int length; } methods[] = {
+        {"canPlayType", _media_can_play_type, 0, 1}, {"play", _media_play, 0, 0},
+        {"pause", _media_control, 0, 0}, {"load", _media_control, 1, 0}
+    };
+    for (const auto& spec : methods) {
+        method.set(js_new_native_payload_function(spec.body, spec.data, spec.length));
+        js_set_function_name(method.get(), js_name_item(spec.name));
+        js_set_key_cstr(prototype.get(), spec.name, method.get());
+    }
+    for (size_t i = 0; i < sizeof(media_fields) / sizeof(*media_fields); i++) {
+        getter.set(js_new_native_payload_function(_media_field, i << 1, 0));
+        setter.set(media_fields[i].command ? js_new_native_payload_function(_media_field, (i << 1) | 1, 1) : ItemNull);
+        js_set_function_name(getter.get(), js_name_item(media_fields[i].name));
+        js_install_native_accessor(media_fields[i].video ? video.get() : prototype.get(),
+            js_name_item(media_fields[i].name), getter.get(), setter.get(), 0);
+    }
 }
 
 static void _install_node_interface_members(Item global) {
@@ -841,7 +996,6 @@ extern "C" void dom_install_collection_globals(void) {
     dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
     js_dom_install_interface(global, "HTMLMediaElement");
     _link_iface_proto(global, "HTMLMediaElement", "HTMLElement");
-    _install_media_interface(global);
     int html_interface_count = dom_html_interface_count();
     for (int i = 0; i < html_interface_count; i++) {
         // Specialized HTML wrappers retain their browser prototype chain for
@@ -854,6 +1008,7 @@ extern "C" void dom_install_collection_globals(void) {
             ? "HTMLMediaElement" : "HTMLElement";
         _link_iface_proto(global, ctor_name, parent_name);
     }
+    _install_media_interface(global);
     js_dom_install_interface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);
@@ -863,6 +1018,8 @@ extern "C" void dom_install_collection_globals(void) {
     Item element_proto = _iface_proto(global, "Element");
     if (get_type_id(element_proto) == LMD_TYPE_MAP) {
         js_set_native_key(element_proto, js_name_item("animate"), dom_element_animate);
+        js_set_native_key(element_proto, js_name_item("getAnimations"), dom_element_get_animations);
+        dom_set_interface_method_metadata(element_proto, "getAnimations", 0);
     }
     // Publish the module's canonical members before scripts inspect bare IDL
     // prototypes, and route instance reads through those same descriptors.

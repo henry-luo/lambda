@@ -156,7 +156,6 @@ extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 void js_builtin_cache_reset();
 // All realm intrinsic slots share this one root-range owner.  Cache builders
 // must register it before publishing an Item into any of its slots.
-bool js_realm_intrinsic_slots_ensure_roots(void);
 void js_deep_batch_reset();
 
 double js_get_number(Item value);

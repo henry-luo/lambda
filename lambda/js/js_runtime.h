@@ -37,6 +37,7 @@ typedef void (*JsDocumentSourceLoadObserver)(size_t source_length);
 // Radiant registers this only while a document watchdog is active. Module
 // loading reports recursively acquired source so its budget covers the graph.
 void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer);
+Item js_dom_media_poll_pending(void);
 // Host cancellation is checked at guest boundaries and returned in the Item lane.
 typedef bool (*JsExecutionInterruptCheck)(void);
 void js_set_execution_interrupt_check(JsExecutionInterruptCheck check);
@@ -51,7 +52,7 @@ LAMBDA_RT_API Item js_make_string_len(const char* str, int len);
 // Take a StrBuf's contents as a GC string Item and free the buffer.
 Item js_strbuf_take_item(StrBuf* sb);
 LAMBDA_RT_API Item js_make_string(const char* str);
-Item js_domexception_new(Item message, Item name_arg);
+LAMBDA_RT_API Item js_domexception_new(Item message, Item name_arg);
 LAMBDA_RT_API bool js_string_equals(Item value, const char* expected);
 // string-only, allocation-free equality; the scalar result is also the MIR ABI.
 int64_t js_string_equal(Item left, Item right);
@@ -120,7 +121,7 @@ Item js_to_property_key(Item value);
 LAMBDA_RT_API bool js_is_truthy(Item value);
 // true for both physical representations of an ordinary JavaScript Array.
 LAMBDA_RT_API bool js_is_js_array(Item value);
-bool js_is_object_value(Item value);
+LAMBDA_RT_API bool js_is_object_value(Item value);
 // Item-status helpers use the same merged lane as ordinary JS calls: a
 // boolean true is success and an ERROR-tagged Item is the complete failure.
 LAMBDA_RT_API Item js_status_ok(void);
@@ -746,7 +747,7 @@ Item js_to_string_val(Item value);
 // =============================================================================
 
 Item js_object_create(Item proto);
-Item js_object_define_property(Item obj, Item name, Item descriptor);
+LAMBDA_RT_API Item js_object_define_property(Item obj, Item name, Item descriptor);
 Item js_object_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
@@ -1295,7 +1296,7 @@ void js_set_class_instance_field_metadata_private_method(Item class_item, int in
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
     Item initializer);
-Item js_private_key_for_class(Item class_item, Item source_name);
+LAMBDA_RT_API Item js_private_key_for_class(Item class_item, Item source_name);
 Item js_private_in(Item object, Item private_key);
 Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
@@ -1406,7 +1407,7 @@ Item js_gen_throw_signal_value(Item value);
 /**
  * v15: Convert an iterable to an array. Drains generators, passes arrays through.
  */
-Item js_iterable_to_array(Item iterable);
+LAMBDA_RT_API Item js_iterable_to_array(Item iterable);
 
 /**
  * Lazy iteration protocol for for-of loops.
@@ -1481,6 +1482,7 @@ Item js_intrinsic_promise_operation(JsPromiseIntrinsicOp operation,
     Item this_value, Item* args, int argc);
 
 LAMBDA_RT_API Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
+LAMBDA_RT_API Item js_promise_from_completion(Item completion);
 LAMBDA_RT_API Item js_promise_resolve(Item value);             // Promise.resolve(value)
 LAMBDA_RT_API Item js_promise_reject(Item reason);             // Promise.reject(reason)
 Item js_promise_create_pending(void);

@@ -1,5 +1,5 @@
 function,function
 en
 0
-1234.5
+1,234.5
 OK

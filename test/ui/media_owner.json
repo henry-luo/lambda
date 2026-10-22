@@ -1,5 +1,5 @@
 {
-  "name":"Native HTML media state survives parent rebuild and layout reset, then resets on source change",
+  "name":"Native HTML media settings survive rebuild, resize and decoder replacement",
   "html":"test/ui/media_owner.ls",
   "viewport":{"width":800,"height":500},
   "input_turn_ms":0,
@@ -16,6 +16,7 @@
     {"type":"assert_text","target":{"selector":"#volume"},"equals":"0.25"},
     {"type":"click","target":{"selector":"#replace"}},
     {"type":"click","target":{"selector":"#read"}},
-    {"type":"assert_text","target":{"selector":"#volume"},"equals":"1"}
+    {"type":"assert_text","target":{"selector":"#volume"},"equals":"0.25"},
+    {"type":"assert_text","target":{"selector":"#source_changed"},"equals":"true"}
   ]
 }

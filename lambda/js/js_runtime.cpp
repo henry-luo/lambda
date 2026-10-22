@@ -9,9 +9,11 @@
 #include "js_interp.hpp"
 #include "../../lib/uv_loop.h"
 #include "js_object_meta.h"
+#include "../../lib/ownership.hpp"
 #include "../input/input.hpp"
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
+#include "js_intl_likely_subtags.h"
 #include "js_regex_router_scanner.h"
 #include "js_regexp_compile.h"
 #include "js_state_guards.h"
@@ -8499,18 +8501,6 @@ static int js_utf8_decode_codepoint(const char* chars, int str_len, int pos,
     return bytes;
 }
 
-static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_idx) {
-    int pos = 0;
-    int64_t cu = 0;
-    while (pos < str_len && cu < utf16_idx) {
-        uint32_t cp;
-        int bytes = js_utf8_decode_codepoint(chars, str_len, pos, &cp);
-        cu += (cp >= 0x10000) ? 2 : 1;
-        pos += bytes;
-    }
-    return pos;
-}
-
 // Only the first registration needs to walk the realm root catalog. Once the
 // fixed cache range is registered for this heap, the ASCII hit path is direct.
 static inline bool js_string_cache_is_ready(void) {
@@ -8581,13 +8571,13 @@ int64_t js_string_utf16_length(String* string) {
 }
 
 static void js_utf16_seek(String* string, int64_t index,
-        int* out_byte_offset, int64_t* out_unit_offset) {
+        int* out_byte_offset, int64_t* out_unit_offset, bool byte_index = false) {
     JsUtf16StringPosition* position = js_utf16_string_position(string);
     int byte_offset = position ? position->byte_offset : 0;
     int64_t unit_offset = position ? position->unit_offset : 0;
     // nearby reads in syntax highlighters must not rescan the whole prefix;
     // retain a codepoint boundary so either half of a surrogate pair stays visible.
-    while (byte_offset > 0 && unit_offset > index) {
+    while (byte_offset > 0 && (byte_index ? byte_offset : unit_offset) > index) {
         byte_offset--;
         while (byte_offset > 0 &&
                 ((unsigned char)string->chars[byte_offset] & 0xC0) == 0x80) {
@@ -8597,12 +8587,12 @@ static void js_utf16_seek(String* string, int64_t index,
         js_utf8_decode_codepoint(string->chars, (int)string->len, byte_offset, &codepoint);
         unit_offset -= codepoint > 0xFFFF ? 2 : 1;
     }
-    while (byte_offset < (int)string->len && unit_offset < index) {
+    while (byte_offset < (int)string->len && (byte_index ? byte_offset : unit_offset) < index) {
         uint32_t codepoint;
         int bytes = js_utf8_decode_codepoint(
             string->chars, (int)string->len, byte_offset, &codepoint);
         int units = codepoint > 0xFFFF ? 2 : 1;
-        if (unit_offset + units > index) break;
+        if ((byte_index ? byte_offset + bytes : unit_offset + units) > index) break;
         unit_offset += units;
         byte_offset += bytes;
     }
@@ -8615,6 +8605,19 @@ static void js_utf16_seek(String* string, int64_t index,
 }
 
 
+static int js_utf16_idx_to_byte(String* string, int64_t index) {
+    if (!string) return 0;
+    if (string->is_ascii) return (int)(index < 0 ? 0 : index > string->len ? string->len : index);
+    int byte_offset;
+    int64_t unit_offset;
+    js_utf16_seek(string, index, &byte_offset, &unit_offset);
+    // RegExp seating rounds an unrepresentable trailing-surrogate index forward.
+    if (unit_offset < index && byte_offset < (int)string->len) {
+        uint32_t codepoint;
+        byte_offset += js_utf8_decode_codepoint(string->chars, (int)string->len, byte_offset, &codepoint);
+    }
+    return byte_offset;
+}
 
 // JS-aware substring: indices are UTF-16 code unit indices (not codepoints).
 Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
@@ -8781,10 +8784,15 @@ static String* js_string_expand_utf16_subject(String* s) {
     return result;
 }
 
-static int64_t js_utf16_index_from_byte(const char* chars, int str_len, int byte_pos) {
-    if (byte_pos <= 0) return 0;
-    if (byte_pos > str_len) byte_pos = str_len;
-    return js_utf16_len(chars, byte_pos, false);
+static int64_t js_utf16_index_from_byte(String* string, int byte_pos) {
+    if (!string || byte_pos <= 0) return 0;
+    if (byte_pos > (int)string->len) byte_pos = (int)string->len;
+    if (string->is_ascii) return byte_pos;
+    int byte_offset;
+    int64_t unit_offset;
+    // RegExp exec/split advances through the same subject; reuse the rooted cursor.
+    js_utf16_seek(string, byte_pos, &byte_offset, &unit_offset, true);
+    return unit_offset;
 }
 
 // =============================================================================
@@ -9929,6 +9937,14 @@ extern "C" Item js_ordinary_has_instance(Item, Item);
 // Forward declarations for promise runtime
 struct JsPromise;
 static JsPromise* js_get_promise(Item promise_obj);
+extern "C" Item js_promise_from_completion(Item completion) {
+    RootFrame roots(2);
+    Rooted<Item> value(roots, completion), reason(roots, ItemNull);
+    if (!item_is_error(value.get())) return js_promise_resolve(value.get());
+    reason.set(js_error_lane_payload(value.get()));
+    return js_promise_reject(reason.get());
+}
+
 static bool js_promise_is_builtin_promise_constructor(Item constructor);
 static Item js_promise_resolve_with_constructor(Item constructor, Item value);
 static Item js_promise_reject_with_constructor(Item constructor, Item reason);
@@ -17861,14 +17877,17 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
         re2 = new re2::RE2(processed_pattern, opts);
         if (!re2->ok()) {
             bool size_limit = re2->error_code() == re2::RE2::ErrorPatternTooLarge;
+            bool repeat_limit = re2->error_code() == re2::RE2::ErrorRepeatSize;
             delete re2;
             re2 = nullptr;
-            if (size_limit) {
+            if (size_limit || repeat_limit) {
                 // Unicode classes with bounded repetition can exceed RE2's
-                // program budget. Its limit does not make valid JS syntax invalid.
+                // program budget or nested-count limit; neither invalidates JS syntax.
                 bt = js_bt_compile(effective_pattern, effective_pattern_len, btflags, js_input->pool);
-                if (!bt) return js_throw_range_error("RegExp matcher cannot compile size-limited pattern");
-            } else {
+                if (!bt && size_limit) return js_throw_range_error("RegExp matcher cannot compile size-limited pattern");
+            }
+            if (!bt) {
+                // malformed bounds still take the ordinary SyntaxError path.
                 re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
                 if (!re2->ok()) {
                     log_error("js regex compile error: /%.*s/%.*s: %s",
@@ -18196,11 +18215,14 @@ static Item js_regex_read_lastindex(Item regex, Item li_key, int* start_pos) {
 extern "C" Item js_regex_test(Item regex, Item str) {
     Item compiled;
     if (mvp_lmd_regexp_intrinsic(regex, str, JS_BUILTIN_REGEXP_TEST, &compiled)) return compiled;
+    RootFrame roots(3);
+    Rooted<Item> regex_root(roots, regex), str_root(roots, str), subject_root(roots, ItemNull);
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
     TypeId tid = get_type_id(str);
     if (tid != LMD_TYPE_STRING) {
         JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
+        str_root.set(str);
         tid = get_type_id(str);
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
@@ -18214,6 +18236,8 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     int64_t subject_units = 0;
     js_regex_prepare_subject(input_s, utf16_subject, false, &match_s,
         &match_chars, &match_len, &subject_units);
+    // expanded UTF-16 subjects must survive observable lastIndex conversion.
+    subject_root.set(match_s ? (Item){.item = s2it(match_s)} : ItemEmptyString);
 
     int start_pos = 0;
     Item li_key = js_name_item("lastIndex", 9);
@@ -18262,7 +18286,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     re2::StringPiece* matches = matches_buf.slots;
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
-        js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
+        js_utf16_idx_to_byte(match_s, start_pos) : start_pos;
     JsRegexMatchResult match_result = js_regex_match_internal(
         rd, match_chars, match_len, match_start_pos, anchor, matches, num_groups);
     if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
@@ -18277,7 +18301,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
 
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
-        if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
+        if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_s, match_end);
         JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, match_end));
     }
     js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
@@ -18366,7 +18390,7 @@ static int js_regex_match_offset_to_index(const char* input, int input_len,
                                           bool code_unit_indices) {
     int offset = (int)(match_ptr - input) + extra_bytes;
     if (code_unit_indices) {
-        return (int)js_utf16_index_from_byte(input, input_len, offset);
+        return (int)js_utf16_len(input, offset > input_len ? input_len : offset, false);
     }
     return offset;
 }
@@ -18408,7 +18432,7 @@ static Item js_regex_attach_indices(Item result, JsRegexData* rd,
 extern "C" Item js_regex_exec(Item regex, Item str) {
     Item compiled;
     if (mvp_lmd_regexp_intrinsic(regex, str, JS_BUILTIN_REGEXP_EXEC, &compiled)) return compiled;
-    RootFrame roots(7);
+    RootFrame roots(8);
     Rooted<Item> regex_root(roots, regex);
     Rooted<Item> str_root(roots, str);
     Rooted<Item> result_root(roots, ItemNull);
@@ -18416,6 +18440,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     Rooted<Item> groups_obj_root(roots, make_js_undefined());
     Rooted<Item> val_root(roots, make_js_undefined());
     Rooted<Item> group_key_root(roots, ItemNull);
+    Rooted<Item> subject_root(roots, ItemNull);
     if (!roots.valid()) return ItemError;
 
     JsRegexData* rd = js_get_regex_data(regex_root.get());
@@ -18429,7 +18454,6 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
     String* input_s = it2s(str_root.get());
-    const char* chars = input_s ? input_s->chars : "";
     int len = input_s ? (int)input_s->len : 0;
     bool utf16_subject = rd->needs_utf16_subject;
     bool full_unicode = rd->unicode;
@@ -18440,6 +18464,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     int64_t subject_units = 0;
     js_regex_prepare_subject(input_s, utf16_subject, code_unit_indices, &match_s,
         &match_chars, &match_len, &subject_units);
+    subject_root.set(match_s ? (Item){.item = s2it(match_s)} : ItemEmptyString);
 
     // RegExpBuiltinExec always observes lastIndex before deciding whether the
     // match should use it; non-global/non-sticky regexes then reset the search
@@ -18471,7 +18496,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = code_unit_indices ?
-        js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
+        js_utf16_idx_to_byte(match_s, start_pos) : start_pos;
     JsRegexMatchResult match_result = js_regex_match_internal(
         rd, match_chars, match_len, match_start_pos, anchor, matches, num_groups);
     if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
@@ -18491,7 +18516,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // the responsibility of callers (e.g. @@split, @@match) which use AdvanceStringIndex.
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
-        if (code_unit_indices) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
+        if (code_unit_indices) match_end = (int)js_utf16_index_from_byte(match_s, match_end);
         JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
             regex_root.get(), key_root.get(), match_end));
     }
@@ -18511,15 +18536,15 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             int mlen = (int)matches[i].size();
             Item s;
             if (utf16_subject) {
-                int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                int start_units = (int)js_utf16_index_from_byte(match_s,
                     (int)(matches[i].data() - match_chars));
-                int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                int end_units = (int)js_utf16_index_from_byte(match_s,
                     (int)(matches[i].data() - match_chars) + mlen);
                 s = js_str_substring_utf16(str_root.get(), start_units, end_units);
             } else if (full_unicode) {
-                int start_units = (int)js_utf16_index_from_byte(chars, len,
+                int start_units = (int)js_utf16_index_from_byte(input_s,
                     (int)(matches[i].data() - match_chars));
-                int end_units = (int)js_utf16_index_from_byte(chars, len,
+                int end_units = (int)js_utf16_index_from_byte(input_s,
                     (int)(matches[i].data() - match_chars) + mlen);
                 s = js_str_substring_utf16(str_root.get(), start_units, end_units);
             } else {
@@ -18533,7 +18558,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     }
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
-    if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
+    if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_s, match_index);
     key_root.set(js_name_item("index", 5));
     js_set_key_default(result_root.get(), key_root.get(),
         (Item){.item = i2it(match_index)});
@@ -18582,16 +18607,16 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                 if (idx < num_groups && matches[idx].data()) {
                     int mlen = (int)matches[idx].size();
                     if (utf16_subject) {
-                        int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                        int start_units = (int)js_utf16_index_from_byte(match_s,
                             (int)(matches[idx].data() - match_chars));
-                        int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                        int end_units = (int)js_utf16_index_from_byte(match_s,
                             (int)(matches[idx].data() - match_chars) + mlen);
                         val_root.set(js_str_substring_utf16(
                             str_root.get(), start_units, end_units));
                     } else if (full_unicode) {
-                        int start_units = (int)js_utf16_index_from_byte(chars, len,
+                        int start_units = (int)js_utf16_index_from_byte(input_s,
                             (int)(matches[idx].data() - match_chars));
-                        int end_units = (int)js_utf16_index_from_byte(chars, len,
+                        int end_units = (int)js_utf16_index_from_byte(input_s,
                             (int)(matches[idx].data() - match_chars) + mlen);
                         val_root.set(js_str_substring_utf16(
                             str_root.get(), start_units, end_units));
@@ -22341,6 +22366,8 @@ static Item js_string_intrinsic_algorithm(Item str,
     if (operation == JS_STRING_INTRINSIC_NORMALIZE || operation == JS_STRING_INTRINSIC_LOCALE_COMPARE)
         return js_string_text_with_ops(str, operation, argc ? args[0] : make_js_undefined(), NULL);
     if (operation == JS_STRING_INTRINSIC_SPLIT) {
+        RootFrame roots(3);
+        Rooted<Item> source_root(roots, str), separator_root(roots, ItemNull), units_root(roots, ItemNull);
         // ES spec §21.1.3.21: check [Symbol.split] on separator
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
             && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
@@ -22358,6 +22385,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
         // Step 3: ToString(this) — deferred from entry per spec ordering
         JS_ASSIGN_OR_RETURN(receiver_status, js_string_coerce_receiver(&str));
+        source_root.set(str);
         // ES spec steps 6-8: compute limit, coerce separator, check limit=0
         // Step 6: ToUint32(limit) — must happen before ToString(separator)
         uint32_t lim = 0xFFFFFFFF; // 2^32 - 1
@@ -22401,6 +22429,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (get_type_id(sep) != LMD_TYPE_STRING) {
             JS_ASSIGN_OR_RETURN_INTO(sep, js_to_string(sep));
         }
+        separator_root.set(sep);
         // Step 8: If lim = 0, return empty array (after separator coercion)
         if (lim == 0) return js_array_new(0);
         // JS edge case: empty string split
@@ -22425,14 +22454,15 @@ static Item js_string_intrinsic_algorithm(Item str,
             // Lambda's fn_split splits by code point (S17.1.1) — right for
             // Lambda, wrong here. ASCII keeps the shared path: there the two
             // readings coincide and fn_split is cheaper.
-            Item units_result = js_array_new(0);
+            // substring allocation can collect before the first append (D5.3.3).
+            units_root.set(js_array_new(0));
             int64_t units = js_string_utf16_length(sstr);
             for (int64_t i = 0; i < units; i++) {
                 if ((uint64_t)i >= (uint64_t)lim) break;
-                js_array_push(units_result,
-                    js_str_substring_utf16(str, (int)i, (int)i + 1));
+                JS_RETURN_IF_ERROR(js_array_push(units_root.get(),
+                    js_str_substring_utf16(source_root.get(), i, i + 1)));
             }
-            return units_result;
+            return units_root.get();
         }
         // The shared ASCII literal scanner can construct tagged JS slots
         // directly; otherwise retain the Lambda split and its lane boundary.
@@ -25632,16 +25662,508 @@ static Item js_intl_construct_plain_object(Item new_target, uint64_t* result_hom
     return result;
 }
 
-static Item js_intl_number_format_format(Item /*this_value*/, Item* args,
-        int argc) {
-    Item value = argc > 0 && args ? args[0] : make_js_undefined();
-    Item number = js_to_number(value);
-    return item_is_error(number) ? number : js_to_string(number);
+static unsigned char js_intl_ascii_case(unsigned char value, bool upper = false) {
+    if (value >= 'A' && value <= 'Z') value += 'a' - 'A';
+    return upper && value >= 'a' && value <= 'z' ? value + 'A' - 'a' : value;
 }
 
-static Item js_intl_number_format_construct_body(Item /*callee*/, Item* /*args*/,
-        int /*argc*/, Item new_target, uint64_t* result_home) {
-    return js_intl_construct_plain_object(new_target, result_home);
+// locale records contain syntax-derived data; all published strings stay precisely rooted.
+enum JsIntlLocaleField { JS_INTL_LOCALE_TAG, JS_INTL_LOCALE_BASE,
+    JS_INTL_LOCALE_LANGUAGE, JS_INTL_LOCALE_SCRIPT, JS_INTL_LOCALE_REGION, JS_INTL_LOCALE_FIELDS };
+struct JsLocaleSubtag { char* text; size_t length; };
+
+static bool js_locale_subtag_matches(const char* text, size_t length, bool alpha, bool digit) {
+    if (!length) return false;
+    for (size_t i = 0; i < length; i++) {
+        char c = text[i];
+        if (!(alpha && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) &&
+                !(digit && c >= '0' && c <= '9')) return false;
+    }
+    return true;
+}
+
+static Item js_intl_locale_record(Item tag, Item options) {
+    RootFrame roots(7);
+    Rooted<Item> input(roots, tag), opts(roots, options), record(roots, ItemNull);
+    Rooted<Item> language(roots, ItemNull), script(roots, ItemNull), region(roots, ItemNull), value(roots, ItemNull);
+    if (get_type_id(input.get()) != LMD_TYPE_STRING && !js_is_object_value(input.get()))
+        return js_throw_type_error("Locale tag must be a string or object");
+    input.set(js_to_string(input.get()));
+    JS_RETURN_IF_ERROR(input.get());
+    String* text = it2s(input.get());
+    lam::Temp<char> copy = lam::temp_array<char>((size_t)text->len + 1, MEM_CAT_TEMP);
+    lam::Temp<JsLocaleSubtag> subtags = lam::temp_array_zero<JsLocaleSubtag>((size_t)text->len / 2 + 1, MEM_CAT_TEMP);
+    if (!copy || !subtags) return ItemError;
+    memcpy(copy.get(), text->chars, text->len);
+    copy.get()[text->len] = 0;
+    size_t count = 0, start = 0;
+    for (size_t i = 0; i <= text->len; i++) {
+        if (i != text->len && copy.get()[i] != '-') continue;
+        size_t length = i - start;
+        if (!length || length > 8 || !js_locale_subtag_matches(copy.get() + start, length, true, true))
+            return js_throw_range_error("Invalid language tag");
+        subtags.get()[count++] = {copy.get() + start, length};
+        copy.get()[i] = 0;
+        for (size_t j = start; j < i; j++)
+            copy.get()[j] = js_intl_ascii_case(copy.get()[j]);
+        start = i + 1;
+    }
+    JsLocaleSubtag* tags = subtags.get();
+    if (tags[0].length < 2 || tags[0].length == 4 ||
+            !js_locale_subtag_matches(tags[0].text, tags[0].length, true, false))
+        return js_throw_range_error("Invalid locale language");
+    size_t cursor = 1, script_index = 0, region_index = 0;
+    if (cursor < count && tags[cursor].length == 4 &&
+            js_locale_subtag_matches(tags[cursor].text, 4, true, false)) script_index = cursor++;
+    if (cursor < count && ((tags[cursor].length == 2 &&
+            js_locale_subtag_matches(tags[cursor].text, 2, true, false)) ||
+            (tags[cursor].length == 3 && js_locale_subtag_matches(tags[cursor].text, 3, false, true))))
+        region_index = cursor++;
+    size_t variants = cursor;
+    for (; cursor < count && tags[cursor].length > 1; cursor++) {
+        size_t length = tags[cursor].length;
+        if (length < 5 && !(length == 4 && tags[cursor].text[0] >= '0' && tags[cursor].text[0] <= '9'))
+            return js_throw_range_error("Invalid locale variant");
+        for (size_t previous = variants; previous < cursor; previous++)
+            if (strcmp(tags[previous].text, tags[cursor].text) == 0)
+                return js_throw_range_error("Duplicate locale variant");
+    }
+    size_t extensions = cursor;
+    uint64_t seen_extensions = 0;
+    while (cursor < count) {
+        JsLocaleSubtag extension = tags[cursor++];
+        if (extension.length != 1 || extension.text[0] == 'x')
+            return js_throw_range_error("Unsupported locale extension");
+        unsigned char name = extension.text[0];
+        unsigned bit = name >= 'a' ? name - 'a' + 10 : name - '0';
+        uint64_t mask = UINT64_C(1) << bit;
+        if (seen_extensions & mask) return js_throw_range_error("Duplicate locale extension");
+        seen_extensions |= mask;
+        size_t first = cursor;
+        while (cursor < count && tags[cursor].length > 1) cursor++;
+        if (cursor == first) return js_throw_range_error("Empty locale extension");
+    }
+    language.set(js_make_string_len(tags[0].text, tags[0].length));
+    if (script_index) {
+        tags[script_index].text[0] = js_intl_ascii_case(tags[script_index].text[0], true);
+        script.set(js_make_string_len(tags[script_index].text, 4));
+    }
+    if (region_index) {
+        for (size_t i = 0; i < tags[region_index].length; i++)
+            tags[region_index].text[i] = js_intl_ascii_case(tags[region_index].text[i], true);
+        region.set(js_make_string_len(tags[region_index].text, tags[region_index].length));
+    }
+    if (get_type_id(opts.get()) == LMD_TYPE_NULL) return js_throw_type_error("Locale options cannot be null");
+    Rooted<Item>* fields[] = {&language, &script, &region};
+    const char* names[] = {"language", "script", "region"};
+    if (get_type_id(opts.get()) != LMD_TYPE_UNDEFINED) {
+        for (size_t i = 0; i < 3; i++) {
+            value.set(js_get_key_cstr(opts.get(), names[i]));
+            JS_RETURN_IF_ERROR(value.get());
+            if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) continue;
+            value.set(js_to_string(value.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            String* part = it2s(value.get());
+            bool valid = i == 0 ? part->len >= 2 && part->len <= 8 && part->len != 4 &&
+                js_locale_subtag_matches(part->chars, part->len, true, false) : i == 1 ?
+                part->len == 4 && js_locale_subtag_matches(part->chars, 4, true, false) :
+                (part->len == 2 && js_locale_subtag_matches(part->chars, 2, true, false)) ||
+                (part->len == 3 && js_locale_subtag_matches(part->chars, 3, false, true));
+            if (!valid) return js_throw_range_error("Invalid locale option");
+            char normalized[9];
+            for (size_t j = 0; j < part->len; j++) {
+                normalized[j] = js_intl_ascii_case(part->chars[j], i == 2 || (i == 1 && j == 0));
+            }
+            fields[i]->set(js_make_string_len(normalized, part->len));
+        }
+    }
+    record.set(js_array_new(0));
+    js_set_prototype(record.get(), ItemNull);
+    StrBuf* canonical = strbuf_new();
+    if (!canonical) return ItemError;
+    for (Rooted<Item>* field : fields) if (get_type_id(field->get()) == LMD_TYPE_STRING) {
+        if (canonical->length) strbuf_append_char(canonical, '-');
+        String* part = it2s(field->get());
+        strbuf_append_str_n(canonical, part->chars, part->len);
+    }
+    for (size_t i = variants; i < extensions; i++) {
+        strbuf_append_char(canonical, '-'); strbuf_append_str(canonical, tags[i].text);
+    }
+    value.set(js_make_string_len(canonical->str, canonical->length));
+    js_array_push(record.get(), value.get()); // reserve the full tag before appending extensions.
+    js_array_push(record.get(), value.get());
+    for (Rooted<Item>* field : fields)
+        js_array_push(record.get(), field->get().item == ItemNull.item ? make_js_undefined() : field->get());
+    for (size_t i = extensions; i < count; i++) {
+        strbuf_append_char(canonical, '-'); strbuf_append_str(canonical, tags[i].text);
+    }
+    value.set(js_strbuf_take_item(canonical));
+    js_set_key_default(record.get(), (Item){.item = i2it(JS_INTL_LOCALE_TAG)}, value.get());
+    return record.get();
+}
+
+static Item js_intl_locale_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    RootFrame roots(1);
+    Rooted<Item> record(roots, js_native_private_array_state(receiver, JS_CLASS_INTL_LOCALE,
+        JS_INTL_LOCALE_FIELDS, "Illegal Intl.Locale receiver"));
+    JS_RETURN_IF_ERROR(record.get());
+    return js_elements_get_int(record.get(), (int)js_fn_native((JsFunction*)callee.function)->target.bits);
+}
+
+static Item js_intl_locale_construct_body(Item callee, Item* args, int argc,
+        Item new_target, uint64_t* result_home) {
+    RootFrame roots(5);
+    Rooted<Item> constructor(roots, callee), target(roots, new_target);
+    Rooted<Item> record(roots, js_intl_locale_record(argc ? args[0] : make_js_undefined(),
+        argc > 1 ? args[1] : make_js_undefined()));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> key(roots, js_private_key_for_class(constructor.get(), js_name_item("#IntlLocale")));
+    JS_RETURN_IF_ERROR(key.get());
+    Rooted<Item> result(roots, js_native_private_array_object(JS_CLASS_INTL_LOCALE, key.get(), record.get(), ItemNull));
+    JS_RETURN_IF_ERROR(result.get());
+    result.set(js_apply_constructed_default_prototype(result.get(), target.get(), JS_CLASS_INTL_LOCALE));
+    if (result_home) *result_home = result.get().item;
+    return result.get();
+}
+
+struct JsIntlLocaleLsr { char language[9], script[5], region[4]; };
+
+static size_t js_intl_locale_lsr_write(char* output, const JsIntlLocaleLsr* value, unsigned mask) {
+    const char* parts[] = {value->language, mask & 1 ? value->script : "", mask & 2 ? value->region : ""};
+    size_t length = 0;
+    for (const char* part : parts) if (*part) {
+        if (length) output[length++] = '-';
+        size_t count = strlen(part);
+        memcpy(output + length, part, count);
+        length += count;
+    }
+    output[length] = 0;
+    return length;
+}
+
+static bool js_intl_locale_add_likely(JsIntlLocaleLsr* value) {
+    if (strcmp(value->script, "Zzzz") == 0) value->script[0] = 0;
+    if (strcmp(value->region, "ZZ") == 0) value->region[0] = 0;
+    if (strcmp(value->language, "und") != 0 && *value->script && *value->region) return true;
+    // CLDR lookup retains supplied subtags; unknown languages do not inherit English defaults.
+    const unsigned masks[] = {3, 1, 2, 0};
+    for (unsigned mask : masks) {
+        char key[20];
+        js_intl_locale_lsr_write(key, value, mask);
+        size_t low = 0, high = sizeof(js_intl_likely_subtags) / sizeof(js_intl_likely_subtags[0]);
+        while (low < high) {
+            size_t middle = low + (high - low) / 2;
+            const JsIntlLikelySubtag* entry = &js_intl_likely_subtags[middle];
+            int order = strcmp(key, entry->source);
+            if (order < 0) high = middle;
+            else if (order > 0) low = middle + 1;
+            else {
+                const char* script = strchr(entry->target, '-') + 1;
+                const char* region = strchr(script, '-') + 1;
+                if (strcmp(value->language, "und") == 0) {
+                    size_t length = script - entry->target - 1;
+                    memcpy(value->language, entry->target, length);
+                    value->language[length] = 0;
+                }
+                if (!*value->script) { memcpy(value->script, script, 4); value->script[4] = 0; }
+                if (!*value->region) strcpy(value->region, region);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static Item js_intl_locale_likely(Item callee, Item receiver, Item*, int, uint64_t*) {
+    RootFrame roots(3);
+    Rooted<Item> record(roots, js_native_private_array_state(receiver, JS_CLASS_INTL_LOCALE,
+        JS_INTL_LOCALE_FIELDS, "Illegal Intl.Locale receiver"));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> constructor(roots, ((JsFunction*)callee.function)->env[0]);
+    Rooted<Item> tag(roots, js_elements_get_int(record.get(), JS_INTL_LOCALE_TAG));
+    JsIntlLocaleLsr original = {};
+    char* parts[] = {original.language, original.script, original.region};
+    size_t suffix = 0;
+    for (int i = 0; i < 3; i++) {
+        Item field = js_elements_get_int(record.get(), JS_INTL_LOCALE_LANGUAGE + i);
+        if (get_type_id(field) != LMD_TYPE_STRING) continue;
+        String* text = it2s(field);
+        memcpy(parts[i], text->chars, text->len);
+        suffix += text->len + (i ? 1 : 0);
+    }
+    JsIntlLocaleLsr selected = original;
+    if (js_intl_locale_add_likely(&selected)) {
+        if (js_fn_native((JsFunction*)callee.function)->target.bits) {
+            // minimization favors the region and compares maximized triples, preserving the suffix.
+            JsIntlLocaleLsr maximal = selected;
+            char maximum[20];
+            js_intl_locale_lsr_write(maximum, &maximal, 3);
+            const unsigned masks[] = {0, 2, 1};
+            for (unsigned mask : masks) {
+                JsIntlLocaleLsr trial = maximal;
+                if (!(mask & 1)) trial.script[0] = 0;
+                if (!(mask & 2)) trial.region[0] = 0;
+                JsIntlLocaleLsr expanded = trial;
+                char candidate[20];
+                if (!js_intl_locale_add_likely(&expanded)) continue;
+                js_intl_locale_lsr_write(candidate, &expanded, 3);
+                if (strcmp(candidate, maximum) == 0) {
+                    selected = trial;
+                    break;
+                }
+            }
+        }
+        char prefix[20];
+        size_t length = js_intl_locale_lsr_write(prefix, &selected, 3);
+        StrBuf* buffer = strbuf_new();
+        if (!buffer) return ItemError;
+        strbuf_append_str_n(buffer, prefix, length);
+        String* source = it2s(tag.get());
+        strbuf_append_str_n(buffer, source->chars + suffix, source->len - suffix);
+        tag.set(js_strbuf_take_item(buffer));
+    }
+    // native closure ownership keeps the intrinsic constructor independent of public replacement.
+    Item argument = tag.get();
+    return js_construct_value(constructor.get(), &argument, 1, constructor.get(), nullptr, false);
+}
+
+static Item js_intl_locale_install(Item intl) {
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, intl), constructor(roots, js_new_native_body_constructor(
+        js_intrinsic_ctor_requires_new_call_body, js_intl_locale_construct_body, 1));
+    Rooted<Item> prototype(roots, js_new_object()), getter(roots, ItemNull);
+    js_set_function_name(constructor.get(), js_name_item("Locale"));
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    const char* properties[] = {"toString", "baseName", "language", "script", "region"};
+    for (size_t i = 0; i < JS_INTL_LOCALE_FIELDS; i++) {
+        getter.set(js_new_native_payload_function(js_intl_locale_get, i, 0));
+        js_set_function_name(getter.get(), js_name_item(properties[i]));
+        if (i == JS_INTL_LOCALE_TAG) {
+            js_set_key_cstr(prototype.get(), properties[i], getter.get());
+            js_mark_non_enumerable(prototype.get(), js_name_item(properties[i]));
+        } else js_install_native_accessor(prototype.get(), js_name_item(properties[i]), getter.get(), ItemNull, JSPD_NON_ENUMERABLE);
+    }
+    const char* methods[] = {"maximize", "minimize"};
+    for (unsigned i = 0; i < 2; i++) {
+        Item* environment = js_alloc_env1(constructor.get());
+        if (!environment) return ItemError;
+        getter.set(js_new_native_payload_function(js_intl_locale_likely, i, 0, environment, 1));
+        js_set_function_name(getter.get(), js_name_item(methods[i]));
+        js_set_key_cstr(prototype.get(), methods[i], getter.get());
+        js_mark_non_enumerable(prototype.get(), js_name_item(methods[i]));
+    }
+    js_namespace_set_to_string_tag(prototype.get(), "Intl.Locale", 11);
+    js_set_key_cstr(owner.get(), "Locale", constructor.get());
+    return constructor.get();
+}
+
+enum JsIntlNumberField { JS_INTL_NUMBER_LOCALE, JS_INTL_NUMBER_GROUP,
+    JS_INTL_NUMBER_MIN_INTEGER, JS_INTL_NUMBER_MIN_FRACTION, JS_INTL_NUMBER_MAX_FRACTION,
+    JS_INTL_NUMBER_STRIP_ZEROS, JS_INTL_NUMBER_BOUND_FORMAT, JS_INTL_NUMBER_FIELDS };
+
+static Item js_intl_number_state(Item receiver) {
+    return js_native_private_array_state(receiver, JS_CLASS_INTL_NUMBER_FORMAT,
+        JS_INTL_NUMBER_FIELDS, "Illegal Intl.NumberFormat receiver");
+}
+
+static Item js_intl_number_part(Item parts, const char* type, const char* text, size_t length) {
+    RootFrame roots(4);
+    Rooted<Item> output(roots, parts), part(roots, js_new_object());
+    Rooted<Item> value(roots, js_make_string_len(text, length)), kind(roots, js_name_item(type));
+    JS_RETURN_IF_ERROR(js_create_data_property(part.get(), js_name_item("type"), kind.get()));
+    JS_RETURN_IF_ERROR(js_create_data_property(part.get(), js_name_item("value"), value.get()));
+    return js_array_push(output.get(), part.get());
+}
+
+static Item js_intl_number_render(Item state, Item input, bool parts) {
+    RootFrame roots(5);
+    Rooted<Item> record(roots, state), number(roots, input), text(roots, ItemNull);
+    Rooted<Item> result(roots, js_array_new(0)), part(roots, ItemNull);
+    number.set(js_to_number(number.get()));
+    JS_RETURN_IF_ERROR(number.get());
+    double value = 0;
+    if (!item_try_to_double(number.get(), &value)) return ItemError;
+    bool negative = signbit(value) && !isnan(value);
+    if (negative) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "minusSign", "-", 1));
+    if (!isfinite(value)) {
+        JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), isnan(value) ? "nan" : "infinity",
+            isnan(value) ? "NaN" : "\xe2\x88\x9e", 3));
+    } else {
+        text.set(js_to_string(number.get()));
+        JS_RETURN_IF_ERROR(text.get());
+        String* source = it2s(text.get());
+        char significant[32]; size_t significant_count = 0;
+        int decimal_position = 0; bool dot = false;
+        for (size_t i = negative && source->chars[0] == '-' ? 1 : 0; i < source->len; i++) {
+            char c = source->chars[i];
+            if (c == '.') { dot = true; continue; }
+            if (c == 'e') { decimal_position += (int)strtol(source->chars + i + 1, nullptr, 10); break; }
+            if (significant_count < sizeof(significant)) significant[significant_count++] = c;
+            if (!dot) decimal_position++;
+        }
+        int minimum_integer = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MIN_INTEGER));
+        int minimum_fraction = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MIN_FRACTION));
+        int fraction = (int)it2i(js_elements_get_int(record.get(), JS_INTL_NUMBER_MAX_FRACTION));
+        int integer = decimal_position > 0 ? decimal_position : 1;
+        // binary64's shortest decimal plus 100 fraction digits fits this native buffer.
+        char digits[512]; memset(digits, '0', sizeof(digits));
+        for (size_t i = 0; i < significant_count; i++) {
+            int position = integer + (int)i - decimal_position;
+            if (position >= 0 && position <= integer + fraction) digits[position] = significant[i];
+        }
+        if (digits[integer + fraction] >= '5') {
+            int position = integer + fraction - 1;
+            while (position >= 0 && digits[position] == '9') digits[position--] = '0';
+            if (position >= 0) digits[position]++;
+            else { memmove(digits + 1, digits, integer + fraction); digits[0] = '1'; integer++; }
+        }
+        bool whole = true;
+        for (int i = 0; i < fraction; i++) if (digits[integer + i] != '0') whole = false;
+        if (whole && it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_STRIP_ZEROS))) minimum_fraction = 0;
+        while (fraction > minimum_fraction && digits[integer + fraction - 1] == '0') fraction--;
+        if (integer < minimum_integer) {
+            int padding = minimum_integer - integer;
+            memmove(digits + padding, digits, integer + fraction);
+            memset(digits, '0', padding); integer = minimum_integer;
+        }
+        bool grouping = it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_GROUP));
+        for (int start = 0; start < integer;) {
+            int length = grouping ? (start ? 3 : (integer - 1) % 3 + 1) : integer;
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "integer", digits + start, length));
+            start += length;
+            if (start < integer) JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "group", ",", 1));
+        }
+        if (fraction) {
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "decimal", ".", 1));
+            JS_RETURN_IF_ERROR(js_intl_number_part(result.get(), "fraction", digits + integer, fraction));
+        }
+    }
+    if (parts) return result.get();
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return ItemError;
+    for (int64_t i = 0; i < js_array_length(result.get()); i++) {
+        part.set(js_get_key_cstr(js_elements_get_int(result.get(), i), "value"));
+        String* value = it2s(part.get());
+        strbuf_append_str_n(buffer, value->chars, value->len);
+    }
+    return js_strbuf_take_item(buffer);
+}
+
+static Item js_intl_number_bound_format(Item callee, Item, Item* args, int argc, uint64_t*) {
+    return js_intl_number_render(((JsFunction*)callee.function)->env[0],
+        argc ? args[0] : make_js_undefined(), false);
+}
+static Item js_intl_number_format_format(Item receiver, Item*, int) {
+    RootFrame roots(2);
+    Rooted<Item> record(roots, js_intl_number_state(receiver)), method(roots, ItemNull);
+    JS_RETURN_IF_ERROR(record.get());
+    method.set(js_elements_get_int(record.get(), JS_INTL_NUMBER_BOUND_FORMAT));
+    if (get_type_id(method.get()) == LMD_TYPE_FUNC) return method.get();
+    Item* environment = js_alloc_env1(record.get());
+    if (!environment) return ItemError;
+    method.set(js_new_native_payload_function(js_intl_number_bound_format, 0, 1, environment, 1));
+    js_set_function_name(method.get(), js_name_item(""));
+    js_set_key_default(record.get(), (Item){.item = i2it(JS_INTL_NUMBER_BOUND_FORMAT)}, method.get());
+    return method.get();
+}
+static Item js_intl_number_format_parts(Item receiver, Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> input(roots, argc ? args[0] : make_js_undefined());
+    Rooted<Item> record(roots, js_intl_number_state(receiver));
+    JS_RETURN_IF_ERROR(record.get());
+    return js_intl_number_render(record.get(), input.get(), true);
+}
+static Item js_intl_number_format_options(Item receiver, Item*, int) {
+    RootFrame roots(3);
+    Rooted<Item> record(roots, js_intl_number_state(receiver));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> result(roots, js_new_object()), value(roots, ItemNull);
+    const char* numeric[] = {"locale", "useGrouping", "minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits"};
+    for (size_t i = 0; i < sizeof(numeric) / sizeof(*numeric); i++) {
+        value.set(js_elements_get_int(record.get(), i));
+        if (i == JS_INTL_NUMBER_GROUP && it2b(value.get())) value.set(js_name_item("auto"));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(numeric[i]), value.get()));
+    }
+    const struct { const char* name; const char* value; } settings[] = {
+        {"numberingSystem", "latn"}, {"style", "decimal"}, {"notation", "standard"},
+        {"signDisplay", "auto"}, {"roundingMode", "halfExpand"}, {"roundingPriority", "auto"}
+    };
+    for (const auto& setting : settings)
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(setting.name), js_name_item(setting.value)));
+    value.set(js_name_item(it2b(js_elements_get_int(record.get(), JS_INTL_NUMBER_STRIP_ZEROS)) ? "stripIfInteger" : "auto"));
+    JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("trailingZeroDisplay"), value.get()));
+    JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("roundingIncrement"), (Item){.item = i2it(1)}));
+    return result.get();
+}
+
+static Item js_intl_number_format_construct_body(Item callee, Item* args,
+        int argc, Item new_target, uint64_t* result_home) {
+    RootFrame roots(7);
+    Rooted<Item> constructor(roots, callee), target(roots, new_target);
+    Rooted<Item> locales(roots, argc ? args[0] : make_js_undefined());
+    Rooted<Item> options(roots, argc > 1 ? args[1] : make_js_undefined());
+    Rooted<Item> record(roots, js_array_new(0)), value(roots, ItemNull), result(roots, ItemNull);
+    js_set_prototype(record.get(), ItemNull);
+    if (get_type_id(locales.get()) == LMD_TYPE_ARRAY) locales.set(js_elements_get_int(locales.get(), 0));
+    if (get_type_id(locales.get()) == LMD_TYPE_UNDEFINED) value.set(js_name_item("en"));
+    else {
+        value.set(js_intl_locale_record(locales.get(), make_js_undefined()));
+        JS_RETURN_IF_ERROR(value.get());
+        Item language = js_elements_get_int(value.get(), JS_INTL_LOCALE_LANGUAGE);
+        value.set(js_string_equals(language, "en") ? js_elements_get_int(value.get(), JS_INTL_LOCALE_TAG) : js_name_item("en"));
+    }
+    js_array_push(record.get(), value.get());
+    if (get_type_id(options.get()) == LMD_TYPE_NULL) return js_throw_type_error("NumberFormat options cannot be null");
+    const struct { const char* name; const char* supported; } strings[] = {
+        {"style", "decimal"}, {"notation", "standard"}, {"signDisplay", "auto"}, {"numberingSystem", "latn"},
+        {"roundingMode", "halfExpand"}, {"roundingPriority", "auto"}
+    };
+    if (get_type_id(options.get()) != LMD_TYPE_UNDEFINED) for (const auto& option : strings) {
+        value.set(js_get_key_cstr(options.get(), option.name)); JS_RETURN_IF_ERROR(value.get());
+        if (get_type_id(value.get()) == LMD_TYPE_UNDEFINED) continue;
+        value.set(js_to_string(value.get())); JS_RETURN_IF_ERROR(value.get());
+        if (!js_string_equals(value.get(), option.supported)) return js_throw_range_error("Unsupported NumberFormat option");
+    }
+    value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), "useGrouping"));
+    JS_RETURN_IF_ERROR(value.get());
+    js_array_push(record.get(), (Item){.item = b2it(get_type_id(value.get()) == LMD_TYPE_UNDEFINED || js_is_truthy(value.get()))});
+    const char* digits[] = {"minimumIntegerDigits", "minimumFractionDigits", "maximumFractionDigits"};
+    int minimum_fraction = 0;
+    for (size_t i = 0; i < 3; i++) {
+        int fallback = i == 0 ? 1 : i == 1 ? 0 : minimum_fraction > 3 ? minimum_fraction : 3;
+        int low = i == 0 ? 1 : 0, high = i == 0 ? 21 : 100;
+        value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), digits[i]));
+        JS_RETURN_IF_ERROR(value.get());
+        double number = fallback;
+        if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED) {
+            value.set(js_to_number(value.get())); JS_RETURN_IF_ERROR(value.get());
+            item_try_to_double(value.get(), &number);
+            if (!isfinite(number) || number < low || number > high) return js_throw_range_error("Invalid NumberFormat digit option");
+        }
+        int integer = (int)floor(number);
+        if (i == 1) minimum_fraction = integer;
+        if (i == 2 && integer < minimum_fraction) return js_throw_range_error("Invalid fraction digit range");
+        js_array_push(record.get(), (Item){.item = i2it(integer)});
+    }
+    value.set(get_type_id(options.get()) == LMD_TYPE_UNDEFINED ? make_js_undefined() : js_get_key_cstr(options.get(), "trailingZeroDisplay"));
+    JS_RETURN_IF_ERROR(value.get());
+    bool strip = false;
+    if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED) {
+        value.set(js_to_string(value.get())); JS_RETURN_IF_ERROR(value.get());
+        strip = js_string_equals(value.get(), "stripIfInteger");
+        if (!strip && !js_string_equals(value.get(), "auto")) return js_throw_range_error("Invalid trailingZeroDisplay");
+    }
+    js_array_push(record.get(), (Item){.item = b2it(strip)});
+    js_array_push(record.get(), make_js_undefined());
+    value.set(js_private_key_for_class(constructor.get(), js_name_item("#IntlNumberFormat")));
+    JS_RETURN_IF_ERROR(value.get());
+    result.set(js_native_private_array_object(JS_CLASS_INTL_NUMBER_FORMAT, value.get(), record.get(), ItemNull));
+    JS_RETURN_IF_ERROR(result.get());
+    result.set(js_apply_constructed_default_prototype(result.get(), target.get(), JS_CLASS_INTL_NUMBER_FORMAT));
+    if (result_home) *result_home = result.get().item;
+    return result.get();
 }
 
 static Item js_intl_number_format_call_body(Item callee, Item /*this_value*/,
@@ -25739,10 +26261,6 @@ static Item js_intl_date_time_format_call_body(Item callee, Item /*this_value*/,
         result_home);
 }
 
-static unsigned char js_intl_collator_fold_ascii(unsigned char value) {
-    return value >= 'A' && value <= 'Z'
-        ? (unsigned char)(value - 'A' + 'a') : value;
-}
 
 static int js_intl_collator_compare_strings(const String* left,
         const String* right) {
@@ -25780,8 +26298,8 @@ static int js_intl_collator_compare_strings(const String* left,
             }
             continue;
         }
-        left_byte = js_intl_collator_fold_ascii(left_byte);
-        right_byte = js_intl_collator_fold_ascii(right_byte);
+        left_byte = js_intl_ascii_case(left_byte);
+        right_byte = js_intl_ascii_case(right_byte);
         if (left_byte != right_byte) return left_byte < right_byte ? -1 : 1;
         left_index++;
         right_index++;
@@ -25843,7 +26361,7 @@ static Item js_intl_display_names_of(Item /*this_value*/, Item* args, int argc) 
         if (value->len != code_len) continue;
         bool matches = true;
         for (size_t byte = 0; byte < code_len; byte++) {
-            if (js_intl_collator_fold_ascii((unsigned char)value->chars[byte]) !=
+            if (js_intl_ascii_case((unsigned char)value->chars[byte]) !=
                     (unsigned char)names[index].code[byte]) {
                 matches = false;
                 break;
@@ -25924,7 +26442,7 @@ extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NU
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_realm_intrinsic_slots_ensure_roots();
-    RootFrame roots(21);
+    RootFrame roots(23);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
     Rooted<Item> segmenter_ctor_root(roots,
         js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
@@ -25976,8 +26494,14 @@ extern "C" Item js_get_intl_object_value() {
     js_set_function_name(number_format_ctor_root.get(), js_name_item("NumberFormat"));
     js_set_key_cstr(number_format_proto_root.get(), "constructor",
         number_format_ctor_root.get());
-    js_set_key_cstr(number_format_proto_root.get(), "format",
-        number_format_method_root.get());
+    JS_RETURN_IF_ERROR(js_define_accessor_partial(number_format_proto_root.get(), js_name_item("format"),
+        number_format_method_root.get(), 0, JSPD_NON_ENUMERABLE));
+    Rooted<Item> number_parts(roots, js_new_native_this_span_function(js_intl_number_format_parts));
+    Rooted<Item> number_options(roots, js_new_native_this_span_function(js_intl_number_format_options));
+    js_set_key_cstr(number_format_proto_root.get(), "formatToParts", number_parts.get());
+    js_mark_non_enumerable(number_format_proto_root.get(), js_name_item("formatToParts"));
+    js_set_key_cstr(number_format_proto_root.get(), "resolvedOptions", number_options.get());
+    js_mark_non_enumerable(number_format_proto_root.get(), js_name_item("resolvedOptions"));
     js_initialize_native_constructor_prototype(number_format_ctor_root.get(),
         number_format_proto_root.get());
     js_set_key_cstr(number_format_ctor_root.get(), "supportedLocalesOf",
@@ -26017,6 +26541,7 @@ extern "C" Item js_get_intl_object_value() {
     js_set_key_cstr(date_time_format_ctor_root.get(), "supportedLocalesOf",
         supported_locales_root.get());
     js_intl_object = intl_root.get();
+    JS_RETURN_IF_ERROR(js_intl_locale_install(intl_root.get()));
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());

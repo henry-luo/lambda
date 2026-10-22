@@ -186,6 +186,32 @@ TEST_F(CssStyleApplicationTest, AllRevertExposesUserAgentDeclaration) {
     EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_WIDTH), nullptr);
 }
 
+TEST_F(CssStyleApplicationTest, PropertyProjectionRetainsShorthandAndResetDependencies) {
+    const struct { CssPropertyCode source; const char* value; CssPropertyCode property; } cases[] = {
+        {CSS_PROPERTY_FONT, "italic 12px serif", CSS_PROPERTY_FONT_WEIGHT},
+        {CSS_PROPERTY_FONT, "italic 12px serif", CSS_PROPERTY_LINE_HEIGHT},
+        {CSS_PROPERTY_MARGIN, "3px", CSS_PROPERTY_MARGIN_LEFT},
+        {CSS_PROPERTY_TRANSITION, "opacity 1s", CSS_PROPERTY_TRANSITION_DURATION},
+    };
+    for (const auto& entry : cases) {
+        StyleTree* tree = style_tree_create(pool);
+        CssDeclaration* declaration = create_declaration(entry.source, entry.value);
+        ASSERT_NE(declaration, nullptr);
+        ASSERT_NE(style_tree_apply_declaration(tree, declaration), nullptr);
+        EXPECT_EQ(style_tree_get_property_declaration(tree, entry.property), declaration);
+    }
+    StyleTree* tree = style_tree_create(pool);
+    CssDeclaration* direction = create_declaration(CSS_PROPERTY_DIRECTION, "rtl");
+    CssDeclaration* bidi = create_declaration(CSS_PROPERTY_UNICODE_BIDI, "isolate");
+    CssDeclaration* reset = create_declaration(CSS_PROPERTY_ALL, "initial");
+    ASSERT_NE(style_tree_apply_declaration(tree, direction), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, bidi), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, reset), nullptr);
+    EXPECT_EQ(style_tree_get_property_declaration(tree, CSS_PROPERTY_WIDTH), reset);
+    EXPECT_EQ(style_tree_get_property_declaration(tree, CSS_PROPERTY_DIRECTION), direction);
+    EXPECT_EQ(style_tree_get_property_declaration(tree, CSS_PROPERTY_UNICODE_BIDI), bidi);
+}
+
 TEST_F(CssStyleApplicationTest, ComponentRollbackSharesShorthandLonghandAndLogicalSources) {
     StyleTree* tree = style_tree_create(pool);
     ASSERT_NE(tree, nullptr);

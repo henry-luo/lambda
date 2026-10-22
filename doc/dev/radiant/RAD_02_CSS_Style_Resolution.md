@@ -19,6 +19,13 @@ The parser produces `CssDeclaration` (`css_style.hpp:765`), each carrying a `Css
 
 Radiant must compare declarations when different CSS names write the same used-value slot, such as logical and physical border sides. Direct candidates use `css_declaration_cascade_compare()`, which includes origin, importance, layer order, specificity and source order. `resolve_css_styles()` assigns a style-pass-local rank to the winning declarations when layers are present; the per-side spacing, border and radius `*_specificity` fields retain that rank. Without layers, `get_cascade_priority()` keeps its compact origin/specificity/source-order encoding. This comparison does not select a winner for a single CSS property; the style tree already did that. The rank array lives in the layout scratch scope and cannot outlive the pass, consistent with **D4.5.1v4**.
 
+Single-property queries retain immutable shorthand dependencies rather than
+scanning the property registry on every read. The process-owned indexes contain
+property identifiers; winning declarations still belong to their native style
+trees (**D4.5.1v4**).
+`CssStyleApplicationTest.PropertyProjectionRetainsShorthandAndResetDependencies`
+covers font projections and the `all` exclusions.
+
 <img alt="Parse cascade resolve computed-props seam" src="diagram/rad02_css_seam.svg" width="720">
 
 The node this writes onto is the same unified DOM/view node described in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md); the layout modes in [RAD_03 — Layout Driver, Block Layout & BFC](RAD_03_Layout_Driver_Block_BFC.md) onward consume the props this doc produces.

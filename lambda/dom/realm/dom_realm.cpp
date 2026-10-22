@@ -51,6 +51,9 @@ Item dom_realm_native_private_array_state(Item receiver, int brand,
         int expected_length, const char* error_message) {
     return js_native_private_array_state(receiver, (JsClass)brand, expected_length, error_message);
 }
+Item dom_realm_native_private_array_object(int brand, Item key, Item state, Item prototype) {
+    return js_native_private_array_object((JsClass)brand, key, state, prototype);
+}
 void dom_realm_install_interface(Item global, const char* name) {
     js_dom_install_interface(global, name);
 }

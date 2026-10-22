@@ -144,6 +144,13 @@ enum JsClass : uint8_t {
     JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
     JS_CLASS_PERFORMANCE_OBSERVER,
     JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST,
+    JS_CLASS_CRYPTO_KEY,
+    JS_CLASS_INTL_LOCALE,
+    JS_CLASS_INTL_NUMBER_FORMAT,
+    JS_CLASS_ANIMATION,
+    JS_CLASS_PERFORMANCE_ENTRY,
+    JS_CLASS_PERFORMANCE_MARK,
+    JS_CLASS_PERFORMANCE_MEASURE,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -347,6 +354,13 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_EVENT_TARGET: return "EventTarget";
         case JS_CLASS_PERFORMANCE_OBSERVER: return "PerformanceObserver";
         case JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST: return "PerformanceObserverEntryList";
+        case JS_CLASS_CRYPTO_KEY: return "CryptoKey";
+        case JS_CLASS_INTL_LOCALE: return "Intl.Locale";
+        case JS_CLASS_INTL_NUMBER_FORMAT: return "Intl.NumberFormat";
+        case JS_CLASS_ANIMATION: return "Animation";
+        case JS_CLASS_PERFORMANCE_ENTRY: return "PerformanceEntry";
+        case JS_CLASS_PERFORMANCE_MARK: return "PerformanceMark";
+        case JS_CLASS_PERFORMANCE_MEASURE: return "PerformanceMeasure";
         case JS_CLASS_FILE_READER: return "FileReader";
         case JS_CLASS_EVENT_EMITTER: return "EventEmitter";
         case JS_CLASS_DOM_EXCEPTION: return "DOMException";

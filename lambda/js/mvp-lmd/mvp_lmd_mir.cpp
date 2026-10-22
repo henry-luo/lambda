@@ -8131,7 +8131,9 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
                 v = eval_reference_operation(c, eval_reference(c, id).eval_reference, JS_INTERP_REFERENCE_TYPEOF);
             else if (binding && binding->with_lookup)
                 v = with_reference_operation(c, with_reference(c, binding, u->operand), u->operand, LMD_PROP_GET, {}, true);
-            if (!v.reg && !receiver_value && !identifier_binding(c->program, id)) {
+            // reflected intrinsic names can be deleted or absent in a host profile;
+            // typeof must allow that miss while lexical bindings retain their TDZ check.
+            if (!v.reg && !receiver_value && (!binding || binding->reflected_intrinsic)) {
                 if (!c->program->global_receiver) return text(c, "undefined");
                 v = boxed(c, global_binding_access(c, u->operand, false, 0, true));
             }
