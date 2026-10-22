@@ -37,14 +37,15 @@ pub let catalog = [
     {id:"guide.update",label:"Move guide",fields:["guide","position"],target:false},
     {id:"guide.remove",label:"Remove guide",fields:["guide"],target:false},
     {id:"guide.clear",label:"Clear guides",fields:[],target:false},
-    {id:"guide.configure",label:"Guide view settings",fields:["visible","snap","layers"],target:false},
+    {id:"guide.layout",label:"Guide layout",fields:["preset","columns","rows","margin","gutter","replace"],target:false},
+    {id:"guide.configure",label:"Guide view settings",fields:["visible","snap","layers","locked"],target:false},
     {id:"layer.rasterize",label:"Rasterize layer",fields:[],target:true},
     {id:"effect.add",label:"Add editable effect",fields:["options","name"],target:true},
     {id:"effect.update",label:"Update effect",fields:["index","options","name"],target:true},
     {id:"effect.toggle",label:"Toggle effect",fields:["index"],target:true},
     {id:"effect.remove",label:"Remove effect",fields:["index"],target:true},
     {id:"effect.reorder",label:"Reorder effect",fields:["index","to"],target:true},
-    {id:"tool.configure",label:"Tool settings",fields:["tool","brush","foreground","background","selection_mode","tolerance","gradient_kind","straighten_axis","crop_aspect"],target:false},
+    {id:"tool.configure",label:"Tool settings",fields:["tool","brush","foreground","background","selection_mode","tolerance","gradient_kind","straighten_axis","crop_aspect","crop_ratio"],target:false},
     {id:"layer.select",label:"Select layer",fields:["ids","target"],target:false},
     {id:"layer.insert",label:"Place image",fields:["raster","name","position","parent"],target:false},
     {id:"layer.new",label:"New layer",fields:["name","parent"],target:false},
@@ -104,6 +105,7 @@ pub fn checked(command) any^ {
 pub fn command_state(st,id) any^ {
     let spec = descriptor(id)
     let reason = if (spec == null) "Unknown command" else if (st.gesture != null) "Finish the active gesture"
+        else if (starts_with(id,"guide.") and id != "guide.configure" and st.guides_locked) "Guides are locked"
         else if (spec.target and len(st.selected)==0) "Select a layer"
         else if (id == "history.undo" and not history.can_undo(st.hist)^) "Nothing to undo"
         else if (id == "history.redo" and not history.can_redo(st.hist)^) "Nothing to redo" else "";

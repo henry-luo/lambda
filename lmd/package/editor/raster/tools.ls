@@ -23,6 +23,8 @@ pub fn configure(st,command) any^ {
     let requested = model.value(command.brush,{})
     let straighten = model.value(command.straighten_axis,st.straighten_axis)
     let aspect = model.value(command.crop_aspect,st.crop_aspect)
+    let custom = model.value(command.crop_ratio,st.crop_ratio)
+    let checked_ratio = canvas.crop_ratio(st.doc,"custom",custom)^
     let limits = [{key:"size",low:0.5,high:4096},{key:"hardness",low:0,high:1},
         {key:"spacing",low:0.01,high:2},{key:"flow",low:0,high:1},{key:"opacity",low:0,high:1}]
     let brush = {*:st.brush,*:requested}
@@ -32,7 +34,7 @@ pub fn configure(st,command) any^ {
         not (requested is map) or any([for (key,value in requested) not (string(key) in [for (limit in limits) limit.key])]) or
         not all([for (limit in limits) model.finite(brush[limit.key]) and brush[limit.key]>=limit.low and brush[limit.key]<=limit.high]))
         raise error("Raster: invalid tool setting")
-    else {*:st,tool:tool,crop:if (tool == st.tool and aspect == st.crop_aspect) st.crop else null,crop_aspect:aspect,
+    else {*:st,tool:tool,crop:if (tool == st.tool and aspect == st.crop_aspect and custom == st.crop_ratio) st.crop else null,crop_aspect:aspect,crop_ratio:custom,
         brush:brush,selection_mode:mode,tolerance:tolerance,gradient_kind:gradient,straighten_axis:straighten,
         foreground:colors.parse(model.value(command.foreground,st.foreground),"raster.foreground")^,
         background:colors.parse(model.value(command.background,st.background),"raster.background")^}

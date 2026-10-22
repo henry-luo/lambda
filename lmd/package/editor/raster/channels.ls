@@ -1,11 +1,11 @@
 // S9.2.2: component views are snapshots; saved coverage is authored project metadata.
 import img: lambda.image
 import model: .model
-pub fn container(image) => [for (child in content(image) where name(child) == 'metadata' and child.role == 'photos_channels') child][0]
+import metadata: .metadata
+pub fn container(image) => metadata.container(image,'photos_channels')
 pub fn items(image) => model.saved_channels(image)
 pub fn lookup(image,id) => [for (channel in items(image) where channel.id == id) channel][0]
-fn replace(image,entries) any^ => img.with_children(image,[*[for (child in content(image) where child != container(image)) child],
-    <metadata role:'photos_channels',*entries>])^
+fn replace(image,entries) any^ => metadata.replace(image,'photos_channels',entries)^
 fn fresh(image,index=1) => if ("channel-" ++ string(index) in model.identifiers(image)) fresh(image,index+1)
     else "channel-" ++ string(index)
 pub fn component(raster,channel) any^ => img.from_array(img.channel(raster,channel)^)^

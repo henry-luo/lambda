@@ -17,6 +17,7 @@ pub fn cancel(st) => if (st.gesture == null) st else
 pub fn begin(st,input) any^ {
     let navigation_mode = if (input.navigator != null) "navigator" else if (input.ruler in ["x","y"]) "guide-new" else null
     if (st.gesture != null) raise error("Raster: a gesture is already active")
+    else if (navigation_mode == "guide-new" and st.guides_locked) st
     else if (navigation_mode == null and st.tool in ["clone","heal"] and input.alt == true)
         core.exec(st,{id:"retouch.source",point:[input.point.x,input.point.y]})^
     else if (navigation_mode == null and st.tool in ["wand","bucket"]) core.exec(st,
@@ -30,7 +31,7 @@ pub fn begin(st,input) any^ {
         else {*:st,foreground:[for (sample in img.sample(img.render_frame(st.doc)^,x,y)^) sample/255.0]}
     }
     else {
-        let guide = if (navigation_mode == null and st.tool == "move" and st.guides_visible) guides.lookup(st.doc,input.guide) else null
+        let guide = if (navigation_mode == null and st.tool == "move" and st.guides_visible and not st.guides_locked) guides.lookup(st.doc,input.guide) else null
         // an explicitly selected adjustment mask owns its hit region without hiding lower pixel layers otherwise.
         let hit = if (navigation_mode == null and st.tool == "move" and guide == null) model.hit(st.doc,input.point,
             if (st.target == "mask" and len(st.selected)==1) st.selected[0] else null) else null
@@ -47,7 +48,7 @@ pub fn begin(st,input) any^ {
             mode:if (navigation_mode != null) navigation_mode else if (guide == null) st.tool else "guide",guide:guide.id,axis:input.ruler,
             pointer:input.pointer,start:input.point,screen:input.screen,end:input.point,crop:st.crop,
             snap_boxes:if (navigation_mode == null and st.tool == "move" and guide == null and picked.snap_enabled and picked.snap_layers) model.snap_boxes(picked) else [],
-            points:[xy(input)],rotate:input.shift,handle:input.handle,shift:input.shift,alt:input.alt,
+            points:[xy(input)],rotate:input.shift,handle:input.handle,crop_handle:input.crop_handle,shift:input.shift,alt:input.alt,
             selection_mode:if (input.shift) "add" else st.selection_mode}},input))^
     }
 }
@@ -63,8 +64,11 @@ pub fn sample(st,input) {
 }
 pub fn render(st) any^ {
     if (st.gesture == null or st.gesture.mode in ["pan","navigator"]) st
-    else if (st.gesture.mode == "crop") {*:st,crop:crop.rectangle(st.doc,st.gesture.start,st.gesture.end,
-        if (st.crop_aspect == "free" and st.gesture.shift == true) "1:1" else st.crop_aspect)^}
+    else if (st.gesture.mode == "crop") {
+        let aspect = if (st.crop_aspect == "free" and st.gesture.shift == true) "1:1" else st.crop_aspect;
+        {*:st,crop:if (st.gesture.crop_handle == null) crop.rectangle(st.doc,st.gesture.start,st.gesture.end,aspect,st.crop_ratio)^
+            else crop.edit_rectangle(st.doc,st.gesture.crop,st.gesture.start,st.gesture.end,st.gesture.crop_handle,aspect,st.crop_ratio)^}
+    }
     else {
         let g = st.gesture
         let before = model.restore({*:st,doc:g.before,gesture:null},g.context)

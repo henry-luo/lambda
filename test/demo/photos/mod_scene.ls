@@ -6,6 +6,7 @@ import styles: lambda.editor.raster.styles
 import transforms: lambda.editor.raster.transform
 import tone: lambda.editor.raster.tone
 import canvas: lambda.editor.raster.canvas
+import guides: lambda.editor.raster.guides
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -69,7 +70,12 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition">
                 <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">
                 <div class:"raster-crop-shade",*[for (edge in ["top","bottom","left","right"]) <div 'data-crop-shade':edge>]>
-                <div class:"raster-crop">
+                <div class:"raster-crop",'data-raster-crop':"move",'aria-label':"Move crop rectangle", *[
+                    *[for (axis in ["x","y"]) for (fraction in [1/3,2/3]) <span class:"crop-third crop-third-" ++ axis,
+                        style:(if (axis == "x") "left:" else "top:") ++ string(fraction*100) ++ "%">],
+                    *[for (handle in canvas.handles) <button type:"button",'data-raster-crop':handle.id,
+                        class:"crop-handle handle-" ++ handle.id,'aria-label':"Resize crop " ++ handle.id,
+                        style:"left:" ++ string(handle.x*100) ++ "%;top:" ++ string(handle.y*100) ++ "%">]]>
                 <div class:"raster-grid"> <div class:"raster-guides"> <div class:"raster-reference">
                 <div class:"raster-transform",'aria-label':"Layer transform controls", *[
                     *[for (handle in transforms.handles) <button type:"button",'data-raster-handle':handle.id,
@@ -81,6 +87,9 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
             <div id:"crop-controls",class:"crop-controls",style:"display:none", *[
                 <select id:"crop-aspect",'aria-label':"Crop aspect ratio",title:"Aspect ratio; Shift makes a free crop square",
                     *[for (preset in canvas.crop_presets) <option value:preset.id,preset.label>]>,
+                <span id:"crop-custom",style:"display:none", *[
+                    <input id:"crop-ratio-width",type:"number",value:"1",'aria-label':"Custom crop ratio width">,
+                    <span ":">,<input id:"crop-ratio-height",type:"number",value:"1",'aria-label':"Custom crop ratio height">]>,
                 <span id:"crop-size","Drag to crop">,button("crop-apply","crop-apply","Apply crop"),button("crop-cancel","crop-cancel","Cancel") ]>>,
         <aside class:"dock", *[
             <section class:"properties", *[<h2 "Properties">,
@@ -197,8 +206,16 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
                 field("guide-position","Position in pixels",100,"number"),
                 <div class:"button-grid",*[button("guide-add","guide-add","Add guide"),button("guide-show","guide-show","Hide guides"),
                     button("guide-snap","guide-snap","Enable snapping"),button("guide-layers","guide-layers","Layer snapping on"),
-                    button("guide-clear","guide.clear","Clear guides")]>,
+                    button("guide-clear","guide.clear","Clear guides"),button("guide-lock","guide-lock","Lock guides")]>,
                 <div id:"guide-list">,
+                <h2 "Guide layout">,
+                <label "Preset" <select id:"guide-layout-preset",*[for (preset in guides.layouts) <option value:preset.id,preset.label>]>>,
+                <div id:"guide-layout-custom",style:"display:none",class:"fields", *[
+                    field("guide-columns","Columns",3,"number"),field("guide-rows","Rows",3,"number"),
+                    field("guide-margin","Margin (px)",0,"number"),field("guide-gutter","Gutter (px)",0,"number")]>,
+                <label "Existing guides" <select id:"guide-layout-mode",<option value:"replace","Replace"> <option value:"append","Keep and append">>>,
+                button("guide-layout","guide-layout","Apply layout"),
+                <p "Custom layouts use equal margins and gutters. Set a row or column count to zero to omit that axis.">,
                 <h2 "Straighten">,<p "Straighten (Q): draw along a horizon or upright edge on the selected layers. Release commits; Escape cancels. Canvas size stays unchanged.">,
                 <label "Align reference to" <select id:"straighten-axis",<option value:"horizontal","Horizontal"> <option value:"vertical","Vertical">>>,
                 button("straighten-tool","straighten-tool","Draw reference line")]>,

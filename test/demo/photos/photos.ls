@@ -27,11 +27,16 @@ let SOURCE = sys.proc.self.env.PHOTOS_SOURCE#
 let INITIAL = editor.open_session(editor.new_document()^ )^
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"photos")
 fn field(owner,id) => dom.get_state(present.node(owner,id),"value")
+pn whole_fields(owner,ids,message) any^ {
+    let values = [for (id in ids) float(field(owner,id))]
+    if (not all([for (v in values) model.finite(v) and v == floor(v)])) raise error(message)
+    return [for (v in values) int(v)]
+}
 // clearing a recovered error must also retire the same text from the status bar.
-fn clear_error(st) => {*:st,error:"",status:if (st.error != "" and st.status == st.error) "Ready" else st.status}
+fn clear_error(st) => {*:st,error:"",crop_ratio_draft:null,status:if (st.error != "" and st.status == st.error) "Ready" else st.status}
 fn base_session(st,name="Untitled") => {*:st,name:name,path:"",dialog:"",pending:"",error:"",status:"Ready · Place images to build a composition",
     effect_index:0,style_index:0,effect_draft:{},curve_draft:{},curve_mode:"linear",curve_channel:"rgb",curve_point:1,curve_drag:null,
-    painted_doc:null,token:0,scale:1.0,canvas_anchor:"top-left",size_draft:{width:st.doc.width,height:st.doc.height}}
+    painted_doc:null,token:0,scale:1.0,crop_ratio_draft:null,canvas_anchor:"top-left",size_draft:{width:st.doc.width,height:st.doc.height}}
 pn publish(owner,st,workspace=null) {
     var next = st
     present.publish(owner,st) ^ { dom.set_attribute(owner,"data-error",^.message) } ~ { next = ~ }
@@ -91,16 +96,20 @@ pn command(owner,st,action) any^ {
     if (action == "crop-cancel") { return {*:st,crop:null} }
     if (action == "crop-apply") { return crop.apply_draft(st)^ }
     if (action == "guide-add") {
-        let position = float(field(owner,"guide-position"))
-        if (not model.finite(position) or position != floor(position)) raise error("Photos: guide position must be a whole pixel")
-        return editor.exec(st,{id:"guide.add",axis:field(owner,"guide-axis"),position:int(position)})^
+        let position = whole_fields(owner,["guide-position"],"Photos: guide position must be a whole pixel")^[0]
+        return editor.exec(st,{id:"guide.add",axis:field(owner,"guide-axis"),position:position})^
     }
     if (action == "grid-configure") {
-        let spacing = float(field(owner,"grid-spacing"))
-        let subdivisions = float(field(owner,"grid-subdivisions"))
-        if (not all([for (value in [spacing,subdivisions]) model.finite(value) and value == floor(value)]))
-            raise error("Photos: grid settings require whole numbers")
-        return editor.exec(st,{id:"view.configure",spacing:int(spacing),subdivisions:int(subdivisions)})^
+        let values = whole_fields(owner,["grid-spacing","grid-subdivisions"],"Photos: grid settings require whole numbers")^
+        return editor.exec(st,{id:"view.configure",spacing:values[0],subdivisions:values[1]})^
+    }
+    if (action == "guide-lock") { return editor.exec(st,{id:"guide.configure",locked:not st.guides_locked})^ }
+    if (action == "guide-layout") {
+        let preset = field(owner,"guide-layout-preset")
+        let values = if (preset == "custom") whole_fields(owner,["guide-columns","guide-rows","guide-margin","guide-gutter"],
+            "Photos: guide layout requires whole numbers")^ else []
+        return editor.exec(st,{id:"guide.layout",preset:preset,replace:field(owner,"guide-layout-mode") == "replace",
+            *:if (preset == "custom") ({columns:values[0],rows:values[1],margin:values[2],gutter:values[3]}) else ({})})^
     }
     if (action in ["rulers-toggle","grid-toggle","grid-snap"]) {
         return editor.exec(st,{id:"view.configure",[if (action == "rulers-toggle") "rulers" else if (action == "grid-toggle") "grid" else "snap"]:
@@ -271,22 +280,20 @@ pn command(owner,st,action) any^ {
         return editor.exec(st,{id:"pixels.fill",color:if (st.target == "mask") [1.0] else [1.0,1.0,1.0,1.0]})^
     }
     if (action in ["resize-image","resize-canvas"]) {
-        let width = float(field(owner,"image-width"))
-        let height = float(field(owner,"image-height"))
-        if (not all([for (n in [width,height]) model.finite(n) and n == floor(n)]))
-            raise error("Photos: image and canvas sizes must be whole pixels")
+        let dimensions = whole_fields(owner,["image-width","image-height"],"Photos: image and canvas sizes must be whole pixels")^
         return editor.exec(st,{id:if (action == "resize-image") "document.resize_image" else "document.resize_canvas",
-            width:int(width),height:int(height),*:if (action == "resize-canvas") ({anchor:st.canvas_anchor}) else ({})})^
+            width:dimensions[0],height:dimensions[1],*:if (action == "resize-canvas") ({anchor:st.canvas_anchor}) else ({})})^
     }
     return editor.exec(st,{id:action})^
 }
 // view state is handler-local; coordinate helpers receive its snapshot explicitly.
 pn pointer_input(owner,st,evt) {
     let handle = dom.closest(evt.target,"[data-raster-handle]")
+    let crop_handle = dom.closest(evt.target,"[data-raster-crop]")
     let guide = dom.closest(evt.target,"[data-raster-guide]")
     let ruler = dom.closest(evt.target,"[data-raster-ruler]")
     let navigator = dom.closest(evt.target,".raster-navigator") != null or st.gesture.mode == "navigator"
-    return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},handle:dom.get_attribute(handle,"data-raster-handle"),
+    return {pointer:evt.pointerId,screen:{x:evt.clientX,y:evt.clientY},handle:dom.get_attribute(handle,"data-raster-handle"),crop_handle:dom.get_attribute(crop_handle,"data-raster-crop"),
         guide:dom.get_attribute(guide,"data-raster-guide"),ruler:dom.get_attribute(ruler,"data-raster-ruler"),
         *:if (navigator) surface.navigator_input(owner,st,evt.clientX,evt.clientY) else ({}),
         point:surface.point(owner,evt.clientX,evt.clientY),shift:evt.shiftKey,alt:evt.altKey}
@@ -455,6 +462,19 @@ on change(evt) {
         session = publish(owner,next,documents)
         return 'handled'
     }
+    if (id == "guide-layout-preset") {
+        dom.style_set_property(present.node(owner,"guide-layout-custom"),"display",if (field(owner,id) == "custom") "grid" else "none")
+        return 'handled'
+    }
+    if (id in ["crop-ratio-width","crop-ratio-height"]) {
+        let draft = [field(owner,"crop-ratio-width"),field(owner,"crop-ratio-height")]
+        next = {*:next,crop_ratio_draft:draft}
+        editor.exec(next,{id:"tool.configure",crop_ratio:[for (value in draft) float(value)]}) ^ {
+            next = {*:next,error:^.message,status:^.message}
+        } ~ { next = ~ }
+        session = publish(owner,next,documents)
+        return 'handled'
+    }
     if (id in ["straighten-axis","crop-aspect"]) {
         editor.exec(next,{id:"tool.configure",[if (id == "straighten-axis") "straighten_axis" else "crop_aspect"]:field(owner,id)}) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
         session = publish(owner,next,documents)
@@ -523,7 +543,8 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on mousedown(evt) {
-    if (dom.closest(evt.target,"#stage,#navigator") != null) {
+    // crop bar controls retain native focus instead of being redirected to the painting surface.
+    if (dom.closest(evt.target,"#stage,#navigator") != null and dom.closest(evt.target,"#crop-controls") == null) {
         dom.focus_set(present.node(owner_of(evt),if (dom.closest(evt.target,"#navigator") != null) "navigator" else "stage"),false)
         return 'prevent-default'
     }
@@ -584,7 +605,9 @@ on keydown(evt) {
     var action = ""
     if (evt.key == "Escape") {
         let trigger = if (session.dialog in ["open","place","save","export"]) session.dialog else "stage"
-        session = publish(owner,{*:cancel_preview(owner,session),dialog:"",pending:"",crop:null},documents)
+        let editing_crop = session.gesture.mode == "crop" and session.gesture.crop_handle != null
+        let cancelled = cancel_preview(owner,session)
+        session = publish(owner,{*:cancelled,dialog:"",pending:"",crop:if (editing_crop) cancelled.crop else null},documents)
         dom.focus_set(present.node(owner,trigger),false)
         return 'prevent-default'
     }

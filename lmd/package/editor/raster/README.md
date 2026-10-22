@@ -74,15 +74,31 @@ history; cancellation restores the preceding draft. Changing tools, canvas exten
 or undo/redo clears obsolete drafts. Hosts may provide `.raster-crop` for its
 separate overlay (**S9.1.2 / S12.1.3**).
 
-`tool.configure.crop_aspect` selects `free` (default), `original` (current
+`tool.configure.crop_aspect` selects `free` (default), `custom`, `original` (current
 canvas ratio), `1:1`, `4:3`, `3:2`, `16:9`, `3:4`, `2:3` or `9:16`.
-`crop.rectangle(image,start,end,aspect="free")` retains free crop's outward
+`crop.rectangle(image,start,end,aspect="free",custom=[1,1])` retains free crop's outward
 rounding. A constrained crop rounds its start to a canvas pixel, fits the ratio
 within the clamped drag/canvas and rounds height to the nearest pixel; the ratio
 error is at most half a vertical pixel. Clicks, lines and subpixel rectangles
 remain empty. Shift temporarily makes a free crop square. Changing preset clears
 the old draft without authored history; Apply/Cancel and undo remain unchanged.
 `lambda.editor.raster.canvas.crop_presets` supplies the same list to hosts.
+Custom mode uses `tool.configure.crop_ratio:[width,height]`, default `[1,1]`,
+with two finite positive numbers whose quotient remains finite and positive.
+Changing ratio/preset clears the old draft; settings remain outside history.
+
+`crop.edit_rectangle(image,before,start,end,handle,aspect="free",custom=[1,1])`
+resizes/moves an existing integral draft from the original pointer snapshot.
+The eight handles share `canvas.handles` with `transform.handles`; `"move"`
+translates the interior without changing dimensions. Free edges stop at a
+minimum one-pixel extent. Constrained corners keep the opposite corner, while
+edge handles keep the opposite edge and perpendicular center; all results stay
+inside the image with whole-pixel rounding. The original draft must fit the
+selected aspect; an unrepresentable constrained size retains the original.
+`interaction` inputs use `crop_handle` for these operations. Completion leaves
+the edited draft, cancellation restores the preceding rectangle, and only Apply
+enters authored history (**S9.1.2 / S9.2.2 / S12.1.3**).
+
 
 `document.resize_canvas` accepts `anchor`, default `"top-left"`: `top`,
 `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom` and `bottom-right`
@@ -128,9 +144,31 @@ the stable `guide` ID. Positions lie inside the canvas, with at most 64 guides.
 Guide edits dirty the project and share undo; `.photos` preserves them, while
 other image formats do not retain this editor metadata. Canvas resize drops
 outside guides, image resize scales them, and crop translates/clips them.
-`guide.configure` changes `visible`, `snap` and `layers` booleans without authored history;
+`guide.configure` changes `visible`, `snap`, `layers` and `locked` booleans without authored history;
 `layers` enables other-layer snapping and defaults to true independently of
 the global snapping switch (which defaults to false).
+`locked` defaults to false and is retained per session/tab. It rejects manual
+guide add/update/remove/clear/layout commands and new ruler gestures, while
+allowing artwork hit testing through guides and snapping to them. Canvas/image
+resize and crop still transform locked guides with the document; lock state is
+not authored project metadata.
+
+`guide.layout` applies `preset:"center"|"thirds"|"quarters"|"custom"` (default
+thirds), with `replace:true` by default or `false` to append. Custom settings
+are integral `columns`/`rows` (default 3 each; zero omits an axis, at most 65),
+`margin` and `gutter` (default 0; nonnegative pixels). At least one axis is
+required and each cell needs a pixel. Equal margins add outer inset guides
+when positive; internal cell edges and paired gutter edges round to whole
+pixels. Layouts deduplicate coordinates, preserve unchanged guide IDs and the
+64-guide budget, commit atomically as one undo item, and leave identical
+layouts out of history. Replacement keeps the first ID for preexisting coincident
+guides; append preserves authored entries and adds only missing coordinates. Presets/custom geometry are exposed by `guides.layouts`
+and `guides.layout(image,options)` (**S9.1.2 / S9.2.2**).
+
+The shared `metadata` helper replaces owned guide/channel blocks in place.
+Resizing or editing one kind retains the other blocks' order, preventing
+metadata reordering from producing false edits on unchanged dimensions.
+
 Move inputs can carry a `guide` ID for a captured guide gesture. With snapping
 enabled, `guides.snap_move` checks selected edges/centers against canvas/visible
 guide coordinates within six screen pixels (`scale` maps document to screen).

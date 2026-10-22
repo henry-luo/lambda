@@ -1,0 +1,618 @@
+{
+  "name": "Photos crop handles, interior movement, cancellation, custom ratios and Apply/Undo",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "400",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "300",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fill-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-crop"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 80,
+        "offset_y": 60
+      },
+      "dx": 160,
+      "dy": 120,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "80"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "160"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "120"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "[data-raster-crop=\"se\"]"
+      },
+      "dx": 40,
+      "dy": 20,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "80"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": ".raster-crop",
+        "offset_x": 40,
+        "offset_y": 50
+      },
+      "dx": 20,
+      "dy": 10,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "100"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "140"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-raster-crop=\"w\"]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 80,
+        "offset_y": 140
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 80,
+        "offset_y": 140
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "100"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "140"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "[data-raster-crop=\"se\"]"
+      },
+      "dx": 1000,
+      "dy": 1000,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "100"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "70"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "300"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "230"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#crop-apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dimensions"
+      },
+      "contains": "300 \u00d7 230"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#crop-aspect"
+      },
+      "value": "custom"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#crop-ratio-width"
+      },
+      "text": "5",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#crop-ratio-height"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-ratio",
+      "equals": "5:2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#crop-ratio-height"
+      },
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": "Raster: custom crop ratio requires two finite positive numbers"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-ratio",
+      "equals": "5:2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#crop-ratio-height"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 80,
+        "offset_y": 60
+      },
+      "dx": 200,
+      "dy": 160,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "80"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "80"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "[data-raster-crop=\"nw\"]"
+      },
+      "dx": -20,
+      "dy": -20,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-x",
+      "equals": "60"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-y",
+      "equals": "52"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "220"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-height",
+      "equals": "88"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-crop-guides-20261022/custom-crop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-ratio",
+      "equals": "1:1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"document-1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-ratio",
+      "equals": "5:2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-aspect",
+      "equals": "custom"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#crop-cancel"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-crop-width",
+      "equals": "null"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

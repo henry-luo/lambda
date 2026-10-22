@@ -51,10 +51,12 @@ Paths resolve from the launch directory; bundled assets resolve from the entry.
   or crop the canvas to their bounds. Selection edits have history without
   marking image pixels unsaved. Ctrl/Cmd+A selects all; Ctrl/Cmd+D deselects.
 - Crop (C) draws a bounded canvas rectangle without changing pixels. Apply crop
-  (or Enter while the stage has focus) commits one edit; Cancel/Escape discards
-  the draft. Undo restores the canvas, layer/group-mask offsets and saved coverage
+  (or Enter while the stage has focus) commits one edit; Cancel discards the
+  draft. Drag its eight handles to resize or its interior to move. Escape during
+  editing restores the preceding rectangle; a second Escape discards the draft. Undo restores the canvas, layer/group-mask offsets and saved coverage
   channels. The crop bar offers Free, Original, Square and common portrait/landscape
-  aspect ratios; changing preset clears the old draft. Shift makes a Free crop
+  aspect ratios, plus Custom width:height fields for any finite positive ratio.
+  Changing ratio/preset clears the old draft. Shift makes a Free crop
   square. Constrained crops stay inside the canvas and round to whole pixels,
   within half a vertical pixel of the chosen ratio.
 - Align selected layer roots to the canvas or their combined bounds in the lower
@@ -164,8 +166,17 @@ With navigator focus, arrow keys pan by 40 screen pixels and Home centers the
 view. The red box shows the visible document region. Thumbnail updates wait
 until a live edit finishes, then refresh from the cached composite. View controls
 are retained per tab and do not dirty the document or add undo entries.
-Physical ruler units, guide locking/layout presets and equal-gap smart guides
-remain outstanding.
+Lock guides prevents guide edits and ruler creation while retaining visibility
+and snapping; Move reaches artwork beneath locked guides. Lock is per tab and
+stays outside project/history. Document crop/resize still updates guide geometry.
+
+Guide layout supplies Center, Rule of thirds, Quarters and Custom. Custom takes
+columns/rows (zero omits an axis), equal pixel margins and gutters. Choose Replace
+or Keep and append, then Apply layout. Coordinates round to pixels, duplicates
+are removed, and the existing 64-guide limit is checked before publication. An
+unchanged layout adds no undo entry; a changed layout is one reversible edit.
+Physical ruler units, named user layout presets and equal-gap smart guides
+remain outstanding (**S9.1.2 / S9.2.2 / S12.1.3**).
 
 The lower Levels dock sets input black/white, midtone gamma and output black/white.
 Curves offers RGB master and separate red/green/blue channels. Click its graph to

@@ -651,3 +651,25 @@ guide positions and Move placement retain whole-pixel semantics. Physical units,
 guide locks/layout presets, custom crop handles/ratios and equal-gap smart guides
 remain outside this profile, alongside the previously recorded typography, PSD,
 background-processing, project-compression and M5 limitations.
+
+
+### Editable crop and guide-layout increment — 2026-10-22
+
+The crop overlay now has eight resize handles, interior translation and thirds
+lines. Free/constrained geometry shares one fitting path and the transform handle
+catalogue; custom positive width:height ratios are tool settings. Edits derive
+from the pointer-down draft, keep valid canvas bounds and preserve Apply/Cancel/
+undo semantics. Escape restores an edited draft before discarding the whole
+crop (**S9.1.2 / S9.2.2 / S12.1.3**).
+
+Guide locking is per tab: authored guide commands are rejected, artwork remains
+hittable beneath guides, and snapping/document resizing still work. Center,
+thirds, quarters and custom equal-margin/gutter layouts replace or append
+integer guide coordinates atomically, retain unchanged IDs, deduplicate and
+respect the existing 64-guide limit. Guide/channel metadata now preserves block
+order so same-size canvas resizing stays outside history (**S9.1.2 / S9.2.2**).
+
+Remaining precision/canvas work includes physical ruler units, named user layout
+presets, equal-gap smart guides, perspective/warp and group-mask/filter affines.
+The previously recorded typography/styles/PSD, background processing, project
+compression and M5 precision/color/scale limits remain open.

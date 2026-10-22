@@ -6,6 +6,7 @@ import geometry: lambda.editor.draw.geometry
 import common: lambda.slide.common
 import affine: lambda.chart.svg_transform
 import guides: .guides
+import metadata: .metadata
 
 pub fn value(v,fallback) => common.value(v,fallback)
 pub fn finite(v) => geometry.finite_number(v)
@@ -28,8 +29,7 @@ pub fn rows(node,path=[],depth=0,parent="") =>
           *if (name(child) == 'stack') rows(child,[*path,i],depth+1,child.id) else []]]
 pub fn layers(image) => rows(img.composition(image),root_path(image))
 pub fn lookup(image,id) => [for (row in layers(image) where row.id == id) row][0]
-pub fn saved_channels(image) => [for (child in content(image) where name(child) == 'metadata' and child.role == 'photos_channels')
-    for (channel in content(child)) channel]
+pub fn saved_channels(image) => metadata.items(image,'photos_channels')
 pub fn identifiers(image) => [*[for (row in layers(image)) row.id],*[for (channel in saved_channels(image)) channel.id],
     *if (img.assets(image) == null) [] else [for (asset in content(img.assets(image))) asset.id]]
 pub fn fresh_id(image,index=1) =>

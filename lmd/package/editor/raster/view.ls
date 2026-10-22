@@ -129,7 +129,7 @@ pub pn publish(owner,st) any^ {
         if (handles_visible) place_box(controls,box,scale)
     }
     let guide_layer = node(owner,".raster-guides")
-    let guide_scene = {items:guides.items(st.doc),visible:st.guides_visible,scale:scale,width:size.width,height:size.height,interactive:st.tool == "move"}
+    let guide_scene = {items:guides.items(st.doc),visible:st.guides_visible,scale:scale,width:size.width,height:size.height,interactive:st.tool == "move" and not st.guides_locked}
     if (guide_layer != null and (st.painted_doc == null or guide_scene != st.painted_guides)) {
         dom.set_inner_html(guide_layer,join([for (g in guide_scene.items) format(
             <div class:"raster-guide guide-" ++ g.axis,'data-raster-guide':g.id,role:"separator",
@@ -137,7 +137,7 @@ pub pn publish(owner,st) any^ {
                 style:if (g.axis == "x") "left:" ++ string(g.position*scale) ++ "px;height:" ++ string(size.height*scale) ++ "px"
                     else "top:" ++ string(g.position*scale) ++ "px;width:" ++ string(size.width*scale) ++ "px",<span>>,'xml')],""))
         dom.style_set_property(guide_layer,"display",if (st.guides_visible) "block" else "none")
-        dom.style_set_property(guide_layer,"pointer-events",if (st.tool == "move") "auto" else "none")
+        dom.style_set_property(guide_layer,"pointer-events",if (guide_scene.interactive) "auto" else "none")
     }
     let reference = node(owner,".raster-reference")
     let line = if (st.gesture.mode == "straighten") {start:st.gesture.start,end:st.gesture.end} else null

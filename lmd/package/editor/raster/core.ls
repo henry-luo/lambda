@@ -32,7 +32,7 @@ pub fn open_session(image) any^ {
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
         target:"pixels",selection:null,crop:null,channel_view:"composite",recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
-        *:navigation.defaults,guides_visible:true,snap_enabled:false,snap_layers:true,straighten_axis:"horizontal",crop_aspect:"free",
+        *:navigation.defaults,guides_visible:true,guides_locked:false,snap_enabled:false,snap_layers:true,straighten_axis:"horizontal",crop_aspect:"free",crop_ratio:[1,1],
         brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
         background:[1.0,1.0,1.0,1.0],retouch:{source:null,anchor:null,aligned:true,strength:0.5,radius:3},selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }

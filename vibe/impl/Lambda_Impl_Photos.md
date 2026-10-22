@@ -1382,3 +1382,110 @@ new-file whitespace checks and `git diff --check` pass. Logs, before/after edge
 replays, captures and `qualification.json` remain under
 `temp/photos-navigation-20261022/`. Release remains restored. Changes stay
 uncommitted in the current workspace; no worktree or remote publication.
+
+
+## Editable crop drafts and guide layouts — 2026-10-22
+
+Implement custom positive crop ratios, eight crop resize handles and interior
+translation, plus per-tab guide locking and center/thirds/quarters/custom guide
+layouts. Reuse the shared handle catalogue, constrained crop geometry, authored
+guide metadata and history (**S9.1.2 / S9.2.2 / S12.1.3**). No native engine or
+vendor changes are planned; current master starts clean.
+
+Acceptance: crop edits derive from the press snapshot, retain the opposite
+edge/corner or perpendicular center, stay inside the image, honor selected/Shift
+aspect, and cancel without history. Interior movement preserves size. Apply
+uses the existing crop transaction. Custom ratios reject zero/nonfinite values.
+Locked guides remain visible and usable for snapping, reject authored guide
+commands, and allow moving artwork through their former hit areas. Layouts
+round to integer positions, deduplicate, preserve unchanged IDs, replace/append
+atomically, honor the 64-guide budget, and undo as one edit.
+
+Scope excludes physical ruler units, named user layout presets, arbitrary guide
+margins per side, equal-gap smart guides, perspective/warp and broader M5 work.
+Verification budget: paired package goldens and focused native mouse workflows,
+then Photos AUTO/eager-JIT forced-GC, Lambda baseline, release restoration and
+one full Photos UI sweep once code is stable. Records stay under
+`temp/photos-crop-guides-20261022/`.
+
+
+### Delivered crop and guide behavior
+
+`canvas.handles` is shared by crop and transform controls, retaining the existing
+transform API alias. `crop.rectangle` and `crop.edit_rectangle` share constrained
+size fitting. Handle drags use the press snapshot and pointer delta, preserve
+opposite anchors/centers, clamp inside the canvas and stop at valid pixel sizes.
+The interior translates an existing draft. Custom ratios validate finite
+positive width/height and quotient; ratio/preset changes discard obsolete drafts.
+Crop edits never change the document, pixels or history until Apply. Escape
+during a handle/interior gesture restores the preceding draft (**S9.1.2 /
+S9.2.2 / S12.1.3**).
+
+The crop bar retains native input focus: its mouse events no longer redirect
+to the stage. Rejected ratio text remains editable until the next interaction,
+so correcting it emits a native change event. Shared numeric-field validation
+reuses the existing whole-pixel contracts for canvas/grid/guide settings;
+disabled controls update only when their state actually changes.
+
+Guide locking disables authored guide commands/controls and guide hit regions;
+ruler creation is inert, while locked guides still supply snap targets. Layouts
+support center/thirds/quarters and custom columns/rows, equal margins and paired
+gutter edges. Replacement/appending is validated before publishing, preserves
+unchanged IDs, rejects over-budget/collapsed-cell layouts and records one edit.
+Repeat applications are no-ops. Lock settings stay outside authored history and
+project serialization; crop/resize continue to transform guide positions.
+
+No-op layout handling exposed an existing metadata-order dependency: channels
+were removed/reappended during resize and the following guide rewrite happened
+to restore their original order. Skipping an unchanged guide rewrite revealed
+a false edit. `metadata.ls` now replaces both owned blocks at their original
+positions, reusing one lookup/items/replacement path for model, guides and
+channels. Regression checks cover both authored block orders and no-op canvas
+resize, plus channel rename and guide movement (**S9.1.2 / S9.2.2**).
+
+Final source review tightened replacement layouts for preexisting coincident
+guides: replacement retains the first stable ID per coordinate, while append
+preserves authored entries. The shared coordinate-membership helper and two
+regression cases were added during the baseline build phase, before package
+scripts start; package sources are frozen for qualification from this point.
+
+
+### Qualification
+
+Two new paired goldens cover **80 true results**: **38** crop editing checks and
+**42** guide layout/lock/metadata checks. Coverage includes all handles, anchors,
+clipping/minimum sizes, constrained edges/centers, custom numeric validation,
+preview cancellation and Apply/undo; guide preset/custom geometry, append/
+replacement, coincident coordinates, stable IDs, project restoration, lock
+enforcement/hit testing/snapping, cell/guide budgets and metadata order.
+
+`make test-lambda-baseline JOBS=4 TEST_JOBS=4` passes **8,032/8,032** on the current
+workspace: input **2,112/2,112**, runtime **5,920/5,920**, including **1,688**
+script checks and **322** MIR forced-GC checks. Package source and goldens were
+frozen before the script runner began. No native engine or vendor code changed
+in this increment.
+
+
+After `make build-release-compile JOBS=4`, the final Photos package sweep passes
+**32/32** in AUTO and **32/32** in eager JIT with forced collection and poisoned
+frees. The final native UI sweep passes **28 workflows / 594 assertions** on
+that optimized host. New crop and guide-layout workflows contribute **44** and
+**37** assertions: real mouse handles/interior movement, clamp/cancel, custom
+ratio rejection/correction and tab retention; layout replacement/appending and
+no-op application, lock-disabled controls, artwork hit testing through guides,
+snapping while locked, undo and per-tab lock retention. Crop handles/thirds,
+custom ratio controls, locked guide controls/layout geometry and the native
+composition were visually inspected. Existing brush/crop/transform, file and
+workspace workflows remain green.
+
+Release SHA-256: `e09f973ff3766c77180a92128d2f9b7fd299b68cc8693f245dcb43054a39bc09`. Local document
+links, paired goldens, new-file whitespace and `git diff --check` pass. No
+additional native library/Radiant aggregate or latency benchmark is claimed
+for this package/demo increment. Logs, initial failure diagnostics, captures and
+`qualification.json` remain under `temp/photos-crop-guides-20261022/`. Changes
+remain uncommitted in the current workspace; no worktree or remote publication.
+
+Physical ruler units, named user guide-layout presets, equal-gap smart guides,
+perspective/warp and group-mask/filter affine support remain open, together
+with the recorded typography/styles/PSD, background processing, compression and
+M5 precision/color/scale limits.
