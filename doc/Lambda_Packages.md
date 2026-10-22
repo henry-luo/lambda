@@ -38,6 +38,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 22. [scene3d.motion — Character animation](#22-scene3dmotion--character-animation)
 23. [archive — Web archiving](#23-archive--web-archiving)
 24. [mail — Mail sync and store](#24-mail--mail-sync-and-store)
+25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
 
 ---
 
@@ -2119,3 +2120,33 @@ An index entry is `{uid, file, flags, date, internaldate, from, to, subject, mes
 
 The sanitizer is the second layer of ML5v2. The first is the frame itself: a `sandbox` frame loads with scripting disabled in Radiant. Blocking is best-effort for CSS written with escapes or `image-set()` strings, which is why the engine-level policy stays the goal (MQ14).
 
+## 25. oauth — Sign-in for native apps
+
+`lambda.oauth` signs a person in with an OAuth 2.0 provider the way native apps do (RFC 8252), with PKCE (RFC 7636). The system browser shows the provider's own sign-in page; a [`lambda.io.loopback`](Lambda_Sys_Func.md#lambdaioloopback) listener on 127.0.0.1 receives the redirect; and the code is exchanged for tokens, so the app never sees the person's password. The mail demo signs in to Gmail and Outlook.com this way (design: [Lambda_Demo_Mail.md](../vibe/Lambda_Demo_Mail.md) M4).
+
+```lambda no-run
+import oauth: lambda.oauth
+
+pn main() {
+    let google = {authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_url: "https://oauth2.googleapis.com/token", scope: "https://mail.google.com/ openid email",
+        userinfo_url: "https://openidconnect.googleapis.com/v1/userinfo",
+        params: {access_type: "offline", prompt: "consent"}}
+    let client = {id: "….apps.googleusercontent.com", secret: "…"}
+    let tokens = oauth.sign_in(google, client, {})^
+    // who signed in: {email, name, …}
+    let me = oauth.userinfo(google, tokens.access_token)^
+    // later: a fresh access token without the browser
+    let renewed = oauth.refresh(google, client, tokens.refresh_token)^
+}
+```
+
+| Function | Contents |
+|---|---|
+| `sign_in(provider, client, options)` | Opens the provider's page in the system browser and returns `{access_token, refresh_token, expires_in, scope}`. Options: `login_hint`, `seconds` (the wait for the person, default 300), and `open`, a `pn` that shows the URL instead of the system browser. A refusal, a mismatched `state` or a failed exchange raises with the provider's reason |
+| `userinfo(provider, access_token)` | Who signed in, from the provider's OpenID Connect userinfo endpoint (`provider.userinfo_url`): `{email, name, …}` as the provider sends it. The token's scope must include `openid` and `email` |
+| `refresh(provider, client, refresh_token)` | New tokens. Google omits `refresh_token` and keeps the old one valid; Microsoft rotates it |
+| `open_browser(url)` | Opens a URL in the system browser: `open` on macOS, `start` on Windows, `xdg-open` elsewhere |
+| `code_challenge`, `base64url`, `form`, `authorize_url`, `tokens_of`, `query_value` | The pure parts: the S256 challenge, URL and body encoding, and token replies |
+
+A provider is `{authorize_url, token_url, scope, params}`, plus `userinfo_url` for `userinfo`, where `params` are extra authorization parameters. A client is `{id, secret}`, the app's registration with the provider. Google requires a secret even for desktop clients, while a Microsoft public client has none; a null secret is not sent. The verifier and `state` come from `uuid()`, and the challenge from `hash`. Keep refresh tokens in [`lambda.io.secret`](Lambda_Sys_Func.md#lambdaiosecret).

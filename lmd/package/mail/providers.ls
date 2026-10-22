@@ -4,38 +4,55 @@
 //
 // A server is {host, port, security}; security is 'tls' (implicit TLS),
 // 'starttls', or 'plain', which lambda.io.mail allows only on loopback.
-// `pop3` is null for a host that offers no POP3 (§3).
+// `pop3` is null for a host that offers no POP3 (§3). `oauth` names the
+// sign-in endpoints for lambda.oauth where the host offers OAuth (M4); the
+// app registers its own client with the provider (MQ4).
+
+// `openid email profile` let a sign-in learn the address it was made for
+// (userinfo_url), so "Login with Gmail" needs no typing
+pub let GOOGLE = {provider: "google", name: "Google", authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
+    token_url: "https://oauth2.googleapis.com/token", scope: "https://mail.google.com/ openid email profile",
+    userinfo_url: "https://openidconnect.googleapis.com/v1/userinfo",
+    params: {access_type: "offline", prompt: "consent"}}
+pub let MICROSOFT = {provider: "microsoft", name: "Microsoft", userinfo_url: null,
+    authorize_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All " ++
+        "https://outlook.office.com/SMTP.Send offline_access",
+    params: null}
 
 pub let PRESETS = [
     {id: "gmail", name: "Gmail", domains: ["gmail.com", "googlemail.com"],
      imap: {host: "imap.gmail.com", port: 993, security: 'tls'},
      smtp: {host: "smtp.gmail.com", port: 465, security: 'tls'},
      pop3: {host: "pop.gmail.com", port: 995, security: 'tls'},
-     note: "Use an app password: Google Account, Security, App passwords."},
+     oauth: GOOGLE,
+     note: "Sign in with Google, or use an app password: Google Account, Security, App passwords."},
     {id: "icloud", name: "iCloud Mail", domains: ["icloud.com", "me.com", "mac.com"],
      imap: {host: "imap.mail.me.com", port: 993, security: 'tls'},
      smtp: {host: "smtp.mail.me.com", port: 587, security: 'starttls'},
-     pop3: null,
+     pop3: null, oauth: null,
      note: "Use an app-specific password from account.apple.com."},
     {id: "fastmail", name: "Fastmail", domains: ["fastmail.com", "fastmail.fm"],
      imap: {host: "imap.fastmail.com", port: 993, security: 'tls'},
      smtp: {host: "smtp.fastmail.com", port: 465, security: 'tls'},
-     pop3: {host: "pop.fastmail.com", port: 995, security: 'tls'},
+     pop3: {host: "pop.fastmail.com", port: 995, security: 'tls'}, oauth: null,
      note: "Use an app password from Fastmail's Privacy & Security settings."},
     {id: "proton", name: "Proton Mail Bridge", domains: ["proton.me", "protonmail.com", "protonmail.ch", "pm.me"],
      imap: {host: "127.0.0.1", port: 1143, security: 'starttls'},
      smtp: {host: "127.0.0.1", port: 1025, security: 'starttls'},
-     pop3: null,
-     note: "Proton Mail Bridge must be running. Use the password and the certificate pin it shows."},
+     pop3: null, oauth: null,
+     note: "Proton Mail Bridge must be running. Use the password it shows, and pin its exported certificate."},
     {id: "outlook", name: "Outlook.com", domains: ["outlook.com", "hotmail.com", "live.com", "msn.com"],
      imap: {host: "outlook.office365.com", port: 993, security: 'tls'},
      smtp: {host: "smtp.office365.com", port: 587, security: 'starttls'},
      pop3: {host: "outlook.office365.com", port: 995, security: 'tls'},
-     note: "Microsoft accounts need OAuth sign-in, which a later milestone adds."},
+     oauth: MICROSOFT,
+     note: "Microsoft accounts sign in with Microsoft; passwords are refused."},
     {id: "yahoo", name: "Yahoo Mail", domains: ["yahoo.com", "ymail.com"],
      imap: {host: "imap.mail.yahoo.com", port: 993, security: 'tls'},
      smtp: {host: "smtp.mail.yahoo.com", port: 465, security: 'tls'},
-     pop3: {host: "pop.mail.yahoo.com", port: 995, security: 'tls'},
+     pop3: {host: "pop.mail.yahoo.com", port: 995, security: 'tls'}, oauth: null,
      note: "Use an app password from Yahoo's account security page."}
 ]
 

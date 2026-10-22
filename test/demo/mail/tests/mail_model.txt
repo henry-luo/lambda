@@ -96,7 +96,9 @@
       port: 465,
       security: 'tls'
     },
-    pin: null
+    pin: null,
+    auth: "password",
+    oauth: null
   }
 }
 {
@@ -124,7 +126,9 @@
       port: 465,
       security: 'tls'
     },
-    pin: null
+    pin: null,
+    auth: "password",
+    oauth: null
   }
 }
 {
@@ -146,7 +150,9 @@
       port: 465,
       security: 'tls'
     },
-    pin: null
+    pin: null,
+    auth: "password",
+    oauth: null
   }
 }
 {
@@ -171,7 +177,56 @@
       port: 465,
       security: 'tls'
     },
-    pin: null
+    pin: null,
+    auth: "password",
+    oauth: null
   }
 }
 [true, false, false]
+"=== sign-in ==="
+["oauth", "password", "password", "password", "google", {
+    id: "id.apps.googleusercontent.com",
+    secret: "s"
+  }, null]
+{
+  account: {
+    id: "ada-gmail-com",
+    name: "ada@gmail.com",
+    email: "ada@gmail.com",
+    user: "ada@gmail.com",
+    provider: "gmail",
+    protocol: "imap",
+    imap: {
+      host: "imap.gmail.com",
+      port: 993,
+      security: 'tls'
+    },
+    pop3: null,
+    smtp: {
+      host: "smtp.gmail.com",
+      port: 465,
+      security: 'tls'
+    },
+    pin: null,
+    auth: "oauth",
+    oauth: {
+      provider: "google",
+      name: "Google",
+      authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
+      token_url: "https://oauth2.googleapis.com/token",
+      scope: "https://mail.google.com/ openid email profile",
+      userinfo_url: "https://openidconnect.googleapis.com/v1/userinfo",
+      params: {
+        access_type: "offline",
+        prompt: "consent"
+      }
+    }
+  }
+}
+"=== Login with Gmail ==="
+["ada-gmail-com", "Ada", "pop3", "pop.gmail.com", "cy-gmail-com", "cy@gmail.com", "imap.gmail.com", "oauth"]
+["Robert", "Ada"]
+["Bob", "Ada", "New"]
+["ada-gmail-com"]
+["Paste the client ID, which ends in .apps.googleusercontent.com.", "That is not a whole client ID. Paste only the ID, like 123456789012-abc….apps.googleusercontent.com, with nothing before or after it.", "That is not a whole client ID. Paste only the ID, like 123456789012-abc….apps.googleusercontent.com, with nothing before or after it.", "Paste the client secret too.", "That is not a whole client secret. Paste only the secret, with nothing before or after it.", null]
+[true, true, true, "bad", ""]

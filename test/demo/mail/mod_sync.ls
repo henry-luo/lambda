@@ -18,6 +18,7 @@ import prov: lambda.mail.providers
 import sync: lambda.mail.sync
 import store: lambda.mail.store
 import pop3: lambda.mail.pop3
+import oauth: lambda.oauth
 import model: .mod_model
 
 // the shown mailbox is checked this often (IDLE push is M2)
@@ -34,23 +35,35 @@ pn ticker(owner) {
     }
 }
 
+// What lambda.io.mail open takes to log in to `server`: the saved password,
+// or for an OAuth account a fresh access token from its saved refresh token
+// (M4). `client` is the app's registration with the account's provider.
+pn login_options(account, server, service, client) map^ {
+    let saved = secret.get(service, account.id)^
+    let signed_in = account.auth == "oauth"
+    if (saved == null) {
+        raise error(if (signed_in) "Sign in again: no refresh token is saved." else "No password is saved for this account.")
+    }
+    if (not signed_in) { return prov.session_options(server, account.user, saved, account.pin) }
+    if (client == null) { raise error("No " ++ account.oauth.name ++ " client is configured; see the mail demo's README.") }
+    let tokens = oauth.refresh(account.oauth, client, saved)^
+    // a provider that rotates refresh tokens (Microsoft) hands out a new one
+    if (tokens.refresh_token != null and tokens.refresh_token != saved) { secret.set(service, account.id, tokens.refresh_token)^ }
+    {user: account.user, token: tokens.access_token, *: (if (server.security == 'plain') {tls: false} else {})}
+}
+
 // A logged-in session with the account's mailboxes, or null once the reason
 // is reported. The mailbox list is cached for the next offline start.
-pn connect(account, service, dir, notify) {
+pn connect(account, service, client, dir, notify) {
     say(account, notify, {type: "status", state: "connecting", text: null})
-    var password = null
+    var options = null
     var failure = null
-    secret.get(service, account.id) ^ { failure = ^ } ~ { password = ~ }
+    login_options(account, account.imap, service, client) ^ { failure = ^ } ~ { options = ~ }
     if (failure is error) {
-        say(account, notify, {type: "status", state: "failed", text: "Cannot read the password: " ++ failure.message})
-        return null
-    }
-    if (password == null) {
-        say(account, notify, {type: "status", state: "failed", text: "No password is saved for this account."})
+        say(account, notify, {type: "status", state: "failed", text: failure.message})
         return null
     }
     var session = null
-    let options = prov.session_options(account.imap, account.user, password, account.pin)
     wire.open(prov.imap_url(account.imap), options) ^ { failure = ^ } ~ { session = ~ }
     var caps = []
     if (session != null) { sync.capabilities(session) ^ { failure = ^ } ~ { caps = ~ } }
@@ -96,13 +109,13 @@ pn download(c, account, dir, path, e, notify) {
     return {*: c, selected: path}
 }
 
-pn serve_imap(account, service, dir, notify) null^ {
+pn serve_imap(account, service, client, dir, notify) null^ {
     var c = null
     var shown = null
     var running = true
     while (running) {
         if (c == null) {
-            c = connect(account, service, dir, notify)
+            c = connect(account, service, client, dir, notify)
             if (c != null and shown != null) { c = refresh(c, account, dir, shown, notify) }
         }
         let m = receive()^
@@ -124,16 +137,14 @@ pn serve_imap(account, service, dir, notify) null^ {
 
 // One POP3 round in a task of its own: its session closes when the task ends
 // (ML3), which releases the server's maildrop lock (RFC 1939 §8).
-pn pop3_round(account, service, dir) map^ {
-    let password = secret.get(service, account.id)^
-    if (password == null) { raise error("No password is saved for this account.") }
-    let session = wire.open(prov.pop3_url(account.pop3), prov.session_options(account.pop3, account.user, password, account.pin))^
+pn pop3_round(account, service, client, dir) map^ {
+    let session = wire.open(prov.pop3_url(account.pop3), login_options(account, account.pop3, service, client)^)^
     pop3.sync_inbox(session, dir, null)
 }
 
-pn pop3_refresh(account, service, dir, notify) {
+pn pop3_refresh(account, service, client, dir, notify) {
     say(account, notify, {type: "status", state: "syncing", text: null})
-    let outcome: map | error = wait(start(pop3_round, [account, service, dir]))
+    let outcome: map | error = wait(start(pop3_round, [account, service, client, dir]))
     if (outcome is error) {
         say(account, notify, {type: "status", state: "failed", text: outcome.message})
     } else {
@@ -144,14 +155,14 @@ pn pop3_refresh(account, service, dir, notify) {
 
 // A POP3 account's local Inbox: every message is on disk once synced, so
 // there is nothing to fetch on demand.
-pn serve_pop3(account, service, dir, notify) null^ {
+pn serve_pop3(account, service, client, dir, notify) null^ {
     say(account, notify, {type: "mailboxes", boxes: pop3.mailboxes()})
-    pop3_refresh(account, service, dir, notify)
+    pop3_refresh(account, service, client, dir, notify)
     var running = true
     while (running) {
         let m = receive()^
         if (m.op == 'select' or m.op == 'refresh' or m.op == 'tick') {
-            pop3_refresh(account, service, dir, notify)
+            pop3_refresh(account, service, client, dir, notify)
         } else if (m.op == 'seen') {
             var index = null
             pop3.mark_seen(dir, m.uid, true) ^ { say(account, notify, {type: "failed", text: "Cannot save the read state."}) } ~ { index = ~ }
@@ -166,8 +177,10 @@ pn serve_pop3(account, service, dir, notify) null^ {
 }
 
 // The task. A first `password` (from the account sheet) is stored before the
-// first login; it is never written anywhere else (ML6).
-pub pn run(account, root, service, password, notify) null^ {
+// first login; it is never written anywhere else (ML6). An OAuth account's
+// refresh token was stored by its sign-in; `client` is the app's
+// registration with that account's provider, else null.
+pub pn run(account, root, service, password, client, notify) null^ {
     let dir = account_dir(root, account.id)
     io.mkdir(dir) ^ { null }
     if (password != null) {
@@ -176,8 +189,8 @@ pub pn run(account, root, service, password, notify) null^ {
         if (not stored) { say(account, notify, {type: "status", state: "failed", text: "Cannot save the password."}) }
     }
     let tick = start(ticker, [self()])
-    if (model.is_pop3(account)) { serve_pop3(account, service, dir, notify)^ }
-    else { serve_imap(account, service, dir, notify)^ }
+    if (model.is_pop3(account)) { serve_pop3(account, service, client, dir, notify)^ }
+    else { serve_imap(account, service, client, dir, notify)^ }
     cancel(tick)
     null
 }

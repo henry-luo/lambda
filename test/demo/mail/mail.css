@@ -85,3 +85,16 @@ main#mail { display: grid; grid-template-columns: 230px 360px minmax(0, 1fr); gr
 .preview-image { max-width: 100%; max-height: 100%; margin: auto; }
 .preview-text { flex: 1; margin: 0; padding: 14px; overflow: auto; }
 .preview-frame { flex: 1; border: 0; }
+
+/* Login with Gmail, Google setup, account removal */
+.login-gmail { margin: 4px 0 10px; }
+.google-change { display: block; margin: 4px auto 0; font-size: 12px; }
+.google-button { width: 100%; padding: 8px 12px; border: 1px solid #c7c9ce; border-radius: 6px; background: #fff;
+  font: inherit; font-weight: 600; color: var(--ink); }
+.divider { margin: 10px 0 4px; color: var(--muted); font-size: 12px; text-align: center; }
+.steps { margin: 6px 0 10px; padding-left: 20px; color: var(--ink); font-size: 12px; line-height: 1.5; }
+.account-head { display: flex; align-items: baseline; padding-right: 8px; }
+.account-head .account-name { flex: 1; }
+.remove-account { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; }
+.confirm-remove { display: flex; align-items: center; gap: 4px; margin: 0 12px 4px; font-size: 12px; }
+.danger { color: #c4321b; }

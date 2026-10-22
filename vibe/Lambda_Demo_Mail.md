@@ -495,6 +495,11 @@ message holds the server's reply without its tag, for example
 `io.mail.command: NO [TRYCREATE] Mailbox doesn't exist`. Error values carry a
 code and a message, not fields, so the reply travels as text. Callers handle
 it with `^` handlers ([Lambda_Error_Handling.md](../doc/Lambda_Error_Handling.md)).
+A refused login raises `login denied` followed by the server's refusal, as in
+`login denied: NO [AUTHENTICATIONFAILED] Invalid credentials`, since servers
+say there why they refused (an app password required, a blocked sign-in). The
+refusal comes from the reply lines curl hands to its header callback, which
+hold only what the server sent, so it never echoes a credential.
 A lost connection or a timeout raises and marks the session unusable. A
 session runs one command at a time; a second task calling into a busy session
 gets an error.
@@ -732,7 +737,7 @@ milestone that first needs it, and fixed at its root if real.
 | **MG4** | Can an embedded document load with scripting disabled and remote loads blocked? Today Radiant has no runtime switch to turn scripts off. `<iframe srcdoc>` inherits its parent's `DocumentJsHostConfig` (`radiant/layout_block.cpp`), `html_scripting_enabled` is hard-coded on (`radiant/cmd_layout.cpp`), and the remote-resource policy is set only by a CLI flag. | M1 | **Resolved for scripting** (M1c): a `sandbox` frame loads with `DomDocument::scripting_disabled`, inherited and never cleared (RAD_20 §6.3); `allow-scripts` is not honoured yet. Remote loads are blocked by the sanitizer; the engine-level policy is MQ14. |
 | **MG5** | MIME coverage. `input-eml.cpp` decodes base64 and quoted-printable but not RFC 2047 encoded words, and it does not convert charsets. Lambda has no legacy charset decoder (ISO-8859-x, Windows-125x, GB18030, Big5, Shift_JIS, EUC-KR, ISO-2022-JP). Nested multipart, `message/rfc822` parts and tolerance of malformed mail are unverified. | M1 | **Resolved** (M1a): `lib/mail_mime` decodes RFC 2047 words, RFC 2231 parameters and address lists, and converts charsets through iconv; the `eml` reader gains decoded subjects, `addresses` and the `mime` part tree, and keeps the last part of a cut-off multipart. Covered by `test_mail_mime_gtest` and the `test/lambda/mail` goldens. |
 | **MG6** | Secret storage. There is no Keychain or secret-store API; the only Security framework use is `lib/trust_store.c`. | M1 | **Resolved** (M1b): `lambda.io.secret` (`get`, `set`, `delete`) over `lib/secret_store` (SecItem generic passwords on macOS; other platforms raise "no secret store on this platform", MQ7). Each call runs on the offload pool and parks. ML8's gate is not applied yet (MQ9). |
-| **MG7** | OAuth enablers. No script can listen on a loopback port: `lambda serve` is a separate process, and its Lambda backend is stubbed. There is no SHA-256, base64url encoder or secure random for PKCE. Opening the system browser through `io.exec("open", [url])` is untested. | M4 | A one-shot loopback listener in `lambda-io` (bound to 127.0.0.1, one request, then closed) and minimal crypto rows backed by mbedTLS. |
+| **MG7** | OAuth enablers. No script can listen on a loopback port: `lambda serve` is a separate process, and its Lambda backend is stubbed. There is no SHA-256, base64url encoder or secure random for PKCE. Opening the system browser through `io.exec("open", [url])` is untested. | M4 | **Resolved** (M4): `lambda.io.loopback` (`listen`, `accept`) waits for one browser request on 127.0.0.1, parked on the event loop; `hash`, `uuid` and `url_encode` are system functions (the names WebScrape E7 and Archive AR-E7 planned); the system browser opens through `io.exec` (`open`, `start`, `xdg-open`). |
 | **MG8** | Scale. Does a 50 000-message mailbox open from its index and scroll within the frame budget with Finder's row window? | M1 | **Partly resolved** (M1d): the list mounts only the rows near its viewport. A 50 000-entry index opens and scrolls in the debug build. Two Radiant grid defects found on the way are fixed (M1 checkpoint). The release-build timing is still to be measured. |
 | **MG9** | Large literals. Does a 25 MB attachment stream to disk without an in-memory copy, from the tokenizer through `input-eml`? | M1 | **Resolved for the store** (M1a): `fetch_message` fetches with `to`, so a large body streams into `incoming/` and moves into place without a copy in memory. Reading it back with `input(…, 'eml')` still holds the decoded parts in memory. |
 | **MG10** | Compose editing. Is contenteditable through the DOM editing package (D7.2.5) good enough for mail: lists, links, pasted HTML, inline images? | M3 | Fix in the editing package. Plain-text compose remains the fallback. |
@@ -802,7 +807,7 @@ increment.
 | **MQ1** | ML1: hand curl's authenticated connection to a native engine, or build a host TLS socket in the `rdb_tunnel.c` shape? Forking curl's `imap.c` is answered in §2.6 (no). | **Answered: ML1 ruled** (user, 2026-10-22). The TLS socket stays the fallback if MG1 fails. |
 | **MQ2** | Script surface: a generic `open()` with a mail URL, or a separate family? | **Answered** (user, 2026-10-22): the minimal native module `lambda.io.mail` (§5.3). URLs stay strings, so no new path scheme is needed. |
 | **MQ3** | Default for remote content? | Blocked, allowed per message or per sender, as macOS Mail does. |
-| **MQ4** | Who owns the OAuth client registrations? | The user supplies their own Google and Microsoft client IDs in a local configuration file. The Google client stays in "Testing" status (weekly re-sign-in). Verification is not pursued for a demo. |
+| **MQ4** | Who owns the OAuth client registrations? | Implemented as recommended (M4): the person registers their own client, kept in the profile's `oauth.mark`. For Google the demo asks for it in a setup panel the first time **Login with Gmail** is pressed; Microsoft's is written by hand, as the README explains. Ruling pending. |
 | **MQ5** | Gmail labels: as mailboxes, or as chips on messages? | Mailboxes in M1, as IMAP presents them. Chips through `X-GM-LABELS` in M5. |
 | **MQ6** | Add JMAP (Fastmail) or Gmail API adapters? | Not in scope. Revisit after M5; both are reachable through `io.fetch` today. |
 | **MQ7** | Secret store on Linux and Windows? | macOS first. The other platforms report a clear "not supported" until a backend lands. |
@@ -1003,6 +1008,84 @@ opening task ends). ML9 was implemented on that ruling.
 - Goldens on both tiers: `test/lambda/mail/pop3`, plus the updated `providers` and `mail_model`.
 
 **Not yet.** MQ10's optional deletion after a set number of days, flags and moves for POP3 mail (M2), and the "N new messages" count on the status line.
+
+## M4 checkpoint — 2026-10-22
+
+The user asked to implement OAuth after Gmail refused an ordinary Google
+password over IMAP (`[AUTHENTICATIONFAILED] Invalid credentials`).
+
+**Delivered.**
+- **Native enablers (MG7):**
+  - `hash(value, 'sha256' | 'sha384' | 'sha512')` returns binary, from mbedTLS.
+  - `uuid()` is a procedure returning a version 4 UUID from mbedTLS's entropy-seeded CTR_DRBG.
+  - `url_encode(text)` keeps the RFC 3986 unreserved characters.
+  - `lambda.io.loopback` (`listen()` with `.port`, and `accept(listener, seconds, page)` returning `{method, path, query}`) is a built-in module under D7.2.4v4. It binds 127.0.0.1 only, and its wait parks the task on the event loop with the socket waiter mail already uses.
+- **`lambda.oauth`** (`lmd/package/oauth.ls`):
+  - `sign_in` takes PKCE with an S256 challenge, a verifier of two UUIDs (64 hex characters) and a UUID `state`. It shows the page in the system browser, or through an `open` callback, then receives the redirect and exchanges the code.
+  - `refresh` renews tokens. Both raise with the provider's reason.
+- **The demo:**
+  - The Gmail and Outlook.com presets name Google's and Microsoft's endpoints. When `oauth.mark` registers a client, the account sheet offers "Sign in with Google/Microsoft".
+  - The sign-in runs in a document-owned task, which writes the refresh token to the Keychain itself and reports only the outcome, so no token travels through view events.
+  - Each login trades the refresh token for an access token (`login_options`, shared by IMAP and POP3) and saves a rotated one.
+  - Accounts carry `auth` (`"password"` or `"oauth"`) and their endpoints; accounts saved before keep the password path.
+  - The sheet now also shows the certificate-pin field for Proton Mail Bridge.
+
+**Verification.**
+- `make test-mail`: 16 tests, one skipped off macOS.
+  - `test_oauth` drives `lambda.oauth` against a fake provider: sign-in through the loopback listener with the S256 challenge checked, refresh, a refused sign-in, a bad client, and an IMAP login with the token.
+  - `test_sync_oauth` drives the demo's account task, which refreshes the token, logs in with it rather than a password, and syncs the Inbox.
+  - `tests/mail_signin_sheet.json` checks the sheet's sign-in choice and the Bridge pin field.
+- Goldens on both tiers: `test/lambda/hash_url_encode` (FIPS 180-2 vectors), `test/lambda/oauth_pkce` (the RFC 7636 Appendix B vector), `test/lambda/proc/uuid`, and the updated `mail_model`.
+
+**Not yet.**
+- A real Google sign-in. It needs the person's own client, which the README explains how to create.
+- Microsoft against a real account.
+- Signing in again from the window when a refresh token is revoked.
+- Rulings on MQ4 and on the new system-function names, which follow E7/AR-E7.
+
+## Login with Gmail — 2026-10-22
+
+The user asked for a "Login with Gmail" button that works through OAuth.
+
+**Delivered.**
+- **One-press sign-in:**
+  - The account sheet opens with **Login with Gmail**. It signs in as whoever the person chooses on Google's page, then learns the address from Google's OpenID userinfo endpoint (`oauth.userinfo`, scope `openid email profile` added to Gmail's), so nothing is typed.
+  - An account for the same address, say one added with a password, turns to OAuth in place instead of being added twice (`model.gmail_account`, `with_account`).
+  - The sign-in runs in a document-owned task (`mod_signin.ls`) that stores the refresh token itself, as before.
+- **In-app client setup (MQ4):**
+  - Without a Google client, the button opens a setup panel: three steps, **Open Google Cloud** (`oauth.open_browser`), and fields for the client ID and secret.
+  - The panel checks the ID's `.apps.googleusercontent.com` suffix and writes the client to `oauth.mark`, merged with any other provider's.
+- **Remove:** each sidebar account has **Remove** with a confirm row. It cancels the account's task, deletes the Keychain item and rewrites `accounts.mark`.
+- **Keychain:** `secret_store_set` replaces an item (delete, then add) instead of updating it. An updated item keeps its access list, which trusts only the program that created it, so after a rebuild the writer was asked for access to the value it had just written.
+- **Radiant fix (event dispatch):**
+  - When an author click handler rebuilds the subtree under the target, the UA tier rebinds the target through its child-index path. That path now also records each step's node name, and a rebuilt node whose name differs is no longer taken as the target.
+  - Before the fix, pressing Save in the setup panel, which swaps the panel for the sheet, delivered the button's click to the Protocol `<select>` that now sat at the same indices, and its dropdown opened.
+
+**Verification.**
+- `make test-mail`: 18 tests, one skipped off macOS.
+  - `test_signin_gmail` drives `mod_signin.sign_in_gmail` against the fake provider. It checks that the address comes from userinfo with no login hint sent, that a password account of the same address turns to OAuth, and that the token lands in a test Keychain service.
+  - `tests/mail_google_setup.json` covers the setup panel: a rejected ID, the save, `oauth.mark`'s contents, and the Protocol dropdown staying shut.
+  - `mail_window_pop3.json` now ends by removing the account; the test checks `accounts.mark` and the Keychain.
+- `mail_model` golden on both tiers, with the Gmail cases.
+- Radiant baseline after the dispatch fix: 6305/6307. The two failures were there before (CssCascadeMemory jqueryui bytes, and the NativeLayout CPU-budget timeout); all 680 UI replays pass.
+
+**Follow-up, the first real try.** Google's page answered "The OAuth client
+was not found" (`Error 401: invalid_client`). Both values saved in the user's
+`oauth.mark` began with `- ` before a well-formed ID and secret, and the panel
+had checked only the ID's suffix. Simulated pastes (plain text, fragment HTML
+and list-item HTML) save clean values, so the prefix came with what was pasted
+or typed; headless runs cannot read the macOS pasteboard to show which.
+- `google_client_error` now checks the whole shape: the ID against
+  `\("\d"+ "-" ("a" to "z" | "\d")+ ".apps.googleusercontent.com")`, and the
+  secret against `\(("\w" | "-")+)`.
+- Login with Gmail reopens the panel, prefilled with the error, for a saved
+  client that fails the check. **Change Google client** opens it for one that
+  passes. The secret field is plain text, so stray characters can be seen.
+- Tests: `tests/mail_google_fix.json` (`test_demo_google_fix`), a prefixed case
+  in `mail_google_setup.json`, and golden cases.
+
+**Not yet.**
+- A real Google sign-in from the button, after the user corrects the client.
 
 ## Appendix A. libcurl build change
 

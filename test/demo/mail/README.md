@@ -27,6 +27,75 @@ task then brings it up to date. It checks again every two minutes.
 macOS asks once per build of `lambda.exe` before it lets that build read a
 saved password: the Keychain grants access per program.
 
+## Signing in with Google or Microsoft
+
+Gmail and Outlook.com accept OAuth sign-in instead of a password, and Gmail
+refuses an ordinary Google password over IMAP. A provider only signs people in
+to an app it knows, so you register the demo as your own app once.
+
+### Login with Gmail
+
+**Add Account** opens the account sheet, whose first button is **Login with
+Gmail**. The first time you press it, the sheet asks for a Google client:
+
+1. **Open Google Cloud** opens console.cloud.google.com. Create a project there.
+2. Under **Google Auth Platform**, set up the consent screen as an **External** app in **Testing**, and add your Gmail address as a **test user**.
+3. Under **Clients**, create a client of type **Desktop app**.
+4. Paste its client ID and client secret into the sheet and press **Save**.
+
+The demo keeps the client in the profile's `oauth.mark`
+(`~/Library/Application Support/Lambda Mail/oauth.mark`). A desktop client's
+secret is not confidential, so the panel shows it in the clear, but keep the
+file to yourself.
+
+The panel checks the whole shape of both values, since Google answers a
+mangled ID only with "The OAuth client was not found" (`invalid_client`). A
+saved client that fails the check, say one with a stray character pasted before
+it, reopens the panel with the values for correcting. **Change Google client**
+under the button opens the panel for a client that passes.
+
+Press **Login with Gmail** again and Google's page opens in your browser. Choose
+the account and allow mail access. The browser returns to the demo on a port of
+127.0.0.1, and the demo asks Google which address signed in (OpenID userinfo),
+so you type nothing. The account's refresh token goes to the Keychain, and each
+later login trades it for a fresh access token, so no password is ever stored.
+If an account for the same address already exists, for one added with a
+password, it switches to OAuth instead of being added twice.
+
+While the app stays in Testing, Google expires its sign-ins after seven days, so
+the account will ask you to sign in again weekly.
+
+The first time the demo reads its Keychain item after a rebuild, macOS asks
+whether `lambda.exe` may use it. Choose **Always Allow**. Each build is a new
+program to the Keychain.
+
+### Microsoft, and writing `oauth.mark` by hand
+
+`oauth.mark` holds one client per provider:
+
+```lambda
+{google: {client_id: "1234-abc.apps.googleusercontent.com", client_secret: "GOCSPX-…"},
+ microsoft: {client_id: "00000000-0000-0000-0000-000000000000"}}
+```
+
+**Microsoft:**
+1. In the Azure portal under **App registrations**, register an app for personal Microsoft accounts.
+2. Add the platform **Mobile and desktop applications** with the redirect URI `http://127.0.0.1`, the loopback address the demo listens on. Microsoft ignores the port of a loopback redirect when it matches one.
+3. Copy its client ID into `oauth.mark`.
+
+Microsoft sign-in is wired the same way as Google's but has not been tried against a real account yet.
+
+With a client registered, choosing Gmail (or Outlook.com) in the account sheet
+also offers **Sign in: With Google** (or Microsoft). **Sign in with Google**
+then signs in as the address you typed.
+
+### Removing an account
+
+Each account in the sidebar has a **Remove** button. After you confirm, the
+demo stops the account's task, deletes its password or refresh token from the
+Keychain, and drops it from `accounts.mark`. The mail already downloaded stays
+in the profile folder.
+
 ## How it is wired
 
 The view's `on load` handler reads the accounts. It starts one task per
@@ -75,9 +144,10 @@ The POP3 replay adds a POP3 account, checks that the Inbox holds both messages a
 ## Not yet
 
 These are later milestones of the design: marking IMAP messages read, flags,
-moves and deletes, IDLE push, compose and send, OAuth sign-in, search and
-conversations. Also not yet done:
+moves and deletes, IDLE push, compose and send, search and conversations.
+Also not yet done:
 
+- signing in again from the window when a refresh token stops working (remove the account's folder and `accounts.mark` entry, then add it again);
 - opening links in the system browser;
 - a unified Inbox;
 - keyboard navigation of the list;

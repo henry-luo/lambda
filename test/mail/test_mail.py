@@ -93,7 +93,12 @@ class MailTests(unittest.TestCase):
         self.assertIn("token ok", out)
         self.assertIn("qualified ok", out)
         self.assertTrue(any(login[3] == fake_mail.TOKEN for login in self.state.logins))
-        self.assertIn("denied: io.mail.open: login denied", out)
+        self.assertIn("denied: io.mail.open: login denied: NO [AUTHENTICATIONFAILED] Invalid credentials", out)
+        self.assertIn("pop3 denied: io.mail.open: login denied: -ERR [AUTH] invalid login", out)
+        self.assertIn("smtp denied: io.mail.send: login denied: 535-5.7.8 Username and Password not accepted. "
+                      "For more information, go to 535 5.7.8 https://support.example.com/BadCredentials", out)
+        # the reason never echoes what the client sent
+        self.assertNotIn("wrong", out)
         self.assertIn("refused: io.mail.open: tls: false is allowed only for a loopback server", out)
         self.assertIn("scheme: io.mail.open: the url must start with imaps://", out)
         self.assertIn("missing: io.mail.open: give exactly one of the options 'password' and 'token'", out)
@@ -125,6 +130,58 @@ class MailTests(unittest.TestCase):
         self.assertNotIn(b"DELE", commands)
         stored = sorted(p.read_bytes() for p in store.rglob("*.eml"))
         self.assertEqual(stored, sorted(body for _, body in self.state.pop3))
+
+    def test_oauth(self):
+        out, _, _ = self.run_script("_oauth.ls")
+        self.assertIn("signed in tok-123 ref-1 3600", out)
+        self.assertIn("userinfo ada@example.org Ada Lovelace", out)
+        self.assertIn("bad token: oauth: the userinfo request failed: status 401", out)
+        self.assertIn("refreshed tok-123 null", out)
+        self.assertIn("stale: oauth: the token request failed: invalid_grant: Token has been expired or revoked.", out)
+        self.assertIn("refused: oauth: sign-in refused: access_denied: The user said no", out)
+        self.assertIn("client: oauth: the token request failed: invalid_client", out)
+        self.assertIn("imap ok", out)
+        authorize = [fields for endpoint, fields in self.state.oauth if endpoint == "authorize"]
+        tokens = [fields for endpoint, fields in self.state.oauth if endpoint == "token"]
+        # PKCE (RFC 7636): an S256 challenge up front, its verifier at the exchange
+        self.assertTrue(all(a["code_challenge_method"] == "S256" and a["access_type"] == "offline" for a in authorize))
+        exchange = [t for t in tokens if t["grant_type"] == "authorization_code"][0]
+        self.assertEqual(len(exchange["code_verifier"]), 64)
+        self.assertEqual(fake_mail.pkce_challenge(exchange["code_verifier"]), authorize[0]["code_challenge"])
+        # each sign-in carries a fresh state
+        self.assertEqual(len({a["state"] for a in authorize}), len(authorize))
+
+    @unittest.skipUnless(sys.platform == "darwin", "the refresh token goes to the Keychain (macOS only, MQ7)")
+    def test_sync_oauth(self):
+        forget = ["security", "delete-generic-password", "-s", "Lambda Mail (oauth test)", "-a", "ada-oauth"]
+        shutil.rmtree(TEMP / "oauth-store", ignore_errors=True)
+        try:
+            out, _, _ = self.run_script("_sync_oauth.ls")
+        finally:
+            subprocess.run(forget, capture_output=True)
+        self.assertIn("status connecting", out)
+        self.assertIn("index INBOX 4", out)
+        self.assertIn("deleted true", out)
+        # the task refreshed the token and logged in with it, never with a password
+        self.assertTrue(any(f.get("grant_type") == "refresh_token" for endpoint, f in self.state.oauth if endpoint == "token"))
+        self.assertTrue(any(login[3] == fake_mail.TOKEN for login in self.state.logins))
+        self.assertFalse(any(login[2] for login in self.state.logins))
+
+    @unittest.skipUnless(sys.platform == "darwin", "the refresh token goes to the Keychain (macOS only, MQ7)")
+    def test_signin_gmail(self):
+        forget = ["security", "delete-generic-password", "-s", "Lambda Mail (signin test)", "-a", "ada-example-org"]
+        try:
+            out, _, _ = self.run_script("_signin_gmail.ls")
+        finally:
+            subprocess.run(forget, capture_output=True)
+        # the address came from userinfo; the password account of that address turned to OAuth
+        self.assertIn("replaced ada-example-org ada@example.org Ada (password) oauth gmail imap.gmail.com true", out)
+        self.assertIn("token ref-1", out)
+        self.assertIn("new ada-example-org Ada Lovelace false", out)
+        self.assertIn("deleted true", out)
+        self.assertTrue(any(endpoint == "userinfo" for endpoint, _ in self.state.oauth))
+        # no address was typed: the sign-ins carried no login hint
+        self.assertFalse(any(f.get("login_hint") for endpoint, f in self.state.oauth if endpoint == "authorize"))
 
     def test_smtp_send(self):
         out, _, _ = self.run_script("_smtp_send.ls")
@@ -202,7 +259,7 @@ class SecretTests(unittest.TestCase):
 class DemoWindowTests(unittest.TestCase):
     """The mail window (test/demo/mail) replayed headless against the fake servers."""
 
-    def replay(self, name, profile, setup=None):
+    def replay(self, name, profile, setup=None, prepare=None):
         """Runs tests/<name>.json against fresh servers with a fresh profile; returns
         the servers' state and the profile folder. The password goes to the Keychain
         under the profile's own service, removed before and after with the security
@@ -216,6 +273,9 @@ class DemoWindowTests(unittest.TestCase):
             TEMP.mkdir(parents=True, exist_ok=True)
             shutil.rmtree(root, ignore_errors=True)
             subprocess.run(forget, capture_output=True)
+            if prepare:
+                root.mkdir(parents=True)
+                prepare(root)
             replay = (ROOT / f"test/demo/mail/tests/{name}.json").read_text()
             for port_name, server in servers.items():
                 replay = replay.replace("{%s_PORT}" % port_name.upper(), str(server.port))
@@ -229,9 +289,9 @@ class DemoWindowTests(unittest.TestCase):
             report = json.loads(result.read_text()) if result.exists() else {}
             self.assertEqual(report.get("result"), "PASS",
                              f"replay {report}\n{process.stderr.decode(errors='replace')[-4000:]}")
-            # the profile holds the account and the mail, never the password (ML6)
-            self.assertIn(b"ada-fake-test", (root / "accounts.mark").read_bytes())
-            stored = [p for p in root.rglob("*") if p.is_file()]
+            # the profile holds the account and the mail, never the password (ML6);
+            # oauth.mark is the app's registration, which the person writes
+            stored = [p for p in root.rglob("*") if p.is_file() and p.name != "oauth.mark"]
             self.assertFalse([p for p in stored if fake_mail.PASSWORD.encode() in p.read_bytes()])
             return state, [p.read_bytes() for p in stored if p.suffix == ".eml"]
         finally:
@@ -240,14 +300,45 @@ class DemoWindowTests(unittest.TestCase):
                 server.stop()
 
     @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_signin_sheet(self):
+        # an app registration for Google turns the sheet's Gmail sign-in to OAuth (MQ4)
+        self.replay("mail_signin_sheet", "demo-signin", prepare=lambda root: (root / "oauth.mark").write_text(
+            '{google: {client_id: "lambda-test.apps.googleusercontent.com", client_secret: "s3cret"}}'))
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_google_setup(self):
+        # without a Google client, Login with Gmail asks for one and keeps it in oauth.mark
+        self.replay("mail_google_setup", "demo-google")
+        saved = (TEMP / "demo-google" / "oauth.mark").read_text()
+        self.assertIn('client_id: "1234-abc.apps.googleusercontent.com"', saved)
+        self.assertIn('client_secret: "GOCSPX-fake"', saved)
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_google_fix(self):
+        # a client saved with stray pasted characters: Google would answer "OAuth client was not found"
+        def bad_client(root):
+            (root / "oauth.mark").write_text(
+                '{google: {client_id: "- 1234-abc.apps.googleusercontent.com", client_secret: "- GOCSPX-fake"}}')
+        self.replay("mail_google_fix", "demo-google-fix", prepare=bad_client)
+        saved = (TEMP / "demo-google-fix" / "oauth.mark").read_text()
+        self.assertIn('client_id: "1234-abc.apps.googleusercontent.com"', saved)
+        self.assertIn('client_secret: "GOCSPX-fake"', saved)
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
     def test_demo_window(self):
         _, messages = self.replay("mail_window", "demo",
                                   lambda state: state.mailboxes["INBOX"].append((5, [], fake_mail.HTML_MAIL)))
         self.assertIn(fake_mail.HTML_MAIL, messages)
+        self.assertIn(b"ada-fake-test", (TEMP / "demo" / "accounts.mark").read_bytes())
 
     @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
     def test_demo_window_pop3(self):
         state, messages = self.replay("mail_window_pop3", "demo-pop3")
+        # the replay ends by removing the account: from the list and from the Keychain
+        self.assertNotIn(b"ada-fake-test", (TEMP / "demo-pop3" / "accounts.mark").read_bytes())
+        found = subprocess.run(["security", "find-generic-password", "-s", f"Lambda Mail ({TEMP / 'demo-pop3'})",
+                                "-a", "ada-fake-test"], capture_output=True)
+        self.assertNotEqual(found.returncode, 0)
         # each message downloaded once, byte for byte, and none deleted (ML9)
         self.assertEqual(sorted(messages), sorted(body for _, body in state.pop3))
         commands = [line.split(b" ")[0] for line in state.lines]

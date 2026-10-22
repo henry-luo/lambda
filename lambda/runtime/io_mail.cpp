@@ -26,6 +26,7 @@
 #include "../../lib/uv_loop.h"
 
 #include <curl/curl.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -451,12 +452,62 @@ static bool mail_last_line(const StrBuf* lines, const char* const* prefixes, int
     return found;
 }
 
+static bool mail_smtp_failure_code(const char* s, size_t n) {
+    return n >= 4 && (s[0] == '4' || s[0] == '5') && isdigit((unsigned char)s[1]) &&
+        isdigit((unsigned char)s[2]) && (s[3] == ' ' || s[3] == '-');
+}
+
+// The server's last refusal among its reply lines, which hold only what the
+// server sent (the header callback never sees the client's commands, so no
+// credential is here): IMAP `NO`/`BAD` without its tag, POP3 `-ERR`, or an
+// SMTP 4xx/5xx reply with its continuation lines joined. A refused login is
+// reported with it, since servers say why there (an app password needed,
+// a blocked sign-in).
+static bool mail_failure_reply(const StrBuf* lines, StrBuf* out) {
+    const char* s = lines->str;
+    size_t n = lines->length;
+    bool found = false;
+    for (size_t i = 0; i < n;) {
+        size_t end = i;
+        while (end < n && s[end] != '\n') end++;
+        size_t content = end;
+        if (content > i && s[content - 1] == '\r') content--;
+        const char* line = s + i;
+        size_t length = content - i;
+        const char* space = (const char*)memchr(line, ' ', length);
+        size_t rest = space ? length - (size_t)(space + 1 - line) : 0;
+        bool imap = space && ((rest >= 3 && !memcmp(space + 1, "NO ", 3)) || (rest == 2 && !memcmp(space + 1, "NO", 2)) ||
+                              (rest >= 4 && !memcmp(space + 1, "BAD ", 4)));
+        bool pop3 = length >= 4 && !memcmp(line, "-ERR", 4);
+        bool smtp = mail_smtp_failure_code(line, length);
+        if (imap || pop3 || smtp) {
+            // a continuation line ("535-…") joins the reply it continues
+            bool continues = smtp && found && out->length >= 4 && !memcmp(out->str, line, 3) &&
+                mail_smtp_failure_code(out->str, out->length) && out->str[3] == '-';
+            if (!continues) strbuf_reset(out);
+            else strbuf_append_char(out, ' ');
+            if (imap) strbuf_append_str_n(out, space + 1, rest);
+            else strbuf_append_str_n(out, line, length);
+            found = true;
+        }
+        i = end + 1;
+    }
+    return found;
+}
+
 // A failed transfer as an error: the server's reply when it gave one, else curl's.
 static Item mail_transfer_error(const char* fn, const MailTransfer* t, const char* const* prefixes, int count) {
     const char* line = NULL;
     size_t length = 0;
     if (t->spill_failed) return mail_error(ERR_FILE_WRITE_ERROR, fn, "cannot write the payload into the 'to' directory");
-    if (t->code == CURLE_LOGIN_DENIED) return mail_error(ERR_NETWORK_ERROR, fn, "login denied");
+    if (t->code == CURLE_LOGIN_DENIED) {
+        StrBuf* reply = strbuf_new_cap(128);
+        Item error = reply && mail_failure_reply(t->lines, reply)
+            ? mail_error(ERR_NETWORK_ERROR, fn, "login denied: %.*s", (int)(reply->length > 300 ? 300 : reply->length), reply->str)
+            : mail_error(ERR_NETWORK_ERROR, fn, "login denied");
+        if (reply) strbuf_free(reply);
+        return error;
+    }
     if (prefixes && mail_last_line(t->lines, prefixes, count, &line, &length))
         return mail_error(ERR_IO_ERROR, fn, "%.*s", (int)length, line);
     const char* reason = t->errbuf[0] ? t->errbuf : curl_easy_strerror(t->code);

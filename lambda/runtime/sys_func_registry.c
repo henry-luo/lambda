@@ -789,6 +789,20 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
+    // url_encode(text): RFC 3986 percent-encoding (WebScrape E7)
+    {SYSFUNC_URL_ENCODE, "url_encode", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_url_encode", FPTR(fn_url_encode), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
+
+    // hash(value, algorithm): a digest as binary (WebScrape E7, Archive AR-E7)
+    {SYSFUNC_HASH, "hash", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_hash", FPTR(fn_hash), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
+
+    // uuid(): a random UUID; a procedure, since each call differs
+    {SYSPROC_UUID, "uuid", 0, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_uuid", FPTR(pn_uuid), NULL, NULL, false, 0},
+
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
@@ -1308,6 +1322,13 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_FILE_IO_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SECRET_DELETE, "io_secret_delete", 2, &TYPE_BOOL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_FILE_IO_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
+
+    // lambda.io.loopback (D7.2.4v4): one browser request on 127.0.0.1, reached
+    // only through `import loopback: lambda.io.loopback`; accept parks the task
+    {SYSPROC_IO_LOOPBACK_LISTEN, "io_loopback_listen", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_loopback_listen", PROFILE_NETWORK_FPTR(pn_io_loopback_listen), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_LOOPBACK_ACCEPT, "io_loopback_accept", 3, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_loopback_accept", PROFILE_NETWORK_FPTR(pn_io_loopback_accept), NULL, NULL, false, 0, true},
 
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)

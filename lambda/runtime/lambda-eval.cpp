@@ -8630,6 +8630,30 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     return {.item = s2it(result)};
 }
 
+// url_encode(text) - percent-encode all but RFC 3986's unreserved characters
+// (letters, digits, - . _ ~), as query strings and OAuth requests take them
+Item fn_url_encode(Item text_item) {
+    GUARD_ERROR1(text_item);
+    if (!is_text_type_id(get_type_id(text_item))) {
+        log_debug("fn_url_encode: the argument must be text");
+        return ItemError;
+    }
+    static uint8_t unreserved[256];
+    static bool ready = false;
+    if (!ready) {
+        for (int c = 0; c < 256; c++) {
+            unreserved[c] = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                c == '-' || c == '.' || c == '_' || c == '~';
+        }
+        ready = true;
+    }
+    char* encoded = url_encode_with_table(text_item.get_chars(), text_item.get_len(), unreserved);
+    if (!encoded) return ItemError;
+    String* result = heap_strcpy(encoded, (int64_t)strlen(encoded));
+    mem_free(encoded);
+    return {.item = s2it(result)};
+}
+
 bool text_item_is_ascii(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {

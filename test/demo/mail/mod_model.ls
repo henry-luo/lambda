@@ -18,7 +18,8 @@ let MARGIN_ROWS = 12
 
 // `now` ({year, month, day}) dates the list's labels; handlers refresh it
 pub fn initial() => {accounts: [], account: null, status: {}, mailboxes: {}, box: null, entries: [], counts: {},
-    selected: null, fetching: null, remote: [], setup: null, preview: null, note: null, loaded: false,
+    selected: null, fetching: null, remote: [], setup: null, preview: null, note: null, loaded: false, clients: null,
+    confirm_remove: null,
     now: {year: 0, month: 0, day: 0}}
 
 // ---- accounts ----
@@ -160,9 +161,11 @@ pub fn quote_runs(text) {
 // ---- the account sheet ----
 
 // The sheet's incoming server is IMAP or POP3 (ML9); its port defaults by protocol and security.
+// `auth` is the sign-in the person chose, null until they choose (setup_auth).
 pub fn setup_initial() => {name: "", email: "", password: "", provider: "auto", protocol: "imap", host: "",
     port: "", security: "tls", user: "", pin: "", smtp_host: "", smtp_port: "465", smtp_security: "tls",
-    note: null, looking: false, found: null}
+    auth: null, note: null, notice: null, looking: false, found: null, signing: false, signing_with: null, signer: null,
+    google_setup: false, client_id: "", client_secret: ""}
 
 // the preset or the looked-up settings the sheet will use, or null for manual
 pub fn setup_preset(form) => if (form.provider == "manual") null
@@ -173,9 +176,25 @@ fn security(text) => if (text == "starttls") 'starttls' else if (text == "plain"
 fn port(text, fallback) => int(trim(text or "")) ^ { fallback }
 fn default_port(protocol, sec) => if (protocol == "pop3") (if (sec == 'tls') 995 else 110) else (if (sec == 'tls') 993 else 143)
 
+// The OAuth endpoints the sheet's provider offers when the app has a client
+// for them in oauth.mark (MQ4), else null.
+pub fn setup_oauth(form, clients) {
+    let preset = setup_preset(form);
+    if (preset == null or preset.oauth == null or clients == null or clients[preset.oauth.provider] == null) null
+    else preset.oauth
+}
+
+// "oauth" or "password": OAuth by default where it is offered
+pub fn setup_auth(form, clients) => if (setup_oauth(form, clients) == null) "password"
+    else if (form.auth == null) "oauth" else form.auth
+
+// the app's client for a provider, as lambda.oauth takes it, or null
+pub fn oauth_client(clients, endpoints) => if (endpoints == null or clients == null or clients[endpoints.provider] == null) null
+    else (let c = clients[endpoints.provider], {id: c.client_id, secret: c.client_secret})
+
 // An account from the sheet, or the reason it cannot be one. The password
-// goes to the secret store, never into the account (ML6).
-pub fn account_from_setup(form, taken) {
+// or refresh token goes to the secret store, never into the account (ML6).
+pub fn account_from_setup(form, taken, clients) {
     let email = trim(form.email)
     let preset = setup_preset(form)
     let pop = form.protocol == "pop3"
@@ -183,15 +202,61 @@ pub fn account_from_setup(form, taken) {
     let manual = {host: trim(form.host), port: port(form.port, default_port(form.protocol, sec)), security: sec}
     let incoming = if (preset == null) manual else if (pop) preset.pop3 else preset.imap
     let smtp = if (preset != null) preset.smtp else {host: trim(form.smtp_host), port: port(form.smtp_port, 465), security: security(form.smtp_security)}
-    let user = if (trim(form.user) != "") trim(form.user) else if (preset != null and preset.user != null) preset.user else email;
+    let user = if (trim(form.user) != "") trim(form.user) else if (preset != null and preset.user != null) preset.user else email
+    let auth = setup_auth(form, clients);
     if (prov.domain_of(email) == "") {error: "Type an email address."}
-    else if (form.password == "") {error: "Type the account's password or app password."}
+    else if (auth == "password" and form.password == "") {error: "Type the account's password or app password."}
     else if (incoming == null) {error: preset.name ++ " offers no " ++ (if (pop) "POP3" else "IMAP") ++ "; choose the other protocol."}
     else if (incoming.host == "") {error: "Choose a provider or type the incoming server."}
     else {account: {id: account_id(email, taken), name: if (trim(form.name) != "") trim(form.name) else email, email: email,
         user: user, provider: if (preset != null) preset.id else "manual", protocol: if (pop) "pop3" else "imap",
         imap: if (pop) null else incoming, pop3: if (pop) incoming else null, smtp: smtp,
-        pin: if (trim(form.pin) == "") null else trim(form.pin)}}
+        pin: if (trim(form.pin) == "") null else trim(form.pin),
+        auth: auth, oauth: if (auth == "oauth") setup_oauth(form, clients) else null}}
 }
 
 pub fn is_pop3(a) => a != null and a.protocol == "pop3"
+
+// The account a "Login with Gmail" sign-in for `email` makes. An account for
+// the same address turns to OAuth, keeping its id, its store and, if it was
+// Gmail already, its protocol; any other address is a new Gmail account.
+// `endpoints` are the provider's (lambda.mail.providers GOOGLE).
+pub fn gmail_account(email, name, accounts, endpoints) {
+    let preset = prov.preset("gmail")
+    let same = [for (a in accounts where lower(a.email) == lower(email)) a][0]
+    let keep = same != null and same.provider == "gmail";
+    {id: if (same != null) same.id else account_id(email, [for (a in accounts) a.id]),
+     name: if (same != null) same.name else if (name != null and name != "") name else email,
+     email: email, user: email, provider: "gmail",
+     protocol: if (keep) same.protocol else "imap",
+     imap: if (keep and same.protocol == "pop3") null else preset.imap,
+     pop3: if (keep and same.protocol == "pop3") preset.pop3 else null,
+     smtp: preset.smtp, pin: null, auth: "oauth", oauth: endpoints}
+}
+
+// the accounts with `a` in place of the account of the same id, or added
+pub fn with_account(accounts, a) => if (len([for (x in accounts where x.id == a.id) x]) > 0)
+    [for (x in accounts) if (x.id == a.id) a else x] else [*accounts, a]
+
+pub fn without_account(accounts, id) => [for (x in accounts where x.id != id) x]
+
+// The whole shape of a Google client, so a stray character pasted with the ID
+// or the secret is caught here: Google only answers "OAuth client was not found"
+type GoogleClientId = \("\d"+ "-" ("a" to "z" | "\d")+ ".apps.googleusercontent.com")
+type ClientSecret = \(("\w" | "-")+)
+
+pub fn google_client_error(client_id, client_secret) {
+    let id = trim(client_id or "")
+    let secret = trim(client_secret or "");
+    if (id == "") "Paste the client ID, which ends in .apps.googleusercontent.com."
+    else if (not (id is GoogleClientId)) "That is not a whole client ID. Paste only the ID, like 123456789012-abc….apps.googleusercontent.com, with nothing before or after it."
+    else if (secret == "") "Paste the client secret too."
+    else if (not (secret is ClientSecret)) "That is not a whole client secret. Paste only the secret, with nothing before or after it."
+    else null
+}
+
+// the Google setup panel over the sheet's form, holding the saved client, if
+// any, for correcting
+pub fn google_setup_form(form, client, note) => {*: form, google_setup: true,
+    client_id: if (client == null) "" else (client.id or ""),
+    client_secret: if (client == null) "" else (client.secret or ""), note: note, notice: null}

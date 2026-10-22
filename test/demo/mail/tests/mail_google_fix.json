@@ -1,0 +1,27 @@
+{
+  "name": "Mail demo: a saved Google client with stray pasted characters reopens the setup panel, prefilled, for correcting",
+  "html": "test/demo/mail/mail.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-loaded", "equals": "true"},
+    {"type": "click", "target": {"selector": "#login-gmail"}},
+    {"type": "assert_count", "target": {"selector": "#google-setup"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#setup-error"}, "contains": "not a whole client ID"},
+    {"type": "assert_value", "target": {"selector": "#google-client-id"}, "equals": "- 1234-abc.apps.googleusercontent.com"},
+    {"type": "assert_value", "target": {"selector": "#google-client-secret"}, "equals": "- GOCSPX-fake"},
+    {"type": "capture_surface", "source": "page", "file": "temp/mail/shots/google_fix.png"},
+    {"type": "type", "target": {"selector": "#google-client-id"}, "text": "1234-abc.apps.googleusercontent.com", "clear": true},
+    {"type": "click", "target": {"selector": "#google-setup-save"}},
+    {"type": "assert_text", "target": {"selector": "#setup-error"}, "contains": "not a whole client secret"},
+    {"type": "type", "target": {"selector": "#google-client-secret"}, "text": "GOCSPX-fake", "clear": true},
+    {"type": "click", "target": {"selector": "#google-setup-save"}},
+    {"type": "assert_count", "target": {"selector": "#google-setup"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#setup-notice"}, "contains": "Google sign-in is set up"},
+    {"type": "click", "target": {"selector": "#google-change"}},
+    {"type": "assert_count", "target": {"selector": "#google-setup"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#setup-error"}, "count": 0},
+    {"type": "assert_value", "target": {"selector": "#google-client-id"}, "equals": "1234-abc.apps.googleusercontent.com"},
+    {"type": "click", "target": {"selector": "#google-setup-back"}},
+    {"type": "assert_count", "target": {"selector": "#google-setup"}, "count": 0}
+  ]
+}

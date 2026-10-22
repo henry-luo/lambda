@@ -4,15 +4,19 @@
 // message list that mounts only the rows in view, and a viewer that shows HTML
 // mail script-free in a sandboxed frame. The profile lives in
 // ~/Library/Application Support/Lambda Mail (MAIL_DEMO_ROOT overrides it);
-// passwords stay in the Keychain.
+// passwords and refresh tokens stay in the Keychain. Sign-in with Google or
+// Microsoft uses the app registration in the profile's oauth.mark (README).
 import dom
 import store: lambda.mail.store
 import prov: lambda.mail.providers
 import san: lambda.mail.sanitize
+import secret: lambda.io.secret
+import oauth: lambda.oauth
 import resources: ~~.mod_resources
 import model: .mod_model
 import ui: .mod_ui
 import sync: .mod_sync
+import signin: .mod_signin
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = input(url_resolve(BASE, "mail.css"), 'text')^
@@ -66,9 +70,31 @@ pn show_box(st, tasks, account_id, path) {
     return {*: st, account: account_id, box: path, entries: cached_entries(account_id, path), selected: null, fetching: null}
 }
 
-pn start_account(root, account, password) {
-    return start(sync.run, [account, ROOT, SERVICE, password, pn (m) => { report(root, m) }], {owner: 'document'})
+pn start_account(root, clients, account, password) {
+    let client = model.oauth_client(clients, account.oauth)
+    return start(sync.run, [account, ROOT, SERVICE, password, client, pn (m) => { report(root, m) }], {owner: 'document'})
 }
+
+// The browser sign-ins (mod_signin.ls), each in a task of its own: the refresh
+// token goes straight to the Keychain, so the window hears only the outcome.
+pn sign_in_task(root, account, client) {
+    var made = null
+    var failure = null
+    signin.sign_in_account(SERVICE, account, client, {}) ^ { failure = ^ } ~ { made = ~ }
+    report(root, if (failure is error) {type: "sign_in_failed", text: failure.message}
+        else {type: "signed_in", account: made})
+}
+
+pn gmail_task(root, client, accounts) {
+    var made = null
+    var failure = null
+    signin.sign_in_gmail(SERVICE, prov.GOOGLE, client, accounts, {}) ^ { failure = ^ } ~ { made = ~ }
+    report(root, if (failure is error) {type: "sign_in_failed", text: failure.message}
+        else {type: "signed_in", account: made.account})
+}
+
+// a removed account's password or refresh token leaves the Keychain too
+pn forget(id) { secret.delete(SERVICE, id) ^ { null } }
 
 pn lookup(root, email) {
     var found = null
@@ -76,20 +102,52 @@ pn lookup(root, email) {
     report(root, {type: "autoconfig", email: email, found: found})
 }
 
-// The account sheet's Add: the account joins the list, and its task stores
-// the password and logs in. Returns the next state and tasks.
-pn add_account(root, st, tasks) {
-    let made = model.account_from_setup(st.setup, [for (a in st.accounts) a.id])
-    if (made.error != null) { return {st: {*: st, setup: {*: st.setup, note: made.error}}, tasks: tasks} }
-    let a = made.account
-    let accounts = [*st.accounts, a]
+// The account joins the list, or replaces the one of the same id, and its
+// task stores the password (if any) and logs in. Returns the next state and tasks.
+pn finish_account(root, st, tasks, a, password) {
+    let accounts = model.with_account(st.accounts, a)
     var failed = false
     io.mkdir(ROOT) ^ { null }
     output({version: 1, accounts: accounts}, ROOT ++ "/accounts.mark", {atomic: true}) ^ { failed = true }
     if (failed) { return {st: {*: st, setup: {*: st.setup, note: "Cannot save the account list in " ++ ROOT ++ "."}}, tasks: tasks} }
-    let next_tasks = {*: tasks, [a.id]: start_account(root, a, st.setup.password)}
-    let next = {*: st, accounts: accounts, setup: null, mailboxes: {*: st.mailboxes, [a.id]: []}}
-    return {st: show_box(next, next_tasks, a.id, "INBOX"), tasks: next_tasks}
+    // a replaced account's task logs in again with the new credentials
+    if (tasks[a.id] != null) { cancel(tasks[a.id]) }
+    let next_tasks = {*: tasks, [a.id]: start_account(root, st.clients, a, password)}
+    let boxes = st.mailboxes[a.id] or []
+    let next = {*: st, accounts: accounts, setup: null, mailboxes: {*: st.mailboxes, [a.id]: boxes}}
+    return {st: show_box(next, next_tasks, a.id, model.inbox_path(boxes)), tasks: next_tasks}
+}
+
+// The account leaves the list and the Keychain; its downloaded mail stays,
+// and adding the same address again picks it up.
+pn remove_account(st, tasks, id) {
+    let accounts = model.without_account(st.accounts, id)
+    var failed = false
+    output({version: 1, accounts: accounts}, ROOT ++ "/accounts.mark", {atomic: true}) ^ { failed = true }
+    if (failed) { return {st: {*: st, confirm_remove: null, note: "Cannot save the account list in " ++ ROOT ++ "."}, tasks: tasks} }
+    if (tasks[id] != null) { cancel(tasks[id]) }
+    start(forget, [id], {owner: 'document'})
+    let next_tasks = {*: tasks, [id]: null}
+    let rest = {*: st, accounts: accounts, confirm_remove: null}
+    if (st.account != id) { return {st: rest, tasks: next_tasks} }
+    if (len(accounts) == 0) {
+        return {st: {*: rest, account: null, box: null, entries: [], selected: null, fetching: null}, tasks: next_tasks}
+    }
+    return {st: show_box(rest, next_tasks, accounts[0].id, model.inbox_path(st.mailboxes[accounts[0].id])), tasks: next_tasks}
+}
+
+// The account sheet's Add: a password account is added at once; an OAuth
+// one first signs in through the browser, and is added when that succeeds.
+pn add_account(root, st, tasks) {
+    if (st.setup.signing) { return {st: st, tasks: tasks} }
+    let made = model.account_from_setup(st.setup, [for (a in st.accounts) a.id], st.clients)
+    if (made.error != null) { return {st: {*: st, setup: {*: st.setup, note: made.error}}, tasks: tasks} }
+    let a = made.account
+    if (a.auth == "oauth") {
+        let signer = start(sign_in_task, [root, a, model.oauth_client(st.clients, a.oauth)], {owner: 'document'})
+        return {st: {*: st, setup: {*: st.setup, signing: true, signing_with: a.oauth.name, signer: signer, note: null}}, tasks: tasks}
+    }
+    return finish_account(root, st, tasks, a, st.setup.password)
 }
 
 // ---- the open message ----
@@ -146,14 +204,16 @@ on load(evt) {
     if (st.loaded) { return 'pass' }
     let root = dom.root_node(evt.target)
     let accounts = read_accounts()
+    // the app's own registrations with OAuth providers (MQ4); none is fine
+    let clients = read_mark(ROOT ++ "/oauth.mark", null)
     var boxes = {}
     var started = {}
     for (a in accounts) {
         boxes = {*: boxes, [a.id]: read_mark(sync.account_dir(ROOT, a.id) ++ "/mailboxes.mark", [])}
-        started = {*: started, [a.id]: start_account(root, a, null)}
+        started = {*: started, [a.id]: start_account(root, clients, a, null)}
     }
     tasks = started
-    st = {*: st, accounts: accounts, mailboxes: boxes, loaded: true, now: today(),
+    st = {*: st, accounts: accounts, mailboxes: boxes, clients: clients, loaded: true, now: today(),
         setup: if (len(accounts) == 0) model.setup_initial() else null}
     if (len(accounts) > 0) { st = show_box(st, tasks, accounts[0].id, model.inbox_path(boxes[accounts[0].id])) }
     return 'handled'
@@ -161,6 +221,17 @@ on load(evt) {
 
 on mail(evt) {
     let m = evt.detail
+    let signing = st.setup != null and st.setup.signing
+    if (m.type == "signed_in" and signing) {
+        let next = finish_account(dom.root_node(evt.target), st, tasks, m.account, null)
+        st = next.st
+        tasks = next.tasks
+        return 'handled'
+    }
+    if (m.type == "sign_in_failed" and signing) {
+        st = {*: st, setup: {*: st.setup, signing: false, signer: null, note: m.text}}
+        return 'handled'
+    }
     let box_before = st.box
     st = {*: model.apply_report(st, m), now: today()}
     if (st.box != box_before and m.account == st.account) {
@@ -208,7 +279,51 @@ on click(evt) {
     } else if (name == "add-account") {
         st = {*: st, setup: model.setup_initial()}
     } else if (name == "setup-cancel") {
+        // a sign-in still waiting for the browser ends with the sheet
+        if (st.setup != null and st.setup.signer != null) { cancel(st.setup.signer) }
         st = {*: st, setup: null}
+    } else if (name == "login-gmail") {
+        // Gmail in one press: Google's page, then the address Google reports
+        let form = if (st.setup == null) model.setup_initial() else st.setup
+        let client = model.oauth_client(st.clients, prov.GOOGLE)
+        let problem = if (client == null) null else model.google_client_error(client.id, client.secret)
+        if (client == null or problem != null) {
+            // no client yet, or a saved one Google would not know: the panel, to correct it
+            st = {*: st, setup: model.google_setup_form(form, client, problem)}
+        } else if (not form.signing) {
+            let signer = start(gmail_task, [dom.root_node(evt.target), client, st.accounts], {owner: 'document'})
+            st = {*: st, setup: {*: form, google_setup: false, signing: true, signing_with: "Google", signer: signer, note: null, notice: null}}
+        }
+    } else if (name == "google-change") {
+        let form = if (st.setup == null) model.setup_initial() else st.setup
+        st = {*: st, setup: model.google_setup_form(form, model.oauth_client(st.clients, prov.GOOGLE), null)}
+    } else if (name == "google-console") {
+        start(oauth.open_browser, ["https://console.cloud.google.com/auth/clients"], {owner: 'document'})
+    } else if (name == "google-setup-back") {
+        st = {*: st, setup: {*: st.setup, google_setup: false, note: null}}
+    } else if (name == "google-setup-save") {
+        let problem = model.google_client_error(st.setup.client_id, st.setup.client_secret)
+        if (problem != null) {
+            st = {*: st, setup: {*: st.setup, note: problem}}
+        } else {
+            // the app's registration with Google (MQ4), kept beside the accounts
+            let clients = {*: (st.clients or {}), google: {client_id: trim(st.setup.client_id), client_secret: trim(st.setup.client_secret)}}
+            var saved = true
+            io.mkdir(ROOT) ^ { null }
+            output(clients, ROOT ++ "/oauth.mark", {atomic: true}) ^ { saved = false }
+            st = if (saved) {*: st, clients: clients, setup: {*: st.setup, google_setup: false, client_id: "", client_secret: "",
+                    note: null, notice: "Google sign-in is set up. Press Login with Gmail."}}
+                else {*: st, setup: {*: st.setup, note: "Cannot save " ++ ROOT ++ "/oauth.mark."}}
+        }
+    } else if (name == "remove-account") {
+        st = {*: st, confirm_remove: value}
+    } else if (name == "keep-account") {
+        st = {*: st, confirm_remove: null}
+    } else if (name == "remove-account-confirm") {
+        let next = remove_account(st, tasks, st.confirm_remove)
+        st = next.st
+        tasks = next.tasks
+        shown = if (st.account == null or st.selected == null) null else shown
     } else if (name == "setup-save") {
         let next = add_account(dom.root_node(evt.target), st, tasks)
         st = next.st

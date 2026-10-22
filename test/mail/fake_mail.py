@@ -6,14 +6,24 @@ Each server records what clients sent so the tests can check it.
 """
 
 import base64
+import hashlib
+import http.server
+import json
 import re
 import select
+import secrets
 import socketserver
 import threading
+import urllib.parse
 
 USER = "ada"
 PASSWORD = "secret"
 TOKEN = "tok-123"
+# the fake OAuth provider's registered client and the refresh token it issues
+CLIENT_ID = "lambda-test"
+CLIENT_SECRET = "s3cret"
+REFRESH = "ref-1"
+USERINFO_EMAIL = "ada@example.org"
 UIDVALIDITY = 1700000001
 
 # A body whose lines look like a tagged completion, an untagged response and
@@ -304,8 +314,12 @@ class SmtpHandler(LineHandler):
                     initial = self.read_line() or b""
                 user, password, token = sasl_identity("PLAIN", base64.b64decode(initial))
                 state.logins.append(("PLAIN", user, password, token))
-                self.send("235 2.7.0 Authentication successful" if credentials_ok(user, password, token)
-                          else "535 5.7.8 Authentication credentials invalid")
+                if credentials_ok(user, password, token):
+                    self.send("235 2.7.0 Authentication successful")
+                else:
+                    # a multi-line refusal, as Gmail sends it
+                    self.send("535-5.7.8 Username and Password not accepted. For more information, go to",
+                              "535 5.7.8 https://support.example.com/BadCredentials")
             elif word == b"MAIL":
                 envelope = {"from": line[10:].strip(b"<>").decode(), "to": []}
                 self.send("250 2.1.0 OK")
@@ -358,12 +372,104 @@ class MailState:
         }
         self.listing = [("INBOX", "\\HasNoChildren"), ("Copies", "\\HasNoChildren"),
                         ("Entw&APw-rfe", "\\HasNoChildren \\Drafts"), ("[Fake]", "\\Noselect \\HasChildren")]
+        self.codes = {}      # OAuth code → the authorization request it answers
+        self.oauth = []      # (endpoint, fields) the OAuth provider received
         self.pop3 = [("uid-alpha", b"Subject: pop\r\n\r\nhello\r\n.hidden dot line\r\n"),
                      ("uid-beta", b"Subject: second\r\n\r\nbye\r\n")]
 
     def record(self, line):
         with self.lock:
             self.lines.append(line)
+
+
+def pkce_challenge(verifier):
+    """RFC 7636 §4.2: BASE64URL(SHA256(verifier)) without padding."""
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+class OAuthHandler(http.server.BaseHTTPRequestHandler):
+    """A provider's authorization and token endpoints (RFC 6749, RFC 7636).
+    /authorize stands in for the sign-in page: it redirects at once, with a
+    code, or with error=access_denied for the login_hint "refuse"."""
+
+    def log_message(self, *args):
+        pass
+
+    def reply_json(self, status, data):
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        state = self.server.state
+        url = urllib.parse.urlsplit(self.path)
+        if url.path == "/userinfo":
+            # OpenID Connect userinfo: who the access token was issued to
+            state.oauth.append(("userinfo", {"authorization": self.headers.get("Authorization", "")}))
+            if self.headers.get("Authorization") == "Bearer " + TOKEN:
+                self.reply_json(200, {"sub": "1", "email": USERINFO_EMAIL, "email_verified": True, "name": "Ada Lovelace"})
+            else:
+                self.reply_json(401, {"error": "invalid_token"})
+            return
+        query = dict(urllib.parse.parse_qsl(url.query, keep_blank_values=True))
+        state.oauth.append(("authorize", query))
+        if url.path != "/authorize" or query.get("client_id") != CLIENT_ID or \
+                query.get("code_challenge_method") != "S256" or not query.get("redirect_uri", "").startswith("http://127.0.0.1:"):
+            self.reply_json(400, {"error": "invalid_request"})
+            return
+        if query.get("login_hint") == "refuse":
+            answer = {"error": "access_denied", "error_description": "The user said no", "state": query.get("state")}
+        else:
+            code = secrets.token_urlsafe(12)
+            state.codes[code] = query
+            answer = {"code": code, "state": query.get("state")}
+        self.send_response(302)
+        self.send_header("Location", query["redirect_uri"] + "?" + urllib.parse.urlencode(answer))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self):
+        state = self.server.state
+        length = int(self.headers.get("Content-Length", "0"))
+        fields = dict(urllib.parse.parse_qsl(self.rfile.read(length).decode()))
+        state.oauth.append(("token", fields))
+        if fields.get("client_id") != CLIENT_ID or fields.get("client_secret") != CLIENT_SECRET:
+            self.reply_json(401, {"error": "invalid_client"})
+            return
+        if fields.get("grant_type") == "authorization_code":
+            request = state.codes.pop(fields.get("code"), None)
+            if not request or request["redirect_uri"] != fields.get("redirect_uri") or \
+                    pkce_challenge(fields.get("code_verifier", "")) != request["code_challenge"]:
+                self.reply_json(400, {"error": "invalid_grant", "error_description": "Bad code or verifier"})
+                return
+            self.reply_json(200, {"access_token": TOKEN, "refresh_token": REFRESH, "expires_in": 3600,
+                                  "token_type": "Bearer", "scope": request.get("scope")})
+        elif fields.get("grant_type") == "refresh_token" and fields.get("refresh_token") == REFRESH:
+            self.reply_json(200, {"access_token": TOKEN, "expires_in": 3600, "token_type": "Bearer"})
+        else:
+            self.reply_json(400, {"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+
+
+class HttpServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, handler, state):
+        super().__init__(("127.0.0.1", 0), handler)
+        self.state = state
+        self.thread = threading.Thread(target=self.serve_forever, daemon=True)
+        self.thread.start()
+
+    @property
+    def port(self):
+        return self.server_address[1]
+
+    def stop(self):
+        self.shutdown()
+        self.server_close()
 
 
 class Server(socketserver.ThreadingTCPServer):
@@ -389,4 +495,5 @@ def start_all():
     state = MailState()
     return state, {"imap": Server(ImapHandler, state),
                    "pop3": Server(Pop3Handler, state),
-                   "smtp": Server(SmtpHandler, state)}
+                   "smtp": Server(SmtpHandler, state),
+                   "oauth": HttpServer(OAuthHandler, state)}

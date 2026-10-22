@@ -35,6 +35,13 @@
     {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-status", "equals": "online",
       "assert_timeout": 10000, "assert_interval": 200},
     {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-rows", "equals": "2"},
-    {"type": "assert_count", "target": {"selector": "#list .row.unread"}, "count": 1}
+    {"type": "assert_count", "target": {"selector": "#list .row.unread"}, "count": 1},
+
+    {"type": "click", "target": {"selector": ".remove-account"}},
+    {"type": "assert_count", "target": {"selector": "#remove-account-confirm"}, "count": 1},
+    {"type": "click", "target": {"selector": "#remove-account-confirm"}},
+    {"type": "assert_count", "target": {"selector": ".account"}, "count": 0},
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-account", "equals": ""},
+    {"type": "wait", "ms": 500}
   ]
 }

@@ -2968,6 +2968,7 @@ static const char* registered_jube_module_name(StrView* name) {
 static const struct { const char* path; const char* module; } io_leaf_modules[] = {
     {"lambda.io.mail", "io_mail"},
     {"lambda.io.secret", "io_secret"},
+    {"lambda.io.loopback", "io_loopback"},
 };
 
 static const char* io_leaf_module_path(const char* module) {

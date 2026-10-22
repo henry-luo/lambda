@@ -95,16 +95,15 @@ SecretStoreStatus secret_store_set(const char* service, const char* account,
                                    char* message, size_t message_size) {
     CFMutableDictionaryRef query = secret_query(service, account);
     CFDataRef data = CFDataCreate(NULL, (const UInt8*)value, (CFIndex)length);
-    CFMutableDictionaryRef change = CFDictionaryCreateMutable(NULL, 0,
-        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     SecretStoreStatus result = SECRET_STORE_FAILED;
-    if (!query || !data || !change) {
+    if (!query || !data) {
         secret_message(message, message_size, "out of memory");
     } else {
-        // an existing item keeps its access list; only its data changes
-        CFDictionarySetValue(change, kSecValueData, data);
-        OSStatus status = SecItemUpdate(query, change);
-        if (status == errSecItemNotFound) {
+        // Replace rather than update: an updated item keeps its access list,
+        // which trusts only the program that created it, so a later build of
+        // the writer would be asked for access to the value it just wrote.
+        OSStatus status = SecItemDelete(query);
+        if (status == errSecSuccess || status == errSecItemNotFound) {
             CFDictionarySetValue(query, kSecValueData, data);
             status = SecItemAdd(query, NULL);
         }
@@ -112,7 +111,6 @@ SecretStoreStatus secret_store_set(const char* service, const char* account,
     }
     if (query) CFRelease(query);
     if (data) CFRelease(data);
-    if (change) CFRelease(change);
     return result;
 }
 

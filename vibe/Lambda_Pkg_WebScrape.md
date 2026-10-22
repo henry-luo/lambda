@@ -462,7 +462,8 @@ runs a **configurable** settle (wait-for-selector / network-idle) replacing the 
 /`query_string` (URL decomposition + percent-encoding); a CSV output formatter in `lambda/format/`
 (input CSV exists, output doesn't); `hash`/`base64`/`uuid` sys-funcs (cache keys, content-dedup —
 `lambda/js/js_crypto.cpp` has implementations to bind); expose regex capture groups from `find()`
-(`re2_wrapper.cpp` uses groups internally already). Each ~½–1 day.
+(`re2_wrapper.cpp` uses groups internally already). Each ~½–1 day. *Partly done 2026-10-22:*
+`url_encode`, `hash` and `uuid` exist, added for the mail demo's OAuth sign-in (vibe/Lambda_Demo_Mail.md M4).
 
 **Effort summary**: static scraping (Tiers 1–2) needs **E1+E2+E3 ≈ 4–5 days native**. Production
 crawler (Tier 3) adds **E4 ≈ 2 days** (E5 is in-package). Dynamic pages add **E6 ≈ 1–2 weeks**. E7 is

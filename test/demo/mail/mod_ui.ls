@@ -24,7 +24,12 @@ fn account_section(st, a) {
     let status = model.status_of(st, a.id)
     let rows = [for (b in model.sidebar(st, a.id)) box_row(st, a, b)];
     <section class:"account", 'data-account':a.id,
-        <h2 class:"account-name", a.name>
+        <div class:"account-head", <h2 class:"account-name", a.name>;
+            button(null, "remove-account", "remove-account", a.id, "Remove", {title:"Remove this account"})>;
+        if (st.confirm_remove == a.id) <div class:"confirm-remove", <span "Remove this account?">;
+            button("remove-account-confirm", "text-button danger", "remove-account-confirm", a.id, "Remove", {});
+            button("keep-account", "text-button", "keep-account", a.id, "Keep", {})>
+        else null;
         <div class:"account-status " ++ status.state, model.status_label(status)>
         <div class:"boxes", *rows>>
 }
@@ -123,25 +128,65 @@ fn manual_fields(form) => <div class:"manual",
     (text_field("User name", "setup-user", "user", form.user, "text"));
     (text_field("Certificate pin", "setup-pin", "pin", form.pin, "text"))>
 
-fn setup_sheet(form) {
+// Gmail in one press, where the app has a Google client; until it has one,
+// the press leads to google_setup_panel
+fn gmail_login(has_client) => <div class:"login-gmail",
+    button("login-gmail", "google-button", "login-gmail", null, "Login with Gmail", {});
+    if (has_client) button("google-change", "text-button google-change", "google-change", null, "Change Google client", {}) else null;
+    <p class:"divider", "or add an account by its settings">>
+
+// The one-time registration Google asks of every app that signs in to Gmail:
+// the person's own client (MQ4), pasted here and kept in oauth.mark.
+fn google_setup_panel(form) => <div id:"google-setup", class:"sheet", role:"dialog", 'aria-label':"Set up Google sign-in",
+    <h2 "Set up Google sign-in">;
+    <p class:"hint", "Google signs people in to Gmail only through an app it knows, so register this demo as your own app once:">;
+    <ol class:"steps",
+        <li "In Google Cloud, create a project and set up its Google Auth Platform as an External app in Testing.">
+        <li "Add your Gmail address as a test user.">
+        <li "Under Clients, create a client of type Desktop app, then paste its ID and secret here.">>;
+    button("google-console", "text-button", "google-console", null, "Open Google Cloud", {});
+    (text_field("Client ID", "google-client-id", "client_id", form.client_id, "text"));
+    // shown in the clear: a desktop client's secret is not confidential, and a stray pasted character must be visible
+    (text_field("Client secret", "google-client-secret", "client_secret", form.client_secret, "text"));
+    if (form.note != null) <p id:"setup-error", class:"error", form.note> else null;
+    <div class:"sheet-buttons",
+        button("google-setup-back", "text-button", "google-setup-back", null, "Back", {});
+        button("google-setup-save", "primary", "google-setup-save", null, "Save", {})>>
+
+fn setup_sheet(form, clients) {
     let preset = model.setup_preset(form)
-    let manual = form.provider == "manual" or (form.provider == "auto" and preset == null and trim(form.email) != "");
-    <div id:"setup", class:"sheet-backdrop",
-        <div class:"sheet", role:"dialog", 'aria-label':"Add a mail account",
+    let manual = form.provider == "manual" or (form.provider == "auto" and preset == null and trim(form.email) != "")
+    let endpoints = model.setup_oauth(form, clients)
+    let auth = model.setup_auth(form, clients)
+    // a local bridge (Proton Mail Bridge) presents a self-signed certificate to pin
+    let bridge = preset != null and preset.imap != null and preset.imap.host == "127.0.0.1";
+    <div id:"setup", class:"sheet-backdrop", 'data-auth':auth, 'data-signing':string(form.signing),
+        'data-google':string(model.oauth_client(clients, prov.GOOGLE) != null),
+        if (form.google_setup) google_setup_panel(form)
+        else <div class:"sheet", role:"dialog", 'aria-label':"Add a mail account",
             <h2 "Add a mail account">;
+            (gmail_login(model.oauth_client(clients, prov.GOOGLE) != null));
             (text_field("Name", "setup-name", "name", form.name, "text"));
             (text_field("Email address", "setup-email", "email", form.email, "email"));
-            (text_field("Password", "setup-password", "password", form.password, "password"));
             <label class:"field", <span "Provider">; (choice("setup-provider", "provider", form.provider, PROVIDER_CHOICES))>;
+            if (endpoints == null) null
+            else <label class:"field", <span "Sign in">; (choice("setup-auth", "auth", auth,
+                [["oauth", "With " ++ endpoints.name], ["password", "With a password or app password"]]))>;
+            if (auth == "password") text_field("Password", "setup-password", "password", form.password, "password") else null;
             <label class:"field", <span "Protocol">; (choice("setup-protocol", "protocol", form.protocol, PROTOCOL_CHOICES))>;
             if (form.looking) <p class:"hint", "Looking up the settings…">
             else if (preset != null) <p id:"setup-preset", class:"hint", preset.name ++ (if (preset.note != null) ". " ++ preset.note else "")>
             else null;
-            if (manual) manual_fields(form) else null;
+            if (manual) manual_fields(form)
+            else if (bridge) text_field("Certificate pin", "setup-pin", "pin", form.pin, "text")
+            else null;
+            if (form.signing) <p id:"setup-signing", class:"hint", ("Finish signing in to " ++ form.signing_with ++ " in your browser…")> else null;
+            if (form.notice != null) <p id:"setup-notice", class:"hint", form.notice> else null;
             if (form.note != null) <p id:"setup-error", class:"error", form.note> else null;
             <div class:"sheet-buttons",
                 button("setup-cancel", "text-button", "setup-cancel", null, "Cancel", {});
-                button("setup-save", "primary", "setup-save", null, "Add Account", {})>>>
+                button("setup-save", "primary", "setup-save", null,
+                    if (auth == "oauth") "Sign in with " ++ endpoints.name else "Add Account", {})>>>
 }
 
 // ---- the attachment preview (Quick Look) ----
@@ -163,5 +208,5 @@ pub fn page(st, shown) => <main id:"mail", 'data-loaded':string(st.loaded), 'dat
     (sidebar(st));
     apply(<mail_list entries:st.entries, selected:st.selected, now:st.now>);
     apply(<mail_viewer shown:shown, remote:shown != null and shown.file in st.remote, fetching:st.fetching>);
-    if (st.setup != null) setup_sheet(st.setup) else null;
+    if (st.setup != null) setup_sheet(st.setup, st.clients) else null;
     if (st.preview != null) preview(st.preview) else null>
