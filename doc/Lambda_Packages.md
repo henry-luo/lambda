@@ -2109,10 +2109,11 @@ pn main() {
 |---|---|
 | `lambda.mail.imap` | `mailbox_name` (modified UTF-7), `list_entry`, `select_state`, `fetch_items`, `uid_set`, and the `is_list`/`is_fetch` tests over response tokens |
 | `lambda.mail.mime` | `text_body` (format=flowed unwrapped), `html_body`, `attachments`, `cid_parts`, `snippet`, `search_text` over a message read with `input(…, 'eml')` |
-| `lambda.mail.store` | store paths, `server_id`, `load_index`, `save_index` (atomic), and the index updates `merge_entries`, `refresh_entries`, `with_files` |
-| `lambda.mail.sync` | `capabilities`, `mailboxes`, `sync_mailbox` (headers of new messages, flags of known ones, expunges, UIDVALIDITY resets), `fetch_message` (the body and its search sidecar) |
+| `lambda.mail.store` | store paths, `safe_name` (distinct file names, case-insensitive file systems included), `server_id`, `load_index`, `save_index` (atomic), and the index updates `merge_entries`, `refresh_entries`, `with_files` |
+| `lambda.mail.sync` | `capabilities`, `mailboxes`, `sync_mailbox` (headers of new messages, flags of known ones, expunges, UIDVALIDITY resets), `fetch_message` (the body and its search sidecar), and the shared `file_message` and `header_entry` |
+| `lambda.mail.pop3` | A POP3 account as a download source (ML9): `sync_inbox(session, root, progress)` downloads each message the server lists by UIDL that the local Inbox lacks, once, and leaves mail on the server; `mark_seen` keeps read state in the store; `listing`, `missing`, `message_id`, `octets` |
 | `lambda.mail.sanitize` | `clean(html, {remote, cids})` → `{html, blocked}`: a standalone document for a message frame, with scripts, `on*` attributes, embedded documents, forms and frame navigation removed, remote loads dropped unless `remote` (`blocked` counts them), `cid:` URLs inlined, and `<noscript>` content parsed and cleaned; `cid_urls`, `data_url`, `clean_css` |
-| `lambda.mail.providers` | `PRESETS` (Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com, Yahoo), `preset_for(address)`, `imap_url`, `smtp_url`, `session_options` for `lambda.io.mail`, and `autoconfig(address)` / `from_autoconfig(doc, address)` for Mozilla's ISPDB |
+| `lambda.mail.providers` | `PRESETS` (Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com, Yahoo, with POP3 servers where the host offers them), `preset_for(address)`, `imap_url`, `pop3_url`, `smtp_url`, `session_options` for `lambda.io.mail`, and `autoconfig(address)` / `from_autoconfig(doc, address)` for Mozilla's ISPDB |
 
 An index entry is `{uid, file, flags, date, internaldate, from, to, subject, message_id, size, thread, has_file}`. List rows come from each message's header block, fetched with `BODY.PEEK[HEADER.FIELDS (…)]` and decoded by the `eml` reader, so subjects and names arrive decoded.
 

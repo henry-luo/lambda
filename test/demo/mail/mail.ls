@@ -191,6 +191,10 @@ on click(evt) {
             if (exists(file)) {
                 shown = open_message(e, file)
                 st = {*: st, selected: e.uid, fetching: null}
+                // a POP3 account keeps read state only in the store (ML9)
+                if (model.is_pop3(model.current(st)) and model.is_unread(e)) {
+                    send(tasks[st.account], {op: 'seen', uid: e.uid}) ^ { null }
+                }
             } else {
                 shown = null
                 st = {*: st, selected: e.uid, fetching: e.uid}

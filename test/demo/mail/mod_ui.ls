@@ -94,7 +94,8 @@ view <mail_viewer> {
             <header class:"message-header",
                 <h1 id:"message-subject", class:"message-subject", m.subject>;
                 (people("From", m.from)); (people("To", m.to)); (people("Cc", m.cc));
-                <div class:"header-line", <span class:"header-label", "Date">; <span class:"header-value", m.date or "">>>;
+                if (m.date == null) null
+                else <div class:"header-line", <span class:"header-label", "Date">; <span class:"header-value", m.date>>>;
             if (cleaned != null and cleaned.blocked > 0 and not ~.remote)
                 <div id:"remote-bar", class:"remote-bar", <span "This message contains remote content.">;
                     button("load-remote", "text-button", "remote", null, "Load Remote Content", {})>
@@ -108,6 +109,7 @@ view <mail_viewer> {
 
 let PROVIDER_CHOICES = [["auto", "Automatic"], *[for (p in prov.PRESETS) [p.id, p.name]], ["manual", "Other (manual)"]]
 let SECURITY_CHOICES = [["tls", "TLS"], ["starttls", "STARTTLS"], ["plain", "None (this computer only)"]]
+let PROTOCOL_CHOICES = [["imap", "IMAP"], ["pop3", "POP3 (download to this computer)"]]
 
 fn choice(id, field, value, choices) => <select id:id, 'data-field':field,
     *[for (c in choices) <option value:c[0], *:(if (c[0] == value) {selected:""} else {}), c[1]>]>
@@ -115,9 +117,9 @@ fn text_field(label, id, key, value, kind) => <label class:"field", <span label>
     <input id:id, type:kind, 'data-field':key, value:value, autocomplete:"off">>
 
 fn manual_fields(form) => <div class:"manual",
-    (text_field("IMAP server", "setup-imap-host", "imap_host", form.imap_host, "text"));
-    (text_field("Port", "setup-imap-port", "imap_port", form.imap_port, "text"));
-    <label class:"field", <span "Security">; (choice("setup-imap-security", "imap_security", form.imap_security, SECURITY_CHOICES))>;
+    (text_field("Incoming server", "setup-host", "host", form.host, "text"));
+    (text_field("Port", "setup-port", "port", form.port, "text"));
+    <label class:"field", <span "Security">; (choice("setup-security", "security", form.security, SECURITY_CHOICES))>;
     (text_field("User name", "setup-user", "user", form.user, "text"));
     (text_field("Certificate pin", "setup-pin", "pin", form.pin, "text"))>
 
@@ -131,6 +133,7 @@ fn setup_sheet(form) {
             (text_field("Email address", "setup-email", "email", form.email, "email"));
             (text_field("Password", "setup-password", "password", form.password, "password"));
             <label class:"field", <span "Provider">; (choice("setup-provider", "provider", form.provider, PROVIDER_CHOICES))>;
+            <label class:"field", <span "Protocol">; (choice("setup-protocol", "protocol", form.protocol, PROTOCOL_CHOICES))>;
             if (form.looking) <p class:"hint", "Looking up the settings…">
             else if (preset != null) <p id:"setup-preset", class:"hint", preset.name ++ (if (preset.note != null) ". " ++ preset.note else "")>
             else null;

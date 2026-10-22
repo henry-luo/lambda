@@ -107,6 +107,25 @@ class MailTests(unittest.TestCase):
         self.assertEqual(payloads[1], self.state.pop3[0][1])
         self.assertIn("refused: io.mail.command: -ERR no such message", out)
 
+    def test_pop3_sync(self):
+        store = TEMP / "pop3-store"
+        shutil.rmtree(store, ignore_errors=True)
+        out, _, _ = self.run_script("_pop3_sync.ls")
+        self.assertIn("downloaded 2", out)
+        self.assertIn("entry 1 uid-alpha pop-uid-alpha pop 41 true", out)
+        self.assertIn("seen [\"\\\\Seen\"]", out)
+        # a second round finds nothing new; a new delivery is the only download
+        self.state.pop3.append(("uid-gamma", b"Subject: third\r\n\r\nagain\r\n"))
+        out, _, _ = self.run_script("_pop3_sync.ls")
+        self.assertIn("downloaded 1", out)
+        self.assertNotIn("downloaded 2", out)
+        self.assertIn("entries 3 uidnext 4", out)
+        commands = [line.split(b" ")[0] for line in self.state.lines]
+        self.assertEqual(commands.count(b"RETR"), 3)
+        self.assertNotIn(b"DELE", commands)
+        stored = sorted(p.read_bytes() for p in store.rglob("*.eml"))
+        self.assertEqual(stored, sorted(body for _, body in self.state.pop3))
+
     def test_smtp_send(self):
         out, _, _ = self.run_script("_smtp_send.ls")
         self.assertIn("rejected [\"nobody@example.org\"]", out)
@@ -181,26 +200,30 @@ class SecretTests(unittest.TestCase):
 
 
 class DemoWindowTests(unittest.TestCase):
-    """The mail window (test/demo/mail) replayed headless against the fake IMAP server."""
+    """The mail window (test/demo/mail) replayed headless against the fake servers."""
 
-    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
-    def test_demo_window(self):
+    def replay(self, name, profile, setup=None):
+        """Runs tests/<name>.json against fresh servers with a fresh profile; returns
+        the servers' state and the profile folder. The password goes to the Keychain
+        under the profile's own service, removed before and after with the security
+        tool, which needs no Keychain prompt."""
         state, servers = fake_mail.start_all()
-        state.mailboxes["INBOX"].append((5, [], fake_mail.HTML_MAIL))
-        root = TEMP / "demo"
-        # the demo files a custom profile's passwords under its own service; the
-        # security tool removes a crashed run's entry without a Keychain prompt
+        if setup:
+            setup(state)
+        root = TEMP / profile
         forget = ["security", "delete-generic-password", "-s", f"Lambda Mail ({root})", "-a", "ada-fake-test"]
         try:
             TEMP.mkdir(parents=True, exist_ok=True)
             shutil.rmtree(root, ignore_errors=True)
             subprocess.run(forget, capture_output=True)
-            replay = (ROOT / "test/demo/mail/tests/mail_window.json").read_text()
-            (TEMP / "mail_window.json").write_text(replay.replace("{IMAP_PORT}", str(servers["imap"].port)))
-            result = TEMP / "mail_window_result.json"
+            replay = (ROOT / f"test/demo/mail/tests/{name}.json").read_text()
+            for port_name, server in servers.items():
+                replay = replay.replace("{%s_PORT}" % port_name.upper(), str(server.port))
+            (TEMP / f"{name}.json").write_text(replay)
+            result = TEMP / f"{name}_result.json"
             result.unlink(missing_ok=True)
             process = subprocess.run([str(EXE), "view", "test/demo/mail/mail.ls", "--headless",
-                                      "--event-file", str(TEMP / "mail_window.json"), "--event-result", str(result)],
+                                      "--event-file", str(TEMP / f"{name}.json"), "--event-result", str(result)],
                                      cwd=ROOT, env=dict(os.environ, MAIL_DEMO_ROOT=str(root)),
                                      capture_output=True, timeout=180)
             report = json.loads(result.read_text()) if result.exists() else {}
@@ -209,13 +232,27 @@ class DemoWindowTests(unittest.TestCase):
             # the profile holds the account and the mail, never the password (ML6)
             self.assertIn(b"ada-fake-test", (root / "accounts.mark").read_bytes())
             stored = [p for p in root.rglob("*") if p.is_file()]
-            self.assertTrue(any(p.suffix == ".eml" for p in stored))
             self.assertFalse([p for p in stored if fake_mail.PASSWORD.encode() in p.read_bytes()])
-            self.assertIn(fake_mail.HTML_MAIL, [p.read_bytes() for p in stored if p.suffix == ".eml"])
+            return state, [p.read_bytes() for p in stored if p.suffix == ".eml"]
         finally:
             subprocess.run(forget, capture_output=True)
             for server in servers.values():
                 server.stop()
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_window(self):
+        _, messages = self.replay("mail_window", "demo",
+                                  lambda state: state.mailboxes["INBOX"].append((5, [], fake_mail.HTML_MAIL)))
+        self.assertIn(fake_mail.HTML_MAIL, messages)
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_window_pop3(self):
+        state, messages = self.replay("mail_window_pop3", "demo-pop3")
+        # each message downloaded once, byte for byte, and none deleted (ML9)
+        self.assertEqual(sorted(messages), sorted(body for _, body in state.pop3))
+        commands = [line.split(b" ")[0] for line in state.lines]
+        self.assertEqual(commands.count(b"RETR"), 2)
+        self.assertNotIn(b"DELE", commands)
 
 
 if __name__ == "__main__":

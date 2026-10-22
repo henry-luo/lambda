@@ -1,9 +1,9 @@
 "=== presets ==="
-[["gmail", ["gmail.com", "googlemail.com"]], ["icloud", ["icloud.com", "me.com", "mac.com"]], ["fastmail", ["fastmail.com", "fastmail.fm"]], ["proton", ["proton.me", "protonmail.com", "protonmail.ch", "pm.me"]], ["outlook", ["outlook.com", "hotmail.com", "live.com", "msn.com"]], ["yahoo", ["yahoo.com", "ymail.com"]]]
+[["gmail", ["gmail.com", "googlemail.com"], true], ["icloud", ["icloud.com", "me.com", "mac.com"], false], ["fastmail", ["fastmail.com", "fastmail.fm"], true], ["proton", ["proton.me", "protonmail.com", "protonmail.ch", "pm.me"], false], ["outlook", ["outlook.com", "hotmail.com", "live.com", "msn.com"], true], ["yahoo", ["yahoo.com", "ymail.com"], true]]
 ["example.com", "", "c.example"]
 ["gmail", "proton", null]
 "=== urls and options ==="
-["imaps://imap.gmail.com:993", "imap://127.0.0.1:1143", "smtp://smtp.mail.me.com:587"]
+["imaps://imap.gmail.com:993", "imap://127.0.0.1:1143", "smtp://smtp.mail.me.com:587", "pop3s://pop.gmail.com:995", "pop3://127.0.0.1:1110"]
 {
   user: "ada",
   password: "pw",
@@ -28,6 +28,24 @@
     port: 587,
     security: 'starttls'
   },
+  pop3: {
+    host: "pop.example.com",
+    port: 995,
+    security: 'tls'
+  },
   user: "ada",
+  note: null
+}
+{
+  id: "autoconfig",
+  name: "Pop Only",
+  imap: null,
+  smtp: null,
+  pop3: {
+    host: "pop.pop.example",
+    port: 995,
+    security: 'tls'
+  },
+  user: "ada@pop.example",
   note: null
 }

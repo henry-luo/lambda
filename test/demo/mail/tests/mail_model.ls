@@ -59,5 +59,10 @@ let form = {*: model.setup_initial(), email: "ada@gmail.com", password: "app pw"
 model.account_from_setup(form, [])
 model.account_from_setup({*: form, password: ""}, [])
 model.account_from_setup({*: form, email: "ada@nowhere.test"}, [])
-model.account_from_setup({*: form, email: "ada@nowhere.test", provider: "manual", imap_host: "127.0.0.1",
-    imap_port: "1143", imap_security: "plain", user: "ada", pin: " "}, ["ada-nowhere-test"])
+model.account_from_setup({*: form, email: "ada@nowhere.test", provider: "manual", host: "127.0.0.1",
+    port: "1143", security: "plain", user: "ada", pin: " "}, ["ada-nowhere-test"])
+model.account_from_setup({*: form, protocol: "pop3"}, [])
+model.account_from_setup({*: form, email: "ada@icloud.com", protocol: "pop3"}, [])
+model.account_from_setup({*: form, email: "ada@nowhere.test", provider: "manual", protocol: "pop3", host: "127.0.0.1",
+    security: "plain", user: "ada"}, []);
+[model.is_pop3({protocol: "pop3"}), model.is_pop3({protocol: "imap"}), model.is_pop3(null)]

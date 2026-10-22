@@ -1,4 +1,4 @@
-"=== ids ===ada-lovelace-example-orgada-example-org-2INBOX_91_Gmail_93__47_Sent_32_MailEntw_252_rfe_95_2=== sidebar ==="
+"=== ids ===ada-lovelace-example-orgada-example-org-2_i_n_b_o_x_91__gmail_93__47__sent_32__mail_entw_252_rfe_95_2=== sidebar ==="
 [{
     path: "INBOX",
     role: 'inbox',
@@ -84,11 +84,13 @@
     email: "ada@gmail.com",
     user: "ada@gmail.com",
     provider: "gmail",
+    protocol: "imap",
     imap: {
       host: "imap.gmail.com",
       port: 993,
       security: 'tls'
     },
+    pop3: null,
     smtp: {
       host: "smtp.gmail.com",
       port: 465,
@@ -101,7 +103,7 @@
   error: "Type the account's password or app password."
 }
 {
-  error: "Choose a provider or type the IMAP server."
+  error: "Choose a provider or type the incoming server."
 }
 {
   account: {
@@ -110,9 +112,58 @@
     email: "ada@nowhere.test",
     user: "ada",
     provider: "manual",
+    protocol: "imap",
     imap: {
       host: "127.0.0.1",
       port: 1143,
+      security: 'plain'
+    },
+    pop3: null,
+    smtp: {
+      host: "",
+      port: 465,
+      security: 'tls'
+    },
+    pin: null
+  }
+}
+{
+  account: {
+    id: "ada-gmail-com",
+    name: "ada@gmail.com",
+    email: "ada@gmail.com",
+    user: "ada@gmail.com",
+    provider: "gmail",
+    protocol: "pop3",
+    imap: null,
+    pop3: {
+      host: "pop.gmail.com",
+      port: 995,
+      security: 'tls'
+    },
+    smtp: {
+      host: "smtp.gmail.com",
+      port: 465,
+      security: 'tls'
+    },
+    pin: null
+  }
+}
+{
+  error: "iCloud Mail offers no POP3; choose the other protocol."
+}
+{
+  account: {
+    id: "ada-nowhere-test",
+    name: "ada@nowhere.test",
+    email: "ada@nowhere.test",
+    user: "ada",
+    provider: "manual",
+    protocol: "pop3",
+    imap: null,
+    pop3: {
+      host: "127.0.0.1",
+      port: 110,
       security: 'plain'
     },
     smtp: {
@@ -123,3 +174,4 @@
     pin: null
   }
 }
+[true, false, false]

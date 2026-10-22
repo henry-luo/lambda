@@ -9,7 +9,8 @@ into a local store. Passwords stay in the Keychain through
 
 | Area | What it does |
 | --- | --- |
-| Account sheet | Email, password and provider. Presets cover Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com and Yahoo. An unknown domain is looked up in Mozilla's ISPDB. **Other (manual)** takes the IMAP server, port, security, user name and a certificate pin. Use an app password; Proton Mail Bridge needs the password and pin it shows |
+| Account sheet | Email, password, provider and protocol. Presets cover Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com and Yahoo. An unknown domain is looked up in Mozilla's ISPDB. **Other (manual)** takes the incoming server, port, security, user name and a certificate pin. Use an app password; Proton Mail Bridge needs the password and pin it shows |
+| POP3 accounts | Choose **POP3** in the sheet. Each message is downloaded once into a local Inbox and stays on the server. Read state lives only on this computer: opening a message marks it read there |
 | Sidebar | Each account's status and its mailboxes. Special-use mailboxes (Inbox, Drafts, Sent, Junk, Trash, Archive) come first, then the rest by name, with unread counts for mailboxes that have been synced. **Get Mail** checks the shown mailbox now |
 | List | Newest first: unread dot, sender, date, subject, flag and size. Only the rows near the viewport are mounted, so a mailbox of any size scrolls through a few dozen rows |
 | Viewer | Header block and the body. Plain text shows quote levels and unwraps `format=flowed`. HTML loads in a sandboxed frame that runs no script; remote images and styles stay blocked until **Load Remote Content**, and `cid:` images come from the message. Links show their target but do not navigate yet |
@@ -54,10 +55,11 @@ The model golden runs in `test_lambda_gtest` (`tests_mail_model`):
 ./test/test_lambda_gtest.exe --gtest_filter='*mail_model*'
 ```
 
-The window replay, `tests/mail_window.json`, runs in `make test-mail` against
-the fake IMAP server (`test/mail/fake_mail.py`). It needs macOS, since the
+The window replays, `tests/mail_window.json` (IMAP) and
+`tests/mail_window_pop3.json` (POP3), run in `make test-mail` against the fake
+servers (`test/mail/fake_mail.py`). They need macOS, since the
 password goes to the Keychain under a test-only service that the test removes
-again. The replay:
+again. The IMAP replay:
 
 - adds an account through the sheet and syncs the Inbox;
 - checks rows, unread dots, decoded senders and mailbox roles;
@@ -68,9 +70,11 @@ again. The replay:
 python3 test/mail/test_mail.py DemoWindowTests
 ```
 
+The POP3 replay adds a POP3 account, checks that the Inbox holds both messages and that opening one marks it read locally, and checks that **Get Mail** downloads nothing twice. The test then checks the fake server: two `RETR`s and no `DELE`.
+
 ## Not yet
 
-These are later milestones of the design: marking messages read, flags,
+These are later milestones of the design: marking IMAP messages read, flags,
 moves and deletes, IDLE push, compose and send, OAuth sign-in, search and
 conversations. Also not yet done:
 

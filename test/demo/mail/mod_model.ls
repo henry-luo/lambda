@@ -4,6 +4,7 @@
 // hand results here (vibe/Lambda_Demo_Mail.md §4, §5.5).
 import prov: lambda.mail.providers
 import mime: lambda.mail.mime
+import store: lambda.mail.store
 
 let MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 // special-use mailboxes first, in Mac Mail's order (RFC 6154)
@@ -38,9 +39,8 @@ pub fn status_label(s) => if (s.text != null) s.text
 
 // ---- mailboxes ----
 
-// A mailbox's file name in the store: letters, digits and '-' stay; anything
-// else is _code_, so two paths never share a name.
-pub fn box_id(path) => join([for (ch in split(path, "")) if (ch is \("\w") and ch != "_" or ch == "-") ch else "_" ++ string(ord(ch)) ++ "_"], "")
+// A mailbox's file name in the store; two paths never share one.
+pub fn box_id(path) => store.safe_name(path)
 
 fn depth(path, delimiter) => if (delimiter == null or delimiter == "") 0
     else len([for (ch in split(path, "") where ch == delimiter) ch])
@@ -159,9 +159,10 @@ pub fn quote_runs(text) {
 
 // ---- the account sheet ----
 
-pub fn setup_initial() => {name: "", email: "", password: "", provider: "auto", imap_host: "", imap_port: "993",
-    imap_security: "tls", user: "", pin: "", smtp_host: "", smtp_port: "465", smtp_security: "tls", note: null, looking: false,
-    found: null}
+// The sheet's incoming server is IMAP or POP3 (ML9); its port defaults by protocol and security.
+pub fn setup_initial() => {name: "", email: "", password: "", provider: "auto", protocol: "imap", host: "",
+    port: "", security: "tls", user: "", pin: "", smtp_host: "", smtp_port: "465", smtp_security: "tls",
+    note: null, looking: false, found: null}
 
 // the preset or the looked-up settings the sheet will use, or null for manual
 pub fn setup_preset(form) => if (form.provider == "manual") null
@@ -170,19 +171,27 @@ pub fn setup_preset(form) => if (form.provider == "manual") null
 
 fn security(text) => if (text == "starttls") 'starttls' else if (text == "plain") 'plain' else 'tls'
 fn port(text, fallback) => int(trim(text or "")) ^ { fallback }
+fn default_port(protocol, sec) => if (protocol == "pop3") (if (sec == 'tls') 995 else 110) else (if (sec == 'tls') 993 else 143)
 
 // An account from the sheet, or the reason it cannot be one. The password
 // goes to the secret store, never into the account (ML6).
 pub fn account_from_setup(form, taken) {
     let email = trim(form.email)
     let preset = setup_preset(form)
-    let imap = if (preset != null) preset.imap else {host: trim(form.imap_host), port: port(form.imap_port, 993), security: security(form.imap_security)}
+    let pop = form.protocol == "pop3"
+    let sec = security(form.security)
+    let manual = {host: trim(form.host), port: port(form.port, default_port(form.protocol, sec)), security: sec}
+    let incoming = if (preset == null) manual else if (pop) preset.pop3 else preset.imap
     let smtp = if (preset != null) preset.smtp else {host: trim(form.smtp_host), port: port(form.smtp_port, 465), security: security(form.smtp_security)}
     let user = if (trim(form.user) != "") trim(form.user) else if (preset != null and preset.user != null) preset.user else email;
     if (prov.domain_of(email) == "") {error: "Type an email address."}
     else if (form.password == "") {error: "Type the account's password or app password."}
-    else if (imap.host == "") {error: "Choose a provider or type the IMAP server."}
+    else if (incoming == null) {error: preset.name ++ " offers no " ++ (if (pop) "POP3" else "IMAP") ++ "; choose the other protocol."}
+    else if (incoming.host == "") {error: "Choose a provider or type the incoming server."}
     else {account: {id: account_id(email, taken), name: if (trim(form.name) != "") trim(form.name) else email, email: email,
-        user: user, provider: if (preset != null) preset.id else "manual", imap: imap, smtp: smtp,
+        user: user, provider: if (preset != null) preset.id else "manual", protocol: if (pop) "pop3" else "imap",
+        imap: if (pop) null else incoming, pop3: if (pop) incoming else null, smtp: smtp,
         pin: if (trim(form.pin) == "") null else trim(form.pin)}}
 }
+
+pub fn is_pop3(a) => a != null and a.protocol == "pop3"

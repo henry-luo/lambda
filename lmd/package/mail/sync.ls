@@ -22,19 +22,25 @@ pub pn mailboxes(session) array^ {
     [for (r in listed.responses where imap.is_list(r)) imap.list_entry(r)]
 }
 
-// One list row from a FETCH of the header fields.
-fn entry_of(box_id, uidvalidity, item) {
-    let header = if (item.header == null) null else (parse(item.header, 'eml') ^ { null })
+// A list row's header fields from a message read with parse(…, 'eml'),
+// or from none: an IMAP header block, or a whole POP3 download.
+pub fn header_entry(header) {
     let senders = if (header == null or header.addresses.from == null) [] else header.addresses.from;
-    {uid: item.uid,
-     file: store.server_id(box_id, uidvalidity, item),
-     flags: if (item.flags == null) [] else item.flags,
-     date: if (header == null) null else header.date,
-     internaldate: item.internaldate,
+    {date: if (header == null) null else header.date,
      from: if (len(senders) == 0) null else senders[0],
      to: if (header == null or header.addresses.to == null) [] else header.addresses.to,
      subject: if (header == null) null else header.subject,
-     message_id: if (header == null) null else header.message_id,
+     message_id: if (header == null) null else header.message_id}
+}
+
+// One list row from a FETCH of the header fields.
+fn entry_of(box_id, uidvalidity, item) {
+    let header = if (item.header == null) null else (parse(item.header, 'eml') ^ { null });
+    {uid: item.uid,
+     file: store.server_id(box_id, uidvalidity, item),
+     flags: if (item.flags == null) [] else item.flags,
+     *: header_entry(header),
+     internaldate: item.internaldate,
      size: item.size,
      thread: item.gm_thrid,
      has_file: false}
@@ -70,9 +76,20 @@ pub pn sync_mailbox(session, root, box_id, path, gmail) map^ {
     updated
 }
 
+// Files a downloaded message under `id` with its search sidecar and returns
+// it read with input(…, 'eml'). `body` is the bytes, or the path of a file
+// that a large download streamed into `incoming/` (§5.3), which is moved.
+pub pn file_message(root, id, body) map^ {
+    let path = store.message_path(root, id)
+    io.mkdir(store.message_dir(root, id))^
+    if (body is binary) { output(body, path)^ } else { io.move(body, path)^ }
+    let message = input(path, 'eml')^
+    output(mime.search_text(message), store.text_path(root, id))^
+    message
+}
+
 // Downloads one message of the selected mailbox into the store, with its
-// search sidecar, and returns the file's path. A large body streams to disk
-// through `to` instead of memory (§5.3).
+// search sidecar, and returns the file's path.
 pub pn fetch_message(session, root, entry) string^ {
     let path = store.message_path(root, entry.file)
     if (exists(path)) { return path }
@@ -81,9 +98,6 @@ pub pn fetch_message(session, root, entry) string^ {
     let items = [for (r in fetched.responses where imap.is_fetch(r)) imap.fetch_items(r)]
     let body = if (len(items) == 0) null else items[0].body
     if (body == null) { raise error("lambda.mail: the server sent no body for UID " ++ string(entry.uid)) }
-    io.mkdir(store.message_dir(root, entry.file))^
-    if (body is binary) { output(body, path)^ } else { io.move(body, path)^ }
-    let message = input(path, 'eml')^
-    output(mime.search_text(message), store.text_path(root, entry.file))^
+    file_message(root, entry.file, body)^
     path
 }
