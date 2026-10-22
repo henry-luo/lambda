@@ -13,6 +13,8 @@ import app: .mod_app
 import page: .mod_page
 import review: .mod_review
 import controller: lambda.edit.controller
+import image: lambda.editor.mod_image
+import changes: .mod_changes
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -23,8 +25,9 @@ edit <word_app> state st:app.initial() {
     let in_table = model.table_context(st.editor) != null
     let tab = if (st.tab=="Table" and not in_table) "Home" else st.tab;
     let paper = page.settings(st.editor.doc)
+    let page_count = len(page.sheets(st.editor.doc))
     let geometry = page.geometry(st.editor.doc);
-    <body id:"word", class:if (st.focused) "focus-mode" else "", ["data-dirty"]:string(dirty),
+    <body id:"word", class:trim((if (st.focused) "focus-mode " else "") ++ (if (st.show_changes) "" else "hide-changes")), ["data-dirty"]:string(dirty),
         ["data-revision"]:string(st.editor.model_revision), ["data-tab"]:tab, ["data-readonly"]:string(st.read_only),
         <style review.css(st.editor.doc)>
         <header class:"titlebar",
@@ -39,13 +42,13 @@ edit <word_app> state st:app.initial() {
                 *[for (name in ["Home","Insert","Layout","Review","View",*if (in_table) ["Table"] else []]) ui.button("tab-" ++ lower(name),"ui.tab",name,null,{tab:name},tab==name,false,"tab")];
                 <div class:"tab-spacer">
                 ui.button("sample","file.sample","Studio example")>
-            ui.ribbon(st.editor,tab,st.nav,st.read_only)
+            ui.ribbon(st.editor,tab,st.nav,st.read_only,st.show_changes)
         >
         <main class:"workspace",
             <div class:"navigation-slot", style:if (st.nav and not st.focused) "display:block" else "display:none",
                 ui.navigation(st.editor,st.query,st.match_index,st.match_case,st.replace_text)>
             <section id:"stage", class:"stage", ["aria-label"]:"Document workspace",
-                <div class:"canvas-heading", <span "DRAFT / " ++ (if (st.read_only) "READING" else "WRITING")> <span paper.paper ++ " · " ++ paper.orientation ++ " · Continuous editing">>
+                <div class:"canvas-heading", <span "DRAFT / " ++ (if (st.read_only) "READING" else "WRITING")> <span paper.paper ++ " · " ++ paper.orientation ++ " · " ++ string(page_count) ++ (if (page_count==1) " page" else " pages")>>
                 <div class:"ruler", style:"width:" ++ string(geometry.width*st.zoom) ++ "px",
                     *[for (n in 0 to 16) <span string(n)>]>
                 <div id:"paper-wrap", class:"paper-wrap", style:"width:" ++ string(geometry.width*st.zoom) ++ "px; min-height:" ++ string(geometry.height*st.zoom) ++ "px;",
@@ -53,6 +56,7 @@ edit <word_app> state st:app.initial() {
                 <div class:"canvas-footer", "A little room for your next idea.">
             >
             if (st.review and not st.focused) ui.comments(st.editor,st.show_resolved,st.read_only) else null
+            if (st.revisions and not st.focused) ui.revisions(st.editor,st.read_only) else null
         >
         <footer class:"statusbar",
             <div class:"status-left", <span class:"status-dot"> <span id:"status", role:"status", st.status> <span class:"status-divider"> <span id:"word-count", string(words) ++ " words">>
@@ -65,8 +69,40 @@ edit <word_app> state st:app.initial() {
     >
 }
 on beforeinput() { return 'pass' }
+on dblclick(evt) {
+    if (st.read_only) { return 'pass' }
+    let story = dom.closest(evt.target,".word-story")
+    if (story!=null) {
+        st = app.command(st,"ui.headerFooter",{},evt.target)
+        app.finish(st,evt.target)
+        return 'prevent-default'
+    }
+    let path = image.hit(st.editor,evt.target,controller.surface(evt.target))
+    if (path!=null) {
+        st = {*:st,editor:image.select_image(app.mounted(st.editor,evt.target),path)}
+        st = app.command(st,"ui.pictureSettings",{},evt.target)
+        app.finish(st,evt.target)
+        return 'prevent-default'
+    }
+    return 'pass'
+}
+on mousedown(evt) {
+    let path = if (evt.button==0 and not st.read_only and st.dialog==null)
+        image.hit(st.editor,evt.target,controller.surface(evt.target)) else null
+    if (path==null) { return 'pass' }
+    // Claim the atom before native text hit testing can replace its node selection.
+    st = {*:st,editor:image.select_image(app.mounted(st.editor,evt.target),path)}
+    app.focus_document(evt.target)
+    app.finish(st,evt.target)
+    return 'prevent-default'
+}
 on editaction(evt) {
+    // pn handlers discard success values (S7.6.7v4); inspect this returned outcome explicitly.
     let run = controller.handle(st.editor,evt,st.read_only)
+    if (run is error) {
+        st = {*:st,status:run.message}
+        return {*:edit_result.model_applied(false,false,false,"",st.editor.selection,st.editor.model_revision),failure:run.message}
+    }
     if (st.read_only or evt.input_type=="copy") { return run.result }
     st = {*:st,editor:model.clean(run.editor),status:if (not (run.result.failure is null)) "This edit is unavailable here." else "Writing"}
     dom.set_close_guard(evt.target,session.is_dirty(st.file_state,st.editor.doc))
@@ -121,5 +157,5 @@ on closerequest(evt) {
     return 'prevent-default'
 }
 
-<html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css>>
+<html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ changes.css>>
     apply(<word_app>,{mode:"edit"})>

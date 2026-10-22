@@ -61,10 +61,13 @@ def main():
         for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
                          "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html",
                          "blank-pages.pdf", "cover-pages.pdf", "insert-pages.word.json", "insert-pages.html",
-                         "bookmarks.word.json", "bookmarks.html"):
+                         "bookmarks.word.json", "bookmarks.html", "shapes.word.json", "shapes.html", "shapes.pdf",
+                         "stories.word.json", "stories.html", "stories.pdf", "changes.word.json", "changes.html", "changes.pdf",
+                         "advanced-objects.word.json", "advanced-objects.html", "advanced-objects.pdf"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
         for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables",
-                        "pictures_links", "paragraph_search", "layout", "review", "insert_pages", "bookmarks_symbols"):
+                        "pictures_links", "paragraph_search", "layout", "review", "insert_pages", "bookmarks_symbols", "shapes",
+                        "stories", "advanced_objects", "changes"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",
@@ -103,6 +106,22 @@ def main():
         bookmarks = ROOT / "temp/word/bookmarks.html"
         record("bookmark-html", bookmarks.exists() and all(value in bookmarks.read_text() for value in
                ('id="word-bookmark-Intro"', 'href="#word-bookmark-Intro"', "Hello Introduction±")))
+        shapes = ROOT / "temp/word/shapes.html"
+        shape_pdf = ROOT / "temp/word/shapes.pdf"
+        record("shape-exports", shapes.exists() and all(value in shapes.read_text() for value in
+               ('data-word-shape=', 'data:image/svg+xml;base64,', 'width="240"', 'alt="Oval"')) and
+               shape_pdf.exists() and shape_pdf.read_bytes().startswith(b"%PDF-"))
+        for stem, markers, page_count in (
+                ("stories", ('counter(page)', 'counter(pages)', '@page:first', 'Studio handbook'), 2),
+                ("advanced-objects", ('data-word-equation=', 'data-word-wordart=', 'data-word-shape=', 'E=mc^2', 'Make something'), 1),
+                ("changes", ('data-word-change-kind="delete"', 'data-word-change-kind="insert"', 'Alex'), 1)):
+            exported = ROOT / "temp/word" / f"{stem}.html"
+            pdf_path = exported.with_suffix(".pdf")
+            data = pdf_path.read_bytes() if pdf_path.exists() else b""
+            record(f"{stem}-exports", exported.exists() and
+                   all(marker in exported.read_text() for marker in markers) and data.startswith(b"%PDF-") and
+                   len(re.findall(rb"/MediaBox\s*\[", data)) == page_count,
+                   f"metadata preserved in HTML; {page_count} PDF page(s)")
 
     passed = sum(entry["passed"] for entry in results)
     report = {"summary": {"passed": passed, "failed": len(results)-passed, "total": len(results)}, "results": results}

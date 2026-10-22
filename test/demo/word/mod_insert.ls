@@ -66,16 +66,22 @@ pub fn cover_transaction(editor,p) map^ {
         tx_set_selection(tx,text_selection(pos([0,0],0),pos([0,0],len(trim(p.title)))))
     }
 }
-pub fn blank_page_transaction(editor) map^ {
+fn page_split(editor) map^ {
     let split = commands.cmd_insert_paragraph(editor)
     let path = if (split==null) [] else inline_format.selection_path(split.sel_after)
     let index = path[0]
-    // two boundaries isolate an editable blank page between the split paragraphs.
     if (len(path)<1 or len(path)>2 or not contains(['p','h1','h2','h3','h4','h5','h6'],node_at(split.doc_after,[index]).tag))
-        raise error("Word: insert a blank page from a body paragraph or heading")
-    else {
+        raise error("Word: insert a page from a body paragraph or heading")
+    else tx_step(split,step_set_attr([index],'data-word-page-break',"true"))
+}
+pub fn page_break_transaction(editor) map^ => page_split(editor)^
+pub fn blank_page_transaction(editor) map^ {
+    let split = page_split(editor)^
+    let index = inline_format.selection_path(split.sel_after)[0];
+    // two boundaries isolate an editable blank page between the split paragraphs.
+    {
         let blank = node_attrs('p',[{name:'data-word-page-break',value:"true"},{name:'data-word-blank-page',value:"true"}],[text("")])
-        let tx = tx_step(tx_step(split,step_set_attr([index],'data-word-page-break',"true")),step_replace([],index,index,[blank]))
+        let tx = tx_step(split,step_replace([],index,index,[blank]))
         tx_set_selection(tx,text_selection(pos([index,0],0),pos([index,0],0)))
     }
 }

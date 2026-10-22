@@ -18,8 +18,10 @@ pub fn without_anchor(marks,id) {
     if (len(attrs)==0) without_mark(marks,'span') else with_mark(marks,'span',attrs)
 }
 // clearing character formatting must retain review anchors.
-pub fn clear_format(marks) => if (len(ids(marks))==0) [] else
-    [mark('span',[{name:'data-word-comment',value:join(ids(marks)," ")}])]
+pub fn clear_format(marks) {
+    let kept = [for (a in span_attrs(marks) where contains(['data-word-comment','data-word-change','data-word-change-kind','data-word-change-author'],a.name)) a]
+    if (len(kept)==0) [] else [mark('span',kept)]
+}
 pub fn with_comments(tx,entries) map^ => tx_step(tx,step_set_attr([],'data-word-comments',format(entries,'json')^))
 pub fn add(tx,doc,entry) map^ => tx_step(with_comments(tx,[*comments(doc),entry])^,
     step_set_attr([],'data-word-comment-seq',((attrs_get(doc.attrs,'data-word-comment-seq') ^ { null }) or 0)+1))

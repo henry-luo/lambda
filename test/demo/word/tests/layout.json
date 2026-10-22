@@ -148,10 +148,10 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface"
+        "selector": "#edit-surface .word-page"
       },
       "attribute": "style",
-      "equals": "transform:scale(1); transform-origin:top left; width:1056px; min-height:816px; padding:48px 48px 48px 48px;"
+      "equals": "width:1056px; min-height:816px; padding:48px 48px 48px 48px;"
     },
     {
       "type": "set_editing_selection",
@@ -177,7 +177,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface p:nth-child(2)"
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
       },
       "attribute": "data-word-page-break",
       "equals": "true"
@@ -189,9 +189,59 @@
     {
       "type": "assert_text",
       "target": {
-        "selector": "#edit-surface p:nth-child(2)"
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
       },
       "contains": "Second page"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface hr"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\".word-page[data-page=\\\"2\\\"]\").getBoundingClientRect().top - document.querySelector(\".word-page\").getBoundingClientRect().bottom >= 23"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type",
+      "text": "Same page paragraph"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"]"
+      },
+      "contains": "Same page paragraph"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
     },
     {
       "type": "render",
@@ -307,7 +357,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface p:nth-child(2)"
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
       },
       "attribute": "data-word-page-break",
       "equals": "true"

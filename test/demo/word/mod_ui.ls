@@ -7,6 +7,11 @@ import files: lambda.edit.files
 import page: .mod_page
 import review: .mod_review
 import insert: .mod_insert
+import shapes: .mod_shapes
+import stories: .mod_stories
+import equation: .mod_equation
+import wordart: .mod_wordart
+import changes: .mod_changes
 import controls: lambda.ui.controls
 
 view <word_button> {
@@ -29,7 +34,7 @@ fn selector(id,command,values,current,css="",param="value") =>
     apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
         options:values,value:current,on_change:{action:command,param:param}>)
 
-pub fn ribbon(editor,tab,nav,read_only) {
+pub fn ribbon(editor,tab,nav,read_only,show_changes=true) {
     let block = model.current_block(editor)
     let style = attrs_get(block.node.attrs,'data-word-style') or "Normal"
     let align = model.css_get(attrs_get(block.node.attrs,'style'),"text-align") or "left";
@@ -71,9 +76,14 @@ pub fn ribbon(editor,tab,nav,read_only) {
         group("Pages",[button("insert-cover","ui.cover","Cover page…","▤",{},false,read_only),
             command("insert.blankPage","Blank page","□",{},false,read_only),
             button("insert-page-break","insert.pageBreak","Page break","↵",{},false,read_only)])
+        group("Header & Footer",[button("insert-header","ui.headerFooter","Header…","▔",{},false,read_only),
+            button("insert-footer","ui.headerFooter","Footer…","▁",{},false,read_only),
+            button("insert-page-number","ui.pageNumber","Page number…","#",{},false,read_only)])
         group("Tables",[button("insert.table","ui.table","Table…","▦",{},false,read_only)])
         group("Pictures",[button("insert-picture","ui.picture","Picture…","▧",{},false,read_only),
             button("picture-settings","ui.pictureSettings","Picture settings…",null,{},false,read_only or model.current_node(editor,'img')==null)])
+        group("Shapes",[button("insert-shape","ui.shape","Shapes…","◇",{},false,read_only),
+            button("shape-settings","ui.shapeSettings","Shape settings…",null,{},false,read_only or shapes.settings(model.current_node(editor,'img').node)==null)])
         group("Links",[button("insert-link","ui.link",if (model.current_node(editor,'a')==null) "Link…" else "Edit link…","↗",{},false,read_only),
             command("insert.removeLink","Remove link",null,{},false,read_only or model.current_node(editor,'a')==null),
             button("insert-bookmark","ui.bookmarks","Bookmark…","⚑")])
@@ -82,12 +92,21 @@ pub fn ribbon(editor,tab,nav,read_only) {
             command("insert.horizontalRule","Rule","—",{},false,read_only),
             button("follow-link","ui.followLink","Go to bookmark","↗",{},false,
                 insert.link_bookmark(attrs_get(model.current_node(editor,'a').node.attrs,'href'))==null)])
+        group("Equations & Art",[button("insert-equation","ui.equation","Equation…","π",{},false,read_only),
+            button("insert-wordart","ui.wordArt","WordArt…","A",{},false,read_only),
+            button("object-settings","ui.objectSettings","Edit object…",null,{},false,read_only or
+                (equation.settings(model.current_node(editor,'img').node)==null and wordart.settings(model.current_node(editor,'img').node)==null))])
     >
     else if (tab == "Review") <div class:"ribbon-groups",
         group("Comments",[button("new-comment","ui.comment","New comment","+",{},false,read_only or not model.can_comment(editor)),
             button("show-comments","ui.comments","Comments pane","☷"),button("show-resolved","ui.resolvedComments","Show resolved")])
         group("Navigate",[button("previous-comment","ui.previousComment","Previous comment","↑"),button("next-comment","ui.nextComment","Next comment","↓")]);
-        <div class:"ribbon-note",<strong "Keep the conversation with the text."> <span "Select text to leave a comment. Resolve it when the edit is complete.">>
+        group("Tracking",[button("track-changes","review.trackChanges","Track text changes","✎",{enabled:not changes.settings(editor.doc).enabled},changes.settings(editor.doc).enabled,read_only),
+            button("tracking-options","ui.tracking","Author and tracking…",null,{},false,read_only),
+            button("show-change-markup","ui.showChanges","Show markup",null,{},show_changes)])
+        group("Changes",[button("show-revisions","ui.revisions",string(len(changes.entries(editor.doc))) ++ " changes","☷"),
+            command("review.acceptAll","Accept all",null,{},false,read_only or len(changes.entries(editor.doc))==0),
+            command("review.rejectAll","Reject all",null,{},false,read_only or len(changes.entries(editor.doc))==0)])
     >
     else if (tab == "Layout") <div class:"ribbon-groups",
         group("Page",[button("page-setup","ui.pageSetup","Page setup…","▤",{},false,read_only),
@@ -157,6 +176,22 @@ pub fn comments(editor,show_resolved,read_only) {
     >
 }
 
+pub fn revisions(editor,read_only=false) {
+    let pending = changes.entries(editor.doc);
+    <aside class:"review-pane revision-pane",["aria-label"]:"Tracked changes",
+        <div class:"review-heading",<strong "Changes">button("close-revisions","ui.revisions","Close","×")>
+        <p class:"review-summary",string(len(pending)) ++ " pending changes">
+        if (len(pending)==0) <p class:"review-empty","Turn on Track text changes to record insertions and deletions."> else null;
+        *[for (entry in pending) <article class:"comment-card revision-card",["data-revision-id"]:entry.id,
+            <div class:"comment-author",entry.author>
+            if (entry.removed=="") null else <p class:"revision-deleted",entry.removed>
+            if (entry.inserted=="") null else <p class:"revision-inserted",entry.inserted>;
+            <div class:"comment-actions",
+                button("revision-go-" ++ entry.id,"ui.revisionText","Go to",null,{id:entry.id})
+                button("revision-accept-" ++ entry.id,"review.accept","Accept",null,{id:entry.id},false,read_only)
+                button("revision-reject-" ++ entry.id,"review.reject","Reject",null,{id:entry.id},false,read_only)>>]>
+}
+
 fn dialog_field(id,label,value,numeric=false,min=0,max=2000) => <label class:"dialog-field",
     <span label> <input id:id, class:"edit-dialog-field", type:if (numeric) "number" else "text",
         value:string(value), *:if (numeric) {min:string(min),max:string(max),step:"1"} else {}>>
@@ -199,6 +234,56 @@ pub fn dialog(dialog,file,editor=null,read_only=false) => if (dialog == null) nu
             <div class:"symbol-grid", *[for (i,c in category.chars)
                 button("symbol-" ++ string(category_index) ++ "-" ++ string(i),"ui.chooseSymbol",c,null,{char:c},dialog.values.char==c,false,"symbol-key")]>>]>,
         dialog_field("symbol-text","Character(s)",dialog.values.char)],"symbol","Insert")
+    else if (dialog.kind == "shape") form_dialog(dialog,if (dialog.editing) "Shape settings" else "Insert shape",
+        "Shapes sit with the text and stay editable through Shape settings.",[
+        <div class:"shape-gallery", *[for (entry in shapes.catalog) button("shape-choice-" ++ entry.id,"ui.chooseShape",entry.label,
+            shapes.graphic({*:shapes.defaults,kind:entry.id,width:44,height:30}),{kind:entry.id},entry.id==dialog.values.kind,false,"shape-choice")]>,
+        dialog_select("shape-kind","Shape",[for (entry in shapes.catalog) {value:entry.id,label:entry.label}],dialog.values.kind),
+        <div class:"dialog-grid",
+            dialog_field("shape-width","Width (px)",dialog.values.width,true,16,650)
+            dialog_field("shape-height","Height (px)",dialog.values.height,true,16,2000)
+            dialog_field("shape-fill","Fill (#RRGGBB)",dialog.values.fill)
+            dialog_field("shape-stroke","Outline (#RRGGBB)",dialog.values.stroke)
+            dialog_field("shape-weight","Outline weight",dialog.values.weight,true,0,12)
+            dialog_field("shape-rotation","Rotation (degrees)",dialog.values.rotation,true,-180,180)
+            dialog_field("shape-size","Text size (px)",dialog.values.size,true,8,72)
+            dialog_field("shape-text-color","Text color",dialog.values.text_color)>,
+        dialog_field("shape-text","Shape text",dialog.values.text)],"shape",if (dialog.editing) "Apply" else "Insert shape")
+    else if (dialog.kind == "stories") form_dialog(dialog,"Header and footer",
+        "Repeat text on each page. Use {PAGE} for its number and {NUMPAGES} for the total. Double-click a page header or footer to edit.",[
+        <label class:"dialog-field",<span "Header"><textarea id:"stories-header",class:"edit-dialog-field",dialog.values.header>>,
+        <label class:"dialog-field",<span "Footer"><textarea id:"stories-footer",class:"edit-dialog-field",dialog.values.footer>>,
+        <div class:"dialog-grid",
+            dialog_select("stories-header-align","Header alignment",[for (v in ["left","center","right"]) {value:v,label:v}],dialog.values.header_align)
+            dialog_select("stories-footer-align","Footer alignment",[for (v in ["left","center","right"]) {value:v,label:v}],dialog.values.footer_align)
+            dialog_field("stories-size","Font size (pt)",dialog.values.size,true,8,24)
+            dialog_field("stories-distance","Screen edge distance (mm)",dialog.values.distance,true,3,30)>,
+        dialog_select("stories-first","First page",[{value:"false",label:"Same header and footer"},{value:"true",label:"Leave first page blank"}],dialog.values.different_first)],"stories","Apply")
+    else if (dialog.kind == "equation") form_dialog(dialog,if (dialog.editing) "Edit equation" else "Insert equation",
+        "Enter LaTeX or choose an example. The equation stays editable after saving.",[
+        <div class:"equation-examples",*[for (i,entry in equation.examples) button("equation-example-" ++ string(i),"ui.equationPreset",entry.label,null,{source:entry.source})]>,
+        <label class:"dialog-field",<span "LaTeX"><textarea id:"equation-source",class:"edit-dialog-field equation-source",dialog.values.source>>,
+        <div class:"dialog-grid",dialog_field("equation-size","Size (px)",dialog.values.size,true,10,72)
+            dialog_field("equation-color","Color",dialog.values.color)>,
+        dialog_select("equation-display","Typesetting",[{value:"true",label:"Display math"},{value:"false",label:"Inline math"}],dialog.values.display)],"equation",if (dialog.editing) "Apply" else "Insert equation")
+    else if (dialog.kind == "wordart") form_dialog(dialog,if (dialog.editing) "Edit WordArt" else "Insert WordArt",
+        "Choose text effects and a transform. Double-click the inserted WordArt to edit its text or appearance.",[
+        <div class:"art-gallery",*[for (s in wordart.styles) button("art-choice-" ++ s,"ui.chooseArt",s,
+            wordart.graphic({*:wordart.defaults,text:"Abc",width:88,height:36,size:24,style:s}),{style:s},s==dialog.values.style,false,"art-choice")]>,
+        dialog_field("art-text","Text",dialog.values.text),
+        <div class:"dialog-grid",
+            dialog_select("art-style","Style",[for (s in wordart.styles) {value:s,label:s}],dialog.values.style)
+            dialog_select("art-transform","Transform",[for (s in wordart.transforms) {value:s,label:s}],dialog.values.transform)
+            dialog_select("art-font","Font",[for (s in ["Georgia","Arial","Times New Roman"]) {value:s,label:s}],dialog.values.font)
+            dialog_field("art-size","Font size (px)",dialog.values.size,true,12,120)
+            dialog_field("art-width","Width (px)",dialog.values.width,true,80,650)
+            dialog_field("art-height","Height (px)",dialog.values.height,true,40,400)
+            dialog_field("art-fill","Text color",dialog.values.fill)
+            dialog_field("art-outline","Outline / gradient color",dialog.values.outline)>],"wordart",if (dialog.editing) "Apply" else "Insert WordArt")
+    else if (dialog.kind=="tracking") form_dialog(dialog,"Track text changes",
+        "Tracks text-only paragraphs and table cells. Insertions are underlined; deletions stay struck out until accepted. Character formatting is not tracked. Turn tracking off for structural edits, links, and embedded objects.",[
+        dialog_field("tracking-author","Author",dialog.values.author),
+        dialog_select("tracking-enabled","Tracking",[{value:"true",label:"On"},{value:"false",label:"Off"}],dialog.values.enabled)],"tracking","Apply")
     else if (dialog.kind == "comment") form_dialog(dialog,"New comment","The comment stays anchored as its text is edited.",[
         dialog_field("comment-author","Author",dialog.values.author),
         <label class:"dialog-field", <span "Comment"> <textarea id:"comment-text",class:"edit-dialog-field comment-input",dialog.values.text>>],"comment","Add comment")

@@ -15,6 +15,11 @@ import document: .mod_document
 import page: .mod_page
 import review: .mod_review
 import insert: .mod_insert
+import shapes: .mod_shapes
+import stories: .mod_stories
+import equation: .mod_equation
+import wordart: .mod_wordart
+import changes: .mod_changes
 
 // The same IDs drive the ribbon, shortcuts, and headless model tests.
 pub let registry = [
@@ -65,6 +70,16 @@ pub let registry = [
     {id:"insert.removeLink",label:"Remove link"},
     {id:"insert.picture",label:"Insert picture"},
     {id:"picture.size",label:"Picture settings"},
+    {id:"insert.shape",label:"Insert shape"},
+    {id:"shape.set",label:"Shape settings"},
+    {id:"layout.headerFooter",label:"Header and footer"},
+    {id:"insert.equation",label:"Insert equation"},
+    {id:"equation.set",label:"Equation settings"},
+    {id:"insert.wordArt",label:"Insert WordArt"},
+    {id:"wordArt.set",label:"WordArt settings"},
+    {id:"review.trackChanges",label:"Track text changes"},
+    {id:"review.accept",label:"Accept change"},{id:"review.reject",label:"Reject change"},
+    {id:"review.acceptAll",label:"Accept all changes"},{id:"review.rejectAll",label:"Reject all changes"},
     {id:"review.addComment",label:"New comment"},
     {id:"review.resolveComment",label:"Resolve comment"},
     {id:"review.deleteComment",label:"Delete comment"},
@@ -81,10 +96,13 @@ pub fn shortcut(key,shift=false) =>
 
 pub let leaves = inline_format.leaves
 pub fn first_pos(doc) => {path:leaves(doc)[0].path or blocks(doc)[0].path,offset:0}
-pub fn open_editor(doc) => edit_open(doc,html.schema,text_selection(first_pos(doc),first_pos(doc)))
+// Page boundaries and cover roles must not repeat when Enter splits a paragraph.
+let word_schema = {*:html.schema,p:{*:html.schema.p,attrs:[*html.schema.p.attrs,
+    *[for (name in ['data-word-page-break','data-word-blank-page','data-word-cover']) {name:name,keep_on_split:false}]]}}
+pub fn open_editor(doc) => {*:edit_open(doc,word_schema,text_selection(first_pos(doc),first_pos(doc))),transaction_filter:changes.filter}
 pub fn initial() => open_editor(document.sample())
 
-pub fn plain_text(n) => if (is_text(n)) n.text else if (not is_node(n)) ""
+pub fn plain_text(n) => if (is_text(n)) (if (changes.deleted(n.marks)) "" else n.text) else if (not is_node(n)) ""
     else join([for (child in n.content) plain_text(child)],
         if (contains(['ul','ol','table','thead','tbody','li'],n.tag) or html.schema[n.tag].content[0].role == 'block') "\n"
         else if (n.tag == 'tr') "\t" else "")
@@ -313,16 +331,33 @@ pub fn execute(editor,id,params={}) map^ {
         if (len(hits)==0) editor else edit_apply(editor,
             replace_hits(tx_begin(editor.doc,editor.selection),hits,params.replace or "",len(hits)-1))
     }
-    else if (id == "layout.pageSetup") edit_apply(editor,page.transaction(editor.doc,editor.selection,{*:page.settings(editor.doc),*:params})^)
-    else if (id == "insert.pageBreak") {
-        let tx = commands.cmd_insert_paragraph(editor)
-        let block = if (tx==null) null else current_block({doc:tx.doc_after,selection:tx.sel_after})
-        if (block==null) raise error("Word: a page break cannot be inserted at this selection")
-        else edit_apply(editor,tx_step(tx,step_set_attr(block.path,'data-word-page-break',"true")))
+    else if (id == "layout.pageSetup") {
+        let tx = page.transaction(editor.doc,editor.selection,{*:page.settings(editor.doc),*:params})^
+        let checked = stories.validate(tx.doc_after,stories.settings(tx.doc_after))^
+        edit_apply(editor,tx)
     }
+    else if (id == "layout.headerFooter") edit_apply(editor,stories.transaction(editor,params)^)
+    else if (contains(["insert.equation","equation.set","insert.wordArt","wordArt.set"],id)) {
+        let selected = if (starts_with(id,"insert.")) null else current_node(editor,'img')
+        let math_object = contains(["insert.equation","equation.set"],id)
+        if (not starts_with(id,"insert.") and (selected==null or
+            (if (math_object) equation.settings(selected.node)==null else wordart.settings(selected.node)==null)))
+            raise error("Word: select the matching object first")
+        else edit_apply(editor,if (math_object) equation.transaction(editor,params,selected)^ else wordart.transaction(editor,params,selected)^)
+    }
+    else if (id == "insert.pageBreak") edit_apply(editor,insert.page_break_transaction(editor)^)
+    else if (id=="review.trackChanges") edit_apply(editor,changes.configure(editor,{*:changes.settings(editor.doc),*:params})^)
+    else if (contains(["review.accept","review.reject","review.acceptAll","review.rejectAll"],id))
+        edit_apply(editor,changes.resolve(editor,if (ends_with(id,"All")) null else params.id,starts_with(id,"review.accept"))^)
     else if (starts_with(id,"review.")) edit_apply(editor,comment_transaction(editor,id,params)^)
     else if (id == "format.clear") edit_apply(editor,char_transaction(editor,review.clear_format))
     else if (id == "para.set") edit_apply(editor,paragraph_transaction(editor,params)^)
+    else if (id == "insert.shape") edit_apply(editor,shapes.transaction(editor,params)^)
+    else if (id == "shape.set") {
+        let selected = current_node(editor,'img')
+        if (selected==null) raise error("Word: select a shape first")
+        else edit_apply(editor,shapes.transaction(editor,params,selected)^)
+    }
     else if (id == "insert.picture" or id == "picture.size") edit_apply(editor,picture_transaction(editor,id,params)^)
     else if (id == "insert.removeLink" or (id == "insert.link" and current_node(editor,'a') != null))
         edit_apply(editor,link_transaction(editor,id,params)^)
@@ -346,7 +381,7 @@ pub fn execute(editor,id,params={}) map^ {
             raise error("Word: choose 1–32 rows and 1–12 columns") else true
         let payload = {*:params,mark:s.mark,value:true,
             kind:if (id == "para.numbering") 'ordered' else 'bullet'}
-        let run = edit_handle_request(editor,edit_request_from_toolbar(s.input,payload))
+        let run = edit_handle_request(editor,edit_request_from_toolbar(s.input,payload))^
         if (not (run.result.failure is null)) raise error("Word: " ++ s.label ++ " is unavailable at this selection")
         else if (id == "insert.table" or starts_with(id,"table.")) edit_apply(editor,table_transaction(run.transaction))
         else run.editor

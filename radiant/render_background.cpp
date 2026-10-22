@@ -1255,6 +1255,10 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
+    // transformed shadows are images; their recording must also inherit rectangular overflow bounds.
+    RenderClipScope viewport_clip = {};
+    if (xform) viewport_clip = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
+
     // Render outer shadows first (in reverse order - last shadow is bottommost)
     for (int i = shadow_count - 1; i >= 0; i--) {
         BoxShadow* s = shadows[i];
@@ -1331,6 +1335,7 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
                             clip_type, clip_params);
         }
     }
+    render_clip_pop_scope(rdcon, &viewport_clip);
 }
 
 /**

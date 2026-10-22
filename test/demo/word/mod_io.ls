@@ -14,6 +14,8 @@ import model: .mod_model
 import surface: .mod_surface
 import page: .mod_page
 import review: .mod_review
+import stories: .mod_stories
+import changes: .mod_changes
 
 let tags = ['doc','p','h1','h2','h3','h4','h5','h6','blockquote','ul','ol','li',
     'table','thead','tbody','tfoot','tr','td','th','pre','code','span','strong','em','u','b','i','del','s','sub','sup','a','img','br','hr','div',
@@ -101,7 +103,7 @@ pub fn read_document(path) map^ {
             status:"Imported " ++ session.basename(path) ++ "; save an editable copy."}
     }
 }
-let metadata_names = ['data-word-page','data-word-comments','data-word-comment-seq']
+let metadata_names = ['data-word-page','data-word-comments','data-word-comment-seq','data-word-stories','data-word-tracking','data-word-change-seq']
 pub fn import_html_document(source) map^ {
     let loaded = html.import_text(source)^
     import_metadata(restored(loaded.doc)^,loaded.envelope.head)^
@@ -118,7 +120,7 @@ fn import_metadata(doc,head) map^ {
 pub fn html_document(doc,title) string^ => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++
     helpers.escape_text(title) ++ "</title><meta name=\"lambda-word-metadata\" content=\"" ++
     helpers.escape_attr(format(pack_attrs([for (a in doc.attrs where contains(metadata_names,a.name)) a]),'json')^) ++
-    "\"><style>" ++ surface.document_css ++ page.export_css(doc) ++ review.css(doc) ++
+    "\"><style>" ++ surface.document_css ++ page.export_css(doc) ++ stories.export_css(doc) ++ review.css(doc) ++ changes.css ++
     "</style></head><body class=\"word-content\">" ++ html.export_text(doc,{document:false,head:<head>}) ++ "</body></html>"
 pub pn export_document(doc,title,path) any^ {
     let extension = lower(split(path,".")[last])

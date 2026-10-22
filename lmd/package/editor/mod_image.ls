@@ -5,6 +5,7 @@ import .mod_source_pos
 import .mod_transaction
 import .mod_editor
 import commands: .mod_commands
+import dom
 
 fn image_node(n) => is_node(n) and contains(['img','image'],n.tag)
 pub fn images(doc) => [for (entry in descendants(doc) where image_node(entry.node)) entry]
@@ -12,6 +13,14 @@ pub fn selected(editor) {
     let path = editor.selection.path
     let n = if (editor.selection.kind=='node') node_at(editor.doc,path) else null
     if (image_node(n)) {path:path,node:n} else null
+}
+// The projection preserves image order; a press selects its model atom before native caret placement.
+pub pn hit(editor,node,surface) {
+    let target = dom.closest(node,"img")
+    if (target==null or surface==null or not dom.contains(surface,target)) { return null }
+    let nodes = dom.query_selector_all(surface,"img")
+    let index = [for (i,n in nodes where n==target) i][0]
+    return [for (entry in images(editor.doc) where entry.node.tag=='img') entry.path][index]
 }
 pub fn select_image(editor,path) => if (image_node(node_at(editor.doc,path)))
     edit_set_selection(editor,node_selection(path)) else editor

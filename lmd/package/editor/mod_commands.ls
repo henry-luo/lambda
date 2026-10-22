@@ -2083,10 +2083,11 @@ fn is_non_repeating_block(tag) =>
 fn split_right_tag(st, block, cut, text_len) =>
   if (is_non_repeating_block(block.tag)) { state_default_block(st) } else { block.tag }
 
-// the new half keeps the block's attributes but not its identity: an `id`
-// names one element, so a split must not clone it
-fn split_right_attrs(block, right_tag) =>
-  if (right_tag == block.tag) { [for (a in block.attrs where a.name != 'id') a] } else { [] }
+// identity and schema-declared boundary attributes belong only to the original block.
+fn split_right_attrs(st, block, right_tag) {
+  let excluded = ['id', *[for (a in state_schema(st)[block.tag].attrs where a.keep_on_split == false) a.name]]
+  if (right_tag == block.tag) { [for (a in block.attrs where not contains(excluded,a.name)) a] } else { [] }
+}
 
 fn first_text_marks_in(n) {
   if (is_text(n)) { n.marks }
@@ -2124,7 +2125,7 @@ fn split_block_text_selection(st) {
     let left_content = left_content0
     let right_content = right_content0
     let left_block = node_attrs(block.tag, block.attrs, left_content)
-    let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
+    let right_block = node_attrs(right_tag, split_right_attrs(st, block, right_tag), right_content)
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
     tx_set_selection(tx1, caret(first_caret_pos_in(right_block, [*grand_path, block_idx + 1])))
@@ -2193,7 +2194,7 @@ fn split_block_collapsed_selection(st) {
       let left_content = left_content0
       let right_content = right_content0
       let left_block = node_attrs(block.tag, block.attrs, left_content)
-      let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
+      let right_block = node_attrs(right_tag, split_right_attrs(st, block, right_tag), right_content)
       let tx0 = tx_begin(st.doc, sel)
       let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
       tx_set_selection(tx1, caret(first_caret_pos_in(right_block, [*grand_path, block_idx + 1])))
@@ -2217,7 +2218,7 @@ fn split_block_node_selection(st) {
     let left_content = left_content0
     let right_content = right_content0
     let left_block = node_attrs(block.tag, block.attrs, left_content)
-    let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
+    let right_block = node_attrs(right_tag, split_right_attrs(st, block, right_tag), right_content)
     let tx0 = tx_begin(st.doc, sel)
     let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
     tx_set_selection(tx1, caret(first_caret_pos_in(right_block, [*grand_path, block_idx + 1])))
