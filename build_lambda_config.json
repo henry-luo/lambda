@@ -4071,7 +4071,7 @@
             "icon": "\ud83d\uddb1\ufe0f",
             "runner_args": [
               "--suite",
-              "baseline,dtna,timeline,wired,clay,blade,photos"
+              "baseline,dtna,timeline,wired,clay,blade"
             ]
           },
           {
@@ -4155,7 +4155,7 @@
             "requires_lambda_exe": true,
             "icon": "\ud83d\uddbc\ufe0f",
             "runner_args": [
-              "--gtest_filter=*-RadiantViewTest.Doom*"
+              "--gtest_filter=*-RadiantViewTest.Doom*:RadiantViewTest.Photo*"
             ]
           },
           {
@@ -6224,7 +6224,7 @@
             "runner_name": "test_ui_automation_extended_gtest",
             "runner_args": [
               "--suite",
-              "bold,editor,edit,hit-test"
+              "bold,editor,edit,hit-test,photos"
             ],
             "binary": "test_ui_automation_gtest.exe",
             "libraries": [
@@ -6242,6 +6242,28 @@
             "runner_args": [
               "--gtest_filter=RadiantViewTest.Doom*"
             ],
+            "binary": "test_radiant_view_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "\ud83d\uddbc\ufe0f"
+          },
+          {
+            "source": "test/test_radiant_view_gtest.cpp",
+            "name": "Radiant View Photo Tests",
+            "runner_only": true,
+            "runner_name": "test_radiant_view_photo_gtest",
+            "runner_args": [
+              "--gtest_filter=RadiantViewTest.Photo*"
+            ],
+            "case_workers": 6,
+            "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
+            "case_worker_args": [
+              "--radiant-case-worker"
+            ],
+            "pin_executables": true,
             "binary": "test_radiant_view_gtest.exe",
             "libraries": [
               "gtest",

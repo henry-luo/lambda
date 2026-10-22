@@ -255,12 +255,18 @@ try {
         assert.equal(selected.size, inventory.length);
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
-        assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*'));
+        assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*:RadiantViewTest.Photo*'));
         assert.equal(view.caseWorkers, 6);
         assert.equal(view.exclusive, true);
         assert.equal(view.pinExecutables, true);
         assert.deepEqual(view.artifactDirs, ['radiant_view']);
         assert.ok(view.caseWorkerArgs.includes('--radiant-case-worker'));
+        const photo = extended.find(t => t.baseName === 'test_radiant_view_photo_gtest');
+        assert.ok(photo);
+        assert.equal(photo.buildTarget, view.buildTarget);
+        assert.deepEqual(photo.runnerArgs, ['--gtest_filter=RadiantViewTest.Photo*']);
+        const extendedUi = extended.find(t => t.baseName === 'test_ui_automation_extended_gtest');
+        assert.deepEqual(extendedUi.runnerArgs, ['--suite', 'bold,editor,edit,hit-test,photos']);
         for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
             const check = inventory.find(t => t.baseName === name);
             assert.equal(check.exclusive, false);
@@ -555,7 +561,7 @@ try {
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade,photos', 'view', 'dom'].entries()) {
+        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
             const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
             assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
         }
