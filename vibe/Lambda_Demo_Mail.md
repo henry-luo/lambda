@@ -14,7 +14,9 @@ storage stays on what Lambda has today, with raw message files plus a Mark
 index per mailbox (ML7v3), and that search uses Lambda's own `io.text_search`
 and `io.grep` (ML12). The known limitations of that store are listed as
 SL1–SL5 for later phases (§5.4.4). **Implementation started 2026-10-22:**
-M0 (transport) is delivered; see the [M0 checkpoint](#m0-checkpoint--2026-10-22).
+M0 (transport) and M1a (MIME decoding, the `lambda.mail` package and the store) are
+delivered; see the [M0](#m0-checkpoint--2026-10-22) and [M1a](#m1a-checkpoint--2026-10-22)
+checkpoints.
 
 **Scope:** a new demo under `test/demo/mail/`, registered as `lambda demo
 mail`. It is a desktop mail client in the manner of macOS Mail that connects to
@@ -432,8 +434,8 @@ only what has to be native: sockets, TLS, and framing an untrusted byte stream.
 | **ML2** | **Framing is native; meaning is Lambda.** The `lib` tokenizer turns each complete server response into a Lambda value: atoms, numbers, quoted strings, literals, `NIL` and nested lists. Literals above a size threshold go to a temporary file. `lambda.mail` interprets ENVELOPE, BODYSTRUCTURE, FLAGS, LIST, STATUS and the extensions. | Framing is security-critical and length-prefixed, so it does not fit the grammar module. Interpretation is data processing, Lambda's strength, and the place where Gmail extensions, CONDSTORE and PREVIEW are added. | proposed |
 | **ML3** | **A session is a scoped resource.** It is opened by `mail.open` in a `pn` (S12.4.1v3) and auto-closed at the end of its block (S12.4.2). There is no close function (S12.4.3). The host registers it as a long-lived connection (JA16). A long-lived session lives in one document-owned sync task per account (S13.3.1v2). | One cleanup mechanism; no session can leak past its owner. The task's lifetime is the account's online lifetime. | proposed; **interim implemented** (M0): the session closes when its opening task ends, since S12.4.2 is not implemented |
 | **ML4** | **Commands park; nothing blocks.** Running a command, idling and sending park the calling task as `io.fetch` does (S13.1.2v2). They are cancellable at park points (S13.3.2), and IDLE ends with `DONE` on cancel. | The window and other accounts keep running. Quitting cancels every sync task cleanly. | proposed |
-| **ML5v2** | **No script in mail content runs.** Script support for mail waits until Lambda implements sandboxing. Each message renders in an `<iframe srcdoc>` whose document Radiant loads with scripting disabled: no `<script>`, no event-handler attributes, no `javascript:` URLs, and `<noscript>` content rendered. The flag is inherited by every nested document. Remote loads are blocked by a per-document resource policy until the user allows them for a message or a sender. A Lambda sanitizer strips the same constructs as a second layer. | Mail content is controlled by its sender, and remote images are trackers. A sanitizer alone is one missed vector (SVG `<script>`, a nested `srcdoc`, an `on*` attribute) away from running code, so the engine enforces the rule (MG4). The demo's own window chrome is local and trusted, so the flag is per document, not global. | **ruled** (user, 2026-10-22); mechanism proposed |
-| **ML6** | **Secrets live only in the OS secret store.** Passwords and refresh tokens are kept in the Keychain (macOS first), never in cache files, logs or `log.txt`. Access tokens stay in memory. | A mail password is the key to every other account the user has. | proposed |
+| **ML5v2** | **No script in mail content runs.** Script support for mail waits until Lambda implements sandboxing. Each message renders in an `<iframe srcdoc>` whose document Radiant loads with scripting disabled: no `<script>`, no event-handler attributes, no `javascript:` URLs, and `<noscript>` content rendered. The flag is inherited by every nested document. Remote loads are blocked by a per-document resource policy until the user allows them for a message or a sender. A Lambda sanitizer strips the same constructs as a second layer. | Mail content is controlled by its sender, and remote images are trackers. A sanitizer alone is one missed vector (SVG `<script>`, a nested `srcdoc`, an `on*` attribute) away from running code, so the engine enforces the rule (MG4). The demo's own window chrome is local and trusted, so the flag is per document, not global. | **ruled** (user, 2026-10-22); scripting mechanism ruled (MQ11) and implemented (M1c). Remote loads are blocked by the sanitizer only; the engine-level policy is MQ14 |
+| **ML6** | **Secrets live only in the OS secret store.** Passwords and refresh tokens are kept in the Keychain (macOS first), never in cache files, logs or `log.txt`. Access tokens stay in memory. | A mail password is the key to every other account the user has. | **ruled** (user, 2026-10-22): the store is the built-in module `lambda.io.secret` with `get`, `set` and `delete`, backed by the Keychain on macOS (MG6) |
 | **ML7v3** | **Raw messages are files; each mailbox has a Mark index.** Each downloaded message is stored once as an immutable `.eml` file with a plain-text sidecar. Each mailbox has one index file in Mark notation, saved whole and atomically. Small per-account files hold the mailbox list and the pending-action queue (§5.4). | Uses only what Lambda has today: `input()`, `output(…, {atomic: true})` and `io.move`. It needs no new runtime feature before M1. Its costs, SL1–SL5, are accepted and left to later phases (§5.4.4). Supersedes ML7v2 (Appendix S). | **ruled** (user, 2026-10-22) |
 | **ML8** | **Mail access is a capability.** Opening a mail session or reading a secret is a `pn` effect through the IO door (D7.5.2). It is allowed only to documents whose top-level source is a local file the user opened, never to network-loaded documents. | The same origin gate that D7.5.4 applies to audio. Mail credentials must never be reachable by a web page. | proposed (needs a D-ruling) |
 | **ML9** | **POP3 is a download source.** A POP3 account is read with curl transfers (UIDL, RETR, TOP, DELE) into a local Inbox. Read state, flags and folders for it live only in the local cache. | POP3 has no server-side state beyond the message list. curl covers the protocol completely (§2.3), so POP3 costs only a sync policy in `mod_sync.ls`. | proposed |
@@ -563,7 +565,7 @@ An index file looks like this (Appendix D has the full sketch):
          uidnext: 48214, highestmodseq: 912377,
     <m uid: 48213, file: "1781c0ffee2a", flags: ['seen'],
        date: t'2026-10-21T09:14:00Z',
-       from: {name: "Ada Lovelace", addr: "ada@example.org"},
+       from: {name: "Ada Lovelace", address: "ada@example.org"},
        subject: "Draft review", snippet: "Thanks, two comments on section 3",
        thread: "1781c0ffee", size: 48210, attachments: 2>
 >
@@ -640,7 +642,7 @@ The model is plain Lambda values held in the window's session state (S1.4).
 ```lambda
 // one row of the message list, built from ENVELOPE, FLAGS and the snippet
 {uid: 48213, flags: ['seen', 'flagged'], date: t'2026-10-21T09:14:00Z',
- from: {name: "Ada Lovelace", addr: "ada@example.org"},
+ from: {name: "Ada Lovelace", address: "ada@example.org"},
  subject: "Draft review", snippet: "Thanks, two comments on section 3",
  thread: "1781c0ffee", size: 48210, attachments: 2}
 ```
@@ -726,13 +728,13 @@ milestone that first needs it, and fixed at its root if real.
 |---|---|---|---|
 | **MG1** | After `CURLOPT_CONNECT_ONLY` on `imaps://`, and on `imap://` with STARTTLS, is the session authenticated with no bytes left in curl's pingpong buffer? Can the event loop wait on `CURLINFO_ACTIVESOCKET` and drive `curl_easy_recv`/`curl_easy_send` with parking? | M0 | **Resolved for plain IMAP** (M0): the handoff works against the scripted server, with no bytes left behind and waits on the loop. TLS and STARTTLS over the handoff are untested until a live server (M1). |
 | **MG2** | Are IMAP(S), POP3(S) and SMTP(S) compiled in on all three platforms? On Linux, does the system libcurl report them in `curl_version_info()->protocols`? | M0 | **macOS done** (M0): libcurl rebuilt with the three protocols. Windows: setup flags changed, not built. Every platform: `open` and `send` check `curl_version_info()` and refuse a missing protocol clearly. |
-| **MG3** | Can a sync task outlive the handler that starts it and report to the window? Document-owned tasks (S13.3.1v2) and task-to-view messages (AR-O13) are not implemented today. | M1 | **Partly resolved:** document-owned tasks (AR-E4, S13.3.1v2) landed with the archive package; task-to-view messages (AR-O13) remain. No interim mechanism. |
+| **MG3** | Can a sync task outlive the handler that starts it and report to the window? Document-owned tasks (S13.3.1v2) and task-to-view messages (AR-O13) are not implemented today. | M1 | **Resolved** (M1d): each account task is document-owned, and it reports through `dom.dispatch` (AR-O13, landed with the archive package). A frame rendered from such a report was never loaded; Radiant now loads it at the next quiescent host turn (RAD_20 §6.3). |
 | **MG4** | Can an embedded document load with scripting disabled and remote loads blocked? Today Radiant has no runtime switch to turn scripts off. `<iframe srcdoc>` inherits its parent's `DocumentJsHostConfig` (`radiant/layout_block.cpp`), `html_scripting_enabled` is hard-coded on (`radiant/cmd_layout.cpp`), and the remote-resource policy is set only by a CLI flag. | M1 | Add a scripting-disabled flag to `DocumentJsHostConfig`, inherited by nested documents and never re-enabled by a child, and honour it in the loader (skip scripts and handlers; `html_scripting_enabled` false so `<noscript>` renders). Let the demo set that flag and the resource policy on the message iframe. How the iframe asks for it (the `sandbox` attribute, with scripts kept off even for `allow-scripts` until sandboxing exists, or a Radiant-specific attribute) is MQ11. The full `sandbox` semantics wait for Lambda's sandboxing work. |
-| **MG5** | MIME coverage. `input-eml.cpp` decodes base64 and quoted-printable but not RFC 2047 encoded words, and it does not convert charsets. Lambda has no legacy charset decoder (ISO-8859-x, Windows-125x, GB18030, Big5, Shift_JIS, EUC-KR, ISO-2022-JP). Nested multipart, `message/rfc822` parts and tolerance of malformed mail are unverified. | M1 | Add charset conversion in `lib` (system iconv on macOS and Linux; the Windows dependencies already carry libiconv) and RFC 2047 decoding in `input-eml.cpp`, with an `.eml` fixture corpus. |
-| **MG6** | Secret storage. There is no Keychain or secret-store API; the only Security framework use is `lib/trust_store.c`. | M1 | A small secret-store row in `lambda-io` (SecItem on macOS; libsecret and Credential Manager later), gated by ML8. |
+| **MG5** | MIME coverage. `input-eml.cpp` decodes base64 and quoted-printable but not RFC 2047 encoded words, and it does not convert charsets. Lambda has no legacy charset decoder (ISO-8859-x, Windows-125x, GB18030, Big5, Shift_JIS, EUC-KR, ISO-2022-JP). Nested multipart, `message/rfc822` parts and tolerance of malformed mail are unverified. | M1 | **Resolved** (M1a): `lib/mail_mime` decodes RFC 2047 words, RFC 2231 parameters and address lists, and converts charsets through iconv; the `eml` reader gains decoded subjects, `addresses` and the `mime` part tree, and keeps the last part of a cut-off multipart. Covered by `test_mail_mime_gtest` and the `test/lambda/mail` goldens. |
+| **MG6** | Secret storage. There is no Keychain or secret-store API; the only Security framework use is `lib/trust_store.c`. | M1 | **Resolved** (M1b): `lambda.io.secret` (`get`, `set`, `delete`) over `lib/secret_store` (SecItem generic passwords on macOS; other platforms raise "no secret store on this platform", MQ7). Each call runs on the offload pool and parks. ML8's gate is not applied yet (MQ9). |
 | **MG7** | OAuth enablers. No script can listen on a loopback port: `lambda serve` is a separate process, and its Lambda backend is stubbed. There is no SHA-256, base64url encoder or secure random for PKCE. Opening the system browser through `io.exec("open", [url])` is untested. | M4 | A one-shot loopback listener in `lambda-io` (bound to 127.0.0.1, one request, then closed) and minimal crypto rows backed by mbedTLS. |
-| **MG8** | Scale. Does a 50 000-message mailbox open from its index and scroll within the frame budget with Finder's row window? | M1 | Measure in a release build. Split the index per mailbox and page it if loading dominates. |
-| **MG9** | Large literals. Does a 25 MB attachment stream to disk without an in-memory copy, from the tokenizer through `input-eml`? | M1 | A spill threshold in the tokenizer, and file-backed parts in the MIME model. |
+| **MG8** | Scale. Does a 50 000-message mailbox open from its index and scroll within the frame budget with Finder's row window? | M1 | **Partly resolved** (M1d): the list mounts only the rows near its viewport. A 50 000-entry index opens and scrolls in the debug build. Two Radiant grid defects found on the way are fixed (M1 checkpoint). The release-build timing is still to be measured. |
+| **MG9** | Large literals. Does a 25 MB attachment stream to disk without an in-memory copy, from the tokenizer through `input-eml`? | M1 | **Resolved for the store** (M1a): `fetch_message` fetches with `to`, so a large body streams into `incoming/` and moves into place without a copy in memory. Reading it back with `input(…, 'eml')` still holds the decoded parts in memory. |
 | **MG10** | Compose editing. Is contenteditable through the DOM editing package (D7.2.5) good enough for mail: lists, links, pasted HTML, inline images? | M3 | Fix in the editing package. Plain-text compose remains the fallback. |
 | **MG11** | *Withdrawn with ML7v3.* SQLite writes from Lambda code are no longer needed before M1. They return with the later phase that removes SL1–SL3 (Appendix S, ML7v2). | — | — |
 | **MG12** | Is Lambda's own search fast enough? `io.text_search` and `io.grep` over the sidecars of 10 000 messages, within 300 ms in a release build. Both rescan the files on every call. | M5 | Measure and record the result. A miss is SL4, left to the later phase that adds a persistent index to `lib/fts`. No database full-text index (ML12). |
@@ -807,8 +809,9 @@ increment.
 | **MQ8** | Where does the cache live? | The user data directory (`~/Library/Application Support/Lambda Mail/` on macOS) for the demo, and `./temp/` for tests. |
 | **MQ9** | ML8 needs a design ruling: mail sessions and secrets only for local-file documents. Extend D7.5.4's origin gate, or write a new D7.5 ruling? | A new D7.5 ruling that generalises the origin gate to credentials and non-HTTP network protocols. |
 | **MQ10** | POP3: delete messages from the server after download? | Leave them on the server by default, with an account option to delete after a set number of days, as macOS Mail did. |
-| **MQ11** | How does the message iframe request scripting-disabled loading (MG4)? | The standard `sandbox` attribute: today Radiant treats any sandboxed frame as script-free, even with `allow-scripts`, and logs that the token is not yet honoured. When sandboxing lands, the attribute gains its full meaning with no change to the demo. |
+| **MQ11** | How does the message iframe request scripting-disabled loading (MG4)? | **Answered** (user, 2026-10-22): the standard `sandbox` attribute, backed by a per-document scripting-disabled flag. Radiant treats any sandboxed frame as script-free, even with `allow-scripts`, and logs that the token is not yet honoured. When sandboxing lands, the attribute gains its full meaning with no change to the demo. |
 | **MQ12** | ML11 needs D7.2.4 amended: a built-in module nested under `lambda.io`. | **Answered: ratified as D7.2.4v4** (user, 2026-10-22; Formal Design 39.1.0). v3 allowed built-in modules only at `lambda.<module>`. v4 adds that `lambda.io.<leaf>` may name a built-in runtime module whose functions park on IO, which a Jube module may not do (D7.4.2v2). It is imported by its full path only, and its leaf may name neither a shipped package nor an `io` system function. Marked `*` until `lambda.io.mail` exists. |
+| **MQ14** | How does the message frame block remote loads in the engine? Today the sanitizer removes them (ML5v2's second layer), which CSS escapes or `image-set()` strings could slip past. Radiant has a per-document `LOCAL_ONLY` admission policy, but no markup asks for it. | A `<meta http-equiv="Content-Security-Policy">` that the sanitizer writes into the message: Radiant would map a policy whose fetch directives admit no network source to `LOCAL_ONLY`, leaving the rest of CSP unimplemented. A sender's own policy can only narrow it. The alternatives are mapping `sandbox` itself, which is not what the standard means, or the `csp` attribute of CSP Embedded Enforcement, a draft that only Chromium ships. |
 | **MQ13** | Who writes the SQLite index? | **Answered** (user, 2026-10-22): no SQLite index for now. The store is a Mark index per mailbox (ML7v3), written by Lambda code with `output(…, {atomic: true})`. |
 
 ---
@@ -867,6 +870,113 @@ increment.
 
 **Next.** M1: accounts and presets, the Keychain store (MG6), the scripting-off
 message view (MG4), MIME decoding (MG5), the store (ML7v3), and the window.
+
+## M1 plan — 2026-10-22
+
+M1 splits into four steps, in dependency order. Each ends with its own tests.
+
+| Step | Delivers | Needs |
+|---|---|---|
+| **M1a Data** | MIME decoding in the `eml` reader (MG5): RFC 2047 headers, address lists with display names, charsets to UTF-8, and a MIME part tree. The `lambda.mail` package: IMAP response interpretation, modified UTF-7, the Mark store (ML7v3), and a headless sync procedure. | No new rulings. Header sync fetches each message's header block and decodes it with `parse(bytes, 'eml')`, so no separate decoding function is needed. |
+| **M1b Secrets** | The OS secret store (MG6) | Ruled (user, 2026-10-22): `lambda.io.secret` with `get`, `set`, `delete`, Keychain on macOS |
+| **M1c Message view** | Script-free, remote-blocked rendering of HTML mail (MG4, ML5v2) | MQ11 answered (user, 2026-10-22): the `sandbox` attribute plus a per-document scripting-disabled flag |
+| **M1d Window** | `test/demo/mail/`: sidebar, list, viewer, attachments, presets and autoconfig; the sync task reports through `dom.dispatch` (AR-O13, resolving MG3) | M1a–M1c |
+
+## M1a checkpoint — 2026-10-22
+
+**Delivered.**
+- **`lib/mail_mime.{h,c}`**: charsets to UTF-8 (fast paths for UTF-8 and
+  windows-1252, which WHATWG also uses for the latin-1 labels; iconv
+  otherwise, with GB2312 read as GB18030 and Shift_JIS as CP932), RFC 2047
+  header decoding (adjacent words in one charset decode together, so a split
+  multibyte character survives), RFC 2045/2231 parameters, and RFC 5322
+  address lists with groups, comments and source routes. `lambda-lib` now
+  links iconv, which `lambda-data` already did for archive names.
+- **The `eml` reader** (`input-eml.cpp`) now uses those helpers instead of
+  its own parameter parser. It decodes `subject` and adds `addresses`
+  (`{name, address}`, the shape `doc.misc.eml()` writes) and `mime`, the part
+  tree. A boundary is never RFC 2047-decoded, since `=` and `?` are legal in
+  it. The `doc.misc` eml writer accepts both fields as views of the headers
+  and `raw_body` and does not serialize them.
+- **The `lambda.mail` package** (`lmd/package/mail/`): `imap` (modified
+  UTF-7, LIST, SELECT, FETCH, UID sets), `mime` (bodies, attachments, `cid:`
+  parts, snippets, search text), `store` (the ML7v3 layout, atomic index
+  saves, merges by UID) and `sync` (mailboxes, a mailbox sync, message
+  download).
+
+**Verification.**
+- `test_mail_mime_gtest`: 8 tests; `test_mail_imap_gtest`: 21.
+- `test/lambda/mail/` goldens (`eml_mime`, `imap_parse`, `mime_helpers`),
+  passing on both the interpreter and the JIT tier, over a fixture corpus in
+  `test/input/mail/`: encoded headers, a mixed/related/alternative message
+  with an RFC 2231 filename, legacy charsets, format=flowed, and a malformed
+  message.
+- `make test-mail`, 7 tests: the M0 six plus a store sync that runs three
+  rounds against the fake server: first sync, then an unread flag, an
+  expunge and a new delivery, then a UIDVALIDITY reset. The hostile and the
+  spilled bodies are stored byte for byte.
+- `make test-lambda-baseline` caught one regression, which is now fixed: the
+  `doc.misc` round trip, whose writer rejected the new fields. The script
+  format round trips (8 eml cases) pass. `latex_phase3_corpus` timed out under
+  load and passes alone.
+
+**Findings.**
+- `if (c) return x` and a line that begins with `[` need braces or a `;` in
+  Lambda; `state`, `type` and `last` are reserved words; a procedure that
+  propagates with `^` must declare a `T^` return type. All are recorded here
+  because the package hit each of them.
+- Updating an index builds string-keyed maps (`{*: m, [k]: v}`) one entry at
+  a time. If each step copies the map, a merge is quadratic in the mailbox
+  size; MG8 will measure it on a 50 000-entry mailbox.
+
+**Next.** M1b and M1c need the user's decisions (MG6's API, MQ11); M1d, the
+window, follows them.
+
+## M1b–M1d checkpoint — 2026-10-22
+
+**Delivered.**
+- **M1b, `lambda.io.secret`** (`lambda/runtime/io_secret.cpp`, `lib/secret_store.{h,c}`):
+  - `get`, `set` and `delete` of generic passwords named by a service and an account, backed by the Keychain on macOS. Other platforms raise an error (MQ7).
+  - Each call runs on the offload pool and parks, since the OS may wait on a prompt. Native copies of a value are wiped and values are never logged.
+  - `lambda.io.<leaf>` modules now resolve from one table in `build_ast.cpp`, shared by `mail` and `secret`. Both refuse an unaliased import.
+- **M1c, script-free frames** (RAD_20 §6.3):
+  - A frame carrying `sandbox` loads with `DomDocument::scripting_disabled`. The flag is inherited by nested documents and never cleared, and `allow-scripts` is logged as not honoured.
+  - With the flag set: no script runs, the parser treats `<noscript>` content as markup, `on*` attributes never compile, external scripts are not prefetched, and `.ls` documents and `<webview>` are refused.
+  - `lambda.mail.sanitize` is the second layer: it removes scripts, handlers, embedded documents, forms and frame navigation, blocks remote loads until allowed, inlines `cid:` parts and cleans `<noscript>` content.
+- **M1d, the window** (`test/demo/mail/`, `lambda demo mail`):
+  - The account sheet, with presets and an ISPDB lookup (`lambda.mail.providers`).
+  - A sidebar with roles and unread counts, and a message list that mounts only the rows near its viewport.
+  - A viewer with headers, quoted plain text, the sandboxed HTML frame, a remote-content bar and an attachment preview with Save to Downloads.
+  - One document-owned task per account, which reports through `dom.dispatch`.
+  - The profile holds no password (ML6).
+
+**Engine fixes found on the way.**
+- **Frames rendered from a task's report never loaded.** Layout cannot load a frame while an evaluator is executing, and nothing retried. `layout_ensure_iframe_document` now records the deferral, and the host pump's next quiescent turn reflows. This may also be the archive demo's known issue of dropped frames; that is not re-checked.
+- **Grid `fr` rows grew to the content of scroll containers.** Two causes:
+  - After the content pass, Radiant grew every `fr` row to its items' content height. In a definite-height container an `fr` row now grows only through an item's automatic minimum.
+  - The §11.5 floor for `auto`-minimum flexible tracks used min-content where §12.5.4 uses the minimum contribution. That contribution is zero for scroll containers and for `min-height: 0`.
+  - `clientHeight` of such items was the content height (5000 instead of 300), which made the list mount every row.
+- **A typed password reached `log.txt`.** `lambda.dom.validate` parsed every control's value as a number, and a failed parse logs its text. Only `number` and `range` values are parsed now (HTML §4.10.5.3).
+
+**Verification.**
+- `make test-mail`: 11 tests, one skipped off macOS. They include the Keychain round trip and the window replay against the fake server (`tests/mail_window.json`, 32 assertions).
+- The window replay adds an account through the sheet and syncs. Inside the HTML message's frame it checks that the script did not run, the tracker has no source, the `cid:` image is inlined and the link is inert. It then loads remote content, previews an attachment and switches mailboxes.
+- Goldens on both tiers: `test/lambda/mail/sanitize`, `providers`, and `test/demo/mail/tests/mail_model`.
+- UI tests:
+  - `dom_iframe_sandbox` (frames and nesting);
+  - `dom_iframe_task_render` (fails with the retry disabled, passes with it);
+  - `layout_grid_fr_scroll` (browser heights).
+
+**Findings.**
+- The Keychain grants read access per program. A password stored by one build of `lambda.exe` prompts the next build, so the tests remove their items with the `security` tool. A leftover item made one development run prompt.
+- The replay harness logs what it types (`event_sim: type`). That is test-only.
+
+**Not yet.**
+- MG8's release-build timing.
+- MQ14 (engine-level remote blocking).
+- ML8's origin gate (MQ9).
+- Opening links in the system browser (§5.8).
+- A unified Inbox, keyboard navigation of the list, and live accounts (the manual checklist).
 
 ## Appendix A. libcurl build change
 
@@ -942,8 +1052,10 @@ recorded here.
 
 ## Appendix D. Store file sketches
 
-A starting point for M1, not a contract. `mod_store.ls` owns the real formats.
-Each file carries a `version` attribute so a later phase can migrate it.
+A starting point for M1, not a contract; `lambda.mail.store` owns the real
+formats. Each file carries a `version` field so a later phase can migrate it.
+The index is a map rather than an element (M1a): entries are updated by UID,
+which a map's `entries` array keeps simple.
 
 ```lambda
 // <account>/mailboxes.mark
@@ -952,16 +1064,14 @@ Each file carries a `version` attribute so a later phase can migrate it.
     <box id: "b02", path: "[Gmail]/Sent Mail", role: 'sent', unread: 0, total: 931>
 >
 
-// <account>/index/b01.mark
-<mailbox version: 1, path: "INBOX", uidvalidity: 1700000001,
-         uidnext: 48214, highestmodseq: 912377,
-    <m uid: 48213, file: "1781c0ffee2a", flags: ['seen', 'flagged'],
-       modseq: 912370, date: t'2026-10-21T09:14:00Z',
-       from: {name: "Ada Lovelace", addr: "ada@example.org"},
-       to: [{name: "", addr: "me@example.org"}],
-       subject: "Draft review", snippet: "Thanks, two comments on section 3",
-       thread: "1781c0ffee", size: 48210, attachments: 2, has_file: true>
->
+// <account>/index/b01.mark — as lambda.mail.store writes it (M1a)
+{version: 1, path: "INBOX", uidvalidity: 1700000001, uidnext: 48214, highestmodseq: 912377,
+ entries: [{uid: 48213, file: "gm1278455344230334865", flags: ["\\Seen", "\\Flagged"],
+            date: "Tue, 21 Oct 2026 09:14:00 +0200", internaldate: "21-Oct-2026 09:14:00 +0200",
+            from: {name: "Ada Lovelace", address: "ada@example.org"},
+            to: [{name: null, address: "me@example.org"}],
+            subject: "Draft review", message_id: "<draft.1@example.org>",
+            size: 48210, thread: 1781234567890123456, has_file: true}]}
 
 // <account>/pending.mark
 <pending version: 1,

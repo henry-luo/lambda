@@ -1,0 +1,33 @@
+"=== presets ==="
+[["gmail", ["gmail.com", "googlemail.com"]], ["icloud", ["icloud.com", "me.com", "mac.com"]], ["fastmail", ["fastmail.com", "fastmail.fm"]], ["proton", ["proton.me", "protonmail.com", "protonmail.ch", "pm.me"]], ["outlook", ["outlook.com", "hotmail.com", "live.com", "msn.com"]], ["yahoo", ["yahoo.com", "ymail.com"]]]
+["example.com", "", "c.example"]
+["gmail", "proton", null]
+"=== urls and options ==="
+["imaps://imap.gmail.com:993", "imap://127.0.0.1:1143", "smtp://smtp.mail.me.com:587"]
+{
+  user: "ada",
+  password: "pw",
+  tls: false
+}
+{
+  user: "ada",
+  password: "pw",
+  pin: "sha256//abc="
+}
+"=== autoconfig ==="
+{
+  id: "autoconfig",
+  name: "Example Mail",
+  imap: {
+    host: "imap.example.com",
+    port: 993,
+    security: 'tls'
+  },
+  smtp: {
+    host: "smtp.example.com",
+    port: 587,
+    security: 'starttls'
+  },
+  user: "ada",
+  note: null
+}

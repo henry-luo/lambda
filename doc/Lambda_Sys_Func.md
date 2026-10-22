@@ -1838,6 +1838,28 @@ pn unread_count(password) {
 }
 ```
 
+#### lambda.io.secret
+
+Passwords and tokens in the OS secret store, as a built-in module at `lambda.io.secret` (D7.2.4v4). Import it with an alias: `import secret: lambda.io.secret`. A value is a generic password named by a `service` and an `account`, both non-empty text. On macOS the store is the user's login Keychain. Other platforms raise `no secret store on this platform` until they gain a backend. All three functions are procedures: the OS may wait on an unlock or access prompt, so each call runs on a worker thread while the calling task parks. Values are never logged (`vibe/Lambda_Demo_Mail.md` ML6).
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `secret.get(service, account)` | string or `null` | The stored text, or `null` when there is none |
+| `secret.set(service, account, value)` | `null` | Store `value` (text), replacing an earlier one |
+| `secret.delete(service, account)` | bool | `true` when a value was removed, `false` when there was none |
+
+A refused prompt or a locked store raises `access denied` with the OS's reason. A value written by an earlier build of `lambda.exe` may make macOS ask again, since the Keychain grants access per program.
+
+```lambda
+import secret: lambda.io.secret
+
+pn password_for(user) {
+    let saved = secret.get("Lambda Mail", user)^
+    if (saved == null) { raise error("no password saved for " ++ user) }
+    saved
+}
+```
+
 #### cmd(command, args?)
 
 Execute a shell command and return its output as a string. The optional

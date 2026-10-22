@@ -1300,6 +1300,15 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_MAIL_SEND, "io_mail_send", 3, (Type*)&TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_mail_send", PROFILE_NETWORK_FPTR(pn_io_mail_send), NULL, NULL, false, 0, true},
 
+    // lambda.io.secret (D7.2.4v4): the OS secret store, reached only through
+    // `import secret: lambda.io.secret`; every call parks while the OS answers
+    {SYSPROC_IO_SECRET_GET, "io_secret_get", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_FILE_IO_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SECRET_SET, "io_secret_set", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_FILE_IO_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SECRET_DELETE, "io_secret_delete", 2, &TYPE_BOOL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_FILE_IO_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
+
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
     {SYSPROC_IO_GREP, "io_grep", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,

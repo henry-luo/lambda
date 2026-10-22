@@ -194,6 +194,18 @@ Stateless document loaders — the LaTeX, PDF, TikZ, graph and math transforms, 
 - **Thread binding.** A load takes the thread at its quiescent load point, as any document load does. A custom-layout callback takes it at a quiescent layout boundary. Under another evaluator's live frames it refuses with `CUSTOM_LAYOUT_LAMBDA_BUSY`.
 - **Package reuse.** Each load still runs `run_lambda_package_module`, so the package's module init re-runs per document while its parse and compile are reused through the runtime's script registry. That keeps a package edited on disk fresh.
 
+### 6.3 Script-free documents and frame loads
+
+A frame that carries `sandbox` loads its document with scripting disabled (MQ11 in `vibe/Lambda_Demo_Mail.md`; the mail demo's message view relies on it). `document_js_host_config_for_frame` builds a frame's `DocumentJsHostConfig` from its embedder's and sets `scripting_disabled` when the attribute is present. No token lifts it yet: `allow-scripts` is logged as not honoured until Lambda implements sandboxing. Every frame loader uses the helper: `srcdoc`, `src` in layout, the async worker load and script navigation.
+
+The flag becomes `DomDocument::scripting_disabled`. Inheritance copies it and `document_apply_js_host_config` only ever sets it, so a nested document can never turn scripting back on. Format-route loaders, which take no host config, see it through `LoadScriptingScope`. With the flag set:
+
+- `load_lambda_html_doc` runs no scripts, whatever its caller asked. It parses with the HTML scripting flag off, so `<noscript>` content is markup, and sets `html_scripting_enabled` to match. Deferred and generated-document script runs (`complete_document_scripts`) are skipped, and external scripts are not prefetched.
+- `on*` attributes never compile (`dom_compile_event_attr_to_expando`), even when another realm wraps the document's nodes.
+- A `.ls` document is refused, since it is author code. A `<webview>` is not created, since it runs its page's scripts.
+
+Layout cannot load a frame while an evaluator is executing. This happens when a task's `dom.dispatch` re-renders a template (AR-O13). In that case `layout_ensure_iframe_document` sets `UiContext::frame_loads_deferred`. The next quiescent host turn (`radiant_commit_async_document_loads`) then requests a reflow, and that reflow loads the frame. `test/ui/dom_iframe_task_render.json` covers it; `test/ui/dom_iframe_sandbox.json` covers the sandbox.
+
 ---
 
 ## 7. Networking: window-owned, session/document-borrowed

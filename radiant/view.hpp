@@ -4558,6 +4558,9 @@ typedef struct UiContext {
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;
+    // A frame load that layout deferred while an evaluator ran: the host
+    // pump's next quiescent turn reflows to load it (layout_ensure_iframe_document).
+    bool frame_loads_deferred;
     MouseState mouse_state; // current mouse state
     DomNodeRef relative_mouse_owner; // validated against the presented document
     // Native click-series tracking is window/UI state. Keeping it here avoids
@@ -4649,9 +4652,15 @@ typedef struct DocumentJsHostConfig {
     bool disable_css_animations;
     InputResourcePolicy resource_policy;
     const struct RenderPagedOptions* paged_media;
+    bool scripting_disabled;    // DomDocument::scripting_disabled for the loaded document
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);
+// The settings a frame's document loads with: its embedder's, and with
+// scripting disabled when the frame carries `sandbox` (MQ11).
+DocumentJsHostConfig document_js_host_config_for_frame(UiContext* uicon,
+                                                       const struct DomDocument* source,
+                                                       struct DomElement* frame);
 void document_apply_js_host_config(struct DomDocument* doc,
                                    const DocumentJsHostConfig* config);
 

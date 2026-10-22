@@ -6,6 +6,7 @@ scripts reach them with `tls: false`. Scratch data stays under temp/mail/.
 """
 
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -116,10 +117,105 @@ class MailTests(unittest.TestCase):
         self.assertEqual(body, b"From: ada@example.org\r\nTo: bob@example.org\r\nSubject: hello\r\n\r\n"
                                b"Hi Bob,\r\n.a line starting with a dot\r\n")
 
+    def test_sync_store(self):
+        store = TEMP / "store"
+        shutil.rmtree(store, ignore_errors=True)
+        out, _, _ = self.run_script("_sync.ls")
+        self.assertIn("box Entw\u00fcrfe drafts true", out)
+        self.assertIn("box [Fake] null false", out)
+        self.assertIn("index 1700000001 5 4", out)
+        self.assertIn('entry 2 ["\\\\Seen", "\\\\Flagged"] caf\u00e9 \u00c9lise b01-1700000001-2', out)
+        self.assertEqual((store / "messages/03/b01-1700000001-3.eml").read_bytes(), fake_mail.HOSTILE)
+        self.assertEqual((store / "messages/04/b01-1700000001-4.eml").read_bytes(), fake_mail.BIG)
+        self.assertTrue((store / "messages/03/b01-1700000001-3.txt").read_text().startswith(
+            "mallory@example.org\ntricks\n"))
+        # the large body was spilled into incoming/ and moved into place
+        self.assertEqual(list((store / "incoming").iterdir()), [])
+        # the server changes: UID 1 unread, UID 2 expunged, UID 5 delivered
+        inbox = self.state.mailboxes["INBOX"]
+        inbox[0] = (1, [], inbox[0][2])
+        del inbox[1]
+        inbox.append((5, [b"\\Answered"], b"From: Bob <bob@example.com>\r\nSubject: five\r\n\r\nnew\r\n"))
+        out, _, _ = self.run_script("_sync.ls")
+        self.assertIn("index 1700000001 6 4", out)
+        self.assertIn("entry 1 [] one Ada Lovelace", out)
+        self.assertNotIn("entry 2 ", out)
+        self.assertIn('entry 5 ["\\\\Answered"] five Bob b01-1700000001-5', out)
+        # a new UIDVALIDITY starts the index over
+        self.state.uidvalidity += 1
+        out, _, _ = self.run_script("_sync.ls")
+        self.assertIn("index 1700000002 6 4", out)
+        self.assertIn("b01-1700000002-5", out)
+        self.assertIn("synced", out)
+
     def test_import_needs_alias(self):
         out, err, code = self.run_script("_import_global.ls", expect_ok=False)
         self.assertNotEqual(code, 0)
         self.assertIn("import lambda.io.mail needs an alias", out + err)
+
+    def test_import_secret_needs_alias(self):
+        out, err, code = self.run_script("_import_secret_global.ls", expect_ok=False)
+        self.assertNotEqual(code, 0)
+        self.assertIn("import lambda.io.secret needs an alias, as in 'import secret: lambda.io.secret'", out + err)
+
+
+class SecretTests(unittest.TestCase):
+    """lambda.io.secret needs no server: it talks to the OS secret store."""
+
+    run_script = MailTests.run_script
+
+    @unittest.skipUnless(sys.platform == "darwin", "the Keychain backend is macOS only (MQ7)")
+    def test_keychain_round_trip(self):
+        out, _, _ = self.run_script("_secret.ls")
+        self.assertEqual(out.splitlines()[:7], [
+            "absent null", "stored app password one", "replaced pässword two ✓", "other null",
+            "deleted true", "again false", "gone null"])
+        self.assertIn("refused: io.secret.set: the value must be text", out)
+        self.assertIn("refused: io.secret.get: the account must be non-empty text without NUL", out)
+
+    @unittest.skipIf(sys.platform == "darwin", "macOS has a backend")
+    def test_unsupported_platform(self):
+        out, err, code = self.run_script("_secret.ls", expect_ok=False)
+        self.assertNotEqual(code, 0)
+        self.assertIn("no secret store on this platform", out + err)
+
+
+class DemoWindowTests(unittest.TestCase):
+    """The mail window (test/demo/mail) replayed headless against the fake IMAP server."""
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_window(self):
+        state, servers = fake_mail.start_all()
+        state.mailboxes["INBOX"].append((5, [], fake_mail.HTML_MAIL))
+        root = TEMP / "demo"
+        # the demo files a custom profile's passwords under its own service; the
+        # security tool removes a crashed run's entry without a Keychain prompt
+        forget = ["security", "delete-generic-password", "-s", f"Lambda Mail ({root})", "-a", "ada-fake-test"]
+        try:
+            TEMP.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            subprocess.run(forget, capture_output=True)
+            replay = (ROOT / "test/demo/mail/tests/mail_window.json").read_text()
+            (TEMP / "mail_window.json").write_text(replay.replace("{IMAP_PORT}", str(servers["imap"].port)))
+            result = TEMP / "mail_window_result.json"
+            result.unlink(missing_ok=True)
+            process = subprocess.run([str(EXE), "view", "test/demo/mail/mail.ls", "--headless",
+                                      "--event-file", str(TEMP / "mail_window.json"), "--event-result", str(result)],
+                                     cwd=ROOT, env=dict(os.environ, MAIL_DEMO_ROOT=str(root)),
+                                     capture_output=True, timeout=180)
+            report = json.loads(result.read_text()) if result.exists() else {}
+            self.assertEqual(report.get("result"), "PASS",
+                             f"replay {report}\n{process.stderr.decode(errors='replace')[-4000:]}")
+            # the profile holds the account and the mail, never the password (ML6)
+            self.assertIn(b"ada-fake-test", (root / "accounts.mark").read_bytes())
+            stored = [p for p in root.rglob("*") if p.is_file()]
+            self.assertTrue(any(p.suffix == ".eml" for p in stored))
+            self.assertFalse([p for p in stored if fake_mail.PASSWORD.encode() in p.read_bytes()])
+            self.assertIn(fake_mail.HTML_MAIL, [p.read_bytes() for p in stored if p.suffix == ".eml"])
+        finally:
+            subprocess.run(forget, capture_output=True)
+            for server in servers.values():
+                server.stop()
 
 
 if __name__ == "__main__":

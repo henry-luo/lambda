@@ -12459,7 +12459,7 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
     if (navigation_schedule_async_document(uicon, owner, iframe, url,
             css_vw, css_vh)) return true;
     if (!navigation_release_evaluator_for_document_load()) return false;
-    DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, owner);
+    DocumentJsHostConfig host_config = document_js_host_config_for_frame(uicon, owner, iframe);
     DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh,
                                          &host_config);
     if (!new_doc) return false;
@@ -12702,6 +12702,12 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
 
 bool radiant_commit_async_document_loads(UiContext* uicon) {
     bool navigated = false;
+    if (uicon && uicon->frame_loads_deferred && uicon->document && uicon->document->state) {
+        // frames layout could not load inside an evaluator load on this reflow
+        uicon->frame_loads_deferred = false;
+        doc_state_request_reflow(uicon->document->state);
+        navigated = true;
+    }
     AsyncScriptNavigation* job = s_async_script_navigations;
     while (job) {
         AsyncScriptNavigation* next = job->next;
@@ -12769,7 +12775,8 @@ static bool navigation_schedule_async_document(UiContext* uicon, DomDocument* so
     job->viewport_height = viewport_height;
     job->iframe = iframe != nullptr;
     job->redirect_count = redirect_count;
-    job->host_config = document_js_host_config_inherit(uicon, source);
+    job->host_config = iframe ? document_js_host_config_for_frame(uicon, source, iframe)
+                              : document_js_host_config_inherit(uicon, source);
     // The worker may use the inherited policy while parsing, but only the
     // host thread may bind the live UiContext before script execution.
     job->host_config.ui_context = nullptr;

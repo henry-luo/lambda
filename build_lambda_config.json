@@ -359,7 +359,7 @@
     },
     {
       "name": "archive-iconv",
-      "description": "Character-set conversion for native archive names",
+      "description": "Character-set conversion for native archive names and mail (lib/mail_mime)",
       "lib": "-liconv",
       "link": "dynamic"
     }
@@ -530,7 +530,8 @@
         "ThorVG",
         "pthread",
         "image-codecs",
-        "zlib"
+        "zlib",
+        "archive-iconv"
       ],
       "linux": {
         "additional_libraries": [
@@ -2603,6 +2604,19 @@
               "gtest_main"
             ],
             "binary": "test_mail_imap_gtest.exe",
+            "icon": "\ud83d\udce8"
+          },
+          {
+            "source": "lib/test_mail_mime_gtest.cpp",
+            "name": "MIME Header Decoding Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_mail_mime_gtest.exe",
             "icon": "\ud83d\udce8"
           },
           {

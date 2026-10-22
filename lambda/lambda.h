@@ -732,6 +732,9 @@ typedef enum SysFunc {
     SYSPROC_IO_MAIL_COMMAND,      // lambda.io.mail command(session, command, args?, options?)
     SYSPROC_IO_MAIL_IDLE,         // lambda.io.mail idle(session, seconds) - IMAP IDLE (RFC 2177)
     SYSPROC_IO_MAIL_SEND,         // lambda.io.mail send(url, options, message) - SMTP submission
+    SYSPROC_IO_SECRET_GET,        // lambda.io.secret get(service, account) - stored text or null
+    SYSPROC_IO_SECRET_SET,        // lambda.io.secret set(service, account, value)
+    SYSPROC_IO_SECRET_DELETE,     // lambda.io.secret delete(service, account) - true if one was removed
 } SysFunc;
 
 typedef struct Type {
@@ -3556,6 +3559,10 @@ extern "C" {
     Item pn_io_mail_command4(Item session, Item command, Item args, Item options);
     Item pn_io_mail_idle(Item session, Item seconds);
     Item pn_io_mail_send(Item url, Item options, Item message);
+    // lambda.io.secret (D7.2.4v4; vibe/Lambda_Demo_Mail.md ML6)
+    Item pn_io_secret_get(Item service, Item account);
+    Item pn_io_secret_set(Item service, Item account, Item value);
+    Item pn_io_secret_delete(Item service, Item account);
 
     // bitwise functions (integer operations)
     int64_t fn_band(int64_t a, int64_t b);

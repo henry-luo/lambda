@@ -1,0 +1,22 @@
+{
+  "name": "Sandboxed frames load script-free, nested frames inherit it, allow-scripts is not honoured yet",
+  "html": "test/ui/dom_iframe_sandbox.html",
+  "viewport": {"width": 800, "height": 700},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#host"}, "attribute": "data-ran", "equals": "yes"},
+    {"type": "switch_frame", "selector": "#open"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "ran"},
+    {"type": "switch_frame"},
+    {"type": "switch_frame", "selector": "#sandboxed"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "before"},
+    {"type": "assert_text", "target": {"selector": "#ns"}, "equals": "no script"},
+    {"type": "click", "target": {"selector": "#btn"}},
+    {"type": "assert_text", "target": {"selector": "#btn"}, "equals": "press"},
+    {"type": "switch_frame", "selector": "#inner"},
+    {"type": "assert_text", "target": {"selector": "#deep"}, "equals": "before"},
+    {"type": "switch_frame"},
+    {"type": "switch_frame", "selector": "#allowed"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "before"},
+    {"type": "switch_frame"}
+  ]
+}

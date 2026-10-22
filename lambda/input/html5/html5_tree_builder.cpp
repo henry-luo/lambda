@@ -370,6 +370,7 @@ Element* html5_parse_n(Input* input, const char* html, size_t length, Html5Parse
     // apply options
     if (opts) {
         parser->track_source_lines = opts->track_source_lines;
+        parser->scripting_enabled = !opts->scripting_disabled;
     }
     // also sync line_scan_pos with pos (in case BOM is skipped below)
     parser->line_scan_pos = 0;

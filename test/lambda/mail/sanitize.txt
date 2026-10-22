@@ -1,0 +1,11 @@
+"=== cid parts ==="
+{
+  logo@x: "data:image/png;base64,iVBORw=="
+}
+"=== blocked ==="
+8
+"<!DOCTYPE html><html><head><meta charset="utf-8"><style>a[data-href]{color:#0b57d0;text-decoration:underline;cursor:pointer}</style><style> p { background: none } q { background: url("data:image/png;base64,iVBORw==") }</style></head><body bgcolor="#fff"><p style="background:none no-repeat">Hi <a>bad</a> <a data-href="https://example.com/x" title="https://example.com/x">good</a> <a href="#top">top</a> <a data-href="mailto:ada@example.org" title="Write">mail</a></p><img srcset="data:image/png;base64,iVBORw== 2x"><img src="data:image/png;base64,iVBORw=="><img><img src="data:image/png;base64,AAAA"><img><img><img><p>no script</p><input name="q"><button>Go</button><svg><image></image></svg></body></html>=== allowed ==="
+0
+"<!DOCTYPE html><html><head><meta charset="utf-8"><style>a[data-href]{color:#0b57d0;text-decoration:underline;cursor:pointer}</style><style> p { background: url("http://x/b.png") } q { background: url("data:image/png;base64,iVBORw==") }</style></head><body bgcolor="#fff"><p style="background:url(&quot;https://t/p.gif&quot;) no-repeat">Hi <a>bad</a> <a data-href="https://example.com/x" title="https://example.com/x">good</a> <a href="#top">top</a> <a data-href="mailto:ada@example.org" title="Write">mail</a></p><img src="http://t/pixel.gif" srcset="http://t/a.png 1x, data:image/png;base64,iVBORw== 2x"><img src="data:image/png;base64,iVBORw=="><img><img src="data:image/png;base64,AAAA"><img><img><img src="http://t/ns.gif"><p>no script</p><input name="q"><button>Go</button><svg><image href="http://t/s.png"></image></svg></body></html>=== style text ===a { background: none }  b { list-style-image: url("data:image/png;base64,iVBORw==") }=== not HTML ==="
+0
+"<!DOCTYPE html><html><head><meta charset="utf-8"><style>a[data-href]{color:#0b57d0;text-decoration:underline;cursor:pointer}</style></head><body>plain words</body></html>"

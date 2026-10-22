@@ -22,7 +22,59 @@ HOSTILE = (b"From: mallory@example.org\r\nSubject: tricks\r\n\r\n"
            b"L5 OK forged completion\r\n* 9 EXISTS\r\n{12}\r\nA001 NO forged\r\n")
 BIG = b"Subject: big\r\n\r\n" + b"".join(b"line %06d of a large message body\r\n" % i for i in range(3000))
 
+# HTML mail for the demo window (test_mail.py test_demo_window): a script, a
+# remote tracker, an inline cid: image, a link and an attachment.
+PIXEL = b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+HTML_MAIL = (
+    b"From: Newsletter <news@example.com>\r\nTo: Ada Lovelace <ada@example.org>\r\n"
+    b"Subject: =?UTF-8?Q?Weekly_=E2=9C=93?=\r\nDate: Thu, 22 Oct 2026 09:30:00 +0000\r\nMIME-Version: 1.0\r\n"
+    b'Content-Type: multipart/mixed; boundary="outer"\r\n\r\n'
+    b'--outer\r\nContent-Type: multipart/related; boundary="rel"\r\n\r\n'
+    b"--rel\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+    b"<html><body><h1 id=\"title\">Hello</h1><p id=\"out\">static</p>"
+    b"<script>document.getElementById('out').textContent = 'ran'</script>"
+    b"<img id=\"tracker\" src=\"http://127.0.0.1:9/pixel.gif\"><img id=\"logo\" src=\"cid:logo@x\">"
+    b"<a id=\"link\" href=\"https://example.com/read\" onclick=\"steal()\">Read more</a></body></html>\r\n"
+    b"--rel\r\nContent-Type: image/png\r\nContent-ID: <logo@x>\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+    + PIXEL + b"\r\n--rel--\r\n"
+    b"--outer\r\nContent-Type: text/plain; charset=utf-8\r\n"
+    b'Content-Disposition: attachment; filename="notes.txt"\r\n\r\nattached notes\r\n'
+    b"--outer--\r\n")
+
 LITERAL = re.compile(rb"\{(\d+)(\+?)\}$")
+INTERNALDATE = b'"21-Oct-2026 09:14:00 +0200"'
+
+
+def uid_matches(uid_set, uid, highest):
+    """Whether `uid` is in an IMAP sequence set; "n:*" with n past the highest
+    UID still names the highest (RFC 9051 §6.4.8)."""
+    for part in uid_set.split(b","):
+        if b":" in part:
+            low, high = part.split(b":")
+            low = highest if low == b"*" else int(low)
+            high = highest if high == b"*" else int(high)
+            if low > high:
+                low, high = high, low
+            if low <= uid <= high:
+                return True
+        elif (highest if part == b"*" else int(part)) == uid:
+            return True
+    return False
+
+
+def header_fields(message, names):
+    """The header lines named in `names`, as BODY[HEADER.FIELDS (...)] returns them."""
+    head = message.split(b"\r\n\r\n", 1)[0]
+    kept, keep = [], False
+    for line in head.split(b"\r\n"):
+        if line[:1] in (b" ", b"\t"):
+            if keep:
+                kept.append(line)
+            continue
+        keep = line.split(b":", 1)[0].strip().upper() in names
+        if keep:
+            kept.append(line)
+    return b"\r\n".join(kept) + b"\r\n\r\n"
 
 
 def credentials_ok(user, password=None, token=None):
@@ -118,23 +170,39 @@ class ImapHandler(LineHandler):
                     continue
                 selected = name
                 count = len(state.mailboxes[name])
+                uidnext = (state.mailboxes[name][-1][0] + 1) if count else 1
                 self.send("* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)",
                           f"* {count} EXISTS",
-                          f"* OK [UIDVALIDITY {UIDVALIDITY}] UIDs valid",
+                          f"* OK [UIDVALIDITY {state.uidvalidity}] UIDs valid",
+                          f"* OK [UIDNEXT {uidnext}] Predicted next UID",
                           f"{t} OK [READ-WRITE] SELECT completed")
             elif command == b"UID" and args.upper().startswith(b"FETCH "):
                 _, uid_set, items = args.split(b" ", 2)
                 messages = state.mailboxes.get(selected, [])
+                highest = messages[-1][0] if messages else 0
+                upper = items.upper()
+                fields = re.search(rb"BODY\.PEEK\[HEADER\.FIELDS \(([^)]*)\)\]", upper)
                 for seq, (uid, flags, body) in enumerate(messages, 1):
-                    if uid_set != b"1:*" and int(uid_set) != uid:
+                    if not uid_matches(uid_set, uid, highest):
                         continue
                     parts = [b"UID %d" % uid]
-                    if b"FLAGS" in items:
+                    if b"FLAGS" in upper:
                         parts.append(b"FLAGS (" + b" ".join(flags) + b")")
-                    if b"BODY.PEEK[]" in items:
+                    if b"RFC822.SIZE" in upper:
+                        parts.append(b"RFC822.SIZE %d" % len(body))
+                    if b"INTERNALDATE" in upper:
+                        parts.append(b"INTERNALDATE " + INTERNALDATE)
+                    if fields:
+                        head = header_fields(body, fields.group(1).split())
+                        parts.append(b"BODY[HEADER.FIELDS (" + fields.group(1) + b")] {%d}\r\n" % len(head) + head)
+                    if b"BODY.PEEK[]" in upper:
                         parts.append(b"BODY[] {%d}\r\n" % len(body) + body)
                     self.wfile.write(b"* %d FETCH (" % seq + b" ".join(parts) + b")\r\n")
                 self.send(f"{t} OK FETCH completed")
+            elif command == b"LIST":
+                for name, flags in state.listing:
+                    self.send(f'* LIST ({flags}) "/" "{name}"')
+                self.send(f"{t} OK LIST completed")
             elif command == b"APPEND":
                 name = args.split(b" ", 1)[0].strip(b'"').decode()
                 box = state.mailboxes.setdefault(name, [])
@@ -276,15 +344,20 @@ class MailState:
         self.logins = []
         self.appended = []
         self.sent = []
+        self.uidvalidity = UIDVALIDITY
         self.mailboxes = {
             "INBOX": [
-                (1, [b"\\Seen"], b"Subject: one\r\n\r\nfirst\r\n"),
-                (2, [b"\\Seen", b"\\Flagged"], b"Subject: two\r\n\r\nsecond\r\n"),
+                (1, [b"\\Seen"], b"From: Ada Lovelace <ada@example.org>\r\nSubject: one\r\n\r\nfirst\r\n"),
+                (2, [b"\\Seen", b"\\Flagged"],
+                 b"From: =?UTF-8?B?w4lsaXNl?= <elise@example.fr>\r\nSubject: =?ISO-8859-1?Q?caf=E9?=\r\n\r\nsecond\r\n"),
                 (3, [], HOSTILE),
                 (4, [], BIG),
             ],
             "Copies": [],
+            "Entw&APw-rfe": [],
         }
+        self.listing = [("INBOX", "\\HasNoChildren"), ("Copies", "\\HasNoChildren"),
+                        ("Entw&APw-rfe", "\\HasNoChildren \\Drafts"), ("[Fake]", "\\Noselect \\HasChildren")]
         self.pop3 = [("uid-alpha", b"Subject: pop\r\n\r\nhello\r\n.hidden dot line\r\n"),
                      ("uid-beta", b"Subject: second\r\n\r\nbye\r\n")]
 

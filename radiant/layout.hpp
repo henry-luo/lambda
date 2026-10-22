@@ -4497,7 +4497,7 @@ DomElement* layout_footnote_pseudo(LayoutContext* lycon, DomElement* note, bool 
 DomElement* layout_generated_text(DomElement* owner, const char* text);
 // Cross-origin document navigation needs its own host turn.  The synchronous
 // layout paths use this guard to retain the iframe's replaced-element box.
-DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
+DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, DomElement* frame, const char* src,
     int viewport_width, int viewport_height);
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);

@@ -28,6 +28,9 @@ test/input/grep_tree/crlf.txt -text
 test/input/grep_tree/eol.txt -text
 test/input/fts_tree/crlf.txt -text
 
+# MIME fixtures: RFC 5322 lines end in CRLF, and the eml goldens keep it (test/lambda/mail)
+test/input/mail/*.eml -text
+
 # RFC round-trip fixtures require their exact CRLF wire representation.
 test/input/script_formats/*.eml -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 test/input/script_formats/*.vcf -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

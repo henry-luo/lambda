@@ -1,0 +1,154 @@
+"=== encoded headers ===Café crème and 日本語"
+{
+  from: [{
+      name: "Élise Dupré",
+      address: "elise@example.fr"
+    }],
+  reply_to: [{
+      name: null,
+      address: "replies@example.fr"
+    }],
+  to: [{
+      name: "Doe, John",
+      address: "john@example.com"
+    }, {
+      name: "Ada Lovelace",
+      address: "ada@example.org"
+    }, {
+      name: null,
+      address: "bob@example.com"
+    }, {
+      name: "Carol \"CJ\" Jones",
+      address: "carol@example.com"
+    }],
+  cc: [{
+      name: "Jörg",
+      address: "joerg@example.de"
+    }]
+}
+{
+  type: "text/plain",
+  charset: "UTF-8",
+  disposition: null,
+  filename: null,
+  cid: null,
+  size: 18,
+  content: "Bonjour à tous.\r\n"
+}
+"=== multipart: alternative, related, RFC 2231 filename ==="
+{
+  type: "multipart/mixed",
+  parts: [{
+      type: "multipart/related",
+      parts: [{
+          type: "multipart/alternative",
+          parts: [{
+              type: "text/plain",
+              charset: "windows-1252",
+              disposition: null,
+              filename: null,
+              cid: null,
+              size: 32,
+              content: "Price: 5 € — “quoted”\r\nLine two."
+            }, {
+              type: "text/html",
+              charset: "UTF-8",
+              disposition: null,
+              filename: null,
+              cid: null,
+              size: 75,
+              content: "<html><body><p>Price: 5 €</p><img src=\"cid:logo@example\"></body></html>\r\n"
+            }]
+        }, {
+          type: "image/png",
+          charset: null,
+          disposition: "inline",
+          filename: null,
+          cid: "logo@example",
+          size: 70,
+          content: b'\x89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4890000000D4944415478DA6364F8FFBF1E0005FE02FE0DC8F2AB0000000049454E44AE426082'
+        }]
+    }, {
+      type: "application/pdf",
+      charset: null,
+      disposition: "attachment",
+      filename: "Reçu n° 42.pdf",
+      cid: null,
+      size: 22,
+      content: b'\x255044462D312E340A252074696E790A2525454F460A'
+    }]
+}
+"=== legacy charsets ===件名テスト"
+[{
+    name: "山田",
+    address: "yamada@example.jp"
+  }]
+{
+  type: "multipart/mixed",
+  parts: [{
+      type: "text/plain",
+      charset: "ISO-2022-JP",
+      disposition: null,
+      filename: null,
+      cid: null,
+      size: 16,
+      content: "こんにちは"
+    }, {
+      type: "text/plain",
+      charset: "GB2312",
+      disposition: null,
+      filename: null,
+      cid: null,
+      size: 10,
+      content: "你好，世界"
+    }, {
+      type: "text/plain",
+      charset: "Shift_JIS",
+      disposition: null,
+      filename: null,
+      cid: null,
+      size: 10,
+      content: "ありがとう"
+    }, {
+      type: "text/plain",
+      charset: "x-unknown-charset",
+      disposition: null,
+      filename: null,
+      cid: null,
+      size: 34,
+      content: "plain ascii under an unknown label"
+    }]
+}
+"=== format=flowed ==="
+{
+  type: "text/plain",
+  charset: "utf-8",
+  disposition: null,
+  filename: null,
+  cid: null,
+  size: 76,
+  content: "This paragraph is wrapped by the sender  \r\nand should join.\r\n> quoted line\r\n",
+  format: "flowed",
+  delsp: true
+}
+"=== malformed ====?UTF-8?Q?unterminated"
+{
+  type: "multipart/alternative",
+  parts: [{
+      type: "text/plain",
+      charset: null,
+      disposition: null,
+      filename: null,
+      cid: null,
+      size: 10,
+      content: "first part"
+    }, {
+      type: "text/html",
+      charset: "utf-8",
+      disposition: null,
+      filename: null,
+      cid: null,
+      size: 0,
+      content: null
+    }]
+}

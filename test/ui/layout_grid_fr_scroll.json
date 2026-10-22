@@ -1,0 +1,11 @@
+{
+  "name": "fr rows in a definite grid: scroll containers and min-height:0 do not grow them",
+  "html": "test/ui/layout_grid_fr_scroll.html",
+  "viewport": {"width": 400, "height": 700},
+  "events": [
+    {"type": "script", "js": "document.getElementById('out').textContent = ['zero-scroll', 'zero-visible', 'one-scroll', 'one-visible', 'one-min-zero'].map(id => document.getElementById(id).offsetHeight).join('/')"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "300/300/300/5000/300"},
+    {"type": "script", "js": "document.getElementById('out').textContent = [document.getElementById('zero-scroll').clientHeight, document.getElementById('zero-scroll').scrollHeight].join('/')"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "300/5000"}
+  ]
+}

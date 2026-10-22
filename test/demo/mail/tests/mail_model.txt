@@ -1,0 +1,125 @@
+"=== ids ===ada-lovelace-example-orgada-example-org-2INBOX_91_Gmail_93__47_Sent_32_MailEntw_252_rfe_95_2=== sidebar ==="
+[{
+    path: "INBOX",
+    role: 'inbox',
+    depth: 0,
+    name: "Inbox",
+    unread: 2
+  }, {
+    path: "[Gmail]/Sent Mail",
+    role: 'sent',
+    depth: 0,
+    name: "Sent",
+    unread: null
+  }, {
+    path: "Archive",
+    role: null,
+    depth: 0,
+    name: "Archive",
+    unread: null
+  }, {
+    path: "Work/2026",
+    role: null,
+    depth: 1,
+    name: "2026",
+    unread: null
+  }]
+"INBOXINBOX=== window ==="
+{
+  first: 0,
+  stop: 22,
+  before: 0,
+  after: 3198592
+}
+{
+  first: 988,
+  stop: 1022,
+  before: 63232,
+  after: 3134592
+}
+{
+  first: 49988,
+  stop: 50000,
+  before: 3199232,
+  after: 0
+}
+{
+  first: 0,
+  stop: 3,
+  before: 0,
+  after: 0
+}
+[5, 4, 3, 2, 1]
+{
+  unread: 3,
+  total: 5
+}
+"=== labels ===09:145 Oct1 Jan 202521 Oct"
+["900 B", "47 KB", "23.8 MB"]
+["Ada", "bob@x", "(no sender)"]
+"(no subject)=== reports ==="
+["Syncing…", "Offline", 5, {
+    unread: 3,
+    total: 5
+  }, "INBOX"]
+"=== quoting ==="
+[{
+    depth: 0,
+    text: "Thanks!"
+  }, {
+    depth: 1,
+    text: "first"
+  }, {
+    depth: 2,
+    text: "deeper\nalso deeper"
+  }, {
+    depth: 0,
+    text: "end"
+  }]
+"=== account sheet ==="
+{
+  account: {
+    id: "ada-gmail-com",
+    name: "ada@gmail.com",
+    email: "ada@gmail.com",
+    user: "ada@gmail.com",
+    provider: "gmail",
+    imap: {
+      host: "imap.gmail.com",
+      port: 993,
+      security: 'tls'
+    },
+    smtp: {
+      host: "smtp.gmail.com",
+      port: 465,
+      security: 'tls'
+    },
+    pin: null
+  }
+}
+{
+  error: "Type the account's password or app password."
+}
+{
+  error: "Choose a provider or type the IMAP server."
+}
+{
+  account: {
+    id: "ada-nowhere-test-2",
+    name: "ada@nowhere.test",
+    email: "ada@nowhere.test",
+    user: "ada",
+    provider: "manual",
+    imap: {
+      host: "127.0.0.1",
+      port: 1143,
+      security: 'plain'
+    },
+    smtp: {
+      host: "",
+      port: 465,
+      security: 'tls'
+    },
+    pin: null
+  }
+}
