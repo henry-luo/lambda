@@ -9,6 +9,7 @@
 #include "font_internal.h"
 #include "font_cbdt.h"
 #include "font_colr.h"
+#include <string.h>
 
 bool font_backend_create(FontHandle* handle, const uint8_t* data, size_t len,
                          int face_index, FontWeight weight, FontSlant slant) {
@@ -115,6 +116,9 @@ void font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
     handle->platform_aux_ref = handle->ct_font_ref;
     handle->backend_kind = FONT_BACKEND_CORETEXT;
     handle->metrics_from_platform_ref = true;
+    // fallback can replace the measurement face on a still-live handle.
+    if (handle->text_measure_cache) memset(handle->text_measure_cache, 0,
+        FONT_TEXT_MEASURE_CACHE_SIZE * sizeof(FontTextMeasureEntry));
 }
 #endif
 

@@ -184,6 +184,7 @@ static bool register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t byte
     oz->range_owners[lo].foreign = foreign;
     oz->range_count++;
     page_index_add_range(oz, base, end, oz->range_owners[lo]);
+    oz->recent_range.base = NULL;
 
     // Publish bounds only after the paired entry is fully present.
     if (!oz->min_addr || base < oz->min_addr) oz->min_addr = base;
@@ -407,7 +408,7 @@ void gc_object_zone_free(gc_object_zone_t* oz, gc_header_t* header) {
 
 // Binary search the sorted slab_ranges array for the range containing p.
 static bool range_search(const gc_object_zone_t* oz, uint8_t* p,
-                         gc_range_owner_t* owner, uint8_t** range_base) {
+                         gc_range_owner_t* owner, gc_slab_range_t* range) {
     size_t lo = 0, hi = oz->range_count;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
@@ -423,7 +424,7 @@ static bool range_search(const gc_object_zone_t* oz, uint8_t* p,
     if (lo >= oz->range_count) return false;
     if (p < oz->slab_ranges[lo].base || p >= oz->slab_ranges[lo].end) return false;
     *owner = oz->range_owners[lo];
-    *range_base = oz->slab_ranges[lo].base;
+    *range = oz->slab_ranges[lo];
     return true;
 }
 
@@ -435,17 +436,23 @@ int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** forei
     // Fast rejection: check against global min/max address bounds
     if (p < oz->min_addr || p >= oz->max_addr) return 0;
 
-    gc_range_owner_t owner;
-    uint8_t* range_base;
-    const gc_range_page_t* indexed = oz->page_index ? page_index_find(oz, p) : NULL;
-    if (oz->page_index && !indexed) return 0;   // a complete index: no page, no range
-    if (indexed && !indexed->shared) {
-        if (p < indexed->base || p >= indexed->end) return 0;
-        owner = indexed->owner;
-        range_base = indexed->base;
-    } else if (!range_search(oz, p, &owner, &range_base)) {
-        return 0;
+    gc_range_owner_t owner = oz->recent_owner;
+    gc_slab_range_t range = oz->recent_range;
+    if (!range.base || p < range.base || p >= range.end) {
+        const gc_range_page_t* indexed = oz->page_index ? page_index_find(oz, p) : NULL;
+        if (oz->page_index && !indexed) return 0;   // a complete index: no page, no range
+        if (indexed && !indexed->shared) {
+            if (p < indexed->base || p >= indexed->end) return 0;
+            owner = indexed->owner;
+            range = (gc_slab_range_t){indexed->base, indexed->end};
+        } else if (!range_search(oz, p, &owner, &range)) {
+            return 0;
+        }
+        // cache ownership, never liveness: exact-slot and allocation-watermark checks still run.
+        oz->recent_range = range;
+        oz->recent_owner = owner;
     }
+    uint8_t* range_base = range.base;
 
     // Non-slab ranges (bump blocks) are not object-zone slots; gc_heap.c owns
     // their exact-slot check, starting from the owner found by this lookup.

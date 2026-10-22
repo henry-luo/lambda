@@ -2027,7 +2027,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->pixel_max_r = ev->pixel_max_g = ev->pixel_max_b = ev->pixel_max_a = -1;
         ev->pixel_search_radius = reader.has("search_radius")
             ? sim_number_as_float(reader.get("search_radius")) : 0.0f;
-        ev->pixel_force_render = reader.has("force_render") ? reader.get("force_render").asBool() : true;
+        ev->pixel_render_if_dirty = !reader.has("force_render");
+        ev->pixel_force_render = !ev->pixel_render_if_dirty && reader.get("force_render").asBool();
         if (reader.has("min_r")) ev->pixel_min_r = reader.get("min_r").asInt32();
         if (reader.has("min_g")) ev->pixel_min_g = reader.get("min_g").asInt32();
         if (reader.has("min_b")) ev->pixel_min_b = reader.get("min_b").asInt32();
@@ -3370,7 +3371,7 @@ static void render_pending_surface(UiContext* uicon) {
     if (!uicon || !uicon->document || (!uicon->document->view_tree && !uicon->paged_view)) return;
     DocState* state = (DocState*)uicon->document->state;
     if (!state) return;
-    bool pending = state->is_dirty || state->needs_repaint ||
+    bool pending = !uicon->surface || state->is_dirty || state->needs_repaint ||
         state->needs_reflow || state->dirty_tracker.full_repaint ||
         state->dirty_tracker.full_reflow || dirty_has_regions(&state->dirty_tracker);
     if (!pending) return;
@@ -3403,6 +3404,8 @@ bool event_sim_pixel_matches_bounds(uint32_t px, const SimEvent* ev, bool report
 
 static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon ? uicon->document : NULL;
+    // consecutive observations share the current pixels; mutations and clocks invalidate them.
+    if (ev->pixel_render_if_dirty) render_pending_surface(uicon);
     if (ev->pixel_force_render && uicon) event_sim_render_surface(uicon);
 
     ImageSurface* actual = uicon ? uicon->surface : NULL;
