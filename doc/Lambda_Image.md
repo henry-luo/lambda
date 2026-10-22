@@ -227,6 +227,25 @@ affine transform. Geometry options are rejected. Gray/tiled inputs materialize
 only for a filter evaluation. Group/filter/clipping buffers share a bounded
 256-MiB composition scratch admission limit.
 
+`adjustment_layer(options={},layer_options={})` constructs a retained
+`<layer kind:'adjustment', <effect kind:'adjust',enabled:true,options:{...}>>`.
+It processes the already-composited lower siblings, respecting isolated versus
+pass-through group scope, without changing source samples (**S9.1.2 / S9.2.2**).
+An optional ordinary gray mask and layer opacity interpolate the original and
+adjusted RGB in linear light; backdrop alpha is retained. Only pointwise color
+effects are admitted: nonzero softness/sharpen/vignette, styles, transforms and
+clipping reject. Adjustment layers cannot be clipping bases. Integral position
+locates their local mask and does not translate the backdrop. Native render
+regions use the same pointwise result as a full render. Projects preserve the
+layer; the current PSD profile rejects it.
+
+Color processing and retained effects accept `curve_mode:"linear"|"smooth"`.
+The default keeps existing linear interpolation. Smooth uses shape-preserving
+cubic Hermite tangents, passing through the authored RGB/channel knots without
+overshooting their segment endpoint range. Curve mode participates in color
+and filter cache identity; master RGB still precedes individual channel curves,
+and alpha is unchanged.
+
 `histogram(raster)` returns one 256-bin count array per native channel. Transparent
 samples contribute to alpha bins and are excluded from color bins. `to_bytes` and
 `from_bytes(bytes,{width,height,channels:4,color_space:'srgb'})` copy raw interleaved

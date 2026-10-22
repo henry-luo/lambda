@@ -110,7 +110,7 @@ Alt resizes about the center. Escape cancels; completion creates one undo item.
 Handles follow the combined document-space bounds. Nested groups and selected
 parents/children transform each leaf once, retaining source pixels, artwork and
 leaf masks. A locked descendant rejects the whole transform. Groups carrying
-group masks/effects/styles require separate support and reject transforms;
+group masks/effects/styles or adjustment-layer descendants require separate support and reject transforms;
 perspective/warp remain outstanding. Dragging the image scales radially; Shift-drag rotates. Numeric
 controls apply relative angle/X/Y scale; reset/flip and explicit rasterization
 are available. Reset requires one leaf layer; use Undo to revert a group transform.
@@ -137,12 +137,27 @@ The lower Levels dock sets input black/white, midtone gamma and output black/whi
 Curves offers RGB master and separate red/green/blue channels. Click its graph to
 add a point, drag to move it, or enter normalized `[input,output]` pairs. Endpoints
 stay at input 0/1; interior points cannot cross their neighbors. Each curve uses
-2–32 points joined by straight segments. Channel changes keep drafts, Escape
+2–32 points with selectable Linear or Smooth interpolation. Smooth uses a
+shape-preserving cubic curve, and its graph samples the rendering kernel. Channel changes keep drafts, Escape
 cancels an active graph drag, and Reset/Remove edit the draft. Add creates an
 editable effect; Apply updates the selected effect with one undo item. Drafts
 leave the image untouched until applied. Effects preserve source pixels and alpha,
 can be reordered/toggled, and survive projects and recorded actions
-(**S9.1.2 / S9.2.2**). Dedicated adjustment layers and smooth curves remain pending.
+(**S9.1.2 / S9.2.2**). New Levels layer / New Curves layer inserts an independent
+adjustment above the selected sibling. New adjustment layer starts with an
+identity effect. Edit its effect with the same controls, or click its M thumbnail
+to paint/fill/invert its mask. A current selection initializes mask coverage;
+otherwise the mask starts white. Opacity fades the grade while retaining alpha.
+Adjustments affect lower siblings inside an isolated group, or the parent
+backdrop inside a pass-through group. Source pixels remain editable and unchanged.
+
+The first adjustment-layer profile supports pointwise color controls; blur,
+sharpen, vignette, styles, affine transforms and clipping require later support.
+Select the mask and use Move to move its coverage. Merge, standalone rasterization
+and Apply mask reject backdrop-dependent layers; Flatten image bakes the full
+composition. Ungrouping an isolated adjustment group rejects a scope change.
+Adjustment layers and smooth curve settings survive `.photos` save/reopen;
+export PNG/JPEG to bake pixels. Current PSD export rejects these editable layers.
 
 Save defaults to `.photos`, preserving original samples and editable settings.
 A `.psd` destination remains supported for the qualified PSD subset; Export PSD

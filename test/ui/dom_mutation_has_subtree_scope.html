@@ -1,0 +1,31 @@
+<!doctype html><style>
+button { display:block; height:24px }
+#indicator { width:80px; height:20px }
+body:has(.flash) #indicator { height:40px }
+#positions { width:80px; height:20px }
+#positions:has(.pos:nth-child(2)) { width:120px }
+</style>
+<button id="add">Add unrelated</button><button id="remove">Remove unrelated</button>
+<button id="add-related">Add related subtree</button><button id="remove-related">Remove related subtree</button>
+<button id="remove-clear">Remove then change class</button>
+<button id="shift">Change position</button><button id="restore">Restore position</button>
+<div id="mutations"></div><div id="indicator"></div>
+<div id="positions"><span class="pos">position</span></div>
+<script>
+var mutation_parent = document.getElementById('mutations');
+var unrelated = document.createElement('span');
+var related = document.createElement('div');
+related.innerHTML = '<span><b class="flash">related</b></span>';
+var positions = document.getElementById('positions');
+var spacer = document.createElement('i');
+document.getElementById('add').onclick = function() { mutation_parent.appendChild(unrelated); };
+document.getElementById('remove').onclick = function() { unrelated.remove(); };
+document.getElementById('add-related').onclick = function() { mutation_parent.appendChild(related); };
+document.getElementById('remove-related').onclick = function() { related.remove(); };
+document.getElementById('remove-clear').onclick = function() {
+    related.remove();
+    related.firstChild.firstChild.className = '';
+};
+document.getElementById('shift').onclick = function() { positions.insertBefore(spacer, positions.firstChild); };
+document.getElementById('restore').onclick = function() { spacer.remove(); };
+</script>

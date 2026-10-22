@@ -1,3 +1,7 @@
 window:type:function
 window:brand:true
 window:event-target:true
+window:descriptor:true
+window:getter:true
+window:receiver:true
+window:readonly:true

@@ -38,13 +38,14 @@ pub pn publish(owner,st) any^ {
     let tone_owner = if (active == null) "" else active.id ++ "/" ++ string(st.effect_index)
     let tone_changed = active_effect != st.tone_effect or tone_owner != st.tone_owner
     let curves = if (tone_changed) model.value(active_effect.options.curves,{}) else st.curve_draft
+    let curve_mode = if (tone_changed) model.value(active_effect.options.curve_mode,"linear") else st.curve_mode
     let primary = model.primary(active.node)
     let active_style = styles.items(active.node)[st.style_index]
     for (id,requested in {status:st.status,'document-name':st.name,dirty:if (editor.dirty(st)) "●" else "",
         dimensions:string(st.doc.width) ++ " × " ++ string(st.doc.height) ++ " · RGB/8",
         zoom:if (st.zoom == 0) "Fit" else string(round(st.zoom*100)) ++ "%",
         'layer-count':string(len(rows)),'target-label':if (len(st.selected)>1) string(len(st.selected)) ++ " selected layers" else if (active == null) "Select a layer" else
-            (if (st.target == "mask") "Layer mask · " else "Pixels · ") ++ active.node.name}) {
+            (if (st.target == "mask") "Layer mask · " else if (model.adjustment(active.node)) "Adjustment · " else "Pixels · ") ++ active.node.name}) {
         let target = node(owner,string(id))
         if (dom.text_content(target) != requested) dom.set_text_content(target,requested)
     }
@@ -57,6 +58,7 @@ pub pn publish(owner,st) any^ {
         'data-guides':string(len(guides.items(st.doc))),'data-guides-visible':string(st.guides_visible),
         'data-snapping':string(st.snap_enabled),'data-snap-x':string(st.gesture.snapped.x),'data-snap-y':string(st.gesture.snapped.y),
         'data-curve-points':string(len(tone.points(curves,st.curve_channel))),
+        'data-curve-mode':curve_mode,'data-adjustment':string(model.adjustment(active.node)),
         'data-dirty':string(editor.dirty(st)),'data-dialog':st.dialog,'data-tool':st.tool,
         'data-recording':if (st.recording == null) "off" else string(len(st.recording.steps)),
         'data-actions':string(len(st.actions)),
@@ -93,13 +95,14 @@ pub pn publish(owner,st) any^ {
     }
     if (tone_changed or st.painted_doc == null) for (control in tone.levels)
         set_value(node(owner,"levels-" ++ control.key),string(model.value(active_effect.options[control.key],control.value)*control.scale))
-    if (st.painted_doc == null or curves != st.painted_curves or st.curve_channel != st.painted_curve_channel or st.curve_point != st.painted_curve_point) {
-        dom.set_inner_html(node(owner,"curve-graph"),format(scene.curve_chart(curves,st.curve_channel,st.curve_point),'xml'))
+    if (st.painted_doc == null or curves != st.painted_curves or curve_mode != st.painted_curve_mode or st.curve_channel != st.painted_curve_channel or st.curve_point != st.painted_curve_point) {
+        dom.set_inner_html(node(owner,"curve-graph"),format(scene.curve_chart(curves,st.curve_channel,st.curve_point,curve_mode)^,'xml'))
         if (st.painted_doc == null or curves != st.painted_curves or st.curve_channel != st.painted_curve_channel)
             set_value(node(owner,"curve-points"),format(tone.points(curves,st.curve_channel),'mark'))
     }
     if (dom.get_state(node(owner,"curve-channel"),"value") != st.curve_channel)
         set_value(node(owner,"curve-channel"),st.curve_channel)
+    if (dom.get_state(node(owner,"curve-mode"),"value") != curve_mode) set_value(node(owner,"curve-mode"),curve_mode)
     if (st.curve_point<=0 or st.curve_point>=len(tone.points(curves,st.curve_channel))-1)
         dom.set_attribute(node(owner,"curve-remove"),"disabled","")
     else dom.remove_attribute(node(owner,"curve-remove"),"disabled")
@@ -172,6 +175,6 @@ pub pn publish(owner,st) any^ {
     dom.style_set_property(node(owner,"discard-dialog"),"display",if (st.dialog == "discard") "block" else "none")
     if (st.dialog == "discard" and previous_dialog != "discard") dom.focus_set(node(owner,"discard-cancel"),false)
     return {*:painted,artwork_node:primary,style_node:active_style,histogram_raster:painted.painted_raster,
-        tone_effect:active_effect,tone_owner:tone_owner,curve_draft:curves,painted_curves:curves,
+        tone_effect:active_effect,tone_owner:tone_owner,curve_draft:curves,painted_curves:curves,curve_mode:curve_mode,painted_curve_mode:curve_mode,
         painted_curve_channel:st.curve_channel,painted_curve_point:st.curve_point}
 }

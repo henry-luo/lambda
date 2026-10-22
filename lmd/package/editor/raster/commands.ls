@@ -47,6 +47,7 @@ pub let catalog = [
     {id:"layer.select",label:"Select layer",fields:["ids","target"],target:false},
     {id:"layer.insert",label:"Place image",fields:["raster","name","position","parent"],target:false},
     {id:"layer.new",label:"New layer",fields:["name","parent"],target:false},
+    {id:"adjustment.insert",label:"New adjustment layer",fields:["options","name","parent"],target:false},
     {id:"layer.duplicate",label:"Duplicate layer",fields:[],target:true},
     {id:"layer.delete",label:"Delete layers",fields:[],target:true},
     {id:"layer.move",label:"Move layers",fields:["dx","dy"],target:true},

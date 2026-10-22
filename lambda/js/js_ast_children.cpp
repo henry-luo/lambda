@@ -590,12 +590,12 @@ bool js_ast_has_optional_chain(JsAstNode* node) {
     if (node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR) {
         JsMemberNode* m = (JsMemberNode*)node;
         if (m->optional) return true;
-        return m->object && node->source_span.start_byte == m->object->source_span.start_byte && js_ast_has_optional_chain(m->object);
+        return js_ast_chain_continues(node, m->object) && js_ast_has_optional_chain(m->object);
     }
     if (node->node_type == AST_NODE_CALL_EXPR) {
         JsCallNode* c = (JsCallNode*)node;
         if (c->optional) return true;
-        return c->callee && node->source_span.start_byte == c->callee->source_span.start_byte && js_ast_has_optional_chain(c->callee);
+        return js_ast_chain_continues(node, c->callee) && js_ast_has_optional_chain(c->callee);
     }
     return false;
 }

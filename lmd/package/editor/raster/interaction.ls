@@ -29,7 +29,9 @@ pub fn begin(st,input) any^ {
     }
     else {
         let guide = if (st.tool == "move" and st.guides_visible) guides.lookup(st.doc,input.guide) else null
-        let hit = if (st.tool == "move" and guide == null) model.hit(st.doc,input.point) else null
+        // an explicitly selected adjustment mask owns its hit region without hiding lower pixel layers otherwise.
+        let hit = if (st.tool == "move" and guide == null) model.hit(st.doc,input.point,
+            if (st.target == "mask" and len(st.selected)==1) st.selected[0] else null) else null
         let picked = if (st.tool != "move" or guide != null) st
             else if (input.shift) model.select(st,if (hit == null) st.selected
                 else if (hit in st.selected) [for (id in st.selected where id != hit) id] else [*st.selected,hit])^

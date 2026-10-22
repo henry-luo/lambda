@@ -1,0 +1,37 @@
+<!doctype html><meta charset="utf-8"><title>Direction selector mutation scope</title>
+<style>
+html,body { margin:0; font:16px/20px Arial }
+button { display:block; height:24px }
+.box { width:80px; height:20px }
+.large { width:100px }
+.box:dir(rtl) { height:30px }
+#automatic,#tree-auto { width:80px; height:20px }
+#automatic:dir(rtl),#tree-auto:dir(rtl) { width:120px }
+input { box-sizing:border-box; width:80px; height:24px }
+input:dir(rtl) { width:120px }
+</style>
+<button id="class-change">Class</button><button id="style-change">Style</button>
+<button id="style-remove">Remove style</button><button id="data-change">Data</button>
+<button id="direction-change">Direction</button><button id="text-change">Text</button>
+<button id="value-change">Value</button>
+<button id="tree-change">Isolated subtree</button><button id="tree-auto-change">Automatic subtree</button>
+<div id="box" class="box">abc</div><div id="automatic" dir="auto">abc</div>
+<div id="tree-auto" dir="auto"><span id="branch"></span></div>
+<input id="field" dir="auto" value="abc">
+<script>
+var box = document.getElementById('box');
+document.getElementById('class-change').onclick = function() { box.className = 'box large'; };
+document.getElementById('style-change').onclick = function() { box.setAttribute('style', 'width:140px'); };
+document.getElementById('style-remove').onclick = function() { box.removeAttribute('style'); };
+document.getElementById('data-change').onclick = function() { box.setAttribute('data-state', 'ready'); };
+document.getElementById('direction-change').onclick = function() { box.setAttribute('dir', 'rtl'); };
+document.getElementById('text-change').onclick = function() { document.getElementById('automatic').firstChild.data = 'אבג'; };
+document.getElementById('value-change').onclick = function() { document.getElementById('field').value = 'אבג'; };
+function append_text(parent, text) {
+    var span = document.createElement('span');
+    span.textContent = text;
+    document.getElementById(parent).appendChild(span);
+}
+document.getElementById('tree-change').onclick = function() { append_text('box', 'abc'); };
+document.getElementById('tree-auto-change').onclick = function() { append_text('branch', 'אבג'); };
+</script>

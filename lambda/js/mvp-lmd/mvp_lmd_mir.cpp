@@ -1671,7 +1671,7 @@ static void walk(AstNode* n, LmdWalk* state) {
             walk(call->arguments, &inner);
             return;
         }
-        if (js_ast_has_optional_chain(call->callee) && n->source_span.start_byte != call->callee->source_span.start_byte) {
+        if (js_ast_has_optional_chain(call->callee) && !js_ast_chain_continues(n, call->callee)) {
             activate_library(p, n); p->primitives = true;
         }
         if (!call->interp_call_shape_planned) ast_plan_call_shape(call);
@@ -6713,7 +6713,7 @@ struct LmdCallCapture { LmdValue callee; LmdValue* values; LmdFunction* direct =
     bool borrows_arguments = false; LmdValue receiver; LmdValue new_target; };
 static LmdValue capture_member_callee(LmdCompiler* c, AstNode* member, AstNode* site,
         LmdReference* ref, bool intrinsic) {
-    bool grouped = js_ast_has_optional_chain(member) && member->source_span.start_byte != site->source_span.start_byte;
+    bool grouped = js_ast_has_optional_chain(member) && !js_ast_chain_continues(site, member);
     if (!grouped) {
         *ref = reference(c, member, true);
         return box(c, read_reference(c, *ref, site, intrinsic));

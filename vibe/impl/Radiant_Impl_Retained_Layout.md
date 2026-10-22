@@ -929,3 +929,148 @@ all render, exit zero and retain no allocations. Gleap remains a performance
 target. These are diagnostic runs alongside the sweep/builds, not isolated
 benchmarks. Logs, metrics, frozen binaries/modules and provenance are under
 `temp/online-followup-20261021/`.
+
+## Remaining online failures (2026-10-22)
+
+**D4.5.1v4 / D4.1.4v5 / D4.5.2**, **VR15**. First milestone: remove repeated
+linear custom-property scans observed in Todoist's forced flex measurements.
+Keep declaration ordering, rollback, animation exclusion and declaration-site
+inheritance unchanged. A lazily built, document-owned sorted name index borrows
+the existing records; membership edits invalidate it before freeing candidates.
+Lookups visit only candidates with the requested case-sensitive name. Unrelated
+style or used-geometry changes do not rebuild the index.
+
+Acceptance: large inherited environments preserve important winners, sliced
+names and case; presentation/animation replacement and removal reveal the
+correct fallback; recascade never retains retired candidates; repeated reads
+allocate nothing. Verify the native core/CSS tests, replay Todoist and Visitors
+with a release host, then run the Radiant baseline at the milestone boundary.
+Keep the 49-page inventory and strict runtime diagnostics intact. Independent
+web API, transport and authored-content failures remain separate work.
+
+**D7.4.4 / D6.2.2v2 / D5.4.1 / D5.3.3**. Next milestone: implement
+`ParentNode.replaceChildren()` for Element, DocumentFragment and Document through
+the shared DOM operation table. Reuse argument conversion, adoption and backing
+edits; publish one observer record with retained added/removed snapshots.
+Synthetic staging must delete a backed source's text slot before unlinking it;
+otherwise a later edit resurrects the moved text. Fragment splicing re-reads the
+source head after edits that can relink surviving wrappers.
+
+WebIDL mixin publications also require separate callable/accessor records per
+declaring interface. Mutating one canonical member's receiver predicate makes
+the last publication change earlier interfaces, including other realms. Keep
+shared native dispatch and stable per-interface metadata; retain/drop function
+cache roots with the owning realm and release publications with their catalog.
+Acceptance: Chromium agreement on replacement order, empty/foreign fragments,
+conversion failures, observer snapshots, declaring-interface brands and distinct
+method identity; AST/MIR with forced GC; affected page replays and the owning
+Radiant/Lambda/Jube gates. Timings and final outcomes follow verification.
+
+**D1.3 / D7.1.2v2 / D5.3.3**. URL module identities now bypass native
+filesystem normalization. Collapsing `https://` to `https:/` made registry
+lookups miss and repeat `realpath`/`getcwd`/`stat`; different URL paths also
+aliased one descriptor. Export publication first checks the actual exported
+binding, excluding local, parameter and unexported writes, while preserving
+alias/reexport updates and rooting their namespace/value. The URL identity
+regression fails before and passes after. Visitors clears its script watchdog
+in strict release replays (60.370s; 83.806s under concurrent build load).
+
+**D1.3 / D6.2.2v2 / D7.4.4**. Optional-call completions carry short-circuit
+state through subsequent calls and member receivers. Grouped expressions end
+the chain using the existing AST source-span boundary, shared with MIR and
+early-error checks; arguments/computed keys stay skipped only within the chain.
+`Window.window` is a readonly, unforgeable native accessor. Complete native
+accessor installation replaces attributes; partial JS getter/setter definitions
+retain them. Slite's browser-realm test now succeeds without suppressing it.
+
+HTML fragment parsing uses the html context's before-head insertion mode,
+retains explicit head/body children and creates implicit ones at EOF, including
+empty markup. HTML start tokens in head modes delegate to in-body rules instead
+of prematurely closing the head. This repairs iframe bootstrap scripts that
+replace documentElement contents then append through contentDocument.head.
+Chromium agrees on the new fragment and optional-chain fixtures and the Window
+descriptor cases. Native interpreter checks pass 216/216; HTML parser checks
+pass 71/71. Slite home/customers and Proven blog/features now pass strict online
+replays with zero retained allocations. Final aggregate qualification is pending.
+
+**D8.2.4v2 / D4.6.1v4**. A fresh Visitors release profile after the URL repair
+places 500/669 main-thread samples in linear lexical-name lookup. The existing
+NameScope index now hashes spelling, reusing cached ordinary NameMeta hashes,
+and supports two queries over one table: exact identity for compiler bindings,
+and first matching spelling for linked JS scripts/eval with distinct NamePools.
+Declaration order and distinct same-spelling identities remain intact; lookups
+allocate nothing. A native wide-scope regression covers both query modes,
+foreign-pool hits/misses and duplicate spelling. Native interpreter checks pass
+217/217; release page replays and final runtime gates follow this optimization.
+
+**D4.5.1v4 / D4.1.4v5**, **VR15**. Intrinsic width memoization retains completed
+constraint tuples within the measurement generation, rather than only the last
+query in each percentage/content basis. Nested flex measurement alternates
+constraints; replacing A with B makes A → B → A traverse the same subtree again.
+Keep the most recent result inline and retain earlier results in pooled history
+with the same complete font, resource, style, generation and geometry keys.
+Explicit invalidation, generation changes and view reset/retirement release the
+history. Context-independent reuse keeps its existing conservative predicate;
+mutable descendant flex geometry still prevents height-query reuse.
+
+Acceptance: repeated 100px/200px percentage constraints hit both prior width
+results; authored changes and generation changes miss; cleanup retires history.
+The regression fails on the single-entry implementation. A release Todoist
+replay must establish page impact separately from this cache regression.
+
+**D4.5.1v4**, **VR15**. Todoist's mutation trace also identifies a broad
+`:dir()` invalidation on every attribute edit. The journal now records whether
+an attribute can affect HTML directionality: `dir`, control value/type, slot
+assignment and namespace changes; unknown attribute identities stay conservative.
+Class, inline-style and data edits keep their ordinary selector invalidation
+without forcing direction-wide recascade. Before removal/reparenting, child-list
+records capture whether first-strong ancestry reaches `dir=auto`/implicit bdi;
+an explicit ltr/rtl boundary stops that dependency. Shadow distribution stays
+conservative. Text and value changes retain the broad direction path. The UI
+regression checks local geometry after class/style/removal/data and isolated
+child edits, and actual RTL selector updates after dir, text, control value and
+nested auto-direction child changes. Cache-debug output records fallback reasons
+before layout, so release profiling can distinguish invalidation from sizing.
+
+**D4.5.1v4**, **VR15**. Todoist also has a global
+`body:has(.experiment-target-flash)` selector. Child-list dependency checks now
+inspect the changed subtree for simple positive tag/class/id arguments before
+escalating to the anchor's ancestors. Reuse the shared stable-compound matcher
+and DOM walker; no match means that particular `:has()` cannot change.
+Functional, positional, stateful and complex arguments keep the conservative
+path. Any attribute record disables this shortcut because a later edit can
+hide a formerly matching identity on a removed node. Acceptance covers unrelated
+insert/remove, a matching nested descendant, removal followed by detached class
+change, and positional matches changed by an unrelated sibling. All 16 UI
+assertions pass; Todoist's strict release replay determines the page outcome.
+
+**VR15 parser prerequisite**, with published-node ownership under
+**D4.5.1v4**. Scripting-enabled body `noscript` content must be raw text before
+DOM construction and resource discovery. Hiding its layout boxes still leaves
+incorrect image nodes and fetches. Retain the fragment context separately from
+the synthetic root so `noscript.innerHTML` also tokenizes as raw text; its closing
+tag cannot escape that context. Disabled-scripting body fragments retain their
+fallback elements. Reuse text-element insertion for title, raw-text elements and
+textarea. EOF recovery distinguishes a consumed final delimiter from EOF itself,
+preserving unmatched end tags and terminating incomplete `<`/`</` text.
+
+The document/fragment fixture matches Chromium; 75 native parser cases cover
+both scripting states, foreign integration points and raw-text/RCDATA EOF
+recovery. Packaged release replays clear Better Stack (1.247s), Canny pricing
+(2.136s) and Canny about (1.026s), with zero retained allocations.
+
+Verification found accumulated `radiant-view-*` scratch workspaces exhausting
+the disk. Successful View GTest runs now remove their own workspace with the
+shared symlink-safe recursive file helper after restoring the working directory.
+External reports and failed-run workspaces remain available. No renderer
+diagnostic, timeout or test expectation is relaxed.
+
+Final qualification: Input baseline 2,112/2,112; full Input 4,516/4,540 with the
+same 24 existing failures; Radiant 6,143 full, 143 partial, two skips and zero
+failures. Four affected JS fixtures pass both AST and MIR under forced GC in the
+packaged release. Earlier runtime gates remain green: Lambda 5,912/5,912 and
+Test262 40,261/40,261. The original 49 failures replay as 12 passes and 37 failures:
+20 HTML downloads, three image/resource errors and 14 runtime errors. No outer
+timeout, nonzero exit or retained-allocation failure occurs. Todoist passes at
+122.022s; its loading time still needs substantial work. Strict diagnostics,
+URLs and watchdog limits are unchanged.

@@ -604,17 +604,22 @@ static Item js_interp_read_import_binding(JsScript* script,
 
 static void js_interp_publish_export_bindings(JsInterpFrame* frame,
         NameEntry* entry, Item value) {
-    if (!frame || !frame->script || !frame->script->is_es_module || !entry) return;
+    if (!frame || !frame->script || !frame->script->is_es_module || !entry ||
+        entry->scope != frame->script->global_scope) return;
+    JsInterpModuleBinding* first = frame->script->interp_exports;
+    while (first && (first->source || first->entry != entry)) first = first->next;
+    // local/parameter writes do not publish exports or resolve a module path.
+    if (!first) return;
     ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
         frame->script->reference);
     if (!module) return;
-    Item namespace_obj = module->namespace_obj;
-    for (JsInterpModuleBinding* binding = frame->script->interp_exports;
-            binding; binding = binding->next) {
+    RootFrame roots(2);
+    Rooted<Item> namespace_obj(roots, module->namespace_obj), value_root(roots, value);
+    for (JsInterpModuleBinding* binding = first; binding; binding = binding->next) {
         if (!binding->source && binding->entry == entry) {
-            js_set_key_default(namespace_obj, js_interp_name_key(binding->export_name), value);
+            js_set_key_default(namespace_obj.get(), js_interp_name_key(binding->export_name), value_root.get());
             js_interp_propagate_reexports(context ? context->runtime : NULL,
-                frame->script->reference, binding->export_name, value, 0);
+                frame->script->reference, binding->export_name, value_root.get(), 0);
         }
     }
 }
@@ -1169,10 +1174,9 @@ static JsInterpEvalVars js_interp_eval_vars(const JsScript* script) {
 }
 
 static NameEntry* js_interp_scope_find_name(NameScope* scope, const String* name) {
-    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
-        if (js_interp_name_matches(entry->name, name)) return entry;
-    }
-    return NULL;
+    // linked eval/import scripts have different NamePools; query the shared
+    // index by spelling while preserving the first declaration's identity.
+    return name_scope_lookup_name_bytes(scope, name);
 }
 
 static NameEntry* js_interp_env_find_name(JsInterpEnv* env, const String* name) {
@@ -1873,6 +1877,20 @@ struct JsInterpMemberResult {
 
 static JsInterpMemberResult js_interp_eval_member_chain(JsInterpFrame* frame,
         JsMemberNode* member);
+static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
+        JsCallNode* call, bool construct);
+
+static JsInterpMemberResult js_interp_eval_chain_operand(JsInterpFrame* frame,
+        JsAstNode* site, JsAstNode* node) {
+    // the parser preserves grouping in source extents rather than wrapper nodes.
+    if (!js_ast_chain_continues(site, node)) return {js_interp_eval(frame, node), false};
+    if (node && (node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR))
+        return js_interp_eval_member_chain(frame, (JsMemberNode*)node);
+    if (node && node->node_type == AST_NODE_CALL_EXPR)
+        return js_interp_eval_call_chain(frame, (JsCallNode*)node, false);
+    // a non-chain expression ends short-circuit propagation.
+    return {js_interp_eval(frame, node), false};
+}
 
 static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name) {
     if (!frame || !name) return NULL;
@@ -3366,39 +3384,37 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     } else if (call->function && (call->function->node_type == AST_NODE_MEMBER_EXPR ||
             call->function->node_type == AST_NODE_INDEX_EXPR)) {
         JsMemberNode* member = (JsMemberNode*)call->function;
+        bool member_short_circuit = false;
         if (js_interp_member_uses_super(member)) {
             this_root.set(js_interp_super_this(frame));
             if (item_is_error(this_root.get())) {
                 JS_INTERP_CALL_RETURN(js_interp_throw(this_root.get()));
             }
-        } else if (member->object &&
-                (member->object->node_type == AST_NODE_MEMBER_EXPR ||
-                    member->object->node_type == AST_NODE_INDEX_EXPR)) {
-            JsInterpMemberResult receiver = js_interp_eval_member_chain(frame,
-                (JsMemberNode*)member->object);
-            if (receiver.completion.kind != JS_INTERP_NORMAL) return receiver;
-            if (receiver.optional_short_circuit) {
-                return {js_interp_normal(make_js_undefined()), true};
-            }
-            this_root.set(receiver.completion.value);
         } else {
-            JsInterpCompletion receiver = js_interp_eval(frame, (JsAstNode*)member->object);
-            if (receiver.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(receiver);
-            this_root.set(receiver.value);
+            JsInterpMemberResult receiver = js_interp_eval_chain_operand(frame,
+                member, (JsAstNode*)member->object);
+            if (receiver.completion.kind != JS_INTERP_NORMAL) return receiver;
+            member_short_circuit = receiver.optional_short_circuit;
+            this_root.set(receiver.completion.value);
         }
-        if (member->optional && js_interp_is_nullish(this_root.get())) {
-            return {js_interp_normal(make_js_undefined()), true};
+        member_short_circuit |= member->optional && js_interp_is_nullish(this_root.get());
+        if (member_short_circuit) {
+            if (js_ast_chain_continues(call, member))
+                return {js_interp_normal(make_js_undefined()), true};
+            // a grouped member completes before the outer call evaluates arguments.
+            callee_root.set(make_js_undefined());
+        } else {
+            bool key_deferred = false;
+            JsInterpCompletion key = js_interp_member_key_after_base(frame, member,
+                this_root.get(), !js_interp_member_uses_super(member), false,
+                key_root.home(), &key_deferred, js_interp_member_uses_super(member)
+                    ? super_base_root.home() : NULL);
+            if (key.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(key);
+            callee_root.set(js_interp_member_uses_super(member)
+                ? js_interp_super_property(this_root.get(), super_base_root.get(),
+                    key_root.get())
+                : js_get_key_default(this_root.get(), key_root.get()));
         }
-        bool key_deferred = false;
-        JsInterpCompletion key = js_interp_member_key_after_base(frame, member,
-            this_root.get(), !js_interp_member_uses_super(member), false,
-            key_root.home(), &key_deferred, js_interp_member_uses_super(member)
-                ? super_base_root.home() : NULL);
-        if (key.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(key);
-        callee_root.set(js_interp_member_uses_super(member)
-            ? js_interp_super_property(this_root.get(), super_base_root.get(),
-                key_root.get())
-            : js_get_key_default(this_root.get(), key_root.get()));
     } else if (!intrinsic_require && !intrinsic_dynamic_import && call->function &&
             call->function->node_type == AST_NODE_IDENT && js_interp_resolves_by_name(frame,
                 ((JsIdentifierNode*)call->function)->entry)) {
@@ -3410,9 +3426,11 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         if (reference.lookup.kind == JS_INTERP_LOOKUP_OBJECT)
             this_root.set((Item){.item = reference.lookup.env->with_object});
     } else if (!intrinsic_require && !intrinsic_dynamic_import) {
-        JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
-        if (callee.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(callee);
-        callee_root.set(callee.value);
+        JsInterpMemberResult callee = js_interp_eval_chain_operand(frame, call,
+            (JsAstNode*)call->function);
+        if (callee.completion.kind != JS_INTERP_NORMAL) return callee;
+        if (callee.optional_short_circuit) return callee;
+        callee_root.set(callee.completion.value);
         if (call->function && call->function->node_type == AST_NODE_IDENT &&
                 js_with_depth_active()) {
             this_root.set(js_get_last_with_binding_base_or_undefined(
@@ -4037,28 +4055,14 @@ static JsInterpMemberResult js_interp_eval_member_chain(JsInterpFrame* frame,
         if (item_is_error(object_root.get())) {
             return {js_interp_throw(object_root.get()), false};
         }
-    } else if (member->object &&
-            (member->object->node_type == AST_NODE_MEMBER_EXPR ||
-                member->object->node_type == AST_NODE_INDEX_EXPR)) {
-        JsInterpMemberResult object = js_interp_eval_member_chain(frame,
-            (JsMemberNode*)member->object);
-        if (object.completion.kind != JS_INTERP_NORMAL) return object;
-        if (object.optional_short_circuit) {
-            return {js_interp_normal(make_js_undefined()), true};
-        }
-        object_root.set(object.completion.value);
-    } else if (member->object && member->object->node_type == AST_NODE_CALL_EXPR) {
-        JsInterpMemberResult object = js_interp_eval_call_chain(frame,
-            (JsCallNode*)member->object, false);
-        if (object.completion.kind != JS_INTERP_NORMAL) return object;
-        if (object.optional_short_circuit) {
-            return {js_interp_normal(make_js_undefined()), true};
-        }
-        object_root.set(object.completion.value);
     } else {
-        JsInterpCompletion object = js_interp_eval(frame, (JsAstNode*)member->object);
-        if (object.kind != JS_INTERP_NORMAL) return {object, false};
-        object_root.set(object.value);
+        JsInterpMemberResult object = js_interp_eval_chain_operand(frame,
+            member, (JsAstNode*)member->object);
+        if (object.completion.kind != JS_INTERP_NORMAL) return object;
+        if (object.optional_short_circuit) {
+            return {js_interp_normal(make_js_undefined()), true};
+        }
+        object_root.set(object.completion.value);
     }
     if (member->optional && js_interp_is_nullish(object_root.get())) {
         return {js_interp_normal(make_js_undefined()), true};

@@ -134,7 +134,7 @@ static ImageProcessOptions image_cache_key(const ImageProcessOptions& options, i
 static bool image_cache_equal(const ImageProcessOptions& a, const ImageProcessOptions& b) {
     // compare fields, excluding padding between the boolean and numeric members.
     return a.turns==b.turns && a.flip_x==b.flip_x && a.flip_y==b.flip_y &&
-        a.compare==b.compare && a.uncropped==b.uncropped &&
+        a.compare==b.compare && a.uncropped==b.uncropped && a.smooth_curves==b.smooth_curves &&
         memcmp(&a.angle,&b.angle,offsetof(ImageProcessOptions,output_width)-offsetof(ImageProcessOptions,angle))==0;
 }
 static bool image_cache_matches(const ImageCacheEntry& entry, uint64_t source,
@@ -179,6 +179,7 @@ struct ImageProcessRun {
     bool color_identity;
     bool has_curves;
     uint8_t curve_segments[IMAGE_TONE_CHANNELS][256];
+    double curve_slopes[IMAGE_TONE_CHANNELS][IMAGE_TONE_POINTS];
 };
 bool image_process_tone_valid(const ImageProcessOptions& options) {
     if (!isfinite(options.output_black) || !isfinite(options.output_white) ||
@@ -201,6 +202,28 @@ static void image_prepare_curves(ImageProcessRun& run) {
         uint64_t count=run.options->curve_counts[channel], segment=0;
         if (count==0) continue;
         run.has_curves=true;
+        if (run.options->smooth_curves) {
+            const double (*points)[2]=run.options->curves[channel];
+            double h[IMAGE_TONE_POINTS], d[IMAGE_TONE_POINTS];
+            for (uint64_t i=0;i+1<count;i++) {
+                h[i]=points[i+1][0]-points[i][0];
+                d[i]=(points[i+1][1]-points[i][1])/h[i];
+            }
+            double* slopes=run.curve_slopes[channel];
+            slopes[0]=d[0]; slopes[count-1]=d[count-2];
+            // harmonic interior tangents preserve extrema and prevent cubic overshoot.
+            for (uint64_t i=1;i+1<count;i++) {
+                double w1=2*h[i]+h[i-1], w2=h[i]+2*h[i-1];
+                slopes[i]=d[i-1]*d[i]<=0 ? 0 : (w1+w2)/(w1/d[i-1]+w2/d[i]);
+            }
+            if (count>2) for (int end=0;end<2;end++) {
+                uint64_t a=end ? count-2 : 0, b=end ? count-3 : 1;
+                double slope=((2*h[a]+h[b])*d[a]-h[a]*d[b])/(h[a]+h[b]);
+                if (slope*d[a]<=0) slope=0;
+                else if (d[a]*d[b]<=0 && fabs(slope)>3*fabs(d[a])) slope=3*d[a];
+                slopes[end ? count-1 : 0]=slope;
+            }
+        }
         for (int bucket=0;bucket<256;bucket++) {
             double x=bucket/255.0;
             while (segment+2<count && run.options->curves[channel][segment+1][0]<=x) segment++;
@@ -219,7 +242,12 @@ static double image_curve_value(const ImageProcessRun& run, int channel, double 
     while (segment+2<count && points[segment+1][0]<=value) segment++;
     const double* a=points[segment];
     const double* b=points[segment+1];
-    return a[1]+(b[1]-a[1])*((value-a[0])/(b[0]-a[0]));
+    double t=(value-a[0])/(b[0]-a[0]);
+    if (!run.options->smooth_curves) return a[1]+(b[1]-a[1])*t;
+    double h=b[0]-a[0], t2=t*t, t3=t2*t;
+    double result=(2*t3-3*t2+1)*a[1]+(t3-2*t2+t)*h*run.curve_slopes[channel][segment]+
+        (-2*t3+3*t2)*b[1]+(t3-t2)*h*run.curve_slopes[channel][segment+1];
+    return fmax(0,fmin(1,result));
 }
 static void image_oriented_pixel(const ImageProcessRun& run, int y, int x, double* rgba) {
     auto& source=*run.source;

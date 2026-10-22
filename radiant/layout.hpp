@@ -792,6 +792,7 @@ struct IntrinsicWidthCacheEntry {
 };
 struct CssResolvedStyle;
 struct IntrinsicHeightCache;
+struct IntrinsicWidthHistory;
 struct FlexMeasuredFlow;
 struct LayoutFlowResult;
 LayoutFlowResult* layout_flow_result_capture(LayoutContext* context, DomNode* root);
@@ -803,10 +804,10 @@ struct LayoutCache {
     lam::Own<CssResolvedStyle> resolved_style;
     lam::Own<IntrinsicHeightCache> intrinsic_heights;
     lam::Own<FlexMeasuredFlow> measured_flex_flow;
+    lam::Own<IntrinsicWidthHistory> intrinsic_width_history;
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
-    // Percentage terms and content-only requests each need a distinct result;
-    // retain all four contributions within the current layout pass.
+    // keep the latest query inline; history retains earlier complete constraints.
     IntrinsicWidthCacheEntry intrinsic_widths[4];
     // conservative ancestry declarations for negative inheritance queries.
     uint64_t inherited_declaration_mask;
@@ -821,6 +822,7 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     cache->resolved_style = nullptr;
     cache->intrinsic_heights = nullptr;
     cache->measured_flex_flow = nullptr;
+    cache->intrinsic_width_history = nullptr;
     cache->final_layout.valid = false;
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
@@ -834,11 +836,14 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     cache->generation = generation;
 }
 
-inline void layout_cache_clear(LayoutCache* cache) {
+void intrinsic_width_history_release(LayoutCache* cache, Pool* pool);
+
+inline void layout_cache_clear(LayoutCache* cache, Pool* pool) {
     // intrinsic heights and computed CSS carry their own complete input keys.
     CssResolvedStyle* resolved = cache->resolved_style;
     IntrinsicHeightCache* heights = cache->intrinsic_heights;
     FlexMeasuredFlow* flow = cache->measured_flex_flow;
+    intrinsic_width_history_release(cache, pool);
     layout_cache_init(cache, cache ? cache->generation : 0);
     cache->resolved_style = lam::own(resolved);
     cache->intrinsic_heights = lam::own(heights);

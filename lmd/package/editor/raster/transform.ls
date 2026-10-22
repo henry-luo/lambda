@@ -9,14 +9,14 @@ pub let handles = [
     {id:"w",x:0,y:0.5},{id:"e",x:1,y:0.5},
     {id:"sw",x:0,y:1},{id:"s",x:0.5,y:1},{id:"se",x:1,y:1}]
 pub fn matrix(node) => model.value(node.transform,identity)
-fn supported(node) => name(node) == 'layer' or (name(node) == 'stack' and
+fn supported(node) => (name(node) == 'layer' and not model.adjustment(node)) or (name(node) == 'stack' and
     not any([for (child in content(node)) name(child) in ['mask','effect','style']]) and
     all([for (child in content(node) where model.composition(child)) supported(child)]))
 pub fn available(st) => target(st) ^ { false } ~ { true }
 pub fn target(st) any^ {
     let rows = model.unlocked_roots(st)^;
     if (not all([for (row in rows) supported(row.node)]))
-        raise error("Raster: group transforms require groups without group masks, effects or styles")
+        raise error("Raster: transforms require layers without backdrop adjustments or group masks, effects or styles")
     else {rows:rows,node:if (len(rows)==1) rows[0].node else img.stack([for (row in rows) row.node])}
 }
 fn around_at(node,center,linear) {
@@ -126,6 +126,8 @@ pub fn handle_gesture(st,start,end,handle,shift=false,alt=false) any^ {
     }
 }
 pub fn rasterize(st,node) any^ {
+    if (model.adjustment(node)) raise error("Raster: adjustment layers depend on lower layers; flatten the document to bake them")
+    else {
     let box = model.bounds(node)
     let x = int(floor(box.x))
     let y = int(floor(box.y))
@@ -135,4 +137,5 @@ pub fn rasterize(st,node) any^ {
     let pixels = model.render_layers(st.doc,[normalized],width,height)^
     let changed = img.with_properties(node,{kind:'raster',transform:null,position:[x,y]})^;
     img.with_children(changed,[pixels])^
+    }
 }

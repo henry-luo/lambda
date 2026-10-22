@@ -18,7 +18,8 @@ pub fn run_command(st,command) any^ {
     let row = model.active(st)^
     let entries = items(row.node)
     let index = model.value(command.index,0)
-    if (name(row.node) != 'layer' or model.locked(st.doc,[row.path])) raise error("Raster: select an unlocked layer for styles")
+    if (name(row.node) != 'layer' or model.adjustment(row.node) or model.locked(st.doc,[row.path]))
+        raise error("Raster: select an unlocked content layer for styles")
     else if (command.id != "style.add" and (not (index is int) or index<0 or index>=len(entries))) raise error("Raster: select a layer style")
     else {
         let changed = if (command.id == "style.add") [*entries,checked(command.options)^]

@@ -83,7 +83,7 @@ static bool image_effect_options(Item effect, ImageProcessOptions* out) {
     Item options=item_attr(effect,"options");
     if (get_type_id(options)!=LMD_TYPE_MAP) return false;
     const char* allowed[]={"exposure","brightness","contrast","saturation","temperature","gamma","black","white",
-        "shadows","highlights","intensity","matrix","vignette","softness","sharpen","output_black","output_white","curves"};
+        "shadows","highlights","intensity","matrix","vignette","softness","sharpen","output_black","output_white","curves","curve_mode"};
     // the iterator borrows its reader, which must outlive the full option scan.
     MapReader reader=MapReader::fromItem(options);
     auto entries=reader.entries(); const char* key; ItemReader value;
@@ -146,6 +146,9 @@ struct ImageComposite {
             bool chain=above>=0 && get_type_id(item_attr(item_at(parent.get(),above),"clipping"))==LMD_TYPE_BOOL &&
                 it2b(item_attr(item_at(parent.get(),above),"clipping"));
             if (!chain) { if (!render(target,child.get(),depth+1)) return false; continue; }
+            if (lambda_image_setting(child.get(),"kind","adjustment") &&
+                    get_type_id(item_attr(child.get(),"kind"))!=LMD_TYPE_NULL)
+                return fail("adjustment layer cannot be a clipping base");
             if (!lambda_image_setting(child.get(),"isolation","isolated"))
                 return fail("pass-through clipping bases require explicit isolation");
             if (target->size>256*1024*1024-scratch) return fail("clipping scratch budget exceeded");
@@ -276,6 +279,26 @@ struct ImageComposite {
             return valid;
         }
         Item kind = item_attr(owner.get(), "kind");
+        if (get_type_id(kind)!=LMD_TYPE_NULL && lambda_image_setting(owner.get(),"kind","adjustment")) {
+            if (blend!=RASTER_NORMAL || get_type_id(item_attr(owner.get(),"transform"))!=LMD_TYPE_NULL ||
+                    (get_type_id(clipping)==LMD_TYPE_BOOL && it2b(clipping)))
+                return fail("adjustment layers require normal blend without transform or clipping");
+            // backdrop adjustments are pointwise, so region rendering has identical results.
+            for (int64_t i=0;i<owner.get().element->length;i++) {
+                Item entry=item_at(owner.get(),i);
+                if (lambda_image_tag(entry,"mask")) continue;
+                ImageProcessOptions config;
+                if (!lambda_image_tag(entry,"effect") || !image_effect_options(entry,&config) ||
+                        config.softness!=0 || config.sharpen!=0 || config.vignette!=0)
+                    return fail("adjustment layers accept masks and pointwise color effects only");
+            }
+            const RasterBuffer* backdrop=target; RasterOwner adjusted;
+            bool valid=effects(owner.get(),&backdrop,adjusted);
+            if (valid && adjusted.result) raster_buffer_crossfade(target,backdrop,opacity,mask,
+                mask_left-origin_x,mask_top-origin_y,outside,inverse,true);
+            if (adjusted.result) scratch-=adjusted.result->size;
+            return valid;
+        }
         bool empty = is_text_type_id(get_type_id(kind)) && !strcmp(kind.get_chars(), "empty");
         bool artwork=lambda_image_setting(owner.get(),"kind","text") || lambda_image_setting(owner.get(),"kind","vector");
         // a missing kind retains the original raster default.

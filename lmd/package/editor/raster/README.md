@@ -90,7 +90,7 @@ mirroring; their absolute magnitude is bounded to 0.001–4096. Hosts can provid
 carry `handle`, `shift` and `alt`. Nested groups and multiple selected roots are
 supported, including existing affines and leaf masks. Selected ancestors suppress
 duplicate child edits. Locks anywhere in a target subtree reject atomically;
-group masks/effects/styles are explicitly outside this descendant-affine profile.
+group masks/effects/styles and backdrop-adjustment descendants are outside this descendant-affine profile.
 The image gesture also scales radially and Shift-drag rotates,
 with shared cancel/commit history (**S9.1.2 / S9.2.2**). Pixel editing on a
 transformed source requires explicit `layer.rasterize`.
@@ -123,12 +123,35 @@ changing documents. Curves have 2–32 strictly increasing input positions from
 0 to 1, with outputs in [0,1]. `insert/move/remove/with_points` retain other
 channels; endpoint inputs stay fixed and moves cannot cross neighbors. Apply
 through `effect.add/update` with `curves:{rgb:[[0,0],[1,1]],r:...,g:...,b:...}`.
-The shared image processor applies exact linear segments, then `output_black` /
-`output_white` endpoints; alpha is unchanged. `lambda.image.project` preserves
+`curve_mode:"linear"` is the default; `"smooth"` selects a shape-preserving
+cubic Hermite interpolation with bounded segment outputs. The native processor
+applies master RGB then channel curves, followed by `output_black` /
+`output_white`; alpha is unchanged. The smooth UI graph samples that same kernel. `lambda.image.project` preserves
 these parameters, original pixel bytes, masks, locks and tree identities in a
 versioned `.photos` data file. High depth and color conversion remain later work. The shared image
 package's strict codec/render limits apply. PSD saving currently refuses editor
 locks, which its writer cannot preserve; flat export intentionally renders pixels.
+
+`adjustment.insert` takes optional `options`, `name` and destination-group `parent`.
+It inserts a `layer kind:adjustment` above the selected sibling, with an editable
+color effect and a gray mask copied from the current selection, or an all-white
+canvas mask. It changes neither lower sources nor selection coverage
+(**S9.1.2 / S9.2.2**). Existing effect controls, visibility, opacity, mask
+painting/fill/invert/toggle/remove, selection-to-mask and undo work on this layer.
+An explicitly selected adjustment mask can also move with a canvas drag.
+
+An adjustment grades only lower siblings already composited in its current
+isolated group; pass-through groups expose the parent backdrop. Normal-blend
+masked opacity interpolates before/after RGB in linear light while preserving
+backdrop alpha. This first profile supports pointwise color options, including
+Levels and linear/smooth channel Curves, and rejects nonzero softness, sharpen or
+vignette, styles, affine transforms and clipping. A separate adjustment cannot
+be a clipping base, merge directly, apply its mask to nonexistent source pixels
+or rasterize alone. Flatten the whole composition to bake it. Isolated groups
+containing adjustments reject ungrouping that would expose a different backdrop.
+Project data preserves adjustment layers and curve modes; the current PSD writer
+rejects them. Effects and mask edits can record/replay in existing single-layer
+actions; insertion remains outside that action profile.
 
 `lambda.editor.raster.export.prepare(image,format,options={})` derives a
 PNG/JPEG composition without changing the input. `width` or `height` alone keeps

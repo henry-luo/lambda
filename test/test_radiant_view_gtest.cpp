@@ -3738,6 +3738,15 @@ int main(int argc, char** argv) {
     }
 
     int result = RUN_ALL_TESTS();
+    if (!result && !list_only) {
+        // passed runs keep their external reports, not per-worker caches and executable copies.
+#ifdef _WIN32
+        int restored = _chdir(g_radiant_view_root);
+#else
+        int restored = chdir(g_radiant_view_root);
+#endif
+        if (restored == 0) file_delete_recursive(g_radiant_view_workspace);
+    }
     mem_free(g_radiant_view_executable);
     mem_free(g_radiant_view_root);
     mem_free(g_radiant_view_home);

@@ -61,6 +61,7 @@ int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first,
 int dom_element_directionality(DomElement* element,
     DomDirectionValueResolver resolve_value = nullptr, void* context = nullptr);
 bool dom_element_has_directionality_hint(DomElement* element);
+CssEnum dom_html_direction_state(DomElement* element);
 extern "C" int dom_css_element_directionality(void* element);
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
@@ -162,6 +163,8 @@ typedef struct DomJsMutationRecord {
     // Capture connection at mutation time; a later append must not make a
     // detached node's earlier attribute/text writes look document-visible.
     bool was_connected;
+    // captured before removal/reparenting changes first-strong ancestry.
+    bool direction_sensitive;
 } DomJsMutationRecord;
 
 #define DOM_JS_MUTATION_RECORD_CAP 64
@@ -700,6 +703,7 @@ DomElement* dom_parent_element(DomElement* element);
 DomNode* dom_source_parent(DomNode* node);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
     const char* name, size_t name_length = (size_t)-1, bool exclude_animations = false);
+void dom_element_invalidate_custom_property_index(DomElement* element);
 const CssValue* dom_element_lookup_own_custom_property(DomElement* element,
     const char* name, size_t name_length = (size_t)-1,
     StrView* token_text = nullptr);
@@ -949,6 +953,7 @@ struct DomElementExt {
     lam::Up<DomElement> selectionchange_event_next;
     // ::marker layout state; markers have no BlockProp
     lam::ViewProp<MarkerProp, DomViewSlot::marker> marker;
+    lam::Own<struct CssCustomPropertyIndex> custom_property_index;
 };
 
 /**

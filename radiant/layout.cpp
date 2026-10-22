@@ -2371,7 +2371,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // by the query itself, including after a speculative sizing pass.
             bool retain_intrinsic_cache = dom_elem->has_cached_intrinsic_widths();
             if (dom_elem->layout_cache && !styles_current && !retain_intrinsic_cache) {
-                radiant::layout_cache_clear(dom_elem->layout_cache);
+                radiant::layout_cache_clear(dom_elem->layout_cache, lycon->pool);
             }
 
             DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())

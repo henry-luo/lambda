@@ -441,6 +441,8 @@ Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input
                                          const char* context_tag, bool svg_namespace) {
     Html5Parser* parser = html5_parser_create(pool, arena, input);
     if (!parser) return nullptr;
+    parser->fragment_context_tag = !svg_namespace && context_tag
+        ? well_known_name_id(strview_init(context_tag, strlen(context_tag))) : NAME_ID_NONE;
 
     MarkBuilder builder(input);
 
@@ -448,12 +450,21 @@ Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input
     // #document -> html -> body
     parser->document = builder.element("#document").final().element;
     parser->html_element = builder.element("html").final().element;
-    Element* body = builder.element("body").final().element;
 
     // Add html to document
     array_append(parser->document, Item{.element = parser->html_element}, pool, arena);
 
+    if (!svg_namespace && context_tag && strcmp(context_tag, "html") == 0) {
+        // html's fragment context starts before head; an artificial body would
+        // discard its head/body tokens and leave documentElement.innerHTML empty.
+        html5_push_element(parser, parser->html_element);
+        parser->fragment_root = parser->html_element;
+        parser->mode = HTML5_MODE_BEFORE_HEAD;
+        return parser;
+    }
+
     // Add body to html
+    Element* body = builder.element("body").final().element;
     array_append(parser->html_element, Item{.element = body}, pool, arena);
 
     // Push html and body onto the open elements stack
@@ -497,7 +508,7 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html) {
     if (!parser || !html) return false;
 
     size_t html_len = strlen(html);
-    if (html_len == 0) return true;
+    if (html_len == 0 && parser->fragment_root != parser->html_element) return true;
 
     // Store the current position (we may be continuing from previous parse)
     size_t old_pos = parser->pos;
@@ -508,7 +519,12 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html) {
     parser->html = html;
     parser->pos = 0;
     parser->length = html_len;
-    parser->tokenizer_state = HTML5_TOK_DATA;
+    parser->tokenizer_state = parser->fragment_context_tag == MARKUP_NAME_NOSCRIPT &&
+        parser->scripting_enabled ? HTML5_TOK_RAWTEXT : HTML5_TOK_DATA;
+    if (parser->tokenizer_state == HTML5_TOK_RAWTEXT) {
+        // a fragment's context has not emitted a start tag, so its end tag cannot break out.
+        parser->last_start_tag_name_len = 0;
+    }
 
     log_debug("html5_fragment: parsing %zu bytes of HTML", html_len);
 
@@ -518,9 +534,10 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html) {
     while (true) {
         Html5Token* token = html5_tokenize_next(parser);
 
-        // Don't process EOF through tree builder for fragments
-        // (we want to keep the parser state for more fragments)
+        // ordinary fragments retain their insertion state for continuation.
         if (token->type == HTML5_TOKEN_EOF) {
+            // this context must finish implicit head/body creation even for empty markup.
+            if (parser->fragment_root == parser->html_element) html5_process_token(parser, token);
             break;
         }
 
@@ -590,6 +607,15 @@ static void html5_clear_stack_back_to_table_row_context(Html5Parser* parser);
 // main token processing dispatcher
 void html5_process_token(Html5Parser* parser, Html5Token* token) {
     log_debug("html5: processing token type=%d in mode=%d", token->type, parser->mode);
+
+    // an html start tag uses in-body rules in all three head modes; it must
+    // not implicitly close head before an explicit head token arrives.
+    if (token->type == HTML5_TOKEN_START_TAG && html5_token_is(token, MARKUP_NAME_HTML) &&
+        (parser->mode == HTML5_MODE_BEFORE_HEAD || parser->mode == HTML5_MODE_IN_HEAD ||
+         parser->mode == HTML5_MODE_AFTER_HEAD)) {
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
 
     switch (parser->mode) {
         case HTML5_MODE_INITIAL:
@@ -795,6 +821,16 @@ static void html5_process_in_before_head_mode(Html5Parser* parser, Html5Token* t
 }
 
 // ===== IN HEAD MODE =====
+static void html5_start_text_element(Html5Parser* parser, Html5Token* token,
+                                     Html5TokenizerState state, bool html_namespace_only = false) {
+    html5_insert_html_element(parser, token);
+    // inspect the inserted node so foreign integration points still create HTML children.
+    if (html_namespace_only && html5_current_node_is_foreign(parser)) return;
+    html5_switch_tokenizer_state(parser, state);
+    parser->original_insertion_mode = parser->mode;
+    parser->mode = HTML5_MODE_TEXT;
+}
+
 static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
     // Handle CHARACTER tokens with special whitespace splitting
     if (token->type == HTML5_TOKEN_CHARACTER) {
@@ -855,20 +891,14 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
 
         // RCDATA elements (title, textarea) - content is parsed as text, only end tag recognized
         if (html5_token_is(token, MARKUP_NAME_TITLE)) {
-            html5_insert_html_element(parser, token);
-            html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
-            parser->original_insertion_mode = parser->mode;
-            parser->mode = HTML5_MODE_TEXT;
+            html5_start_text_element(parser, token, HTML5_TOK_RCDATA);
             return;
         }
 
         // RAWTEXT elements in head (style, script, noscript, noframes)
         if (html5_token_is(token, MARKUP_NAME_STYLE) || html5_token_is(token, MARKUP_NAME_SCRIPT) ||
             html5_token_is(token, MARKUP_NAME_NOSCRIPT) || html5_token_is(token, MARKUP_NAME_NOFRAMES)) {
-            html5_insert_html_element(parser, token);
-            html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
-            parser->original_insertion_mode = parser->mode;
-            parser->mode = HTML5_MODE_TEXT;
+            html5_start_text_element(parser, token, HTML5_TOK_RAWTEXT);
             return;
         }
 
@@ -1438,14 +1468,17 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             tag = "img";
         }
 
+        if (html5_token_is(token, MARKUP_NAME_NOSCRIPT) && parser->scripting_enabled) {
+            // enabled scripting makes fallback markup text, preventing resource discovery.
+            html5_start_text_element(parser, token, HTML5_TOK_RAWTEXT, true);
+            return;
+        }
+
         // <textarea> uses RCDATA mode - content is parsed as text
         if (html5_token_is(token, MARKUP_NAME_TEXTAREA)) {
-            html5_insert_html_element(parser, token);
             // Set ignore_next_lf to skip leading newline per spec
             parser->ignore_next_lf = true;
-            html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
-            parser->original_insertion_mode = parser->mode;
-            parser->mode = HTML5_MODE_TEXT;
+            html5_start_text_element(parser, token, HTML5_TOK_RCDATA);
             return;
         }
 

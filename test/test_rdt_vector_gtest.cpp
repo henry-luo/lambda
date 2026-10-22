@@ -67,7 +67,7 @@ TEST(ImageProcessTest, CacheInvalidationMatchesFreshEvaluation) {
     ImageProcessOptions options; options.angle=3; options.gamma=1.2; options.softness=3;
     ImageProcessCache* cache=image_process_cache_create(300000);
     ASSERT_NE(cache,nullptr);
-    for (int step=0;step<9;step++) {
+    for (int step=0;step<10;step++) {
         if (step==1) options.vignette=0.7;
         if (step==2) options.sharpen=0.9;
         if (step==3) options.exposure=0.4;
@@ -79,6 +79,7 @@ TEST(ImageProcessTest, CacheInvalidationMatchesFreshEvaluation) {
         }
         if (step==7) options.curves[0][1][1]=0.3;
         if (step==8) { options.output_black=0.1; options.output_white=0.8; }
+        if (step==9) options.smooth_curves=true;
         ImageProcessResult cached, fresh;
         ASSERT_TRUE(image_process(source,options,&cached,cache));
         ASSERT_TRUE(image_process(source,options,&fresh));
@@ -144,6 +145,58 @@ TEST(ImageProcessTest, CurvesPreservePeaksBetweenEightBitLookupSamples) {
     ImageProcessResult result;
     ASSERT_TRUE(image_process(source,options,&result));
     EXPECT_EQ(result.pixels[0],255); EXPECT_EQ(result.pixels[1],255); EXPECT_EQ(result.pixels[2],255);
+    image_process_result_free(&result);
+}
+
+TEST(ImageProcessTest, SmoothCurvesMatchParabolaAndInvalidateColorCache) {
+    uint8_t pixels[256*4];
+    for (int x=0;x<256;x++) {
+        for (int c=0;c<3;c++) pixels[x*4+c]=(uint8_t)x;
+        pixels[x*4+3]=(uint8_t)(x%255+1);
+    }
+    ImageProcessSource source={pixels,256,1,{256*4,4,1},1};
+    ImageProcessOptions options;
+    const double points[][2]={{0,0},{0.5,1},{1,0}};
+    options.curve_counts[0]=3; memcpy(options.curves[0],points,sizeof(points));
+    ImageProcessCache* cache=image_process_cache_create(65536);
+    ASSERT_NE(cache,nullptr);
+    ImageProcessResult linear, smooth;
+    ASSERT_TRUE(image_process(source,options,&linear,cache));
+    options.smooth_curves=true;
+    ASSERT_TRUE(image_process(source,options,&smooth,cache));
+    EXPECT_EQ(smooth.color_hits,0u);
+    EXPECT_NE(linear.pixels[64*4],smooth.pixels[64*4]);
+    // this symmetric three-knot curve is exactly y=4*x*(1-x), independently of the implementation.
+    for (int x=0;x<256;x++) {
+        double value=x/255.0;
+        int expected=(int)lround(4*value*(1-value)*255);
+        for (int c=0;c<3;c++) EXPECT_LE(abs((int)smooth.pixels[x*4+c]-expected),1);
+        EXPECT_EQ(smooth.pixels[x*4+3],pixels[x*4+3]);
+    }
+    image_process_result_free(&linear); image_process_result_free(&smooth);
+    ASSERT_TRUE(image_process(source,options,&smooth,cache));
+    EXPECT_EQ(smooth.color_hits,1u);
+    image_process_result_free(&smooth);
+    image_process_cache_destroy(cache);
+}
+
+TEST(ImageProcessTest, SmoothNonuniformCurvesPreserveSegmentBoundsAndExtrema) {
+    uint8_t pixels[256*4];
+    for (int x=0;x<256;x++) for (int c=0;c<4;c++) pixels[x*4+c]=(uint8_t)(c==3 ? 255 : x);
+    ImageProcessSource source={pixels,256,1,{256*4,4,1},1};
+    ImageProcessOptions options; options.smooth_curves=true;
+    const double points[][2]={{0,0.1},{0.02,0.9},{0.4,0.2},{0.7,0.2},{1,0.8}};
+    options.curve_counts[0]=5; memcpy(options.curves[0],points,sizeof(points));
+    ImageProcessResult result;
+    ASSERT_TRUE(image_process(source,options,&result));
+    for (int x=0;x<256;x++) {
+        double value=x/255.0;
+        int segment=value<0.02 ? 0 : value<0.4 ? 1 : value<0.7 ? 2 : 3;
+        int low=(int)floor(fmin(points[segment][1],points[segment+1][1])*255);
+        int high=(int)ceil(fmax(points[segment][1],points[segment+1][1])*255);
+        EXPECT_GE(result.pixels[x*4],low); EXPECT_LE(result.pixels[x*4],high);
+        if (x>0 && value>=0.4 && value<=0.7) EXPECT_EQ(result.pixels[x*4],51);
+    }
     image_process_result_free(&result);
 }
 

@@ -557,6 +557,7 @@ static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     radiant::css_resolved_style_release(elem->layout_cache, tree->prop_pool);
     radiant::intrinsic_height_cache_release(elem->layout_cache, tree->prop_pool);
     radiant::flex_measured_flow_release(elem->layout_cache, tree->prop_pool);
+    radiant::intrinsic_width_history_release(elem->layout_cache, tree->prop_pool);
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
 }
 
@@ -565,6 +566,7 @@ static void free_layout_cache_payload(DomElement* elem, ViewTree* tree) {
         radiant::css_resolved_style_release(elem->layout_cache, tree->prop_pool);
         radiant::intrinsic_height_cache_release(elem->layout_cache, tree->prop_pool);
         radiant::flex_measured_flow_release(elem->layout_cache, tree->prop_pool);
+        radiant::intrinsic_width_history_release(elem->layout_cache, tree->prop_pool);
     }
 }
 

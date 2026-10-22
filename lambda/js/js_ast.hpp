@@ -192,6 +192,10 @@ JsAstNode* js_ast_parameter_default_value(JsAstNode* parameter);
 JsAstNode* js_ast_pattern_reference_target(JsAstNode* pattern);
 JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters);
 bool js_ast_has_optional_chain(JsAstNode* node);
+// parentheses change the outer expression's start without extending the inner chain.
+static inline bool js_ast_chain_continues(const JsAstNode* site, const JsAstNode* operand) {
+    return site && operand && site->source_span.start_byte == operand->source_span.start_byte;
+}
 // Structural gate: every JS-only child layout must appear in the extension table.
 bool js_ast_child_catalog_complete(void);
 
