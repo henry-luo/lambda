@@ -1980,9 +1980,9 @@ bool DomElement::set_attribute(const char* name, const char* value, bool preserv
 bool dom_element_set_namespace_identity(DomElement* element,
         const char* namespace_uri, const char* local_name) {
     if (!element || !local_name) return false;
-    // identity belongs to the element, independent of later ancestry or xmlns edits.
-    return dom_element_store_attribute(element, "__lambda_ns_uri", namespace_uri ? namespace_uri : "", false) &&
-        dom_element_store_attribute(element, "__lambda_ns_local_name", local_name, false);
+    // expanded names belong to the DOM; Mark attributes also feed strict map/SVG consumers.
+    return dom_element_set_synthetic_attribute(element, "__lambda_ns_uri", namespace_uri ? namespace_uri : "") &&
+        dom_element_set_synthetic_attribute(element, "__lambda_ns_local_name", local_name);
 }
 
 DomAttributeIterator dom_element_attribute_iterator(DomElement* element) {
@@ -4553,7 +4553,7 @@ struct DomBuildDepthGuard {
 };
 
 static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* source,
-                                                   DomDocument* doc, DomElement* parent, bool copied_for_view);
+        DomDocument* doc, DomElement* parent, bool copied_for_view, bool link_parent = true);
 
 static bool dom_build_content_occurrence(Item* slot, Item source, DomDocument* doc,
         DomElement* parent, int depth, bool copied_for_view) {
@@ -4605,7 +4605,8 @@ static bool dom_build_content_occurrence(Item* slot, Item source, DomDocument* d
     return true;
 }
 
-DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
+static DomElement* build_dom_tree_with_parent(Element* elem, DomDocument* doc,
+                                               DomElement* parent, bool link_parent) {
     if (!elem || !doc) return nullptr;
     Element* source = elem;
     bool copied_for_view = false;
@@ -4619,11 +4620,20 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         elem = copied.element;
         copied_for_view = true;
     }
-    return build_dom_tree_from_element_impl(elem, source, doc, parent, copied_for_view);
+    return build_dom_tree_from_element_impl(elem, source, doc, parent, copied_for_view, link_parent);
+}
+
+DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
+    return build_dom_tree_with_parent(elem, doc, parent, true);
+}
+
+DomElement* build_dom_tree_from_element_detached(Element* elem, DomDocument* doc,
+                                                 DomElement* namespace_parent) {
+    return build_dom_tree_with_parent(elem, doc, namespace_parent, false);
 }
 
 static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* source,
-                                                   DomDocument* doc, DomElement* parent, bool copied_for_view) {
+        DomDocument* doc, DomElement* parent, bool copied_for_view, bool link_parent) {
     if (!elem || !doc) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
         return nullptr;
@@ -4788,13 +4798,21 @@ static DomElement* build_dom_tree_from_element_impl(Element* elem, Element* sour
     // set parent relationship if provided
     // Use link_child since the Lambda tree already contains this element
     // (we're building DOM wrappers from existing Lambda structure)
-    if (parent) {
+    if (parent && link_parent) {
         parent->link_child(dom_elem);
+    } else if (parent) {
+        // the temporary ancestry resolves expanded names before the atomic replacement splice.
+        dom_elem->parent = lam::up(parent);
     }
-    if (doc->xml_document && !dom_element_stored_attribute(dom_elem, "__lambda_ns_uri")) {
-        // capture XML expanded names while the parser's declaration ancestry is intact.
+    struct DetachedParentScope {
+        DomElement* element;
+        bool detach;
+        ~DetachedParentScope() { if (detach) element->parent = nullptr; }
+    } parent_scope = {dom_elem, parent && !link_parent};
+    if (!dom_element_stored_attribute(dom_elem, "__lambda_ns_uri")) {
+        // generated nodes have immutable expanded names too; repeated layout must not rewalk ancestry.
         dom_element_set_namespace_identity(dom_elem, dom_element_namespace_uri(dom_elem), dom_elem->local_name());
-        dom_element_record_all_attributes(dom_elem);
+        if (doc->xml_document) dom_element_record_all_attributes(dom_elem);
     }
 
     Element* backing = dom_element_to_element(dom_elem);

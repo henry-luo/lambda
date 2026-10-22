@@ -17,10 +17,14 @@ pub pn node_attribute(target,key,requested) {
     }
 }
 pub pn attribute(owner,id,key,requested) { node_attribute(node(owner,id),key,requested) }
+pn style_property(target,key,requested) {
+    // stable geometry must not enqueue another style mutation on every frame.
+    if (dom.style_get_property(target,key) != requested) dom.style_set_property(target,key,requested)
+}
 pub pn visible(owner,id,shown) {
     let target = node(owner,id)
     let requested = if (shown) "block" else "none"
-    if (dom.style_get_property(target,"display") != requested) dom.style_set_property(target,"display",requested)
+    style_property(target,"display",requested)
 }
 pub pn value(owner,id,requested) {
     let control = node(owner,id)
@@ -38,7 +42,7 @@ pub pn value(owner,id,requested) {
 }
 pub pn message(owner,content,failed=false) {
     text(owner,"status",content)
-    dom.set_attribute(owner,"data-error",if (failed) content else "")
+    node_attribute(owner,"data-error",if (failed) content else "")
 }
 pub pn dialog(owner,id) {
     for (candidate in ["open-dialog","export-dialog","recipe-dialog"]) visible(owner,candidate,candidate == id)
@@ -71,15 +75,15 @@ pub pn synchronize(owner,session_value) {
     text(owner,"history-info",string(session_value.hist.cursor) ++ " / " ++ string(len(session_value.hist.entries)-1) ++ " edits")
     text(owner,"source-name",split(session_value.source.path,"/")[last])
     text(owner,"source-size",string(session_value.source.width) ++ " × " ++ string(session_value.source.height))
-    dom.set_attribute(owner,"data-history",string(session_value.hist.cursor))
-    dom.set_attribute(owner,"data-preset",recipe.preset)
-    dom.set_attribute(owner,"data-tool",session_value.tool)
-    dom.set_attribute(owner,"data-inspector",string(session_value.inspector_open))
+    node_attribute(owner,"data-history",string(session_value.hist.cursor))
+    node_attribute(owner,"data-preset",recipe.preset)
+    node_attribute(owner,"data-tool",session_value.tool)
+    node_attribute(owner,"data-inspector",string(session_value.inspector_open))
     attribute(owner,"inspector-toggle","aria-expanded",string(session_value.inspector_open))
     visible(owner,"compare-label",session_value.compare)
-    dom.set_attribute(owner,"data-layers",string(len(recipe.layers)))
+    node_attribute(owner,"data-layers",string(len(recipe.layers)))
     let selected = layers.selected(recipe,session_value.selected)
-    dom.set_attribute(owner,"data-selected",if (selected == null) "0" else string(selected.id))
+    node_attribute(owner,"data-selected",if (selected == null) "0" else string(selected.id))
     visible(owner,"panel-layers",layers.object_tool(session_value.tool))
     visible(owner,"layer-empty",len(recipe.layers) == 0)
     visible(owner,"object-properties",selected != null)
@@ -104,16 +108,16 @@ pub pn frame_geometry(owner,session_value,dimensions) {
     let width = dimensions[1]*factor
     let height = dimensions[0]*factor
     let image = node(owner,"image-plane")
-    dom.style_set_property(image,"width",string(width) ++ "px")
-    dom.style_set_property(image,"height",string(height) ++ "px")
-    dom.style_set_property(image,"left",string((stage.width-width)/2+session_value.pan.x) ++ "px")
-    dom.style_set_property(image,"top",string((stage.height-height)/2+session_value.pan.y) ++ "px")
+    style_property(image,"width",string(width) ++ "px")
+    style_property(image,"height",string(height) ++ "px")
+    style_property(image,"left",string((stage.width-width)/2+session_value.pan.x) ++ "px")
+    style_property(image,"top",string((stage.height-height)/2+session_value.pan.y) ++ "px")
     text(owner,"zoom-label",if (session_value.zoom == 0) "Fit" else string(round(session_value.zoom*100)) ++ "%")
     let rect = model.current(session_value.hist).crop
     let overlay = node(owner,"crop-frame")
     visible(owner,"crop-frame",session_value.tool == "crop")
     for (property,requested in {left:rect.left*100,top:rect.top*100,width:(rect.right-rect.left)*100,height:(rect.bottom-rect.top)*100})
-        dom.style_set_property(overlay,string(property),string(requested) ++ "%")
+        style_property(overlay,string(property),string(requested) ++ "%")
     for (edge in ["left","top","right","bottom"]) value(owner,"crop-" ++ edge,round(rect[edge]*1000)/10)
     let selected = layers.selected(model.current(session_value.hist),session_value.selected)
     visible(owner,"artwork",not session_value.compare and session_value.tool != "crop")
@@ -121,8 +125,8 @@ pub pn frame_geometry(owner,session_value,dimensions) {
     if (selected != null) {
         let frame = node(owner,"selection-frame")
         for (property,requested in {left:selected.x*100,top:selected.y*100,width:selected.width*100,height:selected.height*100})
-            dom.style_set_property(frame,string(property),string(requested) ++ "%")
-        dom.style_set_property(frame,"transform","rotate(" ++ string(selected.rotation) ++ "deg)")
+            style_property(frame,string(property),string(requested) ++ "%")
+        style_property(frame,"transform","rotate(" ++ string(selected.rotation) ++ "deg)")
         text(owner,"selection-label",if (selected.kind == "text") "Text" else selected.kind)
     }
 }

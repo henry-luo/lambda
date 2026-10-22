@@ -1,9 +1,9 @@
 import c: lambda.ui.core.component
 import icons: .icons
 import timeline: lambda.chart.timeline
-import skin: lambda.chart.timeline.theme
 import live: lambda.chart.timeline.events
 import core: lambda.chart.timeline.common
+import styles: .timeline_style
 
 fn placement(value) => if (c.text(value) == "right") "end" else if (c.text(value) == "left") "start" else c.text(value)
 pub fn descriptor(props) element^ {
@@ -81,4 +81,4 @@ on hashchange(evt) { live_state=live.handle(source(~),live_state,evt); live.deli
 on popstate(evt) { live_state=live.handle(source(~),live_state,evt); live.deliver(live_state,evt) }
 
 // share core geometry; dtna supplies CSS variables and its existing class namespace.
-pub let css = replace(skin.cards_css,"lambda-timeline","dtna-timeline")
+pub let css = styles.css

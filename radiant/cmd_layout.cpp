@@ -4983,7 +4983,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         DomNode* old_previous = old_dom->prev_sibling;
         DomNode* old_next = old_dom->next_sibling;
 
-        DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
+        DomElement* new_dom = build_dom_tree_from_element_detached(new_elem, doc, parent_dom);
 
         if (!new_dom) {
             continue;

@@ -3,7 +3,7 @@ import avatar_parts: .avatar
 import display_parts: .display
 import icon_parts: .icons
 import progress_parts: .progress
-import timeline_parts: .timeline
+import timeline_parts: .timeline_style
 import statistic_parts: .statistic
 import skeleton_parts: .skeleton
 import surfaces: .surfaces

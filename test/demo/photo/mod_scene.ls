@@ -1,4 +1,5 @@
-import ui: lambda.ui.dtna
+// this retained scene registers only the button template it embeds.
+import ui: lambda.ui.dtna.button
 import theme: lambda.ui.dtna.tokens
 import model: .mod_model
 import presets: .mod_presets

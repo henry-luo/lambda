@@ -14,6 +14,7 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/format/format.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -704,11 +705,13 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
     dom_document_borrow_input_resources(style->document);
     style->document->services.svg_image_document = image_document;
     if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
-    DomElement* node = build_dom_tree_from_element(root, style->document, nullptr);
+    // isolated fragments acquire their SVG namespace before construction freezes their identities.
+    DomElement* viewport = DomElement::create(style->document, "svg", nullptr);
+    DomElement* node = viewport
+        ? build_dom_tree_from_element_detached(root, style->document, viewport) : nullptr;
     if (node && strcmp(node->local_name(), "svg")) {
         // generated fragments inherit SVG membership from an implicit viewport; authored declarations still win.
-        DomElement* viewport = DomElement::create(style->document, "svg", nullptr);
-        if (viewport) viewport->link_child(node);
+        viewport->link_child(node);
         style->document->root = lam::up(viewport);
     } else style->document->root = lam::up(node);
     style->engine = css_engine_create(style->document->document_pool);

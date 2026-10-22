@@ -6092,8 +6092,9 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     for (int64_t i = 0; i < body_elem->length; i++) {
         TypeId type = get_type_id(body_elem->items[i]);
         if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child_dom = build_dom_tree_from_element(
-                body_elem->items[i].element, doc, nullptr);
+            // fragment names belong to the parsing context before the detached node is spliced.
+            DomElement* child_dom = build_dom_tree_from_element_detached(
+                body_elem->items[i].element, doc, context ? context : target);
             if (child_dom && target->append_child(child_dom)) {
                 dom_post_insert((DomNode*)target, (DomNode*)child_dom,
                                 notify_mutation);
@@ -6189,10 +6190,10 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
 }
 
 static DomElement* dom_parse_html_fragment(DomDocument* doc,
-                                              const char* html_str) {
+                                              const char* html_str, DomElement* context) {
     if (!doc || !doc->input || !html_str) return nullptr;
 
-    Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
     html5_fragment_parse(parser, html_str);
@@ -6204,8 +6205,8 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     for (int64_t i = 0; i < body_elem->length; i++) {
         TypeId type = get_type_id(body_elem->items[i]);
         if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child = build_dom_tree_from_element(
-                body_elem->items[i].element, doc, nullptr);
+            DomElement* child = build_dom_tree_from_element_detached(
+                body_elem->items[i].element, doc, context);
             if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
         } else if (type == LMD_TYPE_STRING) {
             String* text = dom_fragment_text(body_elem->items[i]);
@@ -6229,7 +6230,10 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     DomRange* range = selection->ranges[0];
     if (!range->start.node || !range->end.node) return false;
 
-    DomElement* fragment = dom_parse_html_fragment(doc, html_str);
+    DomNode* context_node = range->start.node;
+    if (!context_node->is_element()) context_node = context_node->parent;
+    DomElement* context = context_node && context_node->is_element() ? context_node->as_element() : nullptr;
+    DomElement* fragment = dom_parse_html_fragment(doc, html_str, context);
     if (!fragment) return false;
 
     ArrayList* inserted = arraylist_new(8);
@@ -16023,7 +16027,7 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_ar
     }
     if (slot == DOM_ADJACENT_NO_PARENT) return ItemNull;
     DomDocument* doc = elem->doc;
-    DomElement* fragment = dom_parse_html_fragment(doc, html_str);
+    DomElement* fragment = dom_parse_html_fragment(doc, html_str, target_parent);
     if (!fragment) return ItemNull;
 
     while (fragment->first_child) {

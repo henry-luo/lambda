@@ -1,0 +1,8 @@
+{
+  "name": "SVG fragments capture their parsing namespace before insertion",
+  "html": "test/ui/svg_fragment_namespaces.html",
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"html"},"attribute":"data-inner","equals":"http://www.w3.org/2000/svg"},
+    {"type":"assert_attribute","target":{"selector":"html"},"attribute":"data-adjacent","equals":"http://www.w3.org/2000/svg"}
+  ]
+}

@@ -84,7 +84,7 @@ const scenario = !workerCase || workerCase === 'Case1' ? requestedScenario : 'pa
 const output = process.argv.find(arg => arg.startsWith('--gtest_output=json:')).slice('--gtest_output=json:'.length);
 if (process.env.FAKE_SUITE_TRACE_DIR) {
     const trace = { name, case: workerCase, start: Date.now(), cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT),
-        args: process.argv.slice(2) };
+        args: process.argv.slice(2), logLevel: process.env.LAMBDA_LOG_LEVEL };
     process.on('exit', () => fs.writeFileSync(path.join(process.env.FAKE_SUITE_TRACE_DIR,
         name + '-' + (workerCase || path.basename(output)) + '.json'), JSON.stringify({ ...trace, end: Date.now() })));
 }
@@ -252,7 +252,7 @@ try {
         for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
             const check = inventory.find(t => t.baseName === name);
             assert.equal(check.exclusive, false);
-            assert.equal(check.workerSlots, name === 'test_radiant_layout_baseline' ? 3 : 2);
+            assert.equal(check.workerSlots, name === 'test_radiant_page_snapshot' ? 2 : 3);
         }
     });
     check('Native build targets deduplicate runner aliases', () => {
@@ -533,10 +533,12 @@ try {
         const names = ['test_ui_automation_gtest', 'test_radiant_view_gtest', 'test_rdt_vector_gtest', 'test_map_gtest'];
         const { child, summary } = runSelected(names, 'pass', [], {
             LAMBDA_TEST_MAX_CONCURRENT: String(budget), FAKE_SUITE_TRACE_DIR: trace,
+            LAMBDA_LOG_LEVEL: 'DEBUG',
         }, true);
         assert.equal(child.status, 0, child.stderr);
         assert.equal(summary.level2_c_tests.length, names.length);
         const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
+        assert.ok(rows.every(row => row.logLevel === 'NOTICE'));
         const events = rows.flatMap(row => [{ time: row.start, delta: row.cap, name: row.name },
             { time: row.end, delta: -row.cap, name: row.name }])
             .sort((a, b) => a.time - b.time || a.delta - b.delta);

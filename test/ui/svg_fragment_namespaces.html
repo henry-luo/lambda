@@ -1,0 +1,11 @@
+<!doctype html><html><body>
+<svg><g id="context"></g></svg>
+<script>
+var context = document.getElementById('context');
+var root = document.documentElement;
+context.innerHTML = '<circle/>';
+root.setAttribute('data-inner', context.firstChild.namespaceURI);
+context.insertAdjacentHTML('beforeend', '<rect/>');
+root.setAttribute('data-adjacent', context.lastChild.namespaceURI);
+</script>
+</body></html>
