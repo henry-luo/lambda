@@ -143,6 +143,7 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"CountQueuingStrategy", JS_HOST_GROUP_STREAMS}, {"Headers", JS_HOST_GROUP_HEADERS},
     {"Response", JS_HOST_GROUP_HEADERS}, {"performance", JS_HOST_GROUP_PERFORMANCE},
     {"Performance", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceObserver", JS_HOST_GROUP_PERFORMANCE},
+    {"PerformanceObserverEntryList", JS_HOST_GROUP_PERFORMANCE},
     {"MessageChannel", JS_HOST_GROUP_MESSAGING},
     {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
     {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
@@ -1564,78 +1565,366 @@ static Item js_performance_noop_3(Item name, Item start_or_options, Item end_mar
     (void)end_mark;
     return ItemNull;
 }
-JS_FORWARD_STATIC_ITEM(js_performance_empty_entries, (void), js_array_new, (0))
+static JsPerformanceState* js_performance_resources(void) {
+    JsPerformanceState* state = js_performance_state();
+    if (!state || !js_root_vector_ensure_registered(state)) return nullptr;
+    if (state->resource_epoch != js_heap_epoch) {
+        // heap replacement retires the old document's entries and overflow task.
+        state->resource_epoch = js_heap_epoch;
+        state->resource_limit = 250;
+        state->resource_full_pending = false;
+        state->observer_task_pending = false;
+    }
+    if (get_type_id(state->resource_entries) != LMD_TYPE_ARRAY)
+        state->resource_entries = js_array_new(0);
+    if (get_type_id(state->resource_secondary) != LMD_TYPE_ARRAY)
+        state->resource_secondary = js_array_new(0);
+    if (get_type_id(state->resource_observers) != LMD_TYPE_ARRAY)
+        state->resource_observers = js_array_new(0);
+    return state;
+}
+
+extern "C" bool js_performance_is_target(Item value) {
+    JsPerformanceState* state = js_performance_state();
+    return state && state->object.item && state->object.item == value.item;
+}
+
+static Item js_performance_set_resource_limit(Item receiver, Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> value(roots, argc ? args[0] : make_js_undefined());
+    if (!js_performance_is_target(receiver_root.get()) || !argc)
+        return js_throw_type_error("setResourceTimingBufferSize requires a Performance receiver and a size");
+    value.set(js_to_number(value.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    double number = 0.0;
+    item_try_to_double(value.get(), &number);
+    // Web IDL unsigned long conversion wraps finite integral values modulo 2^32.
+    js_performance_state()->resource_limit = (uint32_t)js_to_int32(number);
+    return make_js_undefined();
+}
+
+static Item js_performance_clear_resources(void) {
+    if (!js_performance_is_target(js_get_this()))
+        return js_throw_type_error("clearResourceTimings requires a Performance receiver");
+    js_performance_state()->resource_entries = js_array_new(0);
+    return make_js_undefined();
+}
+
+static Item js_performance_insert_resource(Item buffer, Item entry) {
+    RootFrame roots(3);
+    Rooted<Item> list(roots, buffer), value(roots, entry), previous(roots, ItemNull);
+    double start = 0.0;
+    item_try_to_double(js_get_key_cstr(value.get(), "startTime"), &start);
+    int64_t index = js_array_length(list.get());
+    JS_RETURN_IF_ERROR(js_array_push(list.get(), value.get()));
+    // requests can finish out of order; timeline queries are ordered by startTime.
+    while (index > 0) {
+        previous.set(js_elements_get_int(list.get(), index - 1));
+        double previous_start = 0.0;
+        item_try_to_double(js_get_key_cstr(previous.get(), "startTime"), &previous_start);
+        if (previous_start <= start) break;
+        JS_RETURN_IF_ERROR(js_elements_set_int_direct(list.get(), index, previous.get()));
+        index--;
+    }
+    return js_elements_set_int_direct(list.get(), index, value.get());
+}
+
+static Item js_performance_resource_full_task(void) {
+    JsPerformanceState* state = js_performance_resources();
+    if (!state) return ItemError;
+    RootFrame roots(4);
+    Rooted<Item> event(roots, ItemNull), entry(roots, ItemNull);
+    Rooted<Item> completion(roots, js_status_ok()), remainder(roots, ItemNull);
+    while (js_array_length(state->resource_secondary)) {
+        int64_t before = js_array_length(state->resource_secondary);
+        if ((uint64_t)js_array_length(state->resource_entries) >= state->resource_limit) {
+            event.set(js_create_event("resourcetimingbufferfull", false, false));
+            completion.set(dom_dispatch_event(state->object, event.get()));
+        }
+        int64_t copied = 0;
+        while (copied < js_array_length(state->resource_secondary) &&
+                (uint64_t)js_array_length(state->resource_entries) < state->resource_limit) {
+            entry.set(js_elements_get_int(state->resource_secondary, copied++));
+            JS_RETURN_IF_ERROR(js_performance_insert_resource(state->resource_entries, entry.get()));
+        }
+        remainder.set(js_array_new(0));
+        for (int64_t i = copied; i < js_array_length(state->resource_secondary); i++)
+            JS_RETURN_IF_ERROR(js_array_push(remainder.get(),
+                js_elements_get_int(state->resource_secondary, i)));
+        state->resource_secondary = remainder.get();
+        // a handler that cannot make room must not keep an unbounded task alive.
+        if (js_array_length(state->resource_secondary) >= before) {
+            state->resource_secondary = js_array_new(0);
+            break;
+        }
+    }
+    state->resource_full_pending = false;
+    return completion.get();
+}
+
+static void js_performance_observer_enqueue(Item entry);
+
+extern "C" void js_performance_record_resource(const char* url, const char* initiator,
+        double start_ms, double end_ms) {
+    JsPerformanceState* state = js_performance_resources();
+    if (!state) return;
+    RootFrame roots(3);
+    Rooted<Item> entry(roots, js_new_object()), value(roots, ItemNull);
+    Rooted<Item> callback(roots, ItemNull);
+    const struct { const char* name; const char* text; double number; } fields[] = {
+        {"name", url, 0}, {"entryType", "resource", 0}, {"initiatorType", initiator, 0},
+        {"startTime", nullptr, start_ms}, {"duration", nullptr, fmax(0.0, end_ms - start_ms)},
+        {"fetchStart", nullptr, start_ms}, {"responseEnd", nullptr, end_ms},
+    };
+    for (const auto& field : fields) {
+        value.set(field.text ? make_string_item(field.text) : push_d(field.number));
+        if (item_is_error(js_create_data_property(entry.get(), js_name_item(field.name), value.get()))) return;
+        js_attr_set_writable(entry.get(), field.name, (int)strlen(field.name), false);
+        js_attr_set_configurable(entry.get(), field.name, (int)strlen(field.name), false);
+    }
+    js_performance_observer_enqueue(entry.get());
+    if (!state->resource_full_pending &&
+            (uint64_t)js_array_length(state->resource_entries) < state->resource_limit) {
+        js_performance_insert_resource(state->resource_entries, entry.get());
+        return;
+    }
+    js_array_push(state->resource_secondary, entry.get());
+    if (!state->resource_full_pending) {
+        // publish the genuine Performance target even when fetch preceded its first read.
+        if (!js_is_object_value(state->object))
+            state->object = js_get_key_cstr(js_get_global_this(), "performance");
+        state->resource_full_pending = true;
+        callback.set(js_new_native_function(js_performance_resource_full_task));
+        js_setTimeout(callback.get(), (Item){.item = i2it(0)});
+    }
+}
+
+static Item js_performance_filter_entries(Item source, Item name, Item type) {
+    RootFrame roots(5);
+    Rooted<Item> buffer(roots, source);
+    Rooted<Item> name_root(roots, name), type_root(roots, type);
+    Rooted<Item> result(roots, js_array_new(0)), entry(roots, ItemNull);
+    if (get_type_id(name_root.get()) != LMD_TYPE_UNDEFINED) {
+        name_root.set(js_to_string(name_root.get()));
+        JS_RETURN_IF_ERROR(name_root.get());
+    }
+    if (get_type_id(type_root.get()) != LMD_TYPE_UNDEFINED) {
+        type_root.set(js_to_string(type_root.get()));
+        JS_RETURN_IF_ERROR(type_root.get());
+        String* text = it2s(type_root.get());
+        if (text->len != 8 || memcmp(text->chars, "resource", 8)) return result.get();
+    }
+    for (int64_t i = 0; i < js_array_length(buffer.get()); i++) {
+        entry.set(js_elements_get_int(buffer.get(), i));
+        if (get_type_id(name_root.get()) != LMD_TYPE_UNDEFINED && !it2b(js_strict_equal(
+                name_root.get(), js_get_key_cstr(entry.get(), "name")))) continue;
+        JS_RETURN_IF_ERROR(js_array_push(result.get(), entry.get()));
+    }
+    return result.get();
+}
+
+static Item js_performance_resource_entries(Item name, Item type) {
+    RootFrame roots(2);
+    Rooted<Item> name_root(roots, name), type_root(roots, type);
+    JsPerformanceState* state = js_performance_resources();
+    return state ? js_performance_filter_entries(state->resource_entries,
+        name_root.get(), type_root.get()) : ItemError;
+}
+
+static Item js_performance_entries(void) {
+    return js_performance_resource_entries(make_js_undefined(), make_js_undefined());
+}
 
 static Item js_performance_illegal_constructor(void) {
     return js_throw_type_error("Illegal constructor");
 }
 
-static Item js_performance_empty_entries_2(Item name, Item type) {
-    (void)type;
-    return js_array_new(0);
+static Item js_performance_entries_by_name(Item name, Item type) {
+    return js_performance_resource_entries(name, type);
 }
 
 static Item js_performance_entries_by_type(Item type_item) {
-    Item entries = js_array_new(0);
-    Item type_string = js_to_string(type_item);
-    String* type = get_type_id(type_string) == LMD_TYPE_STRING ? it2s(type_string) : NULL;
+    RootFrame roots(3);
+    Rooted<Item> type_string(roots, js_to_string(type_item));
+    JS_RETURN_IF_ERROR(type_string.get());
+    String* type = it2s(type_string.get());
     if (!type || type->len != 10 || memcmp(type->chars, "navigation", 10) != 0) {
-        return entries;
+        return js_performance_resource_entries(make_js_undefined(), type_string.get());
     }
-    Item navigation = js_new_object();
-    js_set_key_cstr(navigation, "type", make_string_item("navigate"));
-    js_set_key_cstr(navigation, "transferSize", (Item){.item = i2it(1)});
-    js_set_key_cstr(navigation, "deliveryType", make_string_item(""));
-    js_array_push(entries, navigation);
-    return entries;
+    Rooted<Item> entries(roots, js_array_new(0)), navigation(roots, js_new_object());
+    js_set_key_cstr(navigation.get(), "type", make_string_item("navigate"));
+    js_set_key_cstr(navigation.get(), "transferSize", (Item){.item = i2it(1)});
+    js_set_key_cstr(navigation.get(), "deliveryType", make_string_item(""));
+    js_array_push(entries.get(), navigation.get());
+    return entries.get();
 }
-JS_FORWARD_STATIC_EXPRESSION(Item, js_performance_observer_string, (const char* str), (js_name_item(str, (int)strlen(str))))
+enum JsPerformanceObserverSlot { PERFORMANCE_CALLBACK, PERFORMANCE_QUEUE, PERFORMANCE_ACTIVE,
+    PERFORMANCE_OBSERVER_SLOTS };
 
-static Item js_performance_observer_entries(void) {
-    Item entry = js_new_object();
-    js_set_key_default(entry, js_performance_observer_string("entryType"),
-        js_performance_observer_string("layout-shift"));
-    js_set_key_default(entry, js_performance_observer_string("name"),
-        js_performance_observer_string(""));
-    js_set_key_default(entry, js_performance_observer_string("startTime"),
-        (Item){.item = i2it(0)});
-    js_set_key_default(entry, js_performance_observer_string("duration"),
-        (Item){.item = i2it(0)});
-    js_set_key_default(entry, js_performance_observer_string("value"),
-        (Item){.item = i2it(0)});
-    js_set_key_default(entry, js_performance_observer_string("hadRecentInput"),
-        (Item){.item = b2it(true)});
-
-    Item entries = js_array_new(0);
-    js_array_push(entries, entry);
-    return entries;
+static Item js_performance_observer_record(Item observer) {
+    return js_native_private_array_state(observer, JS_CLASS_PERFORMANCE_OBSERVER,
+        PERFORMANCE_OBSERVER_SLOTS, "Illegal PerformanceObserver receiver");
 }
-JS_FORWARD_STATIC_ITEM(js_performance_observer_list_get_entries, (void), js_performance_observer_entries, ())
-JS_FORWARD_STATIC_ITEM(js_performance_observer_take_records, (void), js_performance_observer_entries, ())
-JS_FORWARD_STATIC_ITEM(js_performance_observer_disconnect, (void), make_js_undefined, ())
 
-static Item js_performance_observer_observe(void) {
-    Item observer = js_get_this();
-    Item callback = js_get_key_default(observer,
-        js_performance_observer_string("__lambda_performance_observer_callback"));
-    if (!js_is_callable(callback)) return make_js_undefined();
+static Item js_performance_observer_list_filter(Item name, Item type) {
+    RootFrame roots(3);
+    Rooted<Item> name_root(roots, name), type_root(roots, type);
+    Rooted<Item> record(roots, js_native_private_array_state(js_get_this(),
+        JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST, 1, "Illegal PerformanceObserverEntryList receiver"));
+    JS_RETURN_IF_ERROR(record.get());
+    return js_performance_filter_entries(js_elements_get_int(record.get(), 0),
+        name_root.get(), type_root.get());
+}
 
-    Item list = js_new_object();
-    js_globals_set_native_method(list, "getEntries", js_performance_observer_list_get_entries);
-    Item args[1] = { list };
-    js_call_function(callback, observer, args, 1);
+static Item js_performance_observer_list_get_entries(void) {
+    return js_performance_observer_list_filter(make_js_undefined(), make_js_undefined());
+}
+
+static Item js_performance_observer_list_by_type(Item type) {
+    return js_performance_observer_list_filter(make_js_undefined(), type);
+}
+
+static Item js_performance_observer_take_records(void) {
+    RootFrame roots(2);
+    Rooted<Item> record(roots, js_performance_observer_record(js_get_this()));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> queue(roots, js_elements_get_int(record.get(), PERFORMANCE_QUEUE));
+    JS_RETURN_IF_ERROR(js_elements_set_int_direct(record.get(), PERFORMANCE_QUEUE, js_array_new(0)));
+    return queue.get();
+}
+
+static Item js_performance_observer_disconnect(void) {
+    RootFrame roots(4);
+    Rooted<Item> receiver(roots, js_get_this());
+    Rooted<Item> record(roots, js_performance_observer_record(receiver.get()));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> remaining(roots, js_array_new(0)), observer(roots, ItemNull);
+    JsPerformanceState* state = js_performance_resources();
+    for (int64_t i = 0; i < js_array_length(state->resource_observers); i++) {
+        observer.set(js_elements_get_int(state->resource_observers, i));
+        if (observer.get().item != receiver.get().item)
+            JS_RETURN_IF_ERROR(js_array_push(remaining.get(), observer.get()));
+    }
+    state->resource_observers = remaining.get();
+    js_elements_set_int_direct(record.get(), PERFORMANCE_ACTIVE, (Item){.item = ITEM_FALSE});
+    js_elements_set_int_direct(record.get(), PERFORMANCE_QUEUE, js_array_new(0));
+    return make_js_undefined();
+}
+
+static Item js_performance_observer_deliver(void) {
+    JsPerformanceState* state = js_performance_resources();
+    state->observer_task_pending = false;
+    RootFrame roots(8);
+    Rooted<Item> observers(roots, state->resource_observers), observer(roots, ItemNull);
+    Rooted<Item> record(roots, ItemNull), entries(roots, ItemNull), list(roots, ItemNull);
+    Rooted<Item> callback(roots, ItemNull), completion(roots, make_js_undefined());
+    Rooted<Item> list_record(roots, ItemNull);
+    int64_t observer_count = js_array_length(observers.get());
+    for (int64_t i = 0; i < observer_count; i++) {
+        observer.set(js_elements_get_int(observers.get(), i));
+        record.set(js_performance_observer_record(observer.get()));
+        JS_RETURN_IF_ERROR(record.get());
+        entries.set(js_elements_get_int(record.get(), PERFORMANCE_QUEUE));
+        if (!js_array_length(entries.get())) continue;
+        // clear before invoking page code; reentrant requests belong to the next task.
+        js_elements_set_int_direct(record.get(), PERFORMANCE_QUEUE, js_array_new(0));
+        list_record.set(js_array_new(0));
+        js_array_push(list_record.get(), entries.get());
+        NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_PERFORMANCE_ENTRY_LIST);
+        list.set(js_native_private_array_object(JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST,
+            Item{.item = s2it(key)}, list_record.get(), state->observer_list_prototype));
+        callback.set(js_elements_get_int(record.get(), PERFORMANCE_CALLBACK));
+        Item args[] = {list.get(), observer.get()};
+        Item result = js_call_function(callback.get(), observer.get(), args, 2);
+        if (item_is_error(result) && !item_is_error(completion.get())) completion.set(result);
+    }
+    return completion.get();
+}
+
+static void js_performance_queue_observers(void) {
+    JsPerformanceState* state = js_performance_state();
+    if (state->observer_task_pending) return;
+    state->observer_task_pending = true;
+    js_setTimeout(js_new_native_function(js_performance_observer_deliver), (Item){.item = i2it(0)});
+}
+
+static void js_performance_observer_enqueue(Item entry) {
+    RootFrame roots(3);
+    Rooted<Item> value(roots, entry), record(roots, ItemNull), queue(roots, ItemNull);
+    JsPerformanceState* state = js_performance_state();
+    bool queued = false;
+    for (int64_t i = 0; i < js_array_length(state->resource_observers); i++) {
+        record.set(js_performance_observer_record(js_elements_get_int(state->resource_observers, i)));
+        if (item_is_error(record.get())) return;
+        queue.set(js_elements_get_int(record.get(), PERFORMANCE_QUEUE));
+        js_performance_insert_resource(queue.get(), value.get());
+        queued = true;
+    }
+    if (queued) js_performance_queue_observers();
+}
+
+static Item js_performance_observer_observe(Item options) {
+    RootFrame roots(6);
+    Rooted<Item> observer(roots, js_get_this()), opts(roots, options);
+    Rooted<Item> record(roots, js_performance_observer_record(observer.get()));
+    JS_RETURN_IF_ERROR(record.get());
+    if (!js_is_object_value(opts.get())) return js_throw_type_error("PerformanceObserver options require entryTypes or type");
+    Rooted<Item> types(roots, js_get_key_cstr(opts.get(), "entryTypes"));
+    JS_RETURN_IF_ERROR(types.get());
+    Rooted<Item> type(roots, js_get_key_cstr(opts.get(), "type"));
+    JS_RETURN_IF_ERROR(type.get());
+    Rooted<Item> value(roots, ItemNull);
+    bool multiple = get_type_id(types.get()) != LMD_TYPE_UNDEFINED;
+    if (multiple == (get_type_id(type.get()) != LMD_TYPE_UNDEFINED))
+        return js_throw_type_error("PerformanceObserver requires exactly one of entryTypes and type");
+    bool resources = false;
+    if (multiple) {
+        types.set(js_iterable_to_array(types.get()));
+        JS_RETURN_IF_ERROR(types.get());
+        for (int64_t i = 0; i < js_array_length(types.get()); i++) {
+            value.set(js_to_string(js_elements_get_int(types.get(), i)));
+            JS_RETURN_IF_ERROR(value.get());
+            resources |= it2b(js_strict_equal(value.get(), js_name_item("resource")));
+        }
+    } else {
+        type.set(js_to_string(type.get()));
+        JS_RETURN_IF_ERROR(type.get());
+        resources = it2b(js_strict_equal(type.get(), js_name_item("resource")));
+    }
+    if (!resources) return make_js_undefined();
+    JsPerformanceState* state = js_performance_resources();
+    if (!it2b(js_elements_get_int(record.get(), PERFORMANCE_ACTIVE))) {
+        js_array_push(state->resource_observers, observer.get());
+        js_elements_set_int_direct(record.get(), PERFORMANCE_ACTIVE, (Item){.item = ITEM_TRUE});
+    }
+    if (!multiple) {
+        value.set(js_get_key_cstr(opts.get(), "buffered"));
+        JS_RETURN_IF_ERROR(value.get());
+        if (js_is_truthy(value.get())) {
+            types.set(js_elements_get_int(record.get(), PERFORMANCE_QUEUE));
+            for (int64_t i = 0; i < js_array_length(state->resource_entries); i++)
+                js_performance_insert_resource(types.get(), js_elements_get_int(state->resource_entries, i));
+            if (js_array_length(types.get())) js_performance_queue_observers();
+        }
+    }
     return make_js_undefined();
 }
 
 extern "C" Item js_performance_observer_new(Item callback) {
-    Item observer = js_new_object();
-    js_set_key_default(observer,
-        js_performance_observer_string("__lambda_performance_observer_callback"),
-        callback);
-    js_globals_set_native_method(observer, "observe", js_performance_observer_observe);
-    js_globals_set_native_method(observer, "disconnect", js_performance_observer_disconnect);
-    js_globals_set_native_method(observer, "takeRecords", js_performance_observer_take_records);
-    return observer;
+    if (get_type_id(js_get_new_target()) != LMD_TYPE_FUNC || !js_is_callable(callback))
+        return js_throw_type_error("PerformanceObserver requires new and a callable callback");
+    RootFrame roots(3);
+    Rooted<Item> callback_root(roots, callback), record(roots, js_array_new(0));
+    Rooted<Item> prototype(roots, js_get_prototype_from_constructor_default(js_get_new_target(),
+        JS_CLASS_PERFORMANCE_OBSERVER, -1));
+    JS_RETURN_IF_ERROR(prototype.get());
+    js_array_push(record.get(), callback_root.get());
+    js_array_push(record.get(), js_array_new(0));
+    js_array_push(record.get(), (Item){.item = ITEM_FALSE});
+    NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_PERFORMANCE_OBSERVER);
+    return js_native_private_array_object(JS_CLASS_PERFORMANCE_OBSERVER,
+        Item{.item = s2it(key)}, record.get(), prototype.get());
 }
 
 extern "C" double js_date_time_clip(double value) {
@@ -13795,21 +14084,29 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             Rooted<Item> origin_root(performance_roots, ItemNull);
             Rooted<Item> observer_root(performance_roots, ItemNull);
             Rooted<Item> supported_types_root(performance_roots, ItemNull);
-            if (!shared) js_install_native_method(perf, "now", js_performance_now);
-            js_install_native_method(perf, "mark", js_performance_noop_1);
-            js_install_native_method(perf, "measure", js_performance_noop_3);
-            js_install_native_method(perf, "getEntries",
-                js_performance_empty_entries);
-            js_install_native_method(perf, "getEntriesByName",
-                js_performance_empty_entries_2);
-            js_install_native_method(perf, "getEntriesByType",
+            JsPerformanceState* performance = js_performance_resources();
+            if (!performance) return ItemError;
+            performance->object = perf_root.get();
+            js_set_key_cstr(perf_root.get(), "onresourcetimingbufferfull", ItemNull);
+            if (!shared) js_install_native_method(perf_root.get(), "now", js_performance_now);
+            js_install_native_method(perf_root.get(), "mark", js_performance_noop_1);
+            js_install_native_method(perf_root.get(), "measure", js_performance_noop_3);
+            js_install_native_method(perf_root.get(), "getEntries", js_performance_entries);
+            js_install_native_method(perf_root.get(), "getEntriesByName",
+                js_performance_entries_by_name);
+            js_install_native_method(perf_root.get(), "getEntriesByType",
                 js_performance_entries_by_type);
+            js_install_native_method(perf_root.get(), "clearResourceTimings", js_performance_clear_resources);
+            observer_root.set(js_new_native_this_span_function(js_performance_set_resource_limit));
+            js_set_formal_length(observer_root.get(), 1);
+            js_set_function_name(observer_root.get(), js_name_item("setResourceTimingBufferSize"));
+            js_set_key_cstr(perf_root.get(), "setResourceTimingBufferSize", observer_root.get());
             if (!shared) {
                 origin_root.set(push_d(js_performance_time_origin_ms()));
-                js_set_key_cstr(perf, "timeOrigin", origin_root.get());
+                js_set_key_cstr(perf_root.get(), "timeOrigin", origin_root.get());
             }
             timing_root.set(js_new_object());
-            js_set_key_cstr(perf, "timing", timing_root.get());
+            js_set_key_cstr(perf_root.get(), "timing", timing_root.get());
             Rooted<Item> constructor_root(performance_roots, js_install_native_constructor(
                 global.get(), "Performance", js_performance_illegal_constructor));
             Rooted<Item> prototype_root(performance_roots, js_new_object());
@@ -13825,7 +14122,8 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             // libraries capture IDL methods before using the instance. Keep one
             // namespace and move its existing implementations to that prototype.
             static const char* const methods[] = {
-                "now", "mark", "measure", "getEntries", "getEntriesByName", "getEntriesByType"
+                "now", "mark", "measure", "getEntries", "getEntriesByName", "getEntriesByType",
+                "clearResourceTimings", "setResourceTimingBufferSize"
             };
             for (const char* name : methods) {
                 method_root.set(js_get_key_cstr(perf_root.get(), name));
@@ -13834,15 +14132,30 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
                 else js_delete_property(perf_root.get(), js_name_item(name));
             }
             js_set_key_cstr(global.get(), "performance", perf_root.get());
-            Item perf_observer = js_new_native_constructor(
-                js_performance_observer_new);
-            observer_root.set(perf_observer);
-            Item supported_types = js_array_new(0);
-            supported_types_root.set(supported_types);
-            js_array_push(supported_types, make_string_item("layout-shift"));
-            js_set_key_cstr(perf_observer, "supportedEntryTypes",
-                supported_types);
-            js_set_key_cstr(global.get(), "PerformanceObserver", perf_observer);
+            observer_root.set(js_install_native_constructor(global.get(), "PerformanceObserver",
+                js_performance_observer_new));
+            performance->observer_prototype = js_get_key_cstr(observer_root.get(), "prototype");
+            js_install_native_method(performance->observer_prototype, "observe", js_performance_observer_observe);
+            js_set_formal_length(js_get_key_cstr(performance->observer_prototype, "observe"), 0);
+            js_install_native_method(performance->observer_prototype, "disconnect", js_performance_observer_disconnect);
+            js_install_native_method(performance->observer_prototype, "takeRecords", js_performance_observer_take_records);
+            js_set_key_default(performance->observer_prototype, js_well_known_symbol_key(4), js_name_item("PerformanceObserver"));
+            supported_types_root.set(js_array_new(0));
+            js_array_push(supported_types_root.get(), js_name_item("resource"));
+            js_object_freeze(supported_types_root.get());
+            js_set_key_cstr(observer_root.get(), "supportedEntryTypes", supported_types_root.get());
+            js_attr_set_writable(observer_root.get(), "supportedEntryTypes", 19, false);
+            constructor_root.set(js_install_native_constructor(global.get(), "PerformanceObserverEntryList",
+                js_performance_illegal_constructor));
+            performance->observer_list_prototype = js_get_key_cstr(constructor_root.get(), "prototype");
+            js_install_native_method(performance->observer_list_prototype, "getEntries",
+                js_performance_observer_list_get_entries);
+            js_install_native_method(performance->observer_list_prototype, "getEntriesByName",
+                js_performance_observer_list_filter);
+            js_install_native_method(performance->observer_list_prototype, "getEntriesByType",
+                js_performance_observer_list_by_type);
+            js_set_key_default(performance->observer_list_prototype, js_well_known_symbol_key(4),
+                js_name_item("PerformanceObserverEntryList"));
         }
         break;
     }
@@ -16808,22 +17121,21 @@ static Item js_install_url_constructor(Item global) {
 static Item js_url_to_object(Url* url) {
     if (!url || !url->is_valid) {
         if (url) url_destroy(url);
-        return ItemNull;
+        // a normal null completion lets [[Construct]] fabricate an uninitialized URL.
+        return js_throw_type_error("Invalid URL");
     }
     if (!js_activate_url_primitives()) {
         log_error("js_url_to_object: shared URL primitive initialization failed");
         url_destroy(url);
-        return ItemNull;
+        return ItemError;
     }
-    RootFrame roots(2);
+    RootFrame roots(1);
     if (!roots.valid()) { url_destroy(url); return ItemError; }
-    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_URL));
     Rooted<Item> record(roots, js_array_new(0));
     // native URL getters read a branded, private record even after public fields
     // are shadowed or frozen; prototype descriptor discovery uses the same data.
     NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_URL);
-    Item status = key ? js_private_field_define(object.get(),
-        Item{.item = s2it(key)}, record.get()) : ItemError;
+    Item status = key ? js_status_ok() : ItemError;
     for (size_t index = 0; index < js_url_field_count && !item_is_error(status); index++) {
         const JsUrlField* field = &js_url_fields[index];
         const char* text = field->get ? field->get(url) : url_get_search(url);
@@ -16832,7 +17144,8 @@ static Item js_url_to_object(Url* url) {
         status = item_is_error(value) ? value : js_array_push(record.get(), value);
     }
     url_destroy(url);
-    return item_is_error(status) ? status : object.get();
+    return item_is_error(status) ? status : js_native_private_array_object(
+        JS_CLASS_URL, Item{.item = s2it(key)}, record.get(), ItemNull);
 }
 
 extern "C" Item js_url_construct(Item input) {
@@ -16841,10 +17154,10 @@ extern "C" Item js_url_construct(Item input) {
     Rooted<Item> input_text_root(roots, js_to_string(input_root.get()));
     if (item_is_error(input_text_root.get())) return input_text_root.get();
     String* s = it2s(input_text_root.get());
-    if (!s || s->len == 0) return ItemNull;
+    if (!s || s->len == 0) return js_throw_type_error("Invalid URL");
 
     char* input_str = js_url_string_to_cstr(s);
-    if (!input_str) return ItemNull;
+    if (!input_str) return ItemError;
     Url* url = url_parse(input_str);
     mem_free(input_str);
     return js_url_to_object(url);
@@ -16853,7 +17166,7 @@ extern "C" Item js_url_construct(Item input) {
 extern "C" Item js_url_construct_with_base(Item input, Item base) {
     TypeId tid_base = get_type_id(base);
     if (tid_base != LMD_TYPE_STRING) {
-        if (tid_base == LMD_TYPE_NULL || tid_base == LMD_TYPE_UNDEFINED) {
+        if (tid_base == LMD_TYPE_UNDEFINED) {
             return js_url_construct(input);
         }
     }
@@ -16869,24 +17182,24 @@ extern "C" Item js_url_construct_with_base(Item input, Item base) {
 
     String* base_str = it2s(base_text_root.get());
     if (!base_str || base_str->len == 0) {
-        return ItemNull;
+        return js_throw_type_error("Invalid URL");
     }
 
     String* s = it2s(input_text_root.get());
-    if (!s) return ItemNull;
+    if (!s) return ItemError;
 
     char* base_cstr = js_url_string_to_cstr(base_str);
-    if (!base_cstr) return ItemNull;
+    if (!base_cstr) return ItemError;
     Url* base_url = url_parse(base_cstr);
     mem_free(base_cstr);
     if (!base_url || !base_url->is_valid) {
         if (base_url) url_destroy(base_url);
-        return ItemNull;
+        return js_throw_type_error("Invalid URL");
     }
     char* input_cstr = js_url_string_to_cstr(s);
     if (!input_cstr) {
         url_destroy(base_url);
-        return ItemNull;
+        return ItemError;
     }
     Url* url = url_parse_with_base(input_cstr, base_url);
     mem_free(input_cstr);

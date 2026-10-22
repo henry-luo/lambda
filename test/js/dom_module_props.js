@@ -293,7 +293,7 @@ console.log(link.href);
 var image = document.createElement("img");
 image.setAttribute("src", "hero.png");
 image.setAttribute("alt", "Hero");
-console.log(image.src);
+console.log(image.src === new URL("hero.png", document.baseURI).href);
 console.log(image.alt);
 var form = document.createElement("form");
 form.setAttribute("novalidate", "");

@@ -759,6 +759,9 @@ void js_performance_virtual_clock_set(bool enabled, double monotonic_ms);
 void js_performance_frame_clock_begin(double monotonic_ms);
 void js_performance_frame_clock_end(void);
 double js_performance_time_origin_ms(void);
+void js_performance_record_resource(const char* url, const char* initiator,
+    double start_ms, double end_ms);
+bool js_performance_is_target(Item value);
 Item js_date_now(void);
 double js_date_number_to_double(Item value);
 Item js_date_now_string(void);
@@ -1051,6 +1054,7 @@ Item js_delete_property(Item obj, Item key);
 
 // v15: fetch() API
 Item js_fetch(Item url, Item options);
+Item js_fetch_with_initiator(Item url, Item options, const char* initiator);
 void js_fetch_reset(void);
 void js_fetch_dispatch_pending(void);
 // Set base directory for resolving relative fetch() URLs to local files

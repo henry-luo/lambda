@@ -1712,7 +1712,6 @@ static int radiant_dom_reflected_string_set(Item receiver, Item value, Item* out
         return radiant_dom_reflected_string_set(receiver, value, out, attribute); \
     }
 
-RADIANT_REFLECT_STRING(radiant_dom_m4b_src, "src", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_pattern, "pattern", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_min, "min", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_max, "max", "")
@@ -1759,20 +1758,54 @@ RADIANT_REFLECT_STRING(radiant_dom_m4b_wrap, "wrap", "soft")
 #undef DOM_REFLECT_INT
 #undef DOM_REFLECT_STR
 
-RADIANT_C_API int radiant_dom_m4b_href_get(Item receiver, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    if (!elem || !out) return 0;
-    const char* value = elem->get_attribute("href");
-    if (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area")) {
-        Url* resolved = elem->doc && elem->doc->url
-            ? url_parse_with_base(value ? value : "", elem->doc->url)
-            : url_parse(value ? value : "");
-        *out = radiant_dom_string_item(resolved ? url_get_href(resolved) : "");
-        if (resolved) url_destroy(resolved);
+static Url* radiant_dom_url_attribute(Item receiver, const char* attribute) {
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, receiver), base_uri(roots, ItemNull);
+    DomElement* elem = radiant_dom_member_elem(owner.get());
+    if (!elem) return nullptr;
+    const char* value = elem->get_attribute(attribute);
+    if (!value) return nullptr;
+    // a base element resolves its own href against the document fallback, not itself.
+    if (radiant_dom_is_tag(elem, "base")) {
+        base_uri.set(radiant_dom_string_item(elem->doc && elem->doc->url
+            ? url_get_href(elem->doc->url) : "about:blank"));
     } else {
-        *out = radiant_dom_string_item(value ? value : "");
+        Item base_value = ItemNull;
+        if (!radiant_dom_member_property(owner.get(), "baseURI", &base_value)) return nullptr;
+        base_uri.set(base_value);
     }
+    Url* base = url_parse(fn_to_cstr(base_uri.get()));
+    Url* resolved = base ? url_parse_with_base(value, base) : url_parse(value);
+    if (base) url_destroy(base);
+    if (resolved && !url_is_valid(resolved)) {
+        url_destroy(resolved);
+        resolved = nullptr;
+    }
+    return resolved;
+}
+
+static int radiant_dom_url_attribute_get(Item receiver, Item* out, const char* attribute) {
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, receiver);
+    DomElement* elem = radiant_dom_member_elem(owner.get());
+    if (!elem || !out) return 0;
+    Url* resolved = radiant_dom_url_attribute(owner.get(), attribute);
+    const char* raw = elem->get_attribute(attribute);
+    *out = radiant_dom_string_item(resolved ? url_get_href(resolved) : raw ? raw : "");
+    if (resolved) url_destroy(resolved);
     return 1;
+}
+
+RADIANT_C_API int radiant_dom_m4b_src_get(Item receiver, Item* out) {
+    return radiant_dom_url_attribute_get(receiver, out, "src");
+}
+
+RADIANT_C_API int radiant_dom_m4b_src_set(Item receiver, Item value, Item* out) {
+    return radiant_dom_reflected_string_set(receiver, value, out, "src");
+}
+
+RADIANT_C_API int radiant_dom_m4b_href_get(Item receiver, Item* out) {
+    return radiant_dom_url_attribute_get(receiver, out, "href");
 }
 
 RADIANT_C_API int radiant_dom_m4b_href_set(Item receiver, Item value, Item* out) {
@@ -1785,10 +1818,7 @@ static int radiant_dom_anchor_component(Item receiver, Item* out,
                                         RadiantUrlGetter getter) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out || !getter) return 0;
-    const char* href = elem->get_attribute("href");
-    Url* resolved = elem->doc && elem->doc->url
-        ? url_parse_with_base(href ? href : "", elem->doc->url)
-        : url_parse(href ? href : "");
+    Url* resolved = radiant_dom_url_attribute(receiver, "href");
     *out = radiant_dom_string_item(resolved ? getter(resolved) : "");
     if (resolved) url_destroy(resolved);
     return 1;
