@@ -28,6 +28,8 @@ bool io_fs_options_open(Item options, const char* fn, SysFunc id, IoFsOptionMap*
 // Each reader leaves *out unchanged when the option is absent or null.
 bool io_fs_option_bool(const IoFsOptionMap* m, const char* name, bool* out, Item* error);
 bool io_fs_option_count(const IoFsOptionMap* m, const char* name, int64_t* out, Item* error);
+// a text option as a mem-owned copy (MEM_CAT_EVAL)
+bool io_fs_option_text(const IoFsOptionMap* m, const char* name, char** out, Item* error);
 // the option's value, or ItemNull when absent
 Item io_fs_option_get(const IoFsOptionMap* m, const char* name);
 

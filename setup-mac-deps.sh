@@ -404,7 +404,9 @@ stage_brotli_for_curl() {
     fi
 
     echo "Staging Brotli for libcurl..."
-    if ! python3 "$SCRIPT_DIR/utils/build_dependencies.py" brotli --source "$SCRIPT_DIR/mac-deps/brotli" --prefix "$brotli_prefix" --install-only; then
+    # --install-only needs this checkout's build manifest, which is absent when
+    # mac-deps/brotli/out was built elsewhere; the build step is incremental.
+    if ! build_premake_dependency brotli "$SCRIPT_DIR/mac-deps/brotli" "$brotli_prefix"; then
         echo "❌ Could not stage Brotli for libcurl"
         return 1
     fi
@@ -424,7 +426,17 @@ curl_supports_web_features() {
         grep -q '^#define HAVE_BROTLI 1$' "$curl_config" && \
         ! grep -q '^#define CURL_DISABLE_COOKIES 1$' "$curl_config" && \
         nm "mac-deps/curl-8.10.1/lib/libcurl.a" 2>/dev/null | \
-            grep -q 'BrotliDecoderDecompress'
+            grep -q 'BrotliDecoderDecompress' && \
+        curl_supports_mail_protocols "mac-deps/curl-8.10.1/lib/libcurl.a"
+}
+
+# lambda.io.mail drives IMAP, POP3 and SMTP through libcurl (vibe/Lambda_Demo_Mail.md ML1).
+curl_supports_mail_protocols() {
+    local symbols
+    symbols="$(nm "$1" 2>/dev/null)" || return 1
+    for handler in imaps pop3s smtps; do
+        grep -q "_Curl_handler_${handler}\$" <<< "$symbols" || return 1
+    done
 }
 
 # Function to build WOFF2 for Mac
@@ -489,14 +501,15 @@ build_curl_with_http2_for_mac() {
     echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
     cd "$SCRIPT_DIR"
 
-    # Redirect cookies and compressed documents both require enabled curl features.
+    # Redirect cookies, compressed documents and the mail protocols all require
+    # enabled curl features.
     if curl_supports_web_features; then
-        echo "libcurl with HTTP/2, Brotli and cookies already built"
+        echo "libcurl with HTTP/2, Brotli, cookies and mail protocols already built"
         return 0
     fi
 
     if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
-        echo "Existing libcurl lacks required web features, rebuilding..."
+        echo "Existing libcurl lacks required web or mail features, rebuilding..."
     fi
 
     if ! build_brotli_for_mac || ! stage_brotli_for_curl; then
@@ -549,8 +562,8 @@ build_curl_with_http2_for_mac() {
         --without-openssl --without-gnutls --without-wolfssl \
         --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
-        --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
-        --disable-imap --disable-smb --disable-smtp --disable-gopher \
+        --disable-dict --disable-telnet --disable-tftp \
+        --disable-smb --disable-gopher \
         --disable-mqtt --disable-manual --disable-libcurl-option \
         --disable-sspi --disable-ntlm --disable-tls-srp \
         --disable-unix-sockets --enable-cookies --disable-socketpair \

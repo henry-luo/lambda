@@ -1806,6 +1806,38 @@ pn find_docs() {
 
 In a directory, files are selected as `io.grep` selects them. A source that does not exist raises an error (E401). `io.text_search` is a procedure: its result depends on the file system. It runs on `lib/fts`, which reuses `lib/grep`'s walk and its literal search to skip files that hold none of the query's words (`vibe/Lambda_IO_Fulltext_Search.md`). Files are searched as plain text; extracting the text of HTML, Markdown or PDF is planned.
 
+#### lambda.io.mail
+
+IMAP and POP3 sessions and SMTP sending, as a built-in module at `lambda.io.mail` (D7.2.4v4). Import it with an alias: `import mail: lambda.io.mail`. An unaliased import is refused, because its `open` and `send` would shadow the built-in ones; the fully qualified spelling `lambda.io.mail.open(…)` needs no import. All four functions are procedures and park the calling task. curl connects, secures and logs in; after login the runtime speaks IMAP itself, waiting on the event loop rather than a worker thread (`vibe/Lambda_Demo_Mail.md` §2.5, §5.3).
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `mail.open(url, options)` | session | Connect, secure and log in. `imaps://` and `pop3s://` use implicit TLS; `imap://` and `pop3://` require STARTTLS |
+| `mail.command(session, command, args?, options?)` | `{status, code, text, responses}` | Send one command and wait for its completion |
+| `mail.idle(session, seconds)` | array | IMAP IDLE: wait up to `seconds` (1–1740) for the server to report a change |
+| `mail.send(url, options, message)` | array | Send an RFC 5322 message over `smtps://` or `smtp://` (STARTTLS); returns the rejected recipients |
+
+**Options of `open` and `send`.** `user` (required); `password` or `token` (an OAuth access token, sent as OAUTHBEARER or XOAUTH2); `pin` (a `sha256//…` public-key pin, which replaces certificate-chain checks for a self-signed local server such as Proton Mail Bridge); `timeout` in seconds (default 60, an inactivity limit); `tls` (default `true`; `false` is allowed only for a loopback server). `send` also takes `from` and `to`, the envelope sender and every recipient including Cc and Bcc. The URL names a server only (`scheme://host[:port]`); credentials never go in it.
+
+**Commands.** `command` is the command name and any fixed atoms, such as `"UID FETCH 1:* (UID FLAGS)"`; it may not hold a line break. Each value in `args` is appended in its protocol encoding, so scripts never quote by hand: a string becomes a quoted string, or a literal when it cannot be quoted; binary becomes a literal (APPEND sends a message this way); an array becomes a parenthesised list, a symbol an atom, an int a number, and `null` becomes `NIL`. For POP3, arguments are ints or text without spaces. `options.to` names a writable directory: a literal (IMAP) or payload (POP3) over 64 KiB is streamed into a new file there, and the result holds the file's path as a string.
+
+**Responses.** For IMAP, each untagged response is an array of tokens: atoms are symbols, numbers ints (int64 past 2^53), quoted strings strings, literals binary, `NIL` null, and lists arrays. A status response is `[status, code, text]`. `* 12 FETCH (UID 48213 RFC822.SIZE 48210)` arrives as `[12, 'FETCH', ['UID', 48213, 'RFC822.SIZE', 48210]]`. Untagged responses the server sends unprompted during a command are included in its `responses`. For POP3, `text` is the `+OK` line and `responses` holds the multi-line payload as one binary, dot-unstuffed. An empty literal or payload is `null` (S2.2.2v2).
+
+**Errors.** A server refusal (IMAP `NO` or `BAD`, POP3 `-ERR`) raises an error whose message holds the reply, such as `io.mail.command: NO [TRYCREATE] Mailbox doesn't exist`. A failed login raises `login denied`. A lost connection or timeout raises and marks the session unusable; open a new one. A session runs one command at a time; a second task calling into a busy session gets an error.
+
+**Lifetime.** A session belongs to the task that opened it and closes when that task ends; there is no close function. Closing ends an IDLE with `DONE` and logs out on a worker thread.
+
+```lambda
+import mail: lambda.io.mail
+
+pn unread_count(password) {
+    let s = mail.open("imaps://imap.example.com", {user: "ada@example.com", password: password})^
+    mail.command(s, "SELECT", ["INBOX"])^
+    let found = mail.command(s, "UID SEARCH UNSEEN")^
+    len(found.responses[0]) - 1
+}
+```
+
 #### cmd(command, args?)
 
 Execute a shell command and return its output as a string. The optional

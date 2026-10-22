@@ -84,6 +84,17 @@ bool io_fs_option_count(const IoFsOptionMap* m, const char* name, int64_t* out, 
     return true;
 }
 
+bool io_fs_option_text(const IoFsOptionMap* m, const char* name, char** out, Item* error) {
+    Item v = io_fs_option_get(m, name);
+    if (get_type_id(v) == LMD_TYPE_NULL) return true;
+    if (!is_text_type_id(get_type_id(v))) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "%s: option '%s' must be text", m->fn, name);
+        return false;
+    }
+    *out = mem_dup_n(v.get_chars(), v.get_len(), MEM_CAT_EVAL);
+    return *out != NULL;
+}
+
 static bool push_text(ArrayList* list, Item v) {
     if (!is_text_type_id(get_type_id(v))) return false;
     char* copy = mem_dup_n(v.get_chars(), v.get_len(), MEM_CAT_TEMP);

@@ -858,17 +858,6 @@ static Item fetch_execute(FetchJob* job) {
     return result;
 }
 
-static bool fetch_option_text(const IoFsOptionMap* opts, const char* name, char** out, Item* error) {
-    Item value = io_fs_option_get(opts, name);
-    if (get_type_id(value) == LMD_TYPE_NULL) return true;
-    if (!is_text_type_id(get_type_id(value))) {
-        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: option '%s' must be text", name);
-        return false;
-    }
-    *out = fetch_dup(value.get_chars(), value.get_len());
-    return *out != NULL;
-}
-
 // Reads the options map into the job; `callback` receives the progress function.
 static bool fetch_job_configure(FetchJob* job, Item options, Item* callback, Item* error) {
     IoFsOptionMap opts;
@@ -878,8 +867,8 @@ static bool fetch_job_configure(FetchJob* job, Item options, Item* callback, Ite
     job->verify_tls = true;
     job->progress_ms = 250;
     bool resume = false;
-    if (!fetch_option_text(&opts, "method", &job->method, error) ||
-        !fetch_option_text(&opts, "user_agent", &job->user_agent, error) ||
+    if (!io_fs_option_text(&opts, "method", &job->method, error) ||
+        !io_fs_option_text(&opts, "user_agent", &job->user_agent, error) ||
         !io_fs_option_count(&opts, "timeout", &job->timeout_seconds, error) ||
         !io_fs_option_count(&opts, "max_bytes", &job->max_bytes, error) ||
         !io_fs_option_count(&opts, "progress_ms", &job->progress_ms, error) ||

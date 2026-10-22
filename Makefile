@@ -2466,6 +2466,11 @@ test-js-opt: build-test
 test-mcp: build
 	@python3 test/mcp/test_mcp.py
 
+# lambda.io.mail against scripted loopback IMAP/POP3/SMTP servers (no network)
+.PHONY: test-mail
+test-mail: build
+	@python3 test/mail/test_mail.py
+
 test-library: build
 	@echo "Running library test suite..."
 	@node test/test_run.js --target=library --raw

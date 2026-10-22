@@ -2593,6 +2593,19 @@
             "icon": "\ud83d\udcdd"
           },
           {
+            "source": "lib/test_mail_imap_gtest.cpp",
+            "name": "IMAP Framing Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_mail_imap_gtest.exe",
+            "icon": "\ud83d\udce8"
+          },
+          {
             "source": "lib/test_digest_gtest.cpp",
             "name": "Digest Facade Tests",
             "dependencies": [

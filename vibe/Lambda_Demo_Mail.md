@@ -13,7 +13,8 @@ engine) and directed that the native mail API be exposed, minimal, as
 storage stays on what Lambda has today, with raw message files plus a Mark
 index per mailbox (ML7v3), and that search uses Lambda's own `io.text_search`
 and `io.grep` (ML12). The known limitations of that store are listed as
-SL1–SL5 for later phases (§5.4.4).
+SL1–SL5 for later phases (§5.4.4). **Implementation started 2026-10-22:**
+M0 (transport) is delivered; see the [M0 checkpoint](#m0-checkpoint--2026-10-22).
 
 **Scope:** a new demo under `test/demo/mail/`, registered as `lambda demo
 mail`. It is a desktop mail client in the manner of macOS Mail that connects to
@@ -429,7 +430,7 @@ only what has to be native: sockets, TLS, and framing an untrusted byte stream.
 |---|---|---|---|
 | **ML1** | **curl connects and authenticates; a native engine speaks IMAP.** `CURLOPT_CONNECT_ONLY` hands an authenticated, encrypted connection to the IMAP session engine. SMTP and POP3 are plain curl transfers. curl's sources are not forked. | §2.4–§2.6. Reuses curl's TLS, trust store, STARTTLS and SASL, including XOAUTH2, and keeps their security fixes upstream. Avoids curl's command layer, which has no push, no pipelining and unsafe framing. | **ruled** (user, 2026-10-22) |
 | **ML2** | **Framing is native; meaning is Lambda.** The `lib` tokenizer turns each complete server response into a Lambda value: atoms, numbers, quoted strings, literals, `NIL` and nested lists. Literals above a size threshold go to a temporary file. `lambda.mail` interprets ENVELOPE, BODYSTRUCTURE, FLAGS, LIST, STATUS and the extensions. | Framing is security-critical and length-prefixed, so it does not fit the grammar module. Interpretation is data processing, Lambda's strength, and the place where Gmail extensions, CONDSTORE and PREVIEW are added. | proposed |
-| **ML3** | **A session is a scoped resource.** It is opened by `mail.open` in a `pn` (S12.4.1v3) and auto-closed at the end of its block (S12.4.2). There is no close function (S12.4.3). The host registers it as a long-lived connection (JA16). A long-lived session lives in one document-owned sync task per account (S13.3.1v2). | One cleanup mechanism; no session can leak past its owner. The task's lifetime is the account's online lifetime. | proposed |
+| **ML3** | **A session is a scoped resource.** It is opened by `mail.open` in a `pn` (S12.4.1v3) and auto-closed at the end of its block (S12.4.2). There is no close function (S12.4.3). The host registers it as a long-lived connection (JA16). A long-lived session lives in one document-owned sync task per account (S13.3.1v2). | One cleanup mechanism; no session can leak past its owner. The task's lifetime is the account's online lifetime. | proposed; **interim implemented** (M0): the session closes when its opening task ends, since S12.4.2 is not implemented |
 | **ML4** | **Commands park; nothing blocks.** Running a command, idling and sending park the calling task as `io.fetch` does (S13.1.2v2). They are cancellable at park points (S13.3.2), and IDLE ends with `DONE` on cancel. | The window and other accounts keep running. Quitting cancels every sync task cleanly. | proposed |
 | **ML5v2** | **No script in mail content runs.** Script support for mail waits until Lambda implements sandboxing. Each message renders in an `<iframe srcdoc>` whose document Radiant loads with scripting disabled: no `<script>`, no event-handler attributes, no `javascript:` URLs, and `<noscript>` content rendered. The flag is inherited by every nested document. Remote loads are blocked by a per-document resource policy until the user allows them for a message or a sender. A Lambda sanitizer strips the same constructs as a second layer. | Mail content is controlled by its sender, and remote images are trackers. A sanitizer alone is one missed vector (SVG `<script>`, a nested `srcdoc`, an `on*` attribute) away from running code, so the engine enforces the rule (MG4). The demo's own window chrome is local and trusted, so the flag is per document, not global. | **ruled** (user, 2026-10-22); mechanism proposed |
 | **ML6** | **Secrets live only in the OS secret store.** Passwords and refresh tokens are kept in the Keychain (macOS first), never in cache files, logs or `log.txt`. Access tokens stay in memory. | A mail password is the key to every other account the user has. | proposed |
@@ -443,7 +444,8 @@ only what has to be native: sockets, TLS, and framing an untrusted byte stream.
 ### 5.3 The `lambda.io.mail` API
 
 The module carries bytes between Lambda and a mail server, and nothing else
-(ML10). It has four functions, all `pn` (S12.1.1v3) and all gated by ML8.
+(ML10). It has four functions, all `pn` (S12.1.1v3). ML8's origin gate is
+not implemented yet: any document may call them today.
 
 ```lambda
 import mail: lambda.io.mail
@@ -455,12 +457,12 @@ pn check_inbox(account) {
     let r = mail.command(s, "UID FETCH 1:* (UID FLAGS ENVELOPE)")^
     let changes = mail.idle(s, 600)^
     // ... apply r.responses and changes to the store
-}   // the session closes here (S12.4.2)
+}   // the session closes when this task ends (ML3)
 ```
 
 | Function | Returns | Behaviour |
 |---|---|---|
-| `mail.open(url, options)` | session | Connects, secures, authenticates, and returns once logged in. Schemes: `imaps` and `pop3s` (implicit TLS); `imap` and `pop3` (STARTTLS required). Options: `user`; `password` or `token` (an OAuth access token, sent as OAUTHBEARER or XOAUTH2); `pin` (a `sha256//…` public-key pin for a self-signed loopback server such as Bridge); `timeout` in seconds. |
+| `mail.open(url, options)` | session | Connects, secures, authenticates, and returns once logged in. Schemes: `imaps` and `pop3s` (implicit TLS); `imap` and `pop3` (STARTTLS required). Options: `user`; `password` or `token` (an OAuth access token, sent as OAUTHBEARER or XOAUTH2); `pin` (a `sha256//…` public-key pin for a self-signed loopback server such as Bridge); `timeout` in seconds; `tls: false`, allowed only for a loopback server (local test servers, a Bridge set to plain). |
 | `mail.command(session, command, args?, options?)` | `{status, code, text, responses}` | Sends one command and parks until it completes. `command` is the command name and any fixed atoms. Each value in `args` is appended in its protocol encoding (below). `options.to` names a directory: every literal (IMAP) or multi-line payload (POP3) over 64 KiB is streamed into a new file there and returned as its path. |
 | `mail.idle(session, seconds)` | array of untagged responses | IMAP only. Enters IDLE and parks until the server reports a change or `seconds` pass (at most 1 740, under the 30-minute server limit). Sends `DONE` and returns what arrived, possibly nothing. Cancelling the task ends the IDLE cleanly. |
 | `mail.send(url, options, message)` | array of rejected recipients | Schemes `smtps` (implicit TLS) and `smtp` (STARTTLS required). Options: `user`, `password` or `token`, `pin`, `timeout`, `from`, and `to` (every envelope recipient, including Cc and Bcc). `message` is the RFC 5322 text or bytes, as `doc.misc.eml()` builds it. Raises when no recipient is accepted. |
@@ -486,11 +488,23 @@ Untagged responses the server sends unprompted during a command, such as
 binary (dot-unstuffed), or is empty for a single-line reply. `text` is the
 `+OK` line.
 
-**Errors.** `NO` or `BAD` (IMAP) and `-ERR` (POP3) raise an error value
-carrying `status`, `code` and `text`, which callers handle with `^` handlers
-([Lambda_Error_Handling.md](../doc/Lambda_Error_Handling.md)). `BYE` or a lost
-connection raises and closes the session. A session runs one command at a
-time; a second task calling into a busy session gets the error `'busy'`.
+**Errors.** `NO` or `BAD` (IMAP) and `-ERR` (POP3) raise an error whose
+message holds the server's reply without its tag, for example
+`io.mail.command: NO [TRYCREATE] Mailbox doesn't exist`. Error values carry a
+code and a message, not fields, so the reply travels as text. Callers handle
+it with `^` handlers ([Lambda_Error_Handling.md](../doc/Lambda_Error_Handling.md)).
+A lost connection or a timeout raises and marks the session unusable. A
+session runs one command at a time; a second task calling into a busy session
+gets an error.
+
+**Imports.** `import mail: lambda.io.mail` is the only form. An unaliased
+import is refused, because it would put `open` and `send` over the built-in
+ones. The fully qualified spelling, `lambda.io.mail.open(…)`, also resolves.
+
+**Lifetime.** Until the S12.4 resource model lands, a session belongs to the
+task that opened it and closes when that task ends (ML3). Closing sends `DONE`
+when an IDLE is open, and curl's LOGOUT or QUIT runs on a worker thread so the
+loop never waits for it.
 
 **Deliberately absent.** No `close` (S12.4.3: auto-close is the only
 cleanup), no pipelining (UID sets batch the work, §2.6), no `list` or `fetch`
@@ -710,9 +724,9 @@ milestone that first needs it, and fixed at its root if real.
 
 | ID | Question | First needed | If it is a real gap |
 |---|---|---|---|
-| **MG1** | After `CURLOPT_CONNECT_ONLY` on `imaps://`, and on `imap://` with STARTTLS, is the session authenticated with no bytes left in curl's pingpong buffer? Can the event loop wait on `CURLINFO_ACTIVESOCKET` and drive `curl_easy_recv`/`curl_easy_send` with parking? | M0 | Fall back to a host TLS socket (§2.5). Do not drive curl's IMAP command layer instead. |
-| **MG2** | Are IMAP(S), POP3(S) and SMTP(S) compiled in on all three platforms? On Linux, does the system libcurl report them in `curl_version_info()->protocols`? | M0 | Configure flags (Appendix A). On Linux, a clear error when they are missing. |
-| **MG3** | Can a sync task outlive the handler that starts it and report to the window? Document-owned tasks (S13.3.1v2) and task-to-view messages (AR-O13) are not implemented today. | M1 | Implement AR-E4 and the `dom.address` design (K30g) once, for both archive and mail. No interim mechanism. |
+| **MG1** | After `CURLOPT_CONNECT_ONLY` on `imaps://`, and on `imap://` with STARTTLS, is the session authenticated with no bytes left in curl's pingpong buffer? Can the event loop wait on `CURLINFO_ACTIVESOCKET` and drive `curl_easy_recv`/`curl_easy_send` with parking? | M0 | **Resolved for plain IMAP** (M0): the handoff works against the scripted server, with no bytes left behind and waits on the loop. TLS and STARTTLS over the handoff are untested until a live server (M1). |
+| **MG2** | Are IMAP(S), POP3(S) and SMTP(S) compiled in on all three platforms? On Linux, does the system libcurl report them in `curl_version_info()->protocols`? | M0 | **macOS done** (M0): libcurl rebuilt with the three protocols. Windows: setup flags changed, not built. Every platform: `open` and `send` check `curl_version_info()` and refuse a missing protocol clearly. |
+| **MG3** | Can a sync task outlive the handler that starts it and report to the window? Document-owned tasks (S13.3.1v2) and task-to-view messages (AR-O13) are not implemented today. | M1 | **Partly resolved:** document-owned tasks (AR-E4, S13.3.1v2) landed with the archive package; task-to-view messages (AR-O13) remain. No interim mechanism. |
 | **MG4** | Can an embedded document load with scripting disabled and remote loads blocked? Today Radiant has no runtime switch to turn scripts off. `<iframe srcdoc>` inherits its parent's `DocumentJsHostConfig` (`radiant/layout_block.cpp`), `html_scripting_enabled` is hard-coded on (`radiant/cmd_layout.cpp`), and the remote-resource policy is set only by a CLI flag. | M1 | Add a scripting-disabled flag to `DocumentJsHostConfig`, inherited by nested documents and never re-enabled by a child, and honour it in the loader (skip scripts and handlers; `html_scripting_enabled` false so `<noscript>` renders). Let the demo set that flag and the resource policy on the message iframe. How the iframe asks for it (the `sandbox` attribute, with scripts kept off even for `allow-scripts` until sandboxing exists, or a Radiant-specific attribute) is MQ11. The full `sandbox` semantics wait for Lambda's sandboxing work. |
 | **MG5** | MIME coverage. `input-eml.cpp` decodes base64 and quoted-printable but not RFC 2047 encoded words, and it does not convert charsets. Lambda has no legacy charset decoder (ISO-8859-x, Windows-125x, GB18030, Big5, Shift_JIS, EUC-KR, ISO-2022-JP). Nested multipart, `message/rfc822` parts and tolerance of malformed mail are unverified. | M1 | Add charset conversion in `lib` (system iconv on macOS and Linux; the Windows dependencies already carry libiconv) and RFC 2047 decoding in `input-eml.cpp`, with an `.eml` fixture corpus. |
 | **MG6** | Secret storage. There is no Keychain or secret-store API; the only Security framework use is `lib/trust_store.c`. | M1 | A small secret-store row in `lambda-io` (SecItem on macOS; libsecret and Credential Manager later), gated by ML8. |
@@ -722,7 +736,7 @@ milestone that first needs it, and fixed at its root if real.
 | **MG10** | Compose editing. Is contenteditable through the DOM editing package (D7.2.5) good enough for mail: lists, links, pasted HTML, inline images? | M3 | Fix in the editing package. Plain-text compose remains the fallback. |
 | **MG11** | *Withdrawn with ML7v3.* SQLite writes from Lambda code are no longer needed before M1. They return with the later phase that removes SL1–SL3 (Appendix S, ML7v2). | — | — |
 | **MG12** | Is Lambda's own search fast enough? `io.text_search` and `io.grep` over the sidecars of 10 000 messages, within 300 ms in a release build. Both rescan the files on every call. | M5 | Measure and record the result. A miss is SL4, left to the later phase that adds a persistent index to `lib/fts`. No database full-text index (ML12). |
-| **MG13** | Can `lambda.io.mail` resolve as a built-in runtime module? Import resolution checks exact built-in names (`math`, `io`, `mcp`), then static Jube modules, then shipped packages under `lmd/package/` (`build_ast.cpp`). | M0 | Register `lambda.io.mail` as a built-in module whose members resolve to the runtime rows (ML11), as D7.2.4v4 allows. |
+| **MG13** | Can `lambda.io.mail` resolve as a built-in runtime module? Import resolution checks exact built-in names (`math`, `io`, `mcp`), then static Jube modules, then shipped packages under `lmd/package/` (`build_ast.cpp`). | M0 | **Resolved** (M0): `builtin_module_name` maps the full path `lambda.io.mail` to the `io_mail_*` rows; an unaliased import is refused. |
 
 ## 7. Milestones and acceptance
 
@@ -740,12 +754,15 @@ increment.
 
 ## 8. Verification budget
 
-- **No network by default.** The tokenizer and the session state machine are
-  tested as native gtests against recorded server transcripts, replayed
-  through a file-backed transport. Hostile and edge cases include: a literal
+- **No network by default.** Framing, parsing and encoding are native gtests
+  (`test_mail_imap_gtest`). The session engine runs against scripted loopback
+  servers in Python (`test/mail/fake_mail.py`, `make test-mail`), which the
+  scripts reach with `tls: false`. Hostile and edge cases include: a literal
   containing tag lines, zero-length literals, `{n+}` (LITERAL+), `NIL` versus
   `""` versus a literal, 8-bit bytes in quoted strings, `BYE` in the middle of
-  a command, and untagged `EXISTS` during IDLE.
+  a command, and untagged `EXISTS` during IDLE. (Recorded transcripts through
+  a file-backed transport were the first plan; scripted servers also exercise
+  curl's login and the socket waits.)
 - **MIME fixtures.** An `.eml` corpus: RFC examples, encoded words, legacy
   charsets, nested multipart, attached messages and malformed mail. Each
   fixture has an `.ls` script and its `.txt` golden (AGENTS rule 8).
@@ -795,6 +812,61 @@ increment.
 | **MQ13** | Who writes the SQLite index? | **Answered** (user, 2026-10-22): no SQLite index for now. The store is a Mark index per mailbox (ML7v3), written by Lambda code with `output(…, {atomic: true})`. |
 
 ---
+
+## M0 checkpoint — 2026-10-22
+
+**Delivered.**
+- **libcurl** 8.10.1 rebuilt on macOS with IMAP, POP3 and SMTP (Appendix A).
+  The archive grew from 783 KB to 826 KB. The rebuild followed the setup
+  script, which has also required curl's cookie engine and Brotli since
+  2026-10-09. This machine's archive predated that, so cookies and Brotli
+  decoding are now on here too. `stage_brotli_for_curl` failed when
+  `mac-deps/brotli/out` existed without this checkout's build manifest; it now
+  runs the incremental build step first.
+- **`lib/mail_imap.{h,c}`**: framing (literals read by byte count, status lines
+  never carry literals, large literals streamed into a file), the token-tree
+  parser, and the command encoder (quoted or literal, LITERAL+ and LITERAL-,
+  UTF8=ACCEPT).
+- **`lambda/runtime/io_mail.cpp`**: `open`, `command`, `idle` and `send`, with
+  their option-name tables, the `io_mail_*` registry rows and the
+  `lambda.io.mail` import (D7.2.4v4).
+- **A socket waiter in the scheduler** (`lambda_socket_waiter_*`): it parks a
+  task until its socket is ready, on the loop. Closing a waiter wakes a task
+  parked on it with an error. `lambda_task_running()` exposes the running task
+  to other runtime files.
+- **`io_fs_option_text`**, promoted from `io.fetch`'s static helper to the
+  shared io header rather than copied (AGENTS rule 13).
+- **`make test-mail`** and `test/mail/`: scripted loopback IMAP, POP3 and SMTP
+  servers in Python, with Lambda scripts driving them.
+
+**Verification.**
+- `test_mail_imap_gtest`, 21 tests: byte-by-byte framing, a hostile literal, a
+  status line ending in braces, spilling, limits, parsing, encoding, and the
+  refusal of injected command text.
+- `make test-mail`, 6 tests: an IMAP session (SELECT, FETCH, the hostile body
+  round-tripped byte for byte through APPEND, a spill under `to`, a NO error,
+  NOOP); IDLE with an event, a quiet timeout and a cancellation that sends
+  `DONE` on close; password and token logins and the refusals; POP3 STAT, UIDL
+  and RETR with dot-unstuffing and `-ERR`; SMTP with a rejected recipient and a
+  line starting with a dot; the refused unaliased import; and the fully
+  qualified spelling `lambda.io.mail.open(…)`.
+- `make test-lambda-baseline`: 5 936 of 5 937. The one failure,
+  `latex_phase3_corpus`, passes alone in 50 s; it is the LaTeX corpus test
+  known to time out under parallel load.
+
+**Findings.**
+- curl's pingpong layer hands every reply line to the header callback. POP3's
+  `text` and SMTP's rejected-recipient list rely on that, and the tests confirm
+  it.
+- A process that exits with a session still open resets the connection without
+  LOGOUT, because the worker that would log out never runs. Servers tolerate
+  this; a graceful exit would need the scheduler to drain sessions at teardown.
+- Not yet exercised: TLS and STARTTLS through the handoff, a live server
+  (Dovecot in an Apple `container`), Gmail and Microsoft OAuth, and a Windows
+  build.
+
+**Next.** M1: accounts and presets, the Keychain store (MG6), the scripting-off
+message view (MG4), MIME decoding (MG5), the store (ML7v3), and the window.
 
 ## Appendix A. libcurl build change
 
