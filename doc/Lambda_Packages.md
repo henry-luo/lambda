@@ -36,6 +36,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 20. [doc.diff — Git and patch review](#20-docdiff--git-and-patch-review)
 21. [doc.readability — Article extraction](#21-docreadability--article-extraction)
 22. [scene3d.motion — Character animation](#22-scene3dmotion--character-animation)
+23. [archive — Web archiving](#23-archive--web-archiving)
 
 ---
 
@@ -48,6 +49,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
 | `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |
 | `doc.diff` | `lambda.doc.diff` | Initial unified review profile | Grammar-based patch parsing, local Git comparisons, virtual review and complete static HTML | `lambda view change.patch`; also `.diff`, `layout` and `render` |
+| `archive` | `lambda.archive` | Phase 1 (pages, renderings, search, media and gallery engines, job service) | Archives what a link points to — a page with its resources, a video or audio stream with subtitles, a gallery, a file — into a searchable library of ZIP snapshots with readable HTML, Markdown, PDF and thumbnails; all in Lambda, no external tools; see [§23](#23-archive--web-archiving) | `lambda demo archive` |
 | `doc.readability` | `lambda.doc.readability` | Library; passes Mozilla's 130 test pages | Port of Mozilla Readability.js 0.6.0: a page's main article, title, byline, excerpt and site metadata, and the `readerable` check | None; import from a Lambda script |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
@@ -1542,6 +1544,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `archive` | `test/lambda/archive/` (plan, pages, renderings and search, media and gallery engines over the local fixture site `site/`, service); the demo's model golden and replay in `test/demo/archive/tests/` |
 | `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
@@ -2044,3 +2047,43 @@ s.scene([s.camera({id: "cam", position: [0.0, 1.4, 4.0]}), s.light('ambient'),
 | `control(group, states, options)`, `motion_state(name, clip, options)` | A `<motion-controller>`: the template requests `state` and `cue`; Radiant crossfades, follows `next` after a `once` state and fires `statechange` |
 
 `input(x.fbx)` and `input(x.bvh)` also give the raw `<fbx>` record tree and the `<bvh>` hierarchy and motion matrix. Limits: 1,024 joints and clips per character, 256 bones per rendered skeleton and 1,024 tracks per clip. FBX conversion follows profile 1 (Mixamo- and Blender-style files); blend shapes, constraints, cameras, lights and extra animation layers are omitted with warnings, and inheritance other than RSrs is an error. Design and acceptance: [Lambda_Pkg_Motion.md](../vibe/Lambda_Pkg_Motion.md); implementation record: [Lambda_Impl_Motion.md](../vibe/impl/Lambda_Impl_Motion.md).
+
+## 23. archive — Web archiving
+
+`lambda.archive` downloads what a link points to, keeps it in several formats, and maintains a searchable library, in the spirit of ArchiveBox and SingleFile. Every engine is Lambda code; it runs no external tool and links no library (design: [Lambda_Pkg_Archive.md](../vibe/Lambda_Pkg_Archive.md), AR4v2).
+
+```lambda no-run
+import archive: lambda.archive
+
+pn main() {
+    let lib = archive.library("temp/archive", {config: input("archive.yaml", 'yaml')^})^
+    let snap = archive.add(lib, "https://example.org/news/story", {tags: ["reading"],
+        progress: pn (m) => { print(m.stage, " ", m.received, "/", m.total, "\n") }})^
+    print(snap.title, " → ", snap.id, "\n")
+    for (hit in archive.search(lib, "\"street trees\" -opinion", {kind: 'page', limit: 10})^) {
+        print(hit.snapshot.title, ": ", hit.snippet, "\n")
+    }
+}
+```
+
+| Kind | How it is archived | Snapshot |
+|---|---|---|
+| page | the page and its stylesheets, images, icons and fonts, rewritten to local paths; scripts and handlers removed | `snapshot.zip` (`index.html`, `source.html`, `readable.html`, `article.md`, `assets/`, `manifest.json`), `text.txt`, `thumb.png`, `page.pdf` |
+| video, audio | a direct file, or the medium a page exposes (`<video>`/`<audio>`/`<source>`, `og:video`, `<link rel=enclosure>`, JSON-LD); HLS streams reassembled from their segments (fMP4 or MPEG-TS, byte ranges, the highest variant up to `media.max_height`); WebVTT tracks become the transcript | `media/` with the file(s), subtitles, poster and `info.json`; a media page in the ZIP |
+| gallery | a page's images over `gallery.min_pixels` (the widest `srcset` candidate, the full size behind a thumbnail, `og:image`), with captions | `media/` with the images and thumbnails; a gallery page |
+| image, file | the payload itself | `media/<name>`; an image page or a file card |
+
+A page whose media cannot be taken (an encrypted stream, a player that loads by script) is archived as a page with the reason in `note` and the media in `remote`. The kind comes from the configuration's rules, a built-in host table, the extension, or the response's content type. Renderings — the snapshot page, Readability's article and its Markdown, the search text, the PDF and the thumbnail — are made by a child `lambda run` worker, so a window never waits on them.
+
+| Function | Effect |
+|---|---|
+| `library(root, {config})` | open or create a library; the configuration is checked first (`problems(config)` lists its faults) |
+| `plan(url, config)` | the kind, engine and settings for a URL, without IO |
+| `add(lib, url, options)` / `job(…)` | archive one URL; `options.progress` receives `{type: 'progress', tag, stage, received, total, rate}`; only a failed download raises |
+| `service(lib, notify)` | a task that runs up to `defaults.jobs` jobs at once from `{op: 'add' \| 'refresh' \| 'cancel' \| 'stop'}` requests and reports `queued`, `progress`, `done` and `failed` |
+| `refresh(lib, id, formats?)` | re-derive outputs from the stored capture, without the network |
+| `search(lib, query, options?)` | full-text search over `text.txt` (`io.text_search` syntax), filtered like `snapshots` |
+| `snapshots(lib, filter?)`, `remove(lib, id)`, `doctor(lib)`, `with_record(lib, record)` | list, delete, check the library, fold a record into a `Library` value |
+| `snapshot_html(capture)`, `readable(capture)`, `markdown(capture)` | the pure derivations over a capture |
+
+Each snapshot folder's `snapshot.json` is the record and `index.json` a cache rebuilt from the folders. Outputs succeed or fail on their own, each with its status. `lambda demo archive` is the interactive front end ([demo guide](../test/demo/archive/README.md)).

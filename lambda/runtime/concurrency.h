@@ -86,10 +86,36 @@ void lambda_concurrency_set_promise_bridge(LambdaPromiseIsFn is_promise,
 
 Item lambda_task_start_function(Item function, List* args);
 Item lambda_task_start_function_scoped(Item function, List* args, bool escapes);
+// S13.3.1v2 `start(..., {owner: 'document'})`: the UI layer installs the probe
+// naming the running document, and releases a document's tasks when it is
+// discarded (cancel, then join, bounded)
+Item lambda_task_start_document(Item function, List* args);
+void lambda_set_document_probe(void* (*probe)(void));
+int lambda_document_tasks_release(void* document);
 LambdaTaskScope* lambda_task_scope_enter(void);
 LambdaTaskScope* lambda_task_scope_current(void);
 Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit);
 Item lambda_task_scope_unwind(LambdaTaskScope* base, bool error_exit);
+
+// A blocking job run on the libuv thread pool while the calling task parks
+// (io.exec, io.fetch; AR-E3v2). `run` sees only `data` and the job, on the
+// worker thread. `progress` runs on the task's own stack after a
+// lambda_offload_notify, and once more with final=true after run returns; it
+// returns ItemNull to continue or an error, which aborts the job and is raised.
+// `release` frees `data` for a job orphaned by scheduler teardown (a caller
+// that returns frees its own data).
+typedef struct LambdaOffload LambdaOffload;
+typedef struct LambdaOffloadOps {
+    void (*run)(LambdaOffload* job, void* data);
+    Item (*progress)(void* data, bool final);
+    void (*release)(void* data);
+} LambdaOffloadOps;
+// ItemNull once run returned; the cancellation error, or the progress hook's.
+Item lambda_task_offload(const LambdaOffloadOps* ops, void* data, int64_t progress_ms);
+// Worker thread: ask for a progress call, at most once per progress_ms.
+void lambda_offload_notify(LambdaOffload* job);
+// Atomic; nonzero once the task was cancelled or the progress hook aborted.
+const int* lambda_offload_cancel_flag(const LambdaOffload* job);
 
 Item pn_send(Item handle, Item message);
 Item pn_receive(void);

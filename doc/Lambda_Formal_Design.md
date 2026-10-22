@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 39.0.0 (2026-10-21)
+**Spec version:** 39.1.0 (2026-10-22)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1547,7 +1547,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D7.2.3** Imported packages are cached in-process (L1, D8.5.1) and
   distribute as **source** (D1.7); compiled artifacts are derived local
   caches only.
-- **D7.2.4v3** **`lambda.*` is the one root for everything Lambda ships**, and
+- **D7.2.4v4*** **`lambda.*` is the one root for everything Lambda ships**, and
   the root name is reserved (S16.10.1v2). Three tiers live under it:
   **`lambda.sys.*`** — the runtime's own system functions, prelude-imported
   unqualified (S17.2.1); **`lambda.<module>`** — built-in modules, with the
@@ -1558,10 +1558,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   typesetting, PDF and LaTeX; `lambda.math` remains the built-in math module.
   A package path names
   exactly one thing: no path may be both a built-in module and a shipped
-  package. Namespace resolution maps shipped paths to the source tree under
+  package. **`lambda.io.<leaf>` may name a built-in runtime module** whose
+  functions park the calling task on IO, as `io.fetch` does — work a Jube
+  module may not do (D7.4.2v2). It is imported by its full path only, with no
+  bare `io.<leaf>` spelling, and its leaf may name neither a shipped package
+  nor an `io` system function. Namespace resolution maps shipped paths to the source tree under
   `<lambda-home>/package/`, preserving every component below `lambda`:
   `lambda.doc.<package>.*` maps to `package/doc/<package>/`, with no exceptional mapping.
-  [S17.2.1, S17.2.2, S16.10.1v2]
+  [S17.2.1, S17.2.2, S16.10.1v2; Demo_Mail ML11]
 - **D7.2.5*** **Full user-agent editing policy belongs to the shipped Lambda
   DOM behavior package, never to Radiant's native implementation.** Radiant
   owns the platform-input gate and standard DOM mechanisms—editing-host
@@ -1580,7 +1584,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D7.2.6** **Import resolution follows the S16.9.8 roots, one resolver for
   every caller.** A package path is looked up by name only: the built-in
   modules (`math`, `io`), the runtime-registered host modules, then
-  `lambda.<package>` beneath `<lambda-home>/package/` (D7.2.4v3). Any other
+  `lambda.<package>` beneath `<lambda-home>/package/` (D7.2.4v4). Any other
   root yields no path and the import fails E216; it is reserved for the
   package registry and is never retried against the working directory or the
   Lambda home. A relative path resolves against the importing script's
@@ -1588,8 +1592,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   `a/b`, and each leading `~~` step adds one `../`, trying `.ls` and then
   `.js`. Because a relative import binds to its file's location, a checked-in
   script with relative imports runs in place; a harness that copies its text
-  elsewhere breaks it. [S16.9.8, D7.2.4v3]
-- **D7.2.7v2*** **LaTeX is read by TeX expansion, never by TeX typesetting.** Every LaTeX parse runs Lambda's TeX expansion engine at the input boundary before the one direct-parser digester builds the Mark AST; there is no unexpanded front end, so one source yields one AST whatever the entry point. The engine executes TeX *programming* — catcodes, macros, registers, grouping, conditionals, e-TeX and expl3 — for the bundled packages and for `.sty`/`.cls` files beside the document, and passes document constructs through as constructors to the `lambda.doc.latex` script adapters, which own their meaning (D7.2.1–D7.2.4v3). Bundled packages are either unmodified upstream programming packages, which emit no document material, or Lambda-owned bindings, whose macros only expand a package's user commands into constructs the digester and the script adapters already own; a binding neither typesets nor carries semantics of its own. It never reproduces TeX's paragraph builder, page builder, `\output` or font machinery: Radiant owns layout. Reading TeX source as TeX inside this sandbox is not running a string as Lambda code (S1.8): nothing it reads becomes a Lambda import, source or `compile()` input, and `\directlua` stays unsupported. Reads are read-only and path-gated to the document's directory plus the bundled resources in the package tree (D7.1.2v2, D7.5.2) — no TeX installation, network, shell escape or disk write — and output depends only on source and resources (S12.1.1v2). A package or class name resolves once, in source order: a bundled package runs on the engine (an adapter of the same name still receives the declaration); else a script adapter; else a file beside the document; else the located `unknown-package` diagnostic. A local file never replaces an adapter or a built-in class profile. Callers that render with `lambda.doc.latex` parse through it, so the engine receives the adapter registry. [`vibe/latex/Lambda_Design_TeX_Engine.md` §1–§8]
+  elsewhere breaks it. [S16.9.8, D7.2.4v4]
+- **D7.2.7v2*** **LaTeX is read by TeX expansion, never by TeX typesetting.** Every LaTeX parse runs Lambda's TeX expansion engine at the input boundary before the one direct-parser digester builds the Mark AST; there is no unexpanded front end, so one source yields one AST whatever the entry point. The engine executes TeX *programming* — catcodes, macros, registers, grouping, conditionals, e-TeX and expl3 — for the bundled packages and for `.sty`/`.cls` files beside the document, and passes document constructs through as constructors to the `lambda.doc.latex` script adapters, which own their meaning (D7.2.1–D7.2.4v4). Bundled packages are either unmodified upstream programming packages, which emit no document material, or Lambda-owned bindings, whose macros only expand a package's user commands into constructs the digester and the script adapters already own; a binding neither typesets nor carries semantics of its own. It never reproduces TeX's paragraph builder, page builder, `\output` or font machinery: Radiant owns layout. Reading TeX source as TeX inside this sandbox is not running a string as Lambda code (S1.8): nothing it reads becomes a Lambda import, source or `compile()` input, and `\directlua` stays unsupported. Reads are read-only and path-gated to the document's directory plus the bundled resources in the package tree (D7.1.2v2, D7.5.2) — no TeX installation, network, shell escape or disk write — and output depends only on source and resources (S12.1.1v2). A package or class name resolves once, in source order: a bundled package runs on the engine (an adapter of the same name still receives the declaration); else a script adapter; else a file beside the document; else the located `unknown-package` diagnostic. A local file never replaces an adapter or a built-in class profile. Callers that render with `lambda.doc.latex` parse through it, so the engine receives the adapter registry. [`vibe/latex/Lambda_Design_TeX_Engine.md` §1–§8]
 
 - **D7.2.8*** **Document math preserves its source notation's layout policy.**
   `lambda.doc.math` exports Presentation MathML and accepts MathML element
@@ -2662,7 +2666,7 @@ slice; no formal semantic ruling or document semver changes.
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
 | D7.1.7v6 | **Implemented 2026-10-06.** `make lambda-wasm` builds the synchronous browser REPL from an explicit source/dependency manifest, with no MIR, allocation tracker, native string-SIMD unit or excluded acquisition/ambient providers. CSS/graph/math input and CSS/graph/LaTeX/math formatting, image-processing kernels and public history/event builtins are excluded. HTML parsing and template apply are retained, with REPL registration/rollback/reset verified. Node and Chromium each pass 283 embedding checks; native REPL tests pass 41/41 and the full native Lambda baseline passes 6,243/6,243. Optimized WASM + loader: 1,891,405 bytes raw / 729,874 bytes gzipped. Interpreter corpus and broader browser coverage remain verification work; the C API is initial, and external imports are rejected. Working record: `vibe/Lambda_Design_Static_Modules.md` §13.4; reproduction and ABI: `doc/dev/Lambda_WASM_Build.md`. |
-| D7.2.4v3 | **Implemented 2026-10-15.** Shipped imports mirror their namespace below `<lambda-home>/package/`; math, PDF and LaTeX source and resources live in `lmd/package/doc/{math,pdf,latex}/`, with no resolver exceptions or old namespace aliases. Native document bridges, PDF export and TeX resource loading use the matching paths. The checkout and release share `./lmd/`, copied unchanged by `utils/prepare_release.sh`. Built-in `lambda.math`/`lambda.io` aliases and `lambda.sys.*` remain separate from script packages. Regressions: `test/lambda/lambda_namespace.ls`, the reserved-root negative fixture, and `test/lambda/{math,pdf,latex,eps}/`. |
+| D7.2.4v4 | **v3 content implemented 2026-10-15; the v4 clause is not implemented.** No `lambda.io.<leaf>` built-in runtime module exists yet. The first planned one is `lambda.io.mail` (`vibe/Lambda_Demo_Mail.md` ML10, ML11, MG13). Today the resolver tries exact built-in names, then static Jube modules, then shipped packages, and a shipped `lambda.io.<leaf>` is refused when `io_<leaf>` is a system function. v3 record: Shipped imports mirror their namespace below `<lambda-home>/package/`; math, PDF and LaTeX source and resources live in `lmd/package/doc/{math,pdf,latex}/`, with no resolver exceptions or old namespace aliases. Native document bridges, PDF export and TeX resource loading use the matching paths. The checkout and release share `./lmd/`, copied unchanged by `utils/prepare_release.sh`. Built-in `lambda.math`/`lambda.io` aliases and `lambda.sys.*` remain separate from script packages. Regressions: `test/lambda/lambda_namespace.ls`, the reserved-root negative fixture, and `test/lambda/{math,pdf,latex,eps}/`. |
 | D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
 | D7.2.7v2 | **Partially implemented 2026-10-12; bindings 2026-10-13.** Expansion is the only front end: `parse_latex_direct` always runs the engine (the unexpanded branch and the `LAMBDA_TEX_EXPAND` knob are gone), the native document transform and the doc viewer parse through `lambda.doc.latex`, and the script's macro substitution is retired. Engine, bundled programming packages, expl3 through an in-memory format, the path gate and the resolution order are built; 151 trace records match `pdftex -ini -etex`. Lambda-owned bindings run from the bundled `binding/` directory: `physics.sty` and the `mathtools.sty` macro layer. Residue: the layout-metrics hook (box widths are estimates), in-memory write streams for multi-pass runs, the `local-package-shadowed` diagnostic, engine reads through the central IO door, and an on-disk format cache. Pointer: `vibe/latex/Lambda_Design_TeX_Engine.md` §10. |
@@ -2982,7 +2986,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.1.1v3, D5.3.6v2, D6.1.3v2, D6.3.3v2, D7.4.2v2, D8.1.1v16, D8.3.4v4 | RA1–RA15 | `Lambda_Design_Runtime_Async.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM16 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
-| D7.2 | RG14; DF15; ER-D2; MC1; UA editing; TeX engine (D7.2.7v2) | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20, `vibe/latex/Lambda_Design_TeX_Engine.md` |
+| D7.2 | RG14; DF15; ER-D2; MC1; UA editing; TeX engine (D7.2.7v2); Demo_Mail ML11, MQ12 (D7.2.4v4) | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20, `vibe/latex/Lambda_Design_TeX_Engine.md`, `vibe/Lambda_Demo_Mail.md` §5.2 |
 | D7.3–D7.5 | JA1–JA16 (D7.3.6: JA5.1); Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D7.5.4 | Audible-output gate (USER, 2026-10-19) | [Radiant_Design_Speech §5, §9](../vibe/radiant/Radiant_Design_Speech.md#5-policy) |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune_History.md` §4.6 |

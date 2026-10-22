@@ -243,6 +243,8 @@ typedef struct {
     HANDLE pipe;
     ShellCapture capture;
     bool ok;
+    const ShellOptions* opts;   // for the streaming chunk hook
+    bool is_stderr;
 } WinCaptureThread;
 
 typedef struct {
@@ -320,6 +322,9 @@ static DWORD WINAPI win_capture_thread_main(LPVOID data) {
         if (!shell_capture_append(&context->capture, buffer, (size_t)count)) {
             context->ok = false;
             break;
+        }
+        if (context->opts && context->opts->on_chunk) {
+            context->opts->on_chunk(buffer, (size_t)count, context->is_stderr, context->opts->user_data);
         }
     }
     return 0;
@@ -601,11 +606,14 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     }
 
     stdout_context.pipe = stdout_pipe.read;
+    stdout_context.opts = opts;
     HANDLE stdout_thread = CreateThread(NULL, 0, win_capture_thread_main,
                                         &stdout_context, 0, NULL);
     HANDLE stderr_thread = NULL;
     if (!merge) {
         stderr_context.pipe = stderr_pipe.read;
+        stderr_context.opts = opts;
+        stderr_context.is_stderr = true;
         stderr_thread = CreateThread(NULL, 0, win_capture_thread_main,
                                      &stderr_context, 0, NULL);
     }
@@ -869,6 +877,9 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
                         *open_flag = false;
                         close(fds[i].fd);
                         break;
+                    }
+                    if (opts && opts->on_chunk) {
+                        opts->on_chunk(buffer, (size_t)count, capture == &stderr_capture, opts->user_data);
                     }
                     continue;
                 }

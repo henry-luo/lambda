@@ -23,6 +23,11 @@
 #endif
 #include <string.h>  // for strlen
 #include "../input/input.hpp"
+#include "concurrency.h"
+#include "re2_wrapper.hpp"
+#include "../../lib/mime-detect.h"
+#include <curl/curl.h>
+#include <ctype.h>
 
 extern __thread EvalContext* context;
 
@@ -45,12 +50,6 @@ static Item dry_run_fabricated_output() {
     log_debug("dry-run: fabricated output() call");
     // return fabricated bytes-written count
     return {.item = i2it(42)};
-}
-
-static Item dry_run_fabricated_fetch() {
-    log_debug("dry-run: fabricated fetch() call");
-    String* body = heap_strcpy((char*)DRY_RUN_HTTP_BODY, strlen(DRY_RUN_HTTP_BODY));
-    return {.item = s2it(body)};
 }
 
 static Item dry_run_fabricated_cmd() {
@@ -79,6 +78,10 @@ Item pn_print(Item item) {
     if (virtual_failure_version != before) return err2it_or_error(context ? context->last_error : nullptr);
     if (str) {
         printf("%s", str->chars); // PRINTF_OK: Lambda's procedural print() builtin.
+        // print() is line-buffered wherever stdout goes: on a pipe, stdio would
+        // hold whole blocks, so a parent reading a Lambda child's lines (io.exec
+        // progress, AR-E5v2) saw nothing until the child exited.
+        if (memchr(str->chars, '\n', str->len)) fflush(stdout);
     }
     return ItemNull;
 }
@@ -437,162 +440,633 @@ Item pn_output_append(Item source, Item target_item) {
 }
 
 extern void free_fetch_response(FetchResponse* response);
+Item _map_get(TypeMap* type, void* data, const char* key, bool* found);
+extern "C" StrBuf* lambda_get_local_path_from_item(Item item);
 
-// Convert FetchResponse to Lambda Item (simplified approach)
-Item fetch_response_to_item(FetchResponse* response) {
-    if (!response) { return ItemError; }
-    Item result;
-    // For now, return a simple string with the response data
-    // TODO: Implement proper map structure when the complex type system is working
-    String* result_str;
-    if (response->data && response->size > 0) {
-        result_str = heap_strcpy(response->data, response->size);
-        result = {.item = s2it(result_str)};
-    } else {
-        result = ItemNull;
+// ---------------------------------------------------------------------------
+// fetch / io.fetch (AR-E1, AR-E2, AR-E3v2). The transfer runs on the thread
+// pool while the task parks; the result is one map {status, ok, url, headers,
+// body, bytes}; `to` streams the body to disk; `progress` is a callback run
+// on the task's own stack between parks, never a message the runtime sends.
+// ---------------------------------------------------------------------------
+
+#define FETCH_DEFAULT_USER_AGENT "Lambda/0.1"
+#define FETCH_LOCAL_CHUNK ((size_t)256 * 1024)
+
+struct FetchJob {
+    // the request, all mem-owned: the worker thread holds no managed values (D5.3.3)
+    char* url;
+    char* method;
+    char* body;
+    size_t body_size;
+    char** header_lines;
+    int header_count;
+    char* user_agent;
+    char* local_path;          // a local source is read or copied instead of fetched
+    char* sink_path;           // `to`: the final path
+    char* part_path;           // sink_path + ".part", written first
+    bool resume;
+    int64_t resume_from;
+    int64_t timeout_seconds;
+    bool follow_redirects;
+    bool verify_tls;
+    int64_t max_bytes;
+    // the outcome, written by the worker
+    FetchResponse* response;
+    FetchFailure failure;
+    int local_error;           // errno of a failed local read or copy
+    char* local_data;          // body of a local read (mem-owned)
+    int64_t local_size;        // bytes read or copied from a local source
+    char* mime;                // content type of a local source
+    long local_status;         // 200, or 206/416 for a Range request on a local source
+    char content_range[96];    // the 206 response's content-range header
+    // progress (AR-E3v2): the worker writes the counters, the task reads them
+    LambdaOffload* job;
+    int64_t received;
+    int64_t total;
+    uint64_t started_ms;
+    Rooted<Item>* callback;    // the progress function, rooted by the caller's frame
+    int64_t progress_ms;
+    int64_t delivered;         // `received` of the last level the callback saw
+    bool delivered_any;
+};
+
+static void fetch_job_free(FetchJob* job) {
+    if (!job) return;
+    mem_free(job->url);
+    mem_free(job->method);
+    mem_free(job->body);
+    for (int i = 0; job->header_lines && i < job->header_count; i++) mem_free(job->header_lines[i]);
+    mem_free(job->header_lines);
+    mem_free(job->user_agent);
+    mem_free(job->local_path);
+    mem_free(job->sink_path);
+    mem_free(job->part_path);
+    mem_free(job->local_data);
+    mem_free(job->mime);
+    if (job->response) free_fetch_response(job->response);
+    mem_free(job);
+}
+
+static void fetch_release_orphan(void* data) {
+    fetch_job_free((FetchJob*)data);
+}
+
+static char* fetch_dup(const char* chars, size_t length) {
+    return mem_dup_n(chars ? chars : "", length, MEM_CAT_EVAL);
+}
+
+// Worker thread: forward the counters and ask for a tick.
+static int fetch_progress_hook(void* data, int64_t received, int64_t total) {
+    FetchJob* job = (FetchJob*)data;
+    __atomic_store_n(&job->received, received, __ATOMIC_RELAXED);
+    __atomic_store_n(&job->total, total, __ATOMIC_RELAXED);
+    if (job->callback) lambda_offload_notify(job->job);
+    return 0;
+}
+
+// The first `Range: bytes=a-b` or `bytes=a-` header line, as an inclusive
+// [start, end] (end -1 when open); false when there is none or it is not a
+// single byte range, which a server would also ignore.
+static bool fetch_local_range(const FetchJob* job, int64_t* start, int64_t* end) {
+    for (int i = 0; i < job->header_count; i++) {
+        const char* line = job->header_lines[i];
+        if (!line || !str_istarts_with_cstr(line, "range:")) continue;
+        const char* spec = line + 6;
+        while (*spec == ' ' || *spec == '\t') spec++;
+        if (!str_istarts_with_cstr(spec, "bytes=")) return false;
+        spec += 6;
+        char* rest = NULL;
+        long long a = strtoll(spec, &rest, 10);
+        if (rest == spec || *rest != '-' || a < 0) return false;
+        const char* tail = rest + 1;
+        long long b = -1;
+        if (*tail) {
+            char* after = NULL;
+            b = strtoll(tail, &after, 10);
+            if (after == tail || *after || b < a) return false;
+        }
+        *start = a;
+        *end = b;
+        return true;
     }
-    // Clean up the response structure
-    free_fetch_response(response);
+    return false;
+}
+
+// Worker thread: a local source is read whole, or copied in chunks with the
+// same progress calls a network transfer makes. A single byte range is
+// honoured as an HTTP server would (206 with content-range, 416 past the end),
+// so HLS byte-range segments work over file: URLs.
+static void fetch_run_local(FetchJob* job, const int* cancel_flag) {
+    FILE* in = fopen(job->local_path, "rb");
+    if (!in) { job->local_error = errno ? errno : EIO; return; }
+    int64_t size = file_size(job->local_path);
+    if (size < 0) size = 0;
+    job->local_status = 200;
+    int64_t range_start = 0, range_end = -1;
+    if (!job->part_path && fetch_local_range(job, &range_start, &range_end)) {
+        if (range_start >= size) {
+            job->local_status = 416;
+            job->local_data = (char*)mem_calloc(1, 1, MEM_CAT_EVAL);
+            job->local_size = 0;
+            fclose(in);
+            return;
+        }
+        if (range_end < 0 || range_end >= size) range_end = size - 1;
+        if (fseek(in, (long)range_start, SEEK_SET) != 0) { job->local_error = errno ? errno : EIO; fclose(in); return; }
+        job->local_status = 206;
+        snprintf(job->content_range, sizeof(job->content_range), "bytes %lld-%lld/%lld",
+            (long long)range_start, (long long)range_end, (long long)size);
+        size = range_end - range_start + 1;
+    }
+    __atomic_store_n(&job->total, size, __ATOMIC_RELAXED);
+    if (!job->part_path) {
+        if (job->max_bytes > 0 && size > job->max_bytes) {
+            job->failure.over_limit = true;
+            snprintf(job->failure.message, sizeof(job->failure.message), "file exceeds the byte limit");
+            fclose(in);
+            return;
+        }
+        char* data = (char*)mem_alloc((size_t)size + 1, MEM_CAT_EVAL);
+        if (!data) { job->local_error = ENOMEM; fclose(in); return; }
+        size_t got = size ? fread(data, 1, (size_t)size, in) : 0;
+        data[got] = '\0';
+        job->local_data = data;
+        job->local_size = (int64_t)got;
+        fetch_progress_hook(job, (int64_t)got, size);
+        fclose(in);
+        return;
+    }
+    bool resume = job->resume && job->resume_from > 0 && job->resume_from <= size;
+    FILE* out = fopen(job->part_path, resume ? "ab" : "wb");
+    if (!out) { job->local_error = errno ? errno : EIO; fclose(in); return; }
+    int64_t received = 0;
+    if (resume) {
+        if (fseek(in, (long)job->resume_from, SEEK_SET) == 0) received = job->resume_from;
+        else { fclose(out); out = fopen(job->part_path, "wb"); if (!out) { job->local_error = errno; fclose(in); return; } }
+    }
+    char* buffer = (char*)mem_alloc(FETCH_LOCAL_CHUNK, MEM_CAT_EVAL);
+    if (!buffer) { job->local_error = ENOMEM; fclose(out); fclose(in); return; }
+    while (true) {
+        if (cancel_flag && __atomic_load_n(cancel_flag, __ATOMIC_ACQUIRE)) { job->failure.aborted = true; break; }
+        size_t got = fread(buffer, 1, FETCH_LOCAL_CHUNK, in);
+        if (got == 0) break;
+        if (job->max_bytes > 0 && received + (int64_t)got > job->max_bytes) {
+            job->failure.over_limit = true;
+            snprintf(job->failure.message, sizeof(job->failure.message), "file exceeds the byte limit");
+            break;
+        }
+        if (fwrite(buffer, 1, got, out) != got) { job->local_error = errno ? errno : EIO; break; }
+        received += (int64_t)got;
+        fetch_progress_hook(job, received, size);
+    }
+    mem_free(buffer);
+    if (fclose(out) != 0 && !job->local_error) job->local_error = errno ? errno : EIO;
+    fclose(in);
+    job->local_size = received;
+}
+
+static void fetch_run(LambdaOffload* offload, void* data) {
+    FetchJob* job = (FetchJob*)data;
+    job->job = offload;
+    job->started_ms = time_now_ms();
+    if (job->local_path) { fetch_run_local(job, lambda_offload_cancel_flag(offload)); return; }
+    FetchConfig config = {};
+    config.method = job->method ? job->method : "GET";
+    config.body = job->body;
+    config.body_size = job->body_size;
+    config.headers = job->header_lines;
+    config.header_count = job->header_count;
+    config.timeout_seconds = (long)job->timeout_seconds;
+    config.max_redirects = job->follow_redirects ? 5 : 0;
+    config.user_agent = job->user_agent ? job->user_agent : FETCH_DEFAULT_USER_AGENT;
+    config.verify_ssl = job->verify_tls;
+    config.enable_compression = true;
+    config.max_response_bytes = job->max_bytes > 0 ? (size_t)job->max_bytes : 0;
+    config.sink_path = job->part_path;
+    config.resume_from = job->resume ? job->resume_from : 0;
+    config.progress = fetch_progress_hook;
+    config.progress_data = job;
+    config.cancel_flag = lambda_offload_cancel_flag(offload);
+    job->response = http_fetch2(job->url, &config, &job->failure);
+}
+
+static bool fetch_succeeded(const FetchJob* job) {
+    if (job->local_path) return !job->local_error && !job->failure.over_limit && !job->failure.aborted;
+    return job->response != NULL;
+}
+
+// Loop thread, on the task's stack: hand the callback the latest level.
+static Item fetch_progress(void* data, bool final) {
+    FetchJob* job = (FetchJob*)data;
+    if (!job->callback) return ItemNull;
+    if (final && !fetch_succeeded(job)) return ItemNull;
+    int64_t received = __atomic_load_n(&job->received, __ATOMIC_RELAXED);
+    int64_t total = __atomic_load_n(&job->total, __ATOMIC_RELAXED);
+    // the final level is delivered once: skip it when the last tick already carried it
+    if (final && job->delivered_any && job->delivered == received && total == received) return ItemNull;
+    job->delivered = received;
+    job->delivered_any = true;
+    uint64_t now = time_now_ms();
+    double elapsed = now > job->started_ms ? (double)(now - job->started_ms) / 1000.0 : 0.0;
+    double rate = elapsed > 0 ? (double)received / elapsed : 0.0;
+    RootFrame roots(3);
+    Rooted<Item> url(roots, ItemNull), rate_item(roots, ItemNull);
+    Rooted<Map*> record(roots, (Map*)NULL);
+    String* url_string = heap_strcpy(job->url ? job->url : "", job->url ? (int64_t)strlen(job->url) : 0);
+    if (!url_string) return ItemNull;
+    url.set((Item){.item = s2it(url_string)});
+    rate_item.set(push_d(rate));
+    static const char* names[] = {"url", "received", "total", "rate"};
+    static const TypeId types[] = {LMD_TYPE_STRING, LMD_TYPE_INT, LMD_TYPE_ANY, LMD_TYPE_ANY};
+    record.set(map_alloc_for_type(runtime_result_shape(names, types, 4), NULL, 0));
+    if (!record.get()) return ItemNull;
+    Item values[] = {url.get(), (Item){.item = i2it(received)},
+        total >= 0 ? (Item){.item = i2it(total)} : ItemNull, rate_item.get()};
+    map_fill_items(record.get(), values, 4);
+    Item callback = job->callback->get();
+    Item outcome = fn_call1((Function*)(uintptr_t)callback.item, (Item){.map = record.get()});
+    return get_type_id(outcome) == LMD_TYPE_ERROR ? outcome : ItemNull;
+}
+
+// Whether a body with this content type is text to Lambda (a string) or bytes.
+static bool fetch_content_is_text(const char* content_type, const char* data, size_t size) {
+    if (content_type && *content_type) {
+        const char* end = strchr(content_type, ';');
+        size_t length = end ? (size_t)(end - content_type) : strlen(content_type);
+        while (length && content_type[length - 1] == ' ') length--;
+        char type[96];
+        if (length >= sizeof(type)) length = sizeof(type) - 1;
+        for (size_t i = 0; i < length; i++) type[i] = (char)tolower((unsigned char)content_type[i]);
+        type[length] = '\0';
+        if (strncmp(type, "text/", 5) == 0) return true;
+        static const char* const text_types[] = {"json", "xml", "javascript", "ecmascript", "yaml",
+            "toml", "x-www-form-urlencoded", "sql", "graphql", "csv", "x-sh", "x-ndjson", "ld+json",
+            "mpegurl", NULL};  // HLS playlists (application/vnd.apple.mpegurl, audio/x-mpegurl) are UTF-8 text
+        for (int i = 0; text_types[i]; i++) if (strstr(type, text_types[i])) return true;
+        if (strncmp(type, "image/", 6) == 0 && !strstr(type, "svg")) return false;
+        if (strncmp(type, "audio/", 6) == 0 || strncmp(type, "video/", 6) == 0 ||
+            strncmp(type, "font/", 5) == 0) return false;
+        if (strcmp(type, "application/octet-stream") != 0 && strncmp(type, "application/", 12) == 0 &&
+            !strstr(type, "svg")) return false;
+    }
+    // no usable type: a NUL byte near the start says bytes
+    size_t probe = size < 8192 ? size : 8192;
+    return !(data && memchr(data, 0, probe));
+}
+
+// Builds a map of header names (lowercased; a repeated name keeps its last
+// value) to values, on the runtime shape tree.
+static Map* fetch_headers_map(char** lines, int count, const char* type_name, const char* type_value) {
+    int capacity = count + 1;
+    char** names = (char**)mem_calloc((size_t)capacity, sizeof(char*), MEM_CAT_EVAL);
+    char** values = (char**)mem_calloc((size_t)capacity, sizeof(char*), MEM_CAT_EVAL);
+    int used = 0;
+    auto put = [&](const char* name, size_t name_len, const char* value, size_t value_len) {
+        while (value_len && (value[0] == ' ' || value[0] == '\t')) { value++; value_len--; }
+        while (value_len && (value[value_len - 1] == '\r' || value[value_len - 1] == '\n' ||
+            value[value_len - 1] == ' ')) value_len--;
+        char* key = fetch_dup(name, name_len);
+        if (!key) return;
+        for (size_t i = 0; i < name_len; i++) key[i] = (char)tolower((unsigned char)key[i]);
+        for (int i = 0; i < used; i++) {
+            if (strcmp(names[i], key) == 0) {
+                mem_free(key);
+                mem_free(values[i]);
+                values[i] = fetch_dup(value, value_len);
+                return;
+            }
+        }
+        names[used] = key;
+        values[used] = fetch_dup(value, value_len);
+        used++;
+    };
+    if (names && values) {
+        for (int i = 0; i < count; i++) {
+            const char* line = lines[i];
+            const char* colon = line ? strchr(line, ':') : NULL;
+            if (!colon || colon == line) continue;
+            put(line, (size_t)(colon - line), colon + 1, strlen(colon + 1));
+        }
+        if (type_name && type_value) put(type_name, strlen(type_name), type_value, strlen(type_value));
+    }
+    Map* result = NULL;
+    Input* tree = runtime_shape_tree();
+    TypeMap* shape = NULL;
+    if (names && values && tree) {
+        RootSpan span((size_t)(used > 0 ? used : 1));
+        Item* slots = span.items();
+        bool ok = span.valid();
+        for (int i = 0; ok && i < used; i++) {
+            shape = type_tree_add_map_field_chars(tree, shape, names[i], (uint32_t)strlen(names[i]),
+                LMD_TYPE_STRING, NULL);
+            String* text = heap_strcpy(values[i], (int64_t)strlen(values[i]));
+            if (!shape || !text) ok = false;
+            else slots[i] = (Item){.item = s2it(text)};
+        }
+        if (ok && used == 0) {
+            shape = context && context->pool
+                ? (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
+        }
+        if (ok && shape) {
+            result = map_alloc_for_type(shape, NULL, 0);
+            if (result && used > 0) map_fill_items(result, slots, used);
+        }
+    }
+    for (int i = 0; i < used; i++) { mem_free(names[i]); mem_free(values[i]); }
+    mem_free(names);
+    mem_free(values);
     return result;
 }
 
-Item pn_fetch(Item url, Item options) {
-    if (g_dry_run) return dry_run_fabricated_fetch();
-    log_debug("pn_fetch called");
-    // Validate target parameter
+static Item fetch_error(LambdaErrorCode code, const char* what, const char* detail) {
+    return io_fs_error(code, "io.fetch: %s%s%s", what, detail && *detail ? ": " : "", detail ? detail : "");
+}
+
+// The result map, or the error the transfer produced.
+static Item fetch_result(FetchJob* job) {
+    if (job->local_path) {
+        if (job->local_error) {
+            LambdaErrorCode code = job->local_error == ENOENT ? ERR_FILE_NOT_FOUND
+                : (job->local_error == EACCES ? ERR_FILE_ACCESS_DENIED : ERR_FILE_READ_ERROR);
+            return fetch_error(code, job->local_path, strerror(job->local_error));
+        }
+        if (job->failure.over_limit) return fetch_error(ERR_IO_ERROR, job->local_path, job->failure.message);
+        if (job->failure.aborted) return fetch_error(ERR_CANCELLED, job->local_path, "transfer aborted");
+    } else if (!job->response) {
+        LambdaErrorCode code = job->failure.curl_code == CURLE_OPERATION_TIMEDOUT
+            ? ERR_NETWORK_TIMEOUT : (job->failure.over_limit ? ERR_IO_ERROR : ERR_NETWORK_ERROR);
+        return fetch_error(code, job->url, job->failure.message);
+    }
+    if (job->part_path) {
+        // the body is complete: give it its final name
+        if (file_rename(job->part_path, job->sink_path) != 0) {
+            return fetch_error(ERR_FILE_WRITE_ERROR, job->sink_path, strerror(errno));
+        }
+    }
+    long status = job->local_path ? job->local_status : job->response->status_code;
+    const char* final_url = job->local_path ? job->url
+        : (job->response->effective_url ? job->response->effective_url : job->url);
+    const char* content_type = job->local_path ? job->mime : job->response->content_type;
+    const char* data = job->local_path ? job->local_data : job->response->data;
+    int64_t size = job->local_path ? job->local_size : (int64_t)job->response->size;
+    RootFrame roots(4);
+    Rooted<Item> url(roots, ItemNull), body(roots, ItemNull);
+    Rooted<Map*> headers(roots, (Map*)NULL), result(roots, (Map*)NULL);
+    String* url_string = heap_strcpy(final_url ? final_url : "", final_url ? (int64_t)strlen(final_url) : 0);
+    if (!url_string) return fetch_error(ERR_OUT_OF_MEMORY, job->url, NULL);
+    url.set((Item){.item = s2it(url_string)});
+    if (!job->part_path) {
+        if (fetch_content_is_text(content_type, data, (size_t)size)) {
+            String* text = heap_strcpy(data ? data : "", size);
+            if (!text) return fetch_error(ERR_OUT_OF_MEMORY, job->url, NULL);
+            body.set((Item){.item = s2it(text)});
+        } else if (size > 0) {
+            // S2.2.2v2: an empty byte body is absent, represented by null
+            body.set((Item){.item = x2it(heap_binary_from_bytes(data, size))});
+        }
+    }
+    char content_range_line[112];
+    char* local_lines[1] = {content_range_line};
+    int local_line_count = 0;
+    if (job->local_path && job->content_range[0]) {
+        snprintf(content_range_line, sizeof(content_range_line), "content-range: %s", job->content_range);
+        local_line_count = 1;
+    }
+    headers.set(job->local_path
+        ? fetch_headers_map(local_lines, local_line_count, "content-type", content_type ? content_type : "application/octet-stream")
+        : fetch_headers_map(job->response->response_headers, job->response->response_header_count, NULL, NULL));
+    if (!headers.get()) return fetch_error(ERR_OUT_OF_MEMORY, job->url, "headers");
+    static const char* names[] = {"status", "ok", "url", "headers", "body", "bytes"};
+    static const TypeId types[] = {LMD_TYPE_INT, LMD_TYPE_BOOL, LMD_TYPE_STRING, LMD_TYPE_MAP,
+        LMD_TYPE_ANY, LMD_TYPE_INT};
+    result.set(map_alloc_for_type(runtime_result_shape(names, types, 6), NULL, 0));
+    if (!result.get()) return fetch_error(ERR_OUT_OF_MEMORY, job->url, NULL);
+    Item values[] = {(Item){.item = i2it((int64_t)status)}, (Item){.item = b2it(status >= 200 && status < 300)},
+        url.get(), (Item){.map = headers.get()}, body.get(), (Item){.item = i2it(size)}};
+    map_fill_items(result.get(), values, 6);
+    return (Item){.map = result.get()};
+}
+
+// Runs the job while the task parks, then builds its result; a partial sink
+// is removed unless the caller asked to resume it later.
+static Item fetch_execute(FetchJob* job) {
+    static const LambdaOffloadOps ops = {fetch_run, fetch_progress, fetch_release_orphan};
+    Item outcome = lambda_task_offload(&ops, job, job->progress_ms);
+    Item result = get_type_id(outcome) == LMD_TYPE_ERROR ? outcome : fetch_result(job);
+    if (get_type_id(result) == LMD_TYPE_ERROR && job->part_path && !job->resume) remove(job->part_path);
+    return result;
+}
+
+static bool fetch_option_text(const IoFsOptionMap* opts, const char* name, char** out, Item* error) {
+    Item value = io_fs_option_get(opts, name);
+    if (get_type_id(value) == LMD_TYPE_NULL) return true;
+    if (!is_text_type_id(get_type_id(value))) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: option '%s' must be text", name);
+        return false;
+    }
+    *out = fetch_dup(value.get_chars(), value.get_len());
+    return *out != NULL;
+}
+
+// Reads the options map into the job; `callback` receives the progress function.
+static bool fetch_job_configure(FetchJob* job, Item options, Item* callback, Item* error) {
+    IoFsOptionMap opts;
+    if (!io_fs_options_open(options, "io.fetch", SYSPROC_IO_FETCH, &opts, error)) return false;
+    job->timeout_seconds = 30;
+    job->follow_redirects = true;
+    job->verify_tls = true;
+    job->progress_ms = 250;
+    bool resume = false;
+    if (!fetch_option_text(&opts, "method", &job->method, error) ||
+        !fetch_option_text(&opts, "user_agent", &job->user_agent, error) ||
+        !io_fs_option_count(&opts, "timeout", &job->timeout_seconds, error) ||
+        !io_fs_option_count(&opts, "max_bytes", &job->max_bytes, error) ||
+        !io_fs_option_count(&opts, "progress_ms", &job->progress_ms, error) ||
+        !io_fs_option_bool(&opts, "follow_redirects", &job->follow_redirects, error) ||
+        !io_fs_option_bool(&opts, "verify_tls", &job->verify_tls, error) ||
+        !io_fs_option_bool(&opts, "resume", &resume, error)) return false;
+    job->resume = resume;
+    Item body = io_fs_option_get(&opts, "body");
+    TypeId body_type = get_type_id(body);
+    if (body_type == LMD_TYPE_BINARY) {
+        Binary* bytes = body.get_safe_binary();
+        job->body = fetch_dup(bytes ? (const char*)binary_data(bytes) : "", bytes ? binary_length(bytes) : 0);
+        job->body_size = bytes ? binary_length(bytes) : 0;
+    } else if (body_type != LMD_TYPE_NULL) {
+        String* text = is_text_type_id(body_type) ? NULL : fn_string(body);
+        const char* chars = is_text_type_id(body_type) ? body.get_chars() : (text ? text->chars : "");
+        size_t length = is_text_type_id(body_type) ? body.get_len() : (text ? text->len : 0);
+        job->body = fetch_dup(chars, length);
+        job->body_size = length;
+    }
+    Item headers = io_fs_option_get(&opts, "headers");
+    if (get_type_id(headers) == LMD_TYPE_MAP) {
+        TypeMap* shape = lambda_attr_shape(LMD_TYPE_MAP, headers.map);
+        int count = (int)fn_len(headers);
+        job->header_lines = (char**)mem_calloc((size_t)count + 1, sizeof(char*), MEM_CAT_EVAL);
+        if (!job->header_lines) return false;
+        FOR_EACH_MAP_FIELD(shape, field) {
+            if (!field->name || job->header_count >= count) continue;
+            char* key = fetch_dup(field->name->str, field->name->length);
+            bool found = false;
+            Item value = key ? _map_get(shape, headers.map->data, key, &found) : ItemNull;
+            if (!key || !is_text_type_id(get_type_id(value))) {
+                mem_free(key);
+                *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: header values must be text");
+                return false;
+            }
+            size_t line_len = strlen(key) + 2 + value.get_len();
+            char* line = (char*)mem_alloc(line_len + 1, MEM_CAT_EVAL);
+            if (line) snprintf(line, line_len + 1, "%s: %.*s", key, (int)value.get_len(), value.get_chars());
+            mem_free(key);
+            if (!line) return false;
+            job->header_lines[job->header_count++] = line;
+        }
+    } else if (get_type_id(headers) != LMD_TYPE_NULL) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: option 'headers' must be a map");
+        return false;
+    }
+    Item to = io_fs_option_get(&opts, "to");
+    if (get_type_id(to) != LMD_TYPE_NULL) {
+        StrBuf* path = lambda_get_local_path_from_item(to);
+        if (!path) {
+            *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: option 'to' must be a local path");
+            return false;
+        }
+        job->sink_path = fetch_dup(path->str, path->length);
+        size_t part_len = path->length + 5;
+        job->part_path = (char*)mem_alloc(part_len + 1, MEM_CAT_EVAL);
+        if (job->part_path) snprintf(job->part_path, part_len + 1, "%s.part", path->str);
+        strbuf_free(path);
+        if (!job->sink_path || !job->part_path) return false;
+        if (create_parent_dirs(job->part_path) != 0) {
+            *error = io_fs_error(ERR_FILE_WRITE_ERROR, "io.fetch: cannot create the directory of %s", job->sink_path);
+            return false;
+        }
+        if (job->resume) {
+            int64_t present = file_size(job->part_path);
+            job->resume_from = present > 0 ? present : 0;
+        }
+    }
+    *callback = io_fs_option_get(&opts, "progress");
+    TypeId callback_type = get_type_id(*callback);
+    if (callback_type != LMD_TYPE_NULL && callback_type != LMD_TYPE_FUNC) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: option 'progress' must be a function");
+        return false;
+    }
+    return true;
+}
+
+// Resolves the target into the job: a URL to fetch, or a local path to read.
+static bool fetch_job_target(FetchJob* job, Item url, Item* error) {
     TypeId url_type = get_type_id(url);
     if (!is_text_type_id(url_type) && url_type != LMD_TYPE_PATH) {
-        log_debug("fetch target must be a string, symbol, or path, got type %s", get_type_name(url_type));
-        return ItemError;
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.fetch: target must be a string, symbol, or path, got %s",
+            get_type_name(url_type));
+        return false;
     }
-
     Url* cwd = context ? (Url*)context->cwd : NULL;
     Target* target = item_to_target(url.item, cwd);
     if (!target) {
-        log_error("fetch: failed to resolve target");
-        return ItemError;
+        *error = io_fs_error(ERR_INVALID_OPERATION, "io.fetch: failed to resolve target");
+        return false;
     }
-
     if (target_is_local(target)) {
         // fetch() accepts local targets; routing them through HTTP makes offline tests depend on DNS.
-        StrBuf* path_buf = (StrBuf*)target_to_local_path(target, cwd);
+        StrBuf* path = (StrBuf*)target_to_local_path(target, cwd);
         target_free(target);
-        if (!path_buf || !path_buf->str || path_buf->length == 0) {
-            log_error("fetch: failed to resolve local target path");
-            if (path_buf) strbuf_free(path_buf);
-            return ItemError;
+        if (!path || !path->str || path->length == 0) {
+            if (path) strbuf_free(path);
+            *error = io_fs_error(ERR_INVALID_OPERATION, "io.fetch: failed to resolve local target path");
+            return false;
         }
-
-        size_t file_size = 0;
-        char* file_data = read_binary_file(path_buf->str, &file_size);
-        if (!file_data) {
-            log_error("fetch: failed to read local file %s", path_buf->str);
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-
-        // fetch() returns a string body; local files use the same owned string path as HTTP bodies.
-        String* body = heap_strcpy(file_data, file_size);
-        mem_free(file_data);
-        strbuf_free(path_buf);
-        return (Item){.item = s2it(body)};
+        job->local_path = fetch_dup(path->str, path->length);
+        // the result's url is a file URL, so relative references resolve against it
+        size_t url_len = path->length + 8;
+        job->url = (char*)mem_alloc(url_len + 1, MEM_CAT_EVAL);
+        if (job->url) snprintf(job->url, url_len + 1, "file://%s%s", path->str[0] == '/' ? "" : "/", path->str);
+        strbuf_free(path);
+        MimeDetector* detector = mime_detector_init();
+        const char* mime = detector ? detect_mime_from_filename(detector, job->local_path) : NULL;
+        if (mime && strcmp(mime, "application/octet-stream") != 0) job->mime = fetch_dup(mime, strlen(mime));
+        if (detector) mime_detector_destroy(detector);
+        return job->local_path && job->url;
     }
-
     if (!target_is_remote(target)) {
-        log_error("fetch: unsupported target scheme %d", target->scheme);
+        *error = io_fs_error(ERR_INVALID_OPERATION, "io.fetch: unsupported target scheme %d", target->scheme);
         target_free(target);
-        return ItemError;
+        return false;
     }
-
-    // Parse options parameter (similar to JS fetch options)
-    FetchConfig config = {
-        .method = "GET",
-        .body = NULL,
-        .body_size = 0,
-        .headers = NULL,
-        .header_count = 0,
-        .timeout_seconds = 30,
-        .max_redirects = 5,
-        .user_agent = "Lambda/0.1",
-        .verify_ssl = true,
-        .enable_compression = true
-    };
-
-    // Helper to create Item from string literal
-    auto create_string_item = [](const char* str) -> Item {
-        String* string = heap_strcpy((char*)str, strlen(str));
-        return (Item){.item = s2it(string)};
-    };
-
-    // Parse options if provided
-    TypeId options_type = get_type_id(options);
-    if (options_type == LMD_TYPE_MAP) {
-        Map* options_map = options.map;
-
-        // Extract method
-        Item method_key = create_string_item("method");
-        Item method_item = map_get(options_map, method_key);
-        if (method_item.item && (method_item._type_id == LMD_TYPE_STRING || method_item._type_id == LMD_TYPE_SYMBOL)) {
-            config.method = method_item.get_chars();
-        }
-
-        // Extract body
-        Item body_key = create_string_item("body");
-        Item body_item = map_get(options_map, body_key);
-        if (body_item.item) {
-            if (body_item._type_id == LMD_TYPE_STRING || body_item._type_id == LMD_TYPE_SYMBOL) {
-                config.body = body_item.get_chars();
-                config.body_size = body_item.get_len();
-            } else {
-                // Convert other types to string representation
-                String* body_str = fn_string(body_item);
-                if (body_str) {
-                    config.body = body_str->chars;
-                    config.body_size = body_str->len;
-                }
-            }
-        }
-
-        // Extract headers
-        Item headers_key = create_string_item("headers");
-        Item headers_item = map_get(options_map, headers_key);
-        if (headers_item.type_id() == LMD_TYPE_MAP) {
-            // Convert headers map to curl header list
-            // For now, we'll allocate a simple array (this could be enhanced)
-            log_debug("fetch: headers map found but not fully implemented yet");
-        }
-
-        // Extract timeout
-        Item timeout_key = create_string_item("timeout");
-        Item timeout_item = map_get(options_map, timeout_key);
-        if (timeout_item.item && is_integer_type_id(timeout_item._type_id)) {
-            config.timeout_seconds = it2l(timeout_item);
-        }
-    }
-    else if (options_type != LMD_TYPE_NULL) {
-        log_debug("fetch options must be a map or null, got type %s", get_type_name(options_type));
-        // Continue with default config
-    }
-
     StrBuf* url_buf = strbuf_new();
     const char* url_str = target_to_url_string(target, url_buf);
     target_free(target);
     if (!url_str || url_buf->length == 0) {
-        log_error("fetch: failed to render remote target URL");
         strbuf_free(url_buf);
-        return ItemError;
+        *error = io_fs_error(ERR_INVALID_OPERATION, "io.fetch: failed to render remote target URL");
+        return false;
     }
-
-    // Perform the HTTP request
-    FetchResponse* response = http_fetch(url_str, &config);
+    job->url = fetch_dup(url_buf->str, url_buf->length);
     strbuf_free(url_buf);
-    if (!response) {
-        log_debug("fetch: HTTP request failed");
-        return ItemError;
-    }
+    return job->url != NULL;
+}
 
-    // Convert response to Lambda Item
-    return fetch_response_to_item(response);
+static Item dry_run_fabricated_fetch() {
+    log_debug("dry-run: fabricated fetch() call");
+    FetchJob* job = (FetchJob*)mem_calloc(1, sizeof(FetchJob), MEM_CAT_EVAL);
+    if (!job) return ItemError;
+    job->local_path = fetch_dup("dry-run", 7);
+    job->url = fetch_dup("file:///dry-run", 15);
+    job->mime = fetch_dup("application/json", 16);
+    job->local_data = fetch_dup(DRY_RUN_HTTP_BODY, strlen(DRY_RUN_HTTP_BODY));
+    job->local_size = (int64_t)strlen(DRY_RUN_HTTP_BODY);
+    Item result = fetch_result(job);
+    fetch_job_free(job);
+    return result;
+}
+
+Item pn_fetch(Item url, Item options) {
+    GUARD_ERROR2(url, options);
+    if (g_dry_run) return dry_run_fabricated_fetch();
+    log_debug("pn_fetch called");
+    RootFrame roots(3);
+    Rooted<Item> rooted_url(roots, url), rooted_options(roots, options);
+    Rooted<Item> rooted_callback(roots, ItemNull);
+    FetchJob* job = (FetchJob*)mem_calloc(1, sizeof(FetchJob), MEM_CAT_EVAL);
+    if (!job) return io_fs_error(ERR_OUT_OF_MEMORY, "io.fetch: allocation failed");
+    Item error = ItemError;
+    Item callback = ItemNull;
+    if (!fetch_job_target(job, url, &error) || !fetch_job_configure(job, options, &callback, &error)) {
+        fetch_job_free(job);
+        return error;
+    }
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        // read through the root at each call: the heap may move the closure while the task parks
+        rooted_callback.set(callback);
+        job->callback = &rooted_callback;
+    }
+    Item result = fetch_execute(job);
+    fetch_job_free(job);
+    return result;
+}
+
+// io.copy's remote branch: the same transfer, straight to disk.
+static Item fetch_to_file(const char* url, size_t url_len, const char* dst_path) {
+    FetchJob* job = (FetchJob*)mem_calloc(1, sizeof(FetchJob), MEM_CAT_EVAL);
+    if (!job) return io_fs_error(ERR_OUT_OF_MEMORY, "io.copy: allocation failed");
+    job->url = fetch_dup(url, url_len);
+    job->sink_path = fetch_dup(dst_path, strlen(dst_path));
+    size_t part_len = strlen(dst_path) + 5;
+    job->part_path = (char*)mem_alloc(part_len + 1, MEM_CAT_EVAL);
+    if (job->part_path) snprintf(job->part_path, part_len + 1, "%s.part", dst_path);
+    job->timeout_seconds = 30;
+    job->follow_redirects = true;
+    job->verify_tls = true;
+    job->progress_ms = 250;
+    Item result = (job->url && job->sink_path && job->part_path) ? fetch_execute(job)
+        : io_fs_error(ERR_OUT_OF_MEMORY, "io.copy: allocation failed");
+    fetch_job_free(job);
+    return result;
 }
 
 // Helper function to escape shell arguments for safety
@@ -856,69 +1330,22 @@ Item pn_io_copy(Item src_item, Item dst_item) {
 
     const char* dst_path = dst_buf->str;
 
-    // Handle remote source (fetch and save)
+    // Handle remote source: the io.fetch transfer, streamed to disk (AR-E3v2)
     if (target_is_remote(src_target)) {
         log_debug("io.copy: fetching remote source to %s", dst_path);
-
-        // Get the URL string
         StrBuf* url_buf = strbuf_new();
         target_to_url_string(src_target, url_buf);
-        String* url_str = heap_strcpy(url_buf->str, url_buf->length);
-        strbuf_free(url_buf);
         target_free(src_target);
-
-        // Fetch the remote data using pn_fetch
-        Item url_item = {.item = s2it(url_str)};
-        Item fetch_result = pn_fetch(url_item, ItemNull);
-
-        if (item_is_error(fetch_result) || fetch_result.item == ItemNull.item) {
-            log_error("io.copy: failed to fetch remote source");
-            strbuf_free(dst_buf);
-            return ItemError;
-        }
-
-        // Create parent directories if needed
         if (create_parent_dirs(dst_path) != 0) {
             log_error("io.copy: failed to create parent directories for %s", dst_path);
+            strbuf_free(url_buf);
             strbuf_free(dst_buf);
             return ItemError;
         }
-
-        // Write the fetched data to destination
-        TypeId result_type = get_type_id(fetch_result);
-        int wr = -1;
-#ifndef NDEBUG
-        size_t written = 0;
-#endif
-        if (result_type == LMD_TYPE_STRING) {
-            String* str = it2s(fetch_result);
-            if (str) {
-                wr = write_binary_file(dst_path, str->chars, str->len);
-#ifndef NDEBUG
-                if (wr == 0) written = str->len;
-#endif
-            }
-        } else if (result_type == LMD_TYPE_BINARY) {
-            // Binary descriptors no longer share String's inline character layout.
-            Binary* bin = fetch_result.get_safe_binary();
-            if (bin) {
-                size_t bin_len = binary_length(bin);
-                wr = write_binary_file(dst_path, (const char*)binary_data(bin), bin_len);
-#ifndef NDEBUG
-                if (wr == 0) written = bin_len;
-#endif
-            }
-        }
-
-        if (wr != 0) {
-            log_error("io.copy: failed to write to destination file %s", dst_path);
-            strbuf_free(dst_buf);
-            return ItemError;
-        }
-
-        log_debug("io.copy: wrote %zu bytes from remote source to %s", written, dst_path);
+        Item fetched = fetch_to_file(url_buf->str, url_buf->length, dst_path);
+        strbuf_free(url_buf);
         strbuf_free(dst_buf);
-        return ItemNull;
+        return get_type_id(fetched) == LMD_TYPE_ERROR ? fetched : ItemNull;
     }
 
     // Local source - get local path

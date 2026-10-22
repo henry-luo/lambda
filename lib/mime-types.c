@@ -266,6 +266,12 @@ MimeGlob glob_patterns[] = {
     {"*.mkv", "video/x-matroska", "video/x-matroska"},
     {"*.3gp", "video/3gpp"},
 
+    // Streaming and timed text: HLS playlists and fMP4 segments, WebVTT tracks
+    // (MPEG-TS segments keep *.ts above, which names TypeScript source)
+    {"*.m3u8", "application/vnd.apple.mpegurl", "application/vnd.apple.mpegurl"},
+    {"*.m4s", "video/iso.segment"},
+    {"*.vtt", "text/vtt", "text/vtt"},
+
     // Archives
     {"*.zip", "application/zip", "application/zip"},
     {"*.rar", "application/x-rar-compressed", "application/vnd.rar"},

@@ -1,0 +1,19 @@
+# The archive demo's configuration (AR2v2): the package defaults, with no
+# per-host delay for the local sample and two jobs at a time.
+defaults:
+  formats: [html, readable, markdown]
+  per_host_delay_ms: 0
+  jobs: 2
+  thumbnail: true
+
+media:
+  max_height: 1080
+  subtitles: [en]
+
+rules:
+  - match: { host: ["youtube.com", "*.youtube.com", "youtu.be"] }
+    kind: video
+  - match: { host: ["*.flickr.com", "www.pixiv.net"] }
+    kind: gallery
+  - match: { path: ["*.pdf", "*.epub", "*.zip"] }
+    kind: file

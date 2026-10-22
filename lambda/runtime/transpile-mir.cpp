@@ -8294,8 +8294,15 @@ static bool mir_is_nullable_container_type(TypeId type_id) {
 static bool mir_is_null_literal_node(MirTranspiler* mt, AstNode* node) {
     if (mir_is_null_literal(node)) return true;
     node = ast_unwrap_primary(node);
-    return node && ((node->type && node->type->type_id == LMD_TYPE_NULL) ||
-        mir_expr_carrier_type(mt, node) == LMD_TYPE_NULL);
+    if (!node) return false;
+    // A `var` read keeps its initializer's static type, but a write the read
+    // does not dominate (a loop's previous turn) may have given it a value:
+    // only a flow-stable binding's type proves null. `var w = null` assigned a
+    // map in a loop made `s.map == w` a null test of `s.map`, false on the JIT.
+    bool unstable_var = node->node_type == AST_NODE_IDENT && ((AstIdentNode*)node)->entry &&
+        ((AstIdentNode*)node)->entry->is_mutable && !mir_flow_stable_binding(mt, node);
+    return (!unstable_var && node->type && node->type->type_id == LMD_TYPE_NULL) ||
+        mir_expr_carrier_type(mt, node) == LMD_TYPE_NULL;
 }
 
 static bool mir_can_inline_null_item_test(MirTranspiler* mt,
@@ -10541,8 +10548,27 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
         else if (entry_node->node_type == AST_NODE_STRING_PATTERN ||
                  entry_node->node_type == AST_NODE_SYMBOL_PATTERN) {
             AstPatternDefNode* pattern_def = (AstPatternDefNode*)entry_node;
-            ensure_pattern_compiled(mt, pattern_def);
             TypePattern* pattern_type = (TypePattern*)pattern_def->type;
+            // An imported pattern was compiled and published in its declaring
+            // module's type list; its index means nothing in this module's, so
+            // emit the declaration-owned TypePattern itself (as an imported
+            // object type falls back to its Type*), never re-register it here.
+            if (ident->entry->import) {
+                if (!pattern_type || !pattern_type->re2) {
+                    log_error("mir: imported pattern '%s' was never compiled", name_buf);
+                    MIR_reg_t err = new_reg(mt, "import_pattern_error", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err),
+                        MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_ERROR << 56))));
+                    return mir_value_from_reg(mt, (AstNode*)ident, err, VALUE_REP_ITEM,
+                        &TYPE_ANY, LMD_TYPE_ERROR);
+                }
+                MIR_reg_t pat_reg = new_reg(mt, "import_pattern", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pat_reg),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)pattern_type)));
+                return mir_value_from_reg(mt, (AstNode*)ident, pat_reg,
+                    VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, LMD_TYPE_TYPE);
+            }
+            ensure_pattern_compiled(mt, pattern_def);
             log_debug("mir: pattern reference '%s', index=%d", name_buf, pattern_type->pattern_index);
 
             // emit const_pattern_with_tl(pattern_index, type_list_ptr) call
@@ -22156,6 +22182,14 @@ static bool handler_body_consumes_error_value(AstNode* node) {
     AstNode* effective = ast_unwrap_primary(node);
     if (!effective) return false;
     if (effective->node_type == AST_NODE_CURRENT_ERROR) return true;
+    if (effective->node_type == AST_NODE_CONTENT) {
+        // A braced body yields its last statement: `{ e = ^ }` hands the
+        // handled error to `e`, not a fresh one. Unrecognised, a `pn ... T^`
+        // returned that error from the statement, so the handler caught nothing.
+        AstNode* last = NULL;
+        for (AstNode* item = ((AstListNode*)effective)->item; item; item = item->next) last = item;
+        return last && handler_body_consumes_error_value(last);
+    }
     if (effective->node_type != AST_NODE_ASSIGN_STAM) return false;
     AstAssignStamNode* assign = (AstAssignStamNode*)effective;
     AstNode* rhs = ast_unwrap_primary(assign->value);
@@ -24228,7 +24262,11 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
 static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
     MirValue statement = em_lower_value(&mt->em, item, MIR_VALUE_ANY);
     MIR_reg_t stmt_result = statement.reg;
-    if (mt->current_func_can_raise && side_effect_result_can_error(item->node_type)) {
+    // `e = ^` in a handler stores the handled error: its value is that error,
+    // not a failure of the statement. Propagating it made every statement
+    // handler in a `pn ... T^` re-raise what it had just caught.
+    bool stores_handled = item->node_type == AST_NODE_ASSIGN_STAM && handler_body_consumes_error_value(item);
+    if (mt->current_func_can_raise && side_effect_result_can_error(item->node_type) && !stores_handled) {
         // can-raise procs must not discard failed mutation/helper statements as side effects.
         emit_return_if_item_error(mt, stmt_result);
     } else {
@@ -35031,6 +35069,12 @@ static MIR_reg_t emit_start_result(MirTranspiler* mt, AstStartNode* start_node) 
     int args_root = create_pointer_gc_root_slot(mt, args);
     function = load_gc_root_slot(mt, function_root, "start_fn");
     args = load_gc_root_slot(mt, args_root, "start_args");
+    if (start_node->document_owner) {
+        // S13.3.1v2: the running document owns it; no scope registers it
+        return emit_call_2(mt, "lambda_task_start_document", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, function),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, args));
+    }
     return emit_call_3(mt, "lambda_task_start_function_scoped", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, function),
         MIR_T_P, MIR_new_reg_op(mt->ctx, args),

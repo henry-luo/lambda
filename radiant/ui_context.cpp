@@ -21,6 +21,7 @@
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/concurrency.h"
 #include "network_integration.h"
 
 void fontface_cleanup(UiContext* uicon);
@@ -473,6 +474,10 @@ void free_document(DomDocument* doc) {
         log_error("free_document: document runtime state unavailable; document retained");
         return;
     }
+
+    // S13.3.1v2: tasks the document owns are cancelled, then joined, while its
+    // state and DOM still exist, so their cleanup runs against a live document
+    if (state_owner) lambda_document_tasks_release(doc);
 
     radiant_cancel_async_document_loads(doc);
     // Network image release detaches surfaces from element embed props, which

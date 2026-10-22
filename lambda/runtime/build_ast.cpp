@@ -3090,7 +3090,9 @@ static void direct_check_literal_options(Transpiler* tp, SysFuncInfo* info,
     for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
         if (item->node_type != AST_NODE_KEY_EXPR) continue;
         AstNamedNode* option = (AstNamedNode*)item;
-        if (!option->name || sys_func_option_known(info->fn, option->name->chars,
+        // a spread field (`*: options`) names no option; its keys are checked at run time
+        bool spread = option->name && option->name->len == 1 && option->name->chars[0] == '*';
+        if (!option->name || spread || sys_func_option_known(info->fn, option->name->chars,
                 (size_t)option->name->len)) continue;
         record_semantic_error_span(tp, item->source_span, ERR_INVALID_OPERATION,
             "unknown option '%.*s' for %s (S17.8.1)",
@@ -3116,8 +3118,9 @@ static const char* start_literal_symbol(AstNode* node) {
 }
 
 static bool parse_start_options_span(Transpiler* tp, AstNode* options,
-        SourceSpan span, StartMode* mode) {
+        SourceSpan span, StartMode* mode, bool* document_owner) {
     *mode = START_MODE_TASK;
+    *document_owner = false;
     if (!options) return true;
     AstNode* root = ast_unwrap_primary(options);
     if (!root || root->node_type != AST_NODE_MAP) {
@@ -3127,6 +3130,7 @@ static bool parse_start_options_span(Transpiler* tp, AstNode* options,
     }
 
     bool saw_mode = false;
+    bool saw_owner = false;
     bool valid = true;
     for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
         if (item->node_type != AST_NODE_KEY_EXPR) {
@@ -3136,6 +3140,23 @@ static bool parse_start_options_span(Transpiler* tp, AstNode* options,
             continue;
         }
         AstNamedNode* option = (AstNamedNode*)item;
+        if (start_option_name_is(option, "owner")) {
+            // S13.3.1v2: the only owner a start site can name is the document
+            const char* value = start_literal_symbol(option->as);
+            if (saw_owner) {
+                record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+                    "duplicate `start` option 'owner'");
+                valid = false;
+            } else if (!value || strcmp(value, "document") != 0) {
+                record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+                    "`start` option 'owner' must be the literal symbol 'document'");
+                valid = false;
+            } else {
+                *document_owner = true;
+            }
+            saw_owner = true;
+            continue;
+        }
         if (!start_option_name_is(option, "mode")) {
             record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
                 "unknown `start` option '%.*s'",
@@ -3199,7 +3220,7 @@ static void validate_start_parts(Transpiler* tp, AstStartNode* start,
             "`start` second argument must be an argument array");
         start->type = &TYPE_ERROR;
     }
-    if (!parse_start_options_span(tp, options, span, &start->mode)) {
+    if (!parse_start_options_span(tp, options, span, &start->mode, &start->document_owner)) {
         start->type = &TYPE_ERROR;
     }
     AstNode* args_root = args ? ast_unwrap_primary(args) : NULL;
@@ -7865,8 +7886,9 @@ static bool scan_may_await_node(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_START) {
         AstStartNode* start = (AstStartNode*)node;
         // Creating a child is synchronous, but the owning block's implicit
-        // structured join can suspend unless ownership escapes by return.
-        if (!start->escapes) {
+        // structured join can suspend unless ownership escapes by return or
+        // to the document (S13.3.1v2).
+        if (!start->escapes && !start->document_owner) {
             scan->found = true;
             scan->cause = "implicit scoped-task join";
         }
@@ -7910,8 +7932,9 @@ static bool scan_concurrency_body_node(AstNode* node, void* data) {
     if (node->node_type == AST_NODE_START) {
         AstStartNode* start = (AstStartNode*)node;
         // A non-escaping child is joined when its block exits, so the body's
-        // blocks enter task scopes (and the join can suspend).
-        if (!start->escapes) {
+        // blocks enter task scopes (and the join can suspend). A
+        // document-owned child is joined by its document instead.
+        if (!start->escapes && !start->document_owner) {
             facts->owns_task_scopes = true;
             if (!facts->static_may_await) {
                 facts->static_may_await = true;

@@ -2659,6 +2659,12 @@ TEST_F(NegativeScriptTest, SemanticError_StartRejectsUnsupportedMode) {
         "`start` mode 'thread' is not implemented yet; use 'task'");
 }
 
+// S13.3.1v2: the only owner a start site can name is the running document.
+TEST_F(NegativeScriptTest, SemanticError_StartRejectsUnknownOwner) {
+    ExpectErrorMessage("test/lambda/negative/semantic/start_owner_invalid.ls",
+        "`start` option 'owner' must be the literal symbol 'document'");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/var_type_mismatch.ls");
 }

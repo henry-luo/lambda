@@ -2014,11 +2014,14 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
-                    // native document/media work needs wall time before virtual assertion retries advance.
+                    // native document/media work needs wall time before virtual assertion retries advance;
+                    // so do Lambda tasks whose IO, child processes or thread-pool jobs keep the loop alive.
+                    uv_loop_t* task_loop = lambda_uv_loop();
                     if (radiant_async_document_loads_pending(&ui_context) ||
                         dom_document_has_pending_work(ui_context.document) ||
                         radiant_speech_wall_clock_pending(ui_context.document) ||
-                        radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr)) {
+                        radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr) ||
+                        (task_loop && uv_loop_alive(task_loop))) {
                         if (retry_wait_ms > 50) retry_wait_ms = 50;
                         uv_sleep((unsigned int)retry_wait_ms);
                     }

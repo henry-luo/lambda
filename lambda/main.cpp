@@ -2471,6 +2471,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"photo-album", "test/demo/photo-album/photo-album.ls"},
     {"slides", "test/demo/slides/northstar.slides"},
     {"readability", "test/demo/readability/readability.ls"},
+    {"archive", "test/demo/archive/archive.ls"},
     {"wordcloud", "test/demo/wordcloud.ls"},
 };
 

@@ -32,6 +32,22 @@ fn is_node(el) {
     tag == "#comment" or not (starts_with(tag, "#") or starts_with(tag, "?") or starts_with(tag, "!"))
 }
 
+// one srcset candidate; a trailing NUL stands in for the regex's $. Shared
+// with lambda.archive, which collects the candidates' URLs (AGENTS.md rule 13).
+pub type srcset_item = \((!ws)+ (ws+ ("\d" | ".")+ ("x" | "w"))? ws* ("," | "\u0000"))
+// each candidate of a srcset value, in order: its URL and its descriptor
+// (`w` the width, `x` the density; neither when it has none)
+pub fn srcset_candidates(srcset) => if (not (srcset is string)) [] else
+    [for (m in find(srcset ++ "\u0000", srcset_item), let core = trim(slice(m.value, 0, len(m.value) - 1))
+        where core != "" and core != ",")
+        (let gap = find(core, \(ws+), {limit: 1}),
+         let url = if (len(gap) == 0) core else slice(core, 0, gap[0].index),
+         let d = if (len(gap) == 0) "" else lower(trim(slice(core, gap[0].index))),
+         let v = if (d == "") null else float(slice(d, 0, len(d) - 1)),
+         {url: url, w: if (ends_with(d, "w") and v is float) v else null, x: if (ends_with(d, "x") and v is float) v else null})]
+// the URL of each candidate of a srcset value, in order
+pub fn srcset_urls(srcset) => [for (c in srcset_candidates(srcset)) c.url]
+
 // ---- element access (DOM getAttribute / children / className / id) ----
 pub fn is_el(k) => k is map and k.tag != "#comment"
 pub fn elems(n) => [for (k in n.kids where is_el(k)) k]

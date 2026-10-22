@@ -19,6 +19,7 @@ With no name, this opens the bundled `lambda.doc` viewer and its startup splash
 ./lambda demo scene3d
 ./lambda demo chart
 ./lambda demo slides
+./lambda demo archive
 ./lambda demo wordcloud
 ./lambda demo --list
 ```

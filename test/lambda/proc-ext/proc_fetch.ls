@@ -1,4 +1,4 @@
 pn main() {
     let resp = fetch("test/input/test_data.html", {'method': "GET"})^;
-    print("<h1>Welcome</h1>" in resp)
+    print(contains(resp.body, "<h1>Welcome</h1>") and resp.status == 200)
 }

@@ -1,0 +1,4 @@
+@import "deep.css";
+body { font: 18px/1.6 Georgia, serif; background: url(img/bg.svg) repeat; }
+.site-header { background-image: url("img/header.svg"); }
+figure img { max-width: 100%; }
