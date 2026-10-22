@@ -616,7 +616,17 @@ struct JsModuleRuntimeState {
     uint64_t source_evaluation_order = 0;
 };
 
-struct JsPerformanceState {
+struct JsPerformanceState : RootVector {
+    Item object = {};
+    Item resource_entries = {};
+    Item resource_secondary = {};
+    Item resource_observers = {};
+    Item observer_prototype = {};
+    Item observer_list_prototype = {};
+    uint64_t resource_epoch = UINT64_MAX;
+    uint32_t resource_limit = 250;
+    bool resource_full_pending = false;
+    bool observer_task_pending = false;
     uint64_t origin_epoch = UINT64_MAX;
     double origin_monotonic_ms = 0.0;
     double origin_epoch_ms = 0.0;

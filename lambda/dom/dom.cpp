@@ -6875,6 +6875,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(SIZE,                      "size") \
     X(SLOT,                      "slot") \
     X(SPELLCHECK,                "spellcheck") \
+    X(SRC,                       "src") \
     X(SRCDOC,                    "srcdoc") \
     X(STEP,                      "step") \
     X(STYLE,                     "style") \
@@ -9721,6 +9722,7 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
 JS_FORWARD_STATIC_VOID( _collect_form_controls_rec, (DomNode* node, Item arr), _collect_form_related_rec, (node, arr, true))
 
 extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
+extern "C" int radiant_dom_m4b_src_get(Item receiver, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
 static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
@@ -11051,6 +11053,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     const char* string_attr = nullptr;
     if (_is_string_reflected(elem, prop, &string_attr)) {
+        Item url_value = ItemNull;
+        if (prop_id == JS_DOM_PROP_SRC && radiant_dom_m4b_src_get(elem_item, &url_value)) return url_value;
+        if (prop_id == JS_DOM_PROP_HREF && radiant_dom_m4b_href_get(elem_item, &url_value)) return url_value;
         const char* v = dom_element_attribute_value_ns(elem, "", string_attr);
         return js_name_item(v ? v : "");
     }

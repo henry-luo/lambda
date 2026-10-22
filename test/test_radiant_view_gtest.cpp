@@ -920,6 +920,59 @@ TEST(RadiantViewTest, LoadsXhtmlFeatureGallery) {
     shell_result_free(&result);
 }
 
+TEST(RadiantViewTest, ResourceTimingBuffersTrackFetchAndXhrAcrossGc) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    char* page = read_text_file("test/html/js_resource_timing.html");
+    ASSERT_NE(page, nullptr);
+    struct SourceScope { char* page; ~SourceScope() { mem_free(page); } } source_scope = {page};
+    const char payload[] = "resource timing payload";
+    RadiantViewHttpResource resources[] = {
+        {"GET /page ", "text/html", page, strlen(page)},
+        {"GET /first ", "text/plain", payload, sizeof(payload) - 1},
+        {"GET /second ", "text/plain", payload, sizeof(payload) - 1},
+        {"GET /third ", "text/plain", payload, sizeof(payload) - 1},
+        {"GET /fourth ", "text/plain", payload, sizeof(payload) - 1},
+        {"GET /fifth ", "text/plain", payload, sizeof(payload) - 1},
+        {"GET /xhr ", "text/plain", payload, sizeof(payload) - 1},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    struct ServerScope {
+        pid_t pid;
+        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
+    } server_scope = {server.pid};
+    char url[128];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
+    for (const char* backend : {"ast", "mir"}) {
+        SCOPED_TRACE(backend);
+        const ShellEnvEntry env[] = {
+            {"JS_EXEC_BACKEND", backend}, {"MEMTRACK_MODE", "STATS"},
+            {"VIEW_MEM_STAGES", "1"}, {"VIEW_MEM_STATS", "1"},
+            {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+            {"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr},
+        };
+        RadiantViewLaunch launch = {};
+        launch.label = strcmp(backend, "ast") == 0 ? "resource_timing_ast" : "resource_timing_mir";
+        launch.page = url;
+        launch.event_path = "test/html/js_resource_timing_events.json";
+        launch.env = env;
+        launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+        test_radiant_view_launch_all(&launch, 1);
+        ShellResult& result = launch.result;
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Assertions: 1 passed, 0 failed"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+#endif
+}
+
 TEST(RadiantViewTest, SelectsXhtmlFromHttpMimeAndRedirects) {
 #ifdef _WIN32
     GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";

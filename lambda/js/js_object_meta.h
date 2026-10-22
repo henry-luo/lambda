@@ -97,6 +97,7 @@ LAMBDA_RT_API const JsClassMeta* js_object_meta(Item value);
 bool js_object_has_class(Item value, JsClassId id);
 Item js_native_private_array_state(Item receiver, JsClassId brand,
     int expected_length, const char* error_message);
+Item js_native_private_array_object(JsClassId brand, Item key, Item state, Item prototype);
 bool js_object_uses_ordinary_shape(Item value);
 bool js_object_uses_default_object_to_primitive(Item value);
 TypeMap* js_error_carrier_type_map(void);

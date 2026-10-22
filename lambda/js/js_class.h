@@ -142,6 +142,8 @@ enum JsClass : uint8_t {
     JS_CLASS_XML_HTTP_REQUEST,
     JS_CLASS_FILE_READER,
     JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT,
+    JS_CLASS_PERFORMANCE_OBSERVER,
+    JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -343,6 +345,8 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_EVENT: return "Event";
         case JS_CLASS_CUSTOM_EVENT: return "CustomEvent";
         case JS_CLASS_EVENT_TARGET: return "EventTarget";
+        case JS_CLASS_PERFORMANCE_OBSERVER: return "PerformanceObserver";
+        case JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST: return "PerformanceObserverEntryList";
         case JS_CLASS_FILE_READER: return "FileReader";
         case JS_CLASS_EVENT_EMITTER: return "EventEmitter";
         case JS_CLASS_DOM_EXCEPTION: return "DOMException";

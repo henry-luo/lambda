@@ -177,7 +177,7 @@ true
 true
 true
 file:///docs
-hero.png
+true
 Hero
 true
 utf-8

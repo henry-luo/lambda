@@ -1,0 +1,7 @@
+{
+  "events": [
+    {"type": "click", "target": {"selector": "#check"}},
+    {"type": "assert_attribute", "target": {"selector": "#report"},
+      "attribute": "data-result", "equals": "passed"}
+  ]
+}

@@ -3,6 +3,7 @@
 #include "js_object_meta.h"
 #include "js_runtime.h"
 #include "../lambda.hpp"
+#include "../runtime/lambda-root-frame.hpp"
 extern "C" bool js_promise_vmap_is(Item value);
 
 
@@ -132,6 +133,7 @@ static const JsClassMeta js_class_meta_table[JS_CLASS__COUNT] = {
     JS_META(JS_CLASS_XML_HTTP_REQUEST),
     JS_META(JS_CLASS_FILE_READER),
     JS_META(JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT),
+    JS_META(JS_CLASS_PERFORMANCE_OBSERVER), JS_META(JS_CLASS_PERFORMANCE_OBSERVER_ENTRY_LIST),
 };
 #undef JS_META
 #undef JS_META_F
@@ -237,6 +239,16 @@ Item js_native_private_array_state(Item receiver, JsClassId brand,
             (expected_length >= 0 && state.array->length != expected_length))
         return js_throw_type_error(error_message);
     return state;
+}
+
+Item js_native_private_array_object(JsClassId brand, Item key, Item state, Item prototype) {
+    // the private record and prototype must survive allocation of their branded owner (D5.3.3).
+    RootFrame roots(4);
+    Rooted<Item> key_root(roots, key), state_root(roots, state), proto(roots, prototype);
+    Rooted<Item> object(roots, js_new_object_with_class(brand));
+    JS_RETURN_IF_ERROR(js_private_field_define(object.get(), key_root.get(), state_root.get()));
+    if (js_is_object_value(proto.get())) js_set_prototype(object.get(), proto.get());
+    return object.get();
 }
 
 bool js_object_uses_ordinary_shape(Item value) {

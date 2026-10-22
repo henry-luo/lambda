@@ -1,0 +1,112 @@
+<!doctype html>
+<link rel="icon" href="data:,">
+<button id="check">Check resource timing</button><div id="report">pending</div>
+<script>
+const report = document.getElementById('report');
+function check(condition, message) { if (!condition) throw Error(message); }
+function nextTask() { return new Promise(resolve => setTimeout(resolve, 0)); }
+function resources() { return performance.getEntriesByType('resource'); }
+async function request(path) { const response = await fetch(path); await response.text(); }
+async function run() {
+  const setSize = Performance.prototype.setResourceTimingBufferSize;
+  const clear = Performance.prototype.clearResourceTimings;
+  clear.call(performance);
+  setSize.call(performance, 2);
+  const observe = PerformanceObserver.prototype.observe;
+  const disconnect = PerformanceObserver.prototype.disconnect;
+  const takeRecords = PerformanceObserver.prototype.takeRecords;
+  const listEntries = PerformanceObserverEntryList.prototype.getEntries;
+  const observed = [];
+  const observer = new PerformanceObserver(function(list, source) {
+    check(this === observer && source === observer, 'observer callback receiver');
+    check(list instanceof PerformanceObserverEntryList, 'observer entry list prototype');
+    const batch = listEntries.call(list);
+    for (const entry of batch) {
+      check(list.getEntriesByName(entry.name, 'resource').includes(entry), 'observer name filter');
+      check(list.getEntriesByType('mark').length === 0, 'observer type filter');
+      observed.push(entry);
+    }
+  });
+  Object.freeze(observer);
+  observe.call(observer, {entryTypes: ['resource']});
+  check(observed.length === 0, 'observe does not invent an entry');
+  const before = performance.now();
+  await request('/first');
+  await request('/second');
+  await nextTask();
+  let entries = resources();
+  check(entries.length === 2, 'first two requests');
+  const first = entries[0];
+  check(first.name === new URL('/first', location.href).href, 'absolute request name');
+  check(first.entryType === 'resource' && first.initiatorType === 'fetch', 'entry types');
+  check(first.startTime >= before && first.responseEnd >= first.startTime &&
+    first.responseEnd <= performance.now(), 'observed request timing');
+  check(first.duration === first.responseEnd - first.startTime, 'elapsed request time');
+  check(entries[1].startTime >= first.startTime, 'chronological timeline');
+  check(performance.getEntriesByName(first.name, 'resource')[0] === first, 'name filter and identity');
+  check(performance.getEntriesByName(first.name, 'mark').length === 0, 'type filter');
+  check(observed.length === 2 && observed[0] === first, 'asynchronous real observer records');
+  let bufferedCalls = 0;
+  const bufferedObserver = new PerformanceObserver(() => bufferedCalls++);
+  observe.call(bufferedObserver, {type:'resource', buffered:true});
+  const buffered = takeRecords.call(bufferedObserver);
+  check(buffered.length === 2 && buffered[0] === first, 'buffered records and identity');
+  check(takeRecords.call(bufferedObserver).length === 0, 'takeRecords drains queue');
+  disconnect.call(bufferedObserver);
+  await nextTask();
+  check(bufferedCalls === 0, 'disconnect cancels pending delivery');
+  entries.length = 0;
+  check(resources().length === 2 && performance.getEntries().includes(first), 'query snapshot');
+  setSize.call(performance, 0);
+  check(resources().length === 2, 'shrinking retains entries');
+  let full = 0;
+  let mode = 'grow';
+  performance.onresourcetimingbufferfull = function(event) {
+    check(this === performance && event.target === performance &&
+      event.type === 'resourcetimingbufferfull', 'overflow event target');
+    full++;
+    if (mode === 'grow') setSize.call(performance, 3);
+    if (mode === 'clear') { clear.call(performance); setSize.call(performance, 1); }
+  };
+  await request('/third');
+  await nextTask();
+  check(full === 1 && resources().length === 3, 'grow buffer in overflow handler');
+  setSize.call(performance, 1);
+  mode = 'clear';
+  await request('/fourth');
+  await nextTask();
+  check(full === 2 && resources().length === 1 && resources()[0].name.endsWith('/fourth'),
+    'clear buffer preserves pending request');
+  clear.call(performance);
+  setSize.call(performance, 0);
+  mode = 'drop';
+  await request('/fifth');
+  await nextTask();
+  check(full === 3 && resources().length === 0, 'discard overflow without progress');
+  check(observed.length === 5 && observed[4].name.endsWith('/fifth'),
+    'observer receives entries independently of timeline capacity');
+  disconnect.call(observer);
+  performance.onresourcetimingbufferfull = null;
+  setSize.call(performance, 2);
+  await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', '/xhr');
+    xhr.onload = resolve;
+    xhr.onerror = reject;
+    xhr.send();
+  });
+  check(resources().length === 1 && resources()[0].initiatorType === 'xmlhttprequest',
+    'XHR shares transport with its own initiator');
+  await nextTask();
+  check(observed.length === 5, 'disconnected observer stays inactive');
+  clear.call(performance);
+  check(resources().length === 0, 'clear final entries');
+  report.setAttribute('data-result', 'passed');
+}
+document.getElementById('check').onclick = function() {
+  run().catch(error => {
+    report.setAttribute('data-result', String(error));
+    console.error(error);
+  });
+};
+</script>

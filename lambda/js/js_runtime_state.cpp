@@ -754,6 +754,7 @@ static bool js_runtime_state_initialize(JsRuntimeState* state, EvalContext* owne
     state->intrinsics->mutation_serial = 1;
     state->promises.unhandled_strict = js_promise_initial_unhandled_rejections_strict();
     state->performance.origin_epoch = UINT64_MAX;
+    state->performance.resource_epoch = UINT64_MAX;
     return true;
 }
 
@@ -997,6 +998,8 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         "clipboard prototypes and drag session", data);
     visit(&state->dom, &state->dom.implementation, 4,
         "DOM singleton wrappers", data);
+    visit(&state->performance, &state->performance.object, 6,
+        "Performance resource timing buffers", data);
     if (state->string_caches) {
         visit(state->string_caches,
             &state->string_caches->last_four_byte_escape,
