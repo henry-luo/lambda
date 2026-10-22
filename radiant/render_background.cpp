@@ -1684,6 +1684,7 @@ struct BackgroundPaintContext {
     UiContext* ui;
     ViewBlock* view;
     RasterRenderContext* raster;
+    RasterRenderContext* direct_raster;
     float pixel_ratio;
     const RdtMatrix* transform;
     ImageSurface* image;
@@ -1724,8 +1725,14 @@ static void paint_background_tile(const Rect* tile, void* data) {
         return;
     }
     if (context->text_shape) paint_push_clip(context->paint, context->text_shape, context->transform);
-    if (!render_media_paint_svg_image(context->paint, context->image, *tile, &context->clip,
-            ui_context_raster_scale(context->ui), context->ui->font_ctx, context->ui)) {
+    const RdtMatrix* svg_transform = context->image && context->image->format == IMAGE_FORMAT_SVG
+        ? context->transform : nullptr;
+    // subscenes and their content clips inherit density/placement from the stack.
+    if (svg_transform) paint_push_transform(context->paint, svg_transform);
+    bool svg_recorded = render_media_paint_svg_image(context->paint, context->image, *tile, &context->clip,
+        ui_context_raster_scale(context->ui), context->ui->font_ctx, context->ui);
+    if (svg_transform) paint_pop_transform(context->paint);
+    if (!svg_recorded) {
         paint_draw_image_resource(context->paint, context->image, tile->x, tile->y,
             tile->width, tile->height, 255, context->transform);
     }
@@ -1749,14 +1756,14 @@ static bool background_push_layer_clip(BackgroundPaintContext* context,
                                       const BackgroundGeometry* layer, Rect clip) {
     RdtPath* path = background_layer_clip(context->view, layer, clip);
     if (!path) return false;
-    if (context->raster) rc_push_clip(context->raster, path, context->transform);
+    if (context->direct_raster) rc_push_clip(context->direct_raster, path, context->transform);
     else paint_push_clip(context->paint, path, context->transform);
     rdt_path_free(path);
     return true;
 }
 
 static void background_pop_layer_clip(BackgroundPaintContext* context) {
-    if (context->raster) rc_pop_clip(context->raster);
+    if (context->direct_raster) rc_pop_clip(context->direct_raster);
     else paint_pop_clip(context->paint);
 }
 
@@ -1783,12 +1790,15 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
                               const Rect* painting_area) {
     if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
     BackgroundProp* background = view->boundary()->background;
-    BackgroundPaintContext context = {paint, ui, view, raster, pixel_ratio, transform, nullptr, {}, {}};
+    bool isolated = background_has_blend(background);
+    // immediate raster gateways flush pending PaintIR; a blended background
+    // must record its clips and images inside one complete semantic group.
+    BackgroundPaintContext context = {paint, ui, view, raster, isolated ? nullptr : raster,
+        pixel_ratio, transform, nullptr, {}, {}};
     context.text_shape = text_shape;
     int count = background_layer_count(background);
     BackgroundLayer* bottom = background_layer_at(background, count - 1);
     bool recorded = false;
-    bool isolated = background_has_blend(background);
     if (isolated) {
         IRect bounds = background_blend_bounds(&context, painting_area ? *painting_area : rect);
         PaintEffectGroup group = {};
@@ -1832,6 +1842,10 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
         background_source_rects(ui, view, layer, rect, painting_area ? *painting_area : rect, 1.0f, &position, &clip);
         context.image = layer->image ? load_document_image(ui->document, ui, layer->image) : nullptr;
         if (layer->image && !context.image) continue;
+        // semantic image commands borrow decoded pixels; metadata alone is
+        // insufficient when the completed blend group is lowered later.
+        if (context.image && !context.direct_raster && context.image->format != IMAGE_FORMAT_SVG)
+            image_surface_ensure_decoded(context.image, context.image->width, context.image->height);
         context.gradient = {};
         context.gradient.gradient_type = layer->gradient_type;
         context.gradient.linear_gradient = lam::shared(layer->linear_gradient.get());
@@ -1866,7 +1880,7 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
             group.opacity = 1.0f; group.blend_mode = layer->blend_mode;
             paint_begin_effect_group(paint, &group);
         }
-        if (raster && context.image) {
+        if (context.direct_raster && context.image) {
             float scale = raster->raster_scale;
             Rect physical_position = {position.x * scale, position.y * scale,
                 position.width * scale, position.height * scale};

@@ -801,6 +801,9 @@ extern "C" void dom_install_collection_globals(void) {
     _install_node_iface(global);
     js_dom_install_interface(global, "CharacterData");
     _link_iface_proto(global, "CharacterData", "Node");
+    // text nodes must inherit ChildNode's CharacterData methods, like Comment.
+    dom_install_value_constructor(global, "Text", dom_text_ctor, true);
+    _link_iface_proto(global, "Text", "CharacterData");
     dom_install_value_constructor(global, "Comment", dom_comment_ctor, true);
     _link_iface_proto(global, "Comment", "CharacterData");
     // Document wrappers are module-owned, but bare WebIDL constructor lookup

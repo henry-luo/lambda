@@ -1865,6 +1865,7 @@ TEST(RadiantViewTest, ExplicitLayoutTimerWindowOverridesTheEnvironmentIncludingZ
     const char* output = "temp/test_layout_timer_window.json";
     const char* document = "<!doctype html><body><p id='status'>capture-now-ready</p><p id='clock'></p><p id='zero'>zero-pending</p><script>"
         "document.getElementById('clock').textContent='capture-clock-'+performance.now();"
+        "(function repeat(){setTimeout(repeat,0);})();"
         "setTimeout(function(){setTimeout(function(){document.getElementById('zero').textContent='zero-nested-'+performance.now();},0);},0);"
         "setTimeout(function(){document.getElementById('status').textContent='timer-fired';},100);</script></body>";
     FILE* file = fopen(page, "wb"); ASSERT_NE(file, nullptr);

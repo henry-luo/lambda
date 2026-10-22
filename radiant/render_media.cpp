@@ -139,6 +139,8 @@ bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect re
     Element* root = image && image->pic ? rdt_picture_get_svg_root(image->pic) : nullptr;
     if (!root) return false;
     if (rect.width <= 0 || rect.height <= 0) return true;
+    // image-only pages can emit a subscene before any inline SVG initializes its lowerers.
+    render_svg_inline_register_paint_ir_lowerers();
     RdtMatrix placement = rdt_matrix_translate(rect.x, rect.y);
     PaintSvgSubscene scene = {};
     render_svg_build_subscene(&scene, root, rect.width, rect.height,

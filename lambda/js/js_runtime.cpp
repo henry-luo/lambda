@@ -1867,28 +1867,37 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
 
 // Proxy [[GetOwnProperty]](key)
 extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) {
-    JsProxyData* pd = js_get_proxy_data(proxy);
+    RootFrame roots(7);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, proxy), property(roots, key), trap(roots, ItemNull);
+    Rooted<Item> target(roots, ItemNull), handler(roots, ItemNull);
+    Rooted<Item> trap_result(roots, ItemNull), target_desc(roots, ItemNull);
+    JsProxyData* pd = js_get_proxy_data(owner.get());
     if (!pd) return make_js_undefined();
-    JS_ASSIGN_OR_RETURN(trap, js_proxy_get_trap(pd, "getOwnPropertyDescriptor", 24));
-    if (trap.item == ItemNull.item) {
-        return js_object_get_own_property_descriptor(PD_TARGET(pd), key);
-    }
-    Item args[2] = { PD_TARGET(pd), key };
-    JS_ASSIGN_OR_RETURN(trap_result, js_call_function(trap, PD_HANDLER(pd), args, 2));
+    target.set(PD_TARGET(pd));
+    handler.set(PD_HANDLER(pd));
+    trap.set(js_proxy_get_trap(pd, "getOwnPropertyDescriptor", 24));
+    JS_RETURN_IF_ERROR(trap.get());
+    if (trap.get().item == ItemNull.item)
+        return js_object_get_own_property_descriptor(target.get(), property.get());
+    Item args[2] = {target.get(), property.get()};
+    trap_result.set(js_call_function(trap.get(), handler.get(), args, 2));
+    JS_RETURN_IF_ERROR(trap_result.get());
+    // target reflection can collect the user-supplied descriptor before validation.
 
     // ES2020 §9.5.5 invariant checks
-    Item target = PD_TARGET(pd);
-    JS_ASSIGN_OR_RETURN(target_desc, js_object_get_own_property_descriptor(target, key));
+    target_desc.set(js_object_get_own_property_descriptor(target.get(), property.get()));
+    JS_RETURN_IF_ERROR(target_desc.get());
 
     // If trap returns undefined
-    if (trap_result.item == ItemNull.item || get_type_id(trap_result) == LMD_TYPE_UNDEFINED) {
-        if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+    if (trap_result.get().item == ItemNull.item || get_type_id(trap_result.get()) == LMD_TYPE_UNDEFINED) {
+        if (get_type_id(target_desc.get()) == LMD_TYPE_MAP) {
             // target has this property
-            bool configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
+            bool configurable = js_map_own_flag(target_desc.get().map, "configurable", 12, true);
             if (!configurable) {
                 return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned undefined for property which is non-configurable on the target");
             }
-            if (!js_is_extensible(target)) {
+            if (!js_is_extensible(target.get())) {
                 return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned undefined for property which exists on the non-extensible target");
             }
         }
@@ -1896,30 +1905,30 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
     }
 
     // trap result must be an Object
-    if (get_type_id(trap_result) != LMD_TYPE_MAP) {
+    if (get_type_id(trap_result.get()) != LMD_TYPE_MAP) {
         return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap must return an object or undefined");
     }
 
     // Check that the returned descriptor is valid
     // If target property is non-configurable, result must also be non-configurable
-    if (get_type_id(target_desc) == LMD_TYPE_MAP) {
-        bool target_configurable = js_map_own_flag(target_desc.map, "configurable", 12, true);
+    if (get_type_id(target_desc.get()) == LMD_TYPE_MAP) {
+        bool target_configurable = js_map_own_flag(target_desc.get().map, "configurable", 12, true);
 
-        bool result_configurable = js_map_own_flag(trap_result.map, "configurable", 12, true);
+        bool result_configurable = js_map_own_flag(trap_result.get().map, "configurable", 12, true);
 
         if (!target_configurable) {
             if (result_configurable) {
                 return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned configurable descriptor for non-configurable property on target");
             }
             // non-configurable non-writable: result must also be non-writable
-            if (!js_map_own_flag(target_desc.map, "writable", 8, true)) {
-                if (js_map_own_flag(trap_result.map, "writable", 8, false)) {
+            if (!js_map_own_flag(target_desc.get().map, "writable", 8, true)) {
+                if (js_map_own_flag(trap_result.get().map, "writable", 8, false)) {
                     return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned writable descriptor for non-configurable non-writable property on target");
                 }
             }
             // non-configurable + writable target: result must not be non-writable
-            if (js_map_own_flag(target_desc.map, "writable", 8, false)) {
-                if (!js_map_own_flag(trap_result.map, "writable", 8, true)) {
+            if (js_map_own_flag(target_desc.get().map, "writable", 8, false)) {
+                if (!js_map_own_flag(trap_result.get().map, "writable", 8, true)) {
                     return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-writable descriptor for non-configurable writable property on target");
                 }
             }
@@ -1930,16 +1939,16 @@ extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) 
         }
     } else {
         // target doesn't have property
-        if (!js_is_extensible(target)) {
+        if (!js_is_extensible(target.get())) {
             return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned a descriptor for property on a non-extensible target that does not exist on target");
         }
-        bool result_configurable = js_map_own_flag(trap_result.map, "configurable", 12, true);
+        bool result_configurable = js_map_own_flag(trap_result.get().map, "configurable", 12, true);
         if (!result_configurable) {
             return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-configurable descriptor for property that does not exist on target");
         }
     }
 
-    return trap_result;
+    return trap_result.get();
 }
 
 // Proxy [[DefineOwnProperty]](key, desc)
@@ -4631,8 +4640,7 @@ bool js_error_own_property(Item obj, const char* name, int len, Item* out) {
     if (!error || !name || !out) return false;
     uint64_t* value = NULL;
     uint8_t bit = js_error_standard_own_field(error, name, len, &value);
-    if (bit) {
-        if ((error->js_own_flags & bit) == 0) return false;
+    if (bit && (error->js_own_flags & bit)) {
         // Lazy Error stacks are own but have no materialized data Item until
         // the first read; reflection still observes the own-property invariant.
         *out = value && *value ? (Item){.item = *value} :
@@ -4653,16 +4661,22 @@ bool js_error_own_property(Item obj, const char* name, int len, Item* out) {
 bool js_error_delete_own_property(Item obj, const char* name, int len) {
     LambdaError* error = js_error_from_value(obj);
     if (!error || !name) return true;
+    Item properties = js_error_properties_map(obj, false);
+    if (get_type_id(properties) == LMD_TYPE_MAP &&
+            !js_ordinary_delete(properties, name, len)) return false;
+    js_error_clear_standard_own_property(obj, name, len);
+    return true;
+}
+
+void js_error_clear_standard_own_property(Item obj, const char* name, int len) {
+    LambdaError* error = js_error_from_value(obj);
+    if (!error || !name) return;
     uint64_t* value = NULL;
     uint8_t bit = js_error_standard_own_field(error, name, len, &value);
     if (bit) {
         error->js_own_flags &= (uint8_t)~bit;
         if (value) *value = 0;
-        return true;
     }
-    Item properties = js_error_properties_map(obj, false);
-    return get_type_id(properties) != LMD_TYPE_MAP ||
-        js_ordinary_delete(properties, name, len);
 }
 
 static Item js_materialize_function_prototype_property(
@@ -4941,6 +4955,13 @@ extern "C" Item js_get_key_core(Item object, Item key,
         }
         String* property = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!error) return make_js_undefined();
+        Item properties = js_error_properties_map(object_root.get(), false);
+        if (get_type_id(properties) == LMD_TYPE_MAP) {
+            Item own_value = ItemNull;
+            JsOwnGetStatus own_status = js_ordinary_get_own(properties, key,
+                object_root.get(), &own_value);
+            if (own_status == JS_OWN_READY) return own_value;
+        }
         if (property && property->len == 4 && strncmp(property->chars, "name", 4) == 0) {
             if (error->js_name_item) return (Item){.item = error->js_name_item};
         }
@@ -4950,18 +4971,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
         if (property && property->len == 5 && strncmp(property->chars, "cause", 5) == 0) {
             if (error->js_cause_item) return (Item){.item = error->js_cause_item};
             if (error->cause) return err2it(error->cause);
-            return make_js_undefined();
         }
-        if (property && property->len == 5 && strncmp(property->chars, "stack", 5) == 0) {
+        if (property && property->len == 5 && strncmp(property->chars, "stack", 5) == 0 &&
+                (error->js_own_flags & JS_ERROR_OWN_STACK)) {
             return js_error_materialize_stack(object_root.get());
-        }
-        Item properties = js_error_properties_map(object_root.get(), false);
-        if (get_type_id(properties) == LMD_TYPE_MAP) {
-            Item own_value = ItemNull;
-            JsOwnGetStatus own_status = js_ordinary_get_own(properties, key,
-                object_root.get(), &own_value);
-            if (own_status == JS_OWN_READY) return own_value;
-            if (own_status == JS_OWN_DELETED) return make_js_undefined();
         }
         if (error->thrown_value_item) {
             Item original = (Item){.item = error->thrown_value_item};
@@ -7529,6 +7542,13 @@ static Item js_set_storage_mode(Item object, Item key,
         LambdaError* error = js_error_from_value(object);
         String* property = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!error) return value;
+        Item properties = js_error_properties_map(object_root.get(), false);
+        if (property && get_type_id(properties) == LMD_TYPE_MAP &&
+                js_own_shape_slot_status(properties, property->chars,
+                    (int)property->len, nullptr, nullptr) != JS_SHAPE_SLOT_ABSENT) {
+            return js_set_storage_mode(properties, key, value, receiver,
+                bypass_accessor_dispatch, strict);
+        }
         if (property && property->len == 4 && strncmp(property->chars, "name", 4) == 0) {
             error->js_name_item = value.item;
             error->js_own_flags |= JS_ERROR_OWN_NAME;
@@ -7556,7 +7576,7 @@ static Item js_set_storage_mode(Item object, Item key,
                     original, key, value, receiver, bypass_accessor_dispatch, strict);
             }
         }
-        Item properties = js_error_properties_map(object_root.get(), true);
+        properties = js_error_properties_map(object_root.get(), true);
         if (get_type_id(properties) == LMD_TYPE_MAP) {
             return js_set_storage_mode(
                 properties, key, value, receiver, bypass_accessor_dispatch, strict);
@@ -7666,30 +7686,9 @@ static Item js_set_storage_mode(Item object, Item key,
 
 extern "C" Item js_set_error_property_completion(Item object, Item key,
                                                    Item value) {
-    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
-    LambdaError* error = js_error_from_value(object_root.get());
-    if (!error) return (Item){.item = b2it(false)};
-    String* property = get_type_id(key_root.get()) == LMD_TYPE_STRING
-        ? it2s(key_root.get()) : NULL;
-    if (property && property->len == 4 && memcmp(property->chars, "name", 4) == 0) {
-        error->js_name_item = value_root.get().item;
-        error->js_own_flags |= JS_ERROR_OWN_NAME;
-        return (Item){.item = b2it(true)};
-    }
-    if (property && property->len == 7 && memcmp(property->chars, "message", 7) == 0) {
-        error->js_message_item = value_root.get().item;
-        error->js_own_flags |= JS_ERROR_OWN_MESSAGE;
-        return (Item){.item = b2it(true)};
-    }
-    if (property && property->len == 5 && memcmp(property->chars, "cause", 5) == 0) {
-        error->js_cause_item = value_root.get().item;
-        error->js_own_flags |= JS_ERROR_OWN_CAUSE;
-        return (Item){.item = b2it(true)};
-    }
-    Item properties = js_error_properties_map(object_root.get(), true);
-    if (get_type_id(properties) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    Item stored = js_set_storage_mode(properties, key_root.get(), value_root.get(),
-        properties, false, false);
+    if (!js_error_from_value(object)) return (Item){.item = b2it(false)};
+    // keep both execution tiers on the descriptor-aware path with the Error receiver.
+    Item stored = js_set_storage_mode(object, key, value, object, false, false);
     return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
 }
 

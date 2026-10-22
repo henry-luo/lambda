@@ -6492,6 +6492,13 @@ TEST(RenderOutputParity, CalculatedZIndexValuesReachStackingAcrossOutputs) {
 }
 
 TEST(RenderOutputParity, OrderedBackgroundLayersAndComponentsAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const unsigned char red_pixel[] = {255, 0, 0, 255};
+    ASSERT_TRUE(write_png_rgba("temp/render_output_parity/background_blend_red.png", red_pixel, 1, 1));
+    const char* red_svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' "
+        "viewBox='0 0 8 8' preserveAspectRatio='none'>"
+        "<rect width='8' height='8' fill='red'/></svg>";
+    ASSERT_TRUE(write_file_all("temp/render_output_parity/background_blend_red.svg", red_svg, strlen(red_svg)));
     const char* prefix = "<!doctype html><meta charset=utf-8><style>html,body{margin:0;background:white}"
         ".box{position:relative;width:48px;height:32px;box-sizing:border-box}.patch{position:absolute}</style>";
     struct Case { const char* name; const char* actual; const char* reference; const char* parent_style = ""; };
@@ -6504,6 +6511,10 @@ TEST(RenderOutputParity, OrderedBackgroundLayersAndComponentsAcrossOutputs) {
         {"conic_linear", "background:conic-gradient(blue,blue),linear-gradient(red,red)", "background:blue"},
         {"multiply", "background:linear-gradient(red,red),radial-gradient(blue,blue);background-blend-mode:multiply", "background:black"},
         {"isolated_multiply", "background:linear-gradient(red,red);background-blend-mode:multiply", "background:red", "background:blue"},
+        {"image_multiply", "background: url(background_blend_red.png),linear-gradient(blue,blue);"
+            "background-size:100% 100%;background-repeat:no-repeat;background-blend-mode:multiply", "background:black"},
+        {"svg_multiply", "background: url(background_blend_red.svg),linear-gradient(blue,blue);"
+            "background-size:100% 100%;background-repeat:no-repeat;background-blend-mode:multiply", "background:black"},
         {"nonconstant", "background:linear-gradient(red,blue),radial-gradient(green,green)", "background:linear-gradient(red,blue)"},
     };
     for (int scale = 1; scale <= 2; scale++) {
@@ -6534,6 +6545,30 @@ TEST(RenderOutputParity, OrderedBackgroundLayersAndComponentsAcrossOutputs) {
             snprintf(actual, sizeof(actual), "%s<div class=box style='%s'></div>", prefix, geometries[index]);
             snprintf(reference, sizeof(reference), "%s%s", prefix, references[index]);
             expect_html_pair_output_parity(name, actual, reference, true, scale);
+        }
+    }
+}
+
+TEST(RenderOutputParity, RoundedBackgroundBlendCompletesItsEffectScope) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "<!doctype html><style>html,body{margin:0;background:white}"
+        "div{width:48px;height:32px;border-radius:8px;background:linear-gradient(red,red),"
+        "radial-gradient(blue,blue);background-blend-mode:multiply}</style><div></div>";
+    const char* source = "temp/render_output_parity/rounded_background_blend.html";
+    for (int density = 1; density <= 2; density++) {
+        char options[64]; snprintf(options, sizeof(options), "--pixel-ratio %d", density);
+        for (const char* format : {"png", "svg", "pdf"}) {
+            char output[PATH_MAX]; snprintf(output, sizeof(output),
+                "temp/render_output_parity/rounded_background_blend_%dx.%s", density, format);
+            ASSERT_TRUE(render_html_fixture(source, output, html, options));
+            ASSERT_TRUE(file_exists(output));
+            if (strcmp(format, "png")) continue;
+            ImageData image = {}; ASSERT_TRUE(load_png_rgba(output, &image));
+            // rounded layers have independent edge coverage; the opaque interior
+            // and excluded corner verify paint without assuming identical antialiasing.
+            expect_preview_pixel(image, 24 * density, 16 * density, 0, 0, 0);
+            expect_preview_pixel(image, 0, 0, 255, 255, 255);
+            image_free(image.pixels);
         }
     }
 }

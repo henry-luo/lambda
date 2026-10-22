@@ -2454,6 +2454,7 @@ static const char* dom_svg_interface_name(DomElement* elem) {
 extern "C" Item dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)dom_unwrap_element(obj);
     const char* ctor_name = "Node";
+    if (node && node->is_text()) ctor_name = "Text";
     if (node && node->as_attribute()) ctor_name = "Attr";
     if (node && node->is_comment()) {
         // doctypes share native comment storage but expose their own IDL
@@ -18193,7 +18194,7 @@ extern "C" Item dom_document_fragment_ctor(void) {
     return dom_create_document_fragment(_js_current_document);
 }
 
-extern "C" Item dom_comment_ctor(Item data_arg) {
+static Item dom_character_data_ctor(Item data_arg, DomNodeType node_type) {
     DomDocument* doc = _js_current_document;
     if (!doc) return ItemNull;
 
@@ -18203,10 +18204,18 @@ extern "C" Item dom_comment_ctor(Item data_arg) {
     if (item_is_error(data_root.get())) return data_root.get();
     Rooted<Item> document_root(roots,
         dom_wrap_element(dom_get_or_create_doc_node(doc)));
-    Item kind = {.item = i2it(DOM_NODE_COMMENT)};
-    // Reuse the shared creator so Comment and document.createComment agree.
+    Item kind = {.item = i2it(node_type)};
+    // constructors and Document factories must produce the same native node.
     return dom_core_create_node(document_root.get(), kind, ItemNull,
         data_root.get());
+}
+
+extern "C" Item dom_comment_ctor(Item data_arg) {
+    return dom_character_data_ctor(data_arg, DOM_NODE_COMMENT);
+}
+
+extern "C" Item dom_text_ctor(Item data_arg) {
+    return dom_character_data_ctor(data_arg, DOM_NODE_TEXT);
 }
 
 

@@ -1,0 +1,7 @@
+true true true
+true
+function function function function
+leftbetaright
+leftright
+ null
+TEXT_PROTOTYPE_DONE
