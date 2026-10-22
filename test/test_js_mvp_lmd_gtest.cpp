@@ -2327,7 +2327,8 @@ protected:
         mvp_lmd_destroy(execution);
         execution = mvp_lmd_execute(source, strlen(source));
         ASSERT_NE(mvp_lmd_diagnostic(execution), nullptr) << source;
-        EXPECT_NE(strstr(mvp_lmd_diagnostic(execution), expected), nullptr) << source;
+        EXPECT_NE(strstr(mvp_lmd_diagnostic(execution), expected), nullptr)
+            << source << "\n" << mvp_lmd_diagnostic(execution);
         EXPECT_EQ(get_type_id(mvp_lmd_result(execution)), LMD_TYPE_ERROR);
     }
     char* dump(const char* path) {
@@ -2338,6 +2339,37 @@ protected:
         return read_text_file(path);
     }
 };
+
+static thread_local unsigned loop_interrupt_polls;
+static bool interrupt_after_loop_checkpoints() { return ++loop_interrupt_polls >= 2; }
+
+TEST_F(JsMvpLmd, LoopInterruptionsReturnThroughTheCompletionLane) {
+    // finite loops make a missing checkpoint fail without hanging the native runner.
+    const char* sources[] = {
+        "let n=0;while(n<10000){n++}n",
+        "let n=0;do{n++}while(n<10000);n",
+        "let n=0;for(let i=0;i<10000;i++){n++}n",
+        "let n=0;for(let value of Array(10000).fill(1)){n+=value}n",
+        "let n=0;for(let key in Array(10000).fill(1)){n++}n",
+        "function f(n){let x=1.5;while(n>0){x+=0.5;n--}return x}f(10000)"
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        loop_interrupt_polls = 0;
+        js_set_execution_interrupt_check(interrupt_after_loop_checkpoints);
+        error(source, "Error");
+        js_set_execution_interrupt_check(nullptr);
+        EXPECT_GE(loop_interrupt_polls, 2u);
+    }
+    loop_interrupt_polls = 0;
+    js_set_execution_interrupt_check(interrupt_after_loop_checkpoints);
+    boolean("Object.defineProperty(Error.prototype,'code',{set(){throw Error('inherited setter')}});"
+        "let n=0,caught=false,finished=false;try{while(n<10000){n++}}"
+        "catch(e){caught=e instanceof Error&&e.code==='ERR_SCRIPT_EXECUTION_TIMEOUT'&&"
+        "e.message==='Script execution timed out'&&n>0}"
+        "finally{finished=true}caught&&finished");
+    js_set_execution_interrupt_check(nullptr);
+}
 
 TEST_F(JsMvpLmd, NamedPrimitivePropertiesAdmitTheirRealmPrototypes) {
     for (const char* source : kNamedPrimitivePropertySources) boolean(source);

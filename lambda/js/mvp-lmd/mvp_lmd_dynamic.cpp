@@ -501,7 +501,7 @@ static MvpLmdDynamic* dynamic_state(MvpLmdProgram* program) {
         [](void* opaque, Item specifier, const char* reference) {
             MvpLmdProgram* owner = ((MvpLmdDynamic*)opaque)->program;
             return mvp_lmd_dynamic_import(owner, specifier, reference);
-        }};
+        }, mvp_lmd_execution_interrupt_status};
     static const ContextCapsuleOps capsule = {"js-mvp-dynamic", CONTEXT_CAPSULE_LIFETIME_REALM,
         sizeof(MvpLmdDynamic), NULL, dynamic_release, dynamic_destroy};
     if (!context_capsule_extension_install(context, MVP_LMD_DYNAMIC_OWNER, mvp_lmd_program_realm_key(program), state, &capsule)) {

@@ -1,0 +1,27 @@
+{
+  "name": "Captured ZIP members survive collecting navigation and nested preview callbacks",
+  "html": "test/demo/finder/finder.ls",
+  "env": [
+    {"key": "LAMBDA_GC_FORCE_EVERY", "value": "1"},
+    {"key": "LAMBDA_GC_POISON_FREED", "value": "1"}
+  ],
+  "viewport": {"width": 1200, "height": 760},
+  "events": [
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "type", "target": {"selector": "#folder-path"}, "text": "../../../../test/input/zip", "clear": true},
+    {"type": "key_press", "key": "enter"},
+    {"type": "dblclick", "target": {"selector": "[data-name='sample.zip']"}},
+    {"type": "assert_text", "target": {"selector": "#folder-title"}, "equals": "sample.zip"},
+    {"type": "click", "target": {"selector": "[data-name='data.json']"}},
+    {"type": "assert_text", "target": {"selector": "#preview-body pre"}, "equals": "{\"answer\":42}"},
+    {"type": "dblclick", "target": {"selector": "[data-name='nested.zip']"}},
+    {"type": "click", "target": {"selector": "[data-name='inner.txt']"}},
+    {"type": "assert_text", "target": {"selector": "#preview-body pre"}, "equals": "nested"},
+    {"type": "click", "target": {"selector": "#back"}},
+    {"type": "assert_text", "target": {"selector": "#folder-title"}, "equals": "sample.zip"},
+    {"type": "click", "target": {"selector": "[data-name='data.json']"}},
+    {"type": "assert_text", "target": {"selector": "#preview-body pre"}, "equals": "{\"answer\":42}"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true}
+  ]
+}

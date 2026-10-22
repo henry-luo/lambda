@@ -18,7 +18,8 @@ on click(evt) {
 on allocate_frame(evt) {
     // a detached wrapper retains its old attribute after later renders and collections.
     if (calls == 1) { held = dom.query_selector(evt.target, "#saved-markup") }
-    let markup = [for (i in 0 to 999) format(<div ["data-index"]: i, <span "temporary">>, 'html')]
+    // every allocation collects here; a small batch crosses the publication safepoints.
+    let markup = [for (i in 0 to 15) format(<div ["data-index"]: i, <span "temporary">>, 'html')]
     total = sum([for (text in markup) len(text)])
     if (calls == 2) { dom.set_attribute(held, "data-extra", "edited") }
     if (held != null) {

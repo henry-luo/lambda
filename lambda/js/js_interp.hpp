@@ -157,6 +157,7 @@ struct JsInterpHostOps {
     Item (*for_in_key_is_live)(Item, Item key);
     Item (*regexp_literal)(void*, Item pattern, Item flags);
     Item (*dynamic_import)(void*, Item specifier, const char* reference);
+    Item (*interrupt_status)(void);
 };
 // The caller owns these exact roots for the duration of a host operation.
 // Escaped functions retain env, never this activation-local descriptor.

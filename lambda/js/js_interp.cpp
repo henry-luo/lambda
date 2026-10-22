@@ -5234,7 +5234,8 @@ static JsInterpCompletion js_interp_exec_catch(JsInterpFrame* frame,
 }
 
 static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) {
-    Item interrupt_status = js_interp_host ? make_js_undefined() : js_execution_interrupt_status();
+    // D8.4.3v2: hosted AST callbacks must unwind the same explicit watchdog error.
+    Item interrupt_status = js_interp_host ? js_interp_host->interrupt_status() : js_execution_interrupt_status();
     if (item_is_error(interrupt_status)) return js_interp_throw(interrupt_status);
     if (!node) return js_interp_normal(make_js_undefined());
     if (frame && frame->completion_home) {

@@ -1,15 +1,16 @@
 # Lambda Spelling Package Proposal
 
-> **Status:** proposed, 2026-10-22; positional-vocabulary storage and lookup POC
-> implemented. The full checker and suggestion engine remain proposed.
+> **Status:** dictionary resource format adopted, 2026-10-22 (USER), §4.3.
+> Lambda front-coded text lookup is implemented as a POC. XZ resource loading,
+> the full checker and the suggestion engine remain proposed.
 > **Package:** `lambda.doc.spelling`.
 > **Scope:** offline spelling checks and correction suggestions for prose,
 > followed by document and editor integration and qualified language packs.
 > **Spec linkage:** D7.2.1/D7.2.3 govern source packages and state;
 > D7.2.4v3/D7.2.6 govern the namespace and facade; S2.5.8/S17.4.1 govern text
-> positions; S17.7.1/S17.7.2 govern case operations; S12.1.1v3 governs effects.
-> The APIs and defaults below are proposed package policy. No formal language
-> ruling changes are proposed.
+> positions; S6.2.2v3 governs sort order; S17.7.1/S17.7.2 govern case operations;
+> S12.1.1v3 governs effects. The dictionary format in §4.3 is adopted package
+> policy; other APIs and defaults remain proposed. No formal language ruling changes.
 
 ## 1. Recommendation
 
@@ -23,6 +24,9 @@ Start with **English, prepared dictionaries, and deterministic suggestions**:
 - Use **English Speller Database (ESDB, formerly SCOWL)** as the default
   English vocabulary source. Ship separate `en-US` and `en-GB` profiles at
   coverage level 60; offer larger and additional regional profiles separately.
+- Store vocabulary in the **adopted front-coded UTF-8 text format** (§4.3):
+  `;` for suffix entries, `N,` for a retained prefix length, `|` for a full word,
+  and 64 words per line. Use **XZ preset 6** for compressed distribution.
 - Use a **SymSpell-style deletion index** to find likely corrections, followed
   by edit-distance verification and ranking. Implement the algorithm in Lambda;
   the upstream implementation is a reference, not a runtime dependency.
@@ -213,70 +217,156 @@ but its token policy is different: it separates apostrophes and emits CJK
 unigrams. Reuse lower-level Unicode mechanisms where appropriate without
 changing full-text search semantics to suit spelling.
 
-### 4.3 Prepared vocabulary
+### 4.3 Adopted dictionary resource format
+
+**Adopted 2026-10-22 (USER): front-coded UTF-8 text, version 1, with 64 decoded
+words per line and XZ preset 6 for compressed distribution.** This is a dedicated
+spelling dictionary resource format, outside Mark notation.
 
 For English, consume ESDB's complete surface-form wordlists rather than
 implementing a Hunspell affix parser first. Preserve authored spellings,
 case distinctions, regional identity, and any available entry restrictions.
 Do not turn every capitalized name into an accepted lowercase word.
 
-Use a sorted array of lookup keys with parallel **positional entry arrays** and
-binary search. Per-word maps are replaced by rows to avoid repeating field names
-in every entry (USER, 2026-10-22). Keep the small descriptive header as a map:
+#### 4.3.1 Stream and decoding
 
-```json
-{
-  "format_version": 1,
-  "language": "en-US",
-  "keys": ["cat", "cats", "dog", "dogs"],
-  "entries": [
-    ["cat", "ordinary"],
-    ["cats", "ordinary"],
-    ["dog", "ordinary"],
-    ["dogs", "ordinary"]
-  ]
-}
+```text
+catalog;ue;5,yst|dog;s
 ```
 
-The entry ID is its array index, and `keys[i]` identifies `entries[i]`. The row
-schema is `[word, case_policy, commonness?, flags?]`. Omit unused trailing fields;
-use `null` for a missing commonness value when flags follow. The POC recognizes
-`ordinary` and `exact` case labels, nonnegative integer commonness, and flags
-`1 = forbidden`, `2 = no_suggest` (a bit mask). These are storage fields; this
-POC implements exact NFC lookup, not full case admission or restriction policy.
-The measured English files use two-column `[word, "ordinary"]` rows throughout
-to isolate the requested representation; that does not establish case fidelity.
+This line decodes to `catalog`, `catalogue`, `catalyst`, `dog`, `dogs`.
+Each token produces exactly one word:
 
-Store suggestions as deletion keys mapped to entry IDs using
-sorted keys, posting offsets, and a flat ID array. This avoids thousands of
-generated Lambda declarations and a mandatory mutable hash-table build at load.
-Minified UTF-8 JSON is the initial portable artifact encoding; loaded memory and
-decode time must be measured before accepting it for distribution. Retaining the
-word in both `keys` and each row duplicates vocabulary bytes; measure a rows-only
-alternative for comparison while preserving the requested format for this POC.
+| Token | Decoding rule |
+|---|---|
+| First token on a line | A complete word; start fresh without the preceding line's state |
+| `;suffix` | Append the suffix to the previous decoded word |
+| `;N,suffix` | Keep the first `N` code points of the previous decoded word, then append the suffix |
+| `|word` | Use the complete word as written |
 
-**The eventual distribution encoding must be Lambda/Mark binary packing when
-that is supported** (USER, 2026-10-22). Preserve the logical positional schema
-and entry IDs across encodings, and keep JSON for inspection and interchange.
-The current binary-Mark design is deferred under
-[K29c](Lambda_Design_Concurrency.md); this POC does not introduce a private
-binary format or claim an implemented binary loader or measured binary size.
-Sharding remains a separate decision based on actual measurements.
-Do not assume a compressed file implies a small runtime heap, or duplicate the
-same full vocabulary inside both the lookup and suggestion indexes.
+After each token, the result becomes the previous word for the next token.
+There is no persistent root-word anchor: offsets always refer to the immediately
+previous decoded word. `N` is a retained prefix length, not a count to remove.
+It counts **Unicode code points**, following **S2.5.8/S17.4.1**, and must be an
+ASCII decimal integer from 1 through the previous word's code-point length,
+with no sign or leading zeros. Byte offsets are only an internal indexing detail.
 
-Validate format versions, sorted-key order, posting bounds, entry IDs and declared
-sizes when loading a pack. Keep small personal overlays separate from the base
-index, so adding a name does not rebuild the entire dictionary; search those
-overlay entries when producing suggestions as well as during exact lookup.
+Use UTF-8 without a BOM, LF line endings, and a final LF. Every line contains
+**64 decoded words**, except the final line, which may contain 1–64. Full words
+and suffixes are nonempty. There are no blank lines, comments, header lines,
+string quoting, or optional spaces. The illustrative line above is a short final line.
 
-The [2026-10-22 storage POC](impl/Lambda_Impl_Spelling_POC.md) measures the
-requested two-column format against pinned ESDB 2026.02.25 exports: `en-US`
-has **109,902 entries, 3,935,365 bytes of JSON (3.75 MiB), or 616,484 bytes
-with gzip**. Its equivalent object-entry control is 5,473,993 bytes. These are
-vocabulary-only measurements; suggestion indexes, optional fields and separately
-stored provenance/notices are additional. Gzip is a size comparison, not the
-future binary-Mark encoding or a loader feature.
+Semicolon, comma, pipe, CR, LF and NUL are reserved inside words; version 1 has
+no escape syntax. Preparation must reject a source spelling containing one of
+these characters rather than modify or silently discard it. Other supported
+characters, including accents, apostrophes and hyphens, are preserved literally.
+
+#### 4.3.2 Canonical preparation
+
+Normalize complete spellings to NFC, preserve their case, reject normalized
+collisions, and sort the words strictly by case-sensitive UTF-8 byte order
+(**S6.2.2v3**). Do not apply locale collation or case folding to the stored stream.
+Split the sorted sequence into consecutive blocks of 64 words:
+
+1. Write the first word of each block in full.
+2. For each following word, find its longest common prefix with the previous
+   decoded word, measured in code points.
+3. If the prefix is the entire previous word, emit `;suffix`.
+4. Otherwise, if the prefix is nonempty, emit `;N,suffix`.
+5. If there is no shared prefix, emit `|word`.
+6. Terminate the block with LF and reset decoding state for the next block.
+
+Use the longest prefix even when a literal token would be slightly shorter.
+That canonical encoder produced the adopted measurement; the shorter-token
+control compressed less well. This encodes only complete forms present in the
+source vocabulary and does not introduce an affix or morphology rule engine.
+
+#### 4.3.3 Identity, metadata and packaging
+
+A word's **entry ID is its zero-based ordinal in the fully decoded sequence**,
+including across line boundaries. IDs are local to a particular dictionary
+artifact/hash; rebuilding the vocabulary can change them. Keep any policy
+exceptions, commonness, restrictions and suggestion postings in separate
+resources keyed by that artifact's entry IDs. Do not repeat `ordinary` or a
+second complete `keys` array in the vocabulary stream. The metadata sidecar's
+precise representation remains package implementation work.
+
+The pack manifest records the resource format/version, language and profile,
+word count, 64-word block size, compression, source provenance, artifact hashes
+and original notices (§3.2). They are not embedded as word-stream headers.
+Distribute the resource with **XZ / LZMA2 preset 6**; retain the corresponding
+uncompressed text for inspection and conversion. XZ changes the outer bytes,
+not the dictionary's decoding rules. Preparation tooling may use Python;
+released loading/checking must use the package and shared runtime IO facilities.
+
+The earlier positional JSON is an interchange/debugging representation and the
+existing lookup POC's input, not the adopted dictionary resource encoding.
+The former requirement to replace the vocabulary encoding with binary Mark is
+superseded by this decision; see Appendix S. A future Mark pack may contain this
+resource without changing its internal format. The general binary-Mark design
+remains deferred under [K29c](Lambda_Design_Concurrency.md).
+
+#### 4.3.4 Loading and lookup
+
+Build or load a compact line-offset table and binary-search each line's first
+complete word to select a block. Compare the target directly against at most
+64 encoded entries in that block, without constructing intermediate dictionary
+words. Track the matched target-byte prefix: an inherited mismatch remains
+smaller, while a shorter retained prefix permits suffix comparison again.
+Convert token prefix counts to target UTF-8 byte boundaries (**S2.5.8/S17.4.1**);
+compare bytes in the dictionary's sort order (**S6.2.2v3**). Keep the vocabulary
+compact instead of expanding it into one map per word or duplicating the full
+spelling list in suggestion resources.
+
+Offsets into the UTF-8 file are byte positions; prefix lengths inside tokens
+remain code-point counts. A 32-bit line-offset table for the measured US pack
+requires 6,872 bytes and can be rebuilt by scanning LF boundaries, so storing
+it is optional. Whole-file XZ must be decompressed before arbitrary line access;
+independently compressed blocks are not part of version 1.
+
+**Adopted loading policy, 2026-10-22 (USER):** fully validate dictionaries during
+preparation. Check the declared version, UTF-8, token syntax, prefix bounds,
+nonempty words/suffixes, line word counts, NFC, strict global order/uniqueness,
+entry count, hashes and metadata/posting bounds there. Reject malformed or
+truncated packs as preparation errors. For spelling checks, read the prepared
+UTF-8 bytes and build the LF line-offset index; full word reconstruction and
+validation are explicit preparation operations. A supplied entry count is
+prepared metadata, not recomputed by the normal reader. Keep personal overlays
+separate so adding a word does not require rebuilding the base resource.
+
+#### 4.3.5 Size and implementation status
+
+The pinned ESDB 2026.02.25 US level-60 vocabulary contains **109,902 words**:
+
+| Adopted resource | Bytes | KiB |
+|---|---:|---:|
+| Uncompressed UTF-8 text | 525,993 | 513.7 |
+| XZ / LZMA2 preset 6 | **145,056** | **141.7** |
+
+There are 1,718 lines, with 14 words in the last line. These are vocabulary-only
+sizes; notices, manifests, metadata, optional indexes and suggestion resources
+are additional. File size is not a claim about loaded memory or lookup speed.
+
+The [storage POC, §7](impl/Lambda_Impl_Spelling_POC.md#7-semicolon-text-format-with-prefix-offsets)
+records the encoder, complete word-for-word and independent-line round trips,
+hashes and compression measurements. The
+[lookup POC, §8](impl/Lambda_Impl_Spelling_POC.md#8-lambda-front-coded-lookup-and-paragraph-timing)
+implements `lambda.doc.spelling.front_coded`: retained UTF-8 bytes, a `u32[]`
+line-offset index, and binary search of restart keys. The
+[pointer comparison update, §9](impl/Lambda_Impl_Spelling_POC.md#9-direct-byte-comparison-during-lookup)
+compares the target against the selected line directly. Lookup creates no
+dictionary-word strings or line slice and returns a zero-based word ID or null.
+The [loading update, §10](impl/Lambda_Impl_Spelling_POC.md#10-read-and-index-loading-with-explicit-preparation-validation)
+moves full reconstruction/checking into explicit `validate()` for preparation;
+normal `read()`/`from_bytes()` only retain bytes and build offsets. The earlier
+JSON reader remains available for its original fixture.
+
+The POC reads the uncompressed `.dict` produced by the preparation utility;
+in-process standalone XZ loading and a complete manifest/policy loader remain
+implementation work. Its 100-word paragraph harness has a deliberately limited
+ASCII punctuation/lowercase policy; it is not the full prose tokenizer or case
+admission engine. Current timing records separate file reading, index building
+and checks against the loaded dictionary; preparation validation is excluded.
 
 ### 4.4 Correction algorithm
 
@@ -522,8 +612,8 @@ The following increments define the intended completion boundaries.
 
 | Increment | Locations and deliverable | Exit gate |
 |---|---|---|
-| 0. Data qualification | `utils/prepare_spelling.py`; pinned source manifest and notices under `doc/spelling/data/` | Reproducible US/British exports, verified license inventory, artifact/heap size and decode measurements |
-| 1. Lexical core | `doc/spelling.ls`; `spelling/{dictionary,text,tokenize,options}.ls` | Word/text checks, exact ranges, overlays and failures; matching `.ls`/`.txt` goldens |
+| 0. Data qualification | `utils/prepare_spelling.py`; adopted front-coded text/XZ resources, pinned manifests and notices under `doc/spelling/data/` | Reproducible US/British exports, exact round trips, verified licenses, artifact/heap size and decode measurements |
+| 1. Lexical core | `doc/spelling.ls`; `spelling/{dictionary,text,tokenize,options}.ls`; adopted text/XZ reader and line index | Word/text checks, resource validation, exact ranges, overlays and failures; matching `.ls`/`.txt` goldens |
 | 2. Suggestions; first release | `spelling/{index,distance,suggest}.ls`; prepared deletion indexes | Exhaustive candidate gate, frozen typo/clean-text reports, bounded-work behavior and release measurements |
 | 3. Documents/editor | `spelling/document.ls` and existing document/editor adapters | Source-mapped runs, explicit offset conversions, incremental decorations and undoable replacement |
 | 4. Language expansion | Additional qualified packs; decide Lambda rules versus native bridge | One language at a time, with acceptance-oracle and suggestion-quality evidence |
@@ -545,9 +635,76 @@ focused and aggregate gates. This proposal itself requires document checks only.
 - English-first, offline, explicit profiles, immutable checker values.
 - ESDB level 60 for the bundled US and British baseline; broader vocabulary is
   optional and quality-tested, with accurate profile and license labels.
+- Adopted vocabulary resource: semicolon/offset UTF-8 front coding, 64 words
+  per line, with XZ preset 6 distribution (§4.3).
 - Vocabulary validity and suggestion priority remain separate.
 - Prepared English forms avoid an early commitment to full Hunspell emulation.
 - Original source ranges survive normalization, inline formatting and editor
   offset conversion.
 - Publish measured quality, memory and latency before claiming readiness;
   record multilingual and document/editor coverage as separate milestones.
+
+## Appendix S. Superseded dictionary storage decisions
+
+**Superseded 2026-10-22 (USER) by §4.3's adopted semicolon/offset text format.**
+The following wording records the earlier JSON-array POC and intended binary-Mark
+migration. It is historical; the implemented JSON POC and its measurements remain
+valid, while its distribution requirements no longer govern the word resource.
+
+~~Use a sorted array of lookup keys with parallel **positional entry arrays** and
+binary search. Per-word maps are replaced by rows to avoid repeating field names
+in every entry (USER, 2026-10-22). Keep the small descriptive header as a map:~~
+
+```json
+{
+  "format_version": 1,
+  "language": "en-US",
+  "keys": ["cat", "cats", "dog", "dogs"],
+  "entries": [
+    ["cat", "ordinary"],
+    ["cats", "ordinary"],
+    ["dog", "ordinary"],
+    ["dogs", "ordinary"]
+  ]
+}
+```
+
+The entry ID is its array index, and `keys[i]` identifies `entries[i]`. The row
+schema is `[word, case_policy, commonness?, flags?]`. Omit unused trailing fields;
+use `null` for a missing commonness value when flags follow. The POC recognizes
+`ordinary` and `exact` case labels, nonnegative integer commonness, and flags
+`1 = forbidden`, `2 = no_suggest` (a bit mask). These are storage fields; this
+POC implements exact NFC lookup, not full case admission or restriction policy.
+The measured English files use two-column `[word, "ordinary"]` rows throughout
+to isolate the requested representation; that does not establish case fidelity.
+
+Store suggestions as deletion keys mapped to entry IDs using
+sorted keys, posting offsets, and a flat ID array. This avoids thousands of
+generated Lambda declarations and a mandatory mutable hash-table build at load.
+~~Minified UTF-8 JSON is the initial portable artifact encoding; loaded memory and
+decode time must be measured before accepting it for distribution.~~ Retaining the
+word in both `keys` and each row duplicates vocabulary bytes; measure a rows-only
+alternative for comparison while preserving the requested format for this POC.
+
+~~**The eventual distribution encoding must be Lambda/Mark binary packing when
+that is supported** (USER, 2026-10-22). Preserve the logical positional schema
+and entry IDs across encodings, and keep JSON for inspection and interchange.~~
+The current binary-Mark design is deferred under
+[K29c](Lambda_Design_Concurrency.md); this POC does not introduce a private
+binary format or claim an implemented binary loader or measured binary size.
+Sharding remains a separate decision based on actual measurements.
+Do not assume a compressed file implies a small runtime heap, or duplicate the
+same full vocabulary inside both the lookup and suggestion indexes.
+
+Validate format versions, sorted-key order, posting bounds, entry IDs and declared
+sizes when loading a pack. Keep small personal overlays separate from the base
+index, so adding a name does not rebuild the entire dictionary; search those
+overlay entries when producing suggestions as well as during exact lookup.
+
+The [2026-10-22 storage POC](impl/Lambda_Impl_Spelling_POC.md) measures the
+requested two-column format against pinned ESDB 2026.02.25 exports: `en-US`
+has **109,902 entries, 3,935,365 bytes of JSON (3.75 MiB), or 616,484 bytes
+with gzip**. Its equivalent object-entry control is 5,473,993 bytes. These are
+vocabulary-only measurements; suggestion indexes, optional fields and separately
+stored provenance/notices are additional. Gzip is a size comparison, not the
+future binary-Mark encoding or a loader feature.

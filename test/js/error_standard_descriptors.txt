@@ -1,0 +1,32 @@
+message first true true
+accessor changed true true true false true
+own true 1
+caught true changed true
+data final true false true
+delete true false true
+inherited string true
+restored again true true
+stack first true true
+accessor changed true true true false true
+own true 1
+caught true changed true
+data final true false true
+delete true false true
+inherited string true
+restored again true true
+name first true true
+accessor changed true true true false true
+own true 1
+caught true changed true
+data final true false true
+delete true false true
+inherited string true
+restored again true true
+cause first true true
+accessor changed true true true false true
+own true 1
+caught true changed true
+data final true false true
+delete true false true
+inherited string true
+restored again true true

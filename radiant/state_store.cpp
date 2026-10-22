@@ -5799,7 +5799,9 @@ void state_end_batch(DocState* state) {
     state_sync_editing_before_assert(state);
     state_sync_dirty_flags_before_assert(state);
     // TODO: trigger deferred callbacks
-    radiant_state_assert_valid(state, "state_end_batch");
+    // event cascades validate the synchronized state at their own boundary.
+    if (state->active_cascade_depth == 0)
+        radiant_state_assert_valid(state, "state_end_batch");
 }
 
 // ============================================================================

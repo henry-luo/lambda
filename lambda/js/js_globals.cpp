@@ -65,6 +65,7 @@ extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
 Item node_url_search_params_prototype(void);
 static bool js_activate_url_primitives(void);
+static Item js_install_url_constructor(Item global);
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
 extern "C" Item js_get_intl_object_value(void);
@@ -5713,14 +5714,17 @@ static Item js_error_own_property_names(Item object, bool include_symbols) {
     Rooted<Item> symbols_root(roots, ItemNull);
     const char* names[] = {"message", "stack", "cause", "name"};
     const int lengths[] = {7, 5, 5, 4};
+    properties_root.set(js_error_properties_map(object_root.get(), false));
     for (int i = 0; i < 4; i++) {
+        // redefined standard fields are enumerated once by the property Map.
+        if (get_type_id(properties_root.get()) == LMD_TYPE_MAP &&
+                js_ordinary_has_own(properties_root.get(), names[i], lengths[i])) continue;
         Item value = ItemNull;
         if (js_error_own_property(object_root.get(), names[i], lengths[i], &value)) {
             js_array_push(result_root.get(), js_name_item(
                 names[i], lengths[i]));
         }
     }
-    properties_root.set(js_error_properties_map(object_root.get(), false));
     if (get_type_id(properties_root.get()) == LMD_TYPE_MAP) {
         names_root.set(js_object_get_own_property_names(properties_root.get()));
         for (int64_t i = 0; i < js_array_length(names_root.get()); i++) {
@@ -5764,55 +5768,59 @@ extern "C" Item js_reflect_own_keys(Item obj) {
                 obj, ItemNull, ItemNull, false, &proxy_result)) return proxy_result;
     }
     // get string keys via getOwnPropertyNames
-    Item names = js_object_get_own_property_names(obj);
+    Item names = js_object_get_own_property_names(object_root.get());
     names_root.set(names);
+    JS_RETURN_IF_ERROR(names_root.get());
     // get symbol keys via getOwnPropertySymbols
-    Item symbols = js_object_get_own_property_symbols(obj);
+    Item symbols = js_object_get_own_property_symbols(object_root.get());
     symbols_root.set(symbols);
+    JS_RETURN_IF_ERROR(symbols_root.get());
+    // source indices survive collection while sorting; raw key Items do not.
     // Reorder per ES §10.1.11.1 OrdinaryOwnPropertyKeys:
     //   1) integer indices in ascending numeric order
     //   2) other string keys in insertion order
     //   3) symbols in insertion order
     Item result = js_array_new(0);
     result_root.set(result);
-    if (get_type_id(names) == LMD_TYPE_ARRAY) {
-        int n = (int)js_array_length(names);
+    if (get_type_id(names_root.get()) == LMD_TYPE_ARRAY) {
+        int n = (int)js_array_length(names_root.get());
         int64_t* idx_pairs = n > 0 ? (int64_t*)mem_alloc(sizeof(int64_t) * 2 * n, MEM_CAT_JS_RUNTIME) : NULL;
+        if (n > 0 && !idx_pairs) return ItemError;
         int idx_count = 0;
         for (int i = 0; i < n; i++) {
-            Item k = js_elements_get(names, (Item){.item = i2it(i)});
+            Item k = js_elements_get_int(names_root.get(), i);
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 int64_t parsed = js_parse_array_index(ks->chars, (int)ks->len);
                 if (parsed >= 0) {
                     idx_pairs[idx_count * 2 + 0] = parsed;
-                    idx_pairs[idx_count * 2 + 1] = (int64_t)k.item;
+                    idx_pairs[idx_count * 2 + 1] = i;
                     idx_count++;
                 }
             }
         }
         if (idx_count > 1) qsort(idx_pairs, idx_count, sizeof(int64_t) * 2, js_idx_pair_cmp);
         for (int i = 0; i < idx_count; i++) {
-            Item k = (Item){.item = (uint64_t)idx_pairs[i * 2 + 1]};
-            js_array_push(result, k);
+            Item k = js_elements_get_int(names_root.get(), idx_pairs[i * 2 + 1]);
+            js_array_push(result_root.get(), k);
         }
         // Then string keys (skipping integer indices) in insertion order.
         for (int i = 0; i < n; i++) {
-            Item k = js_elements_get(names, (Item){.item = i2it(i)});
+            Item k = js_elements_get_int(names_root.get(), i);
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 if (js_parse_array_index(ks->chars, (int)ks->len) >= 0) continue;
             }
-            js_array_push(result, k);
+            js_array_push(result_root.get(), k);
         }
         if (idx_pairs) mem_free(idx_pairs);
     }
     // Symbols last, in insertion order.
-    if (get_type_id(symbols) == LMD_TYPE_ARRAY) {
-        int sym_len = (int)js_array_length(symbols);
+    if (get_type_id(symbols_root.get()) == LMD_TYPE_ARRAY) {
+        int sym_len = (int)js_array_length(symbols_root.get());
         for (int i = 0; i < sym_len; i++) {
-            Item sym = js_elements_get(symbols, (Item){.item = i2it(i)});
-            js_array_push(result, sym);
+            Item sym = js_elements_get_int(symbols_root.get(), i);
+            js_array_push(result_root.get(), sym);
         }
     }
     return result_root.get();
@@ -7838,12 +7846,16 @@ static bool js_get_string_wrapper_primitive(Map* map, String** primitive) {
     return *primitive != NULL;
 }
 
-static void js_append_string_wrapper_indices(Item result, String* primitive) {
-    int length = primitive ? (int)primitive->len : 0;
+static Item js_append_string_wrapper_indices(Item result, int length) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> output(roots, result);
     for (int i = 0; i < length; i++) {
         String* name = js_property_index_name(i);
-        if (name) js_array_push(result, (Item){.item = s2it(name)});
+        if (!name) return ItemError;
+        JS_RETURN_IF_ERROR(js_array_push(output.get(), (Item){.item = s2it(name)}));
     }
+    return ItemNull;
 }
 
 extern "C" Item js_object_get_own_property_names(Item object) {
@@ -7921,8 +7933,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                 String* pv_s = NULL;
                 if (js_get_string_wrapper_primitive(m, &pv_s)) {
                     int slen = (int)pv_s->len;
-                    Item result = js_array_new(0);
-                    js_append_string_wrapper_indices(result, pv_s);
+                    result_root.set(js_array_new(0));
+                    JS_RETURN_IF_ERROR(js_append_string_wrapper_indices(result_root.get(), slen));
+                    m = object_root.get().map;
                     // J39-7: also include any extra own properties added after construction.
                     // Per ES §10.4.3.4 [[OwnPropertyKeys]] of String exotic: integer-index
                     // properties up to length come first, then other own properties (which
@@ -7948,7 +7961,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                                     v = v * 10 + (s[i] - '0');
                                 }
                                 if (all_digit && v >= slen) {
-                                    JsShapeSlotStatus status = js_own_shape_slot_status(object, s, len, NULL, NULL);
+                                    JsShapeSlotStatus status = js_own_shape_slot_status(object_root.get(), s, len, NULL, NULL);
                                     if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                                         if (extra_idx_count >= extra_idx_capacity) {
                                             int new_cap = extra_idx_capacity * 2;
@@ -7973,9 +7986,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     for (int i = 0; i < extra_idx_count; i++) {
                         String* name = js_property_index_name(extra_idx[i]);
                         if (!name) return ItemError;
-                        js_array_push(result, (Item){.item = s2it(name)});
+                        js_array_push(result_root.get(), (Item){.item = s2it(name)});
                     }
-                    js_array_push(result, js_name_item("length", 6));
+                    js_array_push(result_root.get(), js_name_item("length", 6));
                     // Pass B: named (non-numeric, non-internal) own properties.
                     {
                         ShapeEntry* se = _tm ? _tm->shape : NULL;
@@ -7993,16 +8006,16 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                                 if (all_digit) skip = true;
                             }
                             if (!skip) {
-                                JsShapeSlotStatus status = js_own_shape_slot_status(object, s, len, NULL, NULL);
+                                JsShapeSlotStatus status = js_own_shape_slot_status(object_root.get(), s, len, NULL, NULL);
                                 if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR) skip = true;
                             }
                             if (!skip) {
-                                js_array_push(result, js_name_item(s, len));
+                                js_array_push(result_root.get(), js_name_item(s, len));
                             }
                             se = typemap_next_field(_tm, se);
                         }
                     }
-                    return result;
+                    return result_root.get();
                 }
         }
     }
@@ -8321,29 +8334,31 @@ extern "C" Item js_object_keys(Item object) {
     // v25: String wrapper objects — enumerate character indices then non-internal properties
     {
         if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
+                JS_ROOTS(roots, object_root, object, result_root, ItemNull);
                 String* pv_s = NULL;
                 if (js_get_string_wrapper_primitive(m, &pv_s)) {
                     int slen = (int)pv_s->len;
-                    Item result = js_array_new(0);
-                    js_append_string_wrapper_indices(result, pv_s);
+                    result_root.set(js_array_new(0));
+                    JS_RETURN_IF_ERROR(js_append_string_wrapper_indices(result_root.get(), slen));
+                    m = object_root.get().map;
                     TypeMap* stm = (TypeMap*)m->type;
                     ShapeEntry* se = stm ? stm->shape : NULL;
                     while (se) {
                         const char* s = se->name->str;
                         int len = (int)se->name->length;
                         if (!js_is_engine_internal_enumeration_key(s, len)) {
-                            JsShapeSlotStatus status = js_own_shape_slot_status(object, s, len, NULL, NULL);
+                            JsShapeSlotStatus status = js_own_shape_slot_status(object_root.get(), s, len, NULL, NULL);
                             if ((status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) &&
-                                js_props_query_enumerable(m, se, s, len)) {
+                                js_props_query_enumerable(object_root.get().map, se, s, len)) {
                                 int64_t idx = js_parse_array_index(s, len);
                                 if (idx < 0 || idx >= slen) {
-                                    js_array_push(result, js_name_item(s, len));
+                                    js_array_push(result_root.get(), js_name_item(s, len));
                                 }
                             }
                         }
                         se = typemap_next_field(stm, se);
                     }
-                    return result;
+                    return result_root.get();
                 }
         }
     }
@@ -8854,16 +8869,25 @@ extern "C" Item js_to_string_val(Item value) {
 // =============================================================================
 
 static Item js_object_collect_enumerable_own(Item object, bool entries) {
-    // ES §7.3.22 snapshots keys, then re-checks each descriptor before reading it.
-    JS_ASSIGN_OR_RETURN(keys, js_reflect_own_keys(object));
-    int len = (int)js_array_length(keys);
-    Item result = js_array_new(0);
-    for (int i = 0; i < len; i++) {
-        Item key = js_elements_get(keys, (Item){.item = i2it(i)});
-        if (js_key_is_symbol_c(key)) continue;
+    RootFrame roots(7);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, object), keys(roots, ItemNull), result(roots, ItemNull);
+    Rooted<Item> key(roots, ItemNull), value(roots, ItemNull), descriptor(roots, ItemNull);
+    Rooted<Item> pair(roots, ItemNull);
+    // enumerable own properties snapshot keys, then recheck each descriptor.
+    // Getters and Proxy traps may collect every temporary in this traversal.
+    owner.set(js_to_object(owner.get()));
+    JS_RETURN_IF_ERROR(owner.get());
+    keys.set(js_reflect_own_keys(owner.get()));
+    JS_RETURN_IF_ERROR(keys.get());
+    int64_t length = js_array_length(keys.get());
+    result.set(js_array_new(0));
+    for (int64_t index = 0; index < length; index++) {
+        key.set(js_elements_get_int(keys.get(), index));
+        if (js_key_is_symbol_c(key.get())) continue;
         bool enumerable = false;
-        JsOwnEnumerability inspection = js_own_enumerability_inspect(object,
-            key, &enumerable);
+        JsOwnEnumerability inspection = js_own_enumerability_inspect(owner.get(),
+            key.get(), &enumerable);
         if (inspection == JS_OWN_ENUMERABILITY_PRESENT) {
             js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
                 JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
@@ -8875,63 +8899,27 @@ static Item js_object_collect_enumerable_own(Item object, bool entries) {
         } else {
             js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
                 JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
-            JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(object, key));
-            if (get_type_id(desc) != LMD_TYPE_MAP) continue;
-            bool en_found = false;
-            Item en = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &en_found);
-            if (!en_found || !js_is_truthy(en)) continue;
+            descriptor.set(js_object_get_own_property_descriptor(owner.get(), key.get()));
+            JS_RETURN_IF_ERROR(descriptor.get());
+            if (get_type_id(descriptor.get()) != LMD_TYPE_MAP) continue;
+            bool found = false;
+            Item flag = js_map_shape_lookup_ext(descriptor.get().map, "enumerable", 10, &found);
+            if (!found || !js_is_truthy(flag)) continue;
         }
-        JS_ASSIGN_OR_RETURN(val, js_get_reference(object, key));
-        if (!entries) {
-            js_array_push(result, val);
-        } else {
-            Item pair = js_array_new(2);
-            js_elements_set(pair, (Item){.item = i2it(0)}, key);
-            js_elements_set(pair, (Item){.item = i2it(1)}, val);
-            js_array_push(result, pair);
+        value.set(js_get_reference(owner.get(), key.get()));
+        JS_RETURN_IF_ERROR(value.get());
+        if (entries) {
+            pair.set(js_array_new(2));
+            JS_RETURN_IF_ERROR(js_elements_set_int(pair.get(), 0, key.get()));
+            JS_RETURN_IF_ERROR(js_elements_set_int(pair.get(), 1, value.get()));
         }
+        JS_RETURN_IF_ERROR(js_array_push(result.get(), entries ? pair.get() : value.get()));
     }
-    return result;
+    return result.get();
 }
 
-static Item js_object_collect_string_own(Item object, bool entries) {
-    String* str = it2s(object);
-    int length = str ? (int)str->len : 0;
-    Item result = js_array_new(entries ? 0 : length);
-    for (int i = 0; i < length; i++) {
-        Item value = js_name_item(str->chars + i, 1);
-        if (!entries) {
-            js_elements_set(result, (Item){.item = i2it(i)}, value);
-            continue;
-        }
-        String* index_name = js_property_index_name(i);
-        if (!index_name) return ItemError;
-        Item pair = js_array_new(2);
-        js_elements_set(pair, (Item){.item = i2it(0)}, (Item){.item = s2it(index_name)});
-        js_elements_set(pair, (Item){.item = i2it(1)}, value);
-        js_array_push(result, pair);
-    }
-    return result;
-}
-
-static Item js_object_values_or_entries(Item object, bool entries) {
-    TypeId type = get_type_id(object);
-    if (type == LMD_TYPE_NULL || object.item == ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    if (type == LMD_TYPE_STRING) {
-        return js_object_collect_string_own(object, entries);
-    }
-    // Arrays expose ordinary own keys through Reflect.ownKeys just like Maps;
-    // returning early here skipped Object.values(array) before its descriptors
-    // could be inspected.
-    if (type != LMD_TYPE_MAP && !js_is_js_array(object) &&
-            type != LMD_TYPE_FUNC)
-        return js_array_new(0);
-    return js_object_collect_enumerable_own(object, entries);
-}
-JS_FORWARD_ITEM(js_object_values, (Item object), js_object_values_or_entries, (object, false))
-JS_FORWARD_ITEM(js_object_entries, (Item object), js_object_values_or_entries, (object, true))
+JS_FORWARD_ITEM(js_object_values, (Item object), js_object_collect_enumerable_own, (object, false))
+JS_FORWARD_ITEM(js_object_entries, (Item object), js_object_collect_enumerable_own, (object, true))
 
 // =============================================================================
 // Object.fromEntries(iterable) — create object from [key, value] pairs
@@ -13887,8 +13875,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
 
         // globalThis.URL constructor
         {
-            js_install_native_constructor(global.get(), "URL",
-                js_url_construct_with_base);
+            JS_RETURN_IF_ERROR(js_install_url_constructor(global.get()));
         }
         break;
     }
@@ -16755,13 +16742,67 @@ static char* js_url_string_to_cstr(String* s) {
     return out;
 }
 
+struct JsUrlField {
+    const char* name;
+    const char* (*get)(const Url*);
+    bool readonly;
+};
+static const JsUrlField js_url_fields[] = {
+    {"href", url_get_href, false}, {"origin", url_get_origin, true},
+    {"protocol", url_get_protocol, false}, {"username", url_get_username, false},
+    {"password", url_get_password, false}, {"host", url_get_host, false},
+    {"hostname", url_get_hostname, false}, {"port", url_get_port, false},
+    {"pathname", url_get_pathname, false}, {"search", url_get_search, false},
+    {"hash", url_get_hash, false}, {"searchParams", nullptr, true}
+};
+static constexpr int js_url_field_count = sizeof(js_url_fields) / sizeof(js_url_fields[0]);
+
+static Item js_url_record(Item receiver) {
+    return js_native_private_array_state(receiver, JS_CLASS_URL,
+        js_url_field_count, "Illegal URL receiver");
+}
+
+static Item js_url_field_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    size_t index = js_fn_native((JsFunction*)callee.function)->target.bits;
+    JS_ASSIGN_OR_RETURN(record, js_url_record(receiver));
+    return js_elements_get_int(record, index);
+}
+
+static Item js_url_field_set(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    size_t index = js_fn_native((JsFunction*)callee.function)->target.bits;
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> record(roots, js_url_record(receiver));
+    JS_RETURN_IF_ERROR(record.get());
+    Rooted<Item> value(roots, js_to_string(argc ? args[0] : make_js_undefined()));
+    JS_RETURN_IF_ERROR(value.get());
+    JS_RETURN_IF_ERROR(js_elements_set_int(record.get(), index, value.get()));
+    return make_js_undefined();
+}
+
 static Item js_url_to_string(void) {
-    Item self = js_get_this();
-    if (get_type_id(self) != LMD_TYPE_MAP || js_class_id(self) != JS_CLASS_URL) {
-        return js_throw_type_error("URL.prototype.toString called on incompatible receiver");
+    JS_ASSIGN_OR_RETURN(record, js_url_record(js_get_this()));
+    return js_elements_get_int(record, 0);
+}
+
+static Item js_install_url_constructor(Item global) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> constructor(roots, js_install_native_constructor(global, "URL",
+        js_url_construct_with_base));
+    Rooted<Item> prototype(roots, js_get_key_cstr(constructor.get(), "prototype"));
+    Rooted<Item> getter(roots, ItemNull), setter(roots, ItemNull);
+    for (size_t index = 0; index < js_url_field_count; index++) {
+        const JsUrlField* field = &js_url_fields[index];
+        getter.set(js_new_native_payload_function(js_url_field_get, index, 0));
+        setter.set(field->readonly ? ItemNull :
+            js_new_native_payload_function(js_url_field_set, index, 1));
+        js_install_native_accessor(prototype.get(), js_name_item(field->name),
+            getter.get(), setter.get(), 0);
     }
-    Item href = js_get_key_cstr(self, "href");
-    return get_type_id(href) == LMD_TYPE_STRING ? href : ItemEmptyString;
+    js_install_native_method(prototype.get(), "toString", js_url_to_string);
+    js_install_native_method(prototype.get(), "toJSON", js_url_to_string);
+    return constructor.get();
 }
 
 static Item js_url_to_object(Url* url) {
@@ -16769,76 +16810,29 @@ static Item js_url_to_object(Url* url) {
         if (url) url_destroy(url);
         return ItemNull;
     }
-    // Module activation may allocate, so complete it before this unrooted URL
-    // object is built and handed to the node URL search-params primitive.
     if (!js_activate_url_primitives()) {
         log_error("js_url_to_object: shared URL primitive initialization failed");
         url_destroy(url);
         return ItemNull;
     }
-    RootFrame roots(1);
-    Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_URL));
-    Item obj = object_root.get();
-
-    // Helper macro to set a string property
-    #define URL_SET_PROP(propname, getter) do { \
-        const char* _v = getter(url); \
-        Item _key = js_name_item(propname); \
-        Item _val = _v ? js_name_item(_v, strlen(_v)) : ItemEmptyString; \
-        js_set_key_default(obj, _key, _val); \
-    } while(0)
-
-    URL_SET_PROP("href", url_get_href);
-    // Compute origin: protocol + "//" + host (hostname + optional port)
-    {
-        const char* proto = url_get_protocol(url);
-        const char* host = url_get_host(url);
-        const char* hostname = url_get_hostname(url);
-        // For schemes like mailto:, tel: — origin is "null"
-        bool has_authority = proto && (strncmp(proto, "http", 4) == 0 ||
-                                       strncmp(proto, "ftp", 3) == 0 ||
-                                       strncmp(proto, "ws", 2) == 0);
-        char origin_buf[512];
-        if (has_authority && hostname && hostname[0]) {
-            const char* h = (host && host[0]) ? host : hostname;
-            snprintf(origin_buf, sizeof(origin_buf), "%s//%s", proto ? proto : "", h);
-        } else {
-            snprintf(origin_buf, sizeof(origin_buf), "null");
-        }
-        Item o_key = js_name_item("origin");
-        Item o_val = js_name_item(origin_buf, strlen(origin_buf));
-        js_set_key_default(obj, o_key, o_val);
+    RootFrame roots(2);
+    if (!roots.valid()) { url_destroy(url); return ItemError; }
+    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_URL));
+    Rooted<Item> record(roots, js_array_new(0));
+    // native URL getters read a branded, private record even after public fields
+    // are shadowed or frozen; prototype descriptor discovery uses the same data.
+    NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_URL);
+    Item status = key ? js_private_field_define(object.get(),
+        Item{.item = s2it(key)}, record.get()) : ItemError;
+    for (size_t index = 0; index < js_url_field_count && !item_is_error(status); index++) {
+        const JsUrlField* field = &js_url_fields[index];
+        const char* text = field->get ? field->get(url) : url_get_search(url);
+        Item value = text ? js_name_item(text, strlen(text)) : ItemEmptyString;
+        if (!field->get) value = js_url_search_params_new(value);
+        status = item_is_error(value) ? value : js_array_push(record.get(), value);
     }
-    URL_SET_PROP("protocol", url_get_protocol);
-    URL_SET_PROP("username", url_get_username);
-    URL_SET_PROP("password", url_get_password);
-    URL_SET_PROP("host", url_get_host);
-    URL_SET_PROP("hostname", url_get_hostname);
-    URL_SET_PROP("port", url_get_port);
-    URL_SET_PROP("pathname", url_get_pathname);
-    URL_SET_PROP("search", url_get_search);
-    URL_SET_PROP("hash", url_get_hash);
-
-    #undef URL_SET_PROP
-
-    // URL string coercion is its serialized href, not Object's fallback tag.
-    js_install_native_method(object_root.get(), "toString", js_url_to_string);
-    js_mark_non_enumerable(object_root.get(), js_name_item("toString", 8));
-
-    // searchParams — full URLSearchParams object
-    {
-        const char* search = url_get_search(url);
-        Item search_str;
-        if (search && search[0]) {
-            search_str = js_name_item(search, strlen(search));
-        } else {
-            search_str = ItemEmptyString;
-        }
-        js_set_key_cstr(obj, "searchParams", js_url_search_params_new(search_str));
-    }
-
     url_destroy(url);
-    return object_root.get();
+    return item_is_error(status) ? status : object.get();
 }
 
 extern "C" Item js_url_construct(Item input) {

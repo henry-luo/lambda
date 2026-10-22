@@ -250,8 +250,22 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     if (!img_surface) {
         // Header probing can fail for unusual formats. Fall back to a full
         // decode so the resource still has a chance to render.
-        int channels = 0;
-        unsigned char* data = image_load(res->local_path, &img_width, &img_height, &channels, 4);
+        // optional page images use structured errors; the legacy load adapter
+        // logs every decode miss as an error before the placeholder path can handle it.
+        ImageDecodeOptions options;
+        image_decode_options_init(&options);
+        options.normalize_orientation = false;
+        ImageDecoded decoded = {};
+        ImageError decode_error = {};
+        ImageStatus status = image_io_decode_path(nullptr, res->local_path,
+            &options, &decoded, &decode_error);
+        if (status == IMAGE_IO_ERROR || status == IMAGE_OUT_OF_MEMORY ||
+                status == IMAGE_INTERNAL_ERROR || status == IMAGE_INVALID_ARGUMENT) {
+            log_error("resource_loaders: failed to decode image %s [%s]: %s",
+                res->local_path, image_status_name(status), decode_error.message);
+            return;
+        }
+        unsigned char* data = status == IMAGE_OK ? decoded.pixels : nullptr;
         if (!data) {
             if (res->manager && res->manager->ui_context) {
                 // Cached SVGs have hashed .cache names, so the generic raster
@@ -274,8 +288,10 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
                 return;
             }
         } else {
+            img_width = decoded.width;
+            img_height = decoded.height;
             log_debug("network: image decoded during fallback: %dx%d, channels=%d",
-                      img_width, img_height, channels);
+                      img_width, img_height, 4);
 
             img_surface = image_surface_create_from(img_width, img_height, data);
             if (!img_surface) {

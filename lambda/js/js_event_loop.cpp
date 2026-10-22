@@ -851,12 +851,12 @@ JS_FORWARD_EXPRESSION(bool, js_event_loop_virtual_clock_enabled, (void),
 JS_FORWARD_EXPRESSION(double, js_event_loop_virtual_clock_now_ms, (void),
     js_active_runtime_state ? virtual_clock_ms : 0.0)
 
-static JsTimerHandle* virtual_timer_next_due(double target_ms) {
+static JsTimerHandle* virtual_timer_next_due(double target_ms, int64_t before_id) {
     JsTimerHandle* next = nullptr;
     for (int index = 0; index < timer_slot_count; index++) {
         JsTimerHandle* timer = timer_handle_at(index);
         if (!timer || timer->closing || !timer->virtual_active ||
-            timer->virtual_due_ms > target_ms) continue;
+            timer->job.id >= before_id || timer->virtual_due_ms > target_ms) continue;
         if (!next || timer->virtual_due_ms < next->virtual_due_ms ||
             (timer->virtual_due_ms == next->virtual_due_ms &&
                 timer->job.id < next->job.id)) {
@@ -867,14 +867,18 @@ static JsTimerHandle* virtual_timer_next_due(double target_ms) {
 }
 
 static int virtual_timer_fire_due(double target_ms) {
+    // newly queued callbacks belong to the next turn; a zero-delay chain must
+    // yield to rendering and later deadlines instead of exhausting this drain.
+    const int64_t turn_limit = next_timer_id;
     // The work budget limits a runaway virtual clock, not timer capacity.
     const int callback_limit = (timer_handle_count > 0 ? timer_handle_count : 1) * 64;
     int fired = 0;
     while (fired < callback_limit) {
-        JsTimerHandle* timer = virtual_timer_next_due(target_ms);
+        JsTimerHandle* timer = virtual_timer_next_due(target_ms, turn_limit);
         if (!timer) break;
 
-        virtual_clock_ms = timer->virtual_due_ms;
+        // a callback deferred across a frame must not rewind the document clock.
+        if (timer->virtual_due_ms > virtual_clock_ms) virtual_clock_ms = timer->virtual_due_ms;
         js_performance_virtual_clock_set(true, virtual_clock_ms);
         if (timer->is_interval) {
             // Publish the next interval deadline before the callback so
@@ -890,7 +894,7 @@ static int virtual_timer_fire_due(double target_ms) {
         uv_loop_t* loop = lambda_uv_loop();
         if (loop) uv_run(loop, UV_RUN_NOWAIT);
     }
-    if (virtual_timer_next_due(target_ms)) {
+    if (virtual_timer_next_due(target_ms, turn_limit)) {
         log_error("event_loop: virtual timer drain exceeded %d callbacks", callback_limit);
     }
     return fired;
@@ -1809,7 +1813,7 @@ extern "C" int js_event_loop_wait_until(int (*predicate)(void*), void* user, int
         if (elapsed_ms >= (uint64_t)watchdog_ms) break;
 
         if (virtual_clock_enabled) {
-            JsTimerHandle* next = virtual_timer_next_due(virtual_limit);
+            JsTimerHandle* next = virtual_timer_next_due(virtual_limit, next_timer_id);
             bool frame = js_animation_frame_has_pending();
             if (next || frame) {
                 // explicit readiness follows scheduled work, including delayed action ticks.

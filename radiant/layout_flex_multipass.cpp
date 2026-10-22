@@ -1312,10 +1312,14 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // every content pass of an item comes through here, so a replay always
     // finds the subtree as the recorded pass left it.
     FlexContainerLayout* parent_flex = lycon->flex_container;
-    if (radiant::flex_replay_measured_flow(lycon, flex_item, parent_flex)) return;
-    if (flex_retained_replay_content(lycon, flex_item, parent_flex)) return;
     float final_width = flex_item->width;
     float final_height = flex_item->height;
+    if (radiant::flex_replay_measured_flow(lycon, flex_item, parent_flex)) {
+        // a completed replay also owns the live result needed by the next clean reflow.
+        flex_retained_record_content(lycon, flex_item, parent_flex, final_width, final_height);
+        return;
+    }
+    if (flex_retained_replay_content(lycon, flex_item, parent_flex)) return;
     // any content write replaces the live fragments described by either retention path.
     flex_retained_forget_content(flex_item);
     layout_flex_item_content_pass(lycon, flex_item);

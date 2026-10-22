@@ -1,0 +1,9 @@
+<html
+  <body
+    <div id: "owner",
+      <button id: "noop",
+        "No change">
+      <button id: "change",
+        "Change">
+      <output id: "value",
+        "0">>>>

@@ -250,7 +250,7 @@ enum MvpLmdInternalName {
     LMD_INTERNAL_REGEXP_ITERATOR, LMD_INTERNAL_REGEXP_ITERATOR_STRING,
     LMD_INTERNAL_REGEXP_ITERATOR_GLOBAL, LMD_INTERNAL_REGEXP_ITERATOR_UNICODE,
     LMD_INTERNAL_REGEXP_ITERATOR_DONE, LMD_INTERNAL_ITERATOR_NEXT,
-    LMD_INTERNAL_CUSTOM_ELEMENT_NAME, LMD_INTERNAL_NAME_COUNT
+    LMD_INTERNAL_CUSTOM_ELEMENT_NAME, LMD_INTERNAL_URL, LMD_INTERNAL_NAME_COUNT
 };
 NameRef mvp_lmd_internal_name(MvpLmdInternalName name);
 extern __thread MvpLmdLibraryState* mvp_lmd_foreign_library;
@@ -420,6 +420,7 @@ Item mvp_lmd_template_object(MvpLmdProgram* program, JsTemplateLiteralNode* lite
 const JsTemplateObjectOps* mvp_lmd_template_object_ops();
 Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix);
 Item mvp_lmd_fail(int64_t kind, int64_t site, const char* detail = NULL);
+Item mvp_lmd_execution_interrupt_status(void);
 double mvp_lmd_string_to_number(String* string);
 double mvp_lmd_parse_number(String* string, int64_t prefix);
 Item mvp_lmd_number_to_string(double value);

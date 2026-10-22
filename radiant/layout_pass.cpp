@@ -285,6 +285,12 @@ static bool layout_flow_capture_nodes(LayoutContext* context, DomNode* node,
             output->flex_item = lam::own((FlexItemProp*)pool_alloc(context->pool, sizeof(FlexItemProp)));
             if (!output->flex_item) return false;
             *output->flex_item = *item;
+            // only a memo describing these captured boxes can accompany the owned fragments.
+            FlexRetainedPass* retained = &output->flex_item->retained;
+            retained->has_content = retained->has_content &&
+                retained->laid_width == node->width && retained->laid_height == node->height &&
+                retained->laid_content_width == element->content_width &&
+                retained->laid_content_height == element->content_height;
         }
         if (element->position) {
             output->position = lam::own((PositionProp*)pool_alloc(context->pool, sizeof(PositionProp)));
@@ -433,7 +439,6 @@ bool layout_flow_result_apply(LayoutContext* context, const LayoutFlowResult* re
             element->inline_line_number = output->inline_line_number;
             if (output->flex_item && node != root && element->flex_item()) {
                 *element->fi = *output->flex_item;
-                element->fi->retained.has_content = false;
             }
             if (output->position && element->position) *element->position = *output->position;
             if (output->table && element->table_prop()) *element->tb = *output->table;

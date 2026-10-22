@@ -899,11 +899,11 @@ fn document_pane_model(file, property_data, open_paths, eml_data, csv_data, csv_
   <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
     eml_data:eml_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
+// file navigation owns its updates so filtering never remounts the document pane.
+edit <doc_editor_file_browser> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
-  <div class:"doc-editor"
-  , <aside class:"file-panel"
+  <aside class:"file-panel"
     , <div class:"file-panel-header"
       , <div class:"project-title"
         , <span class:"project-icon", "⌘">
@@ -936,15 +936,13 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
                 initial_open:path_is_open(open_paths,
                                           child_path(PROJECT_ROOT, entry.name)),
                 open_paths:open_paths,
-                selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
+                selected_path:selected_path,
                 filter_text:filter_text
               >)
           >
         }
       >
     <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
-  >
-  apply(pane)
   >
 }
 on click(evt) {
@@ -987,6 +985,16 @@ on keydown(evt) {
   }
 }
 on file_select(entry) {
+  selected_path = entry["file_path"]
+  emit("document_select", entry)
+}
+
+let FILE_BROWSER = <doc_editor_file_browser>
+
+edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
+  <div class:"doc-editor", *[apply(FILE_BROWSER, {mode:"edit"}), apply(pane)]>
+}
+on document_select(entry) {
   let file = {file_path: entry["file_path"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"]}
   let format = property_format(entry["extension"])

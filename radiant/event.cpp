@@ -3262,11 +3262,22 @@ static bool settle_template_retransform(EventContext* evcon,
     }
     int available = count <= 16 ? count : 16;
     int reported = 0;
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
     for (int i = 0; i < available; i++) {
-        // A template returning the same value keeps its live imperative DOM edits.
-        if (results[i].old_result.item != results[i].new_result.item) { // RAW_ITEM_EQ_OK: presentation identity determines whether DOM ownership moved.
-            results[reported++] = results[i];
+        // fresh but equal render values keep their live DOM, geometry and imperative edits.
+        if (results[i].old_result.item == results[i].new_result.item) { // RAW_ITEM_EQ_OK: identical presentation already owns its DOM.
+            continue;
         }
+        if (doc && fn_eq_strict(results[i].old_result, results[i].new_result) == BOOL_TRUE) {
+            dom_rebind_equal_render_result(doc, results[i].old_result, results[i].new_result);
+            // equal pixels can still have new template inputs, such as a delayed spinner.
+            DomNode* root = get_type_id(results[i].new_result) == LMD_TYPE_ELEMENT
+                ? element_dom_map_lookup(doc->element_dom_map, results[i].new_result.element)
+                : doc->root.get();
+            if (root) radiant_queue_template_render_events(doc, root);
+            continue;
+        }
+        results[reported++] = results[i];
     }
     // The render map already published new source identities, even for equal values.
     // Commit their DOM ownership together or the next redraw cannot find its old result.

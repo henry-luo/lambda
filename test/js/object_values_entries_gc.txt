@@ -1,0 +1,11 @@
+values [{"value":"getter"},{"value":"kept"}]
+values ["a","b","c"]
+values ["a","b"]
+values 0
+values [{"nested":"live"},2]
+entries [["first",{"value":"getter"}],["a",{"value":"kept"}]]
+entries [["0","a"],["1","b"],["2","c"]]
+entries [["0","a"],["1","b"]]
+entries 0
+entries [["x",{"nested":"live"}],["y",2]]
+OBJECT_VALUES_ENTRIES_GC_DONE
