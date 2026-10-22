@@ -1,6 +1,6 @@
 # Shared editor coordination and control bindings
 
-Verified against the tree: 2026-10-16.
+Verified against the tree: 2026-10-23.
 
 `lambda.edit.controller` coordinates a model editor with its native surface.
 `lambda.ui.controls` provides style-neutral native controls with declarative
@@ -46,6 +46,18 @@ boundaries belong to the configured surface before accepting it. Private
 form-control selections remain separate. The pure `selection_snapshot` and
 `accept_selection` helpers preserve the editor adapter's stale-revision and
 model-completion-echo checks (**D7.2.5**, **D7.5.3**).
+
+An editor may supply `transaction_filter(editor, transaction)`, a pure callback
+returning a transaction or an error. The adapter invokes it before recording
+history for both native input and `edit_apply`. Derived annotations therefore
+undo with the original edit, and a rejected transaction leaves the editor intact
+(**S1.4**, **D7.2.5**). The Word demo uses this hook for text revisions. Its
+filter skips history restores, transient IME updates, and its own review actions;
+the committed composition is annotated once. Hosts must handle a returned error
+and claim the rejected native action to prevent a second editing path.
+
+`handle` is a procedure. Keep its returned outcome when assigning application
+state; procedure statement handlers discard successful results (**S7.6.7v4**).
 
 ## Controlled inputs
 

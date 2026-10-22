@@ -32,6 +32,11 @@ pub fn editor_style(doc) {
     "width:" ++ string(g.width) ++ "px; min-height:" ++ string(g.height) ++ "px; padding:" ++
         join([for (v in [g.top,g.right,g.bottom,g.left]) string(v) ++ "px"]," ") ++ ";"
 }
+// Keep original child identities: page wrappers must not change editing source paths.
+pub fn sheets(doc) {
+    let starts = [0,*[for (i,n in doc.content where i>0 and attrs_get(n.attrs,'data-word-page-break')=="true") i],len(doc.content)];
+    [for (i in 0 to len(starts)-2) slice(doc.content,starts[i],starts[i+1])]
+}
 pub fn export_css(doc) {
     let p = settings(doc)
     "@media screen { .word-content {" ++ editor_style(doc) ++ "} } @page { size:" ++

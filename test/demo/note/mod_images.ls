@@ -3,6 +3,7 @@ import dom
 import controller: lambda.edit.controller
 import model: .mod_model
 import adapter: lambda.editor.mod_dom_adapter
+import image: lambda.editor.mod_image
 
 pub fn image_index(editor,path) => [for (i,entry in model.images(editor.doc) where entry.path==path) i][0]
 pub pn image_element(editor,node,path=null) {
@@ -11,11 +12,7 @@ pub pn image_element(editor,node,path=null) {
     return if (index==null) null else dom.query_selector_all(controller.surface(node),"img")[index]
 }
 pub pn hit(editor,node) {
-    let image = dom.closest(node,"#edit-surface img")
-    if (image==null) { return null }
-    let nodes = dom.query_selector_all(controller.surface(node),"img")
-    let index = [for (i,n in nodes where n==image) i][0]
-    return model.images(editor.doc)[index].path
+    return image.hit(editor,node,controller.surface(node))
 }
 fn dimensions(box,target) {
     let width = round(max(16,min(4096,target)))

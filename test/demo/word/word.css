@@ -58,7 +58,7 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .paragraph-settings-row { display:flex; gap:3px; align-items:center; }
 .paragraph-dialog { width:24px; padding:2px; margin-top:5px; }
 .paragraph-dialog .tool-label { display:none; }
-.group-pictures .group-tools,.group-rows .group-tools,.group-columns .group-tools { display:flex; flex-direction:column; gap:3px; }
+.group-pictures .group-tools,.group-shapes .group-tools,.group-rows .group-tools,.group-columns .group-tools { display:flex; flex-direction:column; gap:3px; }
 .group-table-style .ribbon-select,.group-cell-alignment .ribbon-select { min-width:150px; margin-bottom:8px; }
 .style-gallery { display:flex; gap:6px; }.style-card { width:67px; height:51px; display:flex; align-items:flex-end;
   justify-content:flex-start; padding:8px; background:#fff; border:1px solid #e1e8e2; font-family:Georgia,serif; }
@@ -87,7 +87,7 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .canvas-heading span:last-child { letter-spacing:0; font-size:10px; }
 .ruler { display:flex; justify-content:space-between; padding:0 72px; height:19px; max-width:none; margin:0 auto; color:#9ba9ad; font-size:8px; border-bottom:1px solid #c7d1d5; }
 .ruler span { border-left:1px solid #c1ced2; padding-left:3px; height:10px; }
-.paper-wrap { margin:13px auto 0; background:#fff; box-shadow:0 3px 15px rgba(31,54,62,0.10); }
+.paper-wrap { margin:13px auto 0; }
 .canvas-footer { text-align:center; color:#a0adb0; font-family:Georgia,serif; font-style:italic; font-size:12px; margin-top:24px; }
 .statusbar { display:flex; height:33px; flex-shrink:0; align-items:center; justify-content:space-between; padding:0 20px;
   background:#f5f8f5; border-top:1px solid #d1dcd5; color:#7b8e81; font-size:10px; }
@@ -98,7 +98,7 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .focus-mode .titlebar,.focus-mode .ribbon-shell,.focus-mode .navigation-slot { display:none; }
 .edit-dialog-layer { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:30; }
 .edit-dialog-backdrop { position:absolute; inset:0; z-index:0; background:rgba(22,43,39,0.35); }
-.edit-dialog { position:relative; z-index:1; width:440px; background:#fff; padding:28px; border:1px solid #c7d8cc; border-radius:10px; box-shadow:0 12px 60px #34524744; }
+.edit-dialog { position:relative; z-index:1; width:440px; max-height:calc(100vh - 40px); overflow:auto; background:#fff; padding:28px; border:1px solid #c7d8cc; border-radius:10px; box-shadow:0 12px 60px #34524744; }
 .edit-dialog-title { font-family:Georgia,serif; font-size:25px; color:#284a39; margin-bottom:12px; }
 .edit-dialog-text { font-size:12px; line-height:1.6; color:#7d8e82; margin-bottom:20px; }
 .edit-dialog-field { width:100%; height:35px; border:1px solid #cbd8ce; padding:7px 10px; border-radius:4px; margin-bottom:10px; }
@@ -114,6 +114,16 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .bookmark-description span { display:block; color:#87958c; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:210px; margin-top:4px; }
 .bookmark-empty { font-size:12px; color:#87958c; }
 .symbol-gallery { max-height:310px; overflow:auto; margin-bottom:18px; }
+.shape-gallery { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:16px; max-height:220px; overflow:auto; }
+.art-gallery { display:flex; gap:4px; overflow:auto; margin-bottom:16px; }
+.art-choice { height:68px; flex-direction:column; gap:5px; font-size:10px; border:1px solid #dce5df; }
+.equation-examples { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:12px; }
+.equation-source { height:90px; font-family:'Courier New',monospace; }
+.revision-inserted { color:#216b47; background:#e5f3e9; padding:8px; white-space:pre-wrap; }
+.revision-deleted { color:#ac3541; background:#fcebed; text-decoration:line-through; padding:8px; white-space:pre-wrap; }
+.group-tracking .group-tools,.group-changes .group-tools { display:flex; flex-direction:column; gap:3px; }
+.shape-choice { height:67px; flex-direction:column; gap:6px; font-size:9px; padding:6px 3px; border:1px solid #dce5df; background:#fafcfb; }
+.shape-choice .tool-icon { height:30px; }
 .symbol-category-title { font-size:10px; color:#7b8e81; margin:12px 0 7px; }
 .symbol-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:4px; }
 .symbol-key { height:32px; font-family:Georgia,serif; font-size:19px; border:1px solid #dce5df; background:#fafcfb; }

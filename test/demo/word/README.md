@@ -29,11 +29,30 @@ at a caret sets the marks for subsequent typing.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.
+  Shapes offers fifteen basic, flowchart, and decorative shapes with editable
+  size, fill, outline color/weight, rotation, and text. Shapes use shared contours, sit inline with text,
+  and retain their settings in snapshots and HTML; PDF includes their SVG image.
+  Click an existing picture or shape to select it, then open its settings, or
+  double-click it to edit directly.
   The Pages group adds an editable cover (title, subtitle, author) at the start,
   a blank page at the caret, or a page break. A blank page splits a body paragraph
   or heading and isolates a new editable paragraph between two page boundaries.
   The Symbol dialog offers punctuation, mathematics, currencies, Greek letters,
   and arrows, plus custom text of 1–64 printable Unicode characters.
+- Header and Footer: repeating text, left/center/right alignment, font size,
+  on-screen edge distance, and an option to leave the first page blank.
+  `{PAGE}` and `{NUMPAGES}` fields update with explicit screen sheets and actual
+  PDF pages. Double-click an existing header/footer to edit both stories.
+  PDF places these stories in the page's top/bottom margin boxes, centered
+  vertically within the margins; the edge-distance control affects the canvas.
+  Settings and page setup reject margins that cannot fit the configured stories.
+- Equations: editable LaTeX source with formula examples, display/inline math
+  typesetting, size, and color. The existing `lambda.doc.math` package supplies
+  typesetting and embedded glyphs. Double-click an equation to revise its source.
+- WordArt: solid, outlined, hollow, gradient, and shadowed text, with straight,
+  upward/downward arch, and wave transforms; editable text, font, size, colors,
+  and dimensions. Equations and WordArt remain editable inline SVG objects in
+  snapshots and HTML; PDF preserves their appearance.
 - Bookmarks: name the current paragraph, list targets, Go to, delete, or move an
   existing name to another paragraph. Names use up to 40 ASCII letters, digits,
   or underscores and cannot start with a digit. Each paragraph has one bookmark.
@@ -51,11 +70,18 @@ at a caret sets the marks for subsequent typing.
   sidebar, previous/next and Go to text, resolve/reopen, and delete. Overlapping
   anchors survive character formatting and editing; comment changes support undo.
   Comments and page settings survive editable snapshots and exported HTML imports.
+- Tracked text changes: author settings, insertion/deletion marks, a Changes
+  pane, Go to text, individual or all-change accept/reject, and a Show markup
+  toggle. Consecutive typing shares a revision; deleting pending inserted text
+  cancels it. Review and editing both support undo/redo. Snapshot and HTML
+  preserve pending revisions; PDF exports visible revision marks and text export
+  uses the final text with pending deletions omitted.
 - Navigation: document headings, Unicode-aware case-insensitive search with a
   Match case toggle, previous/next match, replacement, and one-step undo for
   Replace all across formatting runs within a paragraph.
-- View: navigation pane, read mode, focus mode, and 50–150% zoom. The editor
-  uses a continuous canvas at the chosen paper width; PDF export paginates using
+- View: navigation pane, read mode, focus mode, and 50–150% zoom. Explicit page
+  breaks create separate editable sheets with the chosen size and margins;
+  ordinary Enter continues on the same sheet. PDF export paginates using
   that document's paper, orientation, margins, and explicit page breaks.
 - Native typing, paragraph splitting/joining, selection, deletion, composition,
   and clipboard actions use the existing `lambda.editor` protocol.
@@ -84,10 +110,19 @@ at a caret sets the marks for subsequent typing.
 Save and export default to `temp/word/`. Other destinations must have an
 existing parent directory. Editable snapshots are limited to 4 MB, including
 embedded pictures. `.word.json` is the editable format; DOCX writing,
-RTF/ODT, spell/grammar checking, tracked changes, comment replies, collaboration,
-mail merge, equations, section/header/footer editing, and Word-compatible
-pagination in the editing canvas are outside this demo. Font substitution follows the installed
-fonts available to Radiant. Search does not span paragraph boundaries.
+RTF/ODT, spell/grammar checking, comment replies, collaboration,
+mail merge, rich or section-specific header/footer stories, and Word-compatible
+automatic pagination in the editing canvas are outside this demo. Screen sheets
+grow when their contents overflow; PDF adds pages to fit. Shapes are inline;
+floating objects and attached connectors are outside this milestone.
+Text tracking covers text-only paragraphs, headings, and table cells, including
+formatting runs. Character formatting applies without revisions. Structural
+edits, links, and embedded-content edits require tracking to be turned off;
+they are rejected while tracking is on. Review does not track object, story,
+or paragraph-format changes. LaTeX support follows the math package's command
+coverage; unsupported commands leave the equation dialog open.
+Font substitution follows the installed fonts available to Radiant. Search does
+not span paragraph boundaries.
 Bookmarks target paragraphs rather than arbitrary text ranges; deleting a
 bookmarked paragraph removes its target, leaving any links for the author to
 repair. Cover insertion prepends a new cover; it does not replace an earlier one.
@@ -121,8 +156,9 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 | `crates/engine/src/cmd/{format,para,text,table,edit}.rs` | Existing editor commands plus range formatting, paragraph attributes, style application, and cross-run replacement |
 | `crates/engine/src/cmd/find_pattern.rs` | Literal paragraph search mapped back to source positions; wildcard/regex language is not ported |
 | `crates/engine/src/cmd/{table,table_style,insert,para}.rs` | Reused structural commands plus table presentation, embedded pictures, link editing, and paragraph settings in `mod_model.ls` |
-| `crates/engine/src/cmd/{page,review}.rs` | `mod_page.ls` document-owned paper settings and `mod_review.ls` comment metadata with text-mark anchors |
-| `crates/engine/src/cmd/insert.rs` | `mod_insert.ls` cover/blank pages, paragraph bookmarks, and Unicode symbols; internal links reuse the editor's link transaction |
+| `crates/engine/src/cmd/{page,review}.rs` | `mod_page.ls` document-owned paper settings and screen sheet grouping; `mod_review.ls` comment metadata with text-mark anchors |
+| `crates/engine/src/cmd/insert.rs` | `mod_insert.ls` pages, bookmarks, and Unicode symbols; `mod_shapes.ls` uses drawing contours and image transactions for embedded SVG shapes |
+| Secondary stories, math, WordArt, and text revisions | `mod_stories.ls`, `mod_equation.ls`, `mod_wordart.ls`, and `mod_changes.ls`; generated objects share `mod_objects.ls` |
 | `crates/ui-egui/src/{ribbon,canvas}.rs` | `mod_ui.ls`, `mod_surface.ls`, `word.css`; native HTML/CSS layout and caret geometry |
 | `crates/engine/src/sample.rs` | Adapted studio handbook in `mod_document.ls` |
 | `crates/{docx,formats,pdf}` and `engine/src/io.rs` | Existing Lambda format adapters, conflict-aware `lambda.edit.session`, and Radiant PDF export through `mod_io.ls` |
@@ -139,8 +175,8 @@ Page settings and comment metadata are document attributes, so the same editor
 history restores them atomically with text marks (**S1.4**, **D7.2.5**). HTML
 exports carry this metadata in a named meta element. Comments use IDs on span
 marks, allowing overlapping anchors without a second offset-mapping system.
-Case-insensitive search maps folded Unicode characters back to original UTF-8
-byte positions, including lowercase expansions (**S17.7.2**).
+Case-insensitive search maps folded Unicode characters back to source positions,
+including lowercase expansions (**S17.7.2**).
 
 Bookmark targets use paragraph IDs prefixed with `word-bookmark-`. The shared
 editor already retains `id` on the original paragraph when Enter splits it,
@@ -148,6 +184,21 @@ so the new paragraph never duplicates the target. Moving a bookmark removes
 the old target and assigns the new one in one transaction; imported unrelated
 IDs are preserved. Covers, blank pages, symbols, and bookmark mutations all
 use the same editor history (**S1.4**, **D7.2.5**).
+
+Screen sheets wrap the original model children without changing their source
+paths. The paragraph schema marks page boundaries and cover roles
+`keep_on_split:false`, so Enter does not duplicate them (**D7.2.5**).
+Shapes store their parameters in an image's `data-word-shape` attribute;
+regenerating its SVG, dimensions, and metadata is one transaction (**S1.4**).
+Equations and WordArt follow the same image transaction, preserving editable
+parameters alongside the rendered SVG. Decorative glyph paths are shared with
+Photo through `lambda.doc.shapes` rather than copied.
+
+Tracked changes use the editor's optional transaction filter before history is
+recorded (**D7.2.5**). Insertion and deletion span marks carry revision ID, kind,
+and author; the Changes pane is derived from those marks. Accept/reject transforms
+the marked leaves instead of restoring an old document, preserving other edits.
+Transient IME updates stay unmarked; the committed composition is tracked once.
 
 Toolbar pointer events carry a hit position for the button as well as an
 optional document selection. The controller accepts document selections but
@@ -210,7 +261,8 @@ The runner checks model, snapshot, and HTML/Markdown/text/DOCX import goldens on
 interpreter, auto, and JIT tiers; then replays typing/history/save,
 formatting/search/table, open/export/dirty-guard/focus, table-caret, scrolled-caret,
 table navigation/settings, pictures/links, paragraph/search, page setup, comments,
-cover/blank pages, bookmarks/internal links, and symbols
+cover/blank pages, bookmarks/internal links, symbols, repeated stories, equations,
+WordArt, shape settings, and tracked revisions
 in headless Radiant. It checks the result records and exported file contents,
 including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are

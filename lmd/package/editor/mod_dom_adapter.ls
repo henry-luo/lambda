@@ -115,7 +115,9 @@ fn history_recorded(tx, changed) =>
 pub fn apply_transaction(editor, tx) {
   if (tx == null) editor
   else {
-    let tx2 = transaction.tx_set_meta(tx, "scrollIntoView", true)
+    // hosts may derive review annotations before a transaction enters history (D7.2.5).
+    let filtered = if (editor.transaction_filter==null) tx else editor.transaction_filter(editor,tx)^
+    let tx2 = transaction.tx_set_meta(filtered, "scrollIntoView", true)
     let next = input_intent.state_after_intent(editor, tx2)
     let changed = next.doc != editor.doc
     { *: editor, doc: next.doc, selection: next.selection,
@@ -176,7 +178,7 @@ fn execute(editor, evt, descriptor, snapshot) {
        result: result.decline(true, false, failure, 0),
        action: edit_action, request: edit_request}
     } else {
-      let next_editor = apply_transaction(target_editor, tx)
+      let next_editor = apply_transaction(target_editor, tx)^
       let changed = next_editor.doc != editor.doc
       let selection_changed = not selection_equal(next_editor.selection, editor.selection)
       let edit_result = result.model_applied(changed, selection_changed,

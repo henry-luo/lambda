@@ -5,5 +5,8 @@
 [true, true, true, true]
 [true, true, true, true, true, true, true]
 ["xyb", "x"]
+[[true, true, false, true], [false, false, true, false], [true, false, true, false], [false, false, true, false]]
+[true, true, true, true]
+0
 ["1.23e5", "2"]
 [true, true, true]

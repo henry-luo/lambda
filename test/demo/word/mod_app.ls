@@ -11,13 +11,24 @@ import model: .mod_model
 import storage: .mod_io
 import page: .mod_page
 import insert: .mod_insert
+import shapes: .mod_shapes
+import stories: .mod_stories
+import equation: .mod_equation
+import wordart: .mod_wordart
+import changes: .mod_changes
 import controller: lambda.edit.controller
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
     tab:"Home",dialog:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
-    zoom:1.0,nav:true,read_only:false,focused:false,review:false,show_resolved:false}
+    zoom:1.0,nav:true,read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
+pn shape_values(node,kind=null) { return {kind:kind or field(node,"shape-kind"),width:field(node,"shape-width"),height:field(node,"shape-height"),
+    fill:field(node,"shape-fill"),stroke:field(node,"shape-stroke"),weight:field(node,"shape-weight"),rotation:field(node,"shape-rotation"),
+    text:field(node,"shape-text"),text_color:field(node,"shape-text-color"),size:field(node,"shape-size")} }
+pn art_values(node,style=null) { return {text:field(node,"art-text"),style:style or field(node,"art-style"),transform:field(node,"art-transform"),
+    width:field(node,"art-width"),height:field(node,"art-height"),size:field(node,"art-size"),font:field(node,"art-font"),
+    fill:field(node,"art-fill"),outline:field(node,"art-outline")} }
 pub let focus_document = controller.focus
 pub let is_control = controller.is_control
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
@@ -60,8 +71,9 @@ pn model_command(st,id,params,node) {
     let next = model.execute(editor,id,params) ^ { return {*:st,editor:editor,status:^.message,
         dialog:if (st.dialog==null) null else {*:st.dialog,error:^.message}} }
     focus_document(node)
+    let revision = contains(["review.trackChanges","review.accept","review.reject","review.acceptAll","review.rejectAll"],id)
     return {*:st,editor:model.clean(next),dialog:null,status:model.spec(id).label,
-        review:st.review or starts_with(id,"review.")}
+        review:not revision and (st.review or starts_with(id,"review.")),revisions:st.revisions or revision}
 }
 pn dialog_model(st,id,values,params,node) {
     return model_command({*:st,dialog:{*:st.dialog,values:values}},id,params,node)
@@ -95,6 +107,30 @@ pn dialog_command(st,action,node) {
     if (action == "symbol") {
         let values = {char:field(node,"symbol-text")}
         return dialog_model(st,"insert.symbol",values,values,node)
+    }
+    if (action == "shape") {
+        let values = shape_values(node)
+        return dialog_model(st,if (st.dialog.editing) "shape.set" else "insert.shape",values,
+            {*:values,width:float(values.width),height:float(values.height),weight:float(values.weight),rotation:float(values.rotation),size:float(values.size)},node)
+    }
+    if (action == "stories") {
+        let values = {header:field(node,"stories-header"),footer:field(node,"stories-footer"),header_align:field(node,"stories-header-align"),
+            footer_align:field(node,"stories-footer-align"),size:field(node,"stories-size"),distance:field(node,"stories-distance"),different_first:field(node,"stories-first")}
+        return dialog_model(st,"layout.headerFooter",values,{*:values,size:float(values.size),distance:float(values.distance),different_first:values.different_first=="true"},node)
+    }
+    if (action == "equation") {
+        let values = {source:field(node,"equation-source"),size:field(node,"equation-size"),color:field(node,"equation-color"),display:field(node,"equation-display")}
+        return dialog_model(st,if (st.dialog.editing) "equation.set" else "insert.equation",values,
+            {*:values,size:float(values.size),display:values.display=="true"},node)
+    }
+    if (action == "wordart") {
+        let values = art_values(node)
+        return dialog_model(st,if (st.dialog.editing) "wordArt.set" else "insert.wordArt",values,
+            {*:values,width:float(values.width),height:float(values.height),size:float(values.size)},node)
+    }
+    if (action=="tracking") {
+        let values = {enabled:field(node,"tracking-enabled"),author:field(node,"tracking-author")}
+        return dialog_model(st,"review.trackChanges",values,{*:values,enabled:values.enabled=="true"},node)
     }
     if (action == "internal_link") {
         let name = field(node,"link-bookmark")
@@ -146,7 +182,40 @@ pn dialog_command(st,action,node) {
 }
 pub pn command(st,id,params,node) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
-    if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or params.tab=="Review"} }
+    if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or (params.tab=="Review" and not st.revisions)} }
+    if (contains(["ui.headerFooter","ui.pageNumber","ui.equation","ui.equationSettings","ui.wordArt","ui.wordArtSettings","ui.objectSettings"],id) or
+        (id=="ui.pictureSettings" and (equation.settings(model.current_node(st.editor,'img').node)!=null or wordart.settings(model.current_node(st.editor,'img').node)!=null))) {
+        if (st.read_only) { return st }
+        let selected = model.current_node(st.editor,'img')
+        if (id=="ui.headerFooter" or id=="ui.pageNumber") {
+            let p = stories.settings(st.editor.doc)
+            return {*:st,dialog:{kind:"stories",values:if (id=="ui.pageNumber" and p.footer=="") {*:p,footer:"Page {PAGE} of {NUMPAGES}"} else p}}
+        }
+        let kind = if (contains(["ui.equation","ui.equationSettings"],id) or
+            (contains(["ui.objectSettings","ui.pictureSettings"],id) and equation.settings(selected.node)!=null)) "equation" else "wordart"
+        let editing = not contains(["ui.equation","ui.wordArt"],id)
+        let current = if (kind=="equation") equation.settings(selected.node) else wordart.settings(selected.node)
+        if (editing and current==null) { return {*:st,status:"Select an equation or WordArt object first."} }
+        return {*:st,dialog:{kind:kind,editing:editing,values:if (editing) current else if (kind=="equation") equation.defaults else wordart.defaults}}
+    }
+    if (id=="ui.equationPreset" and st.dialog.kind=="equation") {
+        return {*:st,dialog:{*:st.dialog,error:null,values:{source:params.source,size:field(node,"equation-size"),
+            color:field(node,"equation-color"),display:field(node,"equation-display")}}}
+    }
+    if (id=="ui.chooseArt" and st.dialog.kind=="wordart") {
+        return {*:st,dialog:{*:st.dialog,error:null,values:art_values(node,params.style)}}
+    }
+    if (id == "ui.shape" or id == "ui.shapeSettings" or
+        (id == "ui.pictureSettings" and shapes.settings(model.current_node(st.editor,'img').node)!=null)) {
+        if (st.read_only) { return st }
+        let selected = shapes.settings(model.current_node(st.editor,'img').node)
+        if (id=="ui.shapeSettings" and selected==null) { return {*:st,status:"Select a shape first."} }
+        return {*:st,dialog:{kind:"shape",editing:id!="ui.shape",values:if (id!="ui.shape") selected else shapes.defaults}}
+    }
+    if (id == "ui.chooseShape") {
+        if (st.dialog==null or st.dialog.kind!="shape") { return st }
+        return {*:st,dialog:{*:st.dialog,error:null,values:shape_values(node,params.kind)}}
+    }
     if (id == "ui.cover") {
         if (st.read_only) { return st }
         return {*:st,dialog:{kind:"cover",values:{title:st.file_state.envelope.title,subtitle:"Document subtitle",author:"Me"}}}
@@ -172,7 +241,21 @@ pub pn command(st,id,params,node) {
         if (target!=null) dom.scroll_into_view(target)
         return {*:st,dialog:null,editor:edit_set_selection(mounted(st.editor,node),selection),status:"Bookmark: " ++ name}
     }
-    if (id == "ui.comments") { return {*:st,review:not st.review} }
+    if (id == "ui.comments") { return {*:st,review:not st.review,revisions:false} }
+    if (id=="ui.revisions") { return {*:st,revisions:not st.revisions,review:false} }
+    if (id=="ui.showChanges") { return {*:st,show_changes:not st.show_changes} }
+    if (id=="ui.tracking") {
+        if (st.read_only) { return st }
+        return {*:st,dialog:{kind:"tracking",values:changes.settings(st.editor.doc)}}
+    }
+    if (id=="ui.revisionText") {
+        let selected = changes.selection(st.editor.doc,params.id)
+        if (selected==null) { return {*:st,status:"This revision no longer exists."} }
+        focus_document(node)
+        let target = dom.query_selector(dom.root_node(node),"#edit-surface [data-word-change=\"" ++ params.id ++ "\"]")
+        if (target!=null) dom.scroll_into_view(target)
+        return {*:st,revisions:true,review:false,show_changes:true,editor:edit_set_selection(mounted(st.editor,node),selected)}
+    }
     if (id == "ui.resolvedComments") { return {*:st,show_resolved:not st.show_resolved} }
     if (id == "ui.comment") {
         if (st.read_only) { return st }

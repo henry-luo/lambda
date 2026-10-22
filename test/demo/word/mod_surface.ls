@@ -5,6 +5,7 @@ import lambda.editor.mod_step
 import page: .mod_page
 import rendering: lambda.edit.model
 import insert: .mod_insert
+import stories: .mod_stories
 
 let factories = {
     p:(a,k)=><p *:a, *k>, h1:(a,k)=><h1 *:a, *k>, h2:(a,k)=><h2 *:a, *k>,
@@ -28,31 +29,41 @@ fn make(tag,attrs,kids) {
 // Imported event handlers never reach the live DOM.
 fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','colspan','rowspan','data-word-style',
     'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment',
-    'data-word-cover','data-word-blank-page'],a.name) or
+    'data-word-cover','data-word-blank-page','data-word-shape','data-word-equation','data-word-wordart',
+    'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
     (a.name=='id' and starts_with(string(a.value),insert.bookmark_prefix)))
     (string(a.name),string(a.value))])}
 fn wrap_marks(marks,i,child) => if (i >= len(marks)) child else {
     let m = marks[i]
-    let attrs = if (m.value is array) projected_attrs(m.value) else {}
+    let projected = if (m.value is array) projected_attrs(m.value) else {}
+    let attrs = if (projected["data-word-change-kind"]=="delete") {*:projected,contenteditable:"false"} else projected
     wrap_marks(marks,i+1,make(m.name,attrs,[child]))
 }
 view map {
     if (~.kind == 'text') wrap_marks(~.marks,0,if (~.text == "") "\u200B" else ~.text)
-    else if (~.kind == 'node') make(if (~.tag == 'doc') 'div' else ~.tag,
+    else if (~.kind == 'node' and ~.tag == 'doc') <div class:"word-pages",
+        *[for (i,children in page.sheets(~)) <div class:"word-page",["data-page"]:string(i+1),
+            style:page.editor_style(~),stories.story(~,"header",i+1,len(page.sheets(~)));
+            *[for (child in children) apply(child)];
+            stories.story(~,"footer",i+1,len(page.sheets(~)))>]>
+    else if (~.kind == 'node') make(~.tag,
         projected_attrs(~.attrs),rendering.surface_children(~,(child)=>apply(child)))
     else ""
 }
 pub fn surface(editor,zoom,read_only=false) =>
     <div id:"edit-surface", class:"word-content", contenteditable:if (read_only) "false" else "true", tabindex:"0",
         ["aria-label"]:"Document", ["aria-multiline"]:"true", role:"textbox",
-        style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left; " ++ page.editor_style(editor.doc),
+        style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left; width:" ++ string(page.geometry(editor.doc).width) ++ "px;",
         apply(editor.doc)>
 
 // The same document typography serves the editor, HTML export, and paged PDF.
 pub let document_css = "
- .word-content { box-sizing:border-box; background:#fff; color:#24334b;
+ .word-content { box-sizing:border-box; color:#24334b;
    font-family:Georgia, 'Times New Roman', serif; font-size:11pt; line-height:1.5;
-   padding:64px 72px 72px; width:794px; min-height:1123px; outline:none; }
+   outline:none; }
+ .word-page { position:relative; box-sizing:border-box; background:#fff; box-shadow:0 3px 15px rgba(31,54,62,0.10); }
+ .word-story { position:absolute; font-family:Arial,sans-serif; color:#718397; line-height:1.2; white-space:pre-wrap; cursor:pointer; }
+ .word-page + .word-page { margin-top:24px; }
  .word-content p { margin:0 0 11pt; }
  .word-content h1 { font-size:29pt; font-weight:400; letter-spacing:-0.8px;
    line-height:1.16; margin:0 0 12pt; color:#243b57; }
@@ -85,7 +96,6 @@ pub let document_css = "
  .word-content [data-word-cover=subtitle] { font-family:Arial,sans-serif; font-size:15pt; color:#718397; margin-top:20pt; }
  .word-content [data-word-cover=author] { font-family:Arial,sans-serif; font-size:12pt; color:#527f78; margin-top:100pt; }
  .word-content [data-word-comment] { background-color:#fff3c4; border-bottom:2px solid #d6aa39; }
- @media screen { .word-content [data-word-page-break=true] { border-top:1px dashed #bfced9; margin-top:28px; padding-top:16px; } }
  @page { size:A4; margin:17mm 19mm; }
  @media print { .word-content { width:auto; min-height:0; padding:0; }
    h1,h2,h3 { break-after:avoid; } tr { break-inside:avoid; } }

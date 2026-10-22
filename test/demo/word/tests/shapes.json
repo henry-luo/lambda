@@ -1,0 +1,449 @@
+{
+  "name": "Word shape insertion, settings, history and persistence",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Shape: ",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-shape"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".shape-choice"
+      },
+      "count": 15
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-width"
+      },
+      "text": "200",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-height"
+      },
+      "text": "110",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-fill"
+      },
+      "text": "invalid",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-shape .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"shape-width\").value === \"200\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-fill"
+      },
+      "text": "#aabbcc",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-choice-diamond"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"shape-width\").value === \"200\""
+    },
+    {
+      "type": "render",
+      "file": "temp/word-shape-gallery.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-shape .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "height",
+      "equals": "110"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "alt",
+      "equals": "Diamond"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface img\").getAttribute(\"src\").indexOf(\"data:image/svg+xml;base64,\") === 0"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-shape-inserted.png"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 660,
+      "y": 414,
+      "min_r": 168,
+      "max_r": 172,
+      "min_g": 185,
+      "max_g": 189,
+      "min_b": 202,
+      "max_b": 206
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-settings"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-width"
+      },
+      "text": "240",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-fill"
+      },
+      "text": "#2864ad",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-choice-ellipse"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-shape .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "alt",
+      "equals": "Oval"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "alt",
+      "equals": "Diamond"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shapes.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shapes.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shapes.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shapes.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "alt",
+      "equals": "Oval"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picture-settings"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-shape"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"shape-width\").value === \"240\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-shape"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-shapes.png"
+    }
+  ]
+}

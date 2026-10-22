@@ -1,4 +1,5 @@
 import geometry: .mod_geometry
+import glyphs: lambda.doc.shapes
 import radiant
 
 pub let tools = [
@@ -80,13 +81,11 @@ pub fn drag(layer,handle,dx,dy,aspect=1.0) => if (handle == "resize") (
     )
     else {*:layer,x:geometry.clamp(layer.x+dx,0,1-layer.width),y:geometry.clamp(layer.y+dy,0,1-layer.height)}
 
-pub fn glyph(kind) => if (kind == "rectangle") <rect x:5,y:5,width:90,height:90,rx:8>
+pub fn glyph(kind) => if (contains(glyphs.kinds,kind)) glyphs.glyph(kind)
+    else if (kind == "rectangle") <rect x:5,y:5,width:90,height:90,rx:8>
     else if (kind == "ellipse") <ellipse cx:50,cy:50,rx:45,ry:45>
     else if (kind == "triangle") <path d:"M50 5 L96 95 H4 Z">
-    else if (kind == "arrow") <path d:"M4 36 H58 V8 L98 50 L58 92 V64 H4 Z">
     else if (kind == "line") <rect x:2,y:44,width:96,height:12,rx:6>
-    else if (kind == "heart") <path d:"M50 92 C35 78 4 56 4 30 C4 3 38 0 50 23 C62 0 96 3 96 30 C96 56 65 78 50 92 Z">
-    else if (kind == "star") <path d:"M50 3 L62 35 L97 36 L70 58 L80 93 L50 73 L20 93 L30 58 L3 36 L38 35 Z">
     else if (kind == "bolt") <path d:"M56 2 L15 56 H44 L36 98 L85 40 H55 Z">
     else if (kind == "pin") <path 'fill-rule':"evenodd",d:"M50 3 C1 3 7 54 50 97 C93 54 99 3 50 3 Z M50 22 A15 15 0 1 0 50 52 A15 15 0 1 0 50 22 Z">
     else if (kind == "sun") <g *[<circle cx:50,cy:50,r:24>,*[for (i in 0 to 7)

@@ -10,7 +10,8 @@ let rounds: int = 10
 type BfState = {input: string, cursor: int, memory: array, pointer: int, depth: int,
     output: int[], saved_depth: int?}
 
-fn char_at(s: BfState) string => slice(s.input, s.cursor, s.cursor + 1) or ""
+// or preserves errors; propagate through the Brainfuck state machine (S7.5.3v2).
+fn char_at(s: BfState) string^ => slice(s.input, s.cursor, s.cursor + 1)^ or ""
 
 // .memory[.pointer], null past the end as in jq
 fn cell_at(memory: array, i: int) => if (i < len(memory)) memory[i] else null
@@ -35,7 +36,7 @@ pn assign_cell(memory: array, i: int, delta: int) array {
 pn skip_loop(s: BfState) BfState^ {
     var t: BfState = s
     while (true) {
-        let c: string = char_at(t)
+        let c: string = char_at(t)^
         if (c == "") { raise error("unmatching loop") }
         if (c == "]" and t.depth - 1 < t.saved_depth) { break }
         t.cursor = t.cursor + 1
@@ -51,7 +52,7 @@ pn skip_loop(s: BfState) BfState^ {
 pn backward_loop(s: BfState) BfState^ {
     var t: BfState = s
     while (true) {
-        let c: string = char_at(t)
+        let c: string = char_at(t)^
         if (c == "[" and not (t.saved_depth < t.depth - 1)) { break }
         t.cursor = t.cursor - 1
         if (c == "[") { t.depth = t.depth - 1 }
@@ -66,7 +67,7 @@ pn bf(program: string) string^ {
     var s: BfState = {input: program, cursor: 0, memory: [], pointer: 0, depth: 0,
         output: [], saved_depth: null}
     while (not (s.cursor >= len(s.input))) {
-        let c: string = char_at(s)
+        let c: string = char_at(s)^
         s.cursor = s.cursor + 1
         if (c == ">") { s.pointer = s.pointer + 1 }
         else if (c == "<") {

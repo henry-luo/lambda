@@ -1,7 +1,7 @@
 {
-  "name":"hard outer shadows exclude transparent square, rounded and transformed interiors",
+  "name":"outer shadows exclude interiors and preserve overflow clipping under transforms",
   "html":"test/ui/dtna/hard_shadow_contracts.html",
-  "viewport":{"width":220,"height":100},
+  "viewport":{"width":220,"height":130},
   "events":[
     {"type":"assert_pixel","x":30,"y":30,"min_r":250,"min_g":250,"min_b":250},
     {"type":"assert_pixel","x":90,"y":30,"min_r":250,"min_g":250,"min_b":250},
@@ -9,6 +9,10 @@
     {"type":"assert_pixel","x":52,"y":30,"min_r":250,"max_g":5,"max_b":5},
     {"type":"assert_pixel","x":112,"y":30,"min_r":250,"max_g":5,"max_b":5},
     {"type":"assert_pixel","x":182,"y":40,"min_r":250,"max_g":5,"max_b":5},
+    {"type":"assert_pixel","x":62,"y":68,"min_r":250,"min_g":250,"min_b":250},
+    {"type":"assert_pixel","x":162,"y":68,"min_r":250,"min_g":250,"min_b":250},
+    {"type":"assert_pixel","x":62,"y":88,"min_r":250,"max_g":5,"max_b":5},
+    {"type":"assert_pixel","x":162,"y":88,"min_r":250,"max_g":180,"max_b":180},
     {"type":"render","file":"temp/ui_dtna/hard_shadow.png"}
   ]
 }

@@ -1,0 +1,512 @@
+{
+  "name": "Word advanced_objects",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Formula: ",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-equation"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-equation"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-source"
+      },
+      "text": "\\unsupported{x}",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-equation .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-example-0"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-size"
+      },
+      "text": "26",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-equation .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-equation]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-equation]"
+      },
+      "attribute": "alt",
+      "equals": "x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-settings"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-source"
+      },
+      "text": "E=mc^2",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-equation .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-equation]"
+      },
+      "attribute": "alt",
+      "equals": "E=mc^2"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-equation]"
+      },
+      "attribute": "alt",
+      "equals": "x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-wordart"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-wordart"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".art-choice"
+      },
+      "count": 5
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "Open Studio",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#art-choice-outlined"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"art-text\").value === \"Open Studio\""
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#art-transform"
+      },
+      "value": "archUp"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "300",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-wordart .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "alt",
+      "equals": "Open Studio"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-settings"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "Make something",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#art-choice-gradient"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#art-transform"
+      },
+      "value": "wave"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-wordart .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "alt",
+      "equals": "Make something"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-shape"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-choice-star"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-text"
+      },
+      "text": "Create",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-rotation"
+      },
+      "text": "20",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-weight"
+      },
+      "text": "3",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-shape .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-shape]"
+      },
+      "attribute": "alt",
+      "equals": "Create"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/advanced-objects.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/advanced-objects.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/advanced-objects.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/advanced-objects.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/advanced-objects.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-equation]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "img[data-word-equation]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-equation"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"equation-source\").value === \"E=mc^2\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-wordart"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"art-text\").value === \"Make something\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    }
+  ]
+}

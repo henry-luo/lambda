@@ -423,6 +423,8 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/tune27_loop_accumulator.ls", "test/lambda/proc/tune27_loop_accumulator.txt"},
     {"test/lambda/proc/tune27_int_sentinel_arith.ls", "test/lambda/proc/tune27_int_sentinel_arith.txt"},
     {"test/lambda/proc/interp_typed_var_rebind.ls", "test/lambda/proc/interp_typed_var_rebind.txt"},
+    // S3.4 / D2.4.1: boxed equality errors stay boxed in boolean consumers.
+    {"test/mir/lambda/untyped_scalar_flow.ls", "test/mir/lambda/untyped_scalar_flow.txt"},
     {"test/mir/lambda/tune26_nullable_float_store.ls", "test/mir/lambda/tune26_nullable_float_store.txt"},
     {"test/mir/lambda/tune27_contract_reuse.ls", "test/mir/lambda/tune27_contract_reuse.txt"},
     {"test/mir/lambda/tune27_literal_extent_dense.ls", "test/mir/lambda/tune27_literal_extent_dense.txt"},
