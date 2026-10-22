@@ -450,6 +450,12 @@ define windows_dll_check
 	fi
 endef
 
+# Match severity only after a file location or tool name, or at line start.
+# Source excerpts and notes can contain "error:" or "warning:" as ordinary text.
+BUILD_DIAGNOSTIC_PREFIX = ^([^[:space:]].*:[0-9]+(:[0-9]+)?:[[:space:]]+|[^[:space:]:]+:[[:space:]]+)?
+BUILD_ERROR_PATTERN = $(BUILD_DIAGNOSTIC_PREFIX)(fatal error:|error:|Error:|ERROR:|fatal:|Failed:|failed:)
+BUILD_WARNING_PATTERN = $(BUILD_DIAGNOSTIC_PREFIX)(warning:|Warning:|WARNING:)
+
 # Function to run make with error collection and summary.
 # Full clang output goes to temp/build_<TARGET>.log; only errors + a summary
 # print to the terminal (keeps agent/CI logs small and readable).
@@ -473,15 +479,15 @@ define run_make_with_error_summary
 	echo ""; \
 	echo "📋 Build Summary:"; \
 	echo "================"; \
-	ERROR_COUNT=`grep -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null | grep -v -E "warning:|Warning:|WARNING:" | wc -l | tr -d ' '`; \
-	WARNING_COUNT=`grep -E "(warning:|Warning:|WARNING:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
+	ERROR_COUNT=`grep -E "$(BUILD_ERROR_PATTERN)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
+	WARNING_COUNT=`grep -E "$(BUILD_WARNING_PATTERN)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
 	echo "Errors: $$ERROR_COUNT"; \
 	echo "Warnings: $$WARNING_COUNT"; \
 	echo ""; \
 	if [ "$$ERROR_COUNT" -gt 0 ] 2>/dev/null; then \
 		echo "🔴 ERRORS FOUND:"; \
 		echo "================"; \
-		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | grep -v -E "warning:|Warning:|WARNING:" | while IFS=: read -r line_num content; do \
+		grep -n -E "$(BUILD_ERROR_PATTERN)" "$$BUILD_LOG" | while IFS=: read -r line_num content; do \
 			file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:[0-9]+:" | head -1); \
 			if [ -z "$$file_info" ]; then \
 				file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:" | head -1); \
@@ -1159,7 +1165,11 @@ test-node-module-architecture-checker:
 	@python3 utils/test_node_module_architecture_checker.py
 	@python3 utils/check_node_module_architecture.py --require-module-binary
 
-test-premake-generator:
+.PHONY: test-build-summary
+test-build-summary:
+	@$(PYTHON) utils/test_build_summary.py
+
+test-premake-generator: test-build-summary
 	@PREMAKE5_BIN="$(PREMAKE5_BIN)" python3 utils/test_premake_generator.py
 
 # Node module coverage must stay independent from JavaScript runtime coverage.
