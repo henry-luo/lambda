@@ -1333,36 +1333,49 @@ const AstNodeId* ast_index_function_overlay_nodes(const AstIndex* index,
     return index->function_overlay_nodes ? index->function_overlay_nodes + first : NULL;
 }
 
-static uint32_t name_scope_pointer_hash(const String* name) {
-    uintptr_t value = (uintptr_t)name;
-    value ^= value >> 33;
-    value *= UINT64_C(0xff51afd7ed558ccd);
-    value ^= value >> 33;
-    return (uint32_t)value;
+static uint32_t name_scope_hash(const String* name) {
+    const NameMeta* meta = property_key_meta((NameRef)name);
+    // ordinary pooled names already retain the spelling hash. Unique keys
+    // keep identity comparison, but share the spelling probe sequence.
+    return meta && meta->key_kind == NAME_KEY_STRING ? meta->hash
+        : name_classify_ordinary(name->chars, name->len).hash;
 }
 
-NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name) {
+static bool name_scope_matches(const String* stored, const String* name, bool by_bytes) {
+    return stored == name || (by_bytes && stored && stored->len == name->len &&
+        memcmp(stored->chars, name->chars, name->len) == 0);
+}
+
+static NameEntry* name_scope_lookup(const NameScope* scope, const String* name, bool by_bytes) {
     if (!scope || !name) return NULL;
     if (scope->name_index && scope->name_index_capacity) {
-        uint32_t slot = name_scope_pointer_hash(name) &
+        uint32_t slot = name_scope_hash(name) &
             (scope->name_index_capacity - 1);
         for (;;) {
             NameEntry* entry = scope->name_index[slot];
             if (!entry) return NULL;
-            if (entry->name == name) return entry;
+            if (name_scope_matches(entry->name, name, by_bytes)) return entry;
             slot = (slot + 1) & (scope->name_index_capacity - 1);
         }
     }
     for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (entry->name == name) return entry;
+        if (name_scope_matches(entry->name, name, by_bytes)) return entry;
     }
     return NULL;
+}
+
+NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name) {
+    return name_scope_lookup(scope, name, false);
+}
+
+NameEntry* name_scope_lookup_name_bytes(const NameScope* scope, const String* name) {
+    return name_scope_lookup(scope, name, true);
 }
 
 static bool name_scope_index_insert(NameScope* scope, NameEntry* entry) {
     if (!scope || !entry || !entry->name || !scope->name_index ||
             !scope->name_index_capacity) return true;
-    uint32_t slot = name_scope_pointer_hash(entry->name) &
+    uint32_t slot = name_scope_hash(entry->name) &
         (scope->name_index_capacity - 1);
     for (;;) {
         NameEntry* current = scope->name_index[slot];

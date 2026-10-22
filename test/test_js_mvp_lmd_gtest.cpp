@@ -11486,6 +11486,31 @@ TEST_F(JsMvpLmd, ModuleRegistryCleanupRetiresEveryDescriptorRoot) {
     EXPECT_EQ(gc->root_slot_count, original_roots);
 }
 
+TEST_F(JsMvpLmd, ModuleRegistryKeepsResolvedUrlIdentityWithoutFilesystemNormalization) {
+    boolean("Promise.resolve(1);true");
+    ASSERT_NE(context, nullptr);
+    Runtime owner = {};
+    owner.eval_context = (EvalContext*)context;
+    const char* first = "https://example.invalid/modules/a//b.js?source=../one";
+    const char* second = "https://example.invalid/modules/a/b.js?source=../one";
+    module_register_for_runtime(&owner, first, "js", ItemNull, nullptr);
+    ModuleDescriptor* original = module_get_for_runtime(&owner, first);
+    ASSERT_NE(original, nullptr);
+    EXPECT_STREQ(original->path, first);
+    EXPECT_EQ(module_get_for_runtime(&owner, second), nullptr);
+    module_register_for_runtime(&owner, second, "js", ItemNull, nullptr);
+    ModuleDescriptor* distinct = module_get_for_runtime(&owner, second);
+    ASSERT_NE(distinct, nullptr);
+    EXPECT_NE(distinct, original);
+    EXPECT_STREQ(distinct->path, second);
+    for (unsigned i = 0; i < 100; i++) {
+        EXPECT_EQ(module_get_for_runtime(&owner, first), original);
+        EXPECT_EQ(module_get_for_runtime(&owner, second), distinct);
+    }
+    module_registry_cleanup_for_runtime(&owner);
+    EXPECT_EQ(owner.module_registry, nullptr);
+}
+
 TEST_F(JsMvpLmd, RegExpQuantifierValidationRejectsUnattachedAndReversed) {
     boolean("let bad=['?','*','+','a**','a+*','a??*','{2}','a{1}{2}','.{2,1}','a{02,001}'];let ok=true;for(let p of bad){for(let f of ['', 'u']){let caught=false;try{new RegExp(p,f)}catch(e){caught=e instanceof SyntaxError}ok=ok&&caught}}ok;");
     boolean("let r=/test262/ig;let ok=true;for(let p of ['?','.{2,1}']){r.lastIndex=3;let caught=false;try{r.compile(p)}catch(e){caught=e instanceof SyntaxError}ok=ok&&caught&&r.source==='test262'&&r.flags==='gi'&&r.lastIndex===3;r.lastIndex=0;ok=ok&&r.test('TEsT262')}ok;");

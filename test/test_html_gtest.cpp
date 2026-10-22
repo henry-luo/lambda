@@ -1032,6 +1032,119 @@ TEST_F(HtmlParserTest, FragmentTokenScratchPreservesPublishedDataAndContinuation
     EXPECT_EQ(getAttr(body->items[1000].element, "id"), "later");
 }
 
+TEST_F(HtmlParserTest, HtmlContextFragmentsRetainAndCreateHeadAndBody) {
+    const char* sources[] = {
+        "<!DOCTYPE html><html><head><title>kept</title></head><body><p>text</p></body></html>",
+        "<p>implicit</p>", ""
+    };
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input, "html");
+        ASSERT_NE(parser, nullptr);
+        Html5ParserScope scope(parser);
+        ASSERT_TRUE(html5_fragment_parse(parser, source));
+        Element* fragment = html5_fragment_get_body(parser);
+        ASSERT_NE(fragment, nullptr);
+        EXPECT_STREQ(((TypeElmt*)fragment->type)->name.str, "html");
+        ASSERT_EQ(fragment->length, 2);
+        EXPECT_STREQ(((TypeElmt*)fragment->items[0].element->type)->name.str, "head");
+        EXPECT_STREQ(((TypeElmt*)fragment->items[1].element->type)->name.str, "body");
+        if (source == sources[0]) {
+            Element* head = fragment->items[0].element;
+            ASSERT_EQ(head->length, 1);
+            EXPECT_STREQ(((TypeElmt*)head->items[0].element->type)->name.str, "title");
+        }
+    }
+}
+
+TEST_F(HtmlParserTest, ScriptEnabledNoscriptDocumentKeepsFallbackMarkupAsText) {
+    Item document = parseHtml5Document("<!doctype html><body><noscript>"
+        "<img src='fallback.png'>&amp;</NoScript><p>after</p>");
+    Element* fallback = findElementByTag(document, "noscript");
+    ASSERT_NE(fallback, nullptr);
+    ASSERT_EQ(fallback->length, 1);
+    ASSERT_EQ(get_type_id(fallback->items[0]), LMD_TYPE_STRING);
+    EXPECT_STREQ(fallback->items[0].get_string()->chars, "<img src='fallback.png'>&amp;");
+    EXPECT_EQ(findElementByTag(document, "img"), nullptr);
+    EXPECT_NE(findElementByTag(document, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, NoscriptFragmentsRespectScriptingAndKeepContextEndTagsLiteral) {
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    for (bool scripting : {false, true}) {
+        for (bool direct_context : {false, true}) {
+            SCOPED_TRACE(scripting);
+            SCOPED_TRACE(direct_context);
+            Html5Parser* parser = html5_fragment_parser_create(pool, input->arena, input,
+                direct_context ? "noscript" : "body");
+            ASSERT_NE(parser, nullptr);
+            Html5ParserScope scope(parser);
+            parser->scripting_enabled = scripting;
+            const char* fallback_text = "<img src='fallback.png'>&amp;";
+            ASSERT_TRUE(html5_fragment_parse(parser, direct_context
+                ? "<img src='fallback.png'>&amp;</noscript><b>still text</b>"
+                : "<noscript><img src='fallback.png'>&amp;</noscript><p>after</p>"));
+            Element* fragment = html5_fragment_get_body(parser);
+            ASSERT_NE(fragment, nullptr);
+            Item result = {.element = fragment};
+            EXPECT_EQ(findElementByTag(result, "img") == nullptr, scripting);
+            Element* fallback = direct_context ? fragment : findElementByTag(result, "noscript");
+            ASSERT_NE(fallback, nullptr);
+            if (scripting) {
+                ASSERT_EQ(fallback->length, 1);
+                ASSERT_EQ(get_type_id(fallback->items[0]), LMD_TYPE_STRING);
+                EXPECT_STREQ(fallback->items[0].get_string()->chars, direct_context
+                    ? "<img src='fallback.png'>&amp;</noscript><b>still text</b>" : fallback_text);
+            } else {
+                ASSERT_GE(fallback->length, 2);
+                ASSERT_EQ(get_type_id(fallback->items[1]), LMD_TYPE_STRING);
+                EXPECT_STREQ(fallback->items[1].get_string()->chars, "&");
+            }
+            if (!direct_context) EXPECT_NE(findElementByTag(result, "p"), nullptr);
+        }
+    }
+}
+
+TEST_F(HtmlParserTest, TextElementsPreserveIncompleteAndUnmatchedEndTagsAtEof) {
+    const char* tails[] = {"<", "</", "</wrong>", "</WrOnG ", "</wrong/", "</wrong"};
+    for (const char* tag : {"noscript", "textarea"}) {
+        for (const char* tail : tails) {
+            SCOPED_TRACE(tag);
+            SCOPED_TRACE(tail);
+            StrBuf* source = strbuf_new();
+            strbuf_append_str(source, "<!doctype html><body><");
+            strbuf_append_str(source, tag);
+            strbuf_append_char(source, '>');
+            strbuf_append_str(source, tail);
+            Item document = parseHtml5Document(source->str);
+            strbuf_free(source);
+            Element* text = findElementByTag(document, tag);
+            ASSERT_NE(text, nullptr);
+            ASSERT_EQ(text->length, 1);
+            ASSERT_EQ(get_type_id(text->items[0]), LMD_TYPE_STRING);
+            EXPECT_STREQ(text->items[0].get_string()->chars, tail);
+        }
+    }
+}
+
+TEST_F(HtmlParserTest, NoscriptRawTextOnlyAppliesToHtmlChildrenOfForeignContent) {
+    Item document = parseHtml5Document("<!doctype html><body><svg><noscript>"
+        "<g id='foreign'></g></noscript><foreignObject><noscript>"
+        "<img src='fallback.png'></noscript></foreignObject></svg>");
+    EXPECT_NE(findElementByTag(document, "g"), nullptr);
+    EXPECT_EQ(findElementByTag(document, "img"), nullptr);
+    Element* integration = findElementByTag(document, "foreignObject");
+    ASSERT_NE(integration, nullptr);
+    Element* fallback = findElementByTag(Item{.element = integration}, "noscript");
+    ASSERT_NE(fallback, nullptr);
+    ASSERT_EQ(fallback->length, 1);
+    ASSERT_EQ(get_type_id(fallback->items[0]), LMD_TYPE_STRING);
+    EXPECT_STREQ(fallback->items[0].get_string()->chars, "<img src='fallback.png'>");
+}
+
 TEST_F(HtmlParserTest, ParserWorkDoesNotAccumulateInPublishedOwner) {
     Input* input = Input::create(pool);
     ASSERT_NE(input, nullptr);

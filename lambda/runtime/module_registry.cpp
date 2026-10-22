@@ -99,6 +99,11 @@ static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
 // relative spelling from retaining a namespace in a different registry slot.
 static char* module_registry_key_dup(const char* path) {
     if (!path || !*path) return NULL;
+    // resolved non-file URLs are module identities, not native paths. Filesystem
+    // normalization collapsed https:// to https:/ and made every live read miss.
+    if (url_starts_with_scheme(path) && strncmp(path, "file:", 5) &&
+        !(path_str_is_drive_letter(path[0]) && path[1] == ':'))
+        return mem_strdup(path, MEM_CAT_SYSTEM);
 #ifndef LAMBDA_NO_FILE_IO
     // document URLs and native paths must name one registry entry, including live import reads.
     lam::Temp<char> local_path(url_file_to_local_path(path));

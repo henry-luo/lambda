@@ -8673,6 +8673,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 lycon->doc->document_pool, sizeof(CssCustomProp));
             if (new_var) {
                 new_var->name = lam::up(decl->property_name);
+                dom_element_invalidate_custom_property_index(element);
                 new_var->next = element->css_variables;
                 element->css_variables = lam::own(new_var);
             }

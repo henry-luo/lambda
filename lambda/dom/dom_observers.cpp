@@ -653,26 +653,19 @@ static void observer_set_record_fields(Item record, Item type, Item target,
     dom_realm_set_name(record, "oldValue", old_value);
 }
 
-static void observer_queue_child_record(JsObserverState* observer,
+static void observer_queue_children_record(JsObserverState* observer,
                                         JsObserverTarget* registration,
                                         DomNode* parent,
-                                        DomNode* added,
-                                        DomNode* removed) {
+                                        Item added, Item removed) {
     RootFrame roots(6);
+    Rooted<Item> added_root(roots, added);
+    Rooted<Item> removed_root(roots, removed);
     Rooted<Item> record_root(roots, js_new_object());
-    Rooted<Item> added_root(roots, js_array_new(0));
-    Rooted<Item> removed_root(roots, js_array_new(0));
     Rooted<Item> node_root(roots, ItemNull);
     Rooted<Item> parent_root(roots, ItemNull);
     Rooted<Item> type_root(roots, ItemNull);
-    if (added) {
-        node_root.set(dom_wrap_element(added));
-        js_array_push(added_root.get(), node_root.get());
-    }
-    if (removed) {
-        node_root.set(dom_wrap_element(removed));
-        js_array_push(removed_root.get(), node_root.get());
-    }
+    // transient registration needs the materialized snapshot after NodeList publication.
+    node_root.set(removed_root.get());
     added_root.set(dom_static_node_list_from_array(added_root.get()));
     removed_root.set(dom_static_node_list_from_array(removed_root.get()));
     type_root.set(js_make_string("childList"));
@@ -683,14 +676,35 @@ static void observer_queue_child_record(JsObserverState* observer,
 
     // A removed subtree remains observed through the microtask checkpoint,
     // which is why mutations made before delivery still belong to this observer's batch.
-    if (removed && registration->subtree && registration->transient_root_count < 8) {
+    for (int64_t i = 0; registration->subtree && i < js_array_length(node_root.get()) &&
+            registration->transient_root_count < 8; i++) {
+        DomNode* removed_node = (DomNode*)dom_unwrap_element(js_elements_get_int(node_root.get(), i));
+        if (!removed_node) continue;
         int transient_index = registration->transient_root_count;
-        if (observer_pin_node(registration->owner_doc, removed,
+        if (observer_pin_node(registration->owner_doc, removed_node,
                 &registration->transient_refs[transient_index])) {
-            registration->transient_roots[transient_index] = removed;
+            registration->transient_roots[transient_index] = removed_node;
             registration->transient_root_count++;
         }
     }
+}
+
+static Item observer_single_node_array(DomNode* node) {
+    RootFrame roots(2);
+    Rooted<Item> nodes(roots, js_array_new(0)), wrapped(roots, ItemNull);
+    if (node) {
+        wrapped.set(dom_wrap_element(node));
+        js_array_push(nodes.get(), wrapped.get());
+    }
+    return nodes.get();
+}
+
+static void observer_queue_child_record(JsObserverState* observer,
+        JsObserverTarget* registration, DomNode* parent, DomNode* added, DomNode* removed) {
+    RootFrame roots(2);
+    Rooted<Item> added_root(roots, observer_single_node_array(added));
+    Rooted<Item> removed_root(roots, observer_single_node_array(removed));
+    observer_queue_children_record(observer, registration, parent, added_root.get(), removed_root.get());
 }
 
 extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
@@ -755,19 +769,24 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
 extern "C" void dom_observers_child_replace_notify(void* parent_ptr,
                                                          void* added_ptr,
                                                          void* removed_ptr) {
+    RootFrame roots(2);
+    Rooted<Item> added_root(roots, observer_single_node_array((DomNode*)added_ptr));
+    Rooted<Item> removed_root(roots, observer_single_node_array((DomNode*)removed_ptr));
+    dom_observers_children_replace_notify(parent_ptr, added_root.get(), removed_root.get());
+}
+
+extern "C" void dom_observers_children_replace_notify(void* parent_ptr, Item added, Item removed) {
     DomNode* parent = (DomNode*)parent_ptr;
-    DomNode* added = (DomNode*)added_ptr;
-    DomNode* removed = (DomNode*)removed_ptr;
-    if (!parent) return;
+    if (!parent || (!js_array_length(added) && !js_array_length(removed))) return;
+    RootFrame roots(2);
+    Rooted<Item> added_root(roots, added), removed_root(roots, removed);
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = observers[i];
         if (observer->kind != JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* registration = &observer->targets[j];
-            if (!registration->child_list ||
-                !observer_registration_matches(registration, parent)) continue;
-            observer_queue_child_record(observer, registration, parent,
-                                        added, removed);
+            if (!registration->child_list || !observer_registration_matches(registration, parent)) continue;
+            observer_queue_children_record(observer, registration, parent, added_root.get(), removed_root.get());
             break;
         }
     }

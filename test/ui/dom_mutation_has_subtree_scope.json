@@ -1,0 +1,31 @@
+{
+  "name": "Relational selectors ignore unrelated subtrees while retaining nested and positional dependencies",
+  "html": "test/ui/dom_mutation_has_subtree_scope.html",
+  "viewport": {"width":480,"height":360},
+  "events": [
+    {"type":"click","target":{"selector":"#add"}},
+    {"type":"assert_reconcile_mode","mode":"incremental","reason":"eligible"},
+    {"type":"assert_rect","target":{"selector":"#indicator"},"height":20},
+    {"type":"click","target":{"selector":"#remove"}},
+    {"type":"assert_reconcile_mode","mode":"incremental","reason":"eligible"},
+    {"type":"assert_rect","target":{"selector":"#indicator"},"height":20},
+    {"type":"click","target":{"selector":"#add-related"}},
+    {"type":"assert_reconcile_mode","mode":"retained_full_layout","reason":"broad-structural-css-risk"},
+    {"type":"assert_rect","target":{"selector":"#indicator"},"height":40},
+    {"type":"click","target":{"selector":"#remove-related"}},
+    {"type":"assert_reconcile_mode","mode":"retained_full_layout","reason":"broad-structural-css-risk"},
+    {"type":"assert_rect","target":{"selector":"#indicator"},"height":20},
+    {"type":"click","target":{"selector":"#add-related"}},
+    {"type":"assert_reconcile_mode","mode":"retained_full_layout","reason":"broad-structural-css-risk"},
+    {"type":"assert_rect","target":{"selector":"#indicator"},"height":40},
+    {"type":"click","target":{"selector":"#remove-clear"}},
+    {"type":"assert_reconcile_mode","mode":"retained_full_layout","reason":"broad-structural-css-risk"},
+    {"type":"assert_rect","target":{"selector":"#indicator"},"height":20},
+    {"type":"click","target":{"selector":"#shift"}},
+    {"type":"assert_reconcile_mode","mode":"retained_full_layout","reason":"broad-structural-css-risk"},
+    {"type":"assert_rect","target":{"selector":"#positions"},"width":120},
+    {"type":"click","target":{"selector":"#restore"}},
+    {"type":"assert_reconcile_mode","mode":"retained_full_layout","reason":"broad-structural-css-risk"},
+    {"type":"assert_rect","target":{"selector":"#positions"},"width":80}
+  ]
+}
