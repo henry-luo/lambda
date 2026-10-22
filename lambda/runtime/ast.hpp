@@ -1233,6 +1233,9 @@ struct Script : Input {
     // never retain worker results across their receiving runtime instances.
     struct InterpSatelliteQueue* interp_satellite_queue;
     ArrayList* interp_satellite_images;
+    // Execution-local T0 lookups into this MIR module's exports (entry
+    // address or `_gvar_` slot per declaration); never shared by clones.
+    ArrayList* interp_mir_exports;
     bool interp_whole_script_poc_attempted; // opt-in AUTO whole-module POC gate
     bool interp_whole_script_poc_active;    // whole-module image published
     bool interp_views_registered;   // T0 view entries published in this context

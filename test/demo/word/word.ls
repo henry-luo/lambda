@@ -61,7 +61,7 @@ edit <word_app> state st:app.initial() {
                 <span id:"paper-label",paper.paper> ui.button("status-zoom-out","view.zoomOut","−");
                 <span id:"zoom-label", string(round(st.zoom*100)) ++ "%"> ui.button("status-zoom-in","view.zoomIn","+")>
         >
-        ui.dialog(st.dialog,st.file_state)
+        ui.dialog(st.dialog,st.file_state,st.editor,st.read_only)
     >
 }
 on beforeinput() { return 'pass' }

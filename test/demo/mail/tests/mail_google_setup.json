@@ -1,0 +1,30 @@
+{
+  "name": "Mail demo: Login with Gmail without a Google client asks for one, checks it and keeps it in oauth.mark",
+  "html": "test/demo/mail/mail.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#mail"}, "attribute": "data-loaded", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#setup"}, "attribute": "data-google", "equals": "false"},
+    {"type": "click", "target": {"selector": "#login-gmail"}},
+    {"type": "assert_count", "target": {"selector": "#google-setup"}, "count": 1},
+    {"type": "capture_surface", "source": "page", "file": "temp/mail/shots/google_setup.png"},
+    {"type": "type", "target": {"selector": "#google-client-id"}, "text": "not-a-client"},
+    {"type": "click", "target": {"selector": "#google-setup-save"}},
+    {"type": "assert_text", "target": {"selector": "#setup-error"}, "contains": ".apps.googleusercontent.com"},
+    {"type": "type", "target": {"selector": "#google-client-id"}, "text": "- 1234-abc.apps.googleusercontent.com", "clear": true},
+    {"type": "type", "target": {"selector": "#google-client-secret"}, "text": "GOCSPX-fake"},
+    {"type": "click", "target": {"selector": "#google-setup-save"}},
+    {"type": "assert_text", "target": {"selector": "#setup-error"}, "contains": "not a whole client ID"},
+    {"type": "type", "target": {"selector": "#google-client-secret"}, "text": "", "clear": true},
+    {"type": "type", "target": {"selector": "#google-client-id"}, "text": "1234-abc.apps.googleusercontent.com", "clear": true},
+    {"type": "type", "target": {"selector": "#google-client-secret"}, "text": "GOCSPX-fake"},
+    {"type": "click", "target": {"selector": "#google-setup-save"}},
+    {"type": "assert_count", "target": {"selector": "#google-setup"}, "count": 0},
+    {"type": "assert_attribute", "target": {"selector": "#setup"}, "attribute": "data-google", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#setup-notice"}, "contains": "Google sign-in is set up"},
+    {"type": "assert_count", "target": {"selector": "#setup-error"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#google-change"}, "count": 1},
+    {"type": "assert_state_store", "target": {"selector": "#setup-protocol"}, "open_dropdown": false},
+    {"type": "capture_surface", "source": "page", "file": "temp/mail/shots/login_gmail.png"}
+  ]
+}

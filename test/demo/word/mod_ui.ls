@@ -6,6 +6,7 @@ import document: .mod_document
 import files: lambda.edit.files
 import page: .mod_page
 import review: .mod_review
+import insert: .mod_insert
 import controls: lambda.ui.controls
 
 view <word_button> {
@@ -66,17 +67,21 @@ pub fn ribbon(editor,tab,nav,read_only) {
             *[for (s in take(document.styles,4)) button("style-" ++ s.id,"para.style",s.label,null,{style:s.id},s.id==style,false,"style-card style-" ++ s.id)]>,
             selector("paragraph-style","para.style",[for (s in document.styles) {value:s.id,label:s.label}],style,"style-selector","style")])
     >
-    else if (tab == "Insert") <div class:"ribbon-groups",
-        group("Table",[button("insert.table","ui.table","Table…","▦",{},false,read_only),
-            command("table.insertRowBelow","Add row","+",{},false,not edit_inside(editor,'table')),
-            command("table.insertColumnRight","Add column","+",{},false,not edit_inside(editor,'table')),
-            command("table.deleteRow","Delete row",null,{},false,not edit_inside(editor,'table')),
-            command("table.deleteColumn","Delete column",null,{},false,not edit_inside(editor,'table'))])
+    else if (tab == "Insert") <div class:"ribbon-groups insert-ribbon",
+        group("Pages",[button("insert-cover","ui.cover","Cover page…","▤",{},false,read_only),
+            command("insert.blankPage","Blank page","□",{},false,read_only),
+            button("insert-page-break","insert.pageBreak","Page break","↵",{},false,read_only)])
+        group("Tables",[button("insert.table","ui.table","Table…","▦",{},false,read_only)])
         group("Pictures",[button("insert-picture","ui.picture","Picture…","▧",{},false,read_only),
             button("picture-settings","ui.pictureSettings","Picture settings…",null,{},false,read_only or model.current_node(editor,'img')==null)])
-        group("Document",[button("insert-link","ui.link",if (model.current_node(editor,'a')==null) "Link…" else "Edit link…","↗",{},false,read_only),
+        group("Links",[button("insert-link","ui.link",if (model.current_node(editor,'a')==null) "Link…" else "Edit link…","↗",{},false,read_only),
             command("insert.removeLink","Remove link",null,{},false,read_only or model.current_node(editor,'a')==null),
-            command("insert.horizontalRule","Rule","—")])
+            button("insert-bookmark","ui.bookmarks","Bookmark…","⚑")])
+        group("Comments",[button("insert-comment","ui.comment","Comment","▣",{},false,read_only or not model.can_comment(editor))])
+        group("Text & Symbols",[button("insert-symbol","ui.symbol","Symbol…","Ω",{},false,read_only),
+            command("insert.horizontalRule","Rule","—",{},false,read_only),
+            button("follow-link","ui.followLink","Go to bookmark","↗",{},false,
+                insert.link_bookmark(attrs_get(model.current_node(editor,'a').node.attrs,'href'))==null)])
     >
     else if (tab == "Review") <div class:"ribbon-groups",
         group("Comments",[button("new-comment","ui.comment","New comment","+",{},false,read_only or not model.can_comment(editor)),
@@ -162,7 +167,7 @@ fn form_dialog(d:map,title:string,description:string,fields:array,action:string,
     [if (d.error is null) null else <p id:"dialog-error",role:"alert",d.error>,*fields],
     [files.dialog_button("cancel","Cancel",false),files.dialog_button(action,label,true)])
 
-pub fn dialog(dialog,file) => if (dialog == null) null
+pub fn dialog(dialog,file,editor=null,read_only=false) => if (dialog == null) null
     else if (dialog.kind == "unsaved") files.dialog_frame("unsaved","Keep your changes?","Save this document before continuing.",[],
         [files.dialog_button("cancel","Cancel",false),files.dialog_button("discard","Discard changes",false),files.dialog_button("save","Save",true)])
     else if (dialog.kind == "exists" or dialog.kind == "changed") files.dialog_frame(dialog.kind,"Replace the existing file?",
@@ -170,7 +175,30 @@ pub fn dialog(dialog,file) => if (dialog == null) null
         [files.dialog_button("cancel","Cancel",false),files.dialog_button("overwrite","Replace",true)])
     else if (dialog.kind == "link") form_dialog(dialog,if (dialog.editing) "Edit link" else "Insert a link",
         "Link the selected text, or enter a new display label.",
-        [dialog_field("link-address","Address",dialog.values.href),dialog_field("link-label","Display text",dialog.values.label)],"link",if (dialog.editing) "Apply" else "Insert link")
+        [dialog_field("link-address","Address",dialog.values.href),dialog_field("link-label","Display text",dialog.values.label),
+            if (len(insert.bookmarks(editor.doc))==0) null else <div class:"internal-link-fields",
+                dialog_select("link-bookmark","Place in this document",[for (b in insert.bookmarks(editor.doc)) {value:b.name,label:b.name}],
+                    insert.link_bookmark(dialog.values.href) or "")
+                files.dialog_button("internal_link","Link to bookmark",false)>],"link",if (dialog.editing) "Apply" else "Insert link")
+    else if (dialog.kind == "cover") form_dialog(dialog,"Insert cover page","Add an editable title page at the beginning of your document.",[
+        dialog_field("cover-title","Title",dialog.values.title),dialog_field("cover-subtitle","Subtitle",dialog.values.subtitle),
+        dialog_field("cover-author","Author",dialog.values.author)],"cover","Insert cover")
+    else if (dialog.kind == "bookmarks") files.dialog_frame("bookmarks","Bookmarks",
+        "Name the current paragraph, then jump to it or link to it. One bookmark per paragraph; reusing a name moves it.",[
+            if (dialog.error==null) null else <p id:"dialog-error",role:"alert",dialog.error>,
+            <div class:"bookmark-list", *[for (b in insert.bookmarks(editor.doc)) <div class:"bookmark-row",
+                <div class:"bookmark-description",<strong b.name> <span b.label>>
+                button("bookmark-go-" ++ b.name,"ui.bookmarkText","Go to",null,{name:b.name})
+                button("bookmark-delete-" ++ b.name,"insert.deleteBookmark","Delete",null,{name:b.name},false,read_only)>]
+                if (len(insert.bookmarks(editor.doc))==0) <p class:"bookmark-empty","No bookmarks yet."> else null>,
+            if (read_only) null else dialog_field("bookmark-name","Name (letters, digits, underscores)",dialog.values.name)],
+        [files.dialog_button("cancel","Close",false),if (read_only) null else files.dialog_button("bookmark","Add / replace",true)])
+    else if (dialog.kind == "symbol") form_dialog(dialog,"Insert symbol","Choose a character or enter up to 64 printable characters.",[
+        <div class:"symbol-gallery", *[for (category_index,category in insert.symbols) <section class:"symbol-category",
+            <div class:"symbol-category-title",category.name>
+            <div class:"symbol-grid", *[for (i,c in category.chars)
+                button("symbol-" ++ string(category_index) ++ "-" ++ string(i),"ui.chooseSymbol",c,null,{char:c},dialog.values.char==c,false,"symbol-key")]>>]>,
+        dialog_field("symbol-text","Character(s)",dialog.values.char)],"symbol","Insert")
     else if (dialog.kind == "comment") form_dialog(dialog,"New comment","The comment stays anchored as its text is edited.",[
         dialog_field("comment-author","Author",dialog.values.author),
         <label class:"dialog-field", <span "Comment"> <textarea id:"comment-text",class:"edit-dialog-field comment-input",dialog.values.text>>],"comment","Add comment")

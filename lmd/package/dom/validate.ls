@@ -83,7 +83,9 @@ pub fn is_valid(elem, text, input_type) {
         let min_v = as_number(attr_or_null(elem, "min"));
         let max_v = as_number(attr_or_null(elem, "max"));
         let step_v = as_number(attr_or_null(elem, "step"));
-        let num = as_number(text);
+        // HTML §4.10.5.3: min, max and step apply to numeric controls only;
+        // any other value, a password included, is never parsed (or logged)
+        let num = if (input_type in ["number", "range"]) as_number(text) else null;
 
         if (minlen != null and len(text) < minlen) { false }
         else if (maxlen != null and len(text) > maxlen) { false }

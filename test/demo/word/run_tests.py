@@ -59,10 +59,12 @@ def main():
     if not args.model_only:
         # These are this harness's generated files, never the default user document.
         for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
-                         "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html"):
+                         "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html",
+                         "blank-pages.pdf", "cover-pages.pdf", "insert-pages.word.json", "insert-pages.html",
+                         "bookmarks.word.json", "bookmarks.html"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
         for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables",
-                        "pictures_links", "paragraph_search", "layout", "review"):
+                        "pictures_links", "paragraph_search", "layout", "review", "insert_pages", "bookmarks_symbols"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",
@@ -91,6 +93,16 @@ def main():
         record("comment-html", comments.exists() and
                all(value in comments.read_text() for value in
                    ("lambda-word-metadata", "data-word-comment=", "Please make this clearer.")))
+        for filename, page_count in (("blank-pages", 3), ("cover-pages", 4)):
+            path = ROOT / "temp/word" / f"{filename}.pdf"
+            data = path.read_bytes() if path.exists() else b""
+            record(f"{filename}-pdf", data.startswith(b"%PDF-") and
+                   len(re.findall(rb"/MediaBox\s*\[", data)) == page_count and
+                   re.search(rb"/Count\s+" + str(page_count).encode() + rb"\b", data) is not None,
+                   f"{page_count} pages including explicit blank/cover pages")
+        bookmarks = ROOT / "temp/word/bookmarks.html"
+        record("bookmark-html", bookmarks.exists() and all(value in bookmarks.read_text() for value in
+               ('id="word-bookmark-Intro"', 'href="#word-bookmark-Intro"', "Hello Introduction±")))
 
     passed = sum(entry["passed"] for entry in results)
     report = {"summary": {"passed": passed, "failed": len(results)-passed, "total": len(results)}, "results": results}

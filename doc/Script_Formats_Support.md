@@ -188,7 +188,8 @@ Keeping it preserves original MIME parts and attachments. Remove `raw_body`
 to rebuild a message. A string `body` with a retained transfer-encoding header
 is also wire content; remove that header or use a part map to supply new plain
 text. Rebuilding only a multipart message's display HTML diagnoses attachment
-loss.
+loss. The reader's `addresses` and `mime` views are derived from the headers
+and `raw_body`; the writer ignores them, so edit those instead.
 
 New part maps accept `content` (string, binary, or HTML element),
 `content_type`/`type`, `encoding`, `headers`, `parts`, `filename`, `content_id`,

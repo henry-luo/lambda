@@ -728,6 +728,18 @@ typedef enum SysFunc {
     SYSFUNC_IMAGE_CAPABILITIES,
     SYSFUNC_IMAGE_EDIT,
     SYSPROC_IMAGE_STORAGE,
+    SYSPROC_IO_MAIL_OPEN,         // lambda.io.mail open(url, options) - log in to an IMAP or POP3 server
+    SYSPROC_IO_MAIL_COMMAND,      // lambda.io.mail command(session, command, args?, options?)
+    SYSPROC_IO_MAIL_IDLE,         // lambda.io.mail idle(session, seconds) - IMAP IDLE (RFC 2177)
+    SYSPROC_IO_MAIL_SEND,         // lambda.io.mail send(url, options, message) - SMTP submission
+    SYSPROC_IO_SECRET_GET,        // lambda.io.secret get(service, account) - stored text or null
+    SYSPROC_IO_SECRET_SET,        // lambda.io.secret set(service, account, value)
+    SYSPROC_IO_SECRET_DELETE,     // lambda.io.secret delete(service, account) - true if one was removed
+    SYSFUNC_HASH,                 // hash(value, algorithm) - SHA-256/384/512 digest as binary
+    SYSPROC_UUID,                 // uuid() - a random version 4 UUID
+    SYSFUNC_URL_ENCODE,           // url_encode(text) - RFC 3986 percent-encoding
+    SYSPROC_IO_LOOPBACK_LISTEN,   // lambda.io.loopback listen() - a listener on 127.0.0.1
+    SYSPROC_IO_LOOPBACK_ACCEPT,   // lambda.io.loopback accept(listener, seconds, page) - one browser request
 } SysFunc;
 
 typedef struct Type {
@@ -3392,6 +3404,9 @@ extern "C" {
     Item fn_lower(Item str);
     Item fn_upper(Item str);
     Item fn_url_resolve(Item base, Item relative);
+    Item fn_url_encode(Item text);
+    Item fn_hash(Item value, Item algorithm);
+    Item pn_uuid(void);
     Item fn_split(Item str, Item sep);
     // A literal ASCII split whose result stores tagged Items for guest arrays.
     Item fn_split_literal_items(Item str, Item sep);
@@ -3545,6 +3560,20 @@ extern "C" {
     Item pn_io_text_search3(Item source, Item query, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
+    // lambda.io.mail (D7.2.4v4; vibe/Lambda_Demo_Mail.md §5.3)
+    Item pn_io_mail_open(Item url, Item options);
+    Item pn_io_mail_command2(Item session, Item command);
+    Item pn_io_mail_command3(Item session, Item command, Item args);
+    Item pn_io_mail_command4(Item session, Item command, Item args, Item options);
+    Item pn_io_mail_idle(Item session, Item seconds);
+    Item pn_io_mail_send(Item url, Item options, Item message);
+    // lambda.io.secret (D7.2.4v4; vibe/Lambda_Demo_Mail.md ML6)
+    Item pn_io_secret_get(Item service, Item account);
+    Item pn_io_secret_set(Item service, Item account, Item value);
+    Item pn_io_secret_delete(Item service, Item account);
+    // lambda.io.loopback (D7.2.4v4; vibe/Lambda_Demo_Mail.md MG7)
+    Item pn_io_loopback_listen(void);
+    Item pn_io_loopback_accept(Item listener, Item seconds, Item page);
 
     // bitwise functions (integer operations)
     int64_t fn_band(int64_t a, int64_t b);

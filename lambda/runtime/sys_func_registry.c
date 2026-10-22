@@ -789,6 +789,20 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
+    // url_encode(text): RFC 3986 percent-encoding (WebScrape E7)
+    {SYSFUNC_URL_ENCODE, "url_encode", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_url_encode", FPTR(fn_url_encode), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
+
+    // hash(value, algorithm): a digest as binary (WebScrape E7, Archive AR-E7)
+    {SYSFUNC_HASH, "hash", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_hash", FPTR(fn_hash), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
+
+    // uuid(): a random UUID; a procedure, since each call differs
+    {SYSPROC_UUID, "uuid", 0, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_uuid", FPTR(pn_uuid), NULL, NULL, false, 0},
+
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
@@ -1284,6 +1298,37 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_fetch2", PROFILE_NETWORK_FPTR(pn_io_fetch2), NULL, NULL, false, 0, true},
+
+    // lambda.io.mail (D7.2.4v4): reached only through `import mail: lambda.io.mail`,
+    // whose members resolve to these io_mail_* rows; every call may park
+    {SYSPROC_IO_MAIL_OPEN, "io_mail_open", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_mail_open", PROFILE_NETWORK_FPTR(pn_io_mail_open), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_MAIL_COMMAND, "io_mail_command", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_mail_command2", PROFILE_NETWORK_FPTR(pn_io_mail_command2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_MAIL_COMMAND, "io_mail_command", 3, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_mail_command3", PROFILE_NETWORK_FPTR(pn_io_mail_command3), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_MAIL_COMMAND, "io_mail_command", 4, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_mail_command4", PROFILE_NETWORK_FPTR(pn_io_mail_command4), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_MAIL_IDLE, "io_mail_idle", 2, (Type*)&TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_mail_idle", PROFILE_NETWORK_FPTR(pn_io_mail_idle), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_MAIL_SEND, "io_mail_send", 3, (Type*)&TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_mail_send", PROFILE_NETWORK_FPTR(pn_io_mail_send), NULL, NULL, false, 0, true},
+
+    // lambda.io.secret (D7.2.4v4): the OS secret store, reached only through
+    // `import secret: lambda.io.secret`; every call parks while the OS answers
+    {SYSPROC_IO_SECRET_GET, "io_secret_get", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_FILE_IO_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SECRET_SET, "io_secret_set", 3, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_secret_set", PROFILE_FILE_IO_FPTR(pn_io_secret_set), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_SECRET_DELETE, "io_secret_delete", 2, &TYPE_BOOL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_secret_delete", PROFILE_FILE_IO_FPTR(pn_io_secret_delete), NULL, NULL, false, 0, true},
+
+    // lambda.io.loopback (D7.2.4v4): one browser request on 127.0.0.1, reached
+    // only through `import loopback: lambda.io.loopback`; accept parks the task
+    {SYSPROC_IO_LOOPBACK_LISTEN, "io_loopback_listen", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_loopback_listen", PROFILE_NETWORK_FPTR(pn_io_loopback_listen), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_LOOPBACK_ACCEPT, "io_loopback_accept", 3, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_loopback_accept", PROFILE_NETWORK_FPTR(pn_io_loopback_accept), NULL, NULL, false, 0, true},
 
     // io.grep(source, pattern, options?) - line-oriented search over files
     // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
@@ -3928,6 +3973,10 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     static const char* const fetch_options[] = {"method", "body", "headers", "timeout", "user_agent",
         "follow_redirects", "verify_tls", "max_bytes", "to", "resume", "progress", "progress_ms", NULL};
     static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};
+    static const char* const mail_open_options[] = {"user", "password", "token", "pin", "timeout", "tls", NULL};
+    static const char* const mail_command_options[] = {"to", NULL};
+    static const char* const mail_send_options[] = {"user", "password", "token", "pin", "timeout", "tls",
+        "from", "to", NULL};
     switch (fn) {
     case SYSPROC_IO_EXEC:
         if (options_arg_index) *options_arg_index = 2;
@@ -3939,6 +3988,15 @@ const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     case SYSFUNC_PHYSICS_SIMULATE:
         if (options_arg_index) *options_arg_index = 1;
         return physics_options;
+    case SYSPROC_IO_MAIL_OPEN:
+        if (options_arg_index) *options_arg_index = 1;
+        return mail_open_options;
+    case SYSPROC_IO_MAIL_COMMAND:
+        if (options_arg_index) *options_arg_index = 3;
+        return mail_command_options;
+    case SYSPROC_IO_MAIL_SEND:
+        if (options_arg_index) *options_arg_index = 1;
+        return mail_send_options;
     case SYSFUNC_INPUT2:
         if (options_arg_index) *options_arg_index = 1;
         return input_option_names;

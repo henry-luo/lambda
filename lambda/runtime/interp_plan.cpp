@@ -285,6 +285,35 @@ const char* interp_node_kind_name(AstNodeType kind) {
     }
 }
 
+// Import shapes the walker can bind at all. Namespace/default imports and
+// non-JS hosted languages have no walker equivalent.
+static bool interp_import_shape_supported(const AstImportNode* imp) {
+    bool hosted_js = imp->is_cross_lang && imp->script &&
+        imp->script->profile == &js_profile;
+    return !imp->namespace_name && !imp->default_name && imp->script &&
+        (!imp->is_cross_lang || hosted_js);
+}
+
+// A Lambda dependency on MIR is reached through its exports by name
+// (interp_read_mir_export), so only a dependency with no executable tier
+// rejects its importer; rejecting every importer of a MIR module pushed the
+// whole import cone onto eager MIR. This reads this run's dependency
+// instances, so it must never be memoized on the shared AST index: the
+// prebuild worker's verdict (dependency front-end only) would stick.
+static bool interp_imports_runnable(const Script* script) {
+    AstScript* root = (AstScript*)script->ast_root;
+    for (AstNode* child = root ? root->child : NULL; child; child = child->next) {
+        if (child->node_type != AST_NODE_IMPORT) continue;
+        AstImportNode* imp = (AstImportNode*)child;
+        if (imp->is_cross_lang) continue;
+        const Script* dependency = lambda_ast_overlay_import_script(script, imp);
+        if (!dependency || (!dependency->interp_supported && !dependency->jit_context)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 typedef struct ScanCtx {
     bool ok;
     AstNodeType reject;
@@ -679,11 +708,9 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // `node` + `import` pair as the plain entry, so plan_resolve_import
         // binds it through the identical declaration-node match. Only the
         // namespace/default/cross-language shapes have no walker equivalent.
-        bool hosted_js = imp->is_cross_lang && imp->script &&
-            imp->script->profile == &js_profile;
-        if (imp->namespace_name || imp->default_name || !imp->script ||
-                (imp->is_cross_lang && !hosted_js) ||
-                (!imp->is_cross_lang && !imp->script->interp_supported)) {
+        // The shape is a fact of the source and may be memoized with the AST
+        // index; the dependency's tier is decided per run (interp_imports_runnable).
+        if (!interp_import_shape_supported(imp)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;
@@ -813,6 +840,10 @@ bool interp_scan_supported(Script* script, AstNodeType* reject) {
             interp_profile_support_node, &sc);
     } else {
         interp_scan_visit(script->ast_root, &sc);
+    }
+    if (sc.ok && !interp_imports_runnable(script)) {
+        sc.ok = false;
+        sc.reject = AST_NODE_IMPORT;
     }
     if (reject) *reject = sc.reject;
     return sc.ok;
@@ -998,7 +1029,17 @@ static void plan_place(PlanCtx* pc, AstCompoundAssignNode* assignment) {
 }
 
 static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
-    if (!entry || entry->storage_assigned) return;
+    if (!entry) return;
+    if (entry->storage_assigned) {
+        // A cached AST shared by several runs keeps the identical slots an
+        // earlier plan assigned; module plans live on each Script, so a later
+        // run re-plans and must still count them, or its slab is sized 0.
+        if (!entry->import && entry->binding_storage == pc->storage &&
+                entry->slot >= 0 && (uint32_t)entry->slot >= pc->next_slot) {
+            pc->next_slot = (uint32_t)entry->slot + 1;
+        }
+        return;
+    }
     plan_mark_cow_owned(entry);
     entry->interp_boundary = interp_boundary_plan_create(pc->script->pool,
         entry->declared_type);
@@ -1028,9 +1069,14 @@ static FnAnalysis* plan_ensure_analysis(PlanCtx* pc, AstFuncNode* fn) {
 // declaring module's slot instead of giving it one here. The declaring Script
 // has already been loaded (and planned) by the time its importer builds, so
 // this is a build-time resolution, not a runtime lookup.
-static bool plan_resolve_import(NameEntry* entry) {
+static bool plan_resolve_import(const Script* importer, NameEntry* entry) {
     if (!entry->import || !entry->import->script || !entry->node) return false;
-    Script* owner = entry->import->script;
+    // A cached template's import node still names the Script its prebuild
+    // worker loaded, and worker cleanup frees that Script. Resolve the owner
+    // through this run's dependency instance, as the read path does.
+    Script* owner = entry->import->is_cross_lang ? entry->import->script
+        : lambda_ast_overlay_import_script(importer, entry->import);
+    if (!owner) return false;
     if (entry->import->is_cross_lang) {
         // Hosted modules publish rooted namespace values instead of Lambda
         // module slabs. Mark the binding as externally resolved; the walker
@@ -1052,7 +1098,20 @@ static bool plan_resolve_import(NameEntry* entry) {
         entry->storage_assigned = true;
         return true;
     }
-    return false;
+    // An owner lowered to MIR has no T0 slab plan. Its exported functions and
+    // values are module bindings read by name through its generated entries;
+    // slot -1 marks that route (interp_read_mir_export). Types read their AST.
+    AstNode* decl = entry->node;
+    bool exported_value = decl && (decl->node_type == AST_NODE_FUNC ||
+        decl->node_type == AST_NODE_FUNC_EXPR || decl->node_type == AST_NODE_PROC ||
+        (decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+         !((AstDeclaratorNode*)decl)->is_type_definition));
+    if (!exported_value) return false;
+    entry->slot = -1;
+    entry->binding_storage = BINDING_STORAGE_MODULE;
+    entry->import_owner = owner;
+    entry->storage_assigned = true;
+    return true;
 }
 
 // Captured names read through the closure env, not through a frame slot.
@@ -1066,7 +1125,7 @@ static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
         }
         if (e->import) {
             // Imported names consume no slot in this module's slab.
-            plan_resolve_import(e);
+            plan_resolve_import(pc->script, e);
             continue;
         }
         plan_assign_entry(pc, e);

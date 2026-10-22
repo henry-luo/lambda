@@ -995,13 +995,26 @@ static bool build_outer_shadow_image(
     return true;
 }
 
+static void mask_outer_shadow_image(OuterShadowImage* image,
+    int exclude_type, const float* exclude_params, int clip_type, const float* clip_params) {
+    if (!image || (!exclude_type && !clip_type)) return;
+    ClipShape exclude = exclude_type ? clip_shape_from_params(exclude_type, exclude_params) : ClipShape{};
+    ClipShape clip = clip_type ? clip_shape_from_params(clip_type, clip_params) : ClipShape{};
+    for (int row = 0; row < image->height; row++) for (int col = 0; col < image->width; col++) {
+        float x = (float)(image->x + col) + 0.5f;
+        float y = (float)(image->y + row) + 0.5f;
+        if ((exclude_type && clip_point_in_shape(&exclude, x, y)) ||
+            (clip_type && !clip_point_in_shape(&clip, x, y))) image->pixels[row * image->width + col] = 0;
+    }
+}
+
 void render_outer_shadow_blur_composite(
     ScratchArena* sa, ImageSurface* surface,
     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
     float sr_tl, float sr_tr, float sr_br, float sr_bl,
     Color shadow_color, float blur_radius,
     int exclude_type, const float* exclude_params,
-    int clip_type, const float* clip_params)
+    int clip_type, const float* clip_params, RdtVector* vector)
 {
     if (!surface || !surface->pixels || shadow_color.a == 0) return;
     OuterShadowImage image = {};
@@ -1012,6 +1025,19 @@ void render_outer_shadow_blur_composite(
     uint32_t* shadow_buf = image.pixels;
     int br_x0 = image.x, br_y0 = image.y;
     int br_w = image.width, br_h = image.height;
+
+    if (vector) {
+        // replay's vector owns nested overflow, clip-path and dirty clips; raw pixel writes bypass them.
+        mask_outer_shadow_image(&image, exclude_type, exclude_params, clip_type, clip_params);
+        RdtVectorTarget target = {};
+        if (!rdt_vector_get_target(vector, &target)) return;
+        rdt_draw_image(vector, shadow_buf, br_w, br_h, br_w,
+            (float)br_x0 + target.tile_offset_x, (float)br_y0 + target.tile_offset_y,
+            (float)br_w, (float)br_h, 255, nullptr);
+        // the image borrows this scratch scope until its pending batch is submitted.
+        rdt_vector_flush_batch(vector);
+        return;
+    }
 
     // build clip / exclude shapes for the composite pass
     bool has_exclude = (exclude_type != 0);
@@ -1053,23 +1079,7 @@ static uint32_t* render_outer_shadow_blur_image(
     int br_x0 = image.x, br_y0 = image.y;
     int br_w = image.width, br_h = image.height;
 
-    bool has_exclude = (exclude_type != 0);
-    ClipShape exclude_cs = has_exclude
-        ? clip_shape_from_params(exclude_type, exclude_params)
-        : ClipShape{};
-    if (has_exclude) {
-        for (int row = 0; row < br_h; row++) {
-            int sy = br_y0 + row;
-            for (int col = 0; col < br_w; col++) {
-                int sx = br_x0 + col;
-                float fx = (float)sx + 0.5f;
-                float fy = (float)sy + 0.5f;
-                if (clip_point_in_shape(&exclude_cs, fx, fy)) {
-                    shadow_buf[row * br_w + col] = 0;
-                }
-            }
-        }
-    }
+    mask_outer_shadow_image(&image, exclude_type, exclude_params, 0, nullptr);
 
     if (out_x) *out_x = br_x0;
     if (out_y) *out_y = br_y0;

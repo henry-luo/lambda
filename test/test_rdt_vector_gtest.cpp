@@ -280,6 +280,43 @@ TEST(RdtVectorTest, CompactRectangleAffineExpansionPreservesContourBounds) {
     rdt_path_free(transformed);
 }
 
+TEST(RdtVectorTest, OuterShadowsRespectNestedClipsAcrossReplayModes) {
+    rdt_engine_init(0);
+    for (float blur : {0.0f, 4.0f}) for (float radius : {0.0f, 12.0f}) {
+        DisplayList list;
+        RdtPath* outer = rdt_path_new(); RdtPath* inner = rdt_path_new();
+        ASSERT_NE(outer, nullptr); ASSERT_NE(inner, nullptr);
+        rdt_path_add_rect(outer, 16, 16, 32, 32, radius, radius);
+        rdt_path_add_rect(inner, 20, 10, 30, 36, 0, 0);
+        dl_push_clip(&list, outer, nullptr); dl_push_clip(&list, inner, nullptr);
+        dl_outer_shadow(&list, 12, 8, 44, 48, 0, 0, 0, 0,
+            Color{0xffff0000u}, blur, 0, nullptr, 0, nullptr);
+        dl_pop_clip(&list); dl_pop_clip(&list);
+        rdt_path_free(outer); rdt_path_free(inner);
+        for (unsigned mode = 0; mode < 3; mode++) for (unsigned offset = 0; offset < 2; offset++) {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(blur);
+            SCOPED_TRACE(radius);
+            SCOPED_TRACE(offset);
+            uint32_t pixels[64 * 64]; memset(pixels, 255, sizeof(pixels));
+            ImageSurface surface = {}; surface.pixels = pixels;
+            surface.width = surface.height = 64; surface.pitch = 64 * 4;
+            DirtyRect dirty = {}; dirty.x = 20; dirty.y = 16; dirty.width = 28; dirty.height = 30;
+            int dx = mode == 1 && offset ? 5 : 0;
+            int dy = mode == 1 && offset ? 7 : 0;
+            test_radiant_replay_surface(&list, &surface, mode, &dirty, dx, dy);
+            for (unsigned y = 0; y < 64; y++) for (unsigned x = 0; x < 64; x++) {
+                if (x + dx < 20 || x + dx >= 48 || y + dy < 16 || y + dy >= 46)
+                    ASSERT_EQ(pixels[y * 64 + x], 0xffffffffu) << "pixel " << x << "," << y;
+            }
+            test_radiant_expect_surface_pixel(&surface, 30 - dx, 30 - dy, 0, 0, 255);
+            if (radius > 0) test_radiant_expect_surface_pixel(&surface, 20 - dx, 16 - dy, 255, 255, 255);
+        }
+        dl_destroy(&list);
+    }
+    rdt_engine_term();
+}
+
 TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
     RdtPath* path = rdt_path_new();
     ASSERT_NE(path, nullptr);

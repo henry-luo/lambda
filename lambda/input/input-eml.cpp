@@ -4,7 +4,9 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/base64.h"
+#include "../../lib/mail_mime.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/strbuf.h"
 
 extern "C" {
 #include "../../lib/str.h"
@@ -31,6 +33,14 @@ struct EmlMimeInfo {
     bool is_attachment;
     String* boundary;
     EmlTransferEncoding transfer_encoding;
+    // the part's descriptors for the MIME tree (MG5)
+    String* type;               // lower case; text/plain when absent (RFC 2045 §5.2)
+    String* charset;
+    String* disposition;        // "inline" or "attachment"
+    String* filename;           // Content-Disposition filename, else Content-Type name
+    String* content_id;         // without its angle brackets
+    String* format;             // "flowed" for RFC 3676 text
+    bool delsp;
 };
 
 struct EmlBoundaryLine {
@@ -51,55 +61,33 @@ static const char* eml_next_line(const char* line_end, const char* end) {
     return line_end;
 }
 
+// The scratch buffer's text in the Input arena, or NULL when empty.
+static String* eml_arena_string(InputContext& ctx, StrBuf* buf) {
+    return buf->length ? ctx.builder.createString(buf->str, buf->length) : NULL;
+}
+
+static String* eml_param(InputContext& ctx, StrBuf* buf, const char* value, size_t value_len,
+                         const char* name, bool decode_words) {
+    strbuf_reset(buf);
+    return mime_header_param(value, value_len, name, decode_words, buf) ? eml_arena_string(ctx, buf) : NULL;
+}
+
 static void eml_parse_content_type(InputContext& ctx, const char* value,
                                    size_t value_len, EmlMimeInfo* info) {
-    const char* pos = value;
-    const char* end = value + value_len;
-    pos = strn_skip_line_space(pos, end);
-
-    const char* type_start = pos;
-    while (pos < end && *pos != ';' && !str_char_is_line_space(*pos)) pos++;
-    size_t type_len = (size_t)(pos - type_start);
-    info->is_html = str_ieq_const(type_start, type_len, "text/html");
-    info->is_multipart = str_istarts_with_const(type_start, type_len, "multipart/");
-
-    while (pos < end) {
-        while (pos < end && (*pos == ';' || str_char_is_line_space(*pos))) pos++;
-        const char* name_start = pos;
-        while (pos < end && *pos != '=' && *pos != ';') pos++;
-        const char* name_end = pos;
-        while (name_end > name_start && str_char_is_line_space(name_end[-1])) name_end--;
-        if (pos >= end || *pos != '=') continue;
-
-        pos++;
-        pos = strn_skip_line_space(pos, end);
-        bool quoted = pos < end && *pos == '"';
-        if (quoted) pos++;
-
-        stringbuf_reset(ctx.sb);
-        while (pos < end) {
-            if (quoted) {
-                if (*pos == '"') {
-                    pos++;
-                    break;
-                }
-                if (*pos == '\\' && pos + 1 < end) pos++;
-            }
-            else if (*pos == ';') {
-                break;
-            }
-            stringbuf_append_char(ctx.sb, *pos++);
-        }
-        while (!quoted && ctx.sb->length > 0 &&
-               str_char_is_line_space(ctx.sb->str->chars[ctx.sb->length - 1])) {
-            stringbuf_truncate(ctx.sb, ctx.sb->length - 1);
-        }
-
-        if (str_ieq_const(name_start, (size_t)(name_end - name_start), "boundary") &&
-                ctx.sb->length > 0) {
-            info->boundary = ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
-        }
-    }
+    StrBuf* buf = strbuf_new();
+    if (!buf) return;
+    mime_header_token(value, value_len, buf);
+    info->type = eml_arena_string(ctx, buf);
+    info->is_html = info->type && strcmp(info->type->chars, "text/html") == 0;
+    info->is_multipart = info->type && strncmp(info->type->chars, "multipart/", 10) == 0;
+    info->boundary = eml_param(ctx, buf, value, value_len, "boundary", false);
+    info->charset = eml_param(ctx, buf, value, value_len, "charset", false);
+    info->format = eml_param(ctx, buf, value, value_len, "format", false);
+    String* delsp = eml_param(ctx, buf, value, value_len, "delsp", false);
+    info->delsp = delsp && str_ieq_const(delsp->chars, delsp->len, "yes");
+    // a Content-Disposition filename wins over the older Content-Type name
+    if (!info->filename) info->filename = eml_param(ctx, buf, value, value_len, "name", true);
+    strbuf_free(buf);
 }
 
 static EmlTransferEncoding eml_parse_transfer_encoding(const char* value,
@@ -126,44 +114,64 @@ static EmlTransferEncoding eml_parse_transfer_encoding(const char* value,
     return EML_TRANSFER_UNSUPPORTED;
 }
 
-static bool eml_is_attachment_disposition(const char* value, size_t value_len) {
-    const char* start = value;
+static void eml_parse_disposition(InputContext& ctx, const char* value,
+                                  size_t value_len, EmlMimeInfo* info) {
+    StrBuf* buf = strbuf_new();
+    if (!buf) return;
+    mime_header_token(value, value_len, buf);
+    info->disposition = eml_arena_string(ctx, buf);
+    info->is_attachment = info->disposition && strcmp(info->disposition->chars, "attachment") == 0;
+    String* filename = eml_param(ctx, buf, value, value_len, "filename", true);
+    if (filename) info->filename = filename;
+    strbuf_free(buf);
+}
+
+// Content-ID: <part@host> names the part a cid: URL refers to (RFC 2392).
+static void eml_parse_content_id(InputContext& ctx, const char* value,
+                                 size_t value_len, EmlMimeInfo* info) {
+    const char* start = strn_skip_line_space(value, value + value_len);
     const char* end = value + value_len;
-    start = strn_skip_line_space(start, end);
-    const char* token_end = start;
-    while (token_end < end && *token_end != ';' &&
-           !str_char_is_line_space(*token_end)) {
-        token_end++;
+    while (end > start && str_char_is_line_space(end[-1])) end--;
+    if (start < end && *start == '<') start++;
+    if (end > start && end[-1] == '>') end--;
+    if (end > start) info->content_id = ctx.builder.createString(start, (size_t)(end - start));
+}
+
+static bool eml_is_mime_header(const char* name, size_t name_len) {
+    return str_ieq_const(name, name_len, "content-type") ||
+           str_ieq_const(name, name_len, "content-transfer-encoding") ||
+           str_ieq_const(name, name_len, "content-disposition") ||
+           str_ieq_const(name, name_len, "content-id");
+}
+
+// One MIME header of the message or of a part; the value must outlive the call.
+static void eml_apply_mime_value(InputContext& ctx, const char* name, size_t name_len,
+                                 const char* value, size_t value_len, EmlMimeInfo* info) {
+    if (str_ieq_const(name, name_len, "content-type")) {
+        eml_parse_content_type(ctx, value, value_len, info);
     }
-    return str_ieq_const(start, (size_t)(token_end - start), "attachment");
+    else if (str_ieq_const(name, name_len, "content-transfer-encoding")) {
+        info->transfer_encoding = eml_parse_transfer_encoding(value, value_len);
+    }
+    else if (str_ieq_const(name, name_len, "content-disposition")) {
+        eml_parse_disposition(ctx, value, value_len, info);
+    }
+    else if (str_ieq_const(name, name_len, "content-id")) {
+        eml_parse_content_id(ctx, value, value_len, info);
+    }
 }
 
 static void eml_apply_mime_header(InputContext& ctx, const char* name,
                                   size_t name_len, StringBuf* value,
                                   EmlMimeInfo* info) {
     if (!name || !value || !value->str) return;
-    if (!str_ieq_const(name, name_len, "content-type") &&
-            !str_ieq_const(name, name_len, "content-transfer-encoding") &&
-            !str_ieq_const(name, name_len, "content-disposition")) {
-        return;
-    }
+    if (!eml_is_mime_header(name, name_len)) return;
 
     // The shared scratch buffer is reused while parsing parameters, so preserve
     // the unfolded header value in the Input arena first.
     String* stable_value = ctx.builder.createString(value->str->chars, value->length);
     if (!stable_value) return;
-
-    if (str_ieq_const(name, name_len, "content-type")) {
-        eml_parse_content_type(ctx, stable_value->chars, stable_value->len, info);
-    }
-    else if (str_ieq_const(name, name_len, "content-transfer-encoding")) {
-        info->transfer_encoding =
-            eml_parse_transfer_encoding(stable_value->chars, stable_value->len);
-    }
-    else {
-        info->is_attachment =
-            eml_is_attachment_disposition(stable_value->chars, stable_value->len);
-    }
+    eml_apply_mime_value(ctx, name, name_len, stable_value->chars, stable_value->len, info);
 }
 
 static const char* eml_parse_mime_headers(InputContext& ctx, const char* start,
@@ -266,16 +274,16 @@ static char* eml_decode_transfer(InputContext& ctx, const char* data, size_t len
 
     if (encoding == EML_TRANSFER_BASE64) {
         char* decoded = (char*)base64_decode(data, len, decoded_len);
-        if (!decoded) ctx.addWarning("Failed to decode base64 HTML email body");
+        if (!decoded) ctx.addWarning("Failed to decode a base64 email part");
         return decoded;
     }
     if (encoding == EML_TRANSFER_QUOTED_PRINTABLE) {
         char* decoded = eml_decode_quoted_printable(data, len, decoded_len);
-        if (!decoded) ctx.addWarning("Failed to decode quoted-printable HTML email body");
+        if (!decoded) ctx.addWarning("Failed to decode a quoted-printable email part");
         return decoded;
     }
     if (encoding == EML_TRANSFER_UNSUPPORTED) {
-        ctx.addWarning("Unsupported HTML email Content-Transfer-Encoding");
+        ctx.addWarning("Unsupported email part Content-Transfer-Encoding");
         *decoded_len = 0;
         return NULL;
     }
@@ -402,6 +410,110 @@ static Element* eml_parse_html_entity(InputContext& ctx, const char* body,
     return html;
 }
 
+// ── the MIME part tree (MG5) ────────────────────────────────────────────
+// A multipart is {type, parts}; a leaf is {type, charset, disposition,
+// filename, cid, size, content}, with text decoded to UTF-8 and other
+// content as binary. `format` and `delsp` appear on format=flowed text.
+
+static const int EML_MAX_PARTS = 1000;
+
+static Item eml_text_item(String* value) {
+    return value ? (Item){.item = s2it(value)} : ItemNull;
+}
+
+static Item eml_build_part(InputContext& ctx, const char* body, size_t body_len,
+                           const EmlMimeInfo& info, int depth, int* budget);
+
+static Item eml_build_multipart(InputContext& ctx, const char* body, size_t body_len,
+                                const EmlMimeInfo& info, int depth, int* budget) {
+    ArrayBuilder parts = ctx.builder.array();
+    const char* end = body + body_len;
+    EmlBoundaryLine line = {};
+    if (eml_find_boundary_line(body, end, info.boundary, &line) && !line.closing) {
+        const char* part_start = line.after;
+        while (part_start < end && *budget > 0) {
+            // a message cut before its closing boundary keeps its last part
+            bool found = eml_find_boundary_line(part_start, end, info.boundary, &line);
+            if (!found) line = {end, end, true};
+            const char* part_end = found ? eml_part_end_before_boundary(part_start, line.start) : end;
+            EmlMimeInfo part_info = eml_default_mime_info();
+            const char* part_body = eml_parse_mime_headers(ctx, part_start, part_end, &part_info);
+            if (part_body <= part_end) {
+                parts.append(eml_build_part(ctx, part_body, (size_t)(part_end - part_body),
+                                            part_info, depth + 1, budget));
+            }
+            if (line.closing) break;
+            part_start = line.after;
+        }
+    }
+    return ctx.builder.map()
+        .put("type", eml_text_item(info.type))
+        .put("parts", parts.final())
+        .final();
+}
+
+static Item eml_build_leaf(InputContext& ctx, const char* body, size_t body_len,
+                           const EmlMimeInfo& info) {
+    const char* type = info.type ? info.type->chars : "text/plain";
+    size_t decoded_len = 0;
+    char* decoded = eml_decode_transfer(ctx, body, body_len, info.transfer_encoding, &decoded_len);
+    Item content = ItemNull;
+    if (decoded && strncmp(type, "text/", 5) == 0) {
+        StrBuf* text = strbuf_new_cap(decoded_len + 16);
+        if (text) {
+            mime_to_utf8(info.charset ? info.charset->chars : NULL, info.charset ? info.charset->len : 0,
+                         decoded, decoded_len, text);
+            content = ctx.builder.createStringItem(text->str, text->length);
+            strbuf_free(text);
+        }
+    } else if (decoded && decoded_len > 0) {
+        content = {.item = x2it(ctx.builder.createBinary(decoded, decoded_len))};
+    }
+    if (decoded) mem_free(decoded);
+    MapBuilder part = ctx.builder.map();
+    part.put("type", ctx.builder.createStringItem(type))
+        .put("charset", eml_text_item(info.charset))
+        .put("disposition", eml_text_item(info.disposition))
+        .put("filename", eml_text_item(info.filename))
+        .put("cid", eml_text_item(info.content_id))
+        .put("size", (int64_t)decoded_len)
+        .put("content", content);
+    if (info.format) part.put("format", eml_text_item(info.format)).put("delsp", info.delsp);
+    return part.final();
+}
+
+static Item eml_build_part(InputContext& ctx, const char* body, size_t body_len,
+                           const EmlMimeInfo& info, int depth, int* budget) {
+    // bound nesting and fan-out independently of message size (§5.8)
+    (*budget)--;
+    if (info.is_multipart && info.boundary && depth < 32) {
+        return eml_build_multipart(ctx, body, body_len, info, depth, budget);
+    }
+    return eml_build_leaf(ctx, body, body_len, info);
+}
+
+// Address-list headers become [{name, address}], the mailbox shape
+// doc.misc.eml() writes; names decoded (RFC 2047).
+struct EmlAddressSink {
+    InputContext* ctx;
+    ArrayBuilder* list;
+};
+
+static void eml_address_visit(void* user, const char* name, size_t name_len,
+                              const char* address, size_t address_len) {
+    EmlAddressSink* sink = (EmlAddressSink*)user;
+    MarkBuilder& builder = sink->ctx->builder;
+    Item name_item = name_len ? builder.createStringItem(name, name_len) : ItemNull;
+    sink->list->append(builder.map()
+        .put("name", name_item)
+        .put("address", builder.createStringItem(address, address_len))
+        .final());
+}
+
+static const char* const eml_address_headers[] = {"from", "sender", "reply-to", "to", "cc", "bcc"};
+static const char* const eml_address_keys[] = {"from", "sender", "reply_to", "to", "cc", "bcc"};
+static const int EML_ADDRESS_HEADERS = 6;
+
 // Helper function to parse header name
 static String* parse_header_name(InputContext& ctx, const char **eml) {
     StringBuf* sb = ctx.sb;
@@ -487,6 +599,9 @@ void parse_eml(Input* input, const char* eml_string) {
         return;
     }
 
+    Item address_lists[EML_ADDRESS_HEADERS];
+    for (int a = 0; a < EML_ADDRESS_HEADERS; a++) address_lists[a] = ItemNull;
+
     // Initialize headers map
     Map* headers_map = map_pooled(input->pool);
     List* header_entries = rfc_new_entry_list(input);
@@ -540,16 +655,14 @@ void parse_eml(Input* input, const char* eml_string) {
         ctx.builder.putToMap(lam::gc_borrow(headers_map), header_name, value);
         rfc_append_entry(ctx, header_entries, header_name, value);
 
-        if (strcmp(header_name->chars, "content-type") == 0) {
-            eml_parse_content_type(ctx, header_value->chars, header_value->len, &mime_info);
-        }
-        else if (strcmp(header_name->chars, "content-transfer-encoding") == 0) {
-            mime_info.transfer_encoding =
-                eml_parse_transfer_encoding(header_value->chars, header_value->len);
-        }
-        else if (strcmp(header_name->chars, "content-disposition") == 0) {
-            mime_info.is_attachment =
-                eml_is_attachment_disposition(header_value->chars, header_value->len);
+        eml_apply_mime_value(ctx, header_name->chars, header_name->len,
+                             header_value->chars, header_value->len, &mime_info);
+        for (int a = 0; a < EML_ADDRESS_HEADERS; a++) {
+            if (strcmp(header_name->chars, eml_address_headers[a]) != 0) continue;
+            ArrayBuilder list = ctx.builder.array();
+            EmlAddressSink sink = {&ctx, &list};
+            mime_parse_addresses(header_value->chars, header_value->len, eml_address_visit, &sink);
+            address_lists[a] = list.final();
         }
 
         // Also store common headers as top-level fields for easier access
@@ -570,8 +683,14 @@ void parse_eml(Input* input, const char* eml_string) {
             }
         }
         else if (strcmp(header_name->chars, "subject") == 0) {
+            // RFC 2047 words decoded; the raw value stays in `headers`
             String* subject_key = ctx.builder.createName("subject");
-            Item subject_value = {.item = s2it(header_value)};
+            StrBuf* decoded = strbuf_new();
+            if (decoded) mime_decode_header(header_value->chars, header_value->len, decoded);
+            Item subject_value = decoded && decoded->str
+                ? ctx.builder.createStringItem(decoded->str, decoded->length)
+                : (Item){.item = s2it(header_value)};
+            if (decoded) strbuf_free(decoded);
             ctx.builder.putToMap(lam::gc_borrow(email_map), subject_key, subject_value);
         }
         else if (strcmp(header_name->chars, "date") == 0) {
@@ -595,6 +714,11 @@ void parse_eml(Input* input, const char* eml_string) {
     ctx.builder.putToMap(lam::gc_borrow(email_map), headers_key, headers_value);
     ctx.builder.putToMap(lam::gc_borrow(email_map), ctx.builder.createName("header_entries"),
         {.item = (uint64_t)header_entries});
+    MapBuilder addresses = ctx.builder.map();
+    for (int a = 0; a < EML_ADDRESS_HEADERS; a++) {
+        if (get_type_id(address_lists[a]) != LMD_TYPE_NULL) addresses.put(eml_address_keys[a], address_lists[a]);
+    }
+    ctx.builder.putToMap(lam::gc_borrow(email_map), ctx.builder.createName("addresses"), addresses.final());
 
     // MIME HTML parts become parsed Mark documents; other messages retain the
     // raw body string for compatibility with the existing EML representation.
@@ -602,6 +726,9 @@ void parse_eml(Input* input, const char* eml_string) {
     // Keep MIME wire content as well as the display body so attachments survive export.
     ctx.builder.putToMap(lam::gc_borrow(email_map), ctx.builder.createName("raw_body"),
         ctx.builder.createStringItem(eml, body_len));
+    int part_budget = EML_MAX_PARTS;
+    ctx.builder.putToMap(lam::gc_borrow(email_map), ctx.builder.createName("mime"),
+        eml_build_part(ctx, eml, body_len, mime_info, 0, &part_budget));
     Element* html_body =
         eml_parse_html_entity(ctx, eml, body_len, mime_info, 0);
     if (html_body) {

@@ -4918,6 +4918,7 @@ static Url* clone_document_url_for_iframe(LayoutContext* lycon) {
 }
 
 static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
+                                           DomElement* frame,
                                            const char* srcdoc,
                                            int viewport_width,
                                            int viewport_height) {
@@ -4939,7 +4940,8 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
         pool_destroy(pool);
         return nullptr;
     }
-    DocumentJsHostConfig host_config = document_js_host_config_inherit(nullptr, lycon->ui_context->document);
+    DocumentJsHostConfig host_config = document_js_host_config_for_frame(nullptr,
+        lycon->ui_context->document, frame);
     DomDocument* doc = load_lambda_html_doc(base_url, nullptr,
         viewport_width, viewport_height, pool, srcdoc, false, true, &host_config);
     if (!doc) {
@@ -4954,6 +4956,7 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
 }
 
 DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon,
+                                        DomElement* frame,
                                         const char* src,
                                         int viewport_width,
                                         int viewport_height) {
@@ -4963,7 +4966,7 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon,
     }
     DomDocument* parent = lycon->ui_context->document;
     if (!document_dependency_admits(parent, src)) return nullptr;
-    DocumentJsHostConfig host_config = document_js_host_config_inherit(nullptr, parent);
+    DocumentJsHostConfig host_config = document_js_host_config_for_frame(nullptr, parent, frame);
     size_t src_len = strlen(src);
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src, src_len);
@@ -5095,15 +5098,20 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
         return previous;
     }
     EvalContext* active = (EvalContext*)eval_context_tls_runtime();
-    if ((active && active->execution_depth != 0) || lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH)
+    if (active && active->execution_depth != 0) {
+        // a template re-rendered by a running task (dom.dispatch) lays out
+        // inside its evaluator; load at the host pump's next quiescent turn
+        lycon->ui_context->frame_loads_deferred = true;
         return previous;
+    }
+    if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) return previous;
     if (!srcdoc && iframe_navigation_must_not_run_in_layout(lycon, src)) return previous;
     if (!srcdoc && radiant_schedule_async_iframe_load(lycon->ui_context, block->as_element(), src,
             (int)viewport_width, (int)viewport_height)) return previous; // INT_CAST_OK: loader viewport API uses integer CSS pixels
     lycon->ui_context->iframe_depth++;
-    DomDocument* doc = srcdoc ? load_iframe_srcdoc_doc(lycon, srcdoc,
+    DomDocument* doc = srcdoc ? load_iframe_srcdoc_doc(lycon, block->as_element(), srcdoc,
         (int)viewport_width, (int)viewport_height) : // INT_CAST_OK: loader viewport API uses integer CSS pixels
-        layout_load_iframe_src_doc(lycon, src,
+        layout_load_iframe_src_doc(lycon, block->as_element(), src,
             (int)viewport_width, (int)viewport_height); // INT_CAST_OK: loader viewport API uses integer CSS pixels
     if (doc) {
         if (!layout_iframe_track_source(doc, source_text, viewport_width, viewport_height)) {
@@ -6195,7 +6203,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             layout_iframe(lycon, block, block->display);
         }
         else if (elmt_name == MARKUP_NAME_WEBVIEW) {
-            if (lycon->doc && lycon->doc->services.svg_image_document) return;
+            // a native web view runs its page's scripts
+            if (lycon->doc && (lycon->doc->services.svg_image_document || lycon->doc->scripting_disabled)) return;
             if (!block->embed) {
                 block->ensure_embed(lycon);
             }

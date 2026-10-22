@@ -161,7 +161,7 @@ void dl_replay_validated(const ValidatedDisplayList& recording, RdtVector* vec,
 
         case DL_OUTER_SHADOW: {
             const DlOuterShadow* o = &item->outer_shadow;
-            dl_replay_outer_shadow(scratch, surface, o);
+            dl_replay_outer_shadow(scratch, surface, o, vec);
             break;
         }
 

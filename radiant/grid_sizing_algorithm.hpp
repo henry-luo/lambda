@@ -896,8 +896,9 @@ inline void resolve_intrinsic_track_sizes(
         // contribution so that expand_flexible_tracks() §11.7 has the correct floor.
         //
         // The content size used depends on the track's min sizing function:
-        //   auto | min-content → use min_content_contribution
-        //   max-content        → use max_content_contribution
+        //   auto        → use minimum_contribution (the automatic minimum)
+        //   min-content → use min_content_contribution
+        //   max-content → use max_content_contribution
         int flex_count = 0;
         float current_flex_size = 0.0f;
         for (size_t i = contrib.track_start; i < p3_end; ++i) {
@@ -933,8 +934,11 @@ inline void resolve_intrinsic_track_sizes(
             float item_contrib;
             if (mt == SizingFunctionType::MaxContent) {
                 item_contrib = contrib.max_content_contribution;
+            } else if (mt == SizingFunctionType::Auto) {
+                // §12.5.4: an auto minimum takes the item's minimum contribution,
+                // which a scroll container or an explicit min size sets (§6.6)
+                item_contrib = contrib.minimum_contribution;
             } else {
-                // auto or min-content
                 item_contrib = contrib.min_content_contribution;
             }
             if (mt == SizingFunctionType::Auto ||

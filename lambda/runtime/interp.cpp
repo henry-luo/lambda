@@ -950,6 +950,101 @@ static Item interp_read_cross_lang_binding(InterpState* st, NameEntry* entry) {
     return module_namespace_get(module, name);
 }
 
+#ifndef LAMBDA_NO_MIR
+// A MIR module's export is its boxed `_b` entry (D7.2.2). Publish it as the
+// same Function carrier MIR builds at each reference to a module function.
+static Item interp_mir_export_function(Script* module, AstFuncNode* function,
+        void* boxed_entry, int arity) {
+    TypeFunc* signature = (TypeFunc*)function->type;
+    RootFrame roots(1);
+    Rooted<Item> callable(roots, (Item){.function = to_fn_named(NULL, arity,
+        function->name ? function->name->chars : NULL)});
+    Function* fn = callable.get().function;
+    if (!fn) return ItemError;
+    fn->def_module = module;
+    lambda_function_set_type(fn, signature);
+    lambda_function_publish_boxed_entry(fn, function, boxed_entry);
+    return callable.get();
+}
+
+// One resolved export of a MIR module: a function's boxed entry, or the
+// `_gvar_` slot of an exported value in the module's own slab numbering.
+struct InterpMirExport {
+    const AstNode* decl;
+    void* boxed_entry;
+    int32_t slot;
+};
+
+// The generated-name scan (find_func/find_import) is linear in the module's
+// items, so resolve each declaration once per executing Script.
+static const InterpMirExport* interp_mir_export_lookup(Script* owner,
+        const AstNode* decl) {
+    ArrayList* exports = owner->interp_mir_exports;
+    for (int i = 0; exports && i < exports->length; i++) {
+        InterpMirExport* known = (InterpMirExport*)exports->data[i];
+        if (known->decl == decl) return known;
+    }
+    MIR_context_t ctx = (MIR_context_t)owner->jit_context;
+    InterpMirExport resolved = {decl, NULL, -1};
+    StrBuf* name = strbuf_new_cap(64);
+    if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        // a declarator keeps its name after id/init, not at AstNamedNode's offset
+        const String* var_name = ((const AstDeclaratorNode*)decl)->name;
+        if (var_name) {
+            strbuf_append_str(name, "_gvar_");
+            strbuf_append_str_n(name, var_name->chars, var_name->len);
+            MIR_item_t bss = find_import(ctx, name->str);
+            if (bss && bss->addr) resolved.slot =
+                (int32_t)((LambdaModuleVarRef*)bss->addr)->slot;
+        }
+    } else {
+        write_fn_name_ex(name, (AstFuncNode*)decl, NULL, "_b");
+        resolved.boxed_entry = find_func(ctx, name->str);
+    }
+    strbuf_free(name);
+    if (!resolved.boxed_entry && resolved.slot < 0) return NULL;
+    InterpMirExport* record = (InterpMirExport*)mem_alloc(sizeof(InterpMirExport),
+        MEM_CAT_SYSTEM);
+    if (!record) return NULL;
+    *record = resolved;
+    if (!owner->interp_mir_exports) owner->interp_mir_exports = arraylist_new(8);
+    if (!owner->interp_mir_exports ||
+            !arraylist_append(owner->interp_mir_exports, record)) {
+        mem_free(record);
+        return NULL;
+    }
+    return record;
+}
+#endif
+
+// A T0 importer of a MIR-lowered module reads its exports by name: the two
+// tiers number module slabs independently and MIR keeps no function values
+// there. Decided per read, so a dependency demoted after this importer was
+// planned still resolves correctly.
+static bool interp_module_runs_on_mir(const Script* owner) {
+    return owner && !owner->interp_supported && owner->jit_context;
+}
+
+static Item interp_read_mir_export(Script* owner, NameEntry* entry) {
+#ifndef LAMBDA_NO_MIR
+    const AstNode* decl = entry ? entry->node : NULL;
+    const InterpMirExport* resolved = decl
+        ? interp_mir_export_lookup(owner, decl) : NULL;
+    if (resolved && resolved->boxed_entry) {
+        AstFuncNode* function = (AstFuncNode*)decl;
+        TypeFunc* signature = (TypeFunc*)function->type;
+        return interp_mir_export_function(owner, function, resolved->boxed_entry,
+            signature ? signature->param_count : 0);
+    }
+    if (resolved) return interp_read_module_slot(owner, resolved->slot);
+#endif
+    log_error("interp: MIR module '%s' has no export '%.*s'",
+        owner && owner->reference ? owner->reference : "<unknown>",
+        entry && entry->name ? (int)entry->name->len : 0,
+        entry && entry->name ? entry->name->chars : "");
+    return ItemError;
+}
+
 // Captures are a by-value snapshot taken at closure creation (D6.2.3), so an
 // enclosing name is either this frame's own slot or an env index — never a
 // live cell. Stage 1 has no mutable upvalues (S9.1.4 via D6.2.3).
@@ -1012,6 +1107,17 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
             ? lambda_ast_overlay_import_script(f->module, entry->import)
             : entry->import_owner;
         if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
+        if (entry->import && owner != f->module && interp_module_runs_on_mir(owner)) {
+            return interp_read_mir_export(owner, entry);
+        }
+        if (entry->import && entry->slot < 0) {
+            // planned while its owner ran on MIR; this run's owner is T0
+            Script* t0_owner = NULL;
+            int t0_slot = -1;
+            if (interp_satellite_import_binding(f->module, entry, &t0_owner, &t0_slot)) {
+                return interp_read_module_slot(t0_owner, t0_slot);
+            }
+        }
         return interp_read_module_slot(owner, entry->slot);
     }
     if ((uint32_t)entry->slot >= f->scratch_base) {
@@ -7671,14 +7777,14 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
         }
         TypeFunc* signature = (TypeFunc*)export_function->type;
         RootFrame roots(1);
-        Rooted<Item> callable(roots, (Item){.function = to_fn_named(NULL,
-            signature ? signature->param_count : argc, export_function->name->chars)});
-        Function* function = callable.get().function;
-        if (!function) return ItemError;
-        function->def_module = module;
-        lambda_function_set_type(function, signature);
-        lambda_function_publish_boxed_entry(function, export_function, boxed_entry);
-        return interp_call_runtime_function(runtime, function, args, argc);
+#ifndef LAMBDA_NO_MIR
+        Rooted<Item> callable(roots, interp_mir_export_function(module,
+            export_function, boxed_entry, signature ? signature->param_count : argc));
+#else
+        Rooted<Item> callable(roots, ItemError);
+#endif
+        if (get_type_id(callable.get()) != LMD_TYPE_FUNC) return ItemError;
+        return interp_call_runtime_function(runtime, callable.get().function, args, argc);
     }
     RuntimeModuleStateScope module_state(eval_context);
     if (!module_state.activate(module->module_state_id)) {

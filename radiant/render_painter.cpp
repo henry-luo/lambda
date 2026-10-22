@@ -259,6 +259,8 @@ void rc_outer_shadow(RasterRenderContext* rdcon,
                      Color color, float blur_radius,
                      int exclude_type, const float* exclude_params,
                      int clip_type, const float* clip_params) {
+    // rectangular overflow scopes keep only block bounds until a primitive records its clip.
+    RenderClipScope viewport_clip = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_outer_shadow(&target, "rc_outer_shadow",
                               shadow_x, shadow_y, shadow_w, shadow_h,
@@ -266,6 +268,7 @@ void rc_outer_shadow(RasterRenderContext* rdcon,
                               color, blur_radius,
                               exclude_type, exclude_params,
                               clip_type, clip_params);
+    render_clip_pop_scope(rdcon, &viewport_clip);
 }
 
 void render_painter_draw_picture_rect(RasterRenderContext* rdcon, RdtPicture* picture,

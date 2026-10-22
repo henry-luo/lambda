@@ -4,6 +4,7 @@ import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import page: .mod_page
 import rendering: lambda.edit.model
+import insert: .mod_insert
 
 let factories = {
     p:(a,k)=><p *:a, *k>, h1:(a,k)=><h1 *:a, *k>, h2:(a,k)=><h2 *:a, *k>,
@@ -26,7 +27,9 @@ fn make(tag,attrs,kids) {
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
 fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','colspan','rowspan','data-word-style',
-    'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment'],a.name))
+    'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment',
+    'data-word-cover','data-word-blank-page'],a.name) or
+    (a.name=='id' and starts_with(string(a.value),insert.bookmark_prefix)))
     (string(a.name),string(a.value))])}
 fn wrap_marks(marks,i,child) => if (i >= len(marks)) child else {
     let m = marks[i]
@@ -76,6 +79,11 @@ pub let document_css = "
  .word-content pre,.word-content code { font-family:'Courier New',monospace; }
  .word-content img { max-width:100%; vertical-align:middle; }
  .word-content [data-word-page-break=true] { break-before:page; }
+ .word-content [data-word-blank-page=true] { min-height:1em; }
+ .word-content [data-word-cover=title] { margin-top:96pt; padding-bottom:18pt; border-bottom:2px solid #527f78;
+   font-size:38pt; color:#284e47; }
+ .word-content [data-word-cover=subtitle] { font-family:Arial,sans-serif; font-size:15pt; color:#718397; margin-top:20pt; }
+ .word-content [data-word-cover=author] { font-family:Arial,sans-serif; font-size:12pt; color:#527f78; margin-top:100pt; }
  .word-content [data-word-comment] { background-color:#fff3c4; border-bottom:2px solid #d6aa39; }
  @media screen { .word-content [data-word-page-break=true] { border-top:1px dashed #bfced9; margin-top:28px; padding-top:16px; } }
  @page { size:A4; margin:17mm 19mm; }

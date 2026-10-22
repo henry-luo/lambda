@@ -485,7 +485,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 3155 | How an element pattern spells *content must be empty* |
 | SO48 | 3156 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v39.1.0 (2026-10-22)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v39.1.1 (2026-10-22)
 
 | ID | Line | Title |
 |---|---|---|
@@ -697,7 +697,7 @@ in full — including lines too long for a viewer — run
 | D7.2.1 | 1536 | A Lambda script module (package) is the compilation unit: its language profile is a unit property (D8.2.1), … |
 | D7.2.2 | 1542 | Imports resolve to the **boxed `_b` symbol** of exported functions (export ⇒ boxed entry mandatory, D8.3.4v4); |
 | D7.2.3 | 1547 | Imported packages are cached in-process (L1, D8.5.1) and distribute as **source** (D1.7); |
-| D7.2.4v4* | 1550 | `lambda.*` is the one root for everything Lambda ships |
+| D7.2.4v4 | 1550 | `lambda.*` is the one root for everything Lambda ships |
 | D7.2.5* | 1569 | Full user-agent editing policy belongs to the shipped Lambda DOM behavior package, never to Radiant's native … |
 | D7.2.6 | 1584 | Import resolution follows the S16.9.8 roots, one resolver for every caller |
 | D7.2.7v2* | 1596 | LaTeX is read by TeX expansion, never by TeX typesetting |

@@ -37,7 +37,10 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .group-tools { flex:1; }
 .group-label { color:#87958c; font-size:9px; text-align:center; margin-top:7px; letter-spacing:0.7px; }
 .group-history .group-tools { display:flex; flex-direction:column; gap:7px; }
-.group-table .group-tools { display:flex; flex-wrap:wrap; align-content:flex-start; width:330px; gap:4px; }
+.insert-ribbon .group-tools { display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
+.insert-ribbon .group-tables .tool { height:70px; flex-direction:column; padding:8px 18px; }
+.insert-ribbon .group-tables .tool-icon { font-size:28px; }
+.insert-ribbon .tool { height:25px; }
 .font-selects,.font-tools,.paragraph-tools,.alignment-tools { display:flex; gap:3px; }
 .font-selects { margin-bottom:3px; }
 .ribbon-select { height:25px; border:1px solid #d0dcd6; background:#fff; border-radius:3px; padding:2px 6px; color:#344b40; }
@@ -104,6 +107,17 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .dialog-field>span { display:block; font-size:11px; margin-bottom:6px; color:#536b61; }
 #dialog-error { color:#a6383e; background:#fff0ee; border:1px solid #efc9c7; padding:9px; margin:0 0 14px; font-size:12px; }
 .comment-input { height:120px; resize:vertical; padding:10px; }
+.bookmark-list { max-height:220px; overflow:auto; margin-bottom:18px; }
+.bookmark-row { display:flex; align-items:center; gap:4px; padding:9px 0; border-bottom:1px solid #e2eae5; }
+.bookmark-description { flex:1; min-width:0; }
+.bookmark-description strong { display:block; color:#345e4b; font-size:12px; }
+.bookmark-description span { display:block; color:#87958c; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:210px; margin-top:4px; }
+.bookmark-empty { font-size:12px; color:#87958c; }
+.symbol-gallery { max-height:310px; overflow:auto; margin-bottom:18px; }
+.symbol-category-title { font-size:10px; color:#7b8e81; margin:12px 0 7px; }
+.symbol-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:4px; }
+.symbol-key { height:32px; font-family:Georgia,serif; font-size:19px; border:1px solid #dce5df; background:#fafcfb; }
+.internal-link-fields { border-top:1px solid #dce5df; padding-top:14px; margin-top:5px; }
 .review-pane { width:278px; flex-shrink:0; padding:20px 16px; overflow:auto; background:#f6f9f6; border-left:1px solid #d6dfdb; }
 .review-heading { display:flex; justify-content:space-between; align-items:center; font-family:Georgia,serif; font-size:18px; }
 .review-heading .tool-label { display:none; }

@@ -117,6 +117,19 @@ void lambda_offload_notify(LambdaOffload* job);
 // Atomic; nonzero once the task was cancelled or the progress hook aborted.
 const int* lambda_offload_cancel_flag(const LambdaOffload* job);
 
+// Parks the running task until a socket is ready, on the loop rather than a
+// pool thread (lambda.io.mail). A waiter serves one socket for its lifetime;
+// close it before the socket. wait returns 1 when ready, 0 when timeout_ms
+// passed (0: no timeout), and -1 with *error set (cancellation or failure).
+// Closing a waiter a task is parked on wakes that task with an error.
+typedef struct LambdaSocketWaiter LambdaSocketWaiter;
+LambdaSocketWaiter* lambda_socket_waiter_new(uint64_t socket);
+int lambda_socket_waiter_wait(LambdaSocketWaiter* waiter, bool writable, int64_t timeout_ms, Item* error);
+void lambda_socket_waiter_close(LambdaSocketWaiter* waiter);
+// The task running now: the root task on the base stack, NULL elsewhere
+// outside a task (a generator body).
+LambdaTask* lambda_task_running(void);
+
 Item pn_send(Item handle, Item message);
 Item pn_receive(void);
 Item pn_wait1(Item handle);

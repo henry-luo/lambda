@@ -2,6 +2,7 @@
 
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 > **Scoped source refresh:** 2026-10-19 — whole-subtree marker/cache eligibility during split paint phases (§6); 2026-10-21 — paint layers (§6).
+> **Scoped source refresh:** 2026-10-23 — outer-shadow replay clipping and scratch lifetime (§5).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two retained rendering intermediate representations that sit between the layout/view tree and the pixel/vector backends: the target-neutral, semantic **PaintIR** and its raster-only lowering, the **DisplayList**. It describes why Radiant records draw commands into an immutable buffer and replays them separately (single-threaded, tiled-parallel, or via retained fragments), the record→replay data flow through the `rc_*` painter gateway, the `RenderBackend` vtable that SVG/PDF plug into by consuming PaintIR directly, and the supporting clip/transform/tile/retained-cache machinery. The per-feature painters (backgrounds, borders, glyphs), the raster surface, and PDF/SVG page assembly are [RAD_13](RAD_13_Render_Walk_Painters.md)'s and [RAD_14](RAD_14_SVG_Vector_Graph.md)'s subjects and are only cross-referenced here.
 >
@@ -85,6 +86,18 @@ The SVG lowering (`paint_ir_lower_svg` / `_stream`, `paint_ir.cpp:1966+`) is the
 `dl_replay` (`display_list_replay.cpp:48`) is the reference consumer. It validates the list, pushes a dirty clip via `dl_replay_push_dirty_clip` (`display_list_replay.cpp:58`), opens a ThorVG batch with `rdt_vector_begin_batch` (`:67`), then loops the items in a `switch(item->op)` (`:85`). Vector ops paint through `rdt_*` calls and stay batched; each pixel/effect op forces `rdt_vector_flush_batch` (e.g. `:141`, `:171`) so the surface is coherent before direct-pixel work, then hands off to a sibling file — `dl_replay_backdrop_*`, `dl_replay_shadow_*`, `dl_replay_apply_filter`, `dl_replay_box_blur_*`, `dl_replay_draw_glyph` (the `display_list_replay_*.cpp` family). The batch is closed with `rdt_vector_end_batch` (`:263`).
 
 A presentation-damage frame (RAD_16 §8) does not use the dirty clip. It replays its damage union as one tile (`render_output_replay_region` → `dl_replay_tile`), because the clip's vector mask shifts repeating-gradient and image rounding inside the region, whereas a tile's edges clip exactly. The dirty clip remains the fallback when no tile worker exists.
+
+Outer shadows build their blurred, premultiplied image in isolation, then draw
+that image through the replay vector's active clip stack. Direct surface
+compositing bypasses ancestor overflow, nested clip paths, and dirty clips.
+`rc_outer_shadow` records the current block bounds as a rectangular clip scope,
+since untransformed rectangular overflow may otherwise exist only as bounds
+during recording.
+Serial and tiled replay share this path; a tile restores the image's world
+placement using the vector target's offset. The image borrows scratch pixels,
+so replay flushes the image batch before releasing its scope (**D4.5.1v4**).
+`RdtVectorTest.OuterShadowsRespectNestedClipsAcrossReplayModes` checks hard and
+blurred shadows under nested rectangular/rounded clips, including tile offsets.
 
 **Dirty-clip skipping** makes a partial repaint cheap. When a `DL_BEGIN_ELEMENT` marker's bounds do not intersect the dirty region and its `matching_index` points forward, the loop jumps straight past the whole subtree by setting `i = item->element_marker.matching_index` (`display_list_replay.cpp:73-78`); individual skippable ops are filtered by `dl_replay_can_skip_item_for_dirty` (`display_list_replay.cpp:13`). This is what lets an incremental repaint touch only the changed elements while replaying a full recorded list. `dl_validate` (`render.hpp`) and `DisplayListValidationResult` (`render.hpp`) guard the clip/backdrop/shadow/element depth balance the skip logic relies on.
 

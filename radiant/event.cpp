@@ -3325,10 +3325,19 @@ static bool settle_pending_author_templates(EventContext* evcon,
 // target. The UA tier runs after author dispatch, so retain an all-node DOM
 // path and resolve it only after the author settle; a rebuilt checkbox must
 // receive its default action rather than leaving state on a retired wrapper.
+// Each step also keeps the node's name: a rebuild that reshaped the subtree
+// puts some other node at the old indices (a <select> where a removed button
+// was), and that node must not receive the retired target's default action.
 typedef struct EventTargetPath {
     uint32_t child_indices[64];
+    uint64_t name_hashes[64];
     int length;
 } EventTargetPath;
+
+static uint64_t event_target_path_name_hash(const DomNode* node) {
+    const char* name = node->node_name();
+    return str_hash(name, strlen(name));
+}
 
 static bool capture_event_target_path(DomDocument* doc, View* target,
                                       EventTargetPath* out) {
@@ -3347,7 +3356,8 @@ static bool capture_event_target_path(DomDocument* doc, View* target,
     for (int i = depth - 1; i > 0; i--) {
         uint32_t index = dom_node_child_index(chain[i - 1]);
         if (index == UINT32_MAX || out->length >= 64) return false;
-        out->child_indices[out->length++] = index;
+        out->child_indices[out->length] = index;
+        out->name_hashes[out->length++] = event_target_path_name_hash(chain[i - 1]);
     }
     return true;
 }
@@ -3362,7 +3372,7 @@ static View* resolve_event_target_path(DomDocument* doc,
         for (uint32_t index = 0; child && index < path->child_indices[i]; index++) {
             child = child->next_sibling;
         }
-        if (!child) return nullptr;
+        if (!child || event_target_path_name_hash(child) != path->name_hashes[i]) return nullptr;
         node = child;
     }
     return static_cast<View*>(node);
@@ -12470,7 +12480,7 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
     if (navigation_schedule_async_document(uicon, owner, iframe, url,
             css_vw, css_vh)) return true;
     if (!navigation_release_evaluator_for_document_load()) return false;
-    DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, owner);
+    DocumentJsHostConfig host_config = document_js_host_config_for_frame(uicon, owner, iframe);
     DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh,
                                          &host_config);
     if (!new_doc) return false;
@@ -12713,6 +12723,12 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
 
 bool radiant_commit_async_document_loads(UiContext* uicon) {
     bool navigated = false;
+    if (uicon && uicon->frame_loads_deferred && uicon->document && uicon->document->state) {
+        // frames layout could not load inside an evaluator load on this reflow
+        uicon->frame_loads_deferred = false;
+        doc_state_request_reflow(uicon->document->state);
+        navigated = true;
+    }
     AsyncScriptNavigation* job = s_async_script_navigations;
     while (job) {
         AsyncScriptNavigation* next = job->next;
@@ -12780,7 +12796,8 @@ static bool navigation_schedule_async_document(UiContext* uicon, DomDocument* so
     job->viewport_height = viewport_height;
     job->iframe = iframe != nullptr;
     job->redirect_count = redirect_count;
-    job->host_config = document_js_host_config_inherit(uicon, source);
+    job->host_config = iframe ? document_js_host_config_for_frame(uicon, source, iframe)
+                              : document_js_host_config_inherit(uicon, source);
     // The worker may use the inherited policy while parsing, but only the
     // host thread may bind the live UiContext before script execution.
     job->host_config.ui_context = nullptr;

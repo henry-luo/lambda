@@ -1,0 +1,8 @@
+From: ada@example.org
+To: bob@example.com
+Subject: Flowed
+Content-Type: text/plain; charset=utf-8; format=flowed; delsp=yes
+
+This paragraph is wrapped by the sender  
+and should join.
+> quoted line

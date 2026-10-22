@@ -13,12 +13,15 @@ inline DisplayItem test_radiant_command(const DisplayList* list, int ordinal) {
 inline void test_radiant_replay_surface(DisplayList* list, ImageSurface* surface,
         unsigned mode, DirtyRect* dirty_rect = nullptr, int tile_x = 0, int tile_y = 0) {
     RdtVector vector = {}; ScratchArena scratch = {};
+    // pixel effects allocate during replay; an unbound scratch arena silently omits their paint.
+    Arena* scratch_arena = arena_create_default(); ASSERT_NE(scratch_arena, nullptr);
+    scratch_init(&scratch, scratch_arena);
     rdt_vector_init(&vector, (uint32_t*)surface->pixels, surface->width, surface->height, surface->pitch / 4);
     Bound viewport = {0, 0, (float)surface->width, (float)surface->height};
     DirtyTracker dirty = {}; dirty.dirty_list = dirty_rect;
     if (mode == 1) dl_replay_tile(list, &vector, surface, &scratch, tile_x, tile_y, surface->width, surface->height, 1);
     else dl_replay(list, &vector, surface, &viewport, &scratch, 1, mode == 2 ? &dirty : nullptr);
-    rdt_vector_destroy(&vector); scratch_release(&scratch);
+    rdt_vector_destroy(&vector); scratch_release(&scratch); arena_destroy(scratch_arena);
 }
 
 inline void test_radiant_expect_surface_pixel(const ImageSurface* surface,

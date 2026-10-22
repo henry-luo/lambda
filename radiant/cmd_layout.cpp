@@ -196,6 +196,17 @@ struct CssSourceBuffer {
 static thread_local NetworkResourceManager* g_css_resource_manager = nullptr;
 static thread_local InputResourcePolicy g_css_resource_policy = INPUT_RESOURCE_ALLOW_NETWORK;
 
+// Format-route loaders (SVG, Lambda-generated HTML) take no host config; a
+// load for a scripting-disabled document passes the flag to them this way.
+static thread_local bool g_load_scripting_disabled = false;
+struct LoadScriptingScope {
+    bool saved;
+    explicit LoadScriptingScope(bool disabled) : saved(g_load_scripting_disabled) {
+        g_load_scripting_disabled = saved || disabled;
+    }
+    ~LoadScriptingScope() { g_load_scripting_disabled = saved; }
+};
+
 struct CssSourceScope {
     NetworkResourceManager* manager;
     InputResourcePolicy policy;
@@ -1232,6 +1243,7 @@ static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
     if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = 0;
     if (!doc || !doc->resource_manager || !html_root || !base_path) return 0;
     if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return 0;
+    bool fetch_scripts = !doc->scripting_disabled;  // scripts that will never run are not fetched
 
     ExternalPrefetchUrl* stylesheet_urls = nullptr;
     int stylesheet_count = 0;
@@ -1241,8 +1253,10 @@ static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
     int script_capacity = 0;
     collect_external_resource_urls(html_root, base_path, &stylesheet_urls, &stylesheet_count,
                                    &stylesheet_capacity, EXTERNAL_PREFETCH_STYLESHEET, 0);
-    collect_external_resource_urls(html_root, base_path, &script_urls, &script_count,
-                                   &script_capacity, EXTERNAL_PREFETCH_SCRIPT, 0);
+    if (fetch_scripts) {
+        collect_external_resource_urls(html_root, base_path, &script_urls, &script_count,
+                                       &script_capacity, EXTERNAL_PREFETCH_SCRIPT, 0);
+    }
 
     if (stylesheet_count > 0) {
         uint64_t stylesheet_start = time_now_ns();
@@ -2143,6 +2157,35 @@ DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
     config.redirect_stdout_to_stderr = source->js.redirect_stdout_to_stderr;
     config.disable_css_animations = source->disable_css_animations;
     config.resource_policy = source->resource_policy;
+    config.scripting_disabled = source->scripting_disabled;
+    return config;
+}
+
+// HTML §4.8.5: the sandbox attribute is a set of space-separated tokens
+static bool frame_sandbox_has_token(const char* tokens, const char* token) {
+    size_t length = strlen(token);
+    for (const char* p = tokens; *p;) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\f' || *p == '\r') p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\f' && *p != '\r') p++;
+        if ((size_t)(p - start) == length && strncasecmp(start, token, length) == 0) return true;
+    }
+    return false;
+}
+
+DocumentJsHostConfig document_js_host_config_for_frame(UiContext* uicon,
+                                                       const DomDocument* source,
+                                                       DomElement* frame) {
+    DocumentJsHostConfig config = document_js_host_config_inherit(uicon, source);
+    const char* sandbox = frame ? frame->get_attribute("sandbox") : nullptr;
+    if (sandbox) {
+        // MQ11: a sandboxed frame loads script-free until Lambda implements
+        // sandboxing; no token re-enables scripts yet
+        config.scripting_disabled = true;
+        if (frame_sandbox_has_token(sandbox, "allow-scripts")) {
+            log_info("frame sandbox: allow-scripts is not honoured yet; the frame's scripts stay off");
+        }
+    }
     return config;
 }
 
@@ -2160,6 +2203,8 @@ void document_apply_js_host_config(DomDocument* doc,
     doc->js.redirect_stdout_to_stderr = config->redirect_stdout_to_stderr;
     doc->disable_css_animations = config->disable_css_animations;
     doc->resource_policy = config->resource_policy;
+    // scripting, once disabled, stays disabled
+    doc->scripting_disabled = doc->scripting_disabled || config->scripting_disabled;
 }
 
 // Script realms stay on the host thread; async loaders transfer only the parsed DOM.
@@ -2271,8 +2316,8 @@ static void run_html_document_scripts(DomDocument* dom_doc, Pool* pool,
 
 static void complete_document_scripts(DomDocument* doc, Pool* pool) {
     uint64_t script_start_ns = time_now_ns();
-    run_html_document_scripts(doc, pool, nullptr, nullptr,
-                              false, 0, 0, script_start_ns, nullptr);
+    if (!doc->scripting_disabled) run_html_document_scripts(doc, pool, nullptr, nullptr,
+                                                            false, 0, 0, script_start_ns, nullptr);
     populate_layout_document(doc, doc->root, doc->html_root,
                              (HtmlVersion)doc->html_version, doc->url);
     extract_body_transform_scale(doc->root, doc);
@@ -2377,11 +2422,16 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     auto t_read = time_now_ns();
     log_info("[TIMING] load: read file: %.1fms", time_elapsed_ms_f(t_start, t_read));
 
+    // a scripting-disabled document runs no script, whatever the caller asked
+    bool scripting_disabled = g_load_scripting_disabled ||
+        (js_host_config && js_host_config->scripting_disabled);
+    if (scripting_disabled) execute_scripts = false;
     Input* input = Input::create(pool, html_url);
     Element* parsed_document = nullptr;
     if (input) {
         input->ui_mode = true;
-        Html5ParseOptions parse_opts = { .track_source_lines = track_source_lines };
+        Html5ParseOptions parse_opts = { .track_source_lines = track_source_lines,
+                                         .scripting_disabled = scripting_disabled };
         parsed_document = xhtml
             ? parse_xhtml_document(input, html_content, html_length, track_source_lines)
             : html5_parse_n(input, html_content, html_length, &parse_opts);
@@ -2448,9 +2498,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // document keeps its own copy
     dom_doc->document_charset = lam::own((const char*)(detected_charset && dom_doc->document_pool
         ? pool_strdup(dom_doc->document_pool, detected_charset) : nullptr));
-    // HTML parsing always runs with scripting enabled in the layout loader;
-    // retain that mode so noscript can suppress only its rendered contents.
-    dom_doc->html_scripting_enabled = true;
+    // retain the parser's scripting mode so noscript suppresses its rendered
+    // contents only where scripting was on
+    if (scripting_disabled) dom_doc->scripting_disabled = true;
+    dom_doc->html_scripting_enabled = !scripting_disabled;
 
     // Extract viewport meta tag values before building DOM tree
     extract_viewport_meta(html_root, dom_doc);
@@ -2852,6 +2903,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
     }
     // legacy format loaders inherit one request-scoped admission context.
     CssSourceScope source_scope(nullptr, host_config ? host_config->resource_policy : g_css_resource_policy);
+    LoadScriptingScope scripting_scope(host_config && host_config->scripting_disabled);
 
     if (graph_path_is_graph(path)) {
         if (handled) *handled = true;
@@ -2875,6 +2927,11 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
         bool text_route = route->loader == load_text_doc;
         if (text_route && !include_text) return nullptr;
         if (handled) *handled = true;
+        if (route->loader == load_lambda_script_doc && g_load_scripting_disabled) {
+            // a Lambda script document is author code
+            log_info("[Layout] scripting is disabled here; not running %s", path);
+            return nullptr;
+        }
         log_info("[Layout] Detected %s file, using format loader", ext);
         // Script document formats share the configured transform boundary (D7.2.4).
         // a saved diff exports all rows for layout/render and a virtual surface for review.

@@ -37,6 +37,14 @@
       "file": "temp/word-scroll-before.png"
     },
     {
+      "type": "assert_pixel", "x": 1240, "y": 80,
+      "min_r": 250, "max_r": 250, "min_g": 252, "max_g": 252, "min_b": 251, "max_b": 251
+    },
+    {
+      "type": "assert_pixel", "x": 1240, "y": 150,
+      "min_r": 250, "max_r": 250, "min_g": 252, "max_g": 252, "min_b": 251, "max_b": 251
+    },
+    {
       "type": "click",
       "x": 650,
       "y": 295

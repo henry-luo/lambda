@@ -1090,6 +1090,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
     // Satellite work and private code images belong exclusively to this run.
     instance->interp_satellite_queue = NULL;
     instance->interp_satellite_images = NULL;
+    instance->interp_mir_exports = NULL;
     if (!instance->cache_mir_artifact) {
         // AST reuse borrows parser/analysis facts only. A MIR context
         // (including satellites promoted by an earlier execution) is
@@ -1418,6 +1419,7 @@ static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script)
     image->ast_promotion_overlay = NULL;
     image->interp_satellite_queue = NULL;
     image->interp_satellite_images = NULL;
+    image->interp_mir_exports = NULL;
     image->interp_slab = NULL;
     image->module_initialized = false;
     image->destroy_extension = NULL;
@@ -1483,8 +1485,10 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime) {
     memcpy(&tp, script, sizeof(Script));
     tp.runtime = runtime;
     tp.requires_native_mir_exports = true;
-    script->interp_supported = false;
-    script->interp_planned = false;
+    // compile adopts `tp` back into `script`; clearing only the Script let the
+    // copied T0 flags return, and a T0 runner then initialized MIR code as T0.
+    tp.interp_supported = script->interp_supported = false;
+    tp.interp_planned = script->interp_planned = false;
     compile_script_as_mir_direct(&tp, script, script->reference, NULL, NULL,
         NULL, NULL, NULL, NULL);
     if (!script->jit_context) {
@@ -1564,11 +1568,22 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
     if (!runtime || !script) return false;
+    if (runtime->ast_prebuild_only) return true;
+    // Clone-graph dependencies arrive front-end only, even under an importer
+    // whose template a prebuild worker already planned. Decide their tiers
+    // first (post-order): the importer's scan asks whether each can run, and
+    // an unfinalized shell would otherwise reach execution unplanned.
+    for (int i = 0; script->direct_imports && i < script->direct_imports->length; i++) {
+        Script* dependency = (Script*)script->direct_imports->data[i];
+        if (dependency && dependency->ast_frontend_only &&
+                !lambda_finalize_ast_template_for_execution(runtime, dependency)) {
+            return false;
+        }
+    }
     // an AUTO-planned cache image can contain task satellites; recheck the pin
     if (!script->ast_frontend_only && lambda_tier_selected() != LAMBDA_TIER_INTERP) {
         return true;
     }
-    if (runtime->ast_prebuild_only) return true;
     Transpiler transpiler = {};
     memcpy(&transpiler, script, sizeof(Script));
     transpiler.script_owner = script;
@@ -1587,6 +1602,9 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         script->reference ? script->reference : "<unknown>",
         interp_node_kind_name(transpiler.interp_reject_kind));
     if (!interp_force_jit_import_cone(&transpiler)) return false;
+    // the adopted transpiler must not carry a template's T0 flags onto MIR code
+    transpiler.interp_supported = false;
+    transpiler.interp_planned = false;
     compile_script_as_mir_direct(&transpiler, script, script->reference,
         NULL, NULL, NULL, NULL, NULL, NULL);
     if (script->jit_context) (void)lambda_cache_promote_ast_shell_mir(runtime, script);
@@ -3227,10 +3245,18 @@ void runtime_register_script(Runtime* runtime, Script* script) {
 }
 
 Script* runtime_script_instance(Runtime* runtime, const Script* owner) {
+    // Promoting a demoted AST shell repoints its cache_template at the new MIR
+    // image, so the AST template no longer names it. Its logical unit still
+    // does; without that match every later importer cloned and recompiled the
+    // same module once per import edge.
+    uint32_t unit = owner ? owner->cache_compilation_unit_id : 0;
     for (int i = 0; runtime && runtime->scripts && owner &&
             i < runtime->scripts->length; i++) {
         Script* script = (Script*)runtime->scripts->data[i];
-        if (script && (script == owner || script->cache_template == owner)) return script;
+        if (!script) continue;
+        if (script == owner || script->cache_template == owner) return script;
+        if (unit && !script->is_retired && !script->cache_owned_template &&
+                script->cache_compilation_unit_id == unit) return script;
     }
     return NULL;
 }
@@ -3293,6 +3319,14 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     // releasing an execution shell, then release every private MIR context
     // that was already published into its Function entries.
     interp_satellite_cancel_script(script);
+    if (script->interp_mir_exports) {
+        // plain records (no GC values): each read builds its Function afresh
+        for (int i = 0; i < script->interp_mir_exports->length; i++) {
+            mem_free(script->interp_mir_exports->data[i]);
+        }
+        arraylist_free(script->interp_mir_exports);
+        script->interp_mir_exports = NULL;
+    }
 #ifndef LAMBDA_NO_RESOURCE_CACHE
     if (script->interp_satellite_images) {
         for (int index = 0; index < script->interp_satellite_images->length; index++) {

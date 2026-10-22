@@ -1766,6 +1766,8 @@ static void dom_compile_event_attr_to_expando(DomElement* elem,
                                                  const char* attr_name,
                                                  const char* attr_value) {
     if (!elem || !attr_name || !attr_value) return;
+    // an inline handler is script: none compiles in a scripting-disabled document (MQ11)
+    if (elem->doc && elem->doc->scripting_disabled) return;
 
     char prop_name[64];
     if (!dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;

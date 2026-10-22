@@ -474,14 +474,19 @@ download_extract() {
 }
 
 curl_supports_cookies_for_windows() {
-    # Older archives disabled the cookie engine needed by navigation redirects.
-    [ -f "$DEPS_DIR/lib/libcurl.a" ] && \
-        nm "$DEPS_DIR/lib/libcurl.a" 2>/dev/null | grep -q 'Curl_cookie_init'
+    # Older archives disabled the cookie engine needed by navigation redirects,
+    # and the IMAP/POP3/SMTP handlers lambda.io.mail needs (Lambda_Demo_Mail ML1).
+    local symbols
+    [ -f "$DEPS_DIR/lib/libcurl.a" ] || return 1
+    symbols="$(nm "$DEPS_DIR/lib/libcurl.a" 2>/dev/null)" || return 1
+    for symbol in Curl_cookie_init Curl_handler_imaps Curl_handler_pop3s Curl_handler_smtps; do
+        grep -q "$symbol" <<< "$symbols" || return 1
+    done
 }
 
-# Function to build minimal static libcurl for Windows (HTTP/HTTPS only)
+# Function to build minimal static libcurl for Windows (HTTP/HTTPS plus IMAP/POP3/SMTP)
 build_minimal_static_libcurl() {
-    echo "Building minimal static libcurl for Windows native (HTTP/HTTPS only)..."
+    echo "Building minimal static libcurl for Windows native (HTTP/HTTPS plus IMAP/POP3/SMTP)..."
 
     # Check if already built
     if curl_supports_cookies_for_windows; then
@@ -611,7 +616,7 @@ build_minimal_static_libcurl() {
     export LDFLAGS=""
 
     # Configure with bare minimum features - absolutely no SSH, IDN, HTTP2, or advanced protocols
-    echo "Configuring libcurl with minimal options (HTTP/HTTPS only)..."
+    echo "Configuring libcurl with minimal options (HTTP/HTTPS plus IMAP/POP3/SMTP)..."
     if ./configure \
         --prefix="$SCRIPT_DIR/$DEPS_DIR" \
         --enable-static \
@@ -638,9 +643,6 @@ build_minimal_static_libcurl() {
         --disable-dict \
         --disable-telnet \
         --disable-tftp \
-        --disable-pop3 \
-        --disable-imap \
-        --disable-smtp \
         --disable-gopher \
         --disable-smb \
         --disable-mqtt \
@@ -1055,7 +1057,7 @@ echo "  📦 Tree-sitter library (building from source - see verification below)
 echo "  📦 Tree-sitter-lambda (building from source - see verification below)"
 echo "  📦 Tree-sitter-javascript (building from source - see verification below)"
 echo "  📦 utf8proc (building from source - see verification below)"
-echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS only, no HTTP/2)"
+echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS plus IMAP/POP3/SMTP, no HTTP/2)"
 echo "  📦 ThorVG (building from source - vector graphics for SVG rendering)"
 echo ""
 
