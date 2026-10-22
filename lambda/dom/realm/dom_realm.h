@@ -93,6 +93,9 @@ Item dom_realm_promise_all(Item iterable);
 Item dom_realm_response_from_bytes(const void* bytes, int length, Item headers,
     int status, Item status_text, Item url);
 void dom_realm_microtask_flush(void);
+Item dom_realm_structured_clone(Item value);
+Item dom_realm_queue_task(DomRealmFn1 callback, Item value);
+Item dom_realm_closure_value(Item environment);
 
 // --- native functions: one overload per arity, matching the runtime -------
 #define DOM_REALM_ARITIES(M) M(0) M(1) M(2) M(3) M(4) M(5) M(6) M(7) M(8)

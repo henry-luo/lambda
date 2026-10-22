@@ -899,20 +899,46 @@ TEST_F(RadiantCoreTest, ProvisionalIntrinsicQueriesReuseAndInvalidateAuthoredSiz
 
     // percentage terms depend on the containing width within the same pass.
     set_property("width", "calc(20px + 50%)");
-    context.width = 100.0f;
-    context.block.content_width = 100.0f;
-    context.available_space.width = AvailableSize::make_definite(100.0f);
-    changed = measure_element_intrinsic_widths(&context, block);
+    auto measure_at_width = [&](float width) {
+        context.width = width;
+        context.block.content_width = width;
+        context.available_space.width = AvailableSize::make_definite(width);
+        return measure_element_intrinsic_widths(&context, block);
+    };
+    changed = measure_at_width(100.0f);
     EXPECT_FLOAT_EQ(changed.max_content, 70.0f);
-    context.width = 200.0f;
-    context.block.content_width = 200.0f;
-    context.available_space.width = AvailableSize::make_definite(200.0f);
-    changed = measure_element_intrinsic_widths(&context, block);
+    changed = measure_at_width(200.0f);
     EXPECT_FLOAT_EQ(changed.max_content, 120.0f);
     uint64_t hits = context.profiler.intrinsic_cache_hits;
     repeated = measure_element_intrinsic_widths(&context, block);
     EXPECT_FLOAT_EQ(repeated.max_content, 120.0f);
     EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
+
+    // nested flex queries return to earlier constraints before committing layout.
+    for (float width : {100.0f, 200.0f}) {
+        hits = context.profiler.intrinsic_cache_hits;
+        repeated = measure_at_width(width);
+        EXPECT_FLOAT_EQ(repeated.max_content, 20.0f + width * 0.5f);
+        EXPECT_EQ(context.profiler.intrinsic_cache_hits, hits + 1u);
+    }
+    ASSERT_NE(block->layout_cache->intrinsic_width_history, nullptr);
+    block->set_has_cached_intrinsic_widths(false);
+    misses = context.profiler.intrinsic_cache_misses;
+    EXPECT_FLOAT_EQ(measure_at_width(200.0f).max_content, 120.0f);
+    EXPECT_FLOAT_EQ(measure_at_width(100.0f).max_content, 70.0f);
+    EXPECT_EQ(context.profiler.intrinsic_cache_misses, misses + 2u);
+    EXPECT_FLOAT_EQ(measure_at_width(200.0f).max_content, 120.0f);
+    advance_measurement_cache_generation(&tree);
+    misses = context.profiler.intrinsic_cache_misses;
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, block).max_content, 120.0f);
+    EXPECT_GT(context.profiler.intrinsic_cache_misses, misses);
+    EXPECT_EQ(block->layout_cache->intrinsic_width_history, nullptr);
+    misses = context.profiler.intrinsic_cache_misses;
+    set_property("width", "calc(30px + 50%)");
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, block).max_content, 130.0f);
+    EXPECT_GT(context.profiler.intrinsic_cache_misses, misses);
+    set_property("width", "calc(20px + 50%)");
+    EXPECT_FLOAT_EQ(measure_element_intrinsic_widths(&context, block).max_content, 120.0f);
 
     // a flex height query with a known wrapping width must not measure widths again.
     set_property("height", "24px");
@@ -4066,7 +4092,70 @@ TEST_F(StyleEpochTest, RecascadeRetiresStylesheetCustomPropertyRecords) {
         size_t records = 0;
         for (CssCustomProp* prop = child->css_variables; prop; prop = prop->next) records++;
         EXPECT_EQ(records, 1u);
+        EXPECT_NE(dom_element_lookup_own_custom_property_entry(child, "theme"), nullptr);
     }
+}
+
+TEST_F(StyleEpochTest, CustomPropertyLookupRetainsCascadeAndMutationAcrossLargeEnvironments) {
+    DomElement* child = append("child");
+    StrBuf* css = strbuf_new();
+    ASSERT_NE(css, nullptr);
+    for (unsigned i = 0; i < 256; i++) strbuf_append_format(css, "--entry-%03u:%upx;", i, i);
+    strbuf_append_str(css, "--ENTRY-017:500px;--entry-017:300px!important");
+    EXPECT_EQ(dom_element_apply_inline_style(document_root, css->str), 258);
+    strbuf_free(css);
+
+    DomElement* owner = nullptr;
+    const CssValue* value = dom_element_lookup_custom_property(child, "entry-017", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(owner, document_root);
+    EXPECT_DOUBLE_EQ(value->data.length.value, 300.0);
+    const CssCustomProp* upper = dom_element_lookup_own_custom_property_entry(document_root, "--ENTRY-017");
+    ASSERT_NE(upper, nullptr);
+    EXPECT_DOUBLE_EQ(upper->value->data.length.value, 500.0);
+    EXPECT_EQ(dom_element_lookup_own_custom_property_entry(document_root, "--Entry-017"), nullptr);
+    const CssCustomProp* slice = dom_element_lookup_own_custom_property_entry(document_root, "entry-017suffix", 9);
+    ASSERT_NE(slice, nullptr);
+    EXPECT_EQ(slice->value.get(), value);
+
+    PoolStats before = {}, after = {};
+    pool_get_detailed_stats(doc.document_pool, &before);
+    for (unsigned i = 0; i < 100; i++) {
+        EXPECT_NE(dom_element_lookup_custom_property(child, "--entry-255", &owner), nullptr);
+        EXPECT_EQ(dom_element_lookup_custom_property(child, "--absent", &owner), nullptr);
+    }
+    pool_get_detailed_stats(doc.document_pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(document_root, "--entry-255", "600px", &changed));
+    value = dom_element_lookup_custom_property(child, "--entry-255", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_DOUBLE_EQ(value->data.length.value, 600.0);
+    const CssCustomProp* authored = dom_element_lookup_own_custom_property_entry(document_root, "entry-255", (size_t)-1, true);
+    ASSERT_NE(authored, nullptr);
+    // presentation samples are not animation-owned; exclusion must retain them.
+    EXPECT_EQ(authored->value.get(), value);
+    CssRule* animation = rule(CSS_PROPERTY_UNKNOWN,
+        css_value_create_length(doc.document_pool, 700.0, CSS_UNIT_PX));
+    CssDeclaration* sample = animation->data.style_rule.declarations[0];
+    sample->property_name = pool_strdup(doc.document_pool, "--entry-255");
+    sample->value_text = "700px";
+    sample->value_text_len = 5;
+    ASSERT_TRUE(dom_element_set_animation_custom_property(document_root, sample, &animation, &changed));
+    value = dom_element_lookup_custom_property(child, "--entry-255", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_DOUBLE_EQ(value->data.length.value, 700.0);
+    authored = dom_element_lookup_own_custom_property_entry(document_root, "entry-255", (size_t)-1, true);
+    ASSERT_NE(authored, nullptr);
+    EXPECT_DOUBLE_EQ(authored->value->data.length.value, 600.0);
+    ASSERT_TRUE(dom_element_clear_animation_custom_properties(document_root, &animation));
+    ASSERT_TRUE(dom_element_clear_presentation_style(document_root));
+    value = dom_element_lookup_custom_property(child, "--entry-255", &owner);
+    ASSERT_NE(value, nullptr);
+    EXPECT_DOUBLE_EQ(value->data.length.value, 255.0);
+    ASSERT_TRUE(dom_element_remove_inline_styles(document_root));
+    EXPECT_EQ(dom_element_lookup_custom_property(child, "entry-017", &owner), nullptr);
 }
 
 TEST_F(StyleEpochTest, OverlappingMutationRootsCascadeTheFinalTreeOnce) {

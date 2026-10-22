@@ -1342,8 +1342,13 @@ by **D4.2.5v3**, and keeps allocator ownership explicit as required by
 lines from the child log, and checks
 [`test/css_cascade_memory_baseline.tsv`](../../test/css_cascade_memory_baseline.tsv).
 The captured byte baseline is valid for the standard debug or release host;
-it allows 15% plus 4 KiB for pool extent rounding, while recipe and binding
-counts are exact upper bounds. Run it with:
+it allows 15% plus 4 KiB for pool extent rounding, while recipe, payload and
+cold-cache counts retain recorded upper bounds. Element binding counts use
+the same run's initial cascade as their reference: the initial count must be
+nonzero, and a clean recascade on the unchanged parsed DOM must preserve it.
+Both samples precede scripts, excluding script-driven DOM mutations from this
+comparison. Binding counts in the capture table below are historical
+measurements rather than ceilings. Run it with:
 
 ```sh
 make test-css-cascade-memory
@@ -1772,7 +1777,7 @@ Line references identify the reviewed revision; symbols are the durable anchors.
 | `radiant/view_memory_profile.cpp:110` | `view_memory_profile_write`; reusable reporting infrastructure and selected-owner limitations. |
 | `radiant/view_reuse.cpp:104` | `canonical_inline_find_or_create`; existing exact computed-prop interning and cap. |
 | `test/test_radiant_core_gtest.cpp:309` | `StyleEpochTest`; collisions, COW, epoch coexistence, environment changes, and snapshot lifetime. |
-| `test/test_css_cascade_memory_gtest.cpp` and `test/css_cascade_memory_baseline.tsv` | Standard page-load and forced-recascade memory baseline; exact recipe/binding ceiling plus byte budgets. |
+| `test/test_css_cascade_memory_gtest.cpp` and `test/css_cascade_memory_baseline.tsv` | Standard page-load and forced-recascade memory baseline; relative element-binding check, recorded recipe/payload ceilings and byte budgets. |
 
 The first implementation should concentrate on the measured condition and
 owned-style retention paths, while preserving the demonstrated plain-recipe
@@ -2994,3 +2999,30 @@ width pair in the second. Re-entering descendant measurement for both solves
 made nested grids exponential (513 requests at depth eight, now at most 11).
 The regression also changes a leaf width and checks both updated contributions;
 this sharing ends with the paired query, rather than bypassing mutation keys.
+
+### Custom-property candidate lookup (2026-10-22)
+
+**D4.5.1v4 / D4.1.4v5 / D4.5.2**, **VR15**. A lazy sorted name index in
+`DomElementExt` borrows document-owned custom-property records. Binary lookup
+visits only same-name declarations, retaining their original list order for
+cascade ties, rollback and animation filtering. Membership edits invalidate
+the index before record retirement; value and geometry changes need no rebuild.
+This removes the repeated linear name scans found in forced measurements on
+large online pages; it does not cache context-dependent substitution or claim
+that Todoist's repeated layout flushes are solved. The large-environment native
+regression checks winners, case sensitivity, replacement/removal and warm reads.
+
+**VR15 mutation closure:** the presence of `:dir()` does not make every edit
+direction-sensitive. The journal captures attribute identity and first-strong
+ancestry before child edits: class/style/data writes remain local, while
+`dir=auto`/bdi dependencies, control/text changes and unknown identities retain
+conservative escalation. Explicit HTML ltr/rtl boundaries isolate child edits;
+shadow distribution keeps the broad path (**D4.5.1v4**). Selector dependencies
+such as `:has()` still run their ordinary checks.
+
+**VR15 parsing prerequisite:** scripting-enabled `noscript` fallback markup is
+raw text in documents and HTML fragments, including a `noscript` fragment
+context. Suppressing its layout subtree alone leaves resource discovery and DOM
+queries incorrect. Preserve disabled-scripting fallback parsing and literal
+end tags/entities in raw text; EOF recovery must neither drop the final byte
+nor reconsume EOF. Published nodes retain document ownership (**D4.5.1v4**).

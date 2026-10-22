@@ -803,6 +803,14 @@ DOM_OP(CORE, audio_clock, media, 1, "fn(n: any) -> float", dom_engine_audio_cloc
 // live validation readers append a slot without moving existing module callbacks.
 DOM_RAW(validity_state_flag, forms, Item, (Item state, Item name), dom_validity_state_flag, DOM_F_NATIVE)
 
+// browser channels append without moving existing catalog ordinals (D7.4.4).
+DOM_OP(CORE, broadcast_name, messaging, 1, "fn(n: any) -> string", dom_broadcast_channel_name, DOM_F_NATIVE, "", none, "", "")
+DOM_OP(CORE, broadcast_handler, messaging, 2, "fn(n: any, error: bool) -> any", dom_broadcast_channel_handler, DOM_F_NATIVE, "", none, "", "")
+DOM_OP(CORE, broadcast_set_handler, messaging, 3, "pn(n: any, error: bool, value: any) -> null", dom_broadcast_channel_set_handler, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, broadcast_post, messaging, 2, "pn(n: any, value: any) -> null", dom_broadcast_channel_post, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, broadcast_close, messaging, 1, "pn(n: any) -> null", dom_broadcast_channel_close, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
+DOM_RAW(broadcast_destroy, messaging, void, (void* channel), dom_broadcast_channel_destroy, DOM_F_NATIVE)
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

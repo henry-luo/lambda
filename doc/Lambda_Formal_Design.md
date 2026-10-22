@@ -2492,10 +2492,13 @@ eval-preamble publication and batch/preamble declaration snapshots share
 partial-copy unwind. This retires the two duplicated snapshot walks without
 changing the mode-specific module-variable policies.
 
-P3f (2026-08-28) extends that record to finalized MIR volume accounting:
-Lambda and LambdaJS now call the shared `mir_count_module_volume` walk for
-module, function, and executable-instruction counts, retiring their duplicate
-label-excluding traversals under **D8.2.5**.
+P3f (2026-08-28) initially consolidated finalized MIR volume accounting into
+one shared module walk under **D8.2.5**. The 2026-10-22 implementation follow-up
+retires that walk: Lambda and LambdaJS reuse the shared emitter's existing
+label-excluding function metadata. Lambda accumulates module/function/total
+counts during emission and subtracts late prologue removals; link policy uses
+the cached largest-function count, which can overestimate by four instructions
+before that pruning. This changes accounting mechanics, not the ruling.
 
 P1e (2026-08-29) completes the JavaScript side of the child-ownership slice:
 core-shaped JS nodes now delegate to `ast_visit_core_children()`, while

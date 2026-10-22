@@ -4016,7 +4016,7 @@
             "name": "WPT Input Events Tests",
             "category": "baseline",
             "parallel": true,
-            "worker_slots": 2,
+            "worker_slots": 3,
             "worker_args": [
               "--jobs"
             ],

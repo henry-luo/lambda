@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Browser globals select browser library branches</title>
+<div id="result">pending</div>
+<button id="check" onclick="checkGlobals()">check after initialization</button>
+<script>
+function checkGlobals() {
+    const result = document.getElementById('result');
+    const names = ['process', 'Buffer', 'require', 'global', 'os'];
+    result.setAttribute('data-absent', String(names.every(name =>
+        !(name in globalThis) && Object.getOwnPropertyDescriptor(globalThis, name) === undefined)));
+    result.setAttribute('data-typeof', String(typeof process === 'undefined' &&
+        typeof Buffer === 'undefined' && typeof require === 'undefined' && typeof global === 'undefined'));
+    result.setAttribute('data-dynamic', String(Function('return typeof process')() === 'undefined'));
+    // browser bundles replace server-only imports with empty modules.
+    const server = typeof process === 'object' && process.versions && process.versions.node;
+    const browserImport = {};
+    const digestPath = server ? browserImport.Buffer.from('abc') : 'browser';
+    result.setAttribute('data-branch', String(digestPath === 'browser'));
+    result.setAttribute('data-host-apis', String(typeof crypto.getRandomValues === 'function' &&
+        typeof TextEncoder === 'function' && typeof BroadcastChannel === 'function'));
+    result.textContent = 'complete';
+}
+checkGlobals();
+</script>

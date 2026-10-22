@@ -552,6 +552,13 @@ static void js_script_destroy_extension(Script* base_script) {
     }
 }
 
+JsScript* js_script_from_script(Script* script) {
+    // import bridges share the JS language profile but own only a base Script.
+    // the extension's lifecycle hook identifies its actual retained layout (D5.4.3).
+    return script && script->destroy_extension == js_script_destroy_extension
+        ? (JsScript*)script : NULL;
+}
+
 struct JsFieldInitializerEntry {
     AstNodeId field_id;
     JsFunctionNode* function;

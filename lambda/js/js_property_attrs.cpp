@@ -516,14 +516,6 @@ public:
     bool is_registered() const { return registered_; }
 };
 
-static ShapeEntry* js_accessor_shape_entry(TypeMap* type, String* name) {
-    if (!type || !name) return NULL;
-    NameId name_id = property_key_id(name);
-    return name_id != NAME_ID_NONE
-        ? typemap_hash_lookup_by_name_id(type, name_id, property_key_hash(name))
-        : typemap_hash_lookup(type, name->chars, (int)name->len);
-}
-
 static Map* js_accessor_ensure_property_map(Item obj) {
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_MAP) return obj.map;
@@ -551,9 +543,7 @@ static Item js_store_virtual_accessor_pair(Item obj, Item name,
         return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
             "accessor shape privatization failed");
     }
-    ShapeEntry* previous = js_accessor_shape_entry(type, key);
-    uint8_t flags = attrs | (previous ? previous->flags : 0);
-    if (!js_map_store_accessor(js_obj_underlying_map(obj), key, pair, flags, js_input->pool))
+    if (!js_map_store_accessor(js_obj_underlying_map(obj), key, pair, attrs, js_input->pool))
         return js_throw_error_with_code("ERR_RUNTIME_FAILURE", "accessor shape installation failed");
     js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
     return js_status_ok();
@@ -738,6 +728,9 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     }
     if (is_setter) setter_root.set(fn_root.get());
     else           getter_root.set(fn_root.get());
+    // partial definitions retain existing attributes; complete native installs
+    // must replace them, including clearing a former data property's non-enumerability.
+    if (se) attrs |= se->flags;
     // Accessor pairs are mutable carriers outside the owning Map's data
     // image. Replacing the pair keeps an intrinsic snapshot's native accessor
     // intact when defineProperty installs a test-local getter (D6.2.2v2).

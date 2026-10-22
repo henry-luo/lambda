@@ -625,6 +625,10 @@ function runTest(testInfo) {
         // Build argv based on test type
         let testArgs = [];
         let env = { ...process.env, ...testInfo.env };
+        // parser/layout traces otherwise dominate baseline viewers and their nested workers.
+        if (testInfo.suite === 'radiant' && testInfo.category === 'baseline') {
+            env.LAMBDA_LOG_LEVEL = 'NOTICE';
+        }
         if (testInfo.allocatedSlots) env.LAMBDA_TEST_MAX_CONCURRENT = String(testInfo.allocatedSlots);
 
         // Suppress ASan container-overflow false positives

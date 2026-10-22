@@ -553,6 +553,27 @@ static DomJsMutationAttribute dom_mutation_attribute_from_name(DomDocument* doc,
     return DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
 }
 
+static bool dom_mutation_attribute_affects_direction(const char* name) {
+    // unknown names stay conservative; CSS visibility does not filter first-strong text.
+    return !name || str_ieq_cstr(name, "dir") || str_ieq_cstr(name, "value") ||
+        str_ieq_cstr(name, "type") || str_ieq_cstr(name, "slot") ||
+        str_ieq_cstr(name, "name") || str_istarts_with_cstr(name, "xmlns");
+}
+
+static bool dom_mutation_child_list_affects_direction(DomNode* parent) {
+    // slot distribution can affect a different tree; retain its conservative closure.
+    if (dom_shadow_root(parent)) return true;
+    for (DomElement* ancestor = parent ? parent->as_element() : nullptr;
+         ancestor; ancestor = dom_parent_element(ancestor)) {
+        if (ancestor->shadow_root_element()) return true;
+        CssEnum direction = dom_html_direction_state(ancestor);
+        if (direction == CSS_VALUE_LTR || direction == CSS_VALUE_RTL) return false;
+        if (direction == CSS_VALUE_AUTO || dom_element_is_html_tag(ancestor, MARKUP_NAME_BDI))
+            return true;
+    }
+    return false;
+}
+
 static inline void dom_record_mutation_detail(DomJsMutationKind kind,
                                                  DomNode* target,
                                                  DomNode* parent,
@@ -593,6 +614,11 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
         record->attribute = kind == DOM_JS_MUTATION_ATTRIBUTE
             ? dom_mutation_attribute_from_name(doc, attribute_name)
             : DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
+        record->direction_sensitive = kind == DOM_JS_MUTATION_ATTRIBUTE
+            ? dom_mutation_attribute_affects_direction(attribute_name)
+            : (kind == DOM_JS_MUTATION_CHILD_INSERT || kind == DOM_JS_MUTATION_CHILD_REMOVE)
+                ? dom_mutation_child_list_affects_direction(parent)
+                : kind == DOM_JS_MUTATION_TEXT || kind == DOM_JS_MUTATION_CONTROL_VALUE;
         record->presentation_property = presentation_property;
         record->was_connected =
             dom_mutation_node_was_connected(doc, target) ||
@@ -6066,8 +6092,9 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     for (int64_t i = 0; i < body_elem->length; i++) {
         TypeId type = get_type_id(body_elem->items[i]);
         if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child_dom = build_dom_tree_from_element(
-                body_elem->items[i].element, doc, nullptr);
+            // fragment names belong to the parsing context before the detached node is spliced.
+            DomElement* child_dom = build_dom_tree_from_element_detached(
+                body_elem->items[i].element, doc, context ? context : target);
             if (child_dom && target->append_child(child_dom)) {
                 dom_post_insert((DomNode*)target, (DomNode*)child_dom,
                                 notify_mutation);
@@ -6116,7 +6143,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
         // may have been retired by that relink.
     }
 
-    if (html_str[0] != '\0') {
+    if (html_str[0] != '\0' || elem->tag() == MARKUP_NAME_HTML) {
         if (!dom_parse_markup_into(elem, html_str, notify_mutation)) return false;
     }
 
@@ -6163,10 +6190,10 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
 }
 
 static DomElement* dom_parse_html_fragment(DomDocument* doc,
-                                              const char* html_str) {
+                                              const char* html_str, DomElement* context) {
     if (!doc || !doc->input || !html_str) return nullptr;
 
-    Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5Parser* parser = dom_create_fragment_parser(doc, context);
     Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
     html5_fragment_parse(parser, html_str);
@@ -6178,8 +6205,8 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     for (int64_t i = 0; i < body_elem->length; i++) {
         TypeId type = get_type_id(body_elem->items[i]);
         if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child = build_dom_tree_from_element(
-                body_elem->items[i].element, doc, nullptr);
+            DomElement* child = build_dom_tree_from_element_detached(
+                body_elem->items[i].element, doc, context);
             if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
         } else if (type == LMD_TYPE_STRING) {
             String* text = dom_fragment_text(body_elem->items[i]);
@@ -6203,7 +6230,10 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     DomRange* range = selection->ranges[0];
     if (!range->start.node || !range->end.node) return false;
 
-    DomElement* fragment = dom_parse_html_fragment(doc, html_str);
+    DomNode* context_node = range->start.node;
+    if (!context_node->is_element()) context_node = context_node->parent;
+    DomElement* context = context_node && context_node->is_element() ? context_node->as_element() : nullptr;
+    DomElement* fragment = dom_parse_html_fragment(doc, html_str, context);
     if (!fragment) return false;
 
     ArrayList* inserted = arraylist_new(8);
@@ -14839,6 +14869,19 @@ static bool dom_insert_backed_element(DomElement* parent, DomNode* child,
     return true;
 }
 
+static bool dom_detach_text_for_insertion(DomText* text) {
+    if (!text->parent) return true;
+    DomElement* previous = text->parent->as_element();
+    if (!previous) return false;
+    String* native_string = text->native_string;
+    // a synthetic destination still removes a backed source's Mark slot;
+    // unlinking only its DOM chain resurrects the old text on the next edit.
+    bool removed = previous->is_synthetic()
+        ? previous->DomNode::remove_child(text) : dom_text_remove(text);
+    if (removed && !text->native_string) text->native_string = lam::up(native_string);
+    return removed;
+}
+
 static bool dom_insert_backed_text(DomElement* parent, DomText* text,
                                       DomNode* ref_child) {
     if (!parent || !text || !text->native_string || !parent->doc ||
@@ -14849,35 +14892,16 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
     // response before splicing them into the target; sending that temporary
     // parent through MarkEditor reports "not an element" and drops the text.
     if (parent->is_synthetic()) {
-        if (text->parent && text->parent != (DomNode*)parent) {
-            // The cross-document adoption path has already detached nodes;
-            // same-document moves need only unlink the temporary DOM parent.
-            // The fragment has no backing Element to edit, so routing this
-            // through dom_text_remove would ask for a nonexistent native slot.
-            if (!text->parent->remove_child((DomNode*)text)) return false;
-        }
+        if (text->parent && text->parent != (DomNode*)parent &&
+            !dom_detach_text_for_insertion(text)) return false;
         return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
     }
 
     parent = dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
-    String* native_string = text->native_string;
 
-    if (text->parent) {
-        if (!text->parent->is_element()) return false;
-        // A parsed response is staged in a synthetic DocumentFragment before
-        // its text nodes are moved into the live target.  That parent has no
-        // Mark child slot, so unlink it through the DOM chain rather than
-        // asking dom_text_remove() to edit nonexistent backing storage.
-        if (text->parent->as_element()->is_synthetic()) {
-            if (!text->parent->remove_child((DomNode*)text)) return false;
-        } else if (!dom_text_remove(text)) {
-            return false;
-        }
-        // static Mark text is invalidated when unlinked, but appendChild must
-        // carry the original backing item through a move before relinking it.
-        if (!text->native_string) text->native_string = lam::up(native_string);
-    }
+    if (!dom_detach_text_for_insertion(text)) return false;
+    String* native_string = text->native_string;
 
     int64_t insert_index = dom_element_to_element(parent)->length;
     if (ref_child) {
@@ -14962,12 +14986,12 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
 
 static bool dom_insert_fragment_children_before(DomElement* parent,
                                                 DomElement* fragment,
-                                                DomNode* ref_child) {
+                                                DomNode* ref_child,
+                                                bool notify_observers = true) {
     if (!parent || !fragment ||
         (ref_child && ref_child->parent != (DomNode*)parent)) return false;
-    DomNode* child = fragment->first_child;
-    while (child) {
-        DomNode* next = child->next_sibling;
+    // backing edits can relink surviving wrappers; never follow the old sibling chain.
+    while (DomNode* child = fragment->first_child) {
         if (!dom_prepare_cross_document_insertion(child, parent)) {
             return false;
         }
@@ -14988,10 +15012,9 @@ static bool dom_insert_fragment_children_before(DomElement* parent,
             return false;
         }
         dom_post_insert((DomNode*)parent, child);
-        child = next;
     }
-    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                           (DomNode*)parent, (DomNode*)parent);
+    if (notify_observers) dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+        (DomNode*)parent, (DomNode*)parent);
     return true;
 }
 
@@ -15812,9 +15835,21 @@ typedef enum JsDomChildNodePlacement {
 
 typedef struct JsDomRelativeArgument {
     DomNode* node;
-    Item text;
     uint64_t* text_root;
 } JsDomRelativeArgument;
+
+static Item dom_convert_node_arguments(Item* args, int argc, RootSpan* converted) {
+    if (argc && !converted->items()) return ItemError;
+    // WebIDL converts every DOMString before structural changes or insertion checks.
+    for (int i = 0; i < argc; i++) {
+        converted->items()[i] = args[i];
+        if (!dom_unwrap_element(converted->items()[i])) {
+            converted->items()[i] = js_to_string(converted->items()[i]);
+            if (item_is_error(converted->items()[i])) return converted->items()[i];
+        }
+    }
+    return make_js_undefined();
+}
 
 static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
                                                JsDomChildNodePlacement placement) {
@@ -15841,30 +15876,19 @@ static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
             (size_t)argc, sizeof(JsDomRelativeArgument), MEM_CAT_JS_RUNTIME);
         if (!insertion_args) return ItemNull;
     }
-    RootFrame text_roots((size_t)argc);
-    if (argc > 0 && !text_roots.valid()) {
+    RootSpan converted((size_t)argc);
+    Item status = dom_convert_node_arguments(args, argc, &converted);
+    if (item_is_error(status)) {
         mem_free(insertion_args);
-        return ItemError;
+        return status;
     }
 
     // Web IDL converts every non-Node argument before changing the tree.  In
     // particular, a later throwing ToString must not leave earlier arguments
     // inserted into the document.
     for (int i = 0; i < argc; i++) {
-        DomNode* insertion = (DomNode*)dom_unwrap_element(args[i]);
-        if (!insertion) {
-            Item text_item = js_to_string(args[i]);
-            if (item_is_error(text_item)) {
-                mem_free(insertion_args);
-                return text_item;
-            }
-            insertion_args[i].text = text_item;
-            insertion_args[i].text_root = text_roots.take_slot();
-            if (insertion_args[i].text_root) {
-                *insertion_args[i].text_root = text_item.item;
-            }
-        }
-        insertion_args[i].node = insertion;
+        insertion_args[i].node = (DomNode*)dom_unwrap_element(converted.items()[i]);
+        insertion_args[i].text_root = &converted.items()[i].item;
     }
 
     // before() keeps the receiver as the insertion reference; after() starts
@@ -15896,9 +15920,7 @@ static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
     for (int i = 0; i < argc; i++) {
         DomNode* insertion = insertion_args[i].node;
         if (!insertion) {
-            Item text = insertion_args[i].text_root
-                ? (Item){.item = *insertion_args[i].text_root}
-                : insertion_args[i].text;
+            Item text = {.item = *insertion_args[i].text_root};
             if (!dom_insert_text_before_child(parent, text, viable_next)) {
                 mem_free(insertion_args);
                 return (Item){.item = ITEM_JS_UNDEFINED};
@@ -16005,7 +16027,7 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_ar
     }
     if (slot == DOM_ADJACENT_NO_PARENT) return ItemNull;
     DomDocument* doc = elem->doc;
-    DomElement* fragment = dom_parse_html_fragment(doc, html_str);
+    DomElement* fragment = dom_parse_html_fragment(doc, html_str, target_parent);
     if (!fragment) return ItemNull;
 
     while (fragment->first_child) {
@@ -16094,6 +16116,72 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
     }
     if (pending_node_notification) dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item dom_replace_children(Item parent_item, Item* args, int argc) {
+    RootSpan converted((size_t)argc);
+    RootFrame roots(5);
+    Rooted<Item> parent_root(roots, parent_item), fragment_root(roots, ItemNull);
+    Rooted<Item> added_root(roots, ItemNull), removed_root(roots, ItemNull), node_root(roots, ItemNull);
+    Item status = dom_convert_node_arguments(args, argc, &converted);
+    JS_RETURN_IF_ERROR(status);
+    DomElement* parent = (DomElement*)dom_unwrap_element(parent_root.get());
+    if (!parent || !parent->doc) return make_js_undefined();
+    DomNode* insertion = argc == 1 ? (DomNode*)dom_unwrap_element(converted.items()[0]) : nullptr;
+    bool is_fragment = insertion && insertion->is_element() &&
+        dom_is_document_fragment_element(insertion->as_element());
+    if (!insertion) {
+        fragment_root.set(dom_create_document_fragment(parent->doc));
+        if (fragment_root.get().item == ITEM_NULL) return ItemError;
+        status = dom_append_variadic_bridge(dom_unwrap_element(fragment_root.get()), converted.items(), argc);
+        JS_RETURN_IF_ERROR(status);
+        insertion = (DomNode*)dom_unwrap_element(fragment_root.get());
+        is_fragment = true;
+    }
+    if (dom_node_contains(insertion, parent)) return dom_insertion_ancestor_error();
+    bool document = parent == parent->doc->js.doc_node;
+    int elements = 0, doctypes = 0;
+    for (DomNode* child = is_fragment ? insertion->as_element()->first_child.get() : insertion;
+         child; child = is_fragment ? child->next_sibling.get() : nullptr) {
+        bool element = child->is_element() && !dom_is_document_fragment_element(child->as_element());
+        bool doctype = child->node_type == DOM_NODE_DOCTYPE;
+        if ((!element && !child->is_text() && !doctype && child->node_type != DOM_NODE_COMMENT) ||
+            (document && ((child->is_text()) || (element && ++elements > 1) ||
+                (doctype && (++doctypes > 1 || elements)))) || (!document && doctype)) {
+            return dom_raise_named("HierarchyRequestError", "Invalid replacement children");
+        }
+    }
+
+    added_root.set(js_array_new(0));
+    removed_root.set(js_array_new(0));
+    // snapshots pin removed wrappers through backing-tree edits and observer delivery (D5.3.3).
+    for (DomNode* child = is_fragment ? insertion->as_element()->first_child.get() : insertion;
+         child; child = is_fragment ? child->next_sibling.get() : nullptr) {
+        node_root.set(dom_wrap_element(child));
+        js_array_push(added_root.get(), node_root.get());
+    }
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        node_root.set(dom_wrap_element(child));
+        js_array_push(removed_root.get(), node_root.get());
+    }
+    if (!is_fragment) {
+        fragment_root.set(dom_create_document_fragment(parent->doc));
+        if (fragment_root.get().item == ITEM_NULL) return ItemError;
+        status = dom_append_variadic_bridge(dom_unwrap_element(fragment_root.get()), converted.items(), 1);
+        JS_RETURN_IF_ERROR(status);
+        insertion = (DomNode*)dom_unwrap_element(fragment_root.get());
+    }
+    dom_collapse_selection_before_child_replace(parent, "replaceChildren");
+    while (parent->first_child) {
+        DomNode* child = parent->first_child;
+        dom_pre_remove(child);
+        if (!dom_remove_backed_child(parent, child)) return ItemError;
+    }
+    if (!dom_insert_fragment_children_before(parent, insertion->as_element(), nullptr, false)) return ItemError;
+    dom_document_refresh_root(parent);
+    dom_observers_children_replace_notify(parent, added_root.get(), removed_root.get());
+    dom_mutation_notify();
+    return make_js_undefined();
 }
 
 extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc) {
@@ -17463,6 +17551,9 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     // append(...nodes) — ParentNode.append(), accepts multiple args and strings
     if (operation == JUBE_DOM_APPEND) {
         return dom_append_variadic_bridge((void*)elem, args, argc);
+    }
+    if (operation == JUBE_DOM_REPLACE_CHILDREN) {
+        return dom_replace_children(elem_item, args, argc);
     }
 
     // prepend(...nodes) — ParentNode.prepend()

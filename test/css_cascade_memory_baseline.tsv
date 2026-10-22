@@ -15,10 +15,12 @@
 # The fixture set covers library-selector breadth (jqueryui), large external
 # stylesheet input (linuxmint), repeated content cards (netflix), a high-DOM
 # Bootstrap document, and two independently packaged web templates. Values are
-# bytes except entries, bound_refs, payloads, payload_refs, and bound_entries.
+# bytes except entries, payloads, payload_refs, and bound_entries.
 # The GTest allows 15% plus 4 KiB for pool extent rounding; structural counts
 # and cold-cache storage are strict ceilings. A recascade must not grow
 # canonical CSS beyond that margin.
+# Element bindings use a same-run relative check: the clean recascade must
+# preserve the initial nonzero count on the unchanged parsed DOM, before scripts.
 #
 # On 2026-10-02, strongest matching selector-list specificity separates footer
 # copyright links from other footer links in bootstrap5_kitchen_sink: one extra
@@ -29,18 +31,18 @@
 # Priority-token removal restores the valid important heading font-family rule:
 # one immutable payload binds to six heading recipes in both cascade phases.
 # Byte budgets, recipe counts and cold-cache limits are unchanged.
-# fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries bound_refs payloads payload_refs bound_entries cold_entries cold_bytes
-jqueryui initial 176242 67082 415 321604 321604 317508 78 327 412 769 78 0 0
-jqueryui recascade 176242 37770 104 321604 321604 0 78 327 412 769 78 0 0
-linuxmint initial 715354 502944 754 577222 577222 573126 154 506 594 1768 154 0 0
-linuxmint recascade 715354 243360 104 577222 577222 0 154 506 594 1768 154 0 0
-netflix initial 464141 355136 592 224337 224337 220241 57 245 283 628 57 0 0
-netflix recascade 465741 228160 104 224337 224337 0 57 245 283 628 57 0 0
+# fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries payloads payload_refs bound_entries cold_entries cold_bytes
+jqueryui initial 176242 67082 415 321604 321604 317508 78 412 769 78 0 0
+jqueryui recascade 176242 37770 104 321604 321604 0 78 412 769 78 0 0
+linuxmint initial 715354 502944 754 577222 577222 573126 154 594 1768 154 0 0
+linuxmint recascade 715354 243360 104 577222 577222 0 154 594 1768 154 0 0
+netflix initial 464141 355136 592 224337 224337 220241 57 283 628 57 0 0
+netflix recascade 465741 228160 104 224337 224337 0 57 283 628 57 0 0
 # Selector/cascade corrections bind one more distinct Bootstrap recipe; a clean
 # recascade keeps the same 251 entries and 3305 payload references.
-bootstrap5_kitchen_sink initial 4184606 3584791 1202 1044081 1044081 1039985 251 1212 834 3305 251 0 0
-bootstrap5_kitchen_sink recascade 4553618 2922267 104 1046285 1046285 0 251 1224 834 3305 251 0 0
-matrix_admin initial 717288 552224 439 340279 340279 336183 90 367 386 995 90 0 0
-matrix_admin recascade 733224 362272 104 340279 340279 0 90 367 386 995 90 0 0
-bschool initial 1018890 742992 561 632405 632405 628309 124 424 639 2069 124 0 0
-bschool recascade 1038234 520976 104 632405 632405 0 124 424 639 2069 124 0 0
+bootstrap5_kitchen_sink initial 4184606 3584791 1202 1044081 1044081 1039985 251 834 3305 251 0 0
+bootstrap5_kitchen_sink recascade 4553618 2922267 104 1046285 1046285 0 251 834 3305 251 0 0
+matrix_admin initial 717288 552224 439 340279 340279 336183 90 386 995 90 0 0
+matrix_admin recascade 733224 362272 104 340279 340279 0 90 386 995 90 0 0
+bschool initial 1018890 742992 561 632405 632405 628309 124 639 2069 124 0 0
+bschool recascade 1038234 520976 104 632405 632405 0 124 639 2069 124 0 0

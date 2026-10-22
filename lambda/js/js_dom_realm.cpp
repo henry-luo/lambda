@@ -144,12 +144,11 @@ extern "C" void js_dom_install_interface(Item global, const char* name) {
     js_set_key_default(global_root.get(), key_root.get(), ctor_root.get());
 }
 
-template <typename Target>
-static void dom_install_value_constructor(Item global, const char* name,
-        Target target, bool set_string_tag) {
+static void dom_publish_value_constructor(Item global, const char* name,
+        Item constructor, bool set_string_tag) {
     JS_ROOTS(roots,
         global_root, global,
-        ctor_root, js_new_distinct_native_constructor(target),
+        ctor_root, constructor,
         proto_root, js_new_object());
     Item name_key = js_name_item(name);
     js_set_function_name(ctor_root.get(), name_key);
@@ -158,6 +157,29 @@ static void dom_install_value_constructor(Item global, const char* name,
     js_initialize_native_constructor_prototype(ctor_root.get(),
         proto_root.get());
     js_set_key_default(global_root.get(), name_key, ctor_root.get());
+}
+
+template <typename Target>
+static void dom_install_value_constructor(Item global, const char* name,
+        Target target, bool set_string_tag) {
+    dom_publish_value_constructor(global, name, js_new_distinct_native_constructor(target), set_string_tag);
+}
+
+static Item broadcast_call(Item, Item, Item*, int, uint64_t*) {
+    return js_throw_type_error("BroadcastChannel requires new");
+}
+static Item broadcast_construct(Item, Item* args, int argc, Item new_target, uint64_t*) {
+    if (argc < 1) return js_throw_type_error("BroadcastChannel requires a name");
+    RootFrame roots(4);
+    Rooted<Item> target(roots, new_target), name(roots, js_to_string(args[0]));
+    if (get_type_id(name.get()) == LMD_TYPE_ERROR) return name.get();
+    // subclass prototype lookup can collect before the wrapper reaches its caller.
+    Rooted<Item> channel(roots, dom_broadcast_channel_create(name.get()));
+    if (get_type_id(channel.get()) == LMD_TYPE_ERROR) return channel.get();
+    Rooted<Item> prototype(roots, js_get_key_cstr(target.get(), "prototype"));
+    if (get_type_id(prototype.get()) == LMD_TYPE_ERROR) return prototype.get();
+    if (js_is_object_value(prototype.get())) js_set_prototype(channel.get(), prototype.get());
+    return channel.get();
 }
 
 JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), dom_install_value_constructor, (global, "DocumentFragment", dom_document_fragment_ctor, true))
@@ -590,11 +612,9 @@ static bool _attribute_receiver(Item receiver) {
     return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 2;
 }
 
-static bool _parent_node_receiver(Item receiver) {
+static bool _fragment_receiver(Item receiver) {
     Item kind = dom_core_node_type(receiver);
-    if (get_type_id(kind) != LMD_TYPE_INT) return false;
-    int type = it2i(kind);
-    return type == 1 || type == 9 || type == 11;
+    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 11;
 }
 
 static bool _child_node_receiver(Item receiver) {
@@ -615,6 +635,14 @@ static Item _window_closed_getter(Item /*callee*/, Item receiver, Item* /*args*/
         return js_throw_type_error("Illegal Window.closed receiver");
     return (Item){.item = b2it(jube_internal_host_api()->dom_catalog->window_is_closed(
         dom_get_ui_context()))};
+}
+
+static Item _window_self_getter(Item /*callee*/, Item receiver, Item* /*args*/,
+        int /*argc*/, uint64_t* /*result_home*/) {
+    Item global = js_get_global_this();
+    if (receiver.item != global.item)
+        return js_throw_type_error("Illegal Window.window receiver");
+    return global;
 }
 
 static Item _media_can_play_type(Item /*callee*/, Item receiver, Item* args,
@@ -663,7 +691,7 @@ static void _install_node_interface_members(Item global) {
         "value", "nodeValue", "textContent", NULL};
     static const char* const parent_node_members[] = {
         "children", "childElementCount", "firstElementChild", "lastElementChild",
-        "querySelector", "querySelectorAll", NULL};
+        "querySelector", "querySelectorAll", "append", "prepend", "replaceChildren", NULL};
     static const char* const child_node_members[] = {
         "before", "after", "replaceWith", "remove", NULL};
     static const char* const document_members[] = {
@@ -690,8 +718,9 @@ static void _install_node_interface_members(Item global) {
         {"Element", "html_element", _element_receiver, element_members},
         {"Element", "html_element", _element_receiver, attribute_node_members},
         {"Attr", "attr", _attribute_receiver, attr_members},
-        {"Element", "html_element", _parent_node_receiver, parent_node_members},
-        {"DocumentFragment", "html_element", _parent_node_receiver, parent_node_members},
+        {"Element", "html_element", _element_receiver, parent_node_members},
+        {"DocumentFragment", "html_element", _fragment_receiver, parent_node_members},
+        {"Document", "html_element", _document_receiver, parent_node_members},
         {"Element", "dom_node", _child_node_receiver, child_node_members},
         {"CharacterData", "dom_node", _child_node_receiver, child_node_members},
         {"DocumentType", "dom_node", _child_node_receiver, child_node_members},
@@ -713,10 +742,16 @@ static void _install_node_interface_members(Item global) {
             strlen(interface.host_name));
         for (const char* const* member = interface.members; *member; ++member) {
             if (!jube_publish_prototype_member(type, prototype_root.get(), *member,
-                    interface.receiver)) {
+                    interface.receiver, interface.interface_name)) {
                 log_error("dom-interface-publication: missing %s.%s binding",
                     interface.interface_name, *member);
             }
+        }
+        if (interface.members == parent_node_members) {
+            // variadic ParentNode methods have no required arguments on each declaring interface.
+            dom_set_interface_method_metadata(prototype_root.get(), "append", 0);
+            dom_set_interface_method_metadata(prototype_root.get(), "prepend", 0);
+            dom_set_interface_method_metadata(prototype_root.get(), "replaceChildren", 0);
         }
     }
 }
@@ -738,6 +773,10 @@ extern "C" void dom_install_collection_globals(void) {
     }
     js_dom_install_interface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
+    dom_publish_value_constructor(global, "BroadcastChannel",
+        js_new_native_body_constructor(broadcast_call, broadcast_construct, 1), true);
+    _link_iface_proto(global, "BroadcastChannel", "EventTarget");
+    _publish_interface_records("broadcast_channel", 17);
     {
         RootFrame roots(2);
         Rooted<Item> global_root(roots, global);
@@ -745,6 +784,12 @@ extern "C" void dom_install_collection_globals(void) {
         js_set_function_name(getter.get(), js_name_item("get closed"));
         js_install_native_accessor(global_root.get(), js_name_item("closed"),
             getter.get(), ItemNull, 0);
+        // Window.window is an unforgeable readonly accessor, not a writable
+        // alias; libraries capture the getter to identify browser realms.
+        getter.set(js_new_native_payload_function(_window_self_getter, 0, 0));
+        js_set_function_name(getter.get(), js_name_item("get window"));
+        js_install_native_accessor(global_root.get(), js_name_item("window"),
+            getter.get(), ItemNull, JSPD_NON_CONFIGURABLE);
     }
     Item window_proto = _iface_proto(global, "Window");
     if (get_type_id(window_proto) == LMD_TYPE_MAP) {

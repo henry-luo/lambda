@@ -175,6 +175,7 @@ const char radiant_dom_interface_decl[] =
     "    append_child: pn(a0: any) any, remove_child: pn(a0: any) any,\n"
     "    insert_before: pn(a0: any, a1: any) any, replace_child: pn(a0: any, a1: any) any,\n"
     "    normalize: pn() any, append: pn(a0: any) any, prepend: pn(a0: any) any,\n"
+    "    replace_children: pn(a0: any) any,\n"
     "    insert_adjacent_element: pn(a0: any, a1: any) any,\n"
     "    insert_adjacent_html: pn(a0: any, a1: any) any,\n"
     "    insert_adjacent_text: pn(a0: any, a1: any) any,\n"
@@ -221,6 +222,10 @@ const char radiant_dom_interface_decl[] =
     "    set_current_time: pn(a0: any) any,\n"
     "    begin_element: pn() any, begin_element_at: pn(a0: any) any,\n"
     "    end_element: pn() any, end_element_at: pn(a0: any) any\n"
+    "}\n"
+    "type broadcast_channel {\n"
+    "    name: string, onmessage: any, onmessageerror: any,\n"
+    "    post_message: pn(message: any) null, close: pn() null\n"
     "}\n"
     "type validity_state {\n"
 #define DOM_VALIDITY_FIELD(name, js, field) "    " #name ": bool,\n"
@@ -1267,6 +1272,7 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL_JS("ms_matches_selector", "msMatchesSelector", radiant_dom_m4d_matches),
     BIND_CALL("append", radiant_dom_m4d_append),
     BIND_CALL("prepend", radiant_dom_m4d_prepend),
+    BIND_CALL_JS("replace_children", "replaceChildren", radiant_dom_m4d_replace_children),
     BIND_CALL_JS("get_bounding_client_rect", "getBoundingClientRect", radiant_dom_m4d_get_bounding_client_rect),
     BIND_CALL_JS("get_client_rects", "getClientRects", radiant_dom_m4d_get_client_rects),
     BIND_CALL("scroll", radiant_dom_m4d_scroll),
@@ -1963,7 +1969,40 @@ static Item css_condition_prototype(void) {
 #undef CSS_RULE_INTERFACE_ALIAS
 #undef CSS_RULE_INTERFACE
 
+RADIANT_GETTER(bc_name, broadcast_name)
+RADIANT_METHOD_1(bc_post, broadcast_post)
+RADIANT_METHOD_0(bc_close, broadcast_close)
+#define BROADCAST_HANDLER(prefix, error)                                     \
+    static int prefix##_get(Item receiver, Item* out) {                      \
+        *out = radiant_host_api->dom_catalog->broadcast_handler(receiver,   \
+            (Item){.item = error ? ITEM_TRUE : ITEM_FALSE});                 \
+        return 1;                                                          \
+    }                                                                      \
+    static int prefix##_set(Item receiver, Item value, Item* out) {          \
+        *out = radiant_host_api->dom_catalog->broadcast_set_handler(receiver, \
+            (Item){.item = error ? ITEM_TRUE : ITEM_FALSE}, value);          \
+        return 1;                                                          \
+    }
+BROADCAST_HANDLER(bc_message, false)
+BROADCAST_HANDLER(bc_error, true)
+#undef BROADCAST_HANDLER
+static Item broadcast_prototype(void) {
+    return dom_realm_constructor_prototype("BroadcastChannel");
+}
+static const JubeMemberBind broadcast_members[] = {
+    BIND_GET_PROTO("name", bc_name),
+    {"onmessage", NULL, bc_message_get, bc_message_set, NULL, NULL, JUBE_MEMBER_PROTOTYPE},
+    {"onmessageerror", NULL, bc_error_get, bc_error_set, NULL, NULL, JUBE_MEMBER_PROTOTYPE},
+    {"post_message", NULL, NULL, NULL, bc_post, NULL,
+        JUBE_MEMBER_PROTOTYPE | JUBE_MEMBER_REQUIRED_ARGS(1)},
+    {"close", NULL, NULL, NULL, bc_close, NULL, JUBE_MEMBER_PROTOTYPE},
+};
+
 extern const JubeTypeBinding radiant_dom_type_bindings[] = {
+    {"broadcast_channel", NULL, broadcast_members,
+     (int32_t)(sizeof(broadcast_members) / sizeof(broadcast_members[0])),
+     NULL, NULL, NULL, NULL, broadcast_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
     {"validity_state", NULL, radiant_validity_members,
      (int32_t)(sizeof(radiant_validity_members) / sizeof(radiant_validity_members[0])),
      NULL, NULL, NULL, NULL, radiant_validity_prototype, NULL,

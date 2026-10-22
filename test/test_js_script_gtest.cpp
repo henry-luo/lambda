@@ -1528,6 +1528,12 @@ TEST(JsInterpreter, AutoMvpPromotionsPreserveRealmBindingsAndCallableIdentity) {
         "for(let i=0;i<3;i++){try{f(null)}catch(e){"
         "if(!(e instanceof TypeError)||e.name!=='TypeError'||e.constructor!==TypeError)throw 1;errors++;}}"
         "if(errors!==3)throw 2;f;",
+        // promoted getters may collect between scalar reads or throw an existing object.
+        "let marker={tag:1};let fail=false;"
+        "function f(o){let tiny=o.tiny;let value=o.value;return tiny+value}"
+        "let o={get tiny(){return 5e-324},get value(){gc();if(fail)throw marker;return 1e-323}};"
+        "if(f(o)!==1.5e-323||f(o)!==1.5e-323)throw 1;"
+        "fail=true;let caught;try{f(o)}catch(e){caught=e}if(caught!==marker)throw 2;f;",
         "function f(){return [Math.max,{method:Math.max}]}let a=f(),b=f();"
         "if(a[0]!==b[0]||b[0]!==Math.max||b[1].method!==Math.max||b.indexOf(Math.max)!==0)throw 1;f;",
         "function f(){return Math.max}let a=f(),b=f();if(a!==b||b!==Math.max)throw 1;f;",
@@ -3133,6 +3139,62 @@ TEST(JsInterpreter, PreservesLiveBindingsThroughNamedReexports) {
         nullptr);
 
     runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, OptionalCallsPropagateShortCircuitThroughLaterMethodCalls) {
+    const char* path = "test/js/optional_chain_calls.js";
+    char* source = read_text_file(path);
+    ASSERT_NE(source, nullptr);
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    Item result = js_interp_execute_source(&runtime, source, strlen(source), path, NULL);
+    EXPECT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+    mem_free(source);
+}
+
+TEST(JsInterpreter, WideScopeIndexPreservesIdentityAndCrossScriptSpelling) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    NamePool* first = name_pool_create(pool, nullptr);
+    NamePool* second = name_pool_create(pool, nullptr);
+    NamePool* query = name_pool_create(pool, nullptr);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(query, nullptr);
+    const char* spelling = "__cross_script_scope_identity_7391";
+    String* original = name_pool_create_name(first, spelling);
+    String* distinct = name_pool_create_name(second, spelling);
+    String* foreign = name_pool_create_name(query, spelling);
+    ASSERT_NE(original, distinct);
+    ASSERT_NE(original, foreign);
+    NameScope scope = {};
+    NameEntry entries[64] = {};
+    for (unsigned i = 0; i < 64; i++) {
+        char name[64];
+        snprintf(name, sizeof(name), "__wide_scope_binding_%u", i);
+        entries[i].name = i == 0 ? original : i == 1 ? distinct
+            : name_pool_create_name(first, name);
+        if (scope.last) scope.last->next = &entries[i];
+        else scope.first = &entries[i];
+        scope.last = &entries[i];
+        ASSERT_TRUE(name_scope_index_add(pool, &scope, &entries[i]));
+    }
+    ASSERT_NE(scope.name_index, nullptr);
+    EXPECT_EQ(name_scope_lookup_name(&scope, original), &entries[0]);
+    EXPECT_EQ(name_scope_lookup_name(&scope, distinct), &entries[1]);
+    EXPECT_EQ(name_scope_lookup_name(&scope, foreign), nullptr);
+    EXPECT_EQ(name_scope_lookup_name_bytes(&scope, distinct), &entries[0]);
+    EXPECT_EQ(name_scope_lookup_name_bytes(&scope, foreign), &entries[0]);
+    EXPECT_EQ(name_scope_lookup_name_bytes(&scope,
+        name_pool_create_name(query, "__wide_scope_binding_63")), &entries[63]);
+    EXPECT_EQ(name_scope_lookup_name_bytes(&scope,
+        name_pool_create_name(query, "__wide_scope_absent")), nullptr);
+    name_pool_release(query);
+    name_pool_release(second);
+    name_pool_release(first);
+    pool_destroy(pool);
 }
 
 TEST(JsInterpreter, PreservesLiveBindingsThroughStarReexports) {

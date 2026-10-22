@@ -1,5 +1,6 @@
 // contextual text measurement across CSS inline boundaries.
 #include "layout.hpp"
+#include "layout_text_context.hpp"
 #include "../lib/utf.h"
 #include <limits.h>
 
@@ -143,20 +144,29 @@ bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t 
     return measured;
 }
 
-static void text_shaping_context_slice(const char* source, size_t length,
+void layout_text_shaping_context_slice(const char* source, size_t length,
         bool forward, bool cursive, size_t* first, size_t* last) {
     *first = 0;
     *last = length;
-    const char* cursor = source;
-    const char* end = source + length;
-    while (cursor < end) {
+    const char* cursor = forward ? source : source + length;
+    const char* boundary = forward ? source + length : source;
+    // scan from the requested edge; rescanning every preceding word made long text quadratic.
+    while (cursor != boundary) {
         const char* prior = cursor;
-        uint32_t codepoint = 0;
-        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint) ||
-            !text_shaping_codepoint(codepoint, cursive)) {
-            if (forward) { *last = (size_t)(prior - source); break; }
-            *first = (size_t)(cursor - source);
+        if (!forward) {
+            prior--;
+            while (prior > source && ((unsigned char)*prior & 0xC0) == 0x80) prior--;
         }
+        const char* next = prior;
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&next, forward ? boundary : cursor, &codepoint) ||
+            (!forward && next != cursor) ||
+            !text_shaping_codepoint(codepoint, cursive)) {
+            if (forward) *last = (size_t)(prior - source);
+            else *first = (size_t)(cursor - source);
+            break;
+        }
+        cursor = forward ? next : prior;
     }
 }
 
@@ -196,7 +206,7 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
         size_t local_length = forward ? (size_t)(text_end - start - length)
             : (size_t)(start - text_start);
         size_t local_first, local_last;
-        text_shaping_context_slice(local, local_length, forward, cursive,
+        layout_text_shaping_context_slice(local, local_length, forward, cursive,
             &local_first, &local_last);
         // an emergency break or tracked grapheme still shapes in its unbroken word.
         if (local_last > local_first) {
@@ -207,7 +217,7 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
         while (DomText* neighbor = text_shaping_neighbor(lycon, node, forward, cursive)) {
             const char* source = neighbor->text;
             size_t first, last;
-            text_shaping_context_slice(source, neighbor->length, forward, cursive, &first, &last);
+            layout_text_shaping_context_slice(source, neighbor->length, forward, cursive, &first, &last);
             if (last == first) break;
             if (!append_piece(source + first, last - first, forward)) return false;
             if (first != 0 || last != neighbor->length) break;

@@ -351,6 +351,10 @@ struct MirTranspiler {
     // MIR context
     MIR_context_t ctx;
     MIR_module_t module;
+    uint64_t mir_module_count;
+    uint64_t mir_function_count;
+    uint64_t mir_instruction_count;
+    uint64_t mir_largest_function_instruction_count;
 
     // Shared emit substrate (Phase 0 / P0.1): owns the per-function emit cursor
     // (func_item/func), the register + label counters, and the import cache.
@@ -2748,6 +2752,13 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
     }
     em_profile_root_stores(&mt->em);
     em_finalize_function_metadata(&mt->em);
+    // reuse emission telemetry; later prologue pruning may lower the final size.
+    uint64_t instruction_count = mt->em.last_function.mir_instruction_count;
+    mt->mir_function_count++;
+    mt->mir_instruction_count += instruction_count;
+    if (instruction_count > mt->mir_largest_function_instruction_count) {
+        mt->mir_largest_function_instruction_count = instruction_count;
+    }
 }
 
 // LR07-7, temporaries. The binding-side probe covers named locals and rooted
@@ -8782,10 +8793,13 @@ static MIR_reg_t emit_load_module_type_list(MirTranspiler* mt) {
 // Function and module entries establish this chain eagerly for allocation
 // paths; remove it as one unit when lowering did not consume any link.
 static void mir_drop_unused_eager_prologue(MirTranspiler* mt) {
-    em_drop_unused_definition(&mt->em, mt->gc_reg);
-    em_drop_unused_definition(&mt->em, mt->heap_ptr_reg);
-    em_drop_unused_definition(&mt->em, mt->type_list_reg);
-    em_drop_unused_definition(&mt->em, mt->type_list_bss_reg);
+    uint32_t removed = em_drop_unused_definition(&mt->em, mt->gc_reg);
+    removed += em_drop_unused_definition(&mt->em, mt->heap_ptr_reg);
+    removed += em_drop_unused_definition(&mt->em, mt->type_list_reg);
+    removed += em_drop_unused_definition(&mt->em, mt->type_list_bss_reg);
+    // keep volume reports exact; the size-policy maximum may overestimate by four.
+    mt->mir_instruction_count -= removed;
+    mt->em.last_function.mir_instruction_count -= removed;
 }
 
 static MIR_reg_t emit_load_module_consts(MirTranspiler* mt) {
@@ -47586,6 +47600,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
 
     // Create module
     mt.module = MIR_new_module(ctx, names->module);
+    mt.mir_module_count++;
 
     // Pre-pass: compile string/symbol patterns
     if (!mt.satellite_snapshot) prepass_compile_patterns(&mt, script->child);
@@ -47996,9 +48011,12 @@ static int lambda_mir_finalize_compiler_pass(void* opaque) {
     if (!pass || !pass->build.mt.module) return 0;
     if (!transpile_mir_ast_finalize(&pass->build, pass->property_keys, NULL))
         return 0;
-    mir_count_module_volume(pass->ctx, &pass->mir_module_count,
-        &pass->mir_function_count, &pass->mir_instruction_count,
-        &pass->mir_largest_function_instruction_count);
+    const MirTranspiler& mt = pass->build.mt;
+    pass->mir_module_count = mt.mir_module_count;
+    pass->mir_function_count = mt.mir_function_count;
+    pass->mir_instruction_count = mt.mir_instruction_count;
+    pass->mir_largest_function_instruction_count =
+        mt.mir_largest_function_instruction_count;
     if (pass->link_instruction_count) {
         *pass->link_instruction_count = pass->mir_instruction_count;
     }

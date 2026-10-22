@@ -12,6 +12,7 @@ extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
 #endif
 
 #include "../../lambda/input/css/dom_element.hpp"
+#include "../../lambda/input/css/dom_lifecycle.hpp"
 #include "../../lambda/input/css/selector_matcher.hpp"
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
@@ -1474,6 +1475,68 @@ TEST_F(DomIntegrationTest, ParsedXmlExpandedNamesSurviveDeclarationMutation) {
     EXPECT_STREQ(dom_element_namespace_uri(child), "urn:test");
     EXPECT_STREQ(dom_element_attribute_value_ns(child, "urn:test", "lang"), "he");
     EXPECT_STREQ(dom_element_attribute_node_ns(child, "urn:test", "lang")->local_name, "lang");
+}
+
+TEST_F(DomIntegrationTest, GeneratedExpandedNamesSurviveDeclarationAndAncestryChanges) {
+    doc->page_kind = DOM_PAGE_KIND_LAMBDA_SCRIPT;
+    MarkBuilder builder(input);
+    Item source = builder.element("root").attr("xmlns:p", "urn:test")
+        .child(builder.element("p:child").final())
+        .child(builder.element("svg").child(builder.element("g").final()).final()).final();
+    DomElement* root = build_dom_tree_from_element(source.element, doc, nullptr);
+    ASSERT_NE(root, nullptr);
+    DomElement* qualified = root->first_child->as_element();
+    DomElement* svg = root->last_child->as_element();
+    DomElement* group = svg->first_child->as_element();
+    EXPECT_STREQ(dom_element_namespace_uri(qualified), "urn:test");
+    EXPECT_STREQ(dom_element_namespace_uri(group), "http://www.w3.org/2000/svg");
+    ASSERT_TRUE(root->set_attribute("xmlns:p", "urn:changed"));
+    EXPECT_STREQ(dom_element_namespace_uri(qualified), "urn:test");
+    ASSERT_TRUE(root->append_child(group));
+    EXPECT_STREQ(dom_element_namespace_uri(group), "http://www.w3.org/2000/svg");
+}
+
+TEST_F(DomIntegrationTest, DetachedReplacementCapturesDestinationSvgAndIntegrationNamespaces) {
+    doc->page_kind = DOM_PAGE_KIND_LAMBDA_SCRIPT;
+    MarkBuilder builder(input);
+    Item source = builder.element("svg").child(builder.element("circle").final()).final();
+    DomElement* svg = build_dom_tree_from_element(source.element, doc, nullptr);
+    ASSERT_NE(svg, nullptr);
+    DomNode* previous = svg->first_child;
+    Item replacement = builder.element("g").child(builder.element("foreignObject")
+        .child(builder.element("div").final()).final()).final();
+    DomElement* group = build_dom_tree_from_element_detached(replacement.element, doc, svg);
+    ASSERT_NE(group, nullptr);
+    EXPECT_EQ(group->parent, nullptr);
+    EXPECT_EQ(svg->first_child, previous);
+    EXPECT_EQ(svg->last_child, previous);
+    EXPECT_STREQ(dom_element_namespace_uri(group), "http://www.w3.org/2000/svg");
+    DomElement* foreign = group->first_child->as_element();
+    EXPECT_STREQ(dom_element_namespace_uri(foreign), "http://www.w3.org/2000/svg");
+    EXPECT_STREQ(dom_element_namespace_uri(foreign->first_child->as_element()), "http://www.w3.org/1999/xhtml");
+}
+
+TEST_F(DomIntegrationTest, GeneratedSvgIdentityPreservesSourceAttributes) {
+    MarkBuilder builder(input);
+    Item source_path = builder.element("path").attr("d", "M0 0 L20 0 L20 20 Z").final();
+    Item content = builder.array().append(source_path).final();
+    Item source = builder.element("svg").attr("xmlns", "http://www.w3.org/2000/svg")
+        .child(content).final();
+    DomElement* svg = build_dom_tree_from_element(source.element, doc, nullptr);
+    ASSERT_NE(svg, nullptr);
+    DomElement* path = svg->first_child->as_element();
+    ASSERT_NE(path, nullptr);
+    EXPECT_STREQ(dom_element_namespace_uri(svg), "http://www.w3.org/2000/svg");
+    EXPECT_STREQ(dom_element_namespace_uri(path), "http://www.w3.org/2000/svg");
+    EXPECT_STREQ(path->local_name(), "path");
+    EXPECT_STREQ(path->get_attribute("d"), "M0 0 L20 0 L20 20 Z");
+    EXPECT_EQ(source.element->items[0].array->items[0].element, source_path.element);
+    String* original_path = source_path.element->get_attr("d").string();
+    ASSERT_NE(original_path, nullptr);
+    EXPECT_STREQ(original_path->chars, "M0 0 L20 0 L20 20 Z");
+    EXPECT_FALSE(source.element->has_attr("__lambda_ns_uri"));
+    EXPECT_FALSE(dom_element_to_element(svg)->has_attr("__lambda_ns_uri"));
+    EXPECT_FALSE(dom_element_to_element(path)->has_attr("__lambda_ns_local_name"));
 }
 
 TEST_F(DomIntegrationTest, ParsedHtmlAndXmlAttributeNamespacesKeepTheirSourceIdentity) {

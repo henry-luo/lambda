@@ -1,0 +1,466 @@
+{
+  "name": "Photos grid snapping, zoom overlays and deferred navigator painting refresh",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "200",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "120",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "10",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-fill"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-shape"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-x"
+      },
+      "text": "10",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#position-y"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid-toggle"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid-snap"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#guide-snap"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "dx": 47,
+      "dy": 0,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "56"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-y",
+      "equals": "8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "10"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "dx": 47,
+      "dy": 0,
+      "steps": 4,
+      "mods_str": "alt"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "57"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid",
+      "equals": "false"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "dx": 47,
+      "dy": 0,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-x",
+      "equals": "56"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid-toggle"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".raster-grid svg"
+      },
+      "attribute": "width",
+      "equals": "250"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".raster-grid svg"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-layer"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#foreground"
+      },
+      "text": "#00ff00",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#brush-size"
+      },
+      "text": "24",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#brush-hardness"
+      },
+      "text": "1",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-brush"
+      }
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".dock",
+        "offset_x": 4,
+        "offset_y": 100
+      },
+      "dx": 0,
+      "dy": -1000
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 66,
+        "offset_y": 13
+      },
+      "min_r": 254,
+      "max_g": 1,
+      "max_b": 1
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 60,
+        "offset_y": 12
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 60,
+        "offset_y": 12
+      },
+      "min_g": 254,
+      "max_r": 1,
+      "max_b": 1
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 66,
+        "offset_y": 13
+      },
+      "min_r": 254,
+      "max_g": 1,
+      "max_b": 1
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 60,
+        "offset_y": 12
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 66,
+        "offset_y": 13
+      },
+      "min_g": 254,
+      "max_r": 1,
+      "max_b": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".dock",
+        "offset_x": 4,
+        "offset_y": 100
+      },
+      "dx": 0,
+      "dy": -1000
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 66,
+        "offset_y": 13
+      },
+      "min_r": 254,
+      "max_g": 1,
+      "max_b": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-navigation-20261022/grid-navigator-preview.png"
+    }
+  ]
+}

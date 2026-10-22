@@ -94,6 +94,7 @@ const JubeModuleDef* jube_find_static_module(const char* name);
 bool jube_activate_module(const JubeModuleDef* module);
 bool jube_resolve_global(const char* name, size_t name_length, Item* out_value);
 const JubeGlobalDef* jube_module_globals(const JubeModuleDef* module, int32_t* count);
+bool jube_global_profile_allows(uint32_t flags);
 // Activates the module whose manifest provides `rdb:<name>` and returns its
 // driver table, or NULL when no installed module provides it (RDB4).
 const RdbDriver* jube_rdb_resolve_driver(const char* name);
@@ -144,7 +145,7 @@ Item jube_type_prototype(const JubeTypeDef* type);
 // Publish an existing member on a WebIDL interface whose JS inheritance differs
 // from the module's host-type hierarchy; the adapter supplies its native brand.
 bool jube_publish_prototype_member(const JubeTypeDef* type, Item prototype,
-    const char* name, bool (*accepts_receiver)(Item));
+    const char* name, bool (*accepts_receiver)(Item), const char* interface_name);
 
 #ifdef __cplusplus
 }

@@ -40,6 +40,34 @@ qualification; the existing timing limit remains a qualification caveat.
 
 ## Changes
 
+### Debug compilation latency (2026-10-22)
+
+**D8.1.3v29** keeps AUTO's five-call promotion policy and native MVP entries.
+Promoted function/loop units now use O1 generation to bound the first hot-entry
+cost. Other MVP units retain O2, with the shared native O1 cap above 20,000
+instructions in their largest finalized function. The linker reuses each
+emitter's existing instruction count and maintains a maximum during emission;
+it adds no instruction-list traversal. Lambda's existing link policy calls the
+same optimization-level helper. Under **D8.2.5**, its remaining module-volume
+walk is also retired: module/function/total counts accumulate during emission,
+with late prologue removals subtracted. Its cached maximum may overestimate by
+four instructions; the 20,000-instruction policy needs no exact rescan.
+
+The original debug input-events run took 245.9 s with two workers. In a fresh
+debug cut/paste profile, 30.8 of 34.3 s went to linking/code generation;
+the 62,744-instruction action sender alone took 26.3 s. After tuning,
+cut/paste takes 4.6 s. The complete suite takes 69.4 s with two workers and
+48.8, 48.7 and 48.4 s with three. The baseline now reserves three workers
+through the shared scheduler. These are shared-host debug measurements,
+with background editor search active, not release throughput comparisons.
+
+Every run preserves the per-file results: 20 passing files, 12 existing skips,
+and 2,551/2,880 subtests passing. The existing promoted-realm regression also
+checks subnormal scalar lifetime across getter-triggered GC and thrown-object
+identity. Broad runtime qualification is pending. Pinned binaries, source
+hashes, profiles and per-file comparisons are under
+`temp/wpt-input-events-tuning-20261022/`.
+
 ### Common entry and ownership
 
 - **D8.1.3v29** keeps AUTO as JavaScript's default tier policy. Unset, empty

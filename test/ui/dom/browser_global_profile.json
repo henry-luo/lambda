@@ -1,0 +1,17 @@
+{
+  "name": "Browser realm excludes Node globals before and after native module activation",
+  "html": "test/ui/dom/browser_global_profile.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-absent", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-typeof", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-dynamic", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-branch", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-host-apis", "equals": "true"},
+    {"type": "click", "target": {"selector": "#check"}},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-absent", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-typeof", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-dynamic", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-branch", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "complete"}
+  ]
+}

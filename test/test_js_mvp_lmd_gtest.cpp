@@ -894,6 +894,16 @@ TEST_F(JsFormalMir, PublicRedeclarationFailsBeforeExecutingAndKeepsRealm) {
 
 TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
     ASSERT_FALSE(item_is_error(run("let oldValue=42;Array.prototype.oldMarker=1")));
+    // JS imports from Lambda register base records, without the AST extension.
+    Script* bridge = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_EVAL);
+    ASSERT_NE(bridge, nullptr);
+    bridge->profile = &js_profile;
+    runtime_register_script(&runtime, bridge);
+    EXPECT_EQ(js_script_from_script(bridge), nullptr);
+    JsTranspiler* ast = js_transpiler_create(&runtime);
+    ASSERT_NE(ast, nullptr);
+    EXPECT_EQ(js_script_from_script(ast), ast);
+    js_transpiler_destroy(ast);
     runtime_reset_heap(&runtime);
     Item result = run("typeof oldValue==='undefined'&&Array.prototype.oldMarker===undefined");
     ASSERT_FALSE(item_is_error(result));
@@ -11483,6 +11493,31 @@ TEST_F(JsMvpLmd, ModuleRegistryCleanupRetiresEveryDescriptorRoot) {
     ASSERT_EQ(gc->root_slot_count, original_roots);
     heap_gc_collect();
     EXPECT_EQ(gc->root_slot_count, original_roots);
+}
+
+TEST_F(JsMvpLmd, ModuleRegistryKeepsResolvedUrlIdentityWithoutFilesystemNormalization) {
+    boolean("Promise.resolve(1);true");
+    ASSERT_NE(context, nullptr);
+    Runtime owner = {};
+    owner.eval_context = (EvalContext*)context;
+    const char* first = "https://example.invalid/modules/a//b.js?source=../one";
+    const char* second = "https://example.invalid/modules/a/b.js?source=../one";
+    module_register_for_runtime(&owner, first, "js", ItemNull, nullptr);
+    ModuleDescriptor* original = module_get_for_runtime(&owner, first);
+    ASSERT_NE(original, nullptr);
+    EXPECT_STREQ(original->path, first);
+    EXPECT_EQ(module_get_for_runtime(&owner, second), nullptr);
+    module_register_for_runtime(&owner, second, "js", ItemNull, nullptr);
+    ModuleDescriptor* distinct = module_get_for_runtime(&owner, second);
+    ASSERT_NE(distinct, nullptr);
+    EXPECT_NE(distinct, original);
+    EXPECT_STREQ(distinct->path, second);
+    for (unsigned i = 0; i < 100; i++) {
+        EXPECT_EQ(module_get_for_runtime(&owner, first), original);
+        EXPECT_EQ(module_get_for_runtime(&owner, second), distinct);
+    }
+    module_registry_cleanup_for_runtime(&owner);
+    EXPECT_EQ(owner.module_registry, nullptr);
 }
 
 TEST_F(JsMvpLmd, RegExpQuantifierValidationRejectsUnattachedAndReversed) {

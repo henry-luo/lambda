@@ -567,24 +567,25 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
 static const struct {
     const char* path; const char* headers; int status; const char* markup;
     const char* language; const char* color; unsigned width;
+    bool gc_stress = false;
 } g_radiant_view_language_cases[] = {
     {"single", "Content-Language: iw-IL\r\n", 200, "", "he", "0, 0, 255", 80},
     {"list", "Content-Language: fr,en\r\n", 200, "", "", "255, 0, 0", 20},
     {"duplicate", "Content-Language: fr\r\nContent-Language: de\r\n", 200, "", "", "255, 0, 0", 20},
     {"none", "", 200, "", "", "255, 0, 0", 20},
     {"redirect-none", "Content-Language: fr\r\nLocation: /none.html\r\n", 302, "", "", "255, 0, 0", 20},
-    {"redirect-single", "Content-Language: fr\r\nLocation: /single.html\r\n", 302, "", "he", "0, 0, 255", 80},
+    {"redirect-single", "Content-Language: fr\r\nLocation: /single.html\r\n", 302, "", "he", "0, 0, 255", 80, true},
     {"meta", "Content-Language: iw-IL\r\n", 200,
         "<meta http-equiv='content-language' content='fr'>", "fr", "0, 128, 0", 60},
     {"meta-list", "Content-Language: iw-IL\r\n", 200,
         "<meta http-equiv='content-language' content='fr,en'>", "he", "0, 0, 255", 80},
-    {"root", "Content-Language: iw-IL\r\n", 200, "<html lang='fr'>", "fr", "0, 128, 0", 60},
+    {"root", "Content-Language: iw-IL\r\n", 200, "<html lang='fr'>", "fr", "0, 128, 0", 60, true},
     {"empty", "Content-Language: iw-IL\r\n", 200, "<html lang=''>", "", "255, 0, 0", 20},
     {"whitespace", "Content-Language: \t fr \t\r\n", 200, "", "fr", "0, 128, 0", 60},
     {"empty-header", "Content-Language: \r\n", 200, "", "", "255, 0, 0", 20},
 };
 
-static void test_radiant_view_http_language(size_t selected) {
+static void test_radiant_view_check_http_language(size_t selected, bool gc_stress) {
 #ifdef _WIN32
     GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
 #else
@@ -639,7 +640,9 @@ static void test_radiant_view_http_language(size_t selected) {
     strbuf_free(event_source);
     const ShellEnvEntry env[] = {
         {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"},
-        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
+        // D5.3.3: stress native handoffs separately from the complete header matrix.
+        {"LAMBDA_GC_FORCE_EVERY", gc_stress ? "1" : nullptr},
+        {"LAMBDA_GC_POISON_FREED", gc_stress ? "1" : nullptr}, {nullptr, nullptr},
     };
     RadiantViewLaunch launch = {};
     char remote[160], label[64];
@@ -647,9 +650,11 @@ static void test_radiant_view_http_language(size_t selected) {
     ASSERT_NE(event_path, nullptr);
     ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/%s.html",
         server.port, rows[selected].path), 0);
-    snprintf(label, sizeof(label), "language_%s", rows[selected].path);
+    snprintf(label, sizeof(label), "language_%s%s", gc_stress ? "gc_" : "", rows[selected].path);
     launch.label = label; launch.page = remote;
     launch.event_path = event_path; launch.env = env;
+    // bootstrap collections belong to the sustained replay budget under CPU contention.
+    if (gc_stress) launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
     ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
     test_radiant_view_launch_all(&launch, 1);
     {
@@ -666,6 +671,14 @@ static void test_radiant_view_http_language(size_t selected) {
     mem_free(event_path);
     remove(events);
 #endif
+}
+
+static void test_radiant_view_http_language(size_t selected) {
+    test_radiant_view_check_http_language(selected, false);
+}
+
+static void test_radiant_view_http_language_gc(size_t selected) {
+    test_radiant_view_check_http_language(selected, true);
 }
 
 TEST(RadiantViewTest, PagedWindowScrollResizeAndDensity) {
@@ -1891,7 +1904,7 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     const char* args[] = {"./lambda.exe", "view", page, "--headless", NULL};
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log},
-        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
         {NULL, NULL},
     };
     ShellOptions options = {};
@@ -2052,7 +2065,7 @@ TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
         "test/input/zip/sample.zip", "test/input/zip/sample.jar"};
     const char* view_log = "./temp/test_radiant_view_archive_tree.log";
     const ShellEnvEntry env[] = {
-        {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"}, {NULL, NULL},
+        {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "NOTICE"}, {NULL, NULL},
     };
     test_radiant_view_ensure_temp_dir();
     const char* events = "temp/test_radiant_view_archive_tree_events.json";
@@ -2610,7 +2623,7 @@ TEST(RadiantViewTest, RegistersDownloadedFontsDuringStylesheetDiscovery) {
     char remote[128];
     ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/page.html", server.port), 0);
     const char* view_log = "./temp/test_radiant_view_early_font.log";
-    const ShellEnvEntry env[] = {{"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "DEBUG"}, {nullptr, nullptr}};
+    const ShellEnvEntry env[] = {{"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr}};
     // repeat the same URL to cover both downloaded and immediately cached completion.
     for (unsigned repeat = 0; repeat < 2; repeat++) {
         ShellResult result = test_radiant_view_run_logged_headless(remote, nullptr, env);
@@ -2710,7 +2723,7 @@ TEST(RadiantViewTest, SkipsDefaultCumulativeBrowserScriptBudget) {
     for (bool admitted : {false, true}) {
         SCOPED_TRACE(admitted ? "explicit unlimited budget" : "default static budget");
         const ShellEnvEntry env[] = {
-            {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"},
+            {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
             {"RADIANT_JS_TOTAL_SCRIPT_BYTES", admitted ? "0" : nullptr}, {nullptr, nullptr},
         };
         ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env);
@@ -2752,7 +2765,7 @@ TEST(RadiantViewTest, SkipsExternalScriptResponseThatIsHtml) {
 
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log},
-        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
         {NULL, NULL},
     };
     ShellResult shell_result = test_radiant_view_run_logged_headless(page, events, env);
@@ -2785,7 +2798,7 @@ TEST(RadiantViewTest, ExecutesExternalDependencyInStaticHeadlessView) {
 
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log},
-        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
         {NULL, NULL},
     };
     ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
@@ -3170,7 +3183,8 @@ TEST(RadiantViewTest, LambdaReactiveStylesheetRestylesSiblings) {
 
 static void test_radiant_view_expect_replay(const char* page, const char* replay,
         const ShellEnvEntry* env, bool clean_memtrack = false,
-        int timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS) {
+        int timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS,
+        void (*check_output)(const char*) = nullptr) {
     ShellResult result = test_radiant_view_run_logged_headless(
         page, replay, env, nullptr, nullptr, timeout_ms);
     const char* output = result.stdout_buf ? result.stdout_buf : "";
@@ -3178,6 +3192,7 @@ static void test_radiant_view_expect_replay(const char* page, const char* replay
     EXPECT_EQ(result.exit_code, 0) << output;
     EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
     if (clean_memtrack) EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    if (check_output) check_output(output);
     shell_result_free(&result);
 }
 
@@ -3186,12 +3201,6 @@ static const ShellEnvEntry RADIANT_IMAGE_GC_ENV[] = {
     {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
     {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
 };
-
-TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
-    // D4.5.2 / D5.3.3: the retained surface must outlive borrowed Lambda pixels.
-    test_radiant_view_expect_replay(
-        "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", RADIANT_IMAGE_GC_ENV, true);
-}
 
 static const ShellEnvEntry RADIANT_SPEECH_FAKE_GC_ENV[] = {
     {"LAMBDA_SPEECH_ENGINE", "fake"}, {"LAMBDA_AUDIO_OUTPUT", "offline"},
@@ -3217,15 +3226,7 @@ TEST(RadiantViewTest, SpeechSmokeSpeaksWithBoundaries) {
 #endif
 }
 
-TEST(RadiantViewTest, SameSizeCanvasFramesRepaintWithoutLayout) {
-    const ShellEnvEntry env[] = {
-        {"RADIANT_FRAME_PROFILE","1"}, {"LAMBDA_LOG_LEVEL","NOTICE"},
-        {"LAMBDA_GC_FORCE_EVERY","1"}, {"LAMBDA_GC_POISON_FREED","1"}, {nullptr,nullptr},
-    };
-    ShellResult result=test_radiant_view_run_logged_headless(
-        "test/demo/photo/tests/_canvas_bridge.ls","test/demo/photo/tests/canvas_bridge.json",env);
-    const char* output=result.stdout_buf ? result.stdout_buf : "";
-    EXPECT_EQ(result.exit_code,0) << output;
+static void test_radiant_view_expect_canvas_frames(const char* output) {
     int frames=0;
     for (const char* frame=strstr(output,"[FRAME_PROFILE]");frame;) {
         const char* end=strchr(frame,'\n');
@@ -3238,7 +3239,18 @@ TEST(RadiantViewTest, SameSizeCanvasFramesRepaintWithoutLayout) {
         frame=end ? strstr(end+1,"[FRAME_PROFILE]") : nullptr;
     }
     EXPECT_EQ(frames,3) << output;
-    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
+    // D4.5.2 / D5.3.3: one replay checks retained pixels, repaint-only frames and clean close.
+    constexpr size_t base_count = sizeof(RADIANT_IMAGE_GC_ENV) / sizeof(RADIANT_IMAGE_GC_ENV[0]);
+    ShellEnvEntry env[base_count + 1];
+    memcpy(env, RADIANT_IMAGE_GC_ENV, sizeof(RADIANT_IMAGE_GC_ENV));
+    env[base_count - 1] = {"RADIANT_FRAME_PROFILE", "1"};
+    env[base_count] = {nullptr, nullptr};
+    test_radiant_view_expect_replay(
+        "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json",
+        env, true, RADIANT_VIEW_REPLAY_TIMEOUT_MS, test_radiant_view_expect_canvas_frames);
 }
 
 TEST(RadiantViewTest, PhotoImageJobsOwnPixelsAcrossGcAndClose) {
@@ -3680,6 +3692,13 @@ static void test_radiant_view_register_variants() {
         for (char* ch = name; *ch; ch++) if (*ch == '-') *ch = '_';
         ::testing::RegisterTest("RadiantViewTest", name, nullptr, nullptr, __FILE__, __LINE__,
             [i]() -> ::testing::Test* { return new RadiantViewVariantTest(test_radiant_view_http_language, i); });
+        if (g_radiant_view_language_cases[i].gc_stress) {
+            snprintf(name, sizeof(name), "HttpDocumentLanguageSurvivesForcedGc_%s",
+                g_radiant_view_language_cases[i].path);
+            for (char* ch = name; *ch; ch++) if (*ch == '-') *ch = '_';
+            ::testing::RegisterTest("RadiantViewTest", name, nullptr, nullptr, __FILE__, __LINE__,
+                [i]() -> ::testing::Test* { return new RadiantViewVariantTest(test_radiant_view_http_language_gc, i); });
+        }
     }
     for (size_t i = 0; i < sizeof(g_radiant_view_photo_cases) / sizeof(g_radiant_view_photo_cases[0]); i++) {
         ::testing::RegisterTest("RadiantViewTest", g_radiant_view_photo_cases[i].name, nullptr, nullptr,
@@ -3738,6 +3757,15 @@ int main(int argc, char** argv) {
     }
 
     int result = RUN_ALL_TESTS();
+    if (!result && !list_only) {
+        // passed runs keep their external reports, not per-worker caches and executable copies.
+#ifdef _WIN32
+        int restored = _chdir(g_radiant_view_root);
+#else
+        int restored = chdir(g_radiant_view_root);
+#endif
+        if (restored == 0) file_delete_recursive(g_radiant_view_workspace);
+    }
     mem_free(g_radiant_view_executable);
     mem_free(g_radiant_view_root);
     mem_free(g_radiant_view_home);

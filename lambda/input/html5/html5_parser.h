@@ -195,6 +195,7 @@ typedef struct Html5Parser {
     Element* head_element;      // <head> element
     Element* form_element;      // Current form element (if any)
     Element* fragment_root;     // synthetic fragment context whose children are returned
+    NameId fragment_context_tag; // tokenizer context is distinct from the synthetic root
 
     // Stacks
     List* open_elements;        // Stack of open elements

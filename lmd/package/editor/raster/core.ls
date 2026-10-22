@@ -16,6 +16,8 @@ import styles: .styles
 import channels: .channels
 import arrange: .arrange
 import guides: .guides
+import canvas: .canvas
+import navigation: .navigation
 
 pub fn new_document(options={}) any^ {
     let width = model.value(options.width,1024)
@@ -30,7 +32,7 @@ pub fn open_session(image) any^ {
     let rows = model.layers(ready)
     {doc:ready,saved:ready,hist:history.history_new(),selected:if (len(rows)>0) [rows[0].id] else [],
         target:"pixels",selection:null,crop:null,channel_view:"composite",recording:null,actions:[],tool:"move",zoom:0.0,pan:{x:0.0,y:0.0},gesture:null,
-        guides_visible:true,snap_enabled:false,straighten_axis:"horizontal",
+        *:navigation.defaults,guides_visible:true,guides_locked:false,snap_enabled:false,snap_layers:true,straighten_axis:"horizontal",crop_aspect:"free",crop_ratio:[1,1],
         brush:{size:28,hardness:0.8,spacing:0.2,flow:1.0,opacity:1.0},foreground:[0.1,0.35,0.95,1.0],
         background:[1.0,1.0,1.0,1.0],retouch:{source:null,anchor:null,aligned:true,strength:0.5,radius:3},selection_mode:"replace",tolerance:0.1,gradient_kind:"linear",clipboard:null}
 }
@@ -147,6 +149,7 @@ fn edit_node(st,command) any^ {
 pub fn apply_command(st,command) any^ {
     let id = command.id;
     if (id == "layer.select") model.select(st,command.ids,model.value(command.target,"pixels"))^
+    else if (id == "view.configure") navigation.configure(st,command)^
     else if (starts_with(id,"guide.")) guides.run_command(st,command)^
     else if (id == "layer.transform") transforms.run_command(st,command)^
     else if (id == "layer.straighten") transforms.run_command(st,
@@ -270,17 +273,22 @@ pub fn apply_command(st,command) any^ {
             selected:[model.fresh_id(st.doc)],target:"pixels"}
     }
     else if (id == "document.resize_canvas" or id == "document.resize_image") {
-        let dimensions = new_document({width:command.width,height:command.height})^;
-        let changed = if (id == "document.resize_image") img.replace_at(st.doc,model.root_path(st.doc),
+        let dimensions = new_document({width:command.width,height:command.height})^
+        let scaling = id == "document.resize_image"
+        let shift = if (scaling) [0,0] else canvas.offset(st.doc,dimensions,model.value(command.anchor,"top-left"))^
+        let origin = [-shift[0],-shift[1]]
+        let changed = if (scaling) img.replace_at(st.doc,model.root_path(st.doc),
             scaled(img.composition(st.doc),dimensions.width/st.doc.width,dimensions.height/st.doc.height)^)^ else st.doc;
+        let placed = if (shift == [0,0]) changed else img.replace_at(changed,model.root_path(changed),
+            model.translated(img.composition(changed),shift[0],shift[1])^)^;
         // coverage remains in document coordinates, so its extent must follow the canvas.
-        let coverage = if (st.selection == null) null else if (id == "document.resize_image")
+        let coverage = if (st.selection == null) null else if (scaling)
             img.resize(st.selection,dimensions.width,dimensions.height)^
-            else img.reframe(st.selection,[0,0,dimensions.width,dimensions.height])^;
-        {*:st,doc:guides.resized(channels.resized(img.with_properties(changed,{width:dimensions.width,height:dimensions.height})^,
-            dimensions.width,dimensions.height,id == "document.resize_image")^,
-            if (id == "document.resize_image") dimensions.width/st.doc.width else 1,
-            if (id == "document.resize_image") dimensions.height/st.doc.height else 1)^,selection:coverage}
+            else img.reframe(st.selection,[origin[0],origin[1],origin[0]+dimensions.width,origin[1]+dimensions.height])^;
+        {*:st,doc:guides.resized(channels.resized(img.with_properties(placed,{width:dimensions.width,height:dimensions.height})^,
+            dimensions.width,dimensions.height,scaling,origin)^,
+            if (scaling) dimensions.width/st.doc.width else 1,
+            if (scaling) dimensions.height/st.doc.height else 1,origin)^,selection:coverage}
     }
     else if (id in ["layer.align","layer.distribute"]) arrange.run_command(st,command)^
     else edit_node(st,command)^

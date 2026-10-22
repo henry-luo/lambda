@@ -2,7 +2,8 @@
 // and canvas (S12.1.3, D4.5.1v4); history contains immutable recipes (S1.4).
 import dom
 import radiant
-import ui: lambda.ui.dtna
+// keep stylesheet loading independent of unused component implementations (D8.1.1v18).
+import ui_styles: lambda.ui.dtna.style
 import resources: ~~.mod_resources
 import files: .mod_io
 import model: .mod_model
@@ -382,6 +383,6 @@ on load(evt) {
     return 'handled'
 }
 <html lang:"en",<head <meta charset:"UTF-8"> <title "Photo Studio — Lambda / Radiant">
-    <style (ui.stylesheet())> <link rel:"stylesheet",href:url_resolve(BASE,"photo.css")>>
+    <style ui_styles.css> <link rel:"stylesheet",href:url_resolve(BASE,"photo.css")>>
     apply(<photo_document rendered:<body apply(<photo_session source:INITIAL,rendered:scene.tree()>)>>)
 >

@@ -1,0 +1,748 @@
+{
+  "name": "Photos rulers, grid settings, guide transactions and captured navigator panning",
+  "html": "test/demo/photos/photos.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rulers-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-rulers",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid-toggle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid-snap"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid-snap",
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#grid-spacing"
+      },
+      "text": "20",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#grid-subdivisions"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid-spacing",
+      "equals": "20"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid-subdivisions",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#grid-spacing"
+      },
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": "Raster: grid spacing must be 1\u201365536 whole pixels"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid-spacing",
+      "equals": "20"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#grid-spacing"
+      },
+      "text": "32",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "200",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "120",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".raster-ruler-x",
+        "offset_x": 300,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-raster-guide=\"guide-1\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Horizontal guide at 40"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "1"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".raster-ruler-y",
+        "offset_x": 10,
+        "offset_y": 300
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 80,
+        "offset_y": 50
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 80,
+        "offset_y": 50
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "2"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".raster-ruler-y",
+        "offset_x": 10,
+        "offset_y": 300
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "2"
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-navigation-20261022/rulers-grid.png"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-width"
+      },
+      "text": "1000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#image-height"
+      },
+      "text": "500",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#resize-canvas"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".raster-ruler-y",
+        "offset_x": 10,
+        "offset_y": 360
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#preview",
+        "offset_x": 100,
+        "offset_y": 200
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": ".raster-ruler-y",
+        "offset_x": 10,
+        "offset_y": 360
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-guides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".dock",
+        "offset_x": 4,
+        "offset_y": 100
+      },
+      "dx": 0,
+      "dy": -1000
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 0,
+        "offset_y": 0
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "500"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-y",
+      "equals": "250"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".raster-navigator",
+        "offset_x": 250,
+        "offset_y": 130
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": ".raster-navigator",
+        "offset_x": 250,
+        "offset_y": 130
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-y",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 0,
+        "offset_y": 0
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 0,
+        "offset_y": 0
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "500"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-y",
+      "equals": "250"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#actual"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": ".raster-navigator canvas",
+        "offset_x": 0,
+        "offset_y": 0
+      },
+      "dx": 300,
+      "dy": 200,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "-500"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-y",
+      "equals": "-250"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-y",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#navigator"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "-40"
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-pan-x",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "render",
+      "file": "temp/photos-navigation-20261022/navigator.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-tab"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-rulers",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"document-1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-rulers",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid-spacing",
+      "equals": "32"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-grid-subdivisions",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#photos"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

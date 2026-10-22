@@ -238,6 +238,10 @@ void js_restore_window_event_for_legacy(Item prev);
  * Reset event system state. Call between documents in batch mode.
  */
 void dom_events_reset(void);
+// GC-owned native targets trace listener slots instead of globally rooting them.
+void dom_events_trace_gc_target(void* key, struct gc_heap* gc);
+bool dom_events_target_has_listener(void* key, const char* type);
+void dom_events_forget_gc_target(void* key);
 
 // ============================================================================
 // Host-facing entry points (F23) — see the note in dom.h

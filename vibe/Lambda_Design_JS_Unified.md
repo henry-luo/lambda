@@ -858,7 +858,7 @@ Recommended order:
 
 Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags, backend selection, execution policy, and artifact-retention policy. It is not a copy of the driver.
 
-The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. P3e routes eval-preamble publication and batch/preamble declaration snapshots through one owned map-to-array helper. P3f routes finalized MIR volume accounting for Lambda and LambdaJS through one shared runtime walk. Manual phase timing and cleanup labels remain for the later driver slices.
+The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. P3e routes eval-preamble publication and batch/preamble declaration snapshots through one owned map-to-array helper. P3f originally consolidated MIR volume accounting into one shared runtime walk; the 2026-10-22 follow-up retires that walk and reuses shared emitter metadata in both front ends. Manual phase timing and cleanup labels remain for the later driver slices.
 
 P3g makes pass contexts explicit and places the JS analysis/lower/finalize
 boundary under the manager. P3i extends that authority through Lambda MIR
@@ -1019,16 +1019,17 @@ git diff --check                                     # clean
 **D8.2.5** requires one compile-unit artifact contract across language
 profiles. Lambda and LambdaJS had separate module/function/instruction walks
 for the same finalized-MIR volume definition, including the same exclusion of
-labels. `mir_count_module_volume` in the existing runtime shared utility is now
-the sole walk; both front ends publish their profile-specific counters through
-it, and the private copies are retired.
+labels. The original P3f slice introduced `mir_count_module_volume` in the
+runtime shared utility as the sole walk; both front ends published their
+profile-specific counters through it, retiring the private copies. That helper
+is retired by the follow-up below.
 
 The independent P3f slice is C/C++ `+34/-40 = -6`; all hand source is also
 `+34/-40 = -6`. The phase base is commit `6f7b0ebaa`; the governed candidate is
 310,491 lines, six below P3e and 220 below the 310,711-line project anchor.
-The helper is funded by deleting both duplicate walks in the same slice.
+The original helper was funded by deleting both duplicate walks in that slice.
 
-Focused evidence:
+Focused evidence for the original P3f slice:
 
 ```text
 make build-test                                      # Errors: 0
@@ -1038,6 +1039,25 @@ LAMBDA_TEST_MAX_CONCURRENT=1 make test-lambda-baseline
                                                        # candidate 310,491; phase C/C++ -6; source -6
 git diff --check                                     # clean
 ```
+
+**2026-10-22 follow-up — module-volume walk retired (D8.2.5).**
+`mir_count_module_volume()` has no remaining callers; its implementation and
+declaration are removed. Both front ends reuse
+`em_finalize_function_metadata()`'s existing
+`last_function.mir_instruction_count`, which excludes labels. The emitter's
+metadata pass still counts instructions once; volume accounting and threshold
+selection add no second instruction-list walk.
+
+Lambda accumulates module, function and instruction totals during emission,
+including wrappers, view templates, event handlers and `main`. Late prologue
+cleanup subtracts each removed load from the total as it happens. Its cached
+largest-function count can overestimate by at most four instructions, which
+is sufficient for size-based link policy. MVP maintains its maximum in the
+existing function compilation loop. Updating totals and maxima costs constant
+time per finalized function. Source: `lambda/runtime/transpile-mir.cpp`,
+`lambda/runtime/mir_emitter_shared.hpp`, and
+`lambda/js/mvp-lmd/mvp_lmd_mir.cpp`. This changes accounting mechanics under
+**D8.2.5**, without changing the ruling.
 
 #### P3g implementation record — pass-owned contexts and authoritative MIR driver, 2026-08-29
 

@@ -229,9 +229,7 @@ void js_common_ast_cache_complete_build(InputScriptBuildScope* build,
 bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
                                size_t source_length, const char* reference,
                                bool strict, bool typescript_profile, bool module_parse);
-static inline JsScript* js_script_from_script(Script* script) {
-    return script && script->profile == &js_profile ? (JsScript*)script : NULL;
-}
+JsScript* js_script_from_script(Script* script);
 #ifdef __cplusplus
 }
 #endif

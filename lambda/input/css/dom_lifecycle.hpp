@@ -6,9 +6,14 @@
 
 struct DomDocument;
 struct DomNode;
+struct DomElement;
 struct Element;
 struct Item;
 struct Pool;
+
+// build a replacement in its destination namespace without publishing a child link.
+DomElement* build_dom_tree_from_element_detached(Element* element, DomDocument* document,
+                                                 DomElement* namespace_parent);
 
 typedef enum DomNodePinReason : uint8_t {
     DOM_NODE_PIN_WRAPPER = 0,
