@@ -705,6 +705,7 @@ static void _install_node_interface_members(Item global) {
         "getElementsByName", "querySelector", "querySelectorAll", NULL};
     // captured URL accessors must exist on the declaring HTML prototypes.
     static const char* const href_members[] = {"href", NULL};
+    static const char* const src_members[] = {"src", NULL};
     static const char* const dataset_members[] = {"dataset", NULL};
     static const char* const input_members[] = {"value", "validity", NULL};
     static const struct {
@@ -732,6 +733,14 @@ static void _install_node_interface_members(Item global) {
         {"HTMLAreaElement", "html_element", _element_receiver, href_members},
         {"HTMLBaseElement", "html_element", _element_receiver, href_members},
         {"HTMLLinkElement", "html_element", _element_receiver, href_members},
+        {"HTMLScriptElement", "html_element", _element_receiver, src_members},
+        {"HTMLImageElement", "html_element", _element_receiver, src_members},
+        {"HTMLIFrameElement", "html_element", _element_receiver, src_members},
+        {"HTMLEmbedElement", "html_element", _element_receiver, src_members},
+        {"HTMLSourceElement", "html_element", _element_receiver, src_members},
+        {"HTMLTrackElement", "html_element", _element_receiver, src_members},
+        {"HTMLMediaElement", "html_element", _element_receiver, src_members},
+        {"HTMLInputElement", "html_element", _element_receiver, src_members},
         {"HTMLInputElement", "input_element", _input_receiver, input_members},
     };
     RootFrame roots(1);

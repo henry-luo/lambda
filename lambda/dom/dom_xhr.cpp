@@ -686,7 +686,8 @@ static bool xhr_start_async_fetch(XhrState* xhr) {
     RootFrame roots(7);
     Rooted<Item> url_root(roots, make_string_item(xhr->url));
     Rooted<Item> options_root(roots, xhr_build_fetch_options(xhr));
-    Rooted<Item> promise_root(roots, js_fetch(url_root.get(), options_root.get()));
+    Rooted<Item> promise_root(roots, js_fetch_with_initiator(
+        url_root.get(), options_root.get(), "xmlhttprequest"));
     Rooted<Item> success_root(roots, ItemNull);
     Rooted<Item> failure_root(roots, ItemNull);
     Rooted<Item> continuation_root(roots, ItemNull);

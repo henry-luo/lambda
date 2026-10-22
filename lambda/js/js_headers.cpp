@@ -230,14 +230,15 @@ Item js_headers_list_from_init(Item init, bool request_guard) {
 static Item header_create_with_list(Item constructor, Item list, bool immutable) {
     RootFrame roots(4);
     Rooted<Item> ctor(roots, constructor), entries(roots, list);
-    Rooted<Item> result(roots, js_new_object_with_class(JS_CLASS_HEADERS));
+    Rooted<Item> prototype(roots, ItemNull);
     Rooted<Item> state(roots, js_array_new(0));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), entries.get()));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = b2it(immutable)}));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), ((JsFunction*)ctor.get().function)->env[1]));
-    JS_RETURN_IF_ERROR(js_private_field_define(result.get(), ((JsFunction*)ctor.get().function)->env[0], state.get()));
-    js_set_prototype(result.get(), js_get_key_default(ctor.get(), js_name_item("prototype")));
-    return result.get();
+    prototype.set(js_get_key_default(ctor.get(), js_name_item("prototype")));
+    JS_RETURN_IF_ERROR(prototype.get());
+    return js_native_private_array_object(JS_CLASS_HEADERS,
+        ((JsFunction*)ctor.get().function)->env[0], state.get(), prototype.get());
 }
 
 Item js_headers_create_http(char* const* lines, int count) {

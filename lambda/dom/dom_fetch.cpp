@@ -80,6 +80,8 @@ typedef struct JsFetchWork {
     long   status_code;
     int    curl_error;
     char   error_msg[CURL_ERROR_SIZE];
+    const char* initiator;
+    double start_time_ms;
 
     // promise resolve/reject functions (main thread only)
     Item resolve_fn;
@@ -447,6 +449,11 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     Rooted<Item> reject_root(roots, runtime_resource_table_root_value(
         js_runtime_resource_table(), entry, 2));
 
+    // completion runs in the originating realm; no worker thread may publish JS entries.
+    if (strncmp(fw->url, "http://", 7) == 0 || strncmp(fw->url, "https://", 8) == 0)
+        js_performance_record_resource(fw->url, fw->initiator,
+            fw->start_time_ms, js_performance_now_ms());
+
     if (fw->cookie_jar && !cookie_jar_flush(fw->cookie_jar)) {
         log_error("fetch: failed to persist response cookies");
     }
@@ -562,7 +569,7 @@ static Item fetch_executor(Item resolve_fn, Item reject_fn) {
 // Public API: js_fetch(url [, options])
 // =============================================================================
 
-extern "C" Item js_fetch(Item url_item, Item options_item) {
+extern "C" Item js_fetch_with_initiator(Item url_item, Item options_item, const char* initiator) {
     RootFrame argument_roots(2);
     Rooted<Item> url_root(argument_roots, url_item), options_root(argument_roots, options_item);
     if (!js_fetch_runtime_state_ensure()) {
@@ -736,6 +743,8 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         fw->cookie_jar = NULL;
     }
     fw->work.data = fw;
+    fw->initiator = initiator;
+    fw->start_time_ms = js_performance_now_ms();
 
     // create promise — executor captures resolve/reject into fw
     pending_fetch_work = fw;
@@ -782,6 +791,10 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     }
 
     return promise_root.get();
+}
+
+extern "C" Item js_fetch(Item url_item, Item options_item) {
+    return js_fetch_with_initiator(url_item, options_item, "fetch");
 }
 
 // =============================================================================

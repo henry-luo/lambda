@@ -59,11 +59,52 @@ with Chrome and checks that a subsequent real size change still notifies.
 **Host namespace prototypes (verified 2026-10-21).** `Performance` links the
 existing clock/entry methods through its EventTarget-derived prototype. MVP
 namespaces use their own traced prototype/deletion protocol, preserving public
-identity and method overrides (**D6.2.2v2, D3.4.7**). The existing Performance
-Timeline remains partial; resource-buffer APIs and complete entry production
-remain outstanding. Global and Node `URLSearchParams` share the node-url-owned
+identity and method overrides (**D6.2.2v2, D3.4.7**). Global and Node `URLSearchParams` share the node-url-owned
 prototype and method identities, including iterator publication. No instance
 needs to exist before a library captures those methods.
+
+**Resource timing and observation (verified 2026-10-23).** HTTP(S) fetch and
+asynchronous XHR completions record their request URL, initiator, observed
+start/end time and duration in the originating realm. Timeline queries preserve
+entry identity and order by start time. `setResourceTimingBufferSize` changes the
+default 250-entry capacity without deleting existing entries; overflow tasks
+retain pending entries while a `resourcetimingbufferfull` handler grows or clears
+the buffer, and discard excess entries if the handler makes no room.
+`PerformanceObserver` and `PerformanceObserverEntryList` publish captured
+prototype methods backed by private records. Resource observers support
+asynchronous delivery, buffered observation, draining and disconnect, independent
+of timeline capacity. Their advertised entry type is `resource`; observation
+does not manufacture layout-shift records. Realm-owned exact roots retain
+buffers, registered observers and prototypes (**D5.3.3, D5.3.5**).
+`test/js/performance_resource_buffer` checks the callable surface;
+`RadiantViewTest.ResourceTimingBuffersTrackFetchAndXhrAcrossGc` exercises actual
+HTTP requests and overflow callbacks in AST/MIR with collecting, poisoning GC,
+using a fixture also checked in Chromium. Resource timing remains partial:
+parser-loaded resources, synchronous XHR, detailed network phases, full resource
+entry reflection, navigation/user timing and other observer types are incomplete.
+Algorithms: [Resource Timing buffer management](https://www.w3.org/TR/resource-timing/#sec-extensions-performance-interface)
+and [Performance Timeline observation](https://www.w3.org/TR/performance-timeline/#the-performanceobserver-interface).
+
+**URL constructor failures (verified 2026-10-23).** Invalid input/base parses
+produce a `TypeError` completion. Returning normal null from a native constructor
+previously caused `[[Construct]]` to create a URL-branded object without its
+private record, deferring the failure to an unrelated property getter
+(**D6.2.2v2**). Explicit null bases undergo string conversion; undefined bases
+remain absent. `test/js/url_constructor_errors` compares invalid parses,
+empty-input resolution, valid construction and coercion exceptions with Node,
+following the [URL constructor](https://url.spec.whatwg.org/#dom-url-url).
+
+**Reflected URL attributes (verified 2026-10-23).** `src` and `href` reads
+resolve against the owning node's live `baseURI`, while `getAttribute` retains
+the original text. Missing attributes return an empty string and invalid URLs
+retain their raw text. A base element resolves its own href against the document
+fallback. One native resolver supplies these getters and anchor URL components;
+the declaring HTML prototypes publish captured `src` accessors through the
+existing member installer (**D7.4.4**, ownership **D5.3.3**).
+`test/js/dom_url_reflection` checks base changes, missing/empty/invalid values,
+captured getters and neighboring element types against Chromium. This repairs
+Ghost's `new URL(script.src)` startup path following HTML's
+[URL attribute reflection](https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes).
 
 **Attribute nodes.** `DomAttr` is a document-owned node with independent namespace/name/value storage, an optional owner element, and a Node-derived `Attr` interface. `getAttributeNode`, `NamedNodeMap`, and attribute-node mutation methods share canonical native identity. Replacement detaches the old Attr without changing its value; attached `value` writes use ordinary mutation handling. A live Attr wrapper leases its owner, and adoption transfers registry leases while retaining the physical source pool. Removed attributes and their strings recycle through native retirement (D4.5.1v4); temporary MutationRecord fields use precise roots until the observer's pending list owns them (D5.3.3).
 

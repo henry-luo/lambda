@@ -707,6 +707,7 @@ static bool event_handler_target_supported(Item target) {
     if (target.item != 0 && target.item == global.item) return true;
     if (dom_event_is_document_target(target)) return true;
     if (dom_unwrap_element(target) || dom_broadcast_channel_native(target)) return true;
+    if (js_performance_is_target(target)) return true;
     return get_type_id(target) == LMD_TYPE_MAP &&
            (js_class_id(target) == JS_CLASS_EVENT_TARGET || js_class_id(target) == JS_CLASS_FILE_READER);
 }
