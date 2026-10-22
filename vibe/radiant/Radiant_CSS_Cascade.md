@@ -1342,8 +1342,13 @@ by **D4.2.5v3**, and keeps allocator ownership explicit as required by
 lines from the child log, and checks
 [`test/css_cascade_memory_baseline.tsv`](../../test/css_cascade_memory_baseline.tsv).
 The captured byte baseline is valid for the standard debug or release host;
-it allows 15% plus 4 KiB for pool extent rounding, while recipe and binding
-counts are exact upper bounds. Run it with:
+it allows 15% plus 4 KiB for pool extent rounding, while recipe, payload and
+cold-cache counts retain recorded upper bounds. Element binding counts use
+the same run's initial cascade as their reference: the initial count must be
+nonzero, and a clean recascade on the unchanged parsed DOM must preserve it.
+Both samples precede scripts, excluding script-driven DOM mutations from this
+comparison. Binding counts in the capture table below are historical
+measurements rather than ceilings. Run it with:
 
 ```sh
 make test-css-cascade-memory
@@ -1772,7 +1777,7 @@ Line references identify the reviewed revision; symbols are the durable anchors.
 | `radiant/view_memory_profile.cpp:110` | `view_memory_profile_write`; reusable reporting infrastructure and selected-owner limitations. |
 | `radiant/view_reuse.cpp:104` | `canonical_inline_find_or_create`; existing exact computed-prop interning and cap. |
 | `test/test_radiant_core_gtest.cpp:309` | `StyleEpochTest`; collisions, COW, epoch coexistence, environment changes, and snapshot lifetime. |
-| `test/test_css_cascade_memory_gtest.cpp` and `test/css_cascade_memory_baseline.tsv` | Standard page-load and forced-recascade memory baseline; exact recipe/binding ceiling plus byte budgets. |
+| `test/test_css_cascade_memory_gtest.cpp` and `test/css_cascade_memory_baseline.tsv` | Standard page-load and forced-recascade memory baseline; relative element-binding check, recorded recipe/payload ceilings and byte budgets. |
 
 The first implementation should concentrate on the measured condition and
 owned-style retention paths, while preserving the demonstrated plain-recipe

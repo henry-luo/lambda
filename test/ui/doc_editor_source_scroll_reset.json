@@ -11,7 +11,10 @@
     {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
     {"type": "assert_state_store", "target": {"selector": ".source-tab-panel"}, "view_scroll_y": 250, "tolerance": 20},
     {"type": "click", "target": {"selector": ".tree-filter-clear"}},
+    {"type": "assert_state_store", "target": {"selector": ".source-tab-panel"}, "view_scroll_y": 250, "tolerance": 20},
     {"type": "type", "target": {"selector": "#file-filter"}, "text": "rte_prototype.ls"},
+    {"type": "assert_state_store", "target": {"selector": ".source-tab-panel"}, "view_scroll_y": 250, "tolerance": 20},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "doc_editor.ls"},
     {"type": "click", "target": {"selector": ".tree-hit-__test_ui_rte_prototype_ls .tree-label"}},
     {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "rte_prototype.ls"},
     {"type": "assert_state_store", "target": {"selector": ".source-tab-panel"}, "view_scroll_y": 0, "tolerance": 1}
