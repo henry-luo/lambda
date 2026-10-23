@@ -393,6 +393,11 @@ typedef struct gc_heap {
 
     gc_tune_stats_t tune;           // performance counters (see gc_tune_stats_t)
     gc_external_stats_t external;   // native payload pressure (not a liveness registry)
+    // collection-local worklist built from marked buffer owners, never roots.
+    gc_header_t** compaction_owners;
+    size_t compaction_owner_count;
+    size_t compaction_owner_capacity;
+    bool compaction_owners_valid;   // allocation failure retains the complete heap walk
 } gc_heap_t;
 
 static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {

@@ -2363,8 +2363,12 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         char* eff_url = nullptr;
         char* response_language = nullptr;
         char* response_type = nullptr;
+        long response_status = 0;
         html_content = download_http_document_with_cookie_jar(url_str, &html_length,
-            top_level_cookie_jar, &eff_url, &response_language, &response_type);
+            top_level_cookie_jar, &eff_url, &response_language, &response_type, &response_status);
+        if (html_content && response_status >= 400) {
+            log_info("document-response: rendering HTTP %ld body for %s", response_status, url_str);
+        }
         protocol_language = lam::Temp<char>(response_language);
         // response MIME selects XML syntax even when a URL ends in .html or has no extension.
         const char* response_extension = mime_extension_from_content_type(response_type);

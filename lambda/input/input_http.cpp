@@ -233,12 +233,18 @@ const char* content_type_to_extension(const char* content_type) {
     return ".html";
 }
 
+enum HttpResponsePolicy { HTTP_REQUIRE_SUCCESS, HTTP_DOCUMENT_RESPONSE };
+
 // Download HTTP/HTTPS resource and return content in memory
 static char* download_http_content_impl(const char* url, size_t* content_size,
     const HttpConfig* config, char** effective_url, char** content_language,
-    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE, char** content_type = nullptr) {
+    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE, char** content_type = nullptr,
+    HttpResponsePolicy policy = HTTP_REQUIRE_SUCCESS, long* status = nullptr) {
+    if (content_size) *content_size = 0;
+    if (effective_url) *effective_url = NULL;
     if (content_language) *content_language = NULL;
     if (content_type) *content_type = NULL;
+    if (status) *status = 0;
     if (!init_curl()) {
         return NULL;
     }
@@ -348,9 +354,13 @@ static char* download_http_content_impl(const char* url, size_t* content_size,
     // Check HTTP response code
     long response_code;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    if (status) *status = response_code;
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
+    }
+    // completed error documents retain their origin body; resources still reject HTTP errors.
+    if (response_code >= 400 && (policy == HTTP_REQUIRE_SUCCESS || response_code >= 600)) {
         if (response.cookie_jar && !cookie_jar_flush(response.cookie_jar)) {
             log_error("HTTP: failed to persist response cookies");
         }
@@ -480,14 +490,15 @@ char* download_http_content_with_cookie_jar(const char* url, size_t* content_siz
 }
 
 char* download_http_document_with_cookie_jar(const char* url, size_t* content_size,
-    CookieJar* cookie_jar, char** effective_url, char** content_language, char** content_type) {
+    CookieJar* cookie_jar, char** effective_url, char** content_language, char** content_type,
+    long* status) {
     HttpConfig config = default_http_config;
     // A document navigation owns the resource manager's 60-second page-load
     // budget, rather than the 30-second limit intended for each subresource.
     config.timeout_seconds = 60;
     config.cookie_jar = cookie_jar;
     return download_http_content_impl(url, content_size, &config, effective_url, content_language,
-        HTTP_MAX_RESPONSE_SIZE, content_type);
+        HTTP_MAX_RESPONSE_SIZE, content_type, HTTP_DOCUMENT_RESPONSE, status);
 }
 
 // Download HTTP/HTTPS resource to the native cache and optionally return its path.

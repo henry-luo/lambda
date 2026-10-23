@@ -910,6 +910,35 @@ TEST_F(JsFormalMir, PublicHeapReplacementCreatesFreshRealm) {
     EXPECT_EQ(result.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, ClockOriginPrecedesUserCodeAndFirstNowIsNonnegative) {
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        SCOPED_TRACE(backend);
+        setenv("JS_EXEC_BACKEND", backend, 1);
+        reset_runtime();
+        ASSERT_FALSE(item_is_error(run("var recordedDate=Date.now();true")));
+        EXPECT_EQ(js_runtime_state.performance.origin_epoch, js_heap_epoch);
+        double origin = js_performance_time_origin_ms();
+        EXPECT_GE(js_performance_now_ms(), 0.0);
+        // later static scripts retain the same realm clock.
+        ASSERT_EQ(run("performance.timeOrigin<=recordedDate+1").item, ITEM_TRUE);
+        EXPECT_EQ(js_performance_time_origin_ms(), origin);
+        js_batch_reset();
+        EXPECT_GE(js_performance_now_ms(), 0.0);
+        // callers without an eagerly bound realm still use the ordered fallback.
+        js_runtime_state.performance.origin_epoch = UINT64_MAX;
+        EXPECT_GE(js_performance_now_ms(), 0.0);
+        js_performance_virtual_clock_set(true, 0.0);
+        js_runtime_state.performance.origin_epoch = UINT64_MAX;
+        double virtual_origin = js_performance_time_origin_ms();
+        EXPECT_EQ(js_performance_now_ms(), 0.0);
+        EXPECT_EQ(js_date_number_to_double(js_date_now()), virtual_origin);
+        js_performance_virtual_clock_set(true, 250.5);
+        EXPECT_EQ(js_performance_now_ms(), 250.5);
+        EXPECT_EQ(js_date_number_to_double(js_date_now()), virtual_origin + 250.0);
+        js_performance_virtual_clock_set(false, 0.0);
+    }
+}
+
 TEST_F(JsFormalMir, HostPerformanceAndDateShareVirtualAndFrameClocks) {
     ASSERT_FALSE(item_is_error(run("performance.timeOrigin>1e12")));
     EXPECT_EQ(js_get_key_cstr(js_get_global_this(), "performance").item,

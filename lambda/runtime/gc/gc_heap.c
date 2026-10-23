@@ -602,6 +602,7 @@ void gc_heap_destroy(gc_heap_t* gc) {
         mem_free(gc->mark_stack);
         gc->mark_stack = NULL;
     }
+    mem_free(gc->compaction_owners);
 
     // free root ranges (C heap allocated)
     if (gc->root_ranges) {
@@ -2051,11 +2052,33 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 }
 
+static void gc_record_compaction_owner(gc_heap_t* gc, gc_header_t* header) {
+    if (!gc->compaction_owners_valid) return;
+    switch (header->type_tag) {
+    case LMD_TYPE_ARRAY_: case LMD_TYPE_ARRAY_NUM_: case LMD_TYPE_MAP_:
+    case LMD_TYPE_ELEMENT_: case LMD_TYPE_FUNC_:
+        break;
+    default:
+        return;
+    }
+    if (gc->compaction_owner_count == SIZE_MAX ||
+            !mem_grow_array_raw((void**)&gc->compaction_owners, sizeof(gc_header_t*),
+                &gc->compaction_owner_capacity, gc->compaction_owner_count + 1,
+                GC_MARK_STACK_INITIAL, MEM_CAT_CONTAINER)) {
+        // liveness is already established; an optional worklist must not lose
+        // owners when its allocation fails (D4.3.1, D5.3.3).
+        gc->compaction_owners_valid = false;
+        return;
+    }
+    gc->compaction_owners[gc->compaction_owner_count++] = header;
+}
+
 static int gc_drain_mark_stack(gc_heap_t* gc) {
     int traced_count = 0;
     while (gc->mark_top > 0 && !gc->mark_failed) {
         gc_header_t* obj = mark_stack_pop(gc);
         gc_trace_object(gc, obj);
+        gc_record_compaction_owner(gc, obj);
         traced_count++;
     }
     return traced_count;
@@ -2231,18 +2254,22 @@ static int gc_rebind_array_num_gc_view(gc_heap_t* gc, uint8_t* view) {
     return compacted;
 }
 
-// Compact surviving data from nursery data zone to tenured data zone.
-// For each marked object that has data pointers into the nursery data zone,
-// copy the data to tenured and update the object's pointer.
+static gc_header_t* gc_next_compaction_owner(gc_heap_t* gc,
+        gc_header_t* current, size_t* cursor) {
+    if (!gc->compaction_owners_valid) return current ? current->next : gc->all_objects;
+    return *cursor < gc->compaction_owner_count ? gc->compaction_owners[(*cursor)++] : NULL;
+}
+
+// compact surviving nursery buffers through their marked owners.
 static void gc_compact_data(gc_heap_t* gc) {
-    gc_header_t* current = gc->all_objects;
+    gc_header_t* current = NULL;
+    size_t cursor = 0;
 #ifndef NDEBUG
     size_t compacted = 0;
 #endif
 
-    while (current) {
+    while ((current = gc_next_compaction_owner(gc, current, &cursor))) {
         if (!current->marked || (current->gc_flags & GC_FLAG_FREED)) {
-            current = current->next;
             continue;
         }
 
@@ -2440,8 +2467,6 @@ static void gc_compact_data(gc_heap_t* gc) {
         default:
             break;
         }
-
-        current = current->next;
     }
 
     log_debug("gc_compact_data: compacted %zu data buffers to tenured", compacted);
@@ -2679,6 +2704,8 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     // reset mark stack
     gc->mark_top = 0;
+    gc->compaction_owner_count = 0;
+    gc->compaction_owners_valid = true;
     gc->mark_failed = 0;
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     uint64_t mark_start_ns = gc_now_nanos();
@@ -2739,6 +2766,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
             header->marked = 0;
         }
         gc->mark_top = 0;
+        // an abandoned trace must discard its partial compaction worklist too.
+        gc->compaction_owner_count = 0;
+        gc->compaction_owners_valid = false;
         gc->mark_failed = 0;
         gc->collecting = 0;
         log_error("gc-mark-worklist: allocation failed; collection abandoned");
@@ -2782,6 +2812,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
             ? tenured_after_promotion - tenured_before : 0;
     }
     GC_PROFILE_LEAVE("gc_compact_data", gc_compact_token);
+    // no worklist entry remains live across collections.
+    gc->compaction_owner_count = 0;
+    gc->compaction_owners_valid = false;
 
     for (gc_header_t* header = gc->all_objects; header; header = header->next) {
         header->marked = 0;

@@ -191,10 +191,14 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   before the hot entry, so a threshold of one is honored without executing
   the body first. Imports, captures outside the module slab, method definitions,
   nested definitions, eval and suspended definitions retain their existing
-  boundaries. The existing boxed satellite preserves namespace/callable
-  identity and the source module's binding slab; forced AST stays interpreted
-  (**D8.1.3v32**). `module_numeric_predicates.js` checks values, coercion errors,
-  source identity, live imports and scalar lifetime across GC.
+  implementation boundaries. The existing boxed satellite preserves namespace/
+  callable identity and the source module's binding slab; forced AST stays
+  interpreted (**D8.1.3v34**). Its approved class-method extension, including
+  one-wrapper sites with only module-slab free bindings, remains unimplemented:
+  both release experiments were neutral and removed. Object methods carry method
+  syntax on function-expression AST nodes and are rejected before satellite
+  parsing. `module_numeric_predicates.js` checks values, coercion errors, source
+  identity, live imports and scalar lifetime across GC.
   Satellite parameters keep BigInt and Symbol possibilities even when the
   cloned source has no such literals. Published strict P2 definitions retain
   the admission scan's activation observations as callable analysis flags.
@@ -252,6 +256,16 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   from 4,300 ms to 350 ms with the same result. This is an isolated workload
   measurement, not a whole-page speedup. Unicode position and split fixtures
   cover captures, backward seeks and surrogate boundaries.
+- **RegExp split failure scanning.** After species construction and limit
+  coercion, a native splitter with builtin `exec`, writable own `lastIndex`,
+  no captures and a direct byte matcher searches for the next matching
+  position instead of repeating the full protocol at every failed position.
+  Successful matches still use the ordinary protocol; UTF-16 conversion,
+  surrogate-half replay, terminal boundaries and final `lastIndex` remain
+  unchanged. Custom exec/species results that fail the guard, captures,
+  backtracking and Unicode-mode matchers retain the existing loop
+  (**S1.11**, **D5.3.3**, **D8.4.1v2**). This removes repeated failed probes
+  from CSS source-fragment line splitting without changing tier admission.
 - **Tune12 admitted bulk RegExp match/replace.**
   `js_regexp_symbol_match` and `js_regexp_symbol_replace` (`js_runtime.cpp`)
   select a bulk RE2 loop only for primitive ASCII input, an ordinary global

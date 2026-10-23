@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 42.0.0 (2026-10-23)
+**Spec version:** 44.0.0 (2026-10-23)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1939,7 +1939,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   Generated `parser.c` remains a reference artifact regenerated from
   `grammar.js` (never hand-edit `parser.c`). Build config generates the build
   files (never hand-edit the Lua). [CGP5v2, rules 5, 7]
-- **D8.1.3v30*** LambdaJS uses its first-party C lexer and hybrid
+- **D8.1.3v34*** LambdaJS uses its first-party C lexer and hybrid
   recursive-descent/Pratt parser for normal JavaScript and TypeScript
   source admission. It reduces directly into the retained `JsAstNode` graph;
   the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
@@ -2052,20 +2052,23 @@ loosely across the corpus — context disambiguates, and we live with it.
   nested callable, class,
   compound literal/pattern, `arguments`, `new.target`, `eval`, or `with` pins
   that definition to AST.
-  *(v30, 2026-10-23, USER)* ES modules additionally admit synchronous
-  top-level function declarations and function expressions that satisfy the
-  existing parameter-only numeric/boolean expression proof: simple parameters,
-  one returned expression, primitive Number/boolean literals, comparisons,
-  logical operators and conditional selection. The body cannot read imports,
-  globals or captured bindings, access properties, call another function,
-  write bindings or observe an activation. Methods, nested definitions,
-  suspended definitions, eval and dynamic source remain excluded from this
-  module extension. The shared proof is classified before the hot entry,
-  including a configured threshold of one; admission alone never compiles a
-  definition. Publication uses the existing boxed MIR satellite and preserves
-  the module slab, namespace, callable identity and ordinary argument/coercion
-  semantics. Forced `ast` remains interpreted. This does not widen module loop
-  handoff or whole-module admission.
+  *(v34, 2026-10-23, USER)* ES modules additionally admit synchronous
+  top-level function declarations/expressions and public instance methods under
+  the existing checked body/dependency proof. Methods require simple parameters;
+  their class site is top-level or inside one top-level synchronous module
+  function/arrow. Every resolved free lexical binding must be an ordinary source
+  module-slab binding; wrapper locals, parameters and class-self/private bindings
+  remain captures. Ordinary unresolved globals retain the classic checks.
+  Admitted bodies may perform local loops, property operations and live module
+  reads, writes and calls through ordinary invocation; no binding constancy is
+  inferred. Imports, captures outside the slab, constructors, accessors,
+  static/computed/private methods, super/private access, other nested/deeper or
+  suspended definitions, eval and dynamic source stay excluded. Classification
+  precedes the hot call, including threshold one. Boxed satellites preserve the
+  source slab, namespace and original callable's identity, source, strict
+  receiver, method home and non-constructibility. Thresholds, forced AST, module
+  loop handoff and whole-unit admission do not change. The parameter-expression
+  proof remains a narrower light-call proof.
   *(v14, 2026-09-22)* A promoted definition may read
   or write a direct non-computed named property of its ordinary `this`
   receiver. The existing call kernel installs that receiver; P2 appends its
@@ -2710,7 +2713,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.3v21 | Revised 2026-09-24 (USER): a direct eval from interpreted code links its activation to the caller frame's live `JsInterpEnv` chain through one boundary record (`JsInterpEnv::eval_script`). Free names in eval code and in its closures resolve by name through that chain (`js_interp_lookup_name`); EvalDeclarationInstantiation targets the caller's nearest function variable environment (`js_interp_instantiate_linked_eval`); the eval frame borrows the caller's `this`, `new.target`, and home-object homes. A function whose body or nested arrow contains a direct eval materializes `arguments`. The interpreted side of the bridge (projection, write-back, per-activation journal frames) is deleted; MIR callers keep it, with the source scan for strict writes to bridged consts. Strict `eval`/`arguments` targets in every assignment form are parser early errors on both tiers, and the eval-source stack and function eval-origin payload that only the deleted MIR eval unit fed are removed. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3756/3756 (incl. `test_js_gtest` 481/481); ad-hoc `test/language/eval-code` interpreter 214 → 312 of 343, MIR 217 → 218. Residue: MIR callers keep the bridge until P4 shared environment cells, so JS05-L5–L7 persist there; the interpreter keeps parameters and body vars in one function record (the `arrow-fn-body-cntns-arguments-*` eval-code cases); PerformEval's caller-dependent `new.target`/`super` early errors are not enforced. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI36; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.1.3v22 | Ruled 2026-10-03 (USER); **not implemented** beyond the call-threshold default. JS promotion is hotness-only: `JS_FUNC_JIT_THRESHOLD` defaults to 1000 calls (was five), and a loop reaching `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running AST activation to compiled code at the loop-head test, in the D8.1.1v14 shape (continuation over the live bindings, one-way). This supersedes the v13 sentence that no active AST frame transfers to MIR and JSI18's entry-only rule. JS keeps its own selector and knob names. Both thresholds are provisional pending release profiling. Open: P2 admission still rejects calls and outer bindings, so few loops are eligible until it widens; the satellite still re-parses its source. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §9.3/JSI18v2; plan: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md`. |
 | D8.1.3v23 | Revised 2026-10-03 (USER): the `JS_FUNC_JIT_THRESHOLD` default is 100 calls (1000 in v22). A release sweep over 13 JS benchmarks found no row slower at 100 than at 1000, with most of the gap to 5 recovered (mbrot2 22.8 → 12.6 ms, paraffins 82 → 62, nqueens2 50 → 44, puzzle 51 → 42); 100 still keeps rarely called functions interpreted while each promotion re-parses its whole source (17–59 ms at 17–87 KB). `JS_LOOP_JIT_THRESHOLD` (named `JS_JIT_BACKEDGE` until this revision) stays 10000; the call knob is renamed `JS_FUNC_JIT_THRESHOLD` (was `JS_JIT_THRESHOLD`). Both remain provisional; revisit after satellites compile from the retained script (plan E2). Evidence: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md` §11.5. Renamed 2026-10-03 (USER), meaning unchanged: the tier selector `LAMBDA_TIER` is `LAMBDA_EXEC_BACKEND`, `LAMBDA_JIT_THRESHOLD` is `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE` is `LAMBDA_LOOP_JIT_THRESHOLD`, and LambdaJS's `JS_EXECUTION_BACKEND` is `JS_EXEC_BACKEND`; the old names are no longer read. |
-| D8.1.3v32 | Approved 2026-10-23 (USER): synchronous ES-module top-level declarations and expressions may promote at hot entry under the existing classic-function admission checks, including local loops, property operations and live module-slab reads/writes/calls. Calls use ordinary invocation; no binding constancy is assumed. Imports, captures outside the module slab, methods, nested/suspended definitions, eval and dynamic source remain excluded. Classification precedes the configured hot call, including threshold one; satellites preserve the source module slab, namespace and callable identity. Thresholds, forced AST and module loop/whole-unit admission remain unchanged. Working record: `vibe/Lambda_Design_JS_Interpreter.md` module hot-entry revision and §9.4. |
+| D8.1.3v34 | Approved 2026-10-23 (USER): synchronous top-level ES-module declarations/expressions and simple-parameter public instance methods may promote under the existing proof. Class sites may be top-level or inside one top-level synchronous module function/arrow, with every resolved free lexical binding in the ordinary module slab. Wrapper-local/class-self/private/import captures and deeper or suspended wrappers stay excluded. Original callable identity/source, strict receiver, method home and non-constructibility remain authoritative; calls use ordinary invocation and live slots. Other method/body exclusions, thresholds, forced AST and module loop/whole-unit admission are unchanged. The approved method extension remains unimplemented after neutral release experiments. Working record: `vibe/Lambda_Design_JS_Interpreter.md` module hot-entry revision and §9.4. |
 | D8.1.3v29 | Clarified 2026-10-21 (USER): JavaScript defaults to AUTO, including an unset or empty `JS_EXEC_BACKEND`. Supported units start in AST; whole-unit fallback, hot promotion and explicit `mir` use fast MVP MIR. MVP replaces the old MIR engine, not the AUTO tier policy. The redundant `--runtime=mvp-lmd` option remains removed. Performance preservation and remaining effect-analysis gates stay open. Working records: `vibe/jube/JS_MVP_Integration.md`, `vibe/impl/JS_MVP_Integration.md`. |
 | D8.1.3v27 | Ruled 2026-10-20 (USER): preserve fast MVP performance while unifying the default/explicit command and Lambda context, globals, host and lifetime ownership. Implementation and release qualification remain in progress; finer dynamic-effect boundaries remain open. Design and acceptance gates: `vibe/jube/JS_MVP_Integration.md`. |
 | D8.1.3v26 | Revised 2026-10-18: align the retained interpreter with formal MVP direct eval. Both tiers use live `JsInterpEnv` bindings and bound-AST context checks; remove the retired LJS MIR binding-projection journals, source-scan const checks and bridged-eval entry. Lexical receiver payloads use destination-owned Lambda scalar homes in the GC environment. Explicit AST/native and MVP operation profiles remain distinct. Source audit and qualification: `vibe/impl/JS_Interpreter_MVP_Alignment.md`. |

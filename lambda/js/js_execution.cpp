@@ -487,6 +487,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         log_error("js-mir: cannot initialize compile recovery state");
         return ItemError;
     }
+    // host clocks are configured before source entry; capture this realm's
+    // origin before user Date timestamps can precede its first performance read.
+    (void)js_performance_time_origin_ms();
     js_mir_reset_last_phase_timing();
     long phase_total_start = js_mir_phase_now_us();
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
