@@ -278,3 +278,12 @@ let direct_row_table = html_fragment_to_blocks_for_schema(html5_subset_schema,
 "html direct rows table tag:"; direct_row_table[0].tag == 'table'
 "html direct rows wrapped:"; direct_row_table[0].content[0].tag == 'tbody'
 "html direct rows count:"; len(direct_row_table[0].content[0].content) == 2
+
+let pretty_table = "<table>\n <tr>\n <th> A </th>\n <th>B</th>\n </tr>\n <tr>\n <td>C</td>\n <td>D</td>\n </tr>\n</table>"
+let pretty_html = cmd_paste_html(html_table_state,pretty_table,"").doc_after
+let pretty_md = cmd_paste_html({doc:node('doc',[node('paragraph',[])]),selection:all_selection()},pretty_table,"").doc_after
+"html indented table keeps rows and cells:";
+len(node_at(pretty_html,[0,0]).content)==2 and len(node_at(pretty_html,[0,0,1]).content)==2
+"md indented table keeps rows and cells:";
+len(node_at(pretty_md,[0]).content)==2 and len(node_at(pretty_md,[0,1]).content)==2
+"indented table preserves cell whitespace:"; doc_text(node_at(pretty_html,[0,0,0,0]))==" A "

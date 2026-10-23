@@ -2049,6 +2049,10 @@ static const CssEnumInfo css_value_definitions[] = {
     {"horizontal", 10, CSS_VALUE_HORIZONTAL, CSS_VALUE_GROUP_DIRECTION},
     {"vertical", 8, CSS_VALUE_VERTICAL, CSS_VALUE_GROUP_DIRECTION},
     {"-webkit-baseline-middle", 23, CSS_VALUE_BASELINE_MIDDLE, CSS_VALUE_GROUP_VERTICAL_ALIGN},
+    {"nwse-resize", 11, CSS_VALUE_NWSE_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"nesw-resize", 11, CSS_VALUE_NESW_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"ew-resize", 9, CSS_VALUE_EW_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"ns-resize", 9, CSS_VALUE_NS_RESIZE, CSS_VALUE_GROUP_CURSOR},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

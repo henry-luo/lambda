@@ -54,12 +54,7 @@ fn attr_value_at(attrs, key, i, n) {
 }
 fn attr_value(n, key) =>
   if (is_node(n)) { attr_value_at(n.attrs, key, 0, len(n.attrs)) }
-  else if (type(n) == element and key == 'href') { n.href }
-  else if (type(n) == element and key == 'title') { n.title }
-  else if (type(n) == element and key == 'src') { n.src }
-  else if (type(n) == element and key == 'alt') { n.alt }
-  else if (type(n) == element and key == 'width') { n.width }
-  else if (type(n) == element and key == 'height') { n.height }
+  else if (type(n) == element) { map(n)[string(key)] }
   else { null }
 
 fn html_schema_mode(schema) => schema.p != null and schema.paragraph == null
@@ -80,7 +75,10 @@ fn heading_node(schema, level, kids) =>
 
 fn image_node(schema, n) map | error =>
   node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')},
-    *[for (key in ['width','height'],let value=attr_value(n,key) where value!=null) {name:key,value:value}]], [])
+    // only schema-declared extensions survive paste, including an app's editable object metadata.
+    *[for (key in unique(['width','height',*[for (a in schema[image_tag(schema)].attrs
+        where not contains(['src','alt'],a.name)) a.name]]),let value=attr_value(n,key)
+        where value!=null) {name:key,value:value}]], [])
 
 // HTML input is dynamically shaped, so node construction reports malformed
 // attributes as ordinary data rather than pretending that paste succeeded.
@@ -90,9 +88,12 @@ fn link_node(schema, n) map | error =>
 
 fn blockquote_node(schema, n) map | error => node('blockquote', coerce_children(schema, convert_children_schema(schema, n), 'block'))
 fn code_block_node(schema, n) map | error => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
-fn table_node(schema, n) map | error => node('table', normalize_table_children(schema, convert_children_schema(schema, n)))
-fn table_section_node(schema, tag, n) map | error => node(tag, convert_children_schema(schema, n))
-fn table_row_node(schema, n) map | error => node('tr', convert_children_schema(schema, n))
+// indentation between table parts is not a paragraph that terminates the schema's row/cell run.
+fn table_children_schema(schema, n) =>
+  [for (child in convert_children_schema(schema,n) where not (is_text(child) and trim(child.text)=="")) child]
+fn table_node(schema, n) map | error => node('table', normalize_table_children(schema, table_children_schema(schema, n)))
+fn table_section_node(schema, tag, n) map | error => node(tag, table_children_schema(schema, n))
+fn table_row_node(schema, n) map | error => node('tr', table_children_schema(schema, n))
 fn table_cell_node(schema, tag, n) map | error => node(tag, convert_inline_schema(schema, n))
 
 fn is_list_node(schema, n) {

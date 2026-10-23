@@ -1,6 +1,7 @@
 # Radiant — Events & Input Dispatch
 
 > **Last verified against tree:** 2026-09-01
+> **Scoped source refresh:** 2026-10-23 — keyboard caret/scroll precedence and focused editing-surface facts (§6).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: platform input, IME, automation, and synthetic DOM dispatch construct one native event record and enter the same author-then-UA pipeline. It covers the `RdtEvent` union and `EventContext` record, hit testing, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
@@ -85,6 +86,20 @@ template or native fallback then owns the default action; handler mutations are
 settled through the S12.1.3 regeneration path. Hit-test-only work such as
 cursor selection and scrollbar geometry stays native and is not a second event
 propagation path.
+
+Package clipboard commands retain the enclosing event record across their nested
+notifications (D7.2.5, S12.1.3). An exact `RootFrame` keeps that record alive;
+its cancellation and UA-delivery flags return with it, while
+model edits and selection completions remain pending. This prevents a clipboard
+command from making its enclosing click appear undelivered and replaying it.
+Keyboard events target the live focused control before a retained document caret,
+so a menu can navigate without changing the document's selection.
+
+Secondary-button `contextmenu` records expose the hit `source_pos` separately
+from the retained `source_selection` (D7.2.5, S12.1.3). Rich-editable table cells
+retain their padding as a hit target; nearby caret candidates cannot redirect
+item actions into another paragraph. If text-edge snapping escapes the hit
+element, the context position uses that element's boundary.
 
 ### 4.1 Which runtime runs a handler
 
@@ -172,6 +187,15 @@ native layer keeps platform key translation, focus/selection geometry, and
 paint; package handlers own policy under S12.1.3. `RDT_EVENT_KEY_UP` is
 lightweight, while `RDT_EVENT_TEXT_INPUT` delivers a committed Unicode
 codepoint into the focused editing surface.
+
+The `scrollkey` behavior record includes an `editing` fact derived from the
+live focused surface. `lambda.dom.scroll` leaves Space to text entry there;
+its later character event performs the edit. A completed native editable-caret
+operation ends keyboard default dispatch before scrolling, so arrow keys do
+not both move the caret and page the containing scrollport. Native owns focus
+classification and geometry; the package owns the Space policy (**D7.2.5**).
+`editor_viewport` and the Word `viewport` replay cover physical key sequences;
+the document keyboard-scroll fixtures retain Space/PageDown outside editors.
 
 Both key phases resolve their target through `live_keyboard_event_target`:
 live focus or an editing selection wins, otherwise the document body receives

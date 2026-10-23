@@ -5055,6 +5055,15 @@ static TypesetStatus paged_publish_image(PagedFlowState* state, LayoutViewNode* 
         (!block->scroller || (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
             block->scroll()->overflow_y == CSS_VALUE_VISIBLE));
     node->image_box = lam::up(box);
+    // retain the image's page-space transform before the DOM workspace is reused (D4.5.1v4).
+    Rect border = render_geometry_block_border_rect(&blot, block, 1.0f);
+    RdtMatrix matrix;
+    if (render_geometry_transform_matrix(block->transformp(), border.x, border.y, border.width, border.height, &matrix)) {
+        RdtMatrix* retained = (RdtMatrix*)arena_alloc(tree->model->arena, sizeof(RdtMatrix));
+        if (!retained) return TYPESET_OUT_OF_MEMORY;
+        *retained = matrix;
+        node->paint_transform = lam::up((const RdtMatrix*)retained);
+    }
     // a sliced replaced box clips its image to the fragment
     if (!node->first_fragment || !node->last_fragment) node->clip_content = true;
     return TYPESET_OK;
@@ -7062,8 +7071,15 @@ static bool paged_native_image(void* context, const LayoutViewNode*, const Paint
 static bool paged_native_paint(void* context, const PaintList* source) {
     return paint_list_borrow_commands((PaintList*)context, source);
 }
+static bool paged_native_fragment(void* context, const LayoutViewNode* node, bool entering) {
+    if (node->paint_transform) {
+        if (entering) paint_push_transform((PaintList*)context, node->paint_transform);
+        else paint_pop_transform((PaintList*)context);
+    }
+    return true;
+}
 static SecondaryViewVisitor paged_native_visitor(PaintList* paint, bool pdf = false) {
-    return {paint, nullptr, paged_native_boundary, paged_native_fill, paged_native_clip,
+    return {paint, paged_native_fragment, paged_native_boundary, paged_native_fill, paged_native_clip,
         paged_native_glyph, paged_native_image, paged_native_paint, pdf};
 }
 

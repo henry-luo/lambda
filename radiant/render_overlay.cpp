@@ -16,6 +16,18 @@ typedef struct SelectionPaintCtx {
     float          iframe_offset_y;
 } SelectionPaintCtx;
 
+static void render_caret_in_scroll_clips(RasterRenderContext* rdcon, View* ancestor,
+        RdtLogicalPoint document_offset, Rect rect, Color color) {
+    if (!ancestor) {
+        rc_fill_rect(rdcon, rect.x, rect.y, rect.width, rect.height, color);
+        return;
+    }
+    RenderClipScope clip = render_clip_push_viewport_scope(
+        rdcon, lam::view_as_block(ancestor), document_offset);
+    render_caret_in_scroll_clips(rdcon, ancestor->parent_view(), document_offset, rect, color);
+    render_clip_pop_scope(rdcon, &clip);
+}
+
 static void render_caret(RasterRenderContext* rdcon, DocState* state) {
     View* view = NULL;
     int caret_offset = 0;
@@ -56,7 +68,8 @@ static void render_caret(RasterRenderContext* rdcon, DocState* state) {
     ViewSpan* caret_element = caret_node && caret_node->is_element()
         ? static_cast<ViewSpan*>(caret_node->as_element()) : nullptr;
     Color caret_color = radiant_caret_color_for_view(caret_element);
-    rc_fill_rect(rdcon, x, y, caret_width, height, caret_color);
+    render_caret_in_scroll_clips(rdcon, view->parent_view(),
+        {iframe_offset_x, iframe_offset_y}, {x, y, caret_width, height}, caret_color);
 }
 
 static RdtLogicalPoint selection_paint_to_canvas(const SelectionPaintCtx* ctx,

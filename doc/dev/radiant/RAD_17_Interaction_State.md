@@ -1,6 +1,7 @@
 # Radiant — Interaction State: DocState, State Machine & Schema
 
 > **Last verified against tree:** 2026-10-15 *(focus styling and caret presentation below; other sections retain their prior verification scope)*
+> **Scoped source refresh:** 2026-10-23 — caret overflow ancestry (§3).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's per-document interaction/UI-state layer: the one big mutable `DocState` struct that holds every piece of live presentation state (focus/hover/active, selection/caret, IME, drag-drop, dropdown and context-menu overlays, form-control values, scroll, dirty/reflow tracking, and the Lambda reactive-template reconciliation maps); the `state_set` primitive that backs generic per-node flags; and the *stateless* state machine + declarative schema that wrap direct mutation with a validation/invariant/logging boundary. It is emphatically **not** a Redux/signals store and **not** a persistence/undo store — it models interaction, while selection rendering derives logical boundaries from canonical selection state.
 >
@@ -66,6 +67,13 @@ Selection boundaries for dragging/copying without painting a caret. Readonly
 or disabled controls, noneditable islands, and blurred editors suppress the
 insertion caret. The native `browser_focus_caret` UI fixture covers these
 cases, empty editing hosts, authored outlines, and keyboard navigation.
+The caret overlay replays each ancestor's overflow clip in window coordinates,
+using the same client matrix as hit testing. Nested scrollports, partial clips,
+rounded corners, and embedding offsets therefore constrain the overlay after
+normal document traversal has finished. Vector list markers explicitly open
+the current block clip before recording paths; glyphs and images already
+consume that bound. `editor_viewport` and Word's `viewport` replay check the
+clipped pixels and retain visible caret/marker controls.
 `browser_inline_focus` checks actual outline pixels on links and suppression
 on keyboard-focused controls. The browser model follows
 [Selectors 4 §9.4](https://www.w3.org/TR/selectors-4/#the-focus-visible-pseudo)

@@ -152,6 +152,7 @@ static inline AstFuncNode* ast_direct_call_function(AstCallNode* call) {
 // initializer; an annotated binding is guarded. build_ast and the MIR solver
 // share this walk and differ only in what they know about a call.
 typedef bool (*AstCallDefectPredicate)(AstCallNode* call, void* ctx);
+typedef bool (*AstValueNonErrorPredicate)(AstNode* value, void* ctx);
 
 // The system call a `|>` pipe applies to its whole left operand (`d |> len`,
 // `d |> split(",")`), with its row in `info`: the piped value is the call's
@@ -233,10 +234,12 @@ bool ast_expr_may_defect(AstNode* node, int depth);
 // ast_value_may_carry_defect. `piped` is a `|>` pipe's injected left operand.
 static inline bool ast_sys_operands_error_may_reach(const SysFuncInfo* info,
         AstNode* piped, AstNode* args, AstCallDefectPredicate call_may_defect,
-        void* ctx) {
+        void* ctx, AstValueNonErrorPredicate proven_non_error = NULL) {
     if (!sysfunc_params_reject_error(info)) return false;
     for (AstNode* arg = piped ? piped : args; arg;
             arg = arg == piped ? args : arg->next) {
+        // a tier's admitted carrier can refine the conservative source type.
+        if (proven_non_error && proven_non_error(arg, ctx)) continue;
         if ((arg->type && lambda_type_accepts_error(arg->type)) ||
                 ast_value_may_carry_defect(arg, call_may_defect, ctx, 0)) return true;
     }

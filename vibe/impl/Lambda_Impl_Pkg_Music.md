@@ -4,7 +4,7 @@
 profiles implemented; live playback verified on macOS. Linux/Windows live
 verification and broader expressive notation remain outside the verified profile.
 
-Design: [Lambda_Design_Pkg_Music.md](../Lambda_Design_Pkg_Music.md).
+Design: [Lambda_Pkg_Music.md](../Lambda_Pkg_Music.md).
 The user selected native Lambda and requested implementation. D7.2.4 governs
 the package, S12.1.1v2 separates score transformations from playback effects,
 and D7.1.2v2/D7.5.3 govern resource reads and Radiant calls.

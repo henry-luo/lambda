@@ -2,14 +2,10 @@
 import dom
 import controller: lambda.edit.controller
 import model: .mod_model
-import adapter: lambda.editor.mod_dom_adapter
 import image: lambda.editor.mod_image
 
-pub fn image_index(editor,path) => [for (i,entry in model.images(editor.doc) where entry.path==path) i][0]
 pub pn image_element(editor,node,path=null) {
-    let selected = model.selected_image(editor)
-    let index = image_index(editor,if (path!=null) path else selected.path)
-    return if (index==null) null else dom.query_selector_all(controller.surface(node),"img")[index]
+    return image.image_element(editor,controller.surface(node),path)
 }
 pub pn hit(editor,node) {
     return image.hit(editor,node,controller.surface(node))
@@ -31,19 +27,7 @@ pn clear_preview(editor,node) {
     position(editor,node)
 }
 pn drop_target(editor,path,evt) {
-    let surface = controller.surface(evt.target)
-    let box = dom.bounding_box(surface)
-    if (evt.clientX<box.x or evt.clientX>=box.x+box.width or evt.clientY<box.y or evt.clientY>=box.y+box.height) { return null }
-    let target = adapter.normalize_source_pos(editor.doc,evt.source_pos)
-    if (model.image_move_transaction(editor,path,target)==null) { return null }
-    let boundary = dom.boundary_from_point(surface,int(evt.clientX),int(evt.clientY),null)
-    if (boundary==null or not dom.contains(surface,boundary.node)) { return null }
-    // a collapsed Range measures the drop caret without changing the image bookmark.
-    let caret_range = dom.document_create_range(dom.root_node(surface))
-    dom.range_set_start(caret_range,boundary.node,boundary.offset)
-    dom.range_collapse(caret_range,true)
-    let caret = dom.range_get_bounding_client_rect(caret_range)
-    return if (caret.height>0) {target:target,caret:caret} else null
+    return image.drop_target(editor,path,evt,controller.surface(evt.target))
 }
 pub pn position(editor,node) {
     let image = image_element(editor,node)

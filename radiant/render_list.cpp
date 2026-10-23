@@ -38,6 +38,37 @@ bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker
     return render_paint_image_box(paint, &box);
 }
 
+static RdtPath* marker_shape_path(CssEnum type, float cx, float cy, float size, float stroke) {
+    switch (type) {
+        case CSS_VALUE_DISC:
+        case CSS_VALUE_CIRCLE: {
+            float radius = (size - (type == CSS_VALUE_CIRCLE ? stroke : 0.0f)) / 2.0f;
+            RdtPath* path = rdt_path_new();
+            rdt_path_add_circle(path, cx, cy, radius, radius);
+            return path;
+        }
+        case CSS_VALUE_SQUARE:
+            return render_path_create_rounded_rect({cx-size/2.0f, cy-size/2.0f, size, size}, nullptr);
+        case CSS_VALUE_DISCLOSURE_CLOSED:
+        case CSS_VALUE_DISCLOSURE_OPEN: {
+            float triangle = size * 1.6f;
+            RdtPath* path = rdt_path_new();
+            if (type == CSS_VALUE_DISCLOSURE_CLOSED) {
+                rdt_path_move_to(path, cx, cy-triangle/2.0f);
+                rdt_path_line_to(path, cx+triangle, cy);
+                rdt_path_line_to(path, cx, cy+triangle/2.0f);
+            } else {
+                rdt_path_move_to(path, cx-triangle/2.0f, cy-triangle/2.0f);
+                rdt_path_line_to(path, cx+triangle/2.0f, cy-triangle/2.0f);
+                rdt_path_line_to(path, cx, cy+triangle/2.0f);
+            }
+            rdt_path_close(path);
+            return path;
+        }
+        default: return nullptr;
+    }
+}
+
 void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element() || view_visibility_is_hidden(marker)) return;
 
@@ -123,63 +154,18 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
 
     float marker_cx = x + width - marker_font_size;
     float marker_cy = y + marker_height / 2.0f;
+    // the inherited scroll bound is already projected into destination pixels, as for glyph/image clips.
+    RenderClipScope marker_clip = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
 
-    switch (marker_type) {
-        case CSS_VALUE_DISC: {
-            float radius = bullet_size / 2.0f;
-
-            RdtPath* p = rdt_path_new();
-            rdt_path_add_circle(p, marker_cx, marker_cy, radius, radius);
-            rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
-            rdt_path_free(p);
-            break;
-        }
-
-        case CSS_VALUE_CIRCLE: {
-            float radius = bullet_size / 2.0f;
-            float stroke_width = scale;
-
-            RdtPath* p = rdt_path_new();
-            rdt_path_add_circle(p, marker_cx, marker_cy, radius - stroke_width/2, radius - stroke_width/2);
-            rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
-            rdt_path_free(p);
-            break;
-        }
-
-        case CSS_VALUE_SQUARE: {
-            float sx = marker_cx - bullet_size / 2.0f;
-            float sy = marker_cy - bullet_size / 2.0f;
-
-            rc_fill_rect(rdcon, sx, sy, bullet_size, bullet_size, color);
-            break;
-        }
-
-        case CSS_VALUE_DISCLOSURE_CLOSED: {
-            float tri_size = bullet_size * 1.6f;
-
-            RdtPath* p = rdt_path_new();
-            rdt_path_move_to(p, marker_cx, marker_cy - tri_size / 2.0f);
-            rdt_path_line_to(p, marker_cx + tri_size, marker_cy);
-            rdt_path_line_to(p, marker_cx, marker_cy + tri_size / 2.0f);
-            rdt_path_close(p);
-            rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
-            rdt_path_free(p);
-            break;
-        }
-
-        case CSS_VALUE_DISCLOSURE_OPEN: {
-            float tri_size = bullet_size * 1.6f;
-
-            RdtPath* p = rdt_path_new();
-            rdt_path_move_to(p, marker_cx - tri_size / 2.0f, marker_cy - tri_size / 2.0f);
-            rdt_path_line_to(p, marker_cx + tri_size / 2.0f, marker_cy - tri_size / 2.0f);
-            rdt_path_line_to(p, marker_cx, marker_cy + tri_size / 2.0f);
-            rdt_path_close(p);
-            rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
-            rdt_path_free(p);
-            break;
-        }
-
+    RdtPath* shape = marker_shape_path(marker_type, marker_cx, marker_cy, bullet_size, scale);
+    if (shape) {
+        // marker shapes use the same CSS transform as text; their scroll clip stays in destination space.
+        const RdtMatrix* transform = render_state_current_transform(rdcon);
+        if (marker_type == CSS_VALUE_CIRCLE)
+            rc_stroke_path(rdcon, shape, color, scale, RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, transform);
+        else rc_fill_path(rdcon, shape, color, RDT_FILL_WINDING, transform);
+        rdt_path_free(shape);
+    } else switch (marker_type) {
         case CSS_VALUE_DECIMAL:
         case CSS_VALUE_DECIMAL_LEADING_ZERO:
         case CSS_VALUE_LOWER_ROMAN:
@@ -238,6 +224,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
         default:
             break;
     }
+    render_clip_pop_scope(rdcon, &marker_clip);
 }
 
 void render_litem_view(RasterRenderContext* rdcon, ViewBlock* list_item) {

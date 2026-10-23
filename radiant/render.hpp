@@ -4018,6 +4018,8 @@ RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bo
                                            const RdtMatrix* transform = nullptr);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                                float origin_x, float origin_y);
+RenderClipScope render_clip_push_viewport_scope(RasterRenderContext* rdcon, ViewBlock* block,
+                                               RdtLogicalPoint document_offset);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
 
 // ===== render_composite.hpp =====
@@ -4300,6 +4302,7 @@ struct RenderBorderStroke {
 };
 // the callback takes ownership of path, including on failure (D4.5.1v4).
 bool render_paint_boundary_path(void*, RdtPath*, Color, const RenderBorderStroke*);
+bool render_border_raster_path(void*, RdtPath*, Color, const RenderBorderStroke*);
 using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
 bool render_border_style_supported(CssEnum style);
 bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,

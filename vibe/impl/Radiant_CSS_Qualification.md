@@ -181,7 +181,7 @@ exporting runtime internals. The source-position suite passes **5/5**
 including numeric domain labels. The parser output was already correct.
 
 The graph parser suite passes **20/20** (`graph_audited.json`). The footprint
-review in `vibe/Lambda_Pkg_Graph.md` §19.3.5 accounts for the existing sequence
+review (parser size budget, `vibe/Lambda_Pkg_Graph.md` §11.1; ceilings in `GraphParserTest.ParserLocBudget`) accounts for the existing sequence
 family, shares repeated line-label normalization across families and tightens
 all six source-unit ceilings to their audited sizes. The rebuilt
 Mermaid corpus also passes **40/40** (`graph_corpus_qualified.json`).

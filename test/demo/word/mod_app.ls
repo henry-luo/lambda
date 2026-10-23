@@ -16,10 +16,12 @@ import stories: .mod_stories
 import equation: .mod_equation
 import wordart: .mod_wordart
 import changes: .mod_changes
+import transform: .mod_transform
 import controller: lambda.edit.controller
+import tables: .mod_table
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
-    tab:"Home",dialog:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
+    tab:"Home",dialog:null,context:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
     zoom:1.0,nav:true,read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
@@ -28,20 +30,30 @@ pn shape_values(node,kind=null) { return {kind:kind or field(node,"shape-kind"),
     text:field(node,"shape-text"),text_color:field(node,"shape-text-color"),size:field(node,"shape-size")} }
 pn art_values(node,style=null) { return {text:field(node,"art-text"),style:style or field(node,"art-style"),transform:field(node,"art-transform"),
     width:field(node,"art-width"),height:field(node,"art-height"),size:field(node,"art-size"),font:field(node,"art-font"),
-    fill:field(node,"art-fill"),outline:field(node,"art-outline")} }
+    fill:field(node,"art-fill"),outline:field(node,"art-outline"),rotation:field(node,"art-rotation")} }
 pub let focus_document = controller.focus
 pub let is_control = controller.is_control
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
 pub pn adopt(st,evt,changes_only=false) {
+    // a structural selection's native caret is only a projection; toolbar/key snapshots retain the cells.
+    if (tables.structural(st.editor) and not changes_only) { return st }
     let accepted = controller.adopt(st.editor,evt)
     if (changes_only and not accepted.changed) { return st }
     return {*:st,editor:accepted.editor}
+}
+pub pn selection_changed(st,evt) {
+    if (st.read_only or st.context!=null) { return st }
+    let adopted = adopt(st,evt,true)
+    if (adopted.editor==st.editor) { return st }
+    let next = {*:adopted,editor:model.clean(adopted.editor)}
+    controller.restore(tables.native_editor(next.editor))
+    return next
 }
 let replaced_editor = controller.replace
 pub pn finish(st,node) {
     // Bind only once an editing action owns a selection. View-only changes
     // before the first caret placement have no model selection to publish.
-    controller.restore(st.editor,not st.read_only and st.dialog==null)
+    controller.restore(tables.native_editor(st.editor),not st.read_only and st.dialog==null)
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     dom.set_close_guard(node,dirty)
     dom.set_window_title(node,(if (dirty) "● " else "") ++ st.file_state.envelope.title ++ " — Word")
@@ -81,6 +93,11 @@ pn dialog_model(st,id,values,params,node) {
 pn dialog_command(st,action,node) {
     if (action == "cancel") { focus_document(node); return {*:st,dialog:null,pending:""} }
     if (action == "discard") { return continued(st,st.pending,node) }
+    if (action=="cell_borders") {
+        let values = {preset:field(node,"border-preset"),style:field(node,"border-style"),
+            width:field(node,"border-width"),color:field(node,"border-color")}
+        return dialog_model(st,"table.borders",values,{*:values,width:float(values.width)},node)
+    }
     if (action == "save") { return command({*:st,dialog:null},"file.save",{},node) }
     if (action == "insert_table") {
         let values = {rows:field(node,"table-rows"),cols:field(node,"table-columns"),header:field(node,"table-header")}
@@ -126,7 +143,7 @@ pn dialog_command(st,action,node) {
     if (action == "wordart") {
         let values = art_values(node)
         return dialog_model(st,if (st.dialog.editing) "wordArt.set" else "insert.wordArt",values,
-            {*:values,width:float(values.width),height:float(values.height),size:float(values.size)},node)
+            {*:values,width:float(values.width),height:float(values.height),size:float(values.size),rotation:float(values.rotation)},node)
     }
     if (action=="tracking") {
         let values = {enabled:field(node,"tracking-enabled"),author:field(node,"tracking-author")}
@@ -146,13 +163,13 @@ pn dialog_command(st,action,node) {
             after:float(values.after),indent:float(values.indent),first:float(values.first)},node)
     }
     if (action == "picture") {
-        let values = {path:field(node,"picture-path"),alt:field(node,"picture-alt"),width:field(node,"picture-width"),height:field(node,"picture-height")}
+        let values = {path:field(node,"picture-path"),alt:field(node,"picture-alt"),width:field(node,"picture-width"),height:field(node,"picture-height"),rotation:field(node,"picture-rotation")}
         let editing = st.dialog.kind=="picture_settings"
         let source = if (editing) "" else storage.picture_source(trim(values.path)) ^ {
             return {*:st,dialog:{*:st.dialog,values:values,error:^.message},status:^.message}
         }
         return dialog_model(st,if (editing) "picture.size" else "insert.picture",values,
-            {src:source,alt:values.alt,width:float(values.width),height:if (trim(values.height)=="") 0 else float(values.height)},node)
+            {src:source,alt:values.alt,width:float(values.width),height:if (trim(values.height)=="") 0 else float(values.height),rotation:float(values.rotation)},node)
     }
     if (action == "link") {
         let href = trim(field(node,"link-address"))
@@ -183,6 +200,10 @@ pn dialog_command(st,action,node) {
 pub pn command(st,id,params,node) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
     if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or (params.tab=="Review" and not st.revisions)} }
+    if (id=="ui.cellBorders") {
+        if (st.read_only or model.table_context(st.editor)==null) { return st }
+        return {*:st,dialog:{kind:"cell_borders",values:tables.border_settings(st.editor)}}
+    }
     if (contains(["ui.headerFooter","ui.pageNumber","ui.equation","ui.equationSettings","ui.wordArt","ui.wordArtSettings","ui.objectSettings"],id) or
         (id=="ui.pictureSettings" and (equation.settings(model.current_node(st.editor,'img').node)!=null or wordart.settings(model.current_node(st.editor,'img').node)!=null))) {
         if (st.read_only) { return st }
@@ -282,7 +303,8 @@ pub pn command(st,id,params,node) {
         return {*:st,nav:true}
     }
     if (id == "view.navigationPane") { return {*:st,nav:not st.nav} }
-    if (id == "view.readMode") { return {*:st,read_only:not st.read_only,status:if (st.read_only) "Ready to write" else "Read mode"} }
+    if (id == "view.readMode") { return {*:st,editor:tables.native_editor(st.editor),read_only:not st.read_only,
+        status:if (st.read_only) "Ready to write" else "Read mode"} }
     if (id == "view.focusMode") { return {*:st,focused:not st.focused} }
     if (starts_with(id,"view.zoom")) { return {*:st,zoom:if (id == "view.zoomReset") 1.0
         else min(1.5,max(0.5,st.zoom + if (id == "view.zoomIn") 0.1 else -0.1))} }
@@ -302,7 +324,7 @@ pub pn command(st,id,params,node) {
         let image = model.current_node(st.editor,'img')
         return {*:st,dialog:{kind:if (id == "ui.pictureSettings") "picture_settings" else "picture",
             values:{path:"",alt:attrs_get(image.node.attrs,'alt') or "",width:attrs_get(image.node.attrs,'width') or 320,
-                height:attrs_get(image.node.attrs,'height') or ""}}}
+                height:attrs_get(image.node.attrs,'height') or "",rotation:transform.rotation(image.node)}}}
     }
     if (id == "file.save" or id == "file.saveAs") {
         if (st.file_state.path=="" or id == "file.saveAs") { return {*:st,dialog:{kind:"save",

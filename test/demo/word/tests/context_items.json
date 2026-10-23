@@ -1,0 +1,1308 @@
+{
+  "name": "Word focused-item context menus and command targeting",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "test/demo/word/tests/context_items.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "table"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-row-above"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-row-below"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-column-left"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-column-right"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete-row"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete-column"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-options"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "var r=document.querySelector('#word-context-menu').getBoundingClientRect();r.y>=8&&r.y+r.height<=992.5"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/table-context-menu.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-row-above",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) td:first-child"
+      },
+      "equals": "C"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-row-below",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child"
+      },
+      "equals": "C"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-column-left",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "equals": "C"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-column-right",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child"
+      },
+      "equals": "C"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-delete-row",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface td:first-child"
+      },
+      "equals": "A"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-delete-column",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td"
+      },
+      "equals": "D"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-delete",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-options",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-tab",
+      "equals": "Table"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#cell-alignment"
+      },
+      "value": "center"
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface tr:nth-child(2) td')).textAlign==='center'"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child"
+      },
+      "start": 1,
+      "end": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "F10",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "table"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-all",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "table"
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-row-above",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Plain text for selection"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface li p",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "list"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-indent",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface li"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-link",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "link"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-remove-link"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-edit-link",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-link"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#link-address"
+      },
+      "attribute": "value",
+      "equals": "#word-bookmark-intro"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-link",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-remove-link",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "picture"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#context-object"
+      },
+      "equals": "Picture Settings\u2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-bold"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-picture_settings"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "shape"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#context-object"
+      },
+      "equals": "Format Shape\u2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-bold"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-shape"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "equation"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#context-object"
+      },
+      "equals": "Edit Equation\u2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-bold"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-equation"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "wordart"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#context-object"
+      },
+      "equals": "Edit WordArt\u2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-bold"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-wordart"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-rotate-left",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])"
+      },
+      "attribute": "data-word-rotation",
+      "equals": "-90"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-remove-object",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-resolve-comment-c1"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-resolve-comment-c1",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface [data-word-change]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-accept-change"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-accept-change",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-change]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#word-bookmark-intro",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-remove-bookmark"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-remove-bookmark",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-bookmark-intro"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 1600
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".word-header",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "header"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#context-story-edit"
+      },
+      "equals": "Edit Header\u2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-story-edit",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-stories"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".word-footer",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "footer"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#context-story-edit"
+      },
+      "equals": "Edit Footer\u2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-story-edit",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-stories"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface hr"
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "rule"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-remove-rule",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface hr"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface hr"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-table-delete[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 600
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "var r=document.querySelector('#word-context-menu').getBoundingClientRect();r.y>=8&&r.y+r.height<=592.5"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-link"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    }
+  ]
+}

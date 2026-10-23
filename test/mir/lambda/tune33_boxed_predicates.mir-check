@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "S3.4/D2.4: boxed scalar comparisons admit only the true Item in branch and logical consumers, retaining original error/null values without is_truthy calls.",
+  "checks": [
+    {
+      "in_func": "_classify_#",
+      "expect": ["call\tfn_eq_value_p, fn_eq_value", "call\tfn_lt_p, fn_lt"],
+      "forbid": ["call\tis_truthy_p, is_truthy"]
+    },
+    {
+      "in_func": "_logical_#",
+      "forbid": ["call\tis_truthy_p, is_truthy"]
+    },
+    {
+      "in_func": "_error_branch_#",
+      "forbid": ["call\tis_truthy_p, is_truthy"]
+    },
+    {
+      "in_func": "_compound_#",
+      "forbid": ["call\tis_truthy_p, is_truthy"]
+    }
+  ]
+}

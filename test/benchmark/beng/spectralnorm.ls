@@ -37,7 +37,8 @@ pn eval_A(i, j) {
     return 1.0 / float((i + j) * (i + j + 1) / 2 + i + 1)
 }
 
-pn mul_Av(n, v, av) {
+// output arrays borrow the caller's place rather than a snapshot (S9.1.3).
+pn mul_Av(n, v, var av) {
     var i = 0
     while (i < n) {
         var s = 0.0
@@ -51,7 +52,7 @@ pn mul_Av(n, v, av) {
     }
 }
 
-pn mul_Atv(n, v, atv) {
+pn mul_Atv(n, v, var atv) {
     var i = 0
     while (i < n) {
         var s = 0.0
@@ -65,7 +66,7 @@ pn mul_Atv(n, v, atv) {
     }
 }
 
-pn mul_AtAv(n, v, out) {
+pn mul_AtAv(n, v, var out) {
     var tmp = fill(n, 0.0)
     mul_Av(n, v, tmp)
     mul_Atv(n, tmp, out)

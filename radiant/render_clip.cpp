@@ -670,6 +670,30 @@ RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, View
     return scope;
 }
 
+RenderClipScope render_clip_push_viewport_scope(RasterRenderContext* rdcon, ViewBlock* block,
+                                               RdtLogicalPoint document_offset) {
+    RenderClipScope scope = {};
+    RdtMatrix client;
+    if (!rdcon || !block || !view_get_client_matrix(block, &client)) return scope;
+    RdtMatrix offset = rdt_matrix_translate(document_offset.x, document_offset.y);
+    RdtMatrix density = rdt_matrix_scale(rdcon->raster_scale, rdcon->raster_scale);
+    RdtMatrix window = rdt_matrix_multiply(&offset, &client);
+    RdtMatrix device = rdt_matrix_multiply(&density, &window);
+    Bound clip; Corner radius;
+    if (!render_clip_overflow_bounds(block, 0.0f, 0.0f, 1.0f,
+            rdcon->block.clip, &device, &clip, &radius)) return scope;
+    // overlays have left normal traversal; replay the owner's unscrolled clip in window space.
+    ClipShape shape = {};
+    shape.type = CLIP_SHAPE_ROUNDED_RECT;
+    shape.rounded_rect = {clip.left, clip.top, max(0.0f, clip.right - clip.left),
+        max(0.0f, clip.bottom - clip.top), radius.top_left, radius.top_right,
+        radius.bottom_right, radius.bottom_left};
+    ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
+    render_clip_push_owned_shape(rdcon, &scope,
+        render_clip_clone_shape(&rdcon->scratch, &mem, &shape), &mem, &device);
+    return scope;
+}
+
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope) {
     if (!rdcon || !scope || !scope->active) {
         return;

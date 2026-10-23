@@ -88,6 +88,12 @@ static bool source_item_is_editor_text_leaf(Item item) {
     return source_item_is_editor_kind(item, "text");
 }
 
+static bool source_item_is_empty_editor_node(Item item) {
+    if (!source_item_is_editor_kind(item, "node")) return false;
+    ItemReader content = MapReader::fromItem(item).get("content");
+    return content.isArray() && content.asArray().isEmpty();
+}
+
 extern "C" {
 
 // ---------------------------------------------------------------------------
@@ -284,6 +290,20 @@ bool render_map_reverse_lookup_with_path(Item result_node,
     return true;
 }
 
+static bool source_position_lookup(Item result_node, RenderMapLookup* lookup,
+                                   SourcePathC* out_path) {
+    if (!render_map_reverse_lookup(result_node, lookup)) return false;
+    const SourcePathC* path = path_table_get(lookup->source_item, lookup->template_ref);
+    // application/toolbar owners have render identities but no document coordinates.
+    // treating their missing or retired path as [] lets text input replace the document root.
+    Item source_root = render_map_get_source_doc_root();
+    // plain template events retain their recorded paths without an active editor root.
+    if (!path || (path->depth == 0 && source_root.item != 0 &&
+            lookup->source_item.item != source_root.item)) return false;
+    *out_path = source_path_clone(path);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // DOM → source position
 // ---------------------------------------------------------------------------
@@ -329,7 +349,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
             if (!de->is_synthetic()) {
                 Item result_item;
                 result_item.element = dom_element_render_source(de);
-                if (render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
+                if (source_position_lookup(result_item, &lookup, &base)) {
                     found_base = true;
                     break;
                 }
@@ -341,6 +361,13 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
         node = node->parent;
     }
     if (!found_base) return false;
+    if (source_item_is_empty_editor_node(lookup.source_item)) {
+        // a rendered placeholder has no source child or byte offset; reentry names its empty container.
+        out->path = base;
+        out->offset = 0;
+        out->kind = SOURCE_POS_ELEMENT;
+        return true;
+    }
     // base is a clone of the recorded path. Text leaves rendered through
     // mark wrappers (<strong>/<em>/<code>/...) are recorded at the source
     // text leaf itself, so keep that path instead of appending the wrapper's
@@ -463,14 +490,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
     result_item.element = dom_element_render_source(de);
     RenderMapLookup lookup;
     SourcePathC recorded;
-    if (!render_map_reverse_lookup_with_path(result_item, &lookup, &recorded)) {
-        return false;
-    }
-    Item source_root = render_map_get_source_doc_root();
-    if (recorded.depth == 0 && lookup.source_item.item != source_root.item) {
-        // The outer app template can retain an earlier empty relative path;
-        // only the current editor document root may resolve source path [].
-        source_path_free(&recorded);
+    if (!source_position_lookup(result_item, &lookup, &recorded)) {
         return false;
     }
     bool matched = false;
@@ -483,8 +503,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
     } else { // SOURCE_POS_TEXT
         if (source_path_equal(&pos->path, &recorded)) {
             if (source_item_is_editor_kind(lookup.source_item, "node")) {
-                ItemReader content = MapReader::fromItem(lookup.source_item).get("content");
-                DomText* placeholder = pos->offset == 0 && content.isArray() && content.asArray().length() == 0
+                DomText* placeholder = pos->offset == 0 && source_item_is_empty_editor_node(lookup.source_item)
                     ? first_text_descendant(de) : nullptr;
                 if (placeholder) {
                     // an empty model block projects a presentation-only leaf that owns its visible caret.

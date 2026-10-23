@@ -328,43 +328,36 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
         }
 
         if (use_resolved) {
-            // Render collapsed borders using resolved border data (table cells)
-            // CSS 2.1 17.6.2: Collapsed borders are centered on the cell edges.
-            if (resolved_left && resolved_left->style != CSS_VALUE_NONE && resolved_left->color.a) {
-                float bw = resolved_left->width * s;
-                Rect border_rect = rect;
-                border_rect.x = rect.x - bw / 2.0f;
-                border_rect.width = bw;
-                rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect,
-                                     resolved_left->color.c, &rdcon->block.clip,
-                                     rdcon->clip_shapes, rdcon->clip_shape_depth);
-            }
-            if (resolved_right && resolved_right->style != CSS_VALUE_NONE && resolved_right->color.a) {
-                float bw = resolved_right->width * s;
-                Rect border_rect = rect;
-                border_rect.x = rect.x + rect.width - bw / 2.0f;
-                border_rect.width = bw;
-                rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect,
-                                     resolved_right->color.c, &rdcon->block.clip,
-                                     rdcon->clip_shapes, rdcon->clip_shape_depth);
-            }
-            if (resolved_top && resolved_top->style != CSS_VALUE_NONE && resolved_top->color.a) {
-                float bw = resolved_top->width * s;
-                Rect border_rect = rect;
-                border_rect.y = rect.y - bw / 2.0f;
-                border_rect.height = bw;
-                rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect,
-                                     resolved_top->color.c, &rdcon->block.clip,
-                                     rdcon->clip_shapes, rdcon->clip_shape_depth);
-            }
-            if (resolved_bottom && resolved_bottom->style != CSS_VALUE_NONE && resolved_bottom->color.a) {
-                float bw = resolved_bottom->width * s;
-                Rect border_rect = rect;
-                border_rect.y = rect.y + rect.height - bw / 2.0f;
-                border_rect.height = bw;
-                rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect,
-                                     resolved_bottom->color.c, &rdcon->block.clip,
-                                     rdcon->clip_shapes, rdcon->clip_shape_depth);
+            // collapsed edges are centered on the cell; retain the resolved style as well as its width/color.
+            CollapsedBorder* resolved[] = {resolved_top, resolved_right, resolved_bottom, resolved_left};
+            for (size_t side = 0; side < 4; side++) {
+                const CollapsedBorder* edge = resolved[side];
+                if (!edge || edge->width <= 0.0f || !edge->color.a ||
+                    edge->style == CSS_VALUE_NONE || edge->style == CSS_VALUE_HIDDEN) continue;
+                float width = edge->width * s;
+                Rect band = rect;
+                if (side == 0 || side == 2) {
+                    band.y += side == 0 ? -width * 0.5f : rect.height - width * 0.5f;
+                    band.height = width;
+                } else {
+                    band.x += side == 3 ? -width * 0.5f : rect.width - width * 0.5f;
+                    band.width = width;
+                }
+                if (edge->style == CSS_VALUE_SOLID) {
+                    rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &band,
+                        edge->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                } else {
+                    BorderProp border = {};
+                    border.width.values[side] = width;
+                    border.styles[side] = edge->style;
+                    border.colors[side] = edge->color;
+                    Rect outside = rect;
+                    if (side == 0) outside.y -= width * 0.5f;
+                    else if (side == 3) outside.x -= width * 0.5f;
+                    else if (side == 1) outside.width += width * 0.5f;
+                    else outside.height += width * 0.5f;
+                    render_border_emit_side(outside, &border, side, false, render_border_raster_path, rdcon);
+                }
             }
         } else {
             render_border(rdcon, view, rect);

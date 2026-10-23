@@ -57,7 +57,7 @@ static void render_inset_outset_trapezoid(RasterRenderContext* rdcon, Rect rect,
               tl_color.r, tl_color.g, tl_color.b, br_color.r, br_color.g, br_color.b);
 }
 
-static bool border_raster_emit_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
+bool render_border_raster_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
     RasterRenderContext* rdcon = (RasterRenderContext*)context;
     RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, nullptr);
@@ -77,7 +77,7 @@ static void render_per_side_borders(RasterRenderContext* rdcon, Rect rect, Borde
         rc_push_clip(rdcon, radius_clip, nullptr);
     }
     for (size_t side = 0; side < 4; side++) {
-        render_border_emit_side(rect, border, side, rounded, border_raster_emit_path, rdcon);
+        render_border_emit_side(rect, border, side, rounded, render_border_raster_path, rdcon);
     }
     if (radius_clip) { rc_pop_clip(rdcon); rdt_path_free(radius_clip); }
 }
@@ -673,7 +673,7 @@ void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     const BorderProp* input = view->boundary()->border;
     if (input) { border = *input; border.radius = radiant_corner_scaled(&input->radius, rdcon->raster_scale); }
     // all export backends use the raster painter's original outline geometry.
-    render_outline_emit(rect, &outline, input ? &border : nullptr, border_raster_emit_path, rdcon);
+    render_outline_emit(rect, &outline, input ? &border : nullptr, render_border_raster_path, rdcon);
 }
 
 bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect) {

@@ -202,6 +202,60 @@
             }
           }
         ]
+      },
+      {
+        "engines": [
+          "mir_typed"
+        ],
+        "source": "test/benchmark/benchmark_results_v53_fast_diff_timing.json",
+        "source_started_at": "2026-10-23T08:05:07",
+        "source_finished_at": "2026-10-23T08:05:12",
+        "source_runs": 3,
+        "source_platform": "Darwin arm64",
+        "source_lambda_commit": "cb49b37900dddd572675485c10a4ad15204d9ae3",
+        "merged_at": "2026-10-23T08:05:26",
+        "cells": 1,
+        "note": "Updated only text/fast_diff MIR typed workload time after moving clock() before string-to-code-array preprocessing. Three release JIT samples include preprocessing and retain checksum 748544; prior median was 42.722 ms. The unchanged release archive `test/benchmark/exe/lambda-v53-f3515ebcf3` has SHA-256 `67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290`. The updated benchmark source has SHA-256 `1c5308bc48412351969837c3e6df43e4797f05f2e6eca1ae8a654f0a2f25edb6`. Fresh untyped MIR, auto-tier and Node measurements are retained in the focused source JSON as controls; the original peer and auto-tier cells retain their measurement provenance. The unchanged release's prior Test262 qualification is referenced in the focused capture metadata.",
+        "source_json_sha256": "9e225aaf0bbb56fcd5e4da0a03293b55436afae747d6b4c84b899ad739938213",
+        "source_lambda_archive": "test/benchmark/exe/lambda-v53-f3515ebcf3",
+        "source_lambda_archive_sha256": "67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290",
+        "source_hashes": {
+          "test/benchmark/text/fast_diff2.ls": "1c5308bc48412351969837c3e6df43e4797f05f2e6eca1ae8a654f0a2f25edb6"
+        },
+        "replaced_cells": [
+          {
+            "suite": "text",
+            "benchmark": "fast_diff",
+            "engine": "mir_typed",
+            "value": 42.722,
+            "status": "ok",
+            "status_detail": {
+              "status_counts": {
+                "ok": 3
+              },
+              "samples": [
+                {
+                  "run": 1,
+                  "wall_ms": 67.374667,
+                  "exec_ms": 42.722,
+                  "status": "ok"
+                },
+                {
+                  "run": 2,
+                  "wall_ms": 66.412875,
+                  "exec_ms": 43.045,
+                  "status": "ok"
+                },
+                {
+                  "run": 3,
+                  "wall_ms": 66.019708,
+                  "exec_ms": 42.72,
+                  "status": "ok"
+                }
+              ]
+            }
+          }
+        ]
       }
     ]
   },
@@ -12331,20 +12385,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 67.374667,
-              "exec_ms": 42.722,
+              "wall_ms": 65.688708,
+              "exec_ms": 42.313,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 66.412875,
-              "exec_ms": 43.045,
+              "wall_ms": 65.854917,
+              "exec_ms": 42.824,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 66.019708,
-              "exec_ms": 42.72,
+              "wall_ms": 65.714,
+              "exec_ms": 42.611,
               "status": "ok"
             }
           ]
@@ -12476,7 +12530,7 @@
         }
       },
       "mir_auto_e2e": 750.201209,
-      "mir_typed": 42.722,
+      "mir_typed": 42.611,
       "mir_typed_auto_e2e": 69.703417,
       "lambdajs": 173.386,
       "lambdajs_e2e": 3019.226959,

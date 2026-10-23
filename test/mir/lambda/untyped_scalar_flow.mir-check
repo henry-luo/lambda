@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Homogeneous inferred conditional arms retain native integer carriers; dynamic, mixed, borrowed and error cases keep their original behavior. Error-capable equality stays boxed in logical consumers (D2.4.1-D2.4.3, S7.8.1, S3.4).",
+  "description": "Homogeneous inferred conditional arms retain native integer carriers; dynamic, mixed, borrowed and error cases keep their original behavior. Error-capable equality stays boxed in logical consumers, which admit only the true Item (D2.4.1-D2.4.3, S7.8.1, S3.4).",
   "checks": [
     {
       "in_func": "_flow_magnitude_#",
@@ -9,7 +9,8 @@
     },
     {
       "in_func": "_flow_compare_loop_#",
-      "expect": ["call\tis_truthy_p, is_truthy"]
+      "expect": ["eq\t{{r}}, {{r}}, 216172782113783809"],
+      "forbid": ["call\tis_truthy_p, is_truthy"]
     }
   ]
 }

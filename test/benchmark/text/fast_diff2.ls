@@ -1,6 +1,6 @@
 // Typed text benchmark: deterministic LCS diff over source-like text edits.
-// The static ASCII fixture is admitted once as code arrays before timing, so
-// the LCS loop carries the same native integer comparison lane as C2MIR.
+// Timing includes converting the ASCII fixture to code arrays; the LCS loop
+// carries the same native integer comparison lane as C2MIR.
 
 pn text_codes(text: string) int[] {
     var codes: int[] = fill(len(text), 0)
@@ -85,6 +85,7 @@ pn main() {
         "line zero\nline one\nline 2 changed\nline three\nline four\nline five\n",
         "The quick red fox leaps over the sleepy dog.\nThis paragraph has changed.\n"
     ]
+    let t0 = clock()
     var left_codes: int[][] = []
     var right_codes: int[][] = []
     for pair of left_text {
@@ -93,7 +94,6 @@ pn main() {
     }
     var checksum: int = 0
     var round: int = 0
-    let t0 = clock()
     while (round < 256) {
         for index of left_codes {
             checksum = checksum + score_diff(left_codes[index], right_codes[index])

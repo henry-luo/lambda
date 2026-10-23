@@ -1,5 +1,5 @@
 // sys_crypto.cpp — hash(value, algorithm) and uuid(), the digest and random
-// identifier system functions planned as WebScrape E7 / Archive AR-E7 and
+// identifier system functions planned as Archive AR-E7 and
 // first needed by OAuth's PKCE (vibe/Lambda_Demo_Mail.md MG7, M4).
 //
 // Digests come from mbedTLS; uuid() draws on mbedTLS's entropy-seeded

@@ -2110,6 +2110,32 @@ TEST(RenderOutputParity, PdfExportTransformedAndOffPageRasterResourcesStayBounde
     image_free(image.pixels);
 }
 
+TEST(RenderOutputParity, PagedImageRotationReachesPdfForRasterAndSvgResources) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/paged_image_rotation.html";
+    const char* pdf_path = "temp/render_output_parity/paged_image_rotation.pdf";
+    const char* png_path = "temp/render_output_parity/paged_image_rotation.png";
+    const char* sources[] = {
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC",
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='40'%3E%3Crect width='60' height='40' fill='red'/%3E%3C/svg%3E"
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+        strbuf_append_str(html, "<!doctype html><style>@page{size:200px 120px;margin:10px}html,body{margin:0}"
+            "img{display:block;width:60px;height:40px;margin:20px;transform:rotate(90deg)}</style><img src=\"");
+        strbuf_append_str(html, source); strbuf_append_str(html, "\">");
+        bool rendered = render_html_fixture(html_path, pdf_path, html->str, "--paged");
+        strbuf_free(html); ASSERT_TRUE(rendered);
+        ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, png_path, 4.0f/3.0f));
+        ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+        // PDF points rasterized at 96 dpi expose the original CSS-pixel coordinates.
+        expect_preview_pixel(image, 50, 25, 255, 0, 0);
+        expect_preview_pixel(image, 90, 50, 255, 255, 255);
+        image_free(image.pixels);
+    }
+}
+
 TEST(RenderOutputParity, PdfExportNegativeOutlineOffsetsKeepFiniteMinimumExtents) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* source = "temp/render_output_parity/pdf_negative_outline.html";

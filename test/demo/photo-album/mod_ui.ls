@@ -6,28 +6,9 @@ import CU: .mod_collage_ui
 import BU: .mod_book_ui
 import P: .mod_places
 
-let strokes = {
-    library:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
-    albums:"M4 6h16v13H4z M7 3h10 M9 10l3 3 5-5",
-    heart:"M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z",
-    search:"M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14 M15 15l6 6",
-    close:"M6 6l12 12 M18 6L6 18",
-    prev:"M15 5l-7 7 7 7", next:"M9 5l7 7-7 7",
-    info:"M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 11v6 M12 7.5v.5",
-    plus:"M12 5v14 M5 12h14", minus:"M5 12h14",
-    strip:"M3 7h18v10H3z M7 7v10 M12 7v10 M17 7v10",
-    album:"M4 4h16v16H4z M4 15l5-5 4 4 3-3 4 4",
-    collage:"M3 3h8v11H3z M13 3h8v6h-8z M13 11h8v10h-8z M3 16h8v5H3z",
-    book:"M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2z M12 6v14",
-    play:"M4 5h16v11H4z M10 8.5v4.5l4-2.25z M9 20h6 M12 16v4",
-    film:"M4 5h16v14H4z M8 5v14 M16 5v14 M4 9h4 M4 15h4 M16 9h4 M16 15h4",
-    sound:"M4 9h4l5-4v14l-5-4H4z M16 9a4 4 0 0 1 0 6 M18.5 6.5a8 8 0 0 1 0 11",
-    resume:"M8 5v14l11-7z", pause:"M8 5v14 M16 5v14",
-    places:"M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z M12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5"
-}
-pub fn icon(graphic, size = 20) => <svg width:string(size),height:string(size),viewBox:"0 0 24 24",'aria-hidden':"true",
-    <path d:strokes[graphic] or strokes.library,fill:"none",stroke:"currentColor",'stroke-width':1.7,
-        'stroke-linecap':"round",'stroke-linejoin':"round">>
+import icons: ~~.mod_icons
+pub let icon = icons.icon
+
 fn make(id, action, title, graphic) => <button id:id,type:"button",class:"pill secondary icon-only",'data-action':action,title:title,'aria-label':title,(icon(graphic, 18))>
 fn tool(id, title, graphic, action = id) => <button id:id,type:"button",class:"tool",'data-action':action,title:title,'aria-label':title,(icon(graphic))>
 fn px(v) => string(round(v * 100) / 100) ++ "px"
