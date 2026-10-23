@@ -1478,15 +1478,9 @@ static bool js_ast_string_is_use_strict(JsAstNode* node) {
 bool js_ast_statement_list_has_use_strict_directive(JsAstNode* statements) {
     for (JsAstNode* statement = statements; statement;
             statement = statement->next) {
-        if (statement->node_type != AST_NODE_EXPR_STMT) return false;
-        JsExpressionStatementNode* expression_statement =
-            (JsExpressionStatementNode*)statement;
-        if (js_ast_string_is_use_strict(expression_statement->expression)) return true;
-        JsAstNode* expression = expression_statement->expression;
-        if (!expression || expression->node_type != AST_NODE_LITERAL ||
-                ((JsLiteralNode*)expression)->literal_type != AST_LITERAL_STRING) {
-            return false;
-        }
+        JsLiteralNode* literal = js_ast_statement_string_literal(statement);
+        if (!literal) return false;
+        if (js_ast_string_is_use_strict((JsAstNode*)literal)) return true;
     }
     return false;
 }

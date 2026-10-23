@@ -114,6 +114,7 @@ Item js_load_lambda_module(Runtime* runtime, const char* path);
 
 Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* owner,
     const char* path, const char* source, size_t length, JsSourceModuleRecord** output);
+bool js_module_source_fetch_failed(Runtime* runtime, const char* path);
 Item js_module_evaluate(JsSourceModuleRecord* record);
 bool js_module_set_source_ops(const JsSourceModuleOps* ops, void* owner);
 Item js_source_dynamic_import(Item specifier, const char* reference,

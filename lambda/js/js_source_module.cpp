@@ -1,4 +1,5 @@
 #include "js_source_module.hpp"
+#include "js_execution_internal.hpp"
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
@@ -405,7 +406,11 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
     // publish identities before following requests; cycles never recurse through the loader.
     for (int index = 0; index < graph->length && !item_is_error(status.get()); index++) {
         auto* record = (JsSourceModuleRecord*)graph->data[index];
-        if (record->status == JS_SOURCE_MODULE_FAILED) { status.set(record->descriptor->evaluation_error); break; }
+        if (record->status == JS_SOURCE_MODULE_FAILED) {
+            root->descriptor->source_fetch_failed = record->descriptor->source_fetch_failed;
+            status.set(record->descriptor->evaluation_error);
+            break;
+        }
         if (record->status != JS_SOURCE_MODULE_NEW) {
             for (int request_index = 0; request_index < record->requests->length; request_index++) {
                 auto* child = ((JsSourceModuleRequest*)record->requests->data[request_index])->module;
@@ -424,9 +429,11 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
         size_t loaded_length = 0;
         char* loaded = record == root && source ? NULL : js_load_script_source_from_cache(
             record->descriptor->path, "js-source-module", "module", true, &loaded_length, runtime->resource_policy);
-        if (!loaded && !(record == root && source))
-            status.set(module_error(record, JS_SOURCE_MODULE_REFERENCE, "Cannot find module"));
-        else status.set(ops->prepare(owner, record, loaded ? loaded : source, loaded ? loaded_length : length));
+        if (!loaded && !(record == root && source)) {
+            record->descriptor->source_fetch_failed = root->descriptor->source_fetch_failed = true;
+            status.set(module_error(record, js_path_is_http_url(record->descriptor->path)
+                ? JS_SOURCE_MODULE_TYPE : JS_SOURCE_MODULE_REFERENCE, "Cannot load module source"));
+        } else status.set(ops->prepare(owner, record, loaded ? loaded : source, loaded ? loaded_length : length));
         mem_free(loaded);
         if (!item_is_error(status.get())) status.set(collect_module_declarations(record, graph));
         if (!item_is_error(status.get())) status.set(ops->plan(owner, record));
@@ -446,6 +453,11 @@ Item js_module_load_link(Runtime* runtime, const JsSourceModuleOps* ops, void* o
     }
     if (item_is_error(status.get())) module_fail(root, status.get());
     arraylist_free(graph); return status.get();
+}
+
+bool js_module_source_fetch_failed(Runtime* runtime, const char* path) {
+    ModuleDescriptor* descriptor = runtime && path ? module_get_for_runtime(runtime, path) : NULL;
+    return descriptor && descriptor->source_fetch_failed;
 }
 static Item instantiate_graph(JsSourceModuleRecord* record) {
     if (lambda_stack_is_exhausted(context ? context->stack_limit : 0))

@@ -83,6 +83,9 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                              uint64_t* result_home);
 // P2 promotion is attempted only at an ordinary call-entry boundary.
 bool js_interp_promote_function_if_hot(JsFunction* function);
+// AST and satellite writes publish the same exported aliases and reexports.
+extern "C" void js_interp_publish_export_bindings(JsScript* script,
+    NameEntry* entry, Item value);
 Item js_interp_start_async_function(JsFunction* function, Item* args,
                                     int arg_count);
 Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count);

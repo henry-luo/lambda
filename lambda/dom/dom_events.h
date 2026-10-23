@@ -59,6 +59,8 @@ void dom_event_handler_property_set_for_node(void* dom_node,
  * @return Boolean Item (true if not preventDefault'd)
  */
 Item dom_dispatch_event(Item elem_item, Item event_item);
+// host resource completion dispatches a non-bubbling, non-cancelable element event.
+Item dom_dispatch_resource_event(void* element, const char* type);
 
 // ============================================================================
 // Event Object Creation

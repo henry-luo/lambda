@@ -14,6 +14,7 @@
 #include "js_builtin_catalog.hpp"
 #include "../dom/dom.h"
 #include "js_event_loop.h"
+#include "js_exec_profile.h"
 #include "js_property_attrs.h"
 #include "js_props.h"
 #include "js_typed_array.h"
@@ -217,8 +218,8 @@ struct JsInterpFrame {
     uint32_t* handoff_backedges = NULL;
     JsInterpEnv* this_cell_env = NULL;
     uint64_t* class_constructor_home = NULL;
-    const Item* numeric_parameters = NULL;
-    NameScope* numeric_parameter_scope = NULL;
+    const Item* parameter_values = NULL;
+    NameScope* parameter_scope = NULL;
     uint32_t host_context = 0;
 };
 
@@ -462,6 +463,10 @@ static bool js_interp_name_matches(const String* left, const String* right) {
 
 static JsInterpModuleBinding* js_interp_import_binding(JsScript* script,
         NameEntry* entry, String* local_name) {
+    // direct scope records imports on declarations/specifiers; resolved locals
+    // must not rescan the module's import list on every read and write (D8.2.4v2).
+    if (entry && (!entry->node || (entry->node->node_type != AST_NODE_IMPORT &&
+            entry->node->node_type != AST_NODE_IMPORT_SPECIFIER))) return NULL;
     for (JsInterpModuleBinding* binding = script ? script->interp_imports : NULL;
             binding; binding = binding->next) {
         if (entry) {
@@ -622,16 +627,16 @@ static Item js_interp_read_import_binding(JsScript* script,
         context ? context->runtime : NULL, resolved, binding->export_name, 0);
 }
 
-static void js_interp_publish_export_bindings(JsInterpFrame* frame,
+extern "C" void js_interp_publish_export_bindings(JsScript* script,
         NameEntry* entry, Item value) {
-    if (!frame || !frame->script || !frame->script->is_es_module || !entry ||
-        entry->scope != frame->script->global_scope) return;
-    JsInterpModuleBinding* first = frame->script->interp_exports;
+    if (!script || !script->is_es_module || !entry ||
+        entry->scope != script->global_scope) return;
+    JsInterpModuleBinding* first = script->interp_exports;
     while (first && (first->source || first->entry != entry)) first = first->next;
     // local/parameter writes do not publish exports or resolve a module path.
     if (!first) return;
     ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
-        frame->script->reference);
+        script->reference);
     if (!module) return;
     RootFrame roots(2);
     Rooted<Item> namespace_obj(roots, module->namespace_obj), value_root(roots, value);
@@ -639,7 +644,7 @@ static void js_interp_publish_export_bindings(JsInterpFrame* frame,
         if (!binding->source && binding->entry == entry) {
             js_interp_store_export(namespace_obj.get(), binding->export_name, value_root.get());
             js_interp_propagate_reexports(context ? context->runtime : NULL,
-                frame->script->reference, binding->export_name, value_root.get(), 0);
+                script->reference, binding->export_name, value_root.get(), 0);
         }
     }
 }
@@ -962,9 +967,15 @@ static Item js_interp_env_set_eval_binding(JsInterpEnv* env, Item key,
     return js_interp_array_append(bindings_root.get(), value_root.get());
 }
 
-static JsInterpEnv* js_interp_find_eval_binding_env(JsInterpEnv* env,
+static JsInterpEnv* js_interp_find_eval_binding_env(JsInterpFrame* frame,
         NameEntry* entry, Item key, Item* out_value) {
-    for (JsInterpEnv* scan = env; scan; scan = scan->outer) {
+    // module ancestors are strict: eval cannot add bindings to these records.
+    // strict eval and dynamic functions may still close over sloppy callers.
+    JsScript* script = frame->script;
+    if (!js_interp_host && script && script->is_es_module &&
+            !script->is_eval_script && !script->dynamic_source &&
+            !script->eval_caller_script) return NULL;
+    for (JsInterpEnv* scan = frame->env; scan; scan = scan->outer) {
         if (js_interp_env_has_binding(scan, entry)) {
             // Eval var redeclarations update their function's var binding,
             // while an intervening lexical declaration remains authoritative.
@@ -1311,14 +1322,15 @@ static Item js_interp_binding_slot_store(JsInterpEnv* env, NameEntry* entry, Ite
 }
 
 // A declarative binding's value after its TDZ check.
-static Item js_interp_env_binding_read(JsInterpEnv* env, NameEntry* entry,
-        JsInterpEnv* arguments_env) {
+static Item js_interp_env_binding_read(JsInterpEnv* env, NameEntry* entry) {
     if (!env || !entry || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
         return ItemError;
     }
     Item value = js_interp_binding_slot_read(env, entry);
     if (value.item == ITEM_JS_TDZ) return js_interp_tdz_error(entry->name);
-    return js_interp_read_arguments_param(arguments_env, entry, value);
+    // a captured parameter aliases its owner's arguments, even when an inner
+    // call has materialized a different arguments object (D6.2.2v2).
+    return js_interp_read_arguments_param(env, entry, value);
 }
 
 // PutValue's refusals on a declarative binding: its TDZ, a const, and a
@@ -1344,7 +1356,7 @@ static bool js_interp_binding_write_refused(const JsInterpFrame* frame,
 }
 
 static Item js_interp_env_binding_write(JsInterpFrame* frame, JsInterpEnv* env,
-        NameEntry* entry, Item value, bool initialize, JsInterpEnv* arguments_env) {
+        NameEntry* entry, Item value, bool initialize) {
     if (!env || !entry || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
         return ItemError;
     }
@@ -1355,9 +1367,9 @@ static Item js_interp_env_binding_write(JsInterpFrame* frame, JsInterpEnv* env,
     }
     Item written = js_interp_binding_slot_store(env, entry, value);
     if (item_is_error(written)) return written;
-    written = js_interp_write_arguments_param(arguments_env, entry, value);
+    written = js_interp_write_arguments_param(env, entry, value);
     if (item_is_error(written)) return written;
-    js_interp_publish_export_bindings(frame, entry, value);
+    js_interp_publish_export_bindings(frame->script, entry, value);
     return value;
 }
 
@@ -1385,7 +1397,7 @@ static Item js_interp_read_lookup(JsInterpFrame* frame, const JsInterpLookup* lo
         String* name, bool with_lookup_completed) {
     switch (lookup->kind) {
     case JS_INTERP_LOOKUP_SLOT:
-        return js_interp_env_binding_read(lookup->env, lookup->entry, lookup->env);
+        return js_interp_env_binding_read(lookup->env, lookup->entry);
     case JS_INTERP_LOOKUP_EVAL: {
         Item value = make_js_undefined();
         js_interp_env_get_eval_binding(lookup->env, js_interp_name_key(name), &value);
@@ -1419,7 +1431,7 @@ static Item js_interp_write_lookup(JsInterpFrame* frame, const JsInterpLookup* l
     switch (lookup->kind) {
     case JS_INTERP_LOOKUP_SLOT:
         return js_interp_env_binding_write(frame, lookup->env, lookup->entry, value,
-            initialize, lookup->env);
+            initialize);
     case JS_INTERP_LOOKUP_EVAL: {
         Item stored = js_interp_env_set_eval_binding(lookup->env,
             js_interp_name_key(name), value);
@@ -1506,7 +1518,7 @@ static Item js_interp_delete_identifier(JsInterpFrame* frame,
                 js_interp_arguments_env_for_binding(frame, entry)) {
             return (Item){.item = b2it(false)};
         }
-        eval_env = js_interp_find_eval_binding_env(frame->env, entry, key, NULL);
+        eval_env = js_interp_find_eval_binding_env(frame, entry, key, NULL);
     }
     if (js_with_depth_active()) {
         Item captured = js_capture_with_binding_from(key, by_name
@@ -1535,9 +1547,9 @@ static Item js_interp_delete_identifier(JsInterpFrame* frame,
 static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         String* unresolved_name) {
     if (!frame) return ItemError;
-    if (frame->numeric_parameter_scope && entry &&
-            entry->scope == frame->numeric_parameter_scope)
-        return frame->numeric_parameters[entry->slot];
+    if (frame->parameter_scope && entry &&
+            entry->scope == frame->parameter_scope)
+        return frame->parameter_values[entry->slot];
     if (unresolved_name && js_interp_name_equals(unresolved_name, "this")) {
         return js_interp_frame_this(frame);
     }
@@ -1614,7 +1626,7 @@ static Item js_interp_read_resolved(JsInterpFrame* frame, NameEntry* entry,
     }
     if (unresolved_name) {
         Item eval_value = ItemNull;
-        if (js_interp_find_eval_binding_env(frame->env, entry,
+        if (js_interp_find_eval_binding_env(frame, entry,
                 js_interp_name_key(unresolved_name), &eval_value)) {
             return eval_value;
         }
@@ -1649,7 +1661,7 @@ static Item js_interp_read_resolved(JsInterpFrame* frame, NameEntry* entry,
         return value.item == ITEM_JS_TDZ ? js_interp_tdz_error(entry->name) : value;
     }
     return js_interp_env_binding_read(js_interp_find_binding_env(frame->env, entry),
-        entry, js_interp_find_arguments_env(frame->env));
+        entry);
 }
 
 static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
@@ -1672,11 +1684,11 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     }
     Item eval_value = ItemNull;
     JsInterpEnv* eval_env = !initialize && allow_eval_bindings ? js_interp_find_eval_binding_env(
-        frame->env, entry, key, &eval_value) : NULL;
+        frame, entry, key, &eval_value) : NULL;
     if (eval_env) {
         Item stored = js_interp_env_set_eval_binding(eval_env, key, value);
         if (item_is_error(stored)) return stored;
-        js_interp_publish_export_bindings(frame, entry, value);
+        js_interp_publish_export_bindings(frame->script, entry, value);
         return value;
     }
     if (js_interp_host && (!entry || js_interp_host_global_binding(frame, entry))) {
@@ -1735,11 +1747,11 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
             js_global_lexical_declare_module_slot(key, entry->slot,
                 entry->is_const ? 1 : 0);
         }
-        js_interp_publish_export_bindings(frame, entry, value);
+        js_interp_publish_export_bindings(frame->script, entry, value);
         return value;
     }
     return js_interp_env_binding_write(frame, js_interp_find_binding_env(frame->env, entry),
-        entry, value, initialize, js_interp_find_arguments_env(frame->env));
+        entry, value, initialize);
 }
 
 static Item js_interp_configure_function_metadata(Item function_item);
@@ -1892,7 +1904,7 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         NameScope* scope, bool initialize_functions = true);
 static JsInterpCompletion js_interp_initialize_function_declarations(
         JsInterpFrame* frame, NameScope* scope);
-static Item js_interp_load_es_module(Runtime* runtime, const char* filename);
+static Item js_interp_load_es_module(Runtime* runtime, const char* filename, bool* fetch_failed);
 static Item js_interp_configure_function_metadata(Item function_item);
 
 struct JsInterpMemberResult {
@@ -2462,7 +2474,7 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
                 : js_interp_find_binding(frame, identifier->name);
             Item eval_value = ItemNull;
             out_reference->binding_uses_eval = js_interp_find_eval_binding_env(
-                frame->env, out_reference->entry, key, &eval_value) != NULL;
+                frame, out_reference->entry, key, &eval_value) != NULL;
         }
         if (js_with_depth_active()) {
             Item captured = js_capture_with_binding_from(key, out_reference->by_name
@@ -2663,6 +2675,14 @@ static Item js_interp_reference_write(JsInterpFrame* frame,
         frame->strict ? 1 : 0);
 }
 
+static bool js_interp_is_numeric_comparison(Operator op) {
+    switch (op) {
+    case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
+    case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE: return true;
+    default: return false;
+    }
+}
+
 static Item js_interp_binary(Operator op, Item left, Item right) {
     if (js_interp_host) return js_interp_host->binary((int)op, left, right);
     switch (op) {
@@ -2696,6 +2716,30 @@ static Item js_interp_binary(Operator op, Item left, Item right) {
     case OPERATOR_JS_INSTANCEOF: return js_instanceof(left, right);
     default: return js_throw_type_error("unsupported interpreted binary operator");
     }
+}
+
+static bool js_interp_numeric_operand(JsInterpFrame* frame, JsAstNode* node,
+        Item* value, uint64_t* scalar_home) {
+    if (!node) return false;
+    Item operand = ItemNull;
+    if (node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+        if (!entry || !entry->is_parameter || entry->scope != frame->parameter_scope)
+            return false;
+        operand = frame->parameter_values[entry->slot];
+    } else if (node->node_type == AST_NODE_LITERAL) {
+        JsLiteralNode* literal = (JsLiteralNode*)node;
+        if (literal->literal_type == AST_LITERAL_NUMBER && !literal->bigint_str)
+            operand = js_make_number(literal->value.number_value);
+        else if (literal->literal_type == AST_LITERAL_BOOLEAN)
+            operand = (Item){.item = b2it(literal->value.boolean_value)};
+        else return false;
+    } else return false;
+    if (item_is_error(operand)) return false;
+    // a second literal can reuse transient number homes; own both operands
+    // locally until the callback-free comparison finishes (D5.3.3).
+    *value = lambda_item_adopt_scalar_home(operand, scalar_home);
+    return true;
 }
 
 static Item js_interp_assignment_value(Operator op, Item old_value, Item value) {
@@ -3044,7 +3088,7 @@ static Item js_interp_linked_var_set(JsInterpFrame* frame,
             env->arguments_are_mapped = 0;
             return js_interp_arguments_write(env, value);
         }
-        if (bound) return js_interp_env_binding_write(frame, env, bound, value, false, env);
+        if (bound) return js_interp_env_binding_write(frame, env, bound, value, false);
         Item stored = js_interp_env_set_eval_binding(env, key, value);
         return item_is_error(stored) ? stored : value;
     }
@@ -4271,7 +4315,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                 unresolvable = !has_arguments_binding && !entry &&
                     !js_global_binding_exists(key) &&
                     !js_interp_import_binding(frame->script, entry, identifier->name) &&
-                    !js_interp_find_eval_binding_env(frame->env, entry, key, NULL);
+                    !js_interp_find_eval_binding_env(frame, entry, key, NULL);
             }
             if (unresolvable) return js_interp_normal(js_make_string("undefined"));
         }
@@ -4365,6 +4409,20 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
     }
     case AST_NODE_BINARY: {
         JsBinaryNode* binary = (JsBinaryNode*)node;
+        if (!js_interp_host && frame->parameter_scope && frame->active_function &&
+                frame->active_function->code->parameter_leaf_state == 2 &&
+                js_interp_is_numeric_comparison(binary->op)) {
+            AutoAssertNoGC no_gc;
+            Item left = ItemNull, right = ItemNull;
+            uint64_t left_scalar = 0, right_scalar = 0;
+            if (js_interp_numeric_operand(frame, (JsAstNode*)binary->left, &left, &left_scalar) &&
+                    js_interp_numeric_operand(frame, (JsAstNode*)binary->right, &right, &right_scalar)) {
+                js_opt_trace_record(JS_OPT_AST_PRIMITIVE_COMPARE, JS_OPT_REASON_NONE,
+                    JS_OPT_OUTCOME_TAKEN);
+                Item result = js_interp_binary(binary->op, left, right);
+                return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
+            }
+        }
         if (binary->op == OPERATOR_IN && binary->left &&
                 binary->left->node_type == AST_NODE_IDENT) {
             Item source_key = js_interp_name_key(
@@ -4391,14 +4449,17 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (binary->op == OPERATOR_JS_NULLISH_COALESCE &&
                 get_type_id(left.value) != LMD_TYPE_NULL &&
                 get_type_id(left.value) != LMD_TYPE_UNDEFINED) return left;
+        // logical operators no longer need the discarded left value while
+        // the right operand allocates, calls getters, or throws (D5.3.3).
+        if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR ||
+                binary->op == OPERATOR_JS_NULLISH_COALESCE)
+            return js_interp_eval(frame, (JsAstNode*)binary->right);
         RootFrame roots(2);
         Rooted<Item> left_root(roots, left.value);
         JsInterpCompletion right = js_interp_eval(frame, (JsAstNode*)binary->right);
         if (right.kind != JS_INTERP_NORMAL) return right;
         Rooted<Item> right_root(roots, right.value);
-        Item result = (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR ||
-                binary->op == OPERATOR_JS_NULLISH_COALESCE) ? right_root.get()
-            : js_interp_binary(binary->op, left_root.get(), right_root.get());
+        Item result = js_interp_binary(binary->op, left_root.get(), right_root.get());
         return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
     case AST_NODE_ASSIGN: {
@@ -5954,6 +6015,12 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         if (js_interp_p2_is_this_identifier(node)) break;
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
         NameEntry* entry = identifier->entry;
+        // D8.1.3v32: linked JS imports may have no NameEntry import marker.
+        if (scan->script->is_module && js_interp_import_binding(scan->script,
+                entry, identifier->name)) {
+            js_interp_p2_reject(scan, "import binding");
+            return;
+        }
         // An unresolved name is a global-object read the satellite performs
         // by name, exactly as T0 does (E1, Lambda_Impl_JS_Interp_Tune.md).
         if (!entry) break;
@@ -6094,18 +6161,28 @@ static Runtime* js_interp_promotion_policy(void) {
     return runtime;
 }
 
+static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function);
+static bool js_interp_module_predicate_expression(JsFunction* function);
+
 static const char* js_interp_p2_admission_reason(JsFunction* function,
         AstFunctionId* out_function_id) {
     if (out_function_id) *out_function_id = AST_FUNCTION_ID_INVALID;
     JsScript* script = js_fn_ast_script(function);
     AstFuncNode* definition = js_fn_ast_function(function);
-    if (!script || !definition || !script->source || script->is_module ||
+    if (!script || !definition || !script->source ||
             script->is_eval_script || script->dynamic_source ||
             (definition->node_type != AST_NODE_FUNC &&
              definition->node_type != AST_NODE_FUNC_EXPR)) {
         return "definition shape";
     }
     if (definition->is_generator || definition->is_async) return "suspended definition";
+    // D8.1.3v32 shares classic admission, while only the predicate proof grants
+    // the light-call contract. Classify before entry even at threshold one.
+    if (script->is_module) {
+        if (!script->is_es_module || (function->flags & JS_FUNC_FLAG_METHOD))
+            return "module definition shape";
+        js_interp_module_predicate_expression(function);
+    }
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
     AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
         ? script->ast_index.owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
@@ -6172,7 +6249,10 @@ bool js_interp_promote_function_if_hot(JsFunction* function) {
         script, function_id));
     if (item_is_error(compiled.get()) || !heap_try_register_gc_root(&code->compiled_body.item)) {
         promotion->state = FN_PROMOTION_PINNED_INTERP;
-        log_error("js-p2: satellite compilation failed");
+        log_error("js-p2: satellite compilation failed for %.*s in %s",
+            function->name ? (int)function->name->len : 0,
+            function->name ? function->name->chars : "",
+            script->reference ? script->reference : "<script>");
         return false;
     }
     code->compiled_body = compiled.get();
@@ -6206,6 +6286,8 @@ static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
         return false;
     }
     JsFunction* function = frame->active_function;
+    // D8.1.3v32 extends hot entry only; module activations never hand off.
+    if (js_fn_ast_script(function)->is_module) return false;
     AstFuncNode* definition = js_fn_ast_function(function);
     if (!definition || !function->code || !definition->body ||
             definition->body->node_type != AST_NODE_BLOCK) {
@@ -6628,94 +6710,172 @@ static Item js_interp_initialize_function_parameters(JsInterpFrame* frame, JsFun
     return make_js_undefined();
 }
 
-struct JsNumericLeafScan {
+struct JsParameterLeafScan {
     NameScope* parameters;
     int parameter_count;
+    bool numeric_only;
     bool supported;
+    JsScript* predicate_script = NULL;
 };
 
-static void js_interp_check_numeric_leaf(JsAstNode* node, void* opaque) {
-    JsNumericLeafScan* scan = (JsNumericLeafScan*)opaque;
+static void js_interp_check_parameter_leaf(JsAstNode* node, void* opaque) {
+    JsParameterLeafScan* scan = (JsParameterLeafScan*)opaque;
     if (!node || !scan->supported) return;
     switch (node->node_type) {
     case AST_NODE_IDENT: {
         NameEntry* entry = ((JsIdentifierNode*)node)->entry;
-        scan->supported = entry && entry->is_parameter && entry->scope == scan->parameters &&
-            entry->slot >= 0 && entry->slot < scan->parameter_count;
+        scan->supported = !scan->numeric_only && (!entry || entry->scope != scan->parameters);
+        if (entry && entry->scope == scan->parameters)
+            scan->supported = entry->is_parameter && entry->slot >= 0 &&
+                entry->slot < scan->parameter_count;
         break;
     }
     case AST_NODE_LITERAL: {
         JsLiteralNode* literal = (JsLiteralNode*)node;
-        scan->supported = (literal->literal_type == AST_LITERAL_NUMBER && !literal->bigint_str) ||
+        scan->supported = !scan->numeric_only ||
+            (literal->literal_type == AST_LITERAL_NUMBER && !literal->bigint_str) ||
             literal->literal_type == AST_LITERAL_BOOLEAN;
         break;
     }
     case AST_NODE_BINARY:
-        switch (((JsBinaryNode*)node)->op) {
-        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
-        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
-        case OPERATOR_AND: case OPERATOR_OR:
-            break;
-        default: scan->supported = false; break;
-        }
+        if (!scan->numeric_only) break;
+        scan->supported = js_interp_is_numeric_comparison(((JsBinaryNode*)node)->op) ||
+            ((JsBinaryNode*)node)->op == OPERATOR_AND || ((JsBinaryNode*)node)->op == OPERATOR_OR;
         break;
-    case AST_NODE_UNARY:
-        scan->supported = ((JsUnaryNode*)node)->op == OPERATOR_NOT;
+    case AST_NODE_UNARY: {
+        Operator op = ((JsUnaryNode*)node)->op;
+        scan->supported = scan->numeric_only ? op == OPERATOR_NOT :
+            op != OPERATOR_JS_INCREMENT && op != OPERATOR_JS_DECREMENT &&
+            op != OPERATOR_JS_DELETE;
         break;
+    }
     case AST_NODE_CONDITIONAL_EXPR:
+        break;
+    case AST_NODE_CALL_EXPR: {
+        if (!scan->numeric_only) break;
+        JsCallNode* call = (JsCallNode*)node;
+        JsIdentifierNode* callee = call->function && call->function->node_type == AST_NODE_IDENT
+            ? (JsIdentifierNode*)call->function : NULL;
+        NameEntry* entry = callee ? callee->entry : NULL;
+        // the declaration proves admission, never the value: invocation reads
+        // the original module's live slot and uses the ordinary call kernel.
+        scan->supported = !call->optional && scan->predicate_script && entry && !entry->import &&
+            entry->scope == scan->predicate_script->global_scope && entry->node &&
+            entry->node->node_type == AST_NODE_FUNC;
+        if (scan->supported) {
+            for (JsAstNode* argument = (JsAstNode*)call->argument; argument && scan->supported;
+                    argument = (JsAstNode*)argument->next)
+                js_interp_check_parameter_leaf(argument, scan);
+        }
+        return;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        scan->supported = !scan->numeric_only;
         break;
     default:
         scan->supported = false;
         break;
     }
-    if (scan->supported) js_ast_visit_children(node, js_interp_check_numeric_leaf, scan);
+    if (scan->supported) js_ast_visit_children(node, js_interp_check_parameter_leaf, scan);
 }
 
-static bool js_interp_call_numeric_leaf(JsFunction* function, Item* args,
-        int arg_count, Item* result) {
-    if (js_interp_host) return false;
+static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function) {
     JsCallableCode* code = function->code;
-    if (!code || code->numeric_leaf_state == 1) return false;
+    if (!code || code->parameter_leaf_state == 1) return NULL;
     AstFuncNode* definition = js_fn_ast_function(function);
     JsAstNode* expression = (JsAstNode*)definition->body;
     if (expression && expression->node_type == AST_NODE_BLOCK) {
         JsAstNode* first = (JsAstNode*)((JsBlockNode*)expression)->statements;
+        // leading string literals establish directives without observing an activation.
+        while (js_ast_statement_string_literal(first)) first = (JsAstNode*)first->next;
         expression = first && !first->next && first->node_type == AST_NODE_RETURN_STAM
             ? (JsAstNode*)((JsReturnNode*)first)->value : NULL;
     }
-    if (!code->numeric_leaf_state) {
-        code->numeric_leaf_state = 1;
+    if (!code->parameter_leaf_state) {
+        code->parameter_leaf_state = 1;
         if (!expression || definition->is_async || definition->is_generator ||
-                (definition->node_type != AST_NODE_FUNC && definition->node_type != AST_NODE_FUNC_EXPR) ||
+                (definition->node_type != AST_NODE_FUNC && definition->node_type != AST_NODE_FUNC_EXPR &&
+                 definition->node_type != AST_NODE_METHOD) ||
+                (definition->node_type == AST_NODE_METHOD &&
+                 ((JsMethodDefinitionNode*)definition)->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR) ||
                 code->has_non_simple_params || code->eval_initializer_context || !definition->vars)
-            return false;
+            return NULL;
         int count = 0;
         for (JsAstNode* param = (JsAstNode*)definition->params; param; param = (JsAstNode*)param->next) {
-            if (param->node_type != AST_NODE_IDENT) return false;
+            if (param->node_type != AST_NODE_IDENT) return NULL;
             NameEntry* entry = ((JsIdentifierNode*)param)->entry;
             if (!entry || !entry->is_parameter || entry->scope != definition->vars || entry->slot != count++)
-                return false;
+                return NULL;
         }
-        if (count != code->param_count) return false;
-        JsNumericLeafScan scan = {definition->vars, count, true};
-        js_interp_check_numeric_leaf(expression, &scan);
-        if (!scan.supported) return false;
-        code->numeric_leaf_state = 2;
+        if (count != code->param_count) return NULL;
+        JsParameterLeafScan scan = {definition->vars, count, true, true};
+        js_interp_check_parameter_leaf(expression, &scan);
+        if (scan.supported) code->parameter_leaf_state = 2;
+        else {
+            // strict single-expression bodies cannot expose a mutable parameter
+            // map; eval, arguments and nested closures keep owned records.
+            if (!(function->flags & JS_FUNC_FLAG_STRICT)) return NULL;
+            JsAstFunctionFacts facts = js_ast_collect_function_facts(NULL, expression);
+            if ((facts.observations & ~JS_AST_OBSERVES_THIS) ||
+                    facts.has_direct_eval || facts.observes_direct_eval ||
+                    facts.has_with || facts.has_direct_super_call || facts.has_lexical_super_call)
+                return NULL;
+            scan = {definition->vars, count, false, true};
+            js_interp_check_parameter_leaf(expression, &scan);
+            if (!scan.supported) return NULL;
+            code->parameter_leaf_state = 3;
+        }
     }
+    return expression;
+}
+
+static bool js_interp_module_predicate_expression(JsFunction* function) {
+    JsAstNode* expression = js_interp_parameter_leaf_expression(function);
+    if (!expression) return false;
+    if (function->code->parameter_leaf_state == 2 ||
+            function->code->parameter_leaf_state == 4) return true;
+    AstFuncNode* definition = js_fn_ast_function(function);
+    JsParameterLeafScan scan = {definition->vars, function->code->param_count,
+        true, true, js_fn_ast_script(function)};
+    js_interp_check_parameter_leaf(expression, &scan);
+    if (scan.supported) function->code->parameter_leaf_state = 4;
+    return scan.supported;
+}
+
+static bool js_interp_call_parameter_leaf(JsFunction* function, Item* args,
+        int arg_count, Item* result) {
+    if (js_interp_host) return false;
+    JsAstNode* expression = js_interp_parameter_leaf_expression(function);
+    if (!expression) return false;
+    JsCallableCode* code = function->code;
+    AstFuncNode* definition = js_fn_ast_function(function);
     if (arg_count < code->param_count || (code->param_count && !args) || js_with_depth_active()) return false;
-    for (int index = 0; index < code->param_count; index++) {
-        TypeId type = get_type_id(args[index]);
-        if (type != LMD_TYPE_INT && type != LMD_TYPE_INT64 && type != LMD_TYPE_FLOAT) return false;
+    if (code->parameter_leaf_state == 2) {
+        for (int index = 0; index < code->param_count; index++) {
+            TypeId type = get_type_id(args[index]);
+            if (type != LMD_TYPE_INT && type != LMD_TYPE_INT64 && type != LMD_TYPE_FLOAT) return false;
+        }
+    } else if (!(function->flags & JS_FUNC_FLAG_STRICT)) {
+        return false;
     }
-    // the call activation owns the numeric arguments and callee across literal-cache GC.
-    // this expression cannot capture or mutate bindings; reuse the ordinary AST kernels (D5.3.3).
+    // the call activation owns the arguments and callee across getters/callbacks.
+    // no local binding can mutate or escape; use the ordinary AST kernels (D5.3.3).
     JsInterpFrame frame = {};
     frame.script = js_fn_ast_script(function);
     frame.env = js_fn_ast(function)->env;
     frame.strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
     frame.active_function = function;
-    frame.numeric_parameters = args;
-    frame.numeric_parameter_scope = definition->vars;
+    frame.parameter_values = args;
+    frame.parameter_scope = definition->vars;
+    if (code->parameter_leaf_state == 3) {
+        JsCallActivation* activation = js_call_activation_current();
+        if (!activation) return false;
+        // the call kernel already owns the strict receiver and method home.
+        frame.this_home = (uint64_t*)(void*)activation->items[JS_CALL_ACTIVATION_THIS];
+        frame.home_class_home = function->payload
+            ? &function->payload->home_class.item : &js_interp_no_home_class;
+    }
     JsInterpCompletion completion = js_interp_eval(&frame, expression);
     *result = completion.value;
     return true;
@@ -6728,8 +6888,8 @@ static Item js_interp_call_function_impl(JsFunction* function, Item* args, int a
     // D7.2.3/D8.5.1: queued callbacks execute with their defining script's
     // origin, so relative dynamic imports retain the enclosing module path.
     RuntimeCurrentFileScope current_file(context, js_interp_script_origin(js_fn_ast_script(function)));
-    Item numeric_result = ItemNull;
-    if (js_interp_call_numeric_leaf(function, args, arg_count, &numeric_result)) return numeric_result;
+    Item parameter_result = ItemNull;
+    if (js_interp_call_parameter_leaf(function, args, arg_count, &parameter_result)) return parameter_result;
     // JC20: this activation borrows the call activation a kernel instance
     // pushed for `function` (generic body entry or the AST direct instance).
     // That activation roots the callee and holds `this` and `new.target`; the
@@ -7592,7 +7752,13 @@ Item js_interp_execute_module_source(Runtime* runtime, const char* source,
         JS_INTERP_SOURCE_MODULE, strict, false, result_home);
 }
 
-static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
+static Item js_interp_module_descriptor_error(ModuleDescriptor* module) {
+    if (!module || get_type_id(module->evaluation_error) == LMD_TYPE_NULL) return ItemNull;
+    return item_is_error(module->evaluation_error)
+        ? module->evaluation_error : js_throw_value(module->evaluation_error);
+}
+
+static Item js_interp_load_es_module(Runtime* runtime, const char* filename, bool* fetch_failed) {
     if (runtime && !input_resource_policy_admits(runtime->resource_policy, filename))
         return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
     if (!runtime || !filename) return ItemError;
@@ -7607,8 +7773,13 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     Item specifier = js_make_string(module_filename);
     Item existing = js_module_get(specifier);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
+        ModuleDescriptor* descriptor = module_get_for_runtime(runtime, module_filename);
+        Item error = js_interp_module_descriptor_error(descriptor);
+        if (item_is_error(error) && fetch_failed && descriptor)
+            *fetch_failed = descriptor->source_fetch_failed;
         mem_free(canonical_filename);
-        return existing;
+        // a failed dependency keeps its abrupt completion when another graph imports it.
+        return item_is_error(error) ? error : existing;
     }
     if (jm_path_is_lambda_source(module_filename)) {
         Item result = js_load_lambda_module(runtime, module_filename);
@@ -7619,11 +7790,16 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     char* source = js_load_script_source_from_cache(
         module_filename, "js-interpreter-module", "module", true, &source_length, runtime->resource_policy);
     if (!source) {
+        if (fetch_failed) *fetch_failed = true;
+        bool is_http = js_path_is_http_url(module_filename);
         mem_free(canonical_filename);
-        return js_throw_reference_error(js_make_string("Cannot find module"));
+        return is_http ? js_throw_type_error("Cannot load module source")
+            : js_throw_reference_error(js_make_string("Cannot find module"));
     }
     Item result = js_interp_execute_es_module_source(runtime, source,
         source_length, module_filename, NULL);
+    if (item_is_error(result) && fetch_failed)
+        *fetch_failed = js_module_source_fetch_failed(runtime, module_filename);
     mem_free(source);
     mem_free(canonical_filename);
     return result;
@@ -7646,9 +7822,13 @@ static Item js_interp_load_static_imports(Runtime* runtime, JsScript* script) {
         js_resolve_script_module_path(runtime, script->reference, source->chars,
             (int)source->len, resolved, (int)sizeof(resolved));
         js_interp_static_import_depth++;
-        Item namespace_obj = js_interp_load_es_module(runtime, resolved);
+        bool fetch_failed = false;
+        Item namespace_obj = js_interp_load_es_module(runtime, resolved, &fetch_failed);
         js_interp_static_import_depth--;
         if (item_is_error(namespace_obj) || get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+            // the document host distinguishes graph fetch failure from a thrown body.
+            ModuleDescriptor* importer = module_get_for_runtime(runtime, script->reference);
+            if (importer && fetch_failed) importer->source_fetch_failed = true;
             return item_is_error(namespace_obj) ? namespace_obj :
                 js_throw_reference_error(js_make_string("imported module is unavailable"));
         }
@@ -7767,11 +7947,7 @@ static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) 
 Item js_interp_es_module_evaluation_error(Runtime* runtime, JsScript* script) {
     ModuleDescriptor* module = runtime && script
         ? module_get_for_runtime(runtime, script->reference) : NULL;
-    if (!module || get_type_id(module->evaluation_error) == LMD_TYPE_NULL) {
-        return ItemNull;
-    }
-    return item_is_error(module->evaluation_error)
-        ? module->evaluation_error : js_throw_value(module->evaluation_error);
+    return js_interp_module_descriptor_error(module);
 }
 
 Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,

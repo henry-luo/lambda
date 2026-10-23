@@ -45,6 +45,14 @@
 extern Item js_make_number(double d);
 
 struct EventContext;
+Item dom_dispatch_resource_event(void* element, const char* type) {
+    if (!element || !type) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> event(roots, js_create_native_event(type, false, false));
+    Rooted<Item> target(roots, dom_wrap_element((DomElement*)element));
+    return dom_dispatch_event(target.get(), event.get());
+}
+
 extern "C" bool dom_engine_author_template_event_live(const char* event_name);
 extern "C" void dom_engine_dispatch_author_template_participant(void* dom_node,
                                                                Item event,

@@ -42,6 +42,7 @@ typedef struct ModuleDescriptor {
     void* mir_ctx;              // compiled MIR context (opaque, for function lookup)
     bool initialized;           // true after module code has executed
     bool loading;               // true while module is being loaded (circular import detection)
+    bool source_fetch_failed;   // host fetch failed before parsing/evaluation
 
     // JS module evaluation state belongs to the same canonical descriptor as
     // its namespace. Other languages leave these fields at their zero values.

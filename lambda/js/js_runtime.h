@@ -323,6 +323,7 @@ void js_dom_install_interface(Item global, const char* name);
 LAMBDA_RT_API Item js_create_data_property(Item object, Item key, Item value);
 Item js_get_reference(Item object, Item key);
 Item js_get_name_id(Item object, NameId name_id);
+bool js_try_get_own_named_data_no_gc(Item object, Item key, Item* out_value);
 
 // =============================================================================
 // Array Functions

@@ -222,6 +222,7 @@ struct JsAstFunctionFacts {
 // arrows contribute their lexical observations to the enclosing function.
 JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
                                                   JsAstNode* body);
+JsLiteralNode* js_ast_statement_string_literal(JsAstNode* statement);
 
 // Suspension facts are indexed once with the function owner, so a nested
 // function's yield/await is never charged to its enclosing body.

@@ -4163,10 +4163,7 @@ extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
 static void _dispatch_pending_load(DomElement* element, DomDocument* owner_doc,
                                    DomNodeRef ref, const char* type="load") {
     if (element && dom_node_ref_validate(owner_doc,ref)) {
-        RootFrame roots(2);
-        Rooted<Item> ev(roots,js_create_event(type, /*bubbles=*/false, /*cancelable=*/false));
-        Rooted<Item> target(roots,dom_wrap_element(element));
-        dom_dispatch_event(target.get(), ev.get());
+        dom_dispatch_resource_event(element, type);
     }
     if (owner_doc && ref.address) {
         dom_node_unpin(owner_doc, ref, DOM_NODE_PIN_EVENT_QUEUE);

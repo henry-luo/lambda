@@ -267,7 +267,14 @@ static bool js_function_has_compiled_light_contract(const JsFunction* fn) {
             js_fn_eval_initializer_context(fn)) {
         return false;
     }
-    uint32_t required = JS_FUNC_FLAG_ANALYSIS_KNOWN | JS_FUNC_FLAG_COMPILED_BODY;
+    // both retained predicate proofs exclude observations of this strict
+    // activation; nested calls still enter their own ordinary invoke kernels.
+    // promotion preserves that proof even without legacy per-value analysis flags.
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
+    bool analyzed = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) ||
+        ((fn->flags & JS_FUNC_FLAG_STRICT) && definition &&
+         (definition->parameter_leaf_state == 2 || definition->parameter_leaf_state == 4));
+    uint32_t required = JS_FUNC_FLAG_COMPILED_BODY;
     uint32_t excluded = JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN |
         JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_DERIVED_CTOR | JS_FUNC_FLAG_USES_WITH |
         JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_TYPED_ARRAY_METHOD |
@@ -275,7 +282,7 @@ static bool js_function_has_compiled_light_contract(const JsFunction* fn) {
         JS_FUNC_FLAG_READS_THIS | JS_FUNC_FLAG_READS_NEW_TARGET |
         JS_FUNC_FLAG_USES_ARGUMENTS | JS_FUNC_FLAG_DIRECT_EVAL;
     Item home_class = js_fn_home_class(fn);
-    return (fn->flags & required) == required && (fn->flags & excluded) == 0 &&
+    return analyzed && (fn->flags & required) == required && (fn->flags & excluded) == 0 &&
         (home_class.item == 0 || home_class.item == ItemNull.item ||
          get_type_id(home_class) == LMD_TYPE_UNDEFINED);
 }
@@ -708,6 +715,17 @@ bool js_function_promote_ast_body(JsFunction* fn, void* entry) {
             fn->code->func_ptr != entry ||
             fn->code->runtime_context != (Context*)context) {
         return false;
+    }
+    if ((fn->flags & JS_FUNC_FLAG_STRICT) &&
+            (fn->code->p2_promotion.state == FN_PROMOTION_COMPILING ||
+             fn->code->p2_promotion.state == FN_PROMOTION_COMPILED)) {
+        // P2 proved activation observations absent except this; retain that
+        // proof for the ordinary compiled call entries, including sibling values.
+        AstFuncNode* definition = js_fn_ast_function(fn);
+        JsAstFunctionFacts facts = js_ast_collect_function_facts(
+            (JsAstNode*)definition->params, (JsAstNode*)definition->body);
+        fn->flags |= JS_FUNC_FLAG_ANALYSIS_KNOWN;
+        if (facts.observations & JS_AST_OBSERVES_THIS) fn->flags |= JS_FUNC_FLAG_READS_THIS;
     }
     fn->flags |= JS_FUNC_FLAG_COMPILED_BODY;
     js_function_finalize_capabilities(fn);

@@ -120,6 +120,16 @@ An `await` with no activation to park — a script's top level, the MIR entry mo
 
 The runtime-owned registry (**D5.4.1**) canonicalizes paths when registering modules. Lookups first probe that canonical key directly; only a miss normalizes and resolves an alias. This keeps repeated live import reads, including Three.js render loops, in memory instead of calling `realpath()` on every read. Lookups return the current descriptor, and aliases still resolve to the same descriptor within their owning runtime.
 
+The AST interpreter uses the builder-published declaration kind to reject
+ordinary local/global bindings before scanning import plans. Actual default,
+named and namespace imports keep their identity-based lookup, while unresolved
+recovery names retain spelling lookup (**D8.2.4v2**).
+
+Ordinary ES-module code also skips the eval-created-binding scan: its lexical
+ancestors are strict, so direct eval cannot add a var to those records.
+Eval scripts, dynamic functions and hosted execution retain the scan because
+their outer records can belong to sloppy callers (**D8.1.3v29**, **D8.2.4v2**).
+
 **Namespace object & live bindings.** Exported bindings are written onto the namespace object (`mt->namespace_reg`); `export default <expr>` writes the `default` key (`:3353`). Import *bindings* are recorded in `module_consts` as `JsModuleConstEntry` (`js_mir_context.hpp:69`) mapping each imported name to a `js_module_vars[]` slot; for a **self-import default** the entry is flagged `is_live_default_binding` with a `live_binding_specifier`, so reads emit `js_get_live_binding_default(specifier)` (`js_runtime.cpp:32498`) — which reads `namespace.default` live and throws ReferenceError while still in TDZ — instead of a snapshot `js_get_module_var`. General named imports are otherwise resolved as module-var snapshots (see [§9](#9-known-issues--future-improvements)).
 
 The interpreter publishes local exports, default exports and reexports through one storage helper. New fields use `any`/`TypedItem` lanes (**D3.2.4v4**), so initializing a large namespace from `undefined` to functions, or changing a live export's value kind, writes in place. Inferring packed `undefined` fields previously rebuilt the whole namespace for each widened field, allocating over 15 GB in the OpenAI overview reproduction. Fields are still first published at their existing initialization point; lexical TDZ checks and namespace identity are retained. `JsInterpreter.LargeModuleExportsKeepBoundedStorageAcrossKindChanges` checks a 1,024-function module, live aliases, TDZ and collection across value-kind changes (**D5.3.3**).
