@@ -5161,9 +5161,34 @@ static MIR_reg_t emit_uext8(MirTranspiler* mt, MIR_reg_t val_reg) {
     return ext;
 }
 
+static bool mir_boxed_predicate_result(AstNode* source, int depth = 0) {
+    if (!source || depth > 16) return false;
+    AstNode* node = ast_unwrap_primary_to_leaf(source);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_PRIMARY || node->node_type == AST_NODE_LITERAL) {
+        return node->type && node->type->type_id == LMD_TYPE_BOOL;
+    }
+    if (node->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* binary = (AstBinaryNode*)node;
+    if (binary->op >= OPERATOR_EQ && binary->op <= OPERATOR_REF_EQ) return true;
+    // and/or return operands, so both must retain the predicate-only domain.
+    return (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR) &&
+        mir_boxed_predicate_result(binary->left, depth + 1) &&
+        mir_boxed_predicate_result(binary->right, depth + 1);
+}
+
 // BOOL_ERROR is not a C truth value; predicate admission requires BOOL_TRUE.
 static MIR_reg_t emit_item_truth_test(MirTranspiler* mt, MIR_reg_t item,
-        bool may_error = true) {
+        bool may_error = true, AstNode* source = NULL) {
+    if (mir_boxed_predicate_result(source)) {
+        // Scalar predicates return only bool/null/error Items; admitting true
+        // preserves the existing error edge without a helper (S3.4).
+        MIR_reg_t truthy = new_reg(mt, "comparison_truth", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, truthy), MIR_new_reg_op(mt->ctx, item),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_TRUE)));
+        return truthy;
+    }
     MIR_reg_t classified = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, item)));
     if (!may_error) return classified;
@@ -16433,7 +16458,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         // (a raw register plus emit_box(val, ANY) fails when an inner
         // expression returns a native value)
         MIR_reg_t boxed_left = transpile_box_item(mt, bi->left);
-        MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left)));
+        MIR_reg_t truthy = emit_item_truth_test(mt, boxed_left, false, bi->left);
         MIR_label_t l_false = new_label(mt);
         MIR_label_t l_end = new_label(mt);
         emit_jump_if_item_error(mt, boxed_left, result, l_end);
@@ -16480,7 +16505,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         }
         // Boxed OR: use is_truthy + branch with short-circuit
         MIR_reg_t boxed_left = transpile_box_item(mt, bi->left);
-        MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left)));
+        MIR_reg_t truthy = emit_item_truth_test(mt, boxed_left, false, bi->left);
         MIR_label_t l_true = new_label(mt);
         MIR_label_t l_end = new_label(mt);
         emit_jump_if_item_error(mt, boxed_left, result, l_end);
@@ -17188,14 +17213,6 @@ static MirValue mir_profile_lower_value(void* owner, AstNode* node, uint32_t dem
 static MIR_reg_t mir_profile_emit_condition(void* owner, MirValue value) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     AstNode* condition_node = (AstNode*)value.provenance_node;
-    if (value.rep == VALUE_REP_ITEM && mir_join_int_ordering(mt, condition_node)) {
-        // an ordering join is an error or a bool Item, so only `true` is
-        // truthy: one word compare instead of is_truthy
-        MIR_reg_t truthy = new_reg(mt, "join_cmp_truthy", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, truthy),
-            MIR_new_reg_op(mt->ctx, value.reg), MIR_new_int_op(mt->ctx, (int64_t)ITEM_TRUE)));
-        return truthy;
-    }
     // Truthiness selects an ABI from the producer descriptor. An `any`-typed
     // comparison can still publish a raw Bool lane, so contract inference is
     // not permitted to choose the Item fallback here (D2.4.1-D2.4.3).
@@ -17203,7 +17220,7 @@ static MIR_reg_t mir_profile_emit_condition(void* owner, MirValue value) {
         value = em_apply_value_demand(&mt->em, value,
             MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
         return emit_item_truth_test(mt, value.reg,
-            mir_condition_may_error(mt, condition_node));
+            mir_condition_may_error(mt, condition_node), condition_node);
     }
     if (mir_expr_may_be_null(mt, condition_node)) {
         // A nullable bool's native null is 2, which is C-truthy. Fold it to

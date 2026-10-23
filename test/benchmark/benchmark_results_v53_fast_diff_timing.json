@@ -1,0 +1,286 @@
+{
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-10-23T08:05:07",
+    "command": "test/benchmark/run_benchmarks.py -e mir,nodejs -s text -b fast_diff -n 3 -t 180 --typed --fresh --results-output test/benchmark/benchmark_results_v53_fast_diff_timing.json",
+    "engines": [
+      "mir",
+      "nodejs"
+    ],
+    "runs": 3,
+    "timeout_s": 180,
+    "suite_cooldown_seconds": 10,
+    "results_output": "test/benchmark/benchmark_results_v53_fast_diff_timing.json",
+    "fresh": true,
+    "suite_filters": [
+      "text"
+    ],
+    "bench_filters": [
+      "fast_diff"
+    ],
+    "canonical_duplicate_suites": {
+      "mandelbrot": "awfy",
+      "nbody": "awfy",
+      "richards": "awfy",
+      "deltablue": "awfy",
+      "primes": "kostya"
+    },
+    "platform": "Darwin arm64",
+    "lambda_exe": "test/benchmark/exe/lambda-v53-f3515ebcf3",
+    "lambda_exe_size_bytes": 25625256,
+    "lambda_exe_sha256": "67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290",
+    "lambda_archive": "test/benchmark/exe/lambda-v53-f3515ebcf3",
+    "lambda_archive_size_bytes": 25625256,
+    "lambda_archive_sha256": "67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290",
+    "test262_baseline": {
+      "status": "not_rerun",
+      "reason": "Unchanged archived release; only the benchmark timer moved. Prior qualification is referenced below.",
+      "prior_source": "test/benchmark/benchmark_results_v53_mir_fix.json",
+      "prior_result": {
+        "status": "passed",
+        "duration_s": 234.7,
+        "completed_tests": 42913,
+        "baseline_tests": 40261,
+        "fully_passed": 40261,
+        "regressions": 0,
+        "timing_s": {
+          "prep": 0.0,
+          "batch": 234.6,
+          "batched": 233.8,
+          "sync": 86.6,
+          "async": 147.1,
+          "non_batched": 0.8,
+          "retry": 0.0,
+          "partial": 0.0,
+          "timing": 0.0,
+          "memory": 0.0,
+          "eval": 0.0
+        },
+        "wall_duration_s": 236.24527708299865,
+        "command": "./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt --gtest_brief=1",
+        "gate": true
+      }
+    },
+    "lambda_commit": "cb49b37900dddd572675485c10a4ad15204d9ae3",
+    "node_version": "v22.13.0",
+    "node_version_pinned": "v22.13.0",
+    "python_version": "Python 3.14.6",
+    "julia": null,
+    "java": null,
+    "erlang": null,
+    "quickjs_version": "2025-09-13",
+    "quickjs_exe": "/opt/homebrew/bin/qjs",
+    "quickjs_exe_sha256": "2c8923f779fdfbad032d48f7f1f6442e4a99bbed619dd0182d3758acfc9d85e3",
+    "profile_check": "passed",
+    "log_dir": "temp/result53_fast_diff_timing",
+    "coverage_build": false,
+    "typed_variants": true,
+    "legacy_variants": false,
+    "mir_key_source": "untyped <bench>.ls",
+    "finished_at": "2026-10-23T08:05:12",
+    "source_hashes": {
+      "test/benchmark/text/fast_diff2.ls": "1c5308bc48412351969837c3e6df43e4797f05f2e6eca1ae8a654f0a2f25edb6"
+    },
+    "binary_build_provenance": {
+      "source": "test/benchmark/benchmark_results_v53_mir_fix.json",
+      "build_commit": "f3515ebcf316c5ff8e4ec5ab91cf524de1dfe9e7",
+      "source_patch": {
+        "path": "test/benchmark/exe/lambda-v53-f3515ebcf3-sources.patch",
+        "sha256": "b4ca93ff90e6adc02b38d6c0a759810ae345943d2afb8d44b400bc24d41223bc",
+        "dirty_source": true
+      }
+    },
+    "golden_checks": [
+      {
+        "source": "test/benchmark/text/fast_diff2.ls",
+        "tier": "jit",
+        "golden": "fast_diff: CHECKSUM:748544",
+        "status": "passed"
+      },
+      {
+        "source": "test/benchmark/text/fast_diff2.ls",
+        "tier": "auto",
+        "golden": "fast_diff: CHECKSUM:748544",
+        "status": "passed"
+      }
+    ],
+    "host_load_before_timing": "8:05  1 user, load averages: 2.26 2.07 3.15",
+    "power_before_timing": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22544483)\t100%; charged; 0:00 remaining present: true",
+    "initial_cooldown_seconds": 15,
+    "measurement_notes": [
+      "fast_diff2.ls now starts the workload clock before converting strings into integer code arrays. Only the Result53 mir_typed execution-time cell will be patched; peer and auto-tier measurements are retained as fresh controls."
+    ]
+  },
+  "text": {
+    "fast_diff": {
+      "category": "text-diff",
+      "mir": 688.615,
+      "_status": {
+        "mir": "ok",
+        "mir_auto_e2e": "ok",
+        "mir_typed": "ok",
+        "mir_typed_auto_e2e": "ok",
+        "nodejs": "ok",
+        "nodejs_e2e": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 712.925,
+              "exec_ms": 679.622,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 722.55675,
+              "exec_ms": 688.615,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 726.117,
+              "exec_ms": 691.639,
+              "status": "ok"
+            }
+          ]
+        },
+        "mir_auto_e2e": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 734.1215,
+              "exec_ms": 720.827,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 729.882208,
+              "exec_ms": 716.79,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 740.433541,
+              "exec_ms": 726.759,
+              "status": "ok"
+            }
+          ]
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 65.688708,
+              "exec_ms": 42.313,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 65.854917,
+              "exec_ms": 42.824,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 65.714,
+              "exec_ms": 42.611,
+              "status": "ok"
+            }
+          ]
+        },
+        "mir_typed_auto_e2e": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 69.568958,
+              "exec_ms": 57.128,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 69.530416,
+              "exec_ms": 57.247,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 69.393459,
+              "exec_ms": 57.35,
+              "status": "ok"
+            }
+          ]
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 81.524709,
+              "exec_ms": 39.069,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 82.435291,
+              "exec_ms": 39.19,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 81.657583,
+              "exec_ms": 39.47,
+              "status": "ok"
+            }
+          ]
+        },
+        "nodejs_e2e": {
+          "status_counts": {
+            "ok": 3
+          },
+          "samples": [
+            {
+              "run": 1,
+              "wall_ms": 81.524709,
+              "exec_ms": 39.069,
+              "status": "ok"
+            },
+            {
+              "run": 2,
+              "wall_ms": 82.435291,
+              "exec_ms": 39.19,
+              "status": "ok"
+            },
+            {
+              "run": 3,
+              "wall_ms": 81.657583,
+              "exec_ms": 39.47,
+              "status": "ok"
+            }
+          ]
+        }
+      },
+      "mir_auto_e2e": 734.1215,
+      "mir_typed": 42.611,
+      "mir_typed_auto_e2e": 69.530416,
+      "nodejs": 39.19,
+      "nodejs_e2e": 81.657583
+    }
+  }
+}
