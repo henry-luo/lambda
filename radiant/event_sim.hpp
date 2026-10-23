@@ -319,6 +319,8 @@ struct SimEvent {
     bool expected_drag_drop_target;
     bool has_expected_open_dropdown;
     bool expected_open_dropdown;
+    bool has_expected_dropdown_dragging;
+    bool expected_dropdown_dragging;
     bool has_expected_context_menu_open;
     bool expected_context_menu_open;
     bool has_expected_context_menu_enabled;
@@ -339,6 +341,7 @@ struct SimEvent {
     bool has_expected_dropdown_y;
     bool has_expected_dropdown_width;
     bool has_expected_dropdown_height;
+    bool has_expected_dropdown_scroll_y;
     bool has_expected_context_menu_x;
     bool has_expected_context_menu_y;
     bool has_expected_context_menu_width;
@@ -351,6 +354,7 @@ struct SimEvent {
     float expected_dropdown_y;
     float expected_dropdown_width;
     float expected_dropdown_height;
+    float expected_dropdown_scroll_y;
     float expected_context_menu_x;
     float expected_context_menu_y;
     float expected_context_menu_width;

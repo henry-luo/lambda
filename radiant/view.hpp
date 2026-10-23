@@ -3645,6 +3645,8 @@ namespace FormDefaults {
     // Chrome default: height=19 border-box, width depends on content
     constexpr float SELECT_WIDTH = 57.0f;  // typical default for short options
     constexpr float SELECT_HEIGHT = 19.0f; // border-box height
+    constexpr int SELECT_MAX_VISIBLE_OPTIONS = 10;
+    constexpr float SELECT_SCROLLBAR_WIDTH = 12.0f;
     constexpr float SELECT_ARROW_WIDTH = 16.0f; // painted arrow glyph area
     constexpr float SELECT_NATIVE_ARROW_AREA = 20.0f; // themed arrow button and text gap
     constexpr float SELECT_BORDER = 1.0f;
@@ -3839,6 +3841,20 @@ struct FormControlProp {
 inline float form_select_dropdown_row_height(const FormControlProp* form) {
     return form && form->intrinsic_height > 0.0f
         ? form->intrinsic_height : FormDefaults::SELECT_HEIGHT;
+}
+
+struct ScrollThumbGeometry {
+    float offset;
+    float length;
+};
+
+// shared by document scrollbars and native popup scrollbars, in logical pixels.
+inline ScrollThumbGeometry scroll_thumb_geometry(float viewport, float content,
+        float track, float offset, float range, float minimum) {
+    float length = content > 0.0f
+        ? min(max(minimum, min(viewport / content, 1.0f) * track), track) : 0.0f;
+    float ratio = range > 0.0f ? min(max(offset / range, 0.0f), 1.0f) : 0.0f;
+    return {ratio * (track - length), length};
 }
 
 inline bool form_control_is_text_editable(const FormControlProp* form) {
@@ -4716,7 +4732,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     const DocumentJsHostConfig* host_config = nullptr, bool print_media = false);
 // in-memory documents transfer their URL and loader pool to the returned owner.
 DomDocument* load_html_source_doc(const char* html_source, int viewport_width, int viewport_height,
-    const DocumentJsHostConfig* host_config = nullptr, bool print_media = false, Url* base_url = nullptr);
+    const DocumentJsHostConfig* host_config = nullptr, bool print_media = false, Url* base_url = nullptr, bool xhtml = false);
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr,

@@ -1054,7 +1054,12 @@ static void validate_text_control_focus_state(DocState* state,
 
 static void validate_dropdown_overlay_state(DocState* state,
                                             StateValidationReport* report) {
-    if (!state || !state->open_dropdown) return;
+    if (!state) return;
+    if (!state->open_dropdown) {
+        if (state->dropdown_dragging || state->dropdown_scrollbar_pressed)
+            report_fail(report, "closed dropdown retains scrollbar capture");
+        return;
+    }
     validate_transient_ui_target(state->open_dropdown, "open dropdown target is detached", report);
     if (!state->open_dropdown->is_element()) {
         report_fail(report, "open dropdown target is not an element");
@@ -1062,6 +1067,8 @@ static void validate_dropdown_overlay_state(DocState* state,
         DomElement* elem = lam::dom_require_element(state->open_dropdown);
         if (!elem->form || !form_control_is_dropdown_open(state, state->open_dropdown)) {
             report_fail(report, "open dropdown state disagrees with form control");
+        } else if (select_dropdown_geometry(state, elem->form).scroll_y != state->dropdown_scroll_y) {
+            report_fail(report, "dropdown scroll offset exceeds option extent");
         }
     }
     if (state->dropdown_width < 0 || state->dropdown_height < 0) {

@@ -3,9 +3,14 @@
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import page: .mod_page
+import columns: .mod_columns
 import rendering: lambda.edit.model
 import insert: .mod_insert
 import stories: .mod_stories
+import graphics: .mod_graphics
+import table_design: .mod_table_design
+import object_layout: .mod_object_layout
+import group_data: .mod_group_data
 
 let factories = {
     p:(a,k)=><p *:a, *k>, h1:(a,k)=><h1 *:a, *k>, h2:(a,k)=><h2 *:a, *k>,
@@ -17,7 +22,7 @@ let factories = {
     span:(a,k)=><span *:a, *k>, strong:(a,k)=><strong *:a, *k>, b:(a,k)=><b *:a, *k>,
     em:(a,k)=><em *:a, *k>, i:(a,k)=><i *:a, *k>, u:(a,k)=><u *:a, *k>,
     del:(a,k)=><del *:a, *k>, s:(a,k)=><s *:a, *k>, sub:(a,k)=><sub *:a, *k>, sup:(a,k)=><sup *:a, *k>,
-    a:(a,k)=><span class:"word-link", title:a.title or a.href, style:a.style, *k>,
+    a:(a,k)=><span *:a,class:"word-link", title:a.title or a.href, *k>,
     hr:(a,k)=><hr>, br:(a,k)=><br>, img:(a,k)=><img *:a>,
     div:(a,k)=><div *:a, *k>
 }
@@ -27,41 +32,64 @@ fn make(tag,attrs,kids) {
 }
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
-fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','indent','colspan','rowspan','data-word-style',
-    'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment',
-    'data-word-cover','data-word-blank-page','data-word-shape','data-word-equation','data-word-wordart','data-word-rotation',
+fn projected_attrs(attrs,preview=false) => {*:map([for (a in attrs where contains(['style','align','start','indent','colspan','rowspan','data-word-style',
+    'src','alt','width','height','href','title','data-word-citation','data-word-bibliography',*table_design.attributes,'data-word-repeat-header','data-word-formula','data-word-page-break','data-word-comment',
+    'data-word-cover','data-word-blank-page',*[for (entry in graphics.catalog) entry.key],'data-word-rotation',object_layout.key,group_data.key,
     'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
-    (a.name=='id' and starts_with(string(a.value),insert.bookmark_prefix)))
+    (not preview and a.name=='id' and (starts_with(string(a.value),insert.bookmark_prefix) or starts_with(string(a.value),"word-source-"))))
     (string(a.name),string(a.value))])}
-fn wrap_marks(marks,i,child) => if (i >= len(marks)) child else {
+fn wrap_marks(marks,i,child,preview=false) => if (i >= len(marks)) child else {
     let m = marks[i]
-    let projected = if (m.value is array) projected_attrs(m.value) else {}
+    let projected = if (m.value is array) projected_attrs(m.value,preview) else {}
     let attrs = if (projected["data-word-change-kind"]=="delete") {*:projected,contenteditable:"false"} else projected
-    wrap_marks(marks,i+1,make(m.name,attrs,[child]))
+    wrap_marks(marks,i+1,make(m.name,attrs,[child]),preview)
 }
-view map {
-    if (~.kind == 'text') wrap_marks(~.marks,0,if (~.text == "") "\u200B" else ~.text)
-    else if (~.kind == 'node' and ~.tag == 'doc') <div class:"word-pages",
-        *[for (i,children in page.sheets(~)) <div class:"word-page",["data-page"]:string(i+1),
-            style:page.editor_style(~),stories.story(~,"header",i+1,len(page.sheets(~)));
-            *[for (child in children) apply(child)];
-            stories.story(~,"footer",i+1,len(page.sheets(~)))>]>
-    else if (~.kind == 'node') make(~.tag,
-        projected_attrs(~.attrs),rendering.surface_children(~,(child)=>apply(child)))
+fn project(n,child,preview=false) {
+    // one wrapper per leaf preserves source identity (S2.6.5) and lets read-only navigation resolve text ranges.
+    if (n.kind=='text') <span class:"word-text-run",wrap_marks(n.marks,0,if (n.text=="") "\u200B" else n.text,preview)>
+    else if (n.kind=='node') make(n.tag,projected_attrs(n.attrs,preview),rendering.surface_children(n,child))
     else ""
 }
-pub fn surface(editor,zoom,read_only=false) =>
+// Thumbnails share document painting but never apply source nodes or duplicate bookmark IDs.
+fn preview_node(n) => project(n,(child)=>preview_node(child),true)
+fn column_body(doc,children,preview=false) {
+    let render = (child)=>if (preview) preview_node(child) else apply(child)
+    if (columns.settings(doc).count==1) [for (child in children) render(child)]
+    else [<div class:"word-columns",style:columns.style(doc),*[for (child in children) render(child)]>]
+}
+pub fn thumbnail(doc,children,width=156,page_no=1) {
+    let g = page.geometry(doc)
+    let scale = width/g.width;
+    <span class:"page-thumbnail",["aria-hidden"]:"true",style:"width:" ++ string(width) ++ "px;height:" ++ string(g.height*scale) ++ "px",
+        <span class:"word-content page-thumbnail-content",style:"width:" ++ string(g.width) ++ "px;transform:scale(" ++ string(scale) ++ ")",
+            <span class:"word-page",style:page.editor_style(doc,page_no),*column_body(doc,children,true)>>>
+}
+fn render_pages(doc,web=false) => <div class:"word-pages",
+    *[for (i,children in page.sheets(doc)) <div class:"word-page",["data-page"]:string(i+1),
+        style:if (web) null else page.editor_style(doc,i+1),stories.story(doc,"header",i+1,len(page.sheets(doc)));
+        *column_body(doc,children);
+        stories.story(doc,"footer",i+1,len(page.sheets(doc)))>]>
+// Explicit root-template selection changes presentation while each child still applies its source node.
+view word_web_document: map { render_pages(~,true) }
+view word_document: map {
+    if (~.kind=='node' and ~.tag=='doc') render_pages(~)
+    else project(~,(child)=>apply(child))
+}
+pub fn surface(editor,zoom,read_only=false,layout="print") =>
     <div id:"edit-surface", class:"word-content", contenteditable:if (read_only) "false" else "true", tabindex:"0",
         ["aria-label"]:"Document", ["aria-multiline"]:"true", role:"textbox",
-        style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left; width:" ++ string(page.geometry(editor.doc).width) ++ "px;",
-        apply(editor.doc)>
+        // reflow before applying the same document scale used by object handles and Print Layout.
+        style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left; width:" ++
+            (if (layout=="web") string(100/zoom) ++ "%" else string(page.geometry(editor.doc).width) ++ "px") ++ ";",
+        apply(editor.doc,{template:if (layout=="web") "word_web_document" else "word_document"})>
 
 // The same document typography serves the editor, HTML export, and paged PDF.
 pub let document_css = "
  .word-content { box-sizing:border-box; color:#24334b;
    font-family:Georgia, 'Times New Roman', serif; font-size:11pt; line-height:1.5;
    outline:none; }
- .word-page { position:relative; box-sizing:border-box; background:#fff; box-shadow:0 3px 15px rgba(31,54,62,0.10); }
+ .word-page { position:relative; z-index:0; box-sizing:border-box; background:#fff; box-shadow:0 3px 15px rgba(31,54,62,0.10); }
+ body.word-content { position:relative; z-index:0; }
  .word-story { position:absolute; font-family:Arial,sans-serif; color:#718397; line-height:1.2; white-space:pre-wrap; cursor:pointer; }
  .word-page + .word-page { margin-top:24px; }
  .word-content p { margin:0 0 11pt; }
@@ -87,6 +115,8 @@ pub let document_css = "
    border-left:0; border-right:0; background:transparent; }
  .word-content hr { border:0; border-top:1px solid #bfced9; margin:22px 0; }
  .word-content a,.word-link { color:#2864ad; text-decoration:underline; }
+ .word-content [data-word-citation] { color:inherit; text-decoration:none; cursor:pointer; }
+ .word-content [data-word-citation]:hover { background:#eee8fb; border-radius:2px; }
  .word-content pre,.word-content code { font-family:'Courier New',monospace; }
  .word-content img { max-width:100%; vertical-align:middle; }
  .word-content [data-word-page-break=true] { break-before:page; }
@@ -99,6 +129,6 @@ pub let document_css = "
  @page { size:A4; margin:17mm 19mm; }
  @media print { .word-content { width:auto; min-height:0; padding:0; }
    h1,h2,h3 { break-after:avoid; } tr { break-inside:avoid; } }
-" ++ join([for (level in 1 to 8)
+" ++ table_design.css ++ join([for (level in 1 to 8)
     // the flat-list model stores levels; both screen and export need their visual offset.
     ".word-content li[indent=\"" ++ string(level) ++ "\"] { margin-inline-start:" ++ string(level*1.75) ++ "em; }"],"\n")

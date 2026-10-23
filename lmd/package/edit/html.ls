@@ -34,6 +34,8 @@ let mark_entry = {role: 'mark', content: [{role: 'inline', qty: 'star'}], marks:
 pub let schema = {
   *: schemas.html5_subset_schema,
   s: mark_entry, del: mark_entry, sub: mark_entry, sup: mark_entry,
+  // rowspans can cover every slot in a row, leaving no source td/th children.
+  tr: {*:schemas.html5_subset_schema.tr,content:[{any:[{tag:'td'},{tag:'th'}],qty:'star'}]},
   raw_html:   {role: 'inline', content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'source', required: true}]},
   html_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
@@ -273,7 +275,7 @@ fn row_node(r) {
   if (type(r) != element or name(r) != 'tr') null
   else {
     let cells = [for (c in significant_children(r)) cell_node(c)]
-    if (all_present(cells)) node_attrs('tr', source_attrs(r), cells) else null
+    if (len(cells)==0 or all_present(cells)) node_attrs('tr', source_attrs(r), cells) else null
   }
 }
 

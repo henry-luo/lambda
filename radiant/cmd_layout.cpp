@@ -2336,7 +2336,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
     DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config,
-    CookieJar* top_level_cookie_jar, bool print_media) {
+    CookieJar* top_level_cookie_jar, bool print_media, bool xhtml_source = false) {
     auto t_start = time_now_ns();
 
     log_mem_stage("load_html: enter");
@@ -2347,7 +2347,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     char* html_filepath = url_to_local_path(html_url);
-    bool xhtml = !html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars);
+    bool xhtml = xhtml_source || (!html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars));
 
     // Step 1: Parse HTML with Lambda parser
     // If html_source is provided, use it directly; otherwise read from file or download
@@ -2721,7 +2721,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 }
 
 DomDocument* load_html_source_doc(const char* html_source, int viewport_width, int viewport_height,
-        const DocumentJsHostConfig* host_config, bool print_media, Url* base_url) {
+        const DocumentJsHostConfig* host_config, bool print_media, Url* base_url, bool xhtml) {
     if (!html_source || !html_source[0]) return nullptr;
     Url* source_url = base_url ? url_parse(url_get_href(base_url)) : get_current_dir();
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "radiant.render.document");
@@ -2730,8 +2730,9 @@ DomDocument* load_html_source_doc(const char* html_source, int viewport_width, i
         if (pool) pool_destroy(pool);
         return nullptr;
     }
-    DomDocument* doc = load_lambda_html_doc(source_url, nullptr, viewport_width, viewport_height,
-        pool, html_source, false, false, host_config, print_media);
+    // explicit XML input preserves native page controls and foreign namespaces through the shared loader.
+    DomDocument* doc = load_lambda_html_doc_profiled(source_url, nullptr, false, viewport_width, viewport_height,
+        pool, html_source, false, false, nullptr, nullptr, host_config, nullptr, print_media, xhtml);
     if (!doc) {
         url_destroy(source_url);
         pool_destroy(pool);

@@ -2706,6 +2706,11 @@ typedef struct DocState {
     float dropdown_x, dropdown_y;  // popup origin in the top-level logical viewport
     float dropdown_width;          // logical popup width
     float dropdown_height;         // logical popup height
+    float dropdown_scroll_y;       // option content offset in logical pixels
+    bool dropdown_dragging;
+    bool dropdown_scrollbar_pressed;
+    float dropdown_drag_start_y;
+    float dropdown_drag_start_scroll;
 
     // F8 (Radiant_Design_Form_Input.md §3.10): native context menu for
     // text controls. Owned outside the focus state because right-click
@@ -3627,6 +3632,22 @@ void doc_state_close_dropdown(DocState* state, View* view);
 void doc_state_set_dropdown_geometry(DocState* state,
                                      float x, float y, float width, float height);
 
+struct SelectDropdownGeometry {
+    float row_height;
+    float scroll_max;
+    float scroll_y;
+    float scrollbar_width;
+    float thumb_y;                 // relative to the popup origin
+    float thumb_height;
+};
+SelectDropdownGeometry select_dropdown_geometry(const DocState* state,
+                                                const FormControlProp* form);
+ScrollbarPressPart select_dropdown_scrollbar_part(const DocState* state,
+    const FormControlProp* form, float x, float y);
+void doc_state_set_dropdown_scroll(DocState* state, float y);
+void doc_state_set_dropdown_scrollbar_press(DocState* state, bool pressed, bool dragging, float y);
+void doc_state_reveal_dropdown_option(DocState* state, int index);
+
 // ============================================================================
 // Context Menu DocState API (doc-scoped overlay state)
 // ============================================================================
@@ -3658,7 +3679,7 @@ void form_control_close_dropdown(DocState* state, View* view);
  * Set the hovered option index in an open dropdown (-1 to clear hover).
  * Index is bounds-checked against option count.
  */
-void form_control_set_hover_index(DocState* state, View* view, int index);
+void form_control_set_hover_index(DocState* state, View* view, int index, bool reveal = true);
 
 /**
  * Get the currently hovered option index in a dropdown (-1 if none).
@@ -4223,6 +4244,8 @@ typedef enum SmEvent {
     SM_EV_DROPDOWN_OPEN,
     SM_EV_DROPDOWN_CLOSE,
     SM_EV_DROPDOWN_SET_GEOMETRY,
+    SM_EV_DROPDOWN_SCROLL,
+    SM_EV_DROPDOWN_DRAG,
     SM_EV_CONTEXT_MENU_OPEN,
     SM_EV_CONTEXT_MENU_CLOSE,
     SM_EV_CONTEXT_MENU_HOVER,
@@ -4552,7 +4575,7 @@ typedef struct EventContext {
     RdtEvent event;
     RadiantPaintPhase paint_phase;
     View* target;
-    lam::Up<View> negative_path; // borrowed target while replaying a lifted negative layer's ancestry
+    lam::Up<View> stacking_path; // borrowed target while replaying a lifted signed layer's ancestry
     TextRect* target_text_rect;
     bool target_text_offset_valid;
     int target_text_offset;

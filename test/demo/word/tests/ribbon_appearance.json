@@ -1,0 +1,308 @@
+{
+  "name": "Word ribbon appearance and primary command accessibility",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "window.wordRibbonHeight=document.querySelector(\".ribbon-groups\").getBoundingClientRect().height;window.wordRibbonLabelsFit=function(){return Array.from(document.querySelectorAll(\".ribbon-groups .ribbon-large,.ribbon-groups .table-large-tool\")).every(function(b){var r=b.getBoundingClientRect(),l=b.querySelector(\".tool-label\").getBoundingClientRect();return l.left>=r.left-1 && l.right<=r.right+1 && l.bottom<=r.bottom+1;})};window.wordRibbonCaptionsFit=function(){var rr=document.querySelector(\".ribbon-groups\").getBoundingClientRect();return Math.abs(rr.height-window.wordRibbonHeight)<=1 && Array.from(document.querySelectorAll(\".ribbon-groups .group-label\")).every(function(g){var r=g.getBoundingClientRect(),t=g.parentElement.querySelector(\".group-tools\").getBoundingClientRect();return r.top>=t.bottom-1 && r.bottom<=rr.bottom;})};"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-home.png"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".insert-ribbon .ribbon-large"
+      },
+      "count": 14
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonLabelsFit()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-insert.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-picture"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-shape"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-layout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonLabelsFit()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-layout.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-references"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonLabelsFit()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-references.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-review"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonLabelsFit()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-review.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonLabelsFit()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-view.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-table-design.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonLabelsFit()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRibbonCaptionsFit()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-table-layout.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-icons"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".icon-choice"
+      },
+      "count": 20
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 900
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var r=document.querySelector(\".ribbon-groups\");r.clientWidth<=900 && r.scrollWidth>r.clientWidth"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/ribbon-insert-narrow.png"
+    },
+    {
+      "type": "assert_script",
+      "js": "var r=document.querySelector(\".ribbon-groups\"),s=document.getElementById(\"stage\");r.getBoundingClientRect().bottom<=s.getBoundingClientRect().top && r.scrollLeft>0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    }
+  ]
+}

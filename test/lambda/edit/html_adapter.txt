@@ -28,3 +28,5 @@
 ["block 1 <p> \"y\" would change"]
 "XHTML refused:"
 ["XHTML documents cannot be edited yet; open it with 'lambda view' instead"]
+"rowspans preserve covered empty rows:"
+[true, true, true, true, true]

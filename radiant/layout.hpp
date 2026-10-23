@@ -4829,6 +4829,7 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 void layout_parent_to_containing_block_offset(ViewBlock* block,
                                               ViewBlock* containing_block,
                                               float* out_x, float* out_y);
+RdtLogicalPoint layout_positioned_parent_offset(View* layer);
 void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);

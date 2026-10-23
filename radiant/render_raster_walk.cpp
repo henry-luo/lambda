@@ -225,18 +225,13 @@ void render_raster_positioned_children(RasterRenderContext* rdcon, ViewBlock* bl
     render_walk_positioned_children(&backend, &walk_state, block);
 }
 
-void render_raster_positioned_view(RasterRenderContext* rdcon, ViewBlock* block) {
-    render_raster_dispatch_block(rdcon, block, false);
+void render_raster_stacking_view(RasterRenderContext* rdcon, View* view) {
+    if (ViewBlock* block = lam::view_as_block(view)) render_raster_dispatch_block(rdcon, block, false);
+    else if (ViewElement* span = lam::view_as_element(view)) render_raster_walk_inline(rdcon, span,
+        rdcon->block.x, rdcon->block.y, &rdcon->font, rdcon->color);
 }
 
-void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* view) {
-    if (!rdcon || !view) return;
-    RenderBackend backend;
-    render_raster_backend_init(&backend, rdcon);
-    RenderWalkState walk_state;
-    render_raster_walk_state_init(&walk_state, rdcon);
-    render_walk_positive_z_descendants(&backend, &walk_state, view);
-}
+
 
 bool render_raster_custom_layout_children(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !block->custom_layout_paint_prop()) return false;

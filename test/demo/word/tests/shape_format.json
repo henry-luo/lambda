@@ -1,0 +1,729 @@
+{
+  "name": "Word Shape Format ribbon and format pane",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1680,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "test/demo/word/tests/object_layout.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-shape-format"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#word').getAttribute('data-tab')==='Shape Format'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.shape-style-card').length===4 && document.querySelectorAll('.shape-text-card').length===4"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#shape-fill-menu svg').getAttribute('data-icon-tone')==='amber' && document.querySelector('#shape-outline-menu svg').getAttribute('data-icon-tone')==='violet'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/shape-format-ribbon.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-style-blue"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"fill\"]===\"#3478cc\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text\"]===\"Shape\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"width\"]===100"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-edit-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-change-rounded"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"kind\"]===\"rounded\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-fill-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-fill-violet"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"fill\"]===\"#805bc5\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-outline-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-outline-ink"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"stroke\"]===\"#24334b\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-outline-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#shape-line-weight"
+      },
+      "value": "3"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"weight\"]===3"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#shape-line-dash"
+      },
+      "value": "dashed"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"dash\"]===\"dashed\""
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-effects-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-shape-effect-shadow"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"effect\"]===\"shadow\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-edit-text"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-text"
+      },
+      "text": "Studio",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text\"]===\"Studio\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement.id==='shape-pane-text'"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#shape-pane-font"
+      },
+      "value": "Georgia"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"font\"]===\"Georgia\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-bold"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"bold\"]===true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-italic"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"italic\"]===true"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#shape-pane-fill-style"
+      },
+      "value": "gradient"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"fill_style\"]===\"gradient\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-fill2"
+      },
+      "text": "#12",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('shape-pane-fill2').value==='#12'"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector('#edit-surface img[data-word-shape]').getAttribute('data-word-shape')).fill2==='#bcd9ff'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-fill2"
+      },
+      "text": "#dcebff",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"fill2\"]===\"#dcebff\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-opacity"
+      },
+      "text": "85",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"opacity\"]===85"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-width"
+      },
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('shape-pane-width').value==='0'"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector('#edit-surface img[data-word-shape]').getAttribute('data-word-shape')).width===100"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-width"
+      },
+      "text": "220",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"width\"]===220"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement.id==='shape-pane-width'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-height"
+      },
+      "text": "120",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"height\"]===120"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-alt"
+      },
+      "text": "Studio sign",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface img[data-word-shape]').getAttribute('alt')==='Studio sign'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-align-text-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-shape-text-top"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"vertical\"]===\"top\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-align-left"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"align\"]===\"left\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-direction-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-shape-direction-right"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"direction\"]===90"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-style-outlined"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text_style\"]===\"outlined\""
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/shape-format-pane.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-shape-pane"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#shape-format-pane')===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-style-hollow"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text_style\"]===\"hollow\""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text_style\"]===\"outlined\""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super+shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text_style\"]===\"hollow\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-style-solid"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-square"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).float==='left'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-settings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var ids=Array.from(document.querySelectorAll('[id]')).map(function(n){return n.id});return document.getElementById('shape-fill').tagName==='INPUT' && new Set(ids).size===ids.length})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-text"
+      },
+      "text": "Final sign",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('shape-text').value==='Final sign'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-shape"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"text\"]===\"Final sign\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"fill_style\"]===\"gradient\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"dash\"]===\"dashed\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"font\"]===\"Georgia\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-shape]\").getAttribute(\"data-word-shape\"))[\"direction\"]===90"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-shape-format"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/shape-format-final.png"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super+shift"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shape-format.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shape-format.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/shape-format.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface').textContent.indexOf('The final paragraph stays intact.')>=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-shape-format"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.shape-style-card').length===0 && document.querySelectorAll('.shape-text-card').length===5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-style-outlined"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-wordart]\").getAttribute(\"data-word-wordart\"))[\"style\"]===\"outlined\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-fill-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-fill-violet"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-wordart]\").getAttribute(\"data-word-wordart\"))[\"fill\"]===\"#805bc5\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-text-settings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-pane-text"
+      },
+      "text": "Beautiful words",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-wordart]\").getAttribute(\"data-word-wordart\"))[\"text\"]===\"Beautiful words\""
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#shape-pane-transform"
+      },
+      "value": "archUp"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-wordart]\").getAttribute(\"data-word-wordart\"))[\"transform\"]===\"archUp\""
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/shape-format-wordart.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-shape-pane"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface h1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#tab-shape-format')===null && document.querySelector('#word').getAttribute('data-tab')==='Home'"
+    }
+  ]
+}

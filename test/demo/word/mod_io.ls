@@ -13,6 +13,7 @@ import document: .mod_document
 import model: .mod_model
 import surface: .mod_surface
 import page: .mod_page
+import columns: .mod_columns
 import review: .mod_review
 import stories: .mod_stories
 import changes: .mod_changes
@@ -105,7 +106,7 @@ pub fn read_document(path) map^ {
             status:"Imported " ++ session.basename(path) ++ "; save an editable copy."}
     }
 }
-let metadata_names = ['data-word-page','data-word-comments','data-word-comment-seq','data-word-stories','data-word-tracking','data-word-change-seq']
+let metadata_names = ['data-word-page','data-word-columns','data-word-comments','data-word-comment-seq','data-word-stories','data-word-tracking','data-word-change-seq','data-word-references']
 pub fn import_html_document(source) map^ {
     let loaded = html.import_text(source)^
     import_metadata(restored(loaded.doc)^,loaded.envelope.head)^
@@ -119,11 +120,32 @@ fn import_metadata(doc,head) map^ {
         else {*:doc,attrs:unpack_attrs(attrs)}
     }
 }
-pub fn html_document(doc,title) string^ => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++
+fn document_body(doc,paged) {
+    let body = html.export_text(doc,{document:false,head:<head>})
+    if (paged) columns.pdf_flow(doc,body) else body
+}
+pub fn html_document(doc,title,paged=false) string^ => "<!doctype html><html" ++
+    (if (paged) " xmlns=\"http://www.w3.org/1999/xhtml\"" else "") ++ "><head><meta charset=\"utf-8\"><title>" ++
     helpers.escape_text(title) ++ "</title><meta name=\"lambda-word-metadata\" content=\"" ++
     helpers.escape_attr(format(pack_attrs([for (a in doc.attrs where contains(metadata_names,a.name)) a]),'json')^) ++
-    "\"><style>" ++ surface.document_css ++ page.export_css(doc) ++ stories.export_css(doc) ++ review.css(doc) ++ changes.css ++
-    "</style></head><body class=\"word-content\">" ++ html.export_text(doc,{document:false,head:<head>}) ++ "</body></html>"
+    "\"><style>" ++ surface.document_css ++ page.export_css(doc) ++ columns.export_css(doc) ++ stories.export_css(doc) ++ review.css(doc) ++ changes.css ++
+    "</style></head><body class=\"word-content\">" ++
+    document_body(doc,paged) ++ "</body></html>"
+pub fn pdf_document(doc,title) string^ {
+    let source = html_document(doc,title,true)^
+    if (columns.settings(doc).count==1) source else {
+        // serialize parsed HTML as XML so void elements, text and native namespaces remain well formed.
+        let parsed = parse(source,'html')^
+        let root = [for (child in content(parsed) where type(child)==element and name(child)=='html') child][0]
+        let head = [for (child in content(root) where type(child)==element and name(child)=='head') child][0]
+        // the XML formatter retains HTML raw-text tags; escape this generated head for XML parsing.
+        let xml_head = <head *[for (child in content(head))
+            if (type(child)==element and name(child)=='title') <title helpers.escape_text(join(content(child),""))>
+            else if (type(child)==element and name(child)=='style') <style helpers.escape_text(join(content(child),""))>
+            else child]>
+        format(<html *:map(root),xml_head; *[for (child in content(root) where child!=head) child]>,'xml')^
+    }
+}
 pub pn export_document(doc,title,path) any^ {
     let extension = lower(split(path,".")[last])
     if (extension == "html") { output(html_document(doc,title)^,path,{format:'text',atomic:true})^ }
@@ -131,7 +153,8 @@ pub pn export_document(doc,title,path) any^ {
     else if (extension == "pdf") {
         let pending = path ++ ".word-" ++ string(int(clock()*1000000)) ++ ".pdf"
         let geometry = page.geometry(doc)
-        let result = radiant.export_document(html_document(doc,title)^,pending,{format:"pdf",width:geometry.width,height:geometry.height,pagination:true})
+        let result = radiant.export_document(pdf_document(doc,title)^,pending,{format:"pdf",width:geometry.width,height:geometry.height,pagination:true,
+            source_format:if (columns.settings(doc).count>1) "xhtml" else "html"})
         if (result != true) {
             io.delete(pending) ^ { null }
             raise error("Word: " ++ string(result))

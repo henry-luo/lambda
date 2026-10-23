@@ -5,13 +5,27 @@ import difflib
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "test/demo/word"
 ARTIFACTS = ROOT / "temp/word/tests"
+UI_FIXTURES = ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
+                        "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "ribbon_appearance", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
+                        "stories", "advanced_objects", "equations", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry")
+
+
+def pdf_words(xml):
+    try:
+        return [[{"text": n.text or "", "x": float(n.attrib["xMin"]), "y": float(n.attrib["yMin"])}
+                 for n in page.iter() if n.tag.endswith("}word")]
+                for page in ET.fromstring(xml).iter() if page.tag.endswith("}page")]
+    except (ET.ParseError, KeyError, ValueError):
+        return []
 
 
 def main():
@@ -21,6 +35,8 @@ def main():
     modes.add_argument("--model-only", action="store_true")
     modes.add_argument("--ui-only", action="store_true")
     parser.add_argument("--report")
+    parser.add_argument("--ui-start-at", choices=UI_FIXTURES,
+                        help="Resume UI workflows after interruption, retaining previously generated export files")
     args = parser.parse_args()
     executable = str(Path(args.lambda_exe).resolve())
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
@@ -58,17 +74,32 @@ def main():
 
     if not args.model_only:
         # These are this harness's generated files, never the default user document.
-        for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
+        for filename in (() if args.ui_start_at else ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
                          "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html",
                          "blank-pages.pdf", "cover-pages.pdf", "insert-pages.word.json", "insert-pages.html",
                          "bookmarks.word.json", "bookmarks.html", "shapes.word.json", "shapes.html", "shapes.pdf",
                          "stories.word.json", "stories.html", "stories.pdf", "changes.word.json", "changes.html", "changes.pdf",
                          "advanced-objects.word.json", "advanced-objects.html", "advanced-objects.pdf",
-                         "transforms.word.json", "transforms.html", "transforms.pdf", "lists.word.json", "lists.html"):
+                         "illustrations.word.json", "illustrations.html", "illustrations.pdf",
+                         "table-design.word.json", "table-design.html", "table-design.pdf",
+                         "table-layout.word.json", "table-layout.html", "table-layout.pdf",
+                         "citations.word.json", "citations.html", "citations.pdf",
+                         "citations-ieee.html", "citations-ieee.pdf",
+                         "columns.word.json", "columns.html", "columns.pdf", "columns-long.pdf", "columns-long.xhtml",
+                         "columns-default.svg", "columns-explicit.svg", "columns-invalid.svg",
+                         "margins.word.json", "margins.html", "margins.pdf", "margins-facing.html", "margins-facing.pdf", "margins-columns.pdf",
+                         "margins-normal.pdf", "margins-narrow.pdf", "margins-moderate.pdf", "margins-wide.pdf", "margins-mirrored.pdf",
+                         "object-layout.word.json", "object-layout.html", "object-layout.pdf",
+                         "object-layout-inline.pdf", "object-layout-square.pdf", "object-layout-topBottom.pdf",
+                         "object-layout-front.pdf", "object-layout-behind.pdf",
+                         "shape-format.word.json", "shape-format.html", "shape-format.pdf",
+                         "equations.word.json", "equations.html", "equations.pdf",
+                         "transforms.word.json", "transforms.html", "transforms.pdf", "lists.word.json", "lists.html")):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
-        for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection",
-                        "pictures_links", "paragraph_search", "layout", "review", "insert_pages", "bookmarks_symbols", "shapes",
-                        "stories", "advanced_objects", "changes", "object_transform", "object_move", "clipboard_objects", "viewport", "ruler", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry"):
+        fixtures = UI_FIXTURES
+        if args.ui_start_at:
+            fixtures = fixtures[fixtures.index(args.ui_start_at):]
+        for fixture in fixtures:
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",
@@ -80,6 +111,39 @@ def main():
             passed = (result is not None and result.returncode == 0 and report.get("result") == "PASS"
                       and counts.get("passed", 0) > 0 and counts.get("failed", 1) == 0)
             record(fixture, passed, f"{counts.get('passed', 0)} assertions")
+        for feature in ("columns", "margins", "object_layout", "shape_format", "equations"):
+            exported = run(feature + "-export", [executable, "run", f"test/demo/word/tests/_{feature}_export.ls"])
+            record(feature + "-export-api", exported is not None and exported.returncode == 0 and
+                   exported.stdout.strip() == (DEMO / f"tests/_{feature}_export.txt").read_text().strip())
+        long_pdf = ROOT / "temp/word/columns-long.pdf"
+        column_data = long_pdf.read_bytes() if long_pdf.exists() else b""
+        record("columns-long-pdf", column_data.startswith(b"%PDF-") and
+               len(re.findall(rb"/MediaBox\s*\[", column_data)) == 5,
+               "100 paragraphs flow across five sheets without a blank leading page")
+        if shutil.which("pdftotext") and long_pdf.exists():
+            extracted = run("columns-pdf-text", ["pdftotext", "-layout", str(long_pdf), "-"])
+            pages = extracted.stdout.split("\f")[:-1] if extracted is not None else []
+            record("columns-pdf-text", len(pages) == 5 and
+                   sorted(int(n) for n in re.findall(r"Paragraph (\d+):", extracted.stdout)) == list(range(1, 101)) and
+                   all("A & B < C" in text and f"Page {i+1} of 5" in text for i, text in enumerate(pages)),
+                   "every paragraph once, repeated headers, and resolved page fields")
+            bbox = run("columns-pdf-geometry", ["pdftotext", "-bbox", str(long_pdf), "-"])
+            positions = []
+            if bbox is not None and bbox.returncode == 0:
+                words = pdf_words(bbox.stdout)
+                positions = sorted({round(n["x"], 1) for n in (words[0] if words else [])
+                                    if re.match(r"Paragraph \d+:", n["text"])})
+            record("columns-pdf-geometry", len(positions) == 2 and positions[1]-positions[0] > 200,
+                   "paragraphs occupy two distinct columns on the first sheet")
+        if shutil.which("pdftotext"):
+            for stem, expected in (("normal", [72]), ("narrow", [36]), ("moderate", [54]), ("wide", [144]),
+                                   ("mirrored", [90]), ("facing", [90, 72, 90]), ("columns", [90, 72, 90])):
+                result = run(f"margins-{stem}-bbox", ["pdftotext", "-bbox", str(ROOT / f"temp/word/margins-{stem}.pdf"), "-"])
+                pages = pdf_words(result.stdout) if result is not None and result.returncode == 0 else []
+                edges = [[n["x"] for n in words if n["text"].startswith(("Margin", "Marker"))] for words in pages]
+                record(f"margins-{stem}-geometry", len(edges) == len(expected) and
+                       all(len(xs) == 1 and abs(xs[0]-x) < 0.2 for xs, x in zip(edges, expected)),
+                       "physical text edges match the configured margins in PDF points")
         pdf = ROOT / "temp/word/workflow.pdf"
         html = ROOT / "temp/word/workflow.html"
         snapshot = ROOT / "temp/word/workflow.word.json"
@@ -115,6 +179,14 @@ def main():
         for stem, markers, page_count in (
                 ("stories", ('counter(page)', 'counter(pages)', '@page:first', 'Studio handbook'), 2),
                 ("advanced-objects", ('data-word-equation=', 'data-word-wordart=', 'data-word-shape=', 'E=mc^2', 'Make something'), 1),
+                ("illustrations", ('data-word-icon=', 'data-word-smartart=', 'data-word-chart=', 'Updated hours', '👩‍🎨'), 1),
+                ("table-design", ('data-word-table-style="purple"', 'data-word-banded-rows="true"', 'data-word-banded-columns="true"', '#ddccee', '2pt dashed #2563eb'), 1),
+                ("table-layout", ('data-word-repeat-header="true"', '<thead>', 'data-word-formula="=SUM(LEFT)"', 'padding-left: 8pt', 'table-layout: auto'), 1),
+                ("citations", ('data-word-references', 'data-word-citation=', 'data-word-bibliography=', 'Revised engine notes', '1844'), 1),
+                ("citations-ieee", ('data-word-citation=', 'Open Studio', 'Turing', 'doi.org/10.1000/test', '&lt;making&gt;'), 1),
+                ("columns", ('data-word-columns', 'column-count:2;', 'column-gap:8.5mm;', 'column-rule:0.5pt solid', 'Every Thursday'), 1),
+                ("margins", ('data-word-page', '@page:left', 'margin-left:25.4mm;', 'margin-right:31.75mm;', 'Full width header'), 3),
+                ("object-layout", ('data-word-layout=', 'data-word-group=', 'rotate(90deg)', 'Layout works.'), 1),
                 ("changes", ('data-word-change-kind="delete"', 'data-word-change-kind="insert"', 'Alex'), 1),
                 ("transforms", ('data-word-rotation="-30"', 'rotate(-30deg)', 'Resize me', 'width="225"'), 1)):
             exported = ROOT / "temp/word" / f"{stem}.html"

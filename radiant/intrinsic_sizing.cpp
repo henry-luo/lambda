@@ -7263,6 +7263,21 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                         layout_uses_border_box(child_block));
                 }
             }
+            // descendant minimums contribute to the parent's height even before the
+            // child's used box exists; its own intrinsic content query omits that floor.
+            if (child->is_element()) {
+                DomElement* child_element = child->as_element();
+                ViewBlock* child_view = lam::view_as_block(child_element);
+                float minimum = intrinsic_resolved_height_limit_or(
+                    lycon, child_element, child_view, true);
+                if (minimum >= 0.0f) {
+                    if (!intrinsic_view_uses_border_box(child_view, child_element)) {
+                        minimum += layout_intrinsic_padding_border_axis(
+                            lycon, child_element, false, content_w);
+                    }
+                    child_height = fmaxf(child_height, minimum);
+                }
+            }
 
             // Resolve child's vertical margins for height estimation
             bool block_flow_margin_handled = false;

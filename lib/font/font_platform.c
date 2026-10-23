@@ -28,6 +28,42 @@
 #endif
 #include <sys/stat.h>
 
+static void local_face_free(FontLocalFace* face) {
+    if (!face) return;
+    mem_free(face->postscript_name);
+    mem_free(face->full_name);
+    mem_free(face->family);
+    mem_free(face->style);
+    mem_free(face);
+}
+
+void font_local_fonts_free(ArrayList* faces) {
+    if (!faces) return;
+    for (int i = 0; i < faces->length; i++) local_face_free(faces->data[i]);
+    arraylist_free(faces);
+}
+
+static bool local_face_append(ArrayList* faces, const char* ps, const char* full,
+        const char* family, const char* style) {
+    if (!ps || !*ps || !family || !*family) return true;
+    FontLocalFace* face = mem_calloc(1, sizeof(FontLocalFace), MEM_CAT_FONT);
+    if (!face) return false;
+    face->postscript_name = mem_strdup(ps, MEM_CAT_FONT);
+    face->full_name = mem_strdup(full && *full ? full : ps, MEM_CAT_FONT);
+    face->family = mem_strdup(family, MEM_CAT_FONT);
+    face->style = mem_strdup(style ? style : "", MEM_CAT_FONT);
+    if (!face->postscript_name || !face->full_name || !face->family || !face->style ||
+        !arraylist_append(faces, face)) {
+        local_face_free(face);
+        return false;
+    }
+    return true;
+}
+
+static int local_face_compare(void* left, void* right) {
+    return strcmp(((FontLocalFace*)left)->postscript_name, ((FontLocalFace*)right)->postscript_name);
+}
+
 #ifdef __APPLE__
 #include <CoreText/CoreText.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -1295,3 +1331,70 @@ bool font_platform_measure_text_range(void* ct_font_ref, const char* text,
 }
 
 #endif
+
+#ifdef __APPLE__
+static char* local_font_attribute(CTFontDescriptorRef descriptor, CFStringRef key) {
+    CFStringRef value = (CFStringRef)CTFontDescriptorCopyAttribute(descriptor, key);
+    if (!value) return NULL;
+    CFIndex capacity = CFStringGetMaximumSizeForEncoding(CFStringGetLength(value), kCFStringEncodingUTF8) + 1;
+    char* text = mem_alloc((size_t)capacity, MEM_CAT_FONT);
+    if (text && !CFStringGetCString(value, text, capacity, kCFStringEncodingUTF8)) {
+        mem_free(text);
+        text = NULL;
+    }
+    CFRelease(value);
+    return text;
+}
+#endif
+
+ArrayList* font_query_local_fonts(FontContext* ctx) {
+    ArrayList* faces = arraylist_new(0);
+    if (!faces) return NULL;
+    bool ok = true;
+#ifdef __APPLE__
+    (void)ctx;
+    // enumerate registered faces without loading fonts or triggering automatic downloads.
+    CTFontCollectionRef collection = CTFontCollectionCreateFromAvailableFonts(NULL);
+    CFArrayRef descriptors = collection ? CTFontCollectionCreateMatchingFontDescriptors(collection) : NULL;
+    if (!descriptors) ok = false;
+    for (CFIndex i = 0; descriptors && ok && i < CFArrayGetCount(descriptors); i++) {
+        CTFontDescriptorRef descriptor = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descriptors, i);
+        char* ps = local_font_attribute(descriptor, kCTFontNameAttribute);
+        char* full = local_font_attribute(descriptor, kCTFontDisplayNameAttribute);
+        char* family = local_font_attribute(descriptor, kCTFontFamilyNameAttribute);
+        char* style = local_font_attribute(descriptor, kCTFontStyleNameAttribute);
+        ok = local_face_append(faces, ps, full, family, style);
+        mem_free(ps); mem_free(full); mem_free(family); mem_free(style);
+    }
+    if (descriptors) CFRelease(descriptors);
+    if (collection) CFRelease(collection);
+#else
+    // other backends share the native directory/registry inventory used by font resolution.
+    FontContext* owned = ctx ? NULL : font_context_create(NULL);
+    if (!ctx) ctx = owned;
+    FontDatabase* db = ctx ? font_context_get_database(ctx) : NULL;
+    if (!db) ok = false;
+    font_database_parse_all_internal(db);
+    for (int i = 0; db && ok && i < db->all_fonts->length; i++) {
+        FontEntry* entry = db->all_fonts->data[i];
+        if (entry && !entry->is_placeholder && !entry->collection_expanded) {
+            ok = local_face_append(faces, entry->postscript_name, entry->full_name,
+                entry->family_name, entry->subfamily_name);
+        }
+    }
+    if (owned) font_context_destroy(owned);
+#endif
+    if (!ok) {
+        font_local_fonts_free(faces);
+        return NULL;
+    }
+    arraylist_sort(faces, local_face_compare);
+    int count = 0;
+    for (int i = 0; i < faces->length; i++) {
+        FontLocalFace* face = faces->data[i];
+        if (count && local_face_compare(faces->data[count - 1], face) == 0) local_face_free(face);
+        else faces->data[count++] = face;
+    }
+    faces->length = count;
+    return faces;
+}

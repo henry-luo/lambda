@@ -1278,10 +1278,8 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
 
     // native option rows keep their intrinsic metric when the closed control
     // has an author-specified height
-    float option_height = form_select_dropdown_row_height(form) * s;
-    int max_visible = 10;
-    int visible_count = (form->option_count < max_visible) ? form->option_count : max_visible;
-    if (visible_count <= 0) visible_count = 1;
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, form);
+    float option_height = geometry.row_height * s;
     float h = popup.height;
 
     // Override clip to full viewport for overlay rendering (dropdown should not be clipped by parent containers)
@@ -1310,15 +1308,21 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
     fill_rect(rdcon, x, y, bw, h, border_color);
     fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
 
-    // Render each visible option
+    // clip partial rows and long labels before the scrollbar gutter.
+    float options_right = x + w - max(bw, geometry.scrollbar_width * s);
+    Bound options_clip = {x + bw, y + bw, options_right, y + h - bw};
+    RenderClipScope options_scope = render_clip_push_rect_scope(rdcon, &options_clip, nullptr);
+    rdcon->block.clip = options_clip;
     DomElement* option = dom_select_next_option(select->as_element(), nullptr);
-    for (int i = 0; i < visible_count && option; i++,
+    for (int i = 0; i < form->option_count && option; i++,
          option = dom_select_next_option(select->as_element(), option)) {
-        float opt_y = y + i * option_height;
+        float opt_y = y + i * option_height - geometry.scroll_y * s;
+        if (opt_y + option_height <= y) continue;
+        if (opt_y >= y + h) break;
         SelectOptionPaint paint = select_option_paint(select, option, i == selected_index,
             i == hover_index, form_control_is_disabled(state, option), false);
         if (paint.background.a) fill_rect(rdcon, x + bw, opt_y + bw,
-            w - 2 * bw, option_height - bw, paint.background);
+            options_right - x - bw, option_height - bw, paint.background);
 
         // Get option text
         const char* opt_text = dom_option_text(option);
@@ -1337,6 +1341,18 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
             // Render the option text (y is top of text area, not baseline)
             render_simple_string(rdcon, opt_text, text_x, text_top, paint.font, paint.text);
         }
+    }
+
+    render_clip_pop_scope(rdcon, &options_scope);
+    rdcon->block.clip = {0, 0, (float)rdcon->ui_context->surface->width,
+        (float)rdcon->ui_context->surface->height};
+    if (geometry.scrollbar_width > 0.0f) {
+        float bar_x = x + w - geometry.scrollbar_width * s;
+        fill_rect(rdcon, bar_x, y + bw, geometry.scrollbar_width * s - bw,
+            h - 2 * bw, make_color(246, 246, 246));
+        Color thumb = state->dropdown_dragging ? make_color(142, 142, 142) : make_color(192, 192, 192);
+        rc_fill_rounded_rect(rdcon, bar_x + 2 * s, y + geometry.thumb_y * s,
+            (geometry.scrollbar_width - 4) * s, geometry.thumb_height * s, 4 * s, 4 * s, thumb);
     }
 
     // Restore original clip

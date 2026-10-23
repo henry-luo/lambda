@@ -1,0 +1,387 @@
+{
+  "html": "test/ui/select_dropdown_scroll.html",
+  "description": "Native select overflow: visible thumb, wheel containment, scrolled option commit, keyboard reveal, drag capture, track paging and short menus.",
+  "viewport": {
+    "width": 600,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fonts"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "open_dropdown": true,
+      "dropdown_height": 190,
+      "dropdown_scroll_y": 0
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/font-scroll-top.png"
+    },
+    {
+      "type": "scroll",
+      "x": 100,
+      "y": 90,
+      "dy": -1,
+      "dx": 0
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_scroll_y": 50,
+      "doc_scroll_y": 0
+    },
+    {
+      "type": "click",
+      "x": 100,
+      "y": 64
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fonts"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fonts"
+      }
+    },
+    {
+      "type": "scroll",
+      "x": 100,
+      "y": 90,
+      "dy": -999,
+      "dx": 0
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_scroll_y": 570,
+      "doc_scroll_y": 0
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/font-scroll-bottom.png"
+    },
+    {
+      "type": "click",
+      "x": 100,
+      "y": 64
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fonts"
+      },
+      "equals": "30"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fonts"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "open_dropdown": true,
+      "dropdown_scroll_y": 399
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_scroll_y": 570,
+      "doc_scroll_y": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fonts"
+      },
+      "equals": "39"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fonts"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_scroll_y": 570
+    },
+    {
+      "type": "mouse_down",
+      "x": 214,
+      "y": 210
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_dragging": true
+    },
+    {
+      "type": "mouse_move",
+      "x": 300,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_scroll_y": 0,
+      "dropdown_dragging": true
+    },
+    {
+      "type": "mouse_up",
+      "x": 300,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_dragging": false,
+      "open_dropdown": true
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fonts"
+      },
+      "equals": "39"
+    },
+    {
+      "type": "mouse_down",
+      "x": 214,
+      "y": 230
+    },
+    {
+      "type": "mouse_up",
+      "x": 100,
+      "y": 100
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "open_dropdown": true,
+      "dropdown_scroll_y": 161.5
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fonts"
+      },
+      "equals": "39"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.blockFontWheel=function(e){e.preventDefault()};document.getElementById('fonts').addEventListener('wheel',blockFontWheel);true"
+    },
+    {
+      "type": "scroll",
+      "x": 100,
+      "y": 90,
+      "dy": -2,
+      "dx": 0
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_scroll_y": 161.5,
+      "doc_scroll_y": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('fonts').removeEventListener('wheel',blockFontWheel);fontChanges===3"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "open_dropdown": false,
+      "dropdown_scroll_y": 0,
+      "dropdown_dragging": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#short"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#short"
+      },
+      "open_dropdown": true,
+      "dropdown_height": 57,
+      "dropdown_scroll_y": 0
+    },
+    {
+      "type": "scroll",
+      "x": 300,
+      "y": 80,
+      "dy": -5,
+      "dx": 0
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#short"
+      },
+      "dropdown_scroll_y": 0,
+      "doc_scroll_y": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fonts"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "open_dropdown": true,
+      "dropdown_scroll_y": 570
+    },
+    {
+      "type": "mouse_down",
+      "x": 214,
+      "y": 210
+    },
+    {
+      "type": "mouse_move",
+      "x": 300,
+      "y": 20
+    },
+    {
+      "type": "mouse_up",
+      "x": 300,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#fonts"
+      },
+      "dropdown_dragging": false,
+      "dropdown_scroll_y": 0,
+      "doc_scroll_y": 0
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/font-scroll-2x.png"
+    },
+    {
+      "type": "click",
+      "x": 100,
+      "y": 64
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fonts"
+      },
+      "equals": "0"
+    }
+  ]
+}

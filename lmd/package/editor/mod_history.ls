@@ -12,6 +12,7 @@
 import .mod_doc
 import .mod_step
 import .mod_transaction
+import .mod_source_pos
 
 pub fn history_new() => {undo: [], redo: [], undo_groups: [], redo_groups: []}
 
@@ -38,7 +39,11 @@ pub fn history_push(hist, tx) {
   let group = tx_history_group(tx)
   let groups = undo_groups(hist)
   let n = len(hist.undo)
-  if (group != null and n > 0 and len(groups) == n and groups[n - 1] == group) {
+  // selection replacement or caret movement starts a new typing run.
+  let continuous = group != "typing" or (tx.sel_before.kind == 'text' and
+    pos_equal(tx.sel_before.anchor, tx.sel_before.head) and n > 0 and
+    hist.undo[n - 1].sel_before == tx.sel_before)
+  if (group != null and continuous and n > 0 and len(groups) == n and groups[n - 1] == group) {
     let previous = tx_invert(hist.undo[n - 1])
     let merged = tx_merge(previous, tx)
     {undo: [*list_take(hist.undo, n - 1), tx_invert(merged)], redo: [],

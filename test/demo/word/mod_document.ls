@@ -2,6 +2,7 @@
 // Copyright (c) 2026 ArtCraft Team and the WordCraft contributors; see LICENSE-MIT.
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
+import design: .mod_table_design
 
 pub let styles = [
     {id:"Normal",label:"Normal",tag:'p'},
@@ -11,10 +12,7 @@ pub let styles = [
     {id:"Heading2",label:"Heading 2",tag:'h3'},
     {id:"Quote",label:"Quote",tag:'p'}
 ]
-pub let table_styles = [
-    {id:"grid",label:"Simple grid"}, {id:"soft",label:"Banded blue"},
-    {id:"contrast",label:"Dark header"}, {id:"plain",label:"Minimal lines"}
-]
+pub let table_styles = design.styles
 pub fn paragraph(words,style="Normal") =>
     node_attrs('p',[{name:'data-word-style',value:style}],[text(words)])
 fn styled(words,style,tag) => node_attrs(tag,[{name:'data-word-style',value:style}],[text(words)])

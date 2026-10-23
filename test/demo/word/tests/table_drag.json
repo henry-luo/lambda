@@ -1,0 +1,469 @@
+{
+  "name": "Word promotes direct cross-cell selections without table handles",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1600,
+    "height": 1050
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 500,
+        "offset_y": 350
+      },
+      "dy": -8,
+      "dx": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#table-grips,.table-grip"
+      },
+      "count": 0
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(1)",
+        "offset_x": 14,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(1)",
+        "offset_x": 70,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "assert_script",
+      "js": "var s=getSelection();s.toString().length>0 && s.anchorNode.parentElement.closest(\"td\")==s.focusNode.parentElement.closest(\"td\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": true,
+      "check_dom": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/table-natural-range.png"
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowRight",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==2 && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowLeft",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowUp",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==6 && rows[0].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[0].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowDown",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(1)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==3 && rows[1].children[0].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(1)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==3 && rows[1].children[0].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(1) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(4) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[0].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[3].children[1].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(4) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(1) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[0].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[3].children[1].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(1) :is(td,th):nth-child(1)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(4) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 12
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(4) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(1) :is(td,th):nth-child(1)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 12
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "type_physical",
+      "text": "!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)"
+      },
+      "equals": "Back room!"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowDown",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowDown",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "button": 0
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "button": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var rows=document.querySelectorAll(\"#edit-surface tr\"),picked=document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\");picked.length==4 && rows[1].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[1].children[2].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[1].getAttribute(\"data-word-cell-selected\")==\"true\" && rows[2].children[2].getAttribute(\"data-word-cell-selected\")==\"true\""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface td,#edit-surface th"
+      },
+      "count": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)"
+      },
+      "equals": "Back room"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#table-grips,.table-grip"
+      },
+      "count": 0
+    }
+  ]
+}

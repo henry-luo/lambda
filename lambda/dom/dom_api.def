@@ -811,6 +811,9 @@ DOM_OP(CORE, broadcast_post, messaging, 2, "pn(n: any, value: any) -> null", dom
 DOM_OP(CORE, broadcast_close, messaging, 1, "pn(n: any) -> null", dom_broadcast_channel_close, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
 DOM_RAW(broadcast_destroy, messaging, void, (void* channel), dom_broadcast_channel_destroy, DOM_F_NATIVE)
 
+// native font metadata appends without moving existing host catalog slots (D7.4.4).
+DOM_OP(CORE, query_local_fonts, window, 1, "fn(options: any) -> [map]^", dom_engine_query_local_fonts, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_SNAPSHOT, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

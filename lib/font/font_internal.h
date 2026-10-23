@@ -492,6 +492,7 @@ FontDatabaseResult  font_database_find_best_match_internal(FontDatabase* db, Fon
 ArrayList*          font_database_find_all_matches_internal(FontDatabase* db, const char* family_name);
 FontEntry*          font_database_get_by_postscript_name_internal(FontDatabase* db, const char* ps_name);
 FontEntry*          font_database_find_local_name_internal(FontDatabase* db, const char* name);
+void                font_database_parse_all_internal(FontDatabase* db);
 bool                font_database_save_cache_internal(FontDatabase* db, const char* path);
 bool                font_database_load_cache_internal(FontDatabase* db, const char* path);
 

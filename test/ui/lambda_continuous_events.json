@@ -1,7 +1,10 @@
 {
   "name": "ES5v2: mousemove, wheel and scroll reach Lambda author templates that declare them",
   "html": "test/ui/lambda_continuous_events.ls",
-  "viewport": {"width": 800, "height": 600},
+  "viewport": {
+    "width": 800,
+    "height": 600
+  },
   "events": [
     {"type": "assert_text", "target": {"selector": "#moves"}, "equals": "0"},
     {"type": "mouse_move", "x": 100, "y": 50},
@@ -17,6 +20,27 @@
     {"type": "click", "x": 100, "y": 300},
     {"type": "scroll", "x": 100, "y": 300, "dx": 0, "dy": -3},
     {"type": "wait", "ms": 100},
-    {"type": "assert_text", "target": {"selector": "#scrolls"}, "equals": "1"}
+    {"type": "assert_text", "target": {"selector": "#scrolls"}, "equals": "1"},
+    {"type": "mouse_down", "target": {"selector": "#drag", "offset_x": 294, "offset_y": 20}},
+    {"type": "assert_state_store", "target": {"selector": "#drag"}, "scrollbar_v_dragging": true},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "0"},
+    {"type": "mouse_move", "target": {"selector": "#drag", "offset_x": 294, "offset_y": 60}},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "1"},
+    {"type": "mouse_move", "target": {"selector": "#drag", "offset_x": 294, "offset_y": 40}},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "2"},
+    {"type": "mouse_move", "target": {"selector": "#drag", "offset_x": 294, "offset_y": 40}},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "2"},
+    {"type": "mouse_up", "target": {"selector": "#drag", "offset_x": 294, "offset_y": 40}},
+    {"type": "assert_state_store", "target": {"selector": "#drag"}, "scrollbar_v_dragging": false},
+    {"type": "mouse_down", "target": {"selector": "#drag", "offset_x": 30, "offset_y": 144}},
+    {"type": "assert_state_store", "target": {"selector": "#drag"}, "scrollbar_h_dragging": true},
+    {"type": "mouse_move", "target": {"selector": "#drag", "offset_x": 90, "offset_y": 144}},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "3"},
+    {"type": "mouse_move", "target": {"selector": "#drag", "offset_x": 60, "offset_y": 144}},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "4"},
+    {"type": "mouse_move", "target": {"selector": "#drag", "offset_x": 60, "offset_y": 144}},
+    {"type": "assert_attribute", "target": {"selector": "#drag"}, "attribute": "data-scrolls", "equals": "4"},
+    {"type": "mouse_up", "target": {"selector": "#drag", "offset_x": 60, "offset_y": 144}},
+    {"type": "assert_state_store", "target": {"selector": "#drag"}, "scrollbar_h_dragging": false}
   ]
 }

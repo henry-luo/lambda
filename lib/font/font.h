@@ -6,7 +6,8 @@
  * font face management (@font-face registry), fallback chain resolution,
  * and multi-format loading (TTF/OTF/TTC/WOFF1/WOFF2/data URI).
  *
- * Memory: all allocations go through Lambda Pool/Arena allocators.
+ * Memory: contexts use Lambda Pool/Arena allocators; local-font snapshots own
+ * their metadata until font_local_fonts_free().
  * Thread safety: single-threaded.
  *
  * Copyright (c) 2025 Lambda Script Project
@@ -35,6 +36,17 @@ struct FontMathTable;
 // Forward declarations for Lambda allocators
 struct Pool;
 struct Arena;
+struct _ArrayList;
+
+// owned metadata snapshot; names are UTF-8 and faces are sorted by PostScript name.
+typedef struct FontLocalFace {
+    char* postscript_name;
+    char* full_name;
+    char* family;
+    char* style;
+} FontLocalFace;
+struct _ArrayList* font_query_local_fonts(FontContext* ctx);
+void font_local_fonts_free(struct _ArrayList* faces);
 
 // ============================================================================
 // Font Context — shared font database, caches, and native backend state

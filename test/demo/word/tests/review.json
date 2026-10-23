@@ -86,7 +86,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface span"
+        "selector": "#edit-surface span:not(.word-text-run)"
       },
       "attribute": "data-word-comment",
       "equals": "c1"
@@ -262,7 +262,7 @@
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#edit-surface span"
+        "selector": "#edit-surface span:not(.word-text-run)"
       },
       "attribute": "data-word-comment",
       "equals": "c1"

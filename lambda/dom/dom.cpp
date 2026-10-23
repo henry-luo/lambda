@@ -1298,52 +1298,12 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
 }
 
 
-static bool dom_is_anonymous_table_wrapper(DomNode* node) {
-    if (!node || !node->is_element()) return false;
-    DomElement* elem = node->as_element();
-    return elem->tag_name && strncmp(elem->tag_name, "::anon-", 7) == 0;
-}
-
 extern "C" void* dom_visible_child(void* element, bool first) {
-    DomElement* elem = (DomElement*)element;
-    DomNode* child = elem ? (first ? elem->first_child : elem->last_child) : nullptr;
-    while (child) {
-        if (!dom_is_generated_pseudo_node(child)) return child;
-        if (dom_is_anonymous_table_wrapper(child)) {
-            // layout-only wrappers are transparent in both traversal directions.
-            DomNode* nested = (DomNode*)dom_visible_child(child->as_element(), first);
-            if (nested) return nested;
-        }
-        child = first ? child->next_sibling : child->prev_sibling;
-    }
-    return nullptr;
+    return dom_source_child((DomElement*)element, first);
 }
 
 extern "C" void* dom_visible_sibling(void* native_node, bool forward) {
-    DomNode* node = (DomNode*)native_node;
-    DomNode* sibling = node ? (forward ? node->next_sibling : node->prev_sibling) : nullptr;
-    while (sibling) {
-        if (!dom_is_generated_pseudo_node(sibling)) return sibling;
-        if (dom_is_anonymous_table_wrapper(sibling)) {
-            DomNode* child = (DomNode*)dom_visible_child(sibling->as_element(), forward);
-            if (child) return child;
-        }
-        sibling = forward ? sibling->next_sibling : sibling->prev_sibling;
-    }
-    DomNode* parent = node ? node->parent : nullptr;
-    while (dom_is_anonymous_table_wrapper(parent)) {
-        sibling = forward ? parent->next_sibling : parent->prev_sibling;
-        while (sibling) {
-            if (!dom_is_generated_pseudo_node(sibling)) return sibling;
-            if (dom_is_anonymous_table_wrapper(sibling)) {
-                DomNode* child = (DomNode*)dom_visible_child(sibling->as_element(), forward);
-                if (child) return child;
-            }
-            sibling = forward ? sibling->next_sibling : sibling->prev_sibling;
-        }
-        parent = parent->parent;
-    }
-    return nullptr;
+    return dom_source_sibling((DomNode*)native_node, forward);
 }
 
 JS_FORWARD_STATIC_RETURN(DomNode*, dom_next_script_visible_sibling,
@@ -2139,6 +2099,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_install_window_frames_global();
         dom_install_window_dialog_globals();
         dom_install_window_computed_style_global();
+        dom_install_window_font_global();
         dom_install_custom_elements_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);

@@ -1,0 +1,878 @@
+{
+  "name": "Word page margin presets, mirrored pages, custom fields, rulers and exports",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "text": "First sheet",
+      "clear": false,
+      "target": {
+        "selector": "#edit-surface p"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "[id=\"insert.pageBreak\"]"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "Second sheet"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "[id=\"insert.pageBreak\"]"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "Third sheet"
+    },
+    {
+      "type": "assert_count",
+      "count": 3,
+      "target": {
+        "selector": "#edit-surface .word-page"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-normal"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"96px\":\"96px\") && s.paddingRight===(n%2?\"96px\":\"96px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 5,
+      "target": {
+        "selector": ".margin-preset"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "true",
+      "target": {
+        "selector": "#margins-normal"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Top: 1\", Bottom: 1\"Left: 0.75\", Right: 0.75\"",
+      "target": {
+        "selector": "#margins-moderate .margin-metrics"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.getElementById(\"margins-menu\").getBoundingClientRect(),c=document.querySelector(\"#margins-menu .menu-chevron svg\").getBoundingClientRect();c.width<=11 && c.height<=11 && c.right<=b.right"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/margins-menu.png"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-narrow"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"48px\" && s.paddingBottom===\"48px\" && s.paddingLeft===(n%2?\"48px\":\"48px\") && s.paddingRight===(n%2?\"48px\":\"48px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-moderate"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"72px\":\"72px\") && s.paddingRight===(n%2?\"72px\":\"72px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-wide"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"192px\":\"192px\") && s.paddingRight===(n%2?\"192px\":\"192px\")})"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"72px\":\"72px\") && s.paddingRight===(n%2?\"72px\":\"72px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-mirrored"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"120px\":\"96px\") && s.paddingRight===(n%2?\"96px\":\"120px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#insert-header"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-stories"
+      }
+    },
+    {
+      "type": "type",
+      "text": "Full width header",
+      "clear": true,
+      "target": {
+        "selector": "#stories-header"
+      }
+    },
+    {
+      "type": "type",
+      "text": "Page {PAGE} of {NUMPAGES}",
+      "clear": true,
+      "target": {
+        "selector": "#stories-footer"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": ".edit-dialog-stories .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 3,
+      "target": {
+        "selector": ".word-header"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var s=document.querySelector('.word-page[data-page=\"2\"] .word-header').style;s.left===\"96px\" && s.right===\"120px\""
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-custom-margins"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Custom Margins",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "mirrored",
+      "target": {
+        "selector": "#page-mirror"
+      }
+    },
+    {
+      "type": "type",
+      "text": "28.25",
+      "clear": true,
+      "target": {
+        "selector": "#page-left"
+      }
+    },
+    {
+      "type": "type",
+      "text": "15",
+      "clear": true,
+      "target": {
+        "selector": "#page-right"
+      }
+    },
+    {
+      "type": "select_option",
+      "value": "normal",
+      "target": {
+        "selector": "#page-mirror"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "28.25",
+      "target": {
+        "selector": "#page-left"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"page-left\").parentElement.textContent.indexOf(\"Left margin\")>=0"
+    },
+    {
+      "type": "select_option",
+      "value": "mirrored",
+      "target": {
+        "selector": "#page-mirror"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "28.25",
+      "target": {
+        "selector": "#page-left"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"page-left\").parentElement.textContent.indexOf(\"Inside margin\")>=0 && document.getElementById(\"page-right\").parentElement.textContent.indexOf(\"Outside margin\")>=0"
+    },
+    {
+      "type": "select_option",
+      "value": "A5",
+      "target": {
+        "selector": "#page-paper"
+      }
+    },
+    {
+      "type": "type",
+      "text": "80",
+      "clear": true,
+      "target": {
+        "selector": "#page-left"
+      }
+    },
+    {
+      "type": "type",
+      "text": "80",
+      "clear": true,
+      "target": {
+        "selector": "#page-right"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-page_setup"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#dialog-error"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "20 mm",
+      "target": {
+        "selector": "#dialog-error"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"120px\":\"96px\") && s.paddingRight===(n%2?\"96px\":\"120px\")})"
+    },
+    {
+      "type": "select_option",
+      "value": "A4",
+      "target": {
+        "selector": "#page-paper"
+      }
+    },
+    {
+      "type": "type",
+      "text": "28.25",
+      "clear": true,
+      "target": {
+        "selector": "#page-left"
+      }
+    },
+    {
+      "type": "type",
+      "text": "15",
+      "clear": true,
+      "target": {
+        "selector": "#page-right"
+      }
+    },
+    {
+      "type": "type",
+      "text": "21.5",
+      "clear": true,
+      "target": {
+        "selector": "#page-top"
+      }
+    },
+    {
+      "type": "type",
+      "text": "22",
+      "clear": true,
+      "target": {
+        "selector": "#page-bottom"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-page_setup"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"81px\" && s.paddingBottom===\"83px\" && s.paddingLeft===(n%2?\"107px\":\"57px\") && s.paddingRight===(n%2?\"57px\":\"107px\")})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-custom-margins"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/margins-custom.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-more-columns"
+      }
+    },
+    {
+      "type": "type",
+      "text": "4",
+      "clear": true,
+      "target": {
+        "selector": "#columns-count"
+      }
+    },
+    {
+      "type": "type",
+      "text": "12.7",
+      "clear": true,
+      "target": {
+        "selector": "#columns-gap"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-columns"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 3,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-wide"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "20 mm",
+      "target": {
+        "selector": ".statusbar"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"81px\" && s.paddingBottom===\"83px\" && s.paddingLeft===(n%2?\"107px\":\"57px\") && s.paddingRight===(n%2?\"57px\":\"107px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-columns-1"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-mirrored"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"120px\":\"96px\") && s.paddingRight===(n%2?\"96px\":\"120px\")})"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#nav-tab-pages"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#nav-page-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-page",
+      "equals": "2",
+      "target": {
+        "selector": "#horizontal-ruler"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-label",
+      "equals": "outside page margin",
+      "target": {
+        "selector": "#ruler-margin-left"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-valuenow",
+      "equals": "25.4",
+      "target": {
+        "selector": "#ruler-margin-left"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "touch",
+      "dx": 19,
+      "dy": 0,
+      "target": {
+        "selector": "#ruler-margin-left"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"120px\":\"115px\") && s.paddingRight===(n%2?\"115px\":\"120px\")})"
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-valuenow",
+      "equals": "30.4",
+      "target": {
+        "selector": "#ruler-margin-left"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"120px\":\"96px\") && s.paddingRight===(n%2?\"96px\":\"120px\")})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#nav-page-2 .word-page\").getAttribute(\"style\").indexOf(\"padding:96px 120px 96px 96px;\")>=0"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\"),p=document.querySelector('.word-page[data-page=\"3\"]');s.scrollTop+=p.getBoundingClientRect().top-s.getBoundingClientRect().top"
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-page",
+      "equals": "3",
+      "target": {
+        "selector": "#horizontal-ruler"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-label",
+      "equals": "inside page margin",
+      "target": {
+        "selector": "#ruler-margin-left"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#nav-page-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-page",
+      "equals": "2",
+      "target": {
+        "selector": "#horizontal-ruler"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "start": 3,
+      "end": 3,
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": " new"
+    },
+    {
+      "type": "assert_text",
+      "equals": "Sec newond sheet",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "equals": "Second sheet",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "type",
+      "text": "temp/word/margins.word.json",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/word/margins.html",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/word/margins.pdf",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/word/margins.html",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\"#edit-surface .word-page\")).every(function(p){var n=+p.getAttribute(\"data-page\"),s=getComputedStyle(p);return s.paddingTop===\"96px\" && s.paddingBottom===\"96px\" && s.paddingLeft===(n%2?\"120px\":\"96px\") && s.paddingRight===(n%2?\"96px\":\"120px\")})"
+    },
+    {
+      "type": "assert_count",
+      "count": 3,
+      "target": {
+        "selector": ".word-header"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "true",
+      "target": {
+        "selector": "#margins-mirrored"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#status-view-read"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"margins-menu\").hasAttribute(\"disabled\")"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#status-view-print"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/margins-document.png"
+    }
+  ]
+}

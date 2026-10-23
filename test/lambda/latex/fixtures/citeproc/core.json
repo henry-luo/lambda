@@ -315,5 +315,17 @@
       }
     ],
     "expected": "CSL and the body"
+  },
+  {
+    "id": "empty-generated-suffix-keeps-no-date",
+    "style": "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\"><info><title>Optional generated suffix</title><id>urn:lambda:empty-generated-suffix</id></info><citation><layout><group prefix=\"(\" suffix=\")\" delimiter=\"-\"><text term=\"no date\" form=\"short\"/><text variable=\"year-suffix\"/></group></layout></citation></style>",
+    "references": [
+      {
+        "id": "item",
+        "type": "book",
+        "title": "Undated"
+      }
+    ],
+    "expected": "(n.d.)"
   }
 ]

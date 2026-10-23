@@ -1,0 +1,698 @@
+{
+  "name": "Word source creation, citation editing, CSL styles, bibliography, persistence and read mode",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Research supports this. ",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Research supports this. "
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 24,
+      "end": 24
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-references"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".references-ribbon"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-citation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".source-card"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#source-kind"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-author"
+      },
+      "text": "Lovelace, Ada",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-title"
+      },
+      "text": "Notes on the analytical engine",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-all-fields"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#source-doi"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#source-author"
+      },
+      "equals": "Lovelace, Ada"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#source-kind"
+      },
+      "value": "article-journal"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#source-container"
+      },
+      "count": 1
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#source-kind"
+      },
+      "value": "book"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-all-fields"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#source-doi"
+      },
+      "count": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-year"
+      },
+      "text": "1843",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-publisher"
+      },
+      "text": "Taylor",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-city"
+      },
+      "text": "London",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.getElementById(\"source-kind\").getBoundingClientRect(),b=document.getElementById(\"source-corporate\").getBoundingClientRect(),y=document.getElementById(\"source-year\").getBoundingClientRect(),p=document.getElementById(\"source-publisher\").getBoundingClientRect();b.left>=a.right && p.left>=y.right && Math.abs(a.top-b.top)<1 && Math.abs(y.top-p.top)<1"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/citation-create-source.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Lovelace, 1843)"
+    },
+    {
+      "type": "type_physical",
+      "text": " More text."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Research supports this. (Lovelace, 1843) More text."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Lovelace, 1843)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-bibliography"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "Lovelace, A. (1843). Notes on the analytical engine. Taylor."
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#citation-style"
+      },
+      "value": "ieee"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "[1]"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "[1]"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#citation-style"
+      },
+      "value": "chicago-author-date"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Lovelace 1843)"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#citation-style"
+      },
+      "value": "apa"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/citations-document.png"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#citation-locator"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#citation-locator"
+      },
+      "text": "24",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-citation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Lovelace, 1843, p. 24)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-edit-citation"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-edit-source"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-edit-link"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-edit-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-year"
+      },
+      "text": "1844",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-title"
+      },
+      "text": "Revised engine notes",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Lovelace, 1844, p. 24)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "attribute": "title",
+      "equals": "Revised engine notes"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "Revised engine notes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#manage-sources"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".source-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".source-delete"
+      },
+      "attribute": "disabled",
+      "value": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/citation-source-manager.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/citations.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/citations.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/citations.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/citations.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Lovelace, 1844, p. 24)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#manage-sources"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".source-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".source-card"
+      },
+      "contains": "Revised engine notes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-references"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-citation"
+      },
+      "attribute": "disabled",
+      "value": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-bibliography"
+      },
+      "attribute": "disabled",
+      "value": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#manage-sources"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".source-edit"
+      },
+      "attribute": "disabled",
+      "value": ""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#source-new"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/citations-read-mode.png"
+    }
+  ]
+}

@@ -1958,6 +1958,17 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     block->height = content_height + block_box.pad_border_v;
 
 }
+RdtLogicalPoint layout_positioned_parent_offset(View* layer) {
+    RdtLogicalPoint offset = {};
+    ViewBlock* block = lam::view_as_block(layer);
+    if (block && layout_view_is_out_of_flow_positioned(layer)) {
+        // abs/fixed coordinates belong to their containing block, while clip replay follows DOM ancestry.
+        ViewBlock* containing = find_containing_block(block, block->positionp()->position);
+        if (containing) layout_parent_to_containing_block_offset(block, containing, &offset.x, &offset.y);
+    }
+    return offset;
+}
+
 static void layout_abs_block_internal(LayoutContext* lycon, DomNode* elmt,
                                       ViewBlock* block, BlockContext* pa_block,
                                       Linebox* pa_line,

@@ -347,6 +347,19 @@ ancestor changes, stylesheet insertion, and a sibling dependency.
 
 ## 7. Canvas / measureText via the Radiant font engine
 
+`window.queryLocalFonts(options?)` returns a Promise of metadata snapshots with
+`postscriptName`, `fullName`, `family`, and `style`. An optional iterable
+`postscriptNames` selects exact face names; an empty sequence selects no faces.
+WebIDL conversion failures reject the Promise. The realm adapter delegates to
+the same fallible `dom.query_local_fonts(options)^` catalog operation used by Lambda;
+the new slot is appended to preserve existing host offsets (**D7.4.4**), and
+temporary values retain precise roots through getters and allocation (**D5.3.3**).
+This desktop-host milestone exposes metadata records under Radiant's existing
+local application access model. `FontData.blob()`, branded readonly FontData
+objects, browser permission prompts, secure-context and Permissions Policy
+gating remain outside this metadata milestone. The API follows the metadata
+and filter shape of the [Local Font Access draft](https://wicg.github.io/local-font-access/).
+
 OffscreenCanvas exists for **text measurement only** (`js_canvas.cpp:2`). Realm construction publishes `OffscreenCanvas` as a replaceable global native constructor with an explicit `[[Construct]]` capability; `new OffscreenCanvas(w, h)` uses the same property-resolution and `js_construct_value` path as other constructors. Renaming the function does not change its body, while replacing the global binding is observed. The canvas and its `getContext("2d")` context are plain objects stamped with `JS_CLASS_OFFSCREEN_CANVAS` / `JS_CLASS_CANVAS_RENDERING_CONTEXT_2D`; the selected method function delegates to `js_canvas_method_dispatch` for its host algorithm.
 
 Measurement uses **Lambda's unified font engine** (`lib/font/`): a singleton `FontContext` (`:31`), a fixed `FontHandle*` pool of `MAX_CANVAS_FONT_HANDLES` indexed by integer id stored in the `__font_handle_id` expando (`:50`,`:271`). Setting `ctx.font` parses the CSS font shorthand (`parse_css_font_shorthand`, `:85`) and resolves a `FontHandle` via `font_resolve`. `js_canvas_measure_text` (`:302`) calls `font_measure_text` and returns a `TextMetrics`-shaped `{width}` object, falling back to a `len * size * 0.5` heuristic when no handle resolves (`:222`). Setting `ctx.font` at runtime is intercepted by the property-set path (`js_runtime.cpp:5406`).

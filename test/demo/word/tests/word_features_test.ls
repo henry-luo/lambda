@@ -20,7 +20,7 @@ doc_text(model.execute(pending,"text.insert",{data:"Plain "})^.doc) == "Plain He
 
 let paragraphs = model.open_editor(node('doc',[node('p',[text("First")]),node('p',[text("Second")])]))
 let both = edit_set_selection(paragraphs,text_selection(pos([0,0],0),pos([1,0],6)))
-let props = {align:"justify",lines:2,before:6,after:12,indent:18,first:-6}
+let props = {align:"justify",lines:2,before:6,after:12,indent:18,first:-6,right:12}
 let spaced = model.execute(both,"para.set",props)^
 all([for (p in spaced.doc.content) model.css_get(attrs_get(p.attrs,'style'),"margin-left") == "18pt"])
 model.paragraph_settings(spaced) == props

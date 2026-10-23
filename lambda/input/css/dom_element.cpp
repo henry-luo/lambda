@@ -37,6 +37,41 @@ DomNode* dom_source_parent(DomNode* node) {
     return parent;
 }
 
+static bool dom_is_table_wrapper(DomNode* node) {
+    return node && node->is_element() && node->as_element()->is_table_fixup();
+}
+
+DomNode* dom_source_child(DomElement* element, bool first) {
+    DomNode* child = element ? (first ? element->first_child.get() : element->last_child.get()) : nullptr;
+    while (child) {
+        if (!dom_is_generated_pseudo_node(child)) return child;
+        if (dom_is_table_wrapper(child)) {
+            DomNode* nested = dom_source_child(child->as_element(), first);
+            if (nested) return nested;
+        }
+        child = first ? child->next_sibling.get() : child->prev_sibling.get();
+    }
+    return nullptr;
+}
+
+DomNode* dom_source_sibling(DomNode* node, bool forward) {
+    // anonymous table boxes must not split the source sibling list after layout.
+    DomNode* sibling = node ? (forward ? node->next_sibling.get() : node->prev_sibling.get()) : nullptr;
+    while (true) {
+        while (sibling) {
+            if (!dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (dom_is_table_wrapper(sibling)) {
+                DomNode* nested = dom_source_child(sibling->as_element(), forward);
+                if (nested) return nested;
+            }
+            sibling = forward ? sibling->next_sibling.get() : sibling->prev_sibling.get();
+        }
+        node = node ? node->parent.get() : nullptr;
+        if (!dom_is_table_wrapper(node)) return nullptr;
+        sibling = forward ? node->next_sibling.get() : node->prev_sibling.get();
+    }
+}
+
 DomElement* dom_parent_element(DomElement* element) {
     DomNode* parent_node = dom_source_parent(element);
     DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
@@ -3516,13 +3551,13 @@ bool DomElement::is_first_child() {
 
     // CSS 2.1 §5.11.1: :first-child matches an element that is the first
     // child ELEMENT of its parent. Text nodes are not counted.
-    DomElement* parent = static_cast<DomElement*>(element->parent);
-    DomNode* child = parent->first_child;
+    DomElement* parent = static_cast<DomElement*>(dom_source_parent(element));
+    DomNode* child = dom_source_child(parent, true);
     while (child) {
         if (dom_is_css_element_child(child)) {
             return child == (DomNode*)element;
         }
-        child = child->next_sibling;
+        child = dom_source_sibling(child, true);
     }
     return false;
 }
@@ -3535,12 +3570,12 @@ bool DomElement::is_last_child() {
 
     // CSS 2.1 §5.11.1: :last-child matches an element that is the last
     // child ELEMENT of its parent. Text nodes after it are not counted.
-    DomNode* sibling = element->next_sibling;
+    DomNode* sibling = dom_source_sibling(element, true);
     while (sibling) {
         if (dom_is_css_element_child(sibling)) {
             return false;
         }
-        sibling = sibling->next_sibling;
+        sibling = dom_source_sibling(sibling, true);
     }
     return true;
 }
@@ -3565,15 +3600,15 @@ int DomElement::child_index() {
     // Count only element children (not text nodes or comments)
     // According to CSS spec, :nth-child() counts only element nodes
     int index = 0;
-    DomElement* parent = static_cast<DomElement*>(element->parent);
-    DomNode* sibling = parent->first_child;
+    DomElement* parent = static_cast<DomElement*>(dom_source_parent(element));
+    DomNode* sibling = dom_source_child(parent, true);
 
     while (sibling && sibling != element) {
         // Only count element nodes for nth-child
         if (dom_is_css_element_child(sibling)) {
             index++;
         }
-        sibling = sibling->next_sibling;
+        sibling = dom_source_sibling(sibling, true);
     }
 
     return (sibling == element) ? index : -1;
@@ -3597,14 +3632,14 @@ int DomElement::count_child_elements() {
     DomElement* element = this;
 
     int count = 0;
-    DomNode* child = element->first_child;
+    DomNode* child = dom_source_child(element, true);
 
     while (child) {
         // Count source element children; generated layout nodes are not DOM children.
         if (dom_is_css_element_child(child)) {
             count++;
         }
-        child = child->next_sibling;
+        child = dom_source_sibling(child, true);
     }
 
     return count;

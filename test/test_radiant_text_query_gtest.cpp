@@ -33,6 +33,31 @@ void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
 
 
+TEST(FontLocalMetadata, LocalFontMetadataIsOwnedSortedAndUnique) {
+    ArrayList* faces = font_query_local_fonts(nullptr);
+    ASSERT_NE(faces, nullptr);
+    ASSERT_GT(faces->length, 0);
+    for (int i = 0; i < faces->length; i++) {
+        auto* face = (FontLocalFace*)faces->data[i];
+        ASSERT_NE(face, nullptr);
+        ASSERT_NE(face->postscript_name, nullptr);
+        ASSERT_NE(face->family, nullptr);
+        ASSERT_NE(face->full_name, nullptr);
+        ASSERT_NE(face->style, nullptr);
+        EXPECT_GT(strlen(face->postscript_name), 0u);
+        EXPECT_GT(strlen(face->family), 0u);
+        EXPECT_GT(strlen(face->full_name), 0u);
+        if (i) EXPECT_LT(strcmp(((FontLocalFace*)faces->data[i - 1])->postscript_name, face->postscript_name), 0);
+    }
+    ArrayList* again = font_query_local_fonts(nullptr);
+    ASSERT_NE(again, nullptr);
+    ASSERT_EQ(again->length, faces->length);
+    EXPECT_NE(again->data[0], faces->data[0]);
+    font_local_fonts_free(faces);
+    EXPECT_GT(strlen(((FontLocalFace*)again->data[0])->family), 0u);
+    font_local_fonts_free(again);
+}
+
 TEST(FontTextMeasurement, TextMeasurementsOwnKeysAndInvalidateWhenFontResourcesChange) {
     FontContextConfig config = {};
     config.pixel_ratio = 1.0f;
@@ -1373,6 +1398,31 @@ TEST_F(RadiantTextQuery, CompletedFlexContentEnlargesProvisionalAncestorHeight) 
     EXPECT_FLOAT_EQ(find("auto-sidebar")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-dependent")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 80.0f);
+}
+
+TEST_F(RadiantTextQuery, FlexShellReservesDescendantHeightConstraintsForItsFooter) {
+    ASSERT_NE(load("test/html/flex_shell_descendant_constraints.html"), nullptr);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
+    auto child = [&](const char* shell, const char* suffix) {
+        char id[64];
+        snprintf(id, sizeof(id), "%s-%s", shell, suffix);
+        return find(id);
+    };
+    struct Case { const char* id; float header; };
+    const Case cases[] = {{"min",100.0f},{"explicit",120.0f},{"content",108.0f}};
+    for (unsigned pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const Case& entry : cases) {
+            EXPECT_FLOAT_EQ(child(entry.id,"header")->height, entry.header) << entry.id << " pass " << pass;
+            EXPECT_FLOAT_EQ(child(entry.id,"main")->height, 180.0f-entry.header) << entry.id << " pass " << pass;
+            EXPECT_FLOAT_EQ(child(entry.id,"footer")->y, 180.0f) << entry.id << " pass " << pass;
+        }
+    }
+    ASSERT_TRUE(find("min-tools")->set_attribute("style", "min-height:110px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(find("min-header")->height, 130.0f);
+    EXPECT_FLOAT_EQ(find("min-main")->height, 50.0f);
+    EXPECT_FLOAT_EQ(find("min-footer")->y, 180.0f);
 }
 
 TEST_F(RadiantTextQuery, ScalarSizeCacheExpiresWithoutDiscardingComputedStyle) {

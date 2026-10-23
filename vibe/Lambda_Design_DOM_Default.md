@@ -377,9 +377,9 @@ the behavior-only `scrollwheel` hook carries immutable CSS-pixel deltas to the
 `<body>` policy; its `wheel` request lets native traverse the live target and
 iframe scroll chains. A scrollbar's ordinary `pointerdown` / `mousedown` has
 the same author-cancellation gate, then `scrollbarpress` carries only its
-resolved hit part to the package. A package-selected track page emits the
-non-bubbling element `scroll` event; a package-selected thumb drag stays on
-the native hot path after that single press. A scrollbar hit deliberately does
+resolved hit part to the package. A package-selected track page or changed thumb offset emits the
+non-bubbling element `scroll` event and resamples geometry observers; a thumb
+drag stays on the native hot path after that single press. A scrollbar hit deliberately does
 not enter `mousepress`, so browser chrome cannot change document focus or
 selection. There is no package-off native fallback for these migrated input
 defaults; programmatic `scroll*` APIs, focus reveal, and editing autoscroll
@@ -514,7 +514,7 @@ Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/dom/*.ls`, `lambda
 | context-menu item press / outside press / Escape | no spec event — the popup overlay is not DOM | execute an item or dismiss the menu | native reports only a physical row or outside containment; behavior-only `contextmenuaction` / `contextmenudismiss` route to `menu.ls`, which executes the shared command or closes the overlay (ES34) | ✅ |
 | `mousemove` / `over` / `out` / `enter` / `leave` | UI Events | none | dispatched; hover state native; hot-path gate keeps the package out of per-frame dispatch | ✅ |
 | `wheel` | UI Events; cancelable | scroll | author `WheelEvent` dispatch runs first; an uncancelled gesture reaches `scrollwheel` and `scroll.ls` chooses the `wheel` operation. Native then applies only the current target/iframe scroll chain, clamp, state/event/observer, and paint mechanism. **Ctrl+wheel zoom not implemented** (browser-chrome level; noted, not tracked) | ✅ (ES33) |
-| scrollbar press / drag | UA scrollbar chrome; no DOM event | page in the track direction or drag the thumb | native hit testing supplies `scrollbarPart`; `scroll.ls` maps it through `scrollbarpress`. Native keeps handle geometry, range clamp, and per-frame pointer conversion; the initial page write emits `scroll` | ✅ (ES33) |
+| scrollbar press / drag | UA scrollbar chrome; no DOM event | page in the track direction or drag the thumb | native hit testing supplies `scrollbarPart`; `scroll.ls` maps it through `scrollbarpress`. Native keeps handle geometry, range clamp, and per-frame pointer conversion; track paging and each changed thumb offset emit `scroll` and resample geometry observers | ✅ (ES33) |
 | `pointerdown` / `pointerup` / `pointermove` | Pointer Events L2; cancelable | as their mouse equivalents | **dispatched** as a compatibility stream alongside the mouse events, with `preventDefault` honored (`event.cpp:8530`, `8933`, `8025`) — added because JS drag libraries select the pointer stream when `PointerEvent` exists | ✅ |
 | `pointerover` / `out` / `enter` / `leave` / `cancel`; `setPointerCapture` | Pointer Events L2 | boundary + capture semantics | absent | ❌ (ESO50) |
 | touch events | Touch Events | — | absent | ❌ |

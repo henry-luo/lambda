@@ -12,10 +12,12 @@ import html: lambda.edit.html
 import outcome: lambda.dom.edit_result
 import tree: lambda.dom.tree
 import colors: lambda.ui.core.component
+import grid: .mod_table_grid
 
 pub let border_styles = ["solid","dashed","dotted","double","none"]
 pub let border_presets = ["all","outside","inside","top","bottom","left","right","none"]
 pub fn cells(doc) => [for (entry in descendants(doc) where contains(['td','th'],entry.node.tag)) entry]
+fn cell_path(doc,path) => if (path==null) null else commands.selected_table_context({doc:doc,selection:node_selection(path)}).cell_path
 pub fn context(editor) {
     let path = format.selection_path(editor.selection)
     let table = commands.ancestor_tag(editor.doc,path,'table')
@@ -25,10 +27,7 @@ pub fn context(editor) {
 }
 pub fn entries(editor) {
     let ctx = context(editor)
-    let rows = [for (entry in descendants(ctx.table,ctx.table_path) where entry.node.tag=='tr' and
-        commands.ancestor_tag(editor.doc,entry.path,'table')==ctx.table_path) entry];
-    [for (r,row in rows) for (c,cell in row.node.content where contains(['td','th'],cell.tag))
-        {path:[*row.path,c],node:cell,row:r,col:c,row_path:row.path}]
+    if (ctx==null) [] else grid.entries(editor.doc,ctx.table_path)
 }
 pub fn structural(editor) => editor.selection.kind=='multi-node' or
     (editor.selection.kind=='node' and contains(['table','thead','tbody','tfoot','tr','td','th'],node_at(editor.doc,editor.selection.path).tag))
@@ -48,6 +47,14 @@ pub fn native_editor(editor) {
     let point = pos(first.path,0)
     if (first==null) editor else {*:editor,selection:text_selection(point,point)}
 }
+pub fn projected_selection(editor,selection) {
+    if (not structural(editor)) false else {
+        let first = selected(editor)[0]
+        let leaf = format.leaves(first.node,first.path)[0]
+        let point = pos(leaf.path or first.path,0)
+        first!=null and (selection==native_editor(editor).selection or selection==text_selection(point,point))
+    }
+}
 pub fn result(editor,run) => if (structural(editor)) outcome.with_source_selection(run,native_editor(editor).selection,editor.model_revision) else run
 pub fn command_editor(editor) {
     let ctx = context(editor)
@@ -58,14 +65,29 @@ pub fn selection(editor,scope,path=null,head=null) {
     let all_cells = entries({*:editor,selection:node_selection(base)})
     let a = [for (entry in all_cells where entry.path==base) entry][0]
     let b = [for (entry in all_cells where entry.path==(head or base)) entry][0]
-    let chosen = [for (entry in all_cells where
-        (scope=="table") or
-        ((scope=="row" or (entry.col>=min(a.col,b.col) and entry.col<=max(a.col,b.col))) and
-         (scope=="column" or (entry.row>=min(a.row,b.row) and entry.row<=max(a.row,b.row))))) entry.path]
+    let bounds = grid.bounds(all_cells)
+    let region = {top:if (contains(["column","table"],scope)) 0 else min(a.row,b.row),
+        bottom:if (contains(["column","table"],scope)) bounds.bottom else max(a.end_row,b.end_row),
+        left:if (contains(["row","table"],scope)) 0 else min(a.col,b.col),
+        right:if (contains(["row","table"],scope)) bounds.right else max(a.end_col,b.end_col)}
+    let chosen = [for (entry in grid.rectangle(all_cells,region)) entry.path]
     if (a==null or b==null or len(chosen)==0) editor.selection
     else if (scope=="table") node_selection(context({*:editor,selection:node_selection(base)}).table_path)
-    else if (scope=="row" and a.row==b.row) node_selection(a.row_path)
-    else if (len(chosen)==1) node_selection(chosen[0]) else multi_node_selection(chosen)
+    else if (scope=="row" and a.row==b.row and all([for (p in chosen) parent_path(p)==a.row_path])) node_selection(a.row_path)
+    else if (len(chosen)==1) node_selection(chosen[0])
+    else if (scope=="cell" and len(chosen)==len(all_cells)) node_selection(context({*:editor,selection:node_selection(base)}).table_path)
+    else if (scope=="cell" and a.row==b.row and all([for (p in chosen) parent_path(p)==a.row_path]) and
+        len(chosen)==len([for (entry in all_cells where entry.row==a.row) entry])) node_selection(a.row_path)
+    else multi_node_selection(chosen)
+}
+// crossing cells promotes the range; partial text inside a single cell stays editable text.
+pub fn promote(editor) {
+    let sel = editor.selection
+    let anchor = cell_path(editor.doc,sel.anchor.path)
+    let head = cell_path(editor.doc,sel.head.path)
+    if (sel.kind!='text' or anchor==null or head==null or anchor==head or
+        commands.ancestor_tag(editor.doc,anchor,'table')!=commands.ancestor_tag(editor.doc,head,'table')) editor
+    else preview(editor,{path:anchor,head:head})
 }
 pub fn border_settings(editor) {
     let css = attrs_get(selected(editor)[0].node.attrs,'style')
@@ -81,18 +103,20 @@ let sides = [{id:"top",opposite:"bottom",r: -1,c:0},{id:"right",opposite:"left",
     {id:"bottom",opposite:"top",r:1,c:0},{id:"left",opposite:"right",r:0,c: -1}]
 fn set_border(tx,path,side,value) => tx_step(tx,step_set_attr(path,'style',
     format.css_set(attrs_get(node_at(tx.doc_after,path).attrs,'style'),"border-" ++ side,value)))
-fn border_edges(tx,all,picked,p,i=0,j=0) {
-    if (i>=len(picked)) tx else if (j>=len(sides)) border_edges(tx,all,picked,p,i+1,0) else {
+fn border_edges(tx,all_cells,picked,p,i=0,j=0) {
+    if (i>=len(picked)) tx else if (j>=len(sides)) border_edges(tx,all_cells,picked,p,i+1,0) else {
         let cell = picked[i]
         let side = sides[j]
-        let neighbor = [for (entry in all where entry.row==cell.row+side.r and entry.col==cell.col+side.c) entry][0]
-        let inside = neighbor!=null and any([for (entry in picked) entry.path==neighbor.path])
+        let neighbors = [for (entry in all_cells where
+            if (side.r!=0) (if (side.r<0) entry.end_row==cell.row else entry.row==cell.end_row) and entry.col<cell.end_col and entry.end_col>cell.col
+            else (if (side.c<0) entry.end_col==cell.col else entry.col==cell.end_col) and entry.row<cell.end_row and entry.end_row>cell.row) entry]
+        let inside = len(neighbors)>0 and all([for (neighbor in neighbors) any([for (entry in picked) entry.path==neighbor.path])])
         let applies = contains(["all","none",side.id],p.preset) or (p.preset=="outside" and not inside) or (p.preset=="inside" and inside)
         let value = if (p.preset=="none" or p.style=="none") "0pt none " ++ p.color else string(p.width) ++ "pt " ++ p.style ++ " " ++ p.color
         let next = if (not applies) tx else set_border(tx,cell.path,side.id,value)
         // collapsed table edges belong to both cells; a neighbor's old solid border must not win.
-        let shared = if (applies and neighbor!=null) set_border(next,neighbor.path,side.opposite,value) else next
-        border_edges(shared,all,picked,p,i,j+1)
+        let shared = if (applies) reduce([next,*neighbors],(acc,neighbor)=>set_border(acc,neighbor.path,side.opposite,value)) else next
+        border_edges(shared,all_cells,picked,p,i,j+1)
     }
 }
 pub fn borders(editor,params) map^ {
@@ -147,8 +171,8 @@ fn clipboard(editor,run) {
     let text = join([for (path in rows) join([for (entry in chosen where entry.row_path==path) doc_text(entry.node)],"\t")],"\n")
     outcome.with_clipboard_html(run,html.export_text(fragment,{document:false,head:<head>}),text)
 }
-pub pn handle(editor,evt,read_only=false) {
-    if (read_only or not structural(editor)) { return controller.handle(editor,evt,read_only) }
+pub pn handle(editor,evt,read_only=false,selection=null) {
+    if (read_only or not structural(editor)) { return controller.handle(editor,evt,read_only,"html5_subset","edit-surface",selection) }
     let copied = contains(["copy","deleteByCut"],evt.input_type)
     if (evt.input_type=="copy") {
         return {editor:editor,result:clipboard(editor,outcome.model_applied(false,false,false,"",native_editor(editor).selection,editor.model_revision))}
@@ -165,11 +189,6 @@ pub pn handle(editor,evt,read_only=false) {
 }
 
 // document order is shared by the model projection and the live cell elements.
-pub pn cell_element(editor,node,path) {
-    let entries = cells(editor.doc)
-    let index = [for (i,entry in entries where entry.path==path) i][0]
-    return if (index==null) null else dom.query_selector_all(controller.surface(node),"td,th")[index]
-}
 pub pn hit(editor,node) {
     let target = dom.closest(node,"td,th")
     let host = controller.surface(node)
@@ -180,7 +199,7 @@ pub pn hit(editor,node) {
 }
 pub pn point(editor,node,x,y) {
     let target = dom.element_from_point(dom.owner_document(node),x,y)
-    return hit(editor,target) or gesture(editor,{target:target}).path
+    return hit(editor,target)
 }
 pub pn paint(editor,node) {
     let paths = if (structural(editor)) [for (entry in selected(editor)) entry.path] else []
@@ -190,49 +209,29 @@ pub pn paint(editor,node) {
         else if (dom.get_attribute(cell,"data-word-cell-selected")!=null) dom.remove_attribute(cell,"data-word-cell-selected")
     }
 }
-view <table_grips> {
-    let editor = ~.editor
-    let ctx = context(editor)
-    let all_cells = entries(editor)
-    let rows = unique([for (entry in all_cells) entry.row_path]);
-    if (~.disabled or ctx==null) null else <div id:"table-grips",contenteditable:"false",
-        <button id:"table-grip-table",class:"table-grip",["data-table-scope"]:"table",["aria-label"]:"Select table",title:"Select table">;
-        <button id:"table-grip-cell",class:"table-grip cell-grip",["data-table-scope"]:"cell",["aria-label"]:"Select cells",title:"Select cell; drag across cells to select a range.">;
-        *[for (i,path in rows) <button id:"table-grip-row-" ++ string(i),class:"table-grip row-grip",["data-table-scope"]:"row",
-            ["data-table-index"]:string(i),["aria-label"]:"Select row " ++ string(i+1),title:"Select row; drag to select more rows.">];
-        *[for (i,cell in all_cells where cell.row==0) <button id:"table-grip-column-" ++ string(cell.col),class:"table-grip column-grip",["data-table-scope"]:"column",
-            ["data-table-index"]:string(cell.col),["aria-label"]:"Select column " ++ string(cell.col+1),title:"Select column; drag to select more columns.">]>
-}
-pub fn tools(editor,disabled) => apply(<table_grips editor:editor,disabled:disabled>)
-pub pn position(editor,node) {
-    paint(editor,node)
-    let root = dom.root_node(node)
-    let origin = dom.bounding_box(dom.get_element_by_id(root,"paper-wrap"))
-    let all_cells = entries(editor)
-    let ctx = context(editor)
-    let table = dom.closest(cell_element(editor,node,ctx.cell_path),"table")
-    let bounds = dom.bounding_box(table)
-    for (grip in dom.query_selector_all(root,"#table-grips .table-grip")) {
-        let scope = dom.get_attribute(grip,"data-table-scope")
-        let index = int(dom.get_attribute(grip,"data-table-index") or "0")
-        let cell = if (scope=="cell") ctx.cell_path else [for (entry in all_cells where
-            (scope=="row" and entry.row==index) or (scope=="column" and entry.row==0 and entry.col==index)) entry.path][0]
-        let box = if (scope=="table") bounds else dom.bounding_box(cell_element(editor,node,cell))
-        let rectangle = if (scope=="row") {left:bounds.x-18,top:box.y,width:16,height:box.height}
-            else if (scope=="column") {left:box.x,top:bounds.y-18,width:box.width,height:16}
-            else if (scope=="cell") {left:box.x+1,top:box.y+1,width:9,height:9}
-            else {left:bounds.x-18,top:bounds.y-18,width:16,height:16}
-        for (key,value in rectangle) dom.style_set_property(grip,string(key),string(value-if (string(key)=="left") origin.x else if (string(key)=="top") origin.y else 0) ++ "px")
-    }
+fn anchor_range(editor) {
+    let picked = selected(editor)
+    let saved = editor.table_range
+    if (saved!=null and selection(editor,"cell",saved.anchor,saved.head)==editor.selection) saved
+    else {anchor:picked[0].path,head:picked[len(picked)-1].path}
 }
 pub pn gesture(editor,evt) {
-    let grip = dom.closest(evt.target,"[data-table-scope]")
-    let scope = dom.get_attribute(grip,"data-table-scope")
-    let index = int(dom.get_attribute(grip,"data-table-index") or "0")
-    let path = if (scope=="row" or scope=="column") [for (entry in entries(editor) where
-        (scope=="row" and entry.row==index) or (scope=="column" and entry.col==index)) entry.path][0]
-        else if (scope!=null) context(editor).cell_path else hit(editor,evt.target)
-    return if (scope==null and not (evt.shiftKey and structural(editor) and path!=null)) null
-    else {handle:"table",scope:scope or "cell",path:if (scope==null) selected(editor)[0].path else path,head:path,pointer:evt.pointerId}
+    let path = hit(editor,evt.target)
+    let start = if (structural(editor)) anchor_range(editor).anchor else cell_path(editor.doc,editor.selection.anchor.path)
+    let extended = evt.shiftKey and start!=null and (structural(editor) or start!=path) and
+        commands.ancestor_tag(editor.doc,path,'table')==commands.ancestor_tag(editor.doc,start,'table')
+    let anchor = if (extended) start else path
+    return if (path==null) null else {handle:"table",path:anchor,head:path,pointer:evt.pointerId,
+        active:extended,was_structural:structural(editor)}
 }
-pub fn preview(editor,gesture) => {*:editor,selection:selection(editor,gesture.scope,gesture.path,gesture.head)}
+pub fn preview(editor,gesture) => {*:editor,selection:selection(editor,"cell",gesture.path,gesture.head),
+    table_range:{anchor:gesture.path,head:gesture.head}}
+pub fn extend(editor,key) {
+    let bounds = anchor_range(editor)
+    let all_cells = entries(editor)
+    let head = [for (entry in all_cells where entry.path==bounds.head) entry][0]
+    let row = if (key=="ArrowDown") head.end_row else head.row+if (key=="ArrowUp") -1 else 0
+    let col = if (key=="ArrowRight") head.end_col else head.col+if (key=="ArrowLeft") -1 else 0
+    let next = grid.at(all_cells,row,col)
+    preview(editor,{path:bounds.anchor,head:next.path or bounds.head})
+}
