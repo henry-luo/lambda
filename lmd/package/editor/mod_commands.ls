@@ -501,6 +501,8 @@ pub fn cmd_insert_text(st, txt) {
       let tx1 = tx_step(tx0, step_replace(lo.path, off, off, [text_marked(txt, marks)]))
       tx_set_selection(tx1, caret(pos([*lo.path, off], len(txt))))
     }
+    // a structural boundary is not a text leaf; replacing it would discard its subtree.
+    else if (not is_text(leaf)) { null }
     else if (stored_marks != null and len(txt) > 0 and leaf != null and is_text(leaf) and len(lo.path) > 0) {
       let leaf_parent = parent_path(lo.path)
       let leaf_index = last_index(lo.path)
@@ -914,9 +916,21 @@ pub fn cmd_move_text_selection(st, source_selection, target_pos) {
 
 fn delete_range(st, lo, hi) {
   let leaf = node_at(st.doc, lo.path)
+  // container offsets index children; replace_text would turn the container into a leaf.
+  if (leaf != null and is_node(leaf)) {
+    if (lo.offset < 0 or hi.offset > len(leaf.content) or lo.offset >= hi.offset) { null }
+    else if (len(lo.path) == 0 and lo.offset == 0 and hi.offset == len(leaf.content)) {
+      replace_all_with_text(st, "")
+    } else {
+      let tx0 = tx_begin(st.doc, st.selection)
+      let tx1 = tx_step(tx0, step_replace(lo.path, lo.offset, hi.offset, []))
+      tx_set_selection(tx1, caret(lo))
+    }
+  }
   // Whole leaf emptied → drop the leaf (block becomes empty []), matching JS
   // rather than leaving an empty text("") child.
-  if (leaf != null and is_text(leaf) and lo.offset == 0 and hi.offset == len(leaf.text) and len(lo.path) >= 1) {
+  else if (leaf == null or not is_text(leaf)) { null }
+  else if (lo.offset == 0 and hi.offset == len(leaf.text) and len(lo.path) >= 1) {
     let block_path = parent_path(lo.path)
     let leaf_idx = last_index(lo.path)
     let tx0 = tx_begin(st.doc, st.selection)

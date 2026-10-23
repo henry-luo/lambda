@@ -20,7 +20,7 @@ import transform: .mod_transform
 import controller: lambda.edit.controller
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
-    tab:"Home",dialog:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
+    tab:"Home",dialog:null,context:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
     zoom:1.0,nav:true,read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }

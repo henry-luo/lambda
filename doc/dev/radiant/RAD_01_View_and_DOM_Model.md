@@ -118,6 +118,16 @@ Two rules keep a retained element's used style trustworthy:
 
 The DOM→source direction (`source_pos_from_dom_boundary`) walks DOM ancestors from a boundary to the first `DomElement` whose `native_element` is registered in `render_map`, converting UTF-16 API offsets to the UTF-8 internal storage for text leaves; the source→DOM direction (`dom_boundary_from_source_pos`) walks the subtree consulting `render_map` to match a path. `MarkBuilder` helpers build the Lambda `pos`/`selection` values, and `dom_selection_apply_source_selection` applies a Lambda selection back onto a `DomSelection` ([RAD_18](RAD_18_Editing_Selection_Ranges.md)). The header carries an explicit maturity caveat (`event.hpp`): several of these functions were committed as no-ops returning `false` until `render_map` gained its path field, so the wiring must be confirmed against the current `.cpp` rather than assumed.
 
+Both directions require a recorded path; when an editor document is registered,
+only that current document may own path `[]`. Plain template events retain their
+recorded coordinates when no editor root is active. An application or toolbar render entry without a path still
+participates in handler dispatch, but cannot supply editor coordinates. This
+keeps a native caret on an unmapped editor wrapper from becoming a document-root
+text edit after a toolbar redraw (**D7.2.5**). The bridge unit regressions and
+Word's `page_break_typing` replay cover this distinction. The model text command
+also declines a non-text target unless its schema allows inline insertion;
+structural containers retain their children.
+
 ---
 
 ## 8. Known Issues & Future Improvements

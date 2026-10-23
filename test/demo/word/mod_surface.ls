@@ -27,7 +27,7 @@ fn make(tag,attrs,kids) {
 }
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
-fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','colspan','rowspan','data-word-style',
+fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','indent','colspan','rowspan','data-word-style',
     'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment',
     'data-word-cover','data-word-blank-page','data-word-shape','data-word-equation','data-word-wordart','data-word-rotation',
     'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
@@ -99,4 +99,6 @@ pub let document_css = "
  @page { size:A4; margin:17mm 19mm; }
  @media print { .word-content { width:auto; min-height:0; padding:0; }
    h1,h2,h3 { break-after:avoid; } tr { break-inside:avoid; } }
-"
+" ++ join([for (level in 1 to 8)
+    // the flat-list model stores levels; both screen and export need their visual offset.
+    ".word-content li[indent=\"" ++ string(level) ++ "\"] { margin-inline-start:" ++ string(level*1.75) ++ "em; }"],"\n")

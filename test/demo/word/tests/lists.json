@@ -1,0 +1,508 @@
+{
+  "name": "Word list indentation renders, preserves caret and history, supports Tab, and survives snapshot/HTML exports",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 500,
+      "dy": -10,
+      "dx": 0
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2) p"
+      },
+      "start": 7,
+      "end": 7
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.indent\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelector('#edit-surface ul > li');var b=document.querySelector('#edit-surface ul > li:nth-child(2)');Math.abs(b.getBoundingClientRect().x-a.getBoundingClientRect().x-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2) p"
+      },
+      "char_offset": 7
+    },
+    {
+      "type": "type_physical",
+      "text": "!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2) p"
+      },
+      "equals": "Label w!hat is yours. Share what is on the commons shelf."
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2) p"
+      },
+      "equals": "Label what is yours. Share what is on the commons shelf."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"edit.undo\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)[indent]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*0.0)<0.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"edit.redo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.indent\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*3.5)<0.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.outdent\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*3.5)<0.2"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.outdent\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)[indent]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*0.0)<0.2"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "key_combo",
+      "key": "Tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(2)[indent]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*0.0)<0.2"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface ul > li:first-child p"
+      },
+      "start": 3,
+      "end": 3
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ul > li:first-child"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:first-child\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "key_combo",
+      "key": "Tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li:first-child[indent]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ul > li:first-child\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*0.0)<0.2"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-child"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.numbering\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ol > li"
+      },
+      "count": 1
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface ol > li:first-child p"
+      },
+      "start": 161,
+      "end": 161
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type_physical",
+      "text": "Ordered item"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ol > li"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(3)"
+      },
+      "attribute": "indent",
+      "equals": "2"
+    },
+    {
+      "type": "type_physical",
+      "text": "Keep the indent"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(3)"
+      },
+      "equals": "Keep the indent"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/list-indent.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/lists.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/lists.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/word/lists.html",
+      "contains": "indent=\"2\""
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/word/lists.html",
+      "contains": "margin-inline-start:3.5em"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/lists.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ol > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*3.5)<0.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/lists.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)"
+      },
+      "start": 3,
+      "end": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.outdent\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)"
+      },
+      "attribute": "indent",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface ol > li:nth-child(2)\");Math.abs(b.getBoundingClientRect().x-b.parentElement.getBoundingClientRect().x-parseFloat(getComputedStyle(b.parentElement).paddingLeft)-parseFloat(getComputedStyle(b).fontSize)*1.75)<0.2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(3)"
+      },
+      "equals": "Keep the indent"
+    }
+  ]
+}

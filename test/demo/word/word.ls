@@ -16,6 +16,7 @@ import controller: lambda.edit.controller
 import image: lambda.editor.mod_image
 import changes: .mod_changes
 import handles: .mod_handles
+import context: ~~.mod_context_menu
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -32,9 +33,9 @@ edit <word_app> state st:app.initial() {
         ["data-revision"]:string(st.editor.model_revision), ["data-tab"]:tab, ["data-readonly"]:string(st.read_only),
         <style review.css(st.editor.doc)>
         <header class:"titlebar",
-            <div class:"brand", <span class:"brand-mark", "W"> <span "Word"> <span class:"brand-divider"> <span class:"brand-detail", "A LAMBDA WORKSPACE">>
+            <div class:"brand", <span class:"brand-mark", ui.icon("document",24)> <span "Word"> <span class:"brand-divider"> <span class:"brand-detail", "LAMBDA">>
             <div class:"document-title", st.file_state.envelope.title; <span class:"save-indicator", if (dirty) "  •  Unsaved" else "  •  Saved">>
-            <div class:"title-actions", ui.button("save","file.save","Save","↥"); ui.button("export","file.export","Export","↗")>
+            <div class:"title-actions", ui.button("save","file.save","Save","save"); ui.button("export","file.export","Export","export")>
         >
         <div class:"ribbon-shell",
             <nav class:"tabs", ["aria-label"]:"Ribbon tabs",
@@ -64,14 +65,22 @@ edit <word_app> state st:app.initial() {
             <div class:"status-left", <span class:"status-dot"> <span id:"status", role:"status", st.status> <span class:"status-divider"> <span id:"word-count", string(words) ++ " words">>
             <div class:"status-right",
                 ui.button("exit-focus","view.focusMode",if (st.focused) "Exit focus" else "Focus");
-                <span id:"paper-label",paper.paper> ui.button("status-zoom-out","view.zoomOut","−");
-                <span id:"zoom-label", string(round(st.zoom*100)) ++ "%"> ui.button("status-zoom-in","view.zoomIn","+")>
+                <span id:"paper-label",paper.paper> ui.button("status-zoom-out","view.zoomOut","Zoom out","minus",{},false,false,"icon-only");
+                <span id:"zoom-label", string(round(st.zoom*100)) ++ "%"> ui.button("status-zoom-in","view.zoomIn","Zoom in","plus",{},false,false,"icon-only")>
         >
+        ui.context_menu(st)
         ui.dialog(st.dialog,st.file_state,st.editor,st.read_only)
     >
 }
 on beforeinput() { return 'pass' }
 on word_object_position(evt) { handles.position(st.editor,evt.node or evt.target,st.zoom) }
+on word_context_ready(evt) {
+    if (st.context!=null) context.focus(evt.target,"word-context-menu")
+}
+on word_select_all(evt) {
+    let host = controller.surface(evt.target)
+    dom.selection_select_all_children(dom.document_selection(host),host)
+}
 on dblclick(evt) {
     if (st.read_only) { return 'pass' }
     let story = dom.closest(evt.target,".word-story")
@@ -90,6 +99,9 @@ on dblclick(evt) {
     return 'pass'
 }
 on mousedown(evt) {
+    // contextmenu precedes mousedown; keep its saved range out of native hit testing.
+    if (evt.button==1 and st.context!=null and dom.closest(evt.target,"#edit-surface")!=null) { return 'prevent-default' }
+    if (st.context!=null and dom.closest(evt.target,"#word-context-menu")==null) { st = {*:st,context:null} }
     let path = if (evt.button==0 and not st.read_only and st.dialog==null)
         image.hit(st.editor,evt.target,controller.surface(evt.target)) else null
     if (path==null) { return 'pass' }
@@ -97,6 +109,19 @@ on mousedown(evt) {
     st = {*:st,editor:image.select_image(app.mounted(st.editor,evt.target),path)}
     app.focus_document(evt.target)
     app.finish(st,evt.target)
+    return 'prevent-default'
+}
+on contextmenu(evt) {
+    if (st.dialog!=null or dom.closest(evt.target,"#edit-surface")==null) { return 'pass' }
+    let path = image.hit(st.editor,evt.target,controller.surface(evt.target))
+    if (path!=null) { st = {*:st,editor:image.select_image(app.mounted(st.editor,evt.target),path)} }
+    // right-clicking a selected range must not adopt the pointer's collapsed caret.
+    if (st.read_only or not context.has_selection(st.editor.selection)) { st = app.adopt(st,evt) }
+    // a read-mode menu retains plain selection text while its chrome is rendered.
+    let copied_text = dom.selection_to_string(dom.document_selection(evt.target))
+    st = {*:st,context:{x:evt.clientX,y:evt.clientY,copy_text:copied_text}}
+    app.finish(st,evt.target)
+    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_context_ready")
     return 'prevent-default'
 }
 on editaction(evt) {
@@ -112,6 +137,7 @@ on editaction(evt) {
     return run.result
 }
 on selectionchange(evt) {
+    if (st.read_only or st.context!=null) { return 'pass' }
     let adopted = app.adopt(st,evt,true)
     if (adopted.editor!=st.editor) {
         st = {*:adopted,editor:model.clean(adopted.editor)}
@@ -119,7 +145,31 @@ on selectionchange(evt) {
     }
 }
 on word_command(req) {
-    st = app.adopt(st,req.event)
+    let menu = st.context
+    st = {*:if (st.read_only) st else app.adopt(st,req.event),context:null}
+    if (starts_with(req.id,"clipboard.")) {
+        if (st.read_only and req.id=="clipboard.copy") {
+            dom.clipboard_write(menu.copy_text or "")
+            return 'handled'
+        }
+        if (req.id=="clipboard.selectAll") {
+            if (st.read_only) {
+                // static ranges bind to the live surface after the menu's removal.
+                dom.request_frame(dom.get_element_by_id(dom.root_node(req.node),"word"),"word_select_all")
+                return 'handled'
+            }
+            st = {*:st,editor:edit_set_selection(app.mounted(st.editor,req.node),all_selection())}
+            app.focus_document(req.node)
+            app.finish(st,req.node)
+            return 'handled'
+        }
+        app.finish(st,req.node)
+        if (not st.read_only) { app.focus_document(req.node) }
+        let host = controller.surface(req.node)
+        let command = {cut:"deleteByCut",copy:"copy",paste:"insertFromPaste",delete:"deleteContentForward"}[slice(req.id,10)]
+        dom.keyboard_command(host,command)
+        return 'handled'
+    }
     st = app.command(st,req.id,req.params,req.node)
     app.finish(st,req.node)
 }
@@ -136,6 +186,27 @@ on control_change(req) {
     }
 }
 on keydown(evt) {
+    if (st.context!=null) {
+        if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) {
+            context.navigate(evt.target,"word-context-menu",evt.key)
+            return 'prevent-default'
+        }
+        if (contains(["Escape","Tab"],evt.key)) {
+            st = {*:st,context:null}
+            app.focus_document(evt.target)
+            app.finish(st,evt.target)
+            return 'prevent-default'
+        }
+    }
+    if (st.dialog==null and (evt.key=="ContextMenu" or (evt.key=="F10" and evt.shiftKey)) and
+        dom.closest(evt.target,"#edit-surface")!=null) {
+        let box = dom.bounding_box(evt.target)
+        st = {*:app.adopt(st,evt),context:{x:box.x+20,y:box.y+20,
+            copy_text:dom.selection_to_string(dom.document_selection(evt.target))}}
+        app.finish(st,evt.target)
+        dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_context_ready")
+        return 'prevent-default'
+    }
     let key = lower(string(evt.key))
     let adopted = app.adopt(st,evt)
     let id = if (evt.key=="Escape") "ui.escape"
@@ -146,11 +217,13 @@ on keydown(evt) {
         else if (app.primary(evt) and evt.key=="Enter" and st.dialog==null and not app.is_control(evt.target)) "insert.pageBreak"
         else if (evt.key=="Tab" and st.dialog==null and not st.read_only and not app.is_control(evt.target) and model.table_context(adopted.editor)!=null)
             (if (evt.shiftKey) "table.previousCell" else "table.nextCell")
+        else if (evt.key=="Tab" and st.dialog==null and not st.read_only and not app.is_control(evt.target) and model.current_node(adopted.editor,'li')!=null)
+            (if (evt.shiftKey) "para.outdent" else "para.indent")
         else if (app.primary(evt) and key==" " and st.dialog==null and not app.is_control(evt.target)) "format.clear"
         else if (app.primary(evt) and st.dialog==null and not app.is_control(evt.target)) model.shortcut(key,evt.shiftKey==true)
         else null
     if (id==null) { return 'pass' }
-    st = app.command(adopted,id,{},evt.target)
+    st = app.command({*:adopted,context:null},id,{},evt.target)
     app.finish(st,evt.target)
     return 'prevent-default'
 }

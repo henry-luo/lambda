@@ -497,6 +497,41 @@ TEST_F(SourcePosBridgeRoundTrip, DomElementBoundaryToSourcePos) {
     source_pos_free(&pos);
 }
 
+TEST_F(SourcePosBridgeRoundTrip, UnrecordedOwnerDoesNotProjectAsDocumentRoot) {
+    // handler dispatch still recognizes the owner, but it has no editor path.
+    source_pos_bridge_reset();
+    DomBoundary boundary{root, 0};
+    SourcePosC position{};
+    EXPECT_FALSE(source_pos_from_dom_boundary(&boundary, &position));
+    source_pos_free(&position);
+    DomBoundary resolved{};
+    EXPECT_FALSE(dom_boundary_from_source_pos(root, &position, &resolved));
+}
+
+TEST_F(SourcePosBridgeRoundTrip, ApplicationRootPathDoesNotProjectAsEditorDocument) {
+    // a model redraw replaces the source root while the outer app keeps its old [] path.
+    render_map_set_source_doc_root(para_item);
+    DomBoundary boundary{root, 0};
+    SourcePosC position{};
+    EXPECT_FALSE(source_pos_from_dom_boundary(&boundary, &position));
+    source_pos_free(&position);
+}
+
+TEST_F(SourcePosBridgeRoundTrip, RecordedTemplatePathSurvivesSourceRootReset) {
+    // ordinary template callbacks retain path records after the editor-root index resets.
+    render_map_reset();
+    render_map_record(root_item, tref, root_item, ItemNull, -1);
+    DomBoundary boundary{root, 0};
+    SourcePosC position{};
+    ASSERT_TRUE(source_pos_from_dom_boundary(&boundary, &position));
+    EXPECT_EQ(position.path.depth, 0);
+    EXPECT_EQ(position.offset, 0u);
+    DomBoundary resolved{};
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &position, &resolved));
+    EXPECT_EQ(resolved.node, root);
+    source_pos_free(&position);
+}
+
 TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextBoundary) {
     // Build a SourcePos pointing at offset 4 inside "hello".
     SourcePosC pos;

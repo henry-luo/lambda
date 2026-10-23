@@ -1,0 +1,283 @@
+{
+  "name": "Word page break preserves the document when typing immediately or from an unmapped caret",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 720
+  },
+  "events": [
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 720
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "start": 60,
+      "end": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-page-break"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "type_physical",
+      "text": "a"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "The Open Studio Handbook"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Start with a small idea."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-page-break=true]"
+      },
+      "contains": "a"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "script",
+      "js": "document.getSelection().collapse(document.getElementById(\"edit-surface\"), 0)"
+    },
+    {
+      "type": "type_physical",
+      "text": "b"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "The Open Studio Handbook"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Start with a small idea."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-page-break=true]"
+      },
+      "contains": "ab"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-page-break=true]"
+      },
+      "equals": "lls with people who make things. Painters set up by the north windows, letterpress regulars claim the back room, and somebody always brings bread."
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "print shop on Alder Street"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "BeforeAfter",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "BeforeAfter"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 11,
+      "end": 11
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-page-break"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "type_physical",
+      "text": "Next page"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"]"
+      },
+      "contains": "BeforeAfter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"]"
+      },
+      "contains": "Next page"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"]"
+      },
+      "contains": "BeforeAfter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "BeforeAfter"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "type_physical",
+      "text": "Restored"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"]"
+      },
+      "contains": "BeforeAfter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"]"
+      },
+      "contains": "Restored"
+    }
+  ]
+}

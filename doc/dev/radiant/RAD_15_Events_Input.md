@@ -87,6 +87,14 @@ settled through the S12.1.3 regeneration path. Hit-test-only work such as
 cursor selection and scrollbar geometry stays native and is not a second event
 propagation path.
 
+Package clipboard commands retain the enclosing event record across their nested
+notifications (D7.2.5, S12.1.3). An exact `RootFrame` keeps that record alive;
+its cancellation and UA-delivery flags return with it, while
+model edits and selection completions remain pending. This prevents a clipboard
+command from making its enclosing click appear undelivered and replaying it.
+Keyboard events target the live focused control before a retained document caret,
+so a menu can navigate without changing the document's selection.
+
 ### 4.1 Which runtime runs a handler
 
 Every handler runs on the target document's own runtime,

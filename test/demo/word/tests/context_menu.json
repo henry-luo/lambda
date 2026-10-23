@@ -1,0 +1,565 @@
+{
+  "name": "Word document context menu preserves ranges, edits through commands, supports keyboard and read mode, and stays in bounds",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Hello Word"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello Word"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#context-copy"
+      },
+      "attribute": "role",
+      "equals": "menuitem"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/context-menu.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-copy"
+      }
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "Hello"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello Word"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-cut"
+      }
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "Hello"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": " Word"
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": true,
+      "check_dom": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-paste"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello Word"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": " Word"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-redo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello Word"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-bold"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "equals": "Hello"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-comment"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-undo"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-undo"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "F10",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-paragraph"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-all"
+      }
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-delete"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Hello Word"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "script",
+      "js": "var t=document.querySelector('#edit-surface strong').firstChild;window.getSelection().setBaseAndExtent(t,0,t,5);"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-cut[disabled],#context-paste[disabled],#context-bold[disabled]"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-copy"
+      }
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "Hello"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-all"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "window.getSelection().toString()==='Hello Word'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-copy"
+      }
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "Hello Word"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 700,
+      "height": 400
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('stage').scrollTop=180;"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p",
+        "offset_x": 25,
+        "offset_y": 10
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.getElementById('word-context-menu').getBoundingClientRect();b.x>=0&&b.y>=0&&b.x+b.width<=700&&b.y+b.height<=400"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/context-menu-compact.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import controls: lambda.ui.controls
 import rich: lambda.edit.rich_text
 import model: .mod_model
 import images: .mod_images
+import context: ~~.mod_context_menu
 
 pub fn icon(name) => icons.render({name:name,width:19,height:19})^
 pub pn task_hit(st,evt) {
@@ -137,25 +138,11 @@ fn color_picker(st) => <div id:"color-picker",class:"popover color-popover",role
     if (st.picker_error!="") <p class:"color-error",role:"alert",st.picker_error> else null
 >
 
-view <note_context> { ~.rendered }
-on render(evt) {
-    if (evt.event_phase==2) {
-        let root = dom.root_node(evt.target)
-        let menu = dom.get_element_by_id(root,"note-context-menu")
-        let box = dom.bounding_box(menu)
-        let viewport = dom.bounding_box(dom.get_element_by_id(root,"notes"))
-        // measure the actual menu so its last row remains reachable near any window edge.
-        dom.style_set_property(menu,"left",string(max(8,min(box.x,viewport.width-box.width-8))) ++ "px")
-        dom.style_set_property(menu,"top",string(max(8,min(box.y,viewport.height-box.height-8))) ++ "px")
-        dom.focus_set(dom.query_selector(menu,"button:not([disabled])"),false)
-    }
-    return 'pass'
-}
 fn context_menu(st) {
     let n = model.current(st)
-    let selected = st.editor.selection.kind=='node' or (st.editor.selection.kind=='text' and st.editor.selection.anchor!=st.editor.selection.head)
+    let selected = context.has_selection(st.editor.selection)
     let disabled = n==null or n.deleted;
-    apply(<note_context rendered:<div id:"note-context-menu",class:"popover context-popover",role:"menu",["aria-label"]:if (st.context.kind=="text") "Text actions" else "Note actions",
+    context.frame("note-context-menu","notes",<div id:"note-context-menu",class:"popover context-popover",role:"menu",["aria-label"]:if (st.context.kind=="text") "Text actions" else "Note actions",
         style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
         if (st.context.kind=="text") [
             menu_item("undo","edit.undo","Undo","undo","⌘Z",not edit_can_undo(st.editor) or disabled),
@@ -176,7 +163,7 @@ fn context_menu(st) {
             <div class:"popover-rule">,
             menu_item("delete","note.delete",if (n.deleted) "Delete Permanently…" else "Delete Note","delete")
         ]
-    >>)
+    >)
 }
 
 pub fn menus(st) => if (st.menu=="format") <div class:"popover format-popover",role:"group",["aria-label"]:"Text formatting",

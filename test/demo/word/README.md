@@ -19,13 +19,23 @@ The studio handbook is editable. Start a blank document with **New**, or return
 to the example with **Studio example**. Select text to format it; formatting
 at a caret sets the marks for subsequent typing.
 
+The interface follows photo-album's white panels, cool gray sidebar, blue
+accents, rounded controls, and system typography. Both demos use the shared
+outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
+
 ## Available workflow
 
+- Document context menu: right-click or press Shift+F10 for undo/redo, clipboard
+  actions, selection deletion, character formatting, paragraph settings, links,
+  comments, and selected-object settings. Arrow keys, Home/End, Escape, and Tab
+  navigate or dismiss it. Read mode offers plain-text copying and Select All.
 - Home ribbon: undo/redo; bold, italic, underline, strike, subscript and
   superscript; font family and size; text color and highlighting; paragraph
   alignment and line spacing; clear character formatting; six paragraph styles;
   bullets, numbering, and list indent/outdent. Paragraph settings apply spacing
   before/after, left indentation, and first-line indentation in one undo step.
+  Tab/Shift+Tab adjust list indentation while keeping the caret in the item;
+  the same indentation appears in editable snapshots, HTML, and PDF exports.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.
@@ -291,6 +301,13 @@ The object-transform replay covers mouse/touch resizing, rotation, Shift
 snapping, Escape, zoom, undo/redo, read mode, and editable/HTML/PDF persistence.
 The viewport replay checks caret/list clipping above the workspace and stable
 physical typing, including Space and arrow keys, at normal and increased zoom.
+The page-break typing replay checks immediate typing after a paragraph split,
+an empty new page, and undo/redo. It also puts the native caret on the editor's
+unmapped wrapper to verify typing retains the document and logical caret.
+The context-menu replay checks clipboard edits, selection preservation,
+formatting, history, keyboard navigation, read-mode copying, and small-window bounds.
+The list replay checks visible indent/outdent, Tab/Shift+Tab, caret and history,
+Enter continuing indentation, and editable/HTML round trips.
 The Insert replay additionally verifies a three-page PDF containing an explicit
 blank page and a four-page PDF after prepending a cover. Its screenshot is
 `temp/word-insert-cover.png`.

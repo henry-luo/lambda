@@ -775,6 +775,16 @@ first gives correct results. The axis path is `array_num_reduce_axis`
 the collapsed lanes. Repro: load any JPEG with `load({data:..., thumbnail:64})`
 and compare `sum(img, 0)[0]` with the column sum computed after `as_float`.
 
+<a id="lr05-17"></a>**LR05-17 · String-pattern design questions with no formal open-issue entry · OPEN (logged 2026-10-23, string doc consolidation)**
+These pattern questions are open in the vibe records but have no `SO#` entry in `doc/Lambda_Formal_Semantics.md` Appendix B (SO32 captures and SO47 the empty needle already have one):
+- **SPO7, value half:** the tiers of `|`, `&`, binary `!` and `to` in value expressions. The island half is SP19.
+- **SPO10:** what `.`, `...` and `"\s"` match across line terminators. Today `.` stops at a newline and `...` does not; the recommendation is a dotall `.` and the ECMAScript `\s` set.
+- **SPO12, spelling half:** how to write a case-insensitive `is` or `match`. The folding rule is S17.7.1. SP16's `\tag( … )` family, which the recommendation leaned on, was superseded by SP24.
+- **SPO1:** multi-letter and Unicode class names (`\p{Letter}`), deferred on 2026-08-07.
+- **Rev 1 questions never ruled (2026-01-27):** whether recursive patterns are allowed, and how detailed a pattern-mismatch diagnostic should be.
+
+Full text and recommendations: [Lambda_Expr_String_Pattern.md §8](Lambda_Expr_String_Pattern.md#8-open-questions-spo7spo14) and [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md) Appendix S §6. Summary: [Lambda_Type_String_Pattern.md §6.2](Lambda_Type_String_Pattern.md#62-deferred-and-open).
+
 ---
 
 
@@ -996,11 +1006,12 @@ Abandonment frees a parked activation's stack and runs no code on it (RA7). The 
 
 <a id="lr09-1"></a>**LR09-1 · Commented-out replace-in-file procedures (key collision) · OPEN**
 `pn_replace_file3` / `pn_replace_file4` are still commented out in the registry
-table (`lambda/runtime/sys_func_registry.c:1081`, `:1083`) because their
+table (`lambda/runtime/sys_func_registry.c:1432`, `:1434`, re-resolved 2026-10-23) because their
 `("replace", 3)` key collides with the existing `SYSFUNC_REPLACE` row; the
 composite `(name, arg_count)` map in `build_ast.cpp` cannot disambiguate them.
 Enabling them requires `first_param_type`-based disambiguation (one is
 `LMD_TYPE_PATH`) in `get_sys_func_info`, which does not exist.
+*Design status (noted 2026-10-23):* the file form `pn replace(path, …)` was proposed on 2026-02-28 and never ruled. GRP32 (2026-10-05) names `input()` → `replace()` → `output()` as the way to change file text, so whether the dedicated form is still wanted needs a user ruling before the registry work. Record: [Lambda_Type_String_Pattern.md §5.4](Lambda_Type_String_Pattern.md#54-file-replacepath---proposed-not-built).
 
 <a id="lr09-3"></a>**LR09-3 · Ordered comparison is deliberately partial · OPEN**
 The scalar comparators enumerate numeric/datetime/string cases and return
@@ -1031,6 +1042,9 @@ The markup formatters skip any text string above a size cap, log an error and ca
 
 <a id="lr09-32"></a>**LR09-32 · `format(x, {type: 'json', compact: true})` is documented but ignored · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
 `doc/Lambda_Sys_Func.md` gives `format(data, {type: 'json', compact: true})` as compact JSON. `lambda/format/format-json.cpp` has no compact path, so the output is indented exactly as with `indent: 2`. `indent: 0` is ignored as well. Either implement the option or drop it from the reference.
+
+<a id="lr09-34"></a>**LR09-34 · File-based `find(path, pattern, options?)` is designed but not built; it waits on a proposal that does not exist yet · OPEN (logged 2026-10-23, string doc consolidation)**
+GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, with the uniform `{value, index}` shape, `file` for a directory or wildcard, and opt-in `line` / `byte_offset` fields. Its determinism is to come from session caching, which a separate proposal is to design together with `input()`, `exists()` and `path#`; that proposal has not been written, so phase G5B of [Lambda_Lib_Grep.md](Lambda_Lib_Grep.md) is blocked. Today `find` takes a string or symbol only (`SYSFUNC_FIND`, `SYSFUNC_FIND3` in `lambda/runtime/sys_func_registry.c`), and `io.grep` (a `pn`) is the only file search. Record: [Lambda_Type_String_Pattern.md §5.3](Lambda_Type_String_Pattern.md#53-file-based-findpath---designed-not-built).
 
 ## 10. Error handling (LR_10)
 
@@ -1121,6 +1135,7 @@ The header comment still claims symbols ≤32 chars are pooled
 (`lambda/io/mark_builder.cpp:12`), but `createSymbol` (`:126`–`:134`) is
 **unconditional `arena_alloc`** — no pooling branch exists. Anyone relying on
 symbol pointer-identity for short symbols will be surprised.
+*User-doc drift (noted 2026-10-23):* `doc/Lambda_Data.md` §Symbol Literals tells users that symbols are interned, that only one copy exists, and that comparison is O(1) pointer equality. D4.6.1v4 rules that pointer equality is not a Lambda textual-symbol comparison, and interning is an implementation strategy that S1.6 makes invisible. The doc should state symbol identity as the `NameKey` (S8.2.2v6) instead.
 
 <a id="lr11-8"></a>**LR11-8 · `push` / `splice` are not in the Mark editor · OPEN (note)**
 They are runtime builtins in `lambda/runtime/collection_runtime.cpp` (registered

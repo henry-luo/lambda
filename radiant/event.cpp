@@ -1733,7 +1733,13 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
  * Returns a static string (no allocation needed).
  */
 static const char* key_code_to_name(int key) {
+    static const char* function_keys[] = {
+        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+        "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "F25"
+    };
+    if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F25) return function_keys[key - GLFW_KEY_F1];
     switch (key) {
+        case GLFW_KEY_MENU: return "ContextMenu";
         case RDT_KEY_BACKSPACE: return "Backspace";
         case RDT_KEY_DELETE:    return "Delete";
         case RDT_KEY_ENTER:     return "Enter";
@@ -9590,6 +9596,9 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
 static View* live_keyboard_event_target(DocState* state, DomDocument* doc,
                                         View* preferred) {
     EventTargetPath path = {};
+    // a retained document caret must not steal key events from a focused menu or control.
+    View* focused = focus_get(state);
+    if (focused && capture_event_target_path(doc, focused, &path)) return focused;
     EditingSurface preferred_surface;
     bool preferred_is_editing_surface = preferred &&
         editing_surface_from_target(preferred, &preferred_surface);
@@ -11190,7 +11199,21 @@ extern "C" bool radiant_keyboard_command_from_package(void* dom_node,
     DomElement* elem = scope->as_element();
     DomDocument* document = event_context_target_document(ctx->evcon);
     if (!elem || elem->doc != document) return false;
-    return dispatch_package_keyboard_command(ctx->evcon, ctx->target, name);
+    // clipboard/input notifications must leave the enclosing click or keydown
+    // recognizable, so its default tier does not replay the author handlers.
+    EventContext* evcon = ctx->evcon;
+    RootFrame roots(1);
+    Rooted<Item> enclosing_event(roots, evcon->dom_event);
+    bool enclosing_prevented = evcon->default_prevented;
+    bool enclosing_ua_handled = evcon->dom_event_ua_handled;
+    bool enclosing_author_dirty = evcon->dom_event_author_dirty;
+    bool handled = dispatch_package_keyboard_command(evcon, ctx->target, name);
+    bool dirty = enclosing_author_dirty || evcon->dom_event_author_dirty || render_map_has_dirty();
+    event_context_set_dom_event(evcon, enclosing_event.get());
+    evcon->default_prevented = enclosing_prevented;
+    evcon->dom_event_ua_handled = enclosing_ua_handled;
+    evcon->dom_event_author_dirty = dirty;
+    return handled;
 }
 
 // Only the exact bridge re-entry bypasses the wrapper below. A synthetic event

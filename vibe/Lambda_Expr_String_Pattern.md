@@ -276,7 +276,7 @@ See §7 #6 and SPO11.
 
 | JS feature | In Lambda | Why, or where it stands |
 |---|---|---|
-| Capture groups `( )`, named groups `(?<n> )` | None: groups never capture, and `find` yields only `{value, index}` | A `capture()` function was proposed in [Lambda_Type_String_Pattern.md](Lambda_Type_String_Pattern.md) §4.1; capture binding in `match` arms is SO32 |
+| Capture groups `( )`, named groups `(?<n> )` | None: groups never capture, and `find` yields only `{value, index}` | A `capture()` function was proposed in rev 1 of the pattern design ([Lambda_Type_String_Pattern.md](Lambda_Type_String_Pattern.md) §6.2, Appendix S S-5); capture binding in `match` arms is SO32 |
 | Backreferences `\1`, `\k<n>` | None | Not regular, so RE2 cannot |
 | Lookaround `(?= )`, `(?! )`, `(?<= )`, `(?<! )` | None | RE2 cannot, which is also why island `&` failed (§7 #3) and was removed (SP20, §12) |
 | Anchors `^` and `$`, word boundaries `\b` and `\B` | None (E103) | `is` and `match` are always anchored, and a search cannot be anchored. RE2 supports all four, so this is a design gap, not an engine limit. |

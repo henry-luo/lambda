@@ -284,6 +284,20 @@ bool render_map_reverse_lookup_with_path(Item result_node,
     return true;
 }
 
+static bool source_position_lookup(Item result_node, RenderMapLookup* lookup,
+                                   SourcePathC* out_path) {
+    if (!render_map_reverse_lookup(result_node, lookup)) return false;
+    const SourcePathC* path = path_table_get(lookup->source_item, lookup->template_ref);
+    // application/toolbar owners have render identities but no document coordinates.
+    // treating their missing or retired path as [] lets text input replace the document root.
+    Item source_root = render_map_get_source_doc_root();
+    // plain template events retain their recorded paths without an active editor root.
+    if (!path || (path->depth == 0 && source_root.item != 0 &&
+            lookup->source_item.item != source_root.item)) return false;
+    *out_path = source_path_clone(path);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // DOM → source position
 // ---------------------------------------------------------------------------
@@ -329,7 +343,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
             if (!de->is_synthetic()) {
                 Item result_item;
                 result_item.element = dom_element_render_source(de);
-                if (render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
+                if (source_position_lookup(result_item, &lookup, &base)) {
                     found_base = true;
                     break;
                 }
@@ -463,14 +477,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
     result_item.element = dom_element_render_source(de);
     RenderMapLookup lookup;
     SourcePathC recorded;
-    if (!render_map_reverse_lookup_with_path(result_item, &lookup, &recorded)) {
-        return false;
-    }
-    Item source_root = render_map_get_source_doc_root();
-    if (recorded.depth == 0 && lookup.source_item.item != source_root.item) {
-        // The outer app template can retain an earlier empty relative path;
-        // only the current editor document root may resolve source path [].
-        source_path_free(&recorded);
+    if (!source_position_lookup(result_item, &lookup, &recorded)) {
         return false;
     }
     bool matched = false;
