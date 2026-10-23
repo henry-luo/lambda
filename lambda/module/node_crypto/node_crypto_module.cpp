@@ -13,6 +13,7 @@
 #include "../../jube/jube_registry.h"
 #include "../node_core/node_runtime_state.hpp"
 #include "../../js/js_typed_array.h"
+#include "../../js/js_object_meta.h"
 #include "../../js/js_error_codes.h"
 #include "../../lambda-data.hpp"
 #include "../../lambda.hpp"
@@ -29,6 +30,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../../../lib/base64.h"
 #include "../../../lib/uuid.h"
 #include "../../../lib/digest.h"
+#include "../../../lib/ownership.hpp"
 #include "../../../lib/utf.h"
 #include "../../jube/jube.h"
 #include <mbedtls/bignum.h>
@@ -114,7 +116,9 @@ static void crypto_resource_close(uint32_t rid) {
 #define crypto_pseudo_random_warning_emitted (crypto_native_state.pseudo_random_warning_emitted)
 
 static bool crypto_ensure_roots(void) {
-    return crypto_native_state_ensure() && crypto_namespace_slot_ensure();
+    // reserve key identities before borrowing the namespace's realm-slot address.
+    return crypto_native_state_ensure() &&
+        js_realm_intrinsic_slots_ensure_roots() && crypto_namespace_slot_ensure();
 }
 
 static int crypto_digest_bits_for_name_ext(const char* digest, bool allow_md5, bool allow_sha1, bool allow_sha224) {
@@ -3777,15 +3781,19 @@ extern "C" Item js_crypto_getCurves(void) {
 // timingSafeEqual(a, b) → boolean
 // ============================================================================
 
+static bool crypto_bytes_constant_time_equal(const uint8_t* a, const uint8_t* b, int length) {
+    volatile uint8_t difference = 0;
+    for (int i = 0; i < length; i++) difference |= a[i] ^ b[i];
+    return difference == 0;
+}
+
 extern "C" Item js_crypto_timingSafeEqual(Item a_item, Item b_item) {
     const uint8_t *a_buf, *b_buf;
     int a_len, b_len;
     if (!get_uint8_buffer(a_item, &a_buf, &a_len) || !get_uint8_buffer(b_item, &b_buf, &b_len))
         return (Item){.item = b2it(false)};
     if (a_len != b_len) return (Item){.item = b2it(false)};
-    volatile uint8_t diff = 0;
-    for (int i = 0; i < a_len; i++) diff |= a_buf[i] ^ b_buf[i];
-    return (Item){.item = b2it(diff == 0)};
+    return (Item){.item = b2it(crypto_bytes_constant_time_equal(a_buf, b_buf, a_len))};
 }
 
 // ============================================================================
@@ -4021,7 +4029,9 @@ static bool extract_bytes(Item item, uint8_t** out, int* out_len) {
         if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return false;
         int len = dv->length_tracking ?
             (js_arraybuffer_length(dv->buffer) - dv->byte_offset) : dv->byte_length;
-        if (len < 0) len = 0;
+        // a fixed view can become out of bounds after its backing buffer shrinks.
+        if (len < 0 || dv->byte_offset > js_arraybuffer_length(dv->buffer) ||
+            len > js_arraybuffer_length(dv->buffer) - dv->byte_offset) return false;
         size_t alloc_len = len > 0 ? (size_t)len : 1;
         *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
         const uint8_t* data = js_arraybuffer_data_const(dv->buffer);
@@ -4056,13 +4066,15 @@ static bool extract_bytes(Item item, uint8_t** out, int* out_len) {
 
 static Item crypto_arraybuffer_from_bytes(const uint8_t* bytes, int len) {
     if (len < 0) len = 0;
-    Item result = js_arraybuffer_new(len);
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(result);
+    // retain the wrapper while its native storage is prepared.
+    RootFrame roots(1);
+    Rooted<Item> result(roots, js_arraybuffer_new(len));
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(result.get());
     uint8_t* data = js_arraybuffer_prepare_write(ab);
     if (data && bytes && len > 0) {
         memcpy(data, bytes, (size_t)len);
     }
-    return result;
+    return result.get();
 }
 
 extern "C" Item js_crypto_secretKeyExport(Item options_item) {
@@ -7426,66 +7438,250 @@ extern "C" Item js_subtle_digest(Item alg_item, Item data_item) {
     return js_promise_resolve(result);
 }
 
-static Item js_subtle_clone_usages(Item usages_item) {
-    Item usages = js_array_new(0);
-    if (get_type_id(usages_item) != LMD_TYPE_ARRAY) return usages;
-    int64_t count = js_array_length(usages_item);
-    for (int64_t i = 0; i < count; i++) {
-        js_array_push(usages, js_elements_get_int(usages_item, i));
+enum CryptoKeySlot { CRYPTO_KEY_TYPE, CRYPTO_KEY_EXTRACTABLE, CRYPTO_KEY_USAGES,
+    CRYPTO_KEY_BYTES, CRYPTO_KEY_HASH, CRYPTO_KEY_USAGE_MASK, CRYPTO_KEY_BITS, CRYPTO_KEY_SLOTS };
+enum CryptoKeyUsage { CRYPTO_KEY_SIGN = 1, CRYPTO_KEY_VERIFY = 2 };
+static const struct { const char* name; const char* digest; } subtle_hashes[] = {
+    {"SHA-1", "sha1"}, {"SHA-256", "sha256"}, {"SHA-384", "sha384"}, {"SHA-512", "sha512"}
+};
+
+static Item crypto_key_record(Item key) {
+    return js_native_private_array_state(key, JS_CLASS_CRYPTO_KEY, CRYPTO_KEY_SLOTS,
+        "Illegal CryptoKey receiver");
+}
+
+static Item subtle_algorithm_name(Item value) {
+    RootFrame roots(1);
+    Rooted<Item> name(roots, value);
+    if (js_is_object_value(name.get())) {
+        name.set(js_get_key_cstr(name.get(), "name"));
+        JS_RETURN_IF_ERROR(name.get());
+        if (get_type_id(name.get()) == LMD_TYPE_UNDEFINED)
+            return js_throw_type_error("Algorithm name is required");
     }
-    return usages;
+    return js_to_string(name.get());
 }
 
-static Item js_subtle_hmac_algorithm(Item alg_item, int key_len) {
-    Item algorithm = js_new_object();
-    Item name = make_string_item_crypto("HMAC");
-    Item hash_name = make_string_item_crypto("SHA-256");
-    if (get_type_id(alg_item) == LMD_TYPE_MAP) {
-        Item alg_name = js_get_key_cstr(alg_item, "name");
-        if (get_type_id(alg_name) == LMD_TYPE_STRING) name = alg_name;
-        Item hash = js_get_key_cstr(alg_item, "hash");
-        if (get_type_id(hash) == LMD_TYPE_STRING) {
-            hash_name = hash;
-        } else if (get_type_id(hash) == LMD_TYPE_MAP) {
-            Item nested_name = js_get_key_cstr(hash, "name");
-            if (get_type_id(nested_name) == LMD_TYPE_STRING) hash_name = nested_name;
-        }
+static bool subtle_name_is(Item value, const char* name) {
+    String* text = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : nullptr;
+    char actual[32], expected[32];
+    return text && text->len == strlen(name) && text->len < sizeof(actual) &&
+        crypto_normalize_string(value, actual, sizeof(actual), false) &&
+        crypto_normalize_string(js_name_item(name), expected, sizeof(expected), false) &&
+        strcmp(actual, expected) == 0;
+}
+
+static Item subtle_failure(const char* name, const char* message) {
+    RootFrame roots(3);
+    Rooted<Item> text(roots, make_string_item(message)), type(roots, make_string_item(name));
+    Rooted<Item> error(roots, js_domexception_new(text.get(), type.get()));
+    JS_RETURN_IF_ERROR(error.get());
+    return js_throw_value(error.get());
+}
+
+static lam::Temp<uint8_t> subtle_copy_source(Item value, int* length) {
+    uint8_t* bytes = nullptr;
+    if (!(js_is_typed_array(value) || js_is_dataview(value) || js_is_arraybuffer(value)) ||
+        !extract_bytes(value, &bytes, length)) return {};
+    return lam::Temp<uint8_t>(bytes);
+}
+
+static Item crypto_key_get_field(CryptoKeySlot field) {
+    RootFrame roots(4);
+    Rooted<Item> record(roots, crypto_key_record(js_get_current_this()));
+    JS_RETURN_IF_ERROR(record.get());
+    if (field != CRYPTO_KEY_USAGES && field != CRYPTO_KEY_HASH)
+        return js_elements_get_int(record.get(), field);
+    // public metadata is a snapshot; its mutation cannot change native key permissions.
+    Rooted<Item> result(roots, field == CRYPTO_KEY_USAGES ? js_array_new(0) : js_new_object());
+    Rooted<Item> child(roots, ItemNull), value(roots, ItemNull);
+    if (field == CRYPTO_KEY_USAGES) {
+        child.set(js_elements_get_int(record.get(), CRYPTO_KEY_USAGES));
+        for (int64_t i = 0; i < js_array_length(child.get()); i++)
+            JS_RETURN_IF_ERROR(js_create_data_property(result.get(), (Item){.item = i2it(i)},
+                js_elements_get_int(child.get(), i)));
+    } else {
+        int64_t hash = it2i(js_elements_get_int(record.get(), CRYPTO_KEY_HASH));
+        child.set(js_new_object());
+        value.set(make_string_item(subtle_hashes[hash].name));
+        JS_RETURN_IF_ERROR(js_create_data_property(child.get(), js_name_item("name"), value.get()));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("hash"), child.get()));
+        value.set(make_string_item("HMAC"));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("name"), value.get()));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item("length"),
+            js_elements_get_int(record.get(), CRYPTO_KEY_BITS)));
     }
-    Item hash_obj = js_new_object();
-    js_set_key_cstr(hash_obj, "name", hash_name);
-    js_set_key_cstr(algorithm, "name", name);
-    js_set_key_cstr(algorithm, "hash", hash_obj);
-    js_set_key_cstr(algorithm, "length", (Item){.item = i2it((int64_t)key_len * 8)});
-    return algorithm;
+    return result.get();
+}
+JS_FORWARD_STATIC_ITEM(crypto_key_type, (void), crypto_key_get_field, (CRYPTO_KEY_TYPE))
+JS_FORWARD_STATIC_ITEM(crypto_key_extractable, (void), crypto_key_get_field, (CRYPTO_KEY_EXTRACTABLE))
+JS_FORWARD_STATIC_ITEM(crypto_key_algorithm, (void), crypto_key_get_field, (CRYPTO_KEY_HASH))
+JS_FORWARD_STATIC_ITEM(crypto_key_usages, (void), crypto_key_get_field, (CRYPTO_KEY_USAGES))
+static Item crypto_key_illegal_constructor(void) { return js_throw_type_error("Illegal constructor"); }
+
+static Item crypto_key_constructor(void) {
+    Item* retained = js_realm_intrinsic_slot(JS_REALM_SLOT_CRYPTO_KEY_CONSTRUCTOR, 0);
+    if (!retained) return ItemError;
+    if (retained->item) return *retained;
+    RootFrame roots(6);
+    Rooted<Item> ctor(roots, js_new_native_constructor(crypto_key_illegal_constructor));
+    JS_RETURN_IF_ERROR(ctor.get());
+    js_set_function_name(ctor.get(), js_name_item("CryptoKey"));
+    Rooted<Item> prototype(roots, js_get_key_cstr(ctor.get(), "prototype"));
+    Rooted<Item> key(roots, js_private_key_for_class(ctor.get(), js_name_item("#CryptoKeyRecord")));
+    JS_RETURN_IF_ERROR(key.get());
+    *js_realm_intrinsic_slot(JS_REALM_SLOT_CRYPTO_KEY_PRIVATE_NAME, 0) = key.get();
+    Rooted<Item> getter(roots, ItemNull), descriptor(roots, ItemNull), tag(roots, ItemNull);
+    const struct { const char* name; const char* getter_name; JsNativeP0 get; } fields[] = {
+        {"type", "get type", crypto_key_type}, {"extractable", "get extractable", crypto_key_extractable},
+        {"algorithm", "get algorithm", crypto_key_algorithm}, {"usages", "get usages", crypto_key_usages}
+    };
+    for (const auto& field : fields) {
+        getter.set(js_new_native_function(field.get));
+        js_set_function_name(getter.get(), js_name_item(field.getter_name));
+        descriptor.set(js_new_object());
+        js_set_prototype(descriptor.get(), ItemNull);
+        JS_RETURN_IF_ERROR(js_create_data_property(descriptor.get(), js_name_item("get"), getter.get()));
+        JS_RETURN_IF_ERROR(js_create_data_property(descriptor.get(), js_name_item("enumerable"), (Item){.item = ITEM_TRUE}));
+        JS_RETURN_IF_ERROR(js_create_data_property(descriptor.get(), js_name_item("configurable"), (Item){.item = ITEM_TRUE}));
+        JS_RETURN_IF_ERROR(js_object_define_property(prototype.get(), js_name_item(field.name), descriptor.get()));
+    }
+    descriptor.set(js_new_object());
+    js_set_prototype(descriptor.get(), ItemNull);
+    tag.set(make_string_item("CryptoKey"));
+    JS_RETURN_IF_ERROR(js_create_data_property(descriptor.get(), js_name_item("value"), tag.get()));
+    JS_RETURN_IF_ERROR(js_create_data_property(descriptor.get(), js_name_item("configurable"), (Item){.item = ITEM_TRUE}));
+    JS_RETURN_IF_ERROR(js_object_define_property(prototype.get(), js_well_known_symbol_key(4), descriptor.get()));
+    *js_realm_intrinsic_slot(JS_REALM_SLOT_CRYPTO_KEY_CONSTRUCTOR, 0) = ctor.get();
+    return ctor.get();
 }
 
-// subtle.importKey('raw', keyData, {name:'HMAC', hash}, extractable, usages)
-extern "C" Item js_subtle_importKey(Item format_item, Item key_data_item, Item alg_item,
-                                    Item extractable_item, Item usages_item) {
-    if (!js_string_equals(format_item, "raw")) return js_promise_resolve(ItemNull);
-
-    uint8_t* key = NULL;
-    int key_len = 0;
-    if (!extract_bytes(key_data_item, &key, &key_len)) return js_promise_resolve(ItemNull);
-
-    Item bytes = js_typed_array_new(JS_TYPED_UINT8, key_len);
-    uint8_t* out = (uint8_t*)js_typed_array_prepare_write_ptr(bytes);
-    if (out && key && key_len > 0) memcpy(out, key, (size_t)key_len);
-    mem_free(key);
-
-    Item key_obj = js_new_object();
-    // Lambda does not yet expose full WebCrypto key operations; deep equality
-    // still needs the raw key metadata so distinct imported HMAC keys differ.
-    js_set_key_cstr(key_obj, "type", make_string_item_crypto("secret"));
-    js_set_key_cstr(key_obj, "extractable", (extractable_item.item == ITEM_TRUE ||
-                     (get_type_id(extractable_item) == LMD_TYPE_BOOL && it2b(extractable_item)))
-                        ? (Item){.item = ITEM_TRUE}
-                        : (Item){.item = ITEM_FALSE});
-    js_set_key_cstr(key_obj, "algorithm", js_subtle_hmac_algorithm(alg_item, key_len));
-    js_set_key_cstr(key_obj, "usages", js_subtle_clone_usages(usages_item));
-    js_set_key_cstr(key_obj, "__crypto_key_data__", bytes);
-    return js_promise_resolve(key_obj);
+static Item subtle_import_key(Item format, Item data, Item algorithm, Item extractable, Item usages) {
+    RootFrame roots(12);
+    Rooted<Item> fmt(roots, format), input(roots, data), alg(roots, algorithm), use(roots, usages);
+    Rooted<Item> ext(roots, extractable), value(roots, ItemNull), hash_name(roots, ItemNull);
+    Rooted<Item> record(roots, ItemNull), bytes(roots, ItemNull), copied_usages(roots, ItemNull);
+    Rooted<Item> ctor(roots, ItemNull), prototype(roots, ItemNull);
+    fmt.set(js_to_string(fmt.get()));
+    JS_RETURN_IF_ERROR(fmt.get());
+    if (!js_string_equals(fmt.get(), "raw"))
+        return subtle_failure("NotSupportedError", "Only raw HMAC key import is supported");
+    use.set(js_iterable_to_array(use.get()));
+    JS_RETURN_IF_ERROR(use.get());
+    copied_usages.set(js_array_new(0));
+    js_set_prototype(copied_usages.get(), ItemNull);
+    int mask = 0;
+    for (int64_t i = 0; i < js_array_length(use.get()); i++) {
+        value.set(js_to_string(js_elements_get_int(use.get(), i)));
+        JS_RETURN_IF_ERROR(value.get());
+        if (js_string_equals(value.get(), "sign")) mask |= CRYPTO_KEY_SIGN;
+        else if (js_string_equals(value.get(), "verify")) mask |= CRYPTO_KEY_VERIFY;
+        else return subtle_failure("SyntaxError", "Unsupported HMAC key usage");
+        JS_RETURN_IF_ERROR(js_array_push(copied_usages.get(), value.get()));
+    }
+    if (!mask) return subtle_failure("SyntaxError", "HMAC keys require at least one usage");
+    value.set(subtle_algorithm_name(alg.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    if (!subtle_name_is(value.get(), "HMAC"))
+        return subtle_failure("NotSupportedError", "Unsupported key algorithm");
+    hash_name.set(js_get_key_cstr(alg.get(), "hash"));
+    JS_RETURN_IF_ERROR(hash_name.get());
+    hash_name.set(subtle_algorithm_name(hash_name.get()));
+    JS_RETURN_IF_ERROR(hash_name.get());
+    int hash = -1;
+    for (size_t i = 0; i < sizeof(subtle_hashes) / sizeof(*subtle_hashes); i++)
+        if (subtle_name_is(hash_name.get(), subtle_hashes[i].name)) hash = (int)i;
+    if (hash < 0) return subtle_failure("NotSupportedError", "Unsupported HMAC hash");
+    value.set(js_get_key_cstr(alg.get(), "length"));
+    JS_RETURN_IF_ERROR(value.get());
+    if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED)
+        return subtle_failure("NotSupportedError", "Explicit HMAC import lengths are not supported");
+    int length = 0;
+    // normalization can execute getters; copy the resulting input before publishing the key.
+    lam::Temp<uint8_t> material = subtle_copy_source(input.get(), &length);
+    if (!material) return js_throw_type_error("keyData must be a BufferSource");
+    if (!length) return subtle_failure("DataError", "HMAC key data must not be empty");
+    bytes.set(js_typed_array_new(JS_TYPED_UINT8, length));
+    uint8_t* destination = (uint8_t*)js_typed_array_prepare_write_ptr(bytes.get());
+    if (!destination) return ItemError;
+    memcpy(destination, material.get(), (size_t)length);
+    ctor.set(crypto_key_constructor());
+    JS_RETURN_IF_ERROR(ctor.get());
+    prototype.set(js_get_key_cstr(ctor.get(), "prototype"));
+    record.set(js_array_new(0));
+    // native material must never reach an inherited Array index setter.
+    js_set_prototype(record.get(), ItemNull);
+    value.set(make_string_item("secret"));
+    Item fields[] = {value.get(), (Item){.item = b2it(js_is_truthy(ext.get()))}, copied_usages.get(),
+        bytes.get(), (Item){.item = i2it(hash)}, (Item){.item = i2it(mask)}, (Item){.item = i2it((int64_t)length * 8)}};
+    for (Item field : fields) JS_RETURN_IF_ERROR(js_array_push(record.get(), field));
+    return js_native_private_array_object(JS_CLASS_CRYPTO_KEY,
+        *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_CRYPTO_KEY_PRIVATE_NAME, 0), record.get(), prototype.get());
 }
+
+static Item subtle_export_key(Item format, Item key) {
+    RootFrame roots(3);
+    Rooted<Item> fmt(roots, format), receiver(roots, key);
+    Rooted<Item> record(roots, ItemNull);
+    fmt.set(js_to_string(fmt.get()));
+    JS_RETURN_IF_ERROR(fmt.get());
+    record.set(crypto_key_record(receiver.get()));
+    JS_RETURN_IF_ERROR(record.get());
+    if (!js_string_equals(fmt.get(), "raw"))
+        return subtle_failure("NotSupportedError", "Only raw HMAC key export is supported");
+    if (!it2b(js_elements_get_int(record.get(), CRYPTO_KEY_EXTRACTABLE)))
+        return subtle_failure("InvalidAccessError", "Key is not extractable");
+    const uint8_t* bytes = nullptr;
+    int length = 0;
+    if (!get_uint8_buffer(js_elements_get_int(record.get(), CRYPTO_KEY_BYTES), &bytes, &length)) return ItemError;
+    return crypto_arraybuffer_from_bytes(bytes, length);
+}
+
+static Item subtle_hmac(Item algorithm, Item key, Item data, Item signature, bool verify) {
+    RootFrame roots(6);
+    Rooted<Item> alg(roots, algorithm), receiver(roots, key), source(roots, data);
+    Rooted<Item> expected(roots, signature), name(roots, ItemNull);
+    Rooted<Item> record(roots, crypto_key_record(receiver.get()));
+    JS_RETURN_IF_ERROR(record.get());
+    name.set(subtle_algorithm_name(alg.get()));
+    JS_RETURN_IF_ERROR(name.get());
+    if (!subtle_name_is(name.get(), "HMAC"))
+        return subtle_failure("NotSupportedError", "Unsupported signing algorithm");
+    int length = 0, signature_length = 0;
+    lam::Temp<uint8_t> bytes = subtle_copy_source(source.get(), &length);
+    if (!bytes) return js_throw_type_error("data must be a BufferSource");
+    lam::Temp<uint8_t> signature_bytes;
+    if (verify) {
+        signature_bytes = subtle_copy_source(expected.get(), &signature_length);
+        if (!signature_bytes) return js_throw_type_error("signature must be a BufferSource");
+    }
+    int mask = (int)it2i(js_elements_get_int(record.get(), CRYPTO_KEY_USAGE_MASK));
+    if (!(mask & (verify ? CRYPTO_KEY_VERIFY : CRYPTO_KEY_SIGN)))
+        return subtle_failure("InvalidAccessError", "Key does not permit this operation");
+    const uint8_t* material = nullptr;
+    int key_length = 0;
+    if (!get_uint8_buffer(js_elements_get_int(record.get(), CRYPTO_KEY_BYTES), &material, &key_length)) return ItemError;
+    int64_t hash_index = it2i(js_elements_get_int(record.get(), CRYPTO_KEY_HASH));
+    uint8_t digest[64];
+    int digest_length = 0;
+    hmac_compute(material, key_length, bytes.get(), length,
+        subtle_hashes[hash_index].digest, digest, &digest_length);
+    if (!digest_length) return subtle_failure("OperationError", "HMAC operation failed");
+    if (!verify) return crypto_arraybuffer_from_bytes(digest, digest_length);
+    if (signature_length != digest_length) return (Item){.item = ITEM_FALSE};
+    return (Item){.item = b2it(crypto_bytes_constant_time_equal(digest, signature_bytes.get(), digest_length))};
+}
+
+#define JS_SUBTLE_PROMISE(name, params, expression) \
+    extern "C" Item name params { return js_promise_from_completion(expression); }
+JS_SUBTLE_PROMISE(js_subtle_importKey, (Item format, Item data, Item algorithm, Item extractable, Item usages),
+    subtle_import_key(format, data, algorithm, extractable, usages))
+JS_SUBTLE_PROMISE(js_subtle_exportKey, (Item format, Item key), subtle_export_key(format, key))
+JS_SUBTLE_PROMISE(js_subtle_sign, (Item algorithm, Item key, Item data),
+    subtle_hmac(algorithm, key, data, ItemNull, false))
+JS_SUBTLE_PROMISE(js_subtle_verify, (Item algorithm, Item key, Item signature, Item data),
+    subtle_hmac(algorithm, key, data, signature, true))
+#undef JS_SUBTLE_PROMISE
 
 typedef struct CryptoCipherInputs {
     char full_alg[32];
@@ -7682,10 +7878,14 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(subtle_root.get(), name, target, arity);
     JS_SUBTLE_INSTALL("digest", js_subtle_digest, 2)
     JS_SUBTLE_INSTALL("importKey", js_subtle_importKey, 5)
+    JS_SUBTLE_INSTALL("exportKey", js_subtle_exportKey, 2)
+    JS_SUBTLE_INSTALL("sign", js_subtle_sign, 3)
+    JS_SUBTLE_INSTALL("verify", js_subtle_verify, 4)
     JS_SUBTLE_INSTALL("encrypt", js_subtle_encrypt, 3)
     JS_SUBTLE_INSTALL("decrypt", js_subtle_decrypt, 3)
 #undef JS_SUBTLE_INSTALL
     js_set_key_cstr(crypto_namespace, "subtle", subtle_root.get());
+    JS_RETURN_IF_ERROR(crypto_key_constructor());
 
     // crypto.constants — OpenSSL-compatible constants
     constants_root.set(js_new_object());

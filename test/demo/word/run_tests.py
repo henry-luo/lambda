@@ -63,11 +63,12 @@ def main():
                          "blank-pages.pdf", "cover-pages.pdf", "insert-pages.word.json", "insert-pages.html",
                          "bookmarks.word.json", "bookmarks.html", "shapes.word.json", "shapes.html", "shapes.pdf",
                          "stories.word.json", "stories.html", "stories.pdf", "changes.word.json", "changes.html", "changes.pdf",
-                         "advanced-objects.word.json", "advanced-objects.html", "advanced-objects.pdf"):
+                         "advanced-objects.word.json", "advanced-objects.html", "advanced-objects.pdf",
+                         "transforms.word.json", "transforms.html", "transforms.pdf"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
         for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables",
                         "pictures_links", "paragraph_search", "layout", "review", "insert_pages", "bookmarks_symbols", "shapes",
-                        "stories", "advanced_objects", "changes"):
+                        "stories", "advanced_objects", "changes", "object_transform", "viewport"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",
@@ -114,7 +115,8 @@ def main():
         for stem, markers, page_count in (
                 ("stories", ('counter(page)', 'counter(pages)', '@page:first', 'Studio handbook'), 2),
                 ("advanced-objects", ('data-word-equation=', 'data-word-wordart=', 'data-word-shape=', 'E=mc^2', 'Make something'), 1),
-                ("changes", ('data-word-change-kind="delete"', 'data-word-change-kind="insert"', 'Alex'), 1)):
+                ("changes", ('data-word-change-kind="delete"', 'data-word-change-kind="insert"', 'Alex'), 1),
+                ("transforms", ('data-word-rotation="-30"', 'rotate(-30deg)', 'Resize me', 'width="225"'), 1)):
             exported = ROOT / "temp/word" / f"{stem}.html"
             pdf_path = exported.with_suffix(".pdf")
             data = pdf_path.read_bytes() if pdf_path.exists() else b""

@@ -148,6 +148,39 @@ TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
     enhanced_cache_destroy(cache);
 }
 
+TEST(NetworkResourceManager, DecoderFileSurvivesCacheReplacementAndEviction) {
+    const char* url = "https://example.com/media.mp4";
+    const char* original = "immutable-media-body";
+    EnhancedFileCache* cache = enhanced_cache_create("./temp/test_media_file_cache", 4096, 4);
+    ASSERT_NE(cache, nullptr);
+    char* cached = enhanced_cache_store(cache, url, original, strlen(original), nullptr);
+    ASSERT_NE(cached, nullptr);
+    DomDocument document = {};
+    document.url = lam::own(url_parse("https://example.com/"));
+    NetworkResourceManager* manager = resource_manager_create(&document, nullptr, cache);
+    ASSERT_NE(manager, nullptr);
+    ASSERT_NE(resource_manager_prefetch(manager, url, PRIORITY_NORMAL), nullptr);
+    bool pending = true;
+    char* owned = resource_manager_copy_ready_resource_file(manager, url, "decoder-test", ".bin", &pending);
+    ASSERT_NE(owned, nullptr);
+    EXPECT_FALSE(pending);
+    EXPECT_STRNE(owned, cached);
+    char* replacement = enhanced_cache_store(cache, url, "replacement", 11, nullptr);
+    ASSERT_NE(replacement, nullptr);
+    mem_free(replacement);
+    enhanced_cache_clear(cache);
+    EXPECT_FALSE(file_exists(cached));
+    resource_manager_destroy(manager);
+    enhanced_cache_destroy(cache);
+    url_destroy(document.url);
+    char content[64] = {};
+    ASSERT_TRUE(read_text_file(owned, content, sizeof(content)));
+    EXPECT_STREQ(content, original);
+    EXPECT_EQ(file_delete(owned), 0);
+    mem_free(owned);
+    mem_free(cached);
+}
+
 TEST(NetworkResourceManager, PreservesParserBlockingPriorityAcrossConsumers) {
     const char* cache_dir = "./temp/test_cache_manager_priority";
     const char* url = "https://example.com/assets/parser-blocking.js";

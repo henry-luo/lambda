@@ -1,0 +1,315 @@
+{
+  "name": "Word caret and list clipping, and stable physical typing",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 720
+  },
+  "events": [
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 720
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 600,
+      "dx": 0,
+      "dy": -6
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 300,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/word-scroll-before.png"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1240,
+      "y": 80,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1240,
+      "y": 150,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "click",
+      "x": 650,
+      "y": 295
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"edit-surface\").style.caretColor = \"rgb(255, 0, 255)\";"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 650,
+      "y": 295,
+      "search_radius": 10,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface h2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-tab",
+      "equals": "Home"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 600,
+      "dy": -2,
+      "dx": 0
+    },
+    {
+      "type": "assert_pixel",
+      "x": 643,
+      "y": 195,
+      "search_radius": 0,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 600,
+      "dy": -4,
+      "dx": 0
+    },
+    {
+      "type": "assert_pixel",
+      "x": 525,
+      "y": 189,
+      "search_radius": 0,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "assert_pixel",
+      "x": 525,
+      "y": 214,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "assert_pixel",
+      "x": 525,
+      "y": 216,
+      "min_r": 36,
+      "max_r": 36,
+      "min_g": 51,
+      "max_g": 51,
+      "min_b": 75,
+      "max_b": 75
+    },
+    {
+      "type": "assert_pixel",
+      "x": 525,
+      "y": 243,
+      "min_r": 36,
+      "max_r": 36,
+      "min_g": 51,
+      "max_g": 51,
+      "min_b": 75,
+      "max_b": 75
+    },
+    {
+      "type": "render",
+      "file": "temp/word-viewport-clipped.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 485,
+      "y": 214,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "assert_pixel",
+      "x": 485,
+      "y": 243,
+      "min_r": 36,
+      "max_r": 36,
+      "min_g": 51,
+      "max_g": 51,
+      "min_b": 75,
+      "max_b": 75
+    },
+    {
+      "type": "render",
+      "file": "temp/word-viewport-zoom-clipped.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-out"
+      }
+    },
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 500,
+      "dx": 0,
+      "dy": 6
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 300,
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "x": 650,
+      "y": 295
+    },
+    {
+      "type": "type_physical",
+      "text": "A stable sentence with spaces."
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 300,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h2"
+      },
+      "contains": "stable sentence with spaces"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 300,
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/word-viewport-typed.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "x": 650,
+      "y": 350
+    },
+    {
+      "type": "type_physical",
+      "text": " Zoom stays steady "
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('word').setAttribute('data-stage-scroll',String(document.getElementById('stage').scrollTop));"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-stage-scroll",
+      "equals": "300"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-viewport-zoomed.png"
+    }
+  ]
+}

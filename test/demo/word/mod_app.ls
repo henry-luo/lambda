@@ -16,6 +16,7 @@ import stories: .mod_stories
 import equation: .mod_equation
 import wordart: .mod_wordart
 import changes: .mod_changes
+import transform: .mod_transform
 import controller: lambda.edit.controller
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
@@ -28,7 +29,7 @@ pn shape_values(node,kind=null) { return {kind:kind or field(node,"shape-kind"),
     text:field(node,"shape-text"),text_color:field(node,"shape-text-color"),size:field(node,"shape-size")} }
 pn art_values(node,style=null) { return {text:field(node,"art-text"),style:style or field(node,"art-style"),transform:field(node,"art-transform"),
     width:field(node,"art-width"),height:field(node,"art-height"),size:field(node,"art-size"),font:field(node,"art-font"),
-    fill:field(node,"art-fill"),outline:field(node,"art-outline")} }
+    fill:field(node,"art-fill"),outline:field(node,"art-outline"),rotation:field(node,"art-rotation")} }
 pub let focus_document = controller.focus
 pub let is_control = controller.is_control
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
@@ -126,7 +127,7 @@ pn dialog_command(st,action,node) {
     if (action == "wordart") {
         let values = art_values(node)
         return dialog_model(st,if (st.dialog.editing) "wordArt.set" else "insert.wordArt",values,
-            {*:values,width:float(values.width),height:float(values.height),size:float(values.size)},node)
+            {*:values,width:float(values.width),height:float(values.height),size:float(values.size),rotation:float(values.rotation)},node)
     }
     if (action=="tracking") {
         let values = {enabled:field(node,"tracking-enabled"),author:field(node,"tracking-author")}
@@ -146,13 +147,13 @@ pn dialog_command(st,action,node) {
             after:float(values.after),indent:float(values.indent),first:float(values.first)},node)
     }
     if (action == "picture") {
-        let values = {path:field(node,"picture-path"),alt:field(node,"picture-alt"),width:field(node,"picture-width"),height:field(node,"picture-height")}
+        let values = {path:field(node,"picture-path"),alt:field(node,"picture-alt"),width:field(node,"picture-width"),height:field(node,"picture-height"),rotation:field(node,"picture-rotation")}
         let editing = st.dialog.kind=="picture_settings"
         let source = if (editing) "" else storage.picture_source(trim(values.path)) ^ {
             return {*:st,dialog:{*:st.dialog,values:values,error:^.message},status:^.message}
         }
         return dialog_model(st,if (editing) "picture.size" else "insert.picture",values,
-            {src:source,alt:values.alt,width:float(values.width),height:if (trim(values.height)=="") 0 else float(values.height)},node)
+            {src:source,alt:values.alt,width:float(values.width),height:if (trim(values.height)=="") 0 else float(values.height),rotation:float(values.rotation)},node)
     }
     if (action == "link") {
         let href = trim(field(node,"link-address"))
@@ -302,7 +303,7 @@ pub pn command(st,id,params,node) {
         let image = model.current_node(st.editor,'img')
         return {*:st,dialog:{kind:if (id == "ui.pictureSettings") "picture_settings" else "picture",
             values:{path:"",alt:attrs_get(image.node.attrs,'alt') or "",width:attrs_get(image.node.attrs,'width') or 320,
-                height:attrs_get(image.node.attrs,'height') or ""}}}
+                height:attrs_get(image.node.attrs,'height') or "",rotation:transform.rotation(image.node)}}}
     }
     if (id == "file.save" or id == "file.saveAs") {
         if (st.file_state.path=="" or id == "file.saveAs") { return {*:st,dialog:{kind:"save",

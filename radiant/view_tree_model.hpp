@@ -6,6 +6,7 @@
 #include "../lambda/input/css/css_paged_media.hpp"
 #include "../lambda/input/css/css_environment.hpp"
 #include "../lib/ownership.hpp"
+#include "../lib/rdt_geometry_types.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -100,6 +101,7 @@ struct LayoutViewNode {
     size_t text_start, text_length;
     lam::Up<PaintGlyphRun> glyph_run;
     lam::Up<PaintImageBox> image_box;
+    lam::Up<const RdtMatrix> paint_transform;
     lam::Up<const PaintList> paint_before, paint_after;
     lam::Up<const PaintList> paint_before_pdf;
     lam::Up<ViewCssStyle> computed_style;

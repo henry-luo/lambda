@@ -417,13 +417,19 @@ void pdf_walk_subscene(RenderContext* base, const PaintSvgSubscene* subscene) {
     paint_svg_subscene(batch.paint, subscene); batch.finish();
 }
 
+static void pdf_walk_push_transform(PdfWalkContext* ctx, const RdtMatrix& matrix,
+        const BinarySchema* schema, const void* source) {
+    ctx->frame.matrix = matrix;
+    PdfPaintBatch batch(ctx, {}); paint_push_transform(batch.paint, &ctx->frame.matrix);
+    if (!ctx->effect.active) pdf_walk_dispatch(ctx, "begin_transform", schema, source);
+    batch.finish(false);
+}
 void pdf_walk_begin_transform(RenderContext* base, ViewBlock* view, float x, float y) {
     PdfWalkContext* ctx = (PdfWalkContext*)base;
-    ctx->frame.x = x; ctx->frame.y = y; ctx->frame.matrix = rdt_matrix_identity();
-    render_geometry_transform_matrix(view->transform, x, y, view->width, view->height, &ctx->frame.matrix);
-    PdfPaintBatch batch(ctx, {}); paint_push_transform(batch.paint, &ctx->frame.matrix);
-    if (!ctx->effect.active) pdf_walk_dispatch(ctx, "begin_transform", ctx->element, view);
-    batch.finish(false);
+    ctx->frame.x = x; ctx->frame.y = y;
+    RdtMatrix matrix = rdt_matrix_identity();
+    render_geometry_transform_matrix(view->transform, x, y, view->width, view->height, &matrix);
+    pdf_walk_push_transform(ctx, matrix, ctx->element, view);
 }
 void pdf_walk_end_transform(RenderContext* base) {
     PdfWalkContext* ctx = (PdfWalkContext*)base;
@@ -585,6 +591,8 @@ bool pdf_walk_page_finish(PdfWalkContext* ctx) {
 bool pdf_secondary_fragment(void* data, const LayoutViewNode* node, bool entering) {
     PdfWalkContext* ctx = (PdfWalkContext*)data;
     ctx->frame.fragment = node;
+    if (entering && node->paint_transform)
+        pdf_walk_push_transform(ctx, *node->paint_transform, ctx->fragment_schema, node);
     if (entering) {
         DomNode* source = dom_node_ref_validate(ctx->ui_context->document, node->source);
         if (node->first_fragment) radiant_pdf_destination(*ctx->destinations, source, node->rect.x, node->rect.y);
@@ -605,6 +613,7 @@ bool pdf_secondary_fragment(void* data, const LayoutViewNode* node, bool enterin
         }
     }
     pdf_walk_dispatch(ctx, entering ? "begin_fragment" : "end_fragment", ctx->fragment_schema, node);
+    if (!entering && node->paint_transform) pdf_walk_end_transform(ctx);
     if (!entering) ctx->frame.fragment = node->parent.get();
     return !pdf_walk_aborted(ctx);
 }

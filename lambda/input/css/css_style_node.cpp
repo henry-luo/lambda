@@ -1000,17 +1000,41 @@ CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
     return style_tree_best_property_candidate(style_tree, sources, source_count, NULL, NULL);
 }
 
+struct StylePropertySources {
+    static constexpr size_t words = (CSS_PROPERTY_CUSTOM + 63) / 64;
+    uint64_t members[CSS_PROPERTY_CUSTOM][words] = {};
+    void add(CssPropertyCode property, CssPropertyCode source) {
+        if (property > 0 && property < CSS_PROPERTY_CUSTOM && source > 0 && source < CSS_PROPERTY_CUSTOM)
+            members[property][source / 64] |= UINT64_C(1) << (source % 64);
+    }
+    StylePropertySources() {
+        for (int index = 1; index < CSS_PROPERTY_CUSTOM; index++) {
+            CssPropertyCode property = (CssPropertyCode)index;
+            add(property, property);
+            add(property, css_property_cascade_shorthand(property));
+            if (property != CSS_PROPERTY_DIRECTION && property != CSS_PROPERTY_UNICODE_BIDI)
+                add(property, CSS_PROPERTY_ALL);
+            if (css_font_shorthand_contains_property(css_property_spelling_from_code(property)))
+                add(property, CSS_PROPERTY_FONT);
+            const CssProperty* metadata = css_property_get_by_code(property);
+            if (metadata && metadata->shorthand)
+                for (int i = 0; i < metadata->longhand_count; i++) add(metadata->longhand_props[i], property);
+        }
+    }
+};
+
 CssDeclaration* style_tree_get_property_declaration(StyleTree* tree, CssPropertyCode property) {
     if (!tree || property <= 0 || property >= CSS_PROPERTY_CUSTOM) return NULL;
+    // dependency names never change; SVG/style reads must not scan the entire property registry.
+    static const StylePropertySources index;
     CssPropertyCode sources[CSS_PROPERTY_COUNT];
     size_t count = 0;
-    CssPropertyCode primary = css_property_cascade_shorthand(property);
-    const char* name = css_property_spelling_from_code(property);
-    for (int index = 1; index < CSS_PROPERTY_CUSTOM; index++) {
-        CssPropertyCode source = (CssPropertyCode)index;
-        bool all = source == CSS_PROPERTY_ALL && property != CSS_PROPERTY_DIRECTION && property != CSS_PROPERTY_UNICODE_BIDI;
-        if (source == property || source == primary || all || css_property_shorthand_contains(source, property) ||
-            (source == CSS_PROPERTY_FONT && css_font_shorthand_contains_property(name))) sources[count++] = source;
+    for (size_t word = 0; word < StylePropertySources::words; word++) {
+        uint64_t bits = index.members[property][word];
+        while (bits) {
+            sources[count++] = (CssPropertyCode)(word * 64 + __builtin_ctzll(bits));
+            bits &= bits - 1;
+        }
     }
     return style_tree_get_component_declaration(tree, sources, count);
 }

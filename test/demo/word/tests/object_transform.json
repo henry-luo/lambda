@@ -1,0 +1,677 @@
+{
+  "name": "Word object resize and rotation",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Caption ",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-picture"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-path"
+      },
+      "text": "test/demo/word/tests/picture.svg",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-width"
+      },
+      "text": "160",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-height"
+      },
+      "text": "100",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-picture .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-handles"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".object-handle"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_script",
+      "js": "var i=document.querySelector(\"#edit-surface img\").getBoundingClientRect(),f=document.querySelector(\"#object-handles\").getBoundingClientRect(); Math.abs(i.width-f.width)<2 && Math.abs(i.top-f.top)<2"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "pointerType": "touch",
+      "dx": 40,
+      "dy": 25
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "height",
+      "equals": "125"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "160"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#object-se"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#object-se",
+        "offset_x": 60,
+        "offset_y": 35
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface img\").style.width !== \"200px\""
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#object-se"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picture-settings"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-rotation"
+      },
+      "text": "90",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-picture_settings .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "data-word-rotation",
+      "equals": "90"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.querySelector(\"#edit-surface img\").getBoundingClientRect(); Math.abs(b.width-125)<2 && Math.abs(b.height-200)<2"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "pointerType": "touch",
+      "dx": -25,
+      "dy": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "height",
+      "equals": "150"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-rotate"
+      },
+      "pointerType": "touch",
+      "dx": 70,
+      "dy": 70
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.querySelector(\"#edit-surface img\").getAttribute(\"data-word-rotation\")) !== 90"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "data-word-rotation",
+      "equals": "90"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "pointerType": "touch",
+      "dx": -33,
+      "dy": 52.8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "288"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "height",
+      "equals": "180"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-out"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word/object-picture-handles.png"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-shape"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-choice-star"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#shape-text"
+      },
+      "text": "Star",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-shape .primary"
+      }
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "dx": 40,
+      "dy": 25
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-shape]"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-shape]"
+      },
+      "attribute": "height",
+      "equals": "125"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-rotate"
+      },
+      "pointerType": "touch",
+      "dx": 75,
+      "dy": 75,
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.querySelector(\"img[data-word-shape]\").getAttribute(\"data-word-rotation\")) % 15 === 0"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-shape]\").getAttribute(\"data-word-shape\")).rotation !== 0"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-shape]"
+      },
+      "attribute": "data-word-rotation",
+      "equals": "0"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-wordart"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-text"
+      },
+      "text": "Resize me",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-width"
+      },
+      "text": "180",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-height"
+      },
+      "text": "80",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-size"
+      },
+      "text": "36",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-wordart .primary"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "pointerType": "touch",
+      "dx": 45,
+      "dy": 20
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "width",
+      "equals": "225"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "height",
+      "equals": "100"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-wordart]\").getAttribute(\"data-word-wordart\")).size === 45"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-settings"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#art-rotation"
+      },
+      "text": "-30",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-wordart .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "data-word-rotation",
+      "equals": "-30"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/object-art-handles.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/transforms.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/transforms.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/transforms.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/transforms.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "width",
+      "equals": "225"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      },
+      "attribute": "data-word-rotation",
+      "equals": "-30"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-handles"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-handles"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-wordart]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-handles"
+      },
+      "count": 1
+    }
+  ]
+}

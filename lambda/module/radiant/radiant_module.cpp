@@ -2547,50 +2547,91 @@ RADIANT_C_API Item fn_radiant_speech_info(Item node, Item token) {
 
 RADIANT_C_API Item fn_radiant_media_info(Item node) {
     DomElement* elem = radiant_dom_element_from_item(node, "MEDIA_INFO");
-    MediaViewState* media = elem && elem->doc
-        ? media_view_state_get(elem->doc->state, static_cast<View*>(elem)) : nullptr;
-    if (!media || !media->player) return ItemNull;
+    MediaViewState* media = radiant_media_prepare(elem);
+    if (!media) return ItemNull;
+    rdt_video_pump_events();
     static const char* states[] = {"idle", "loading", "ready", "playing", "paused", "ended", "error"};
     RdtVideo* player = media->player;
+    RdtVideoState state = player ? rdt_video_get_state(player) :
+        media->source_pending ? RDT_VIDEO_STATE_LOADING : RDT_VIDEO_STATE_IDLE;
+    if (media->play_requested && !player && !media->source_pending && media->sources && media->sources->length)
+        state = RDT_VIDEO_STATE_ERROR;
+    if (state == RDT_VIDEO_STATE_PAUSED || state == RDT_VIDEO_STATE_ENDED || state == RDT_VIDEO_STATE_ERROR)
+        media->play_requested = false;
+    if (state == RDT_VIDEO_STATE_PLAYING) media->play_requested = media->native_play_requested = true;
+    if (state == RDT_VIDEO_STATE_ERROR) media->play_error = 2;
     RootFrame roots(1);
     Rooted<Item> result(roots, radiant_obj_new());
-    radiant_rooted_obj_set(result, "state", radiant_string_item(states[rdt_video_get_state(player)]));
-    radiant_rooted_obj_set(result, "current_time", radiant_float_item(rdt_video_get_current_time(player)));
-    radiant_rooted_obj_set(result, "duration", radiant_float_item(rdt_video_get_duration(player)));
-    radiant_rooted_obj_set(result, "volume", radiant_float_item(rdt_video_get_volume(player)));
-    radiant_rooted_obj_set(result, "has_audio", radiant_bool_item(rdt_video_has_audio(player)));
-    radiant_rooted_obj_set(result, "width", radiant_int_item(rdt_video_get_width(player)));
-    radiant_rooted_obj_set(result, "height", radiant_int_item(rdt_video_get_height(player)));
+    radiant_rooted_obj_set(result, "state", radiant_string_item(states[state]));
+    radiant_rooted_obj_set(result, "generation", radiant_int_item((int64_t)media->source_generation));
+    radiant_rooted_obj_set(result, "play_error", radiant_int_item(media->play_error));
+    radiant_rooted_obj_set(result, "paused", radiant_bool_item(!media->play_requested));
+    radiant_rooted_obj_set(result, "muted", radiant_bool_item(media->muted));
+    radiant_rooted_obj_set(result, "has_source", radiant_bool_item(media->sources && media->sources->length));
+    radiant_rooted_obj_set(result, "supported_source", radiant_bool_item(player || media->source_pending));
+    radiant_rooted_obj_set(result, "ready_state", radiant_int_item(state >= RDT_VIDEO_STATE_READY && state < RDT_VIDEO_STATE_ERROR ? 4 : 0));
+    radiant_rooted_obj_set(result, "current_time", radiant_float_item(player && media->opened ? rdt_video_get_current_time(player) : media->seek_time));
+    radiant_rooted_obj_set(result, "duration", radiant_float_item(player && state >= RDT_VIDEO_STATE_READY && state < RDT_VIDEO_STATE_ERROR ? rdt_video_get_duration(player) : NAN));
+    radiant_rooted_obj_set(result, "volume", radiant_float_item(media->volume));
+    radiant_rooted_obj_set(result, "has_audio", radiant_bool_item(player && rdt_video_has_audio(player)));
+    radiant_rooted_obj_set(result, "width", radiant_int_item(player ? rdt_video_get_width(player) : 0));
+    radiant_rooted_obj_set(result, "height", radiant_int_item(player ? rdt_video_get_height(player) : 0));
+    radiant_rooted_obj_set(result, "ended", radiant_bool_item(state == RDT_VIDEO_STATE_ENDED));
     return result.get();
 }
 
 RADIANT_C_API Item fn_radiant_media_command(Item node, Item command, Item value) {
     DomElement* elem = radiant_dom_element_from_item(node, "MEDIA_COMMAND");
-    MediaViewState* media = elem && elem->doc
-        ? media_view_state_get(elem->doc->state, static_cast<View*>(elem)) : nullptr;
+    MediaViewState* media = radiant_media_prepare(elem);
     const char* action = get_type_id(command) == LMD_TYPE_STRING ? fn_to_cstr(command) : nullptr;
-    if (!media || !media->player || !action) return radiant_bool_item(false);
+    if (!media || !action) return radiant_bool_item(false);
     RdtVideo* player = media->player;
     double number = 0;
     bool numeric = item_try_to_double(value, &number);
-    if (strcmp(action, "play") == 0) {
+    if (strcmp(action, "load") == 0) {
+        media_view_state_reset(media);
+        radiant_media_prepare(elem);
+    } else if (strcmp(action, "play") == 0) {
         if (value.item != ITEM_NULL && (!numeric || !isfinite(number) || number < 0)) return radiant_bool_item(false);
-        if (!media->opened) media->opened = rdt_video_open_file(player, media->source) == 0;
-        if (!media->opened || rdt_video_get_state(player) == RDT_VIDEO_STATE_ERROR) return radiant_bool_item(false);
-        if (numeric && isfinite(number) && number >= 0) rdt_video_seek(player, number);
-        else if (rdt_video_get_state(player) == RDT_VIDEO_STATE_ENDED) rdt_video_seek(player, 0);
-        rdt_video_play(player);
+        media->play_error = 0;
+        // audible playback shares the document activation gate with other audio (D7.5.4).
+        if (!media->muted && media->volume > 0.0f && !radiant_document_may_start_audio(elem->doc)) {
+            media->play_error = 1;
+            return radiant_bool_item(false);
+        }
+        if (numeric) media->seek_time = number;
+        else if (player && rdt_video_get_state(player) == RDT_VIDEO_STATE_ENDED) {
+            media->seek_time = 0.0;
+            rdt_video_seek(player, 0.0);
+        }
+        media->play_requested = true;
+        media->native_play_requested = false;
+        media = radiant_media_prepare(elem);
+        if (!media || (media->player && rdt_video_get_state(media->player) == RDT_VIDEO_STATE_ERROR) ||
+                (!media->player && !media->source_pending && media->sources && media->sources->length)) {
+            if (media) { media->play_error = 2; media->play_requested = false; }
+            return radiant_bool_item(false);
+        }
     } else if (strcmp(action, "pause") == 0 || strcmp(action, "stop") == 0) {
-        rdt_video_pause(player);
-        if (strcmp(action, "stop") == 0) rdt_video_seek(player, 0);
+        media->play_requested = false;
+        media->native_play_requested = false;
+        if (player) rdt_video_pause(player);
+        if (strcmp(action, "stop") == 0) {
+            media->seek_time = 0.0;
+            if (player) rdt_video_seek(player, 0.0);
+        }
     } else if (strcmp(action, "seek") == 0 && numeric && isfinite(number) && number >= 0) {
-        rdt_video_seek(player, number);
+        media->seek_time = number;
+        if (player) rdt_video_seek(player, number);
     } else if (strcmp(action, "volume") == 0 && numeric && isfinite(number) && number >= 0 && number <= 1) {
-        rdt_video_set_volume(player, (float)number);
+        media->volume = (float)number;
+        if (player) rdt_video_set_volume(player, media->volume);
     } else if (strcmp(action, "muted") == 0 && get_type_id(value) == LMD_TYPE_BOOL) {
-        rdt_video_set_muted(player, value.item == ITEM_TRUE);
+        media->muted = value.item == ITEM_TRUE;
+        media->muted_override = true;
+        if (player) rdt_video_set_muted(player, media->muted);
     } else if (strcmp(action, "loop") == 0 && get_type_id(value) == LMD_TYPE_BOOL) {
-        rdt_video_set_loop(player, value.item == ITEM_TRUE);
+        if (player) rdt_video_set_loop(player, value.item == ITEM_TRUE);
     } else return radiant_bool_item(false);
     return radiant_bool_item(true);
 }

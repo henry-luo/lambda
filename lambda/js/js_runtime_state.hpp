@@ -223,6 +223,10 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_GENERATOR_FUNCTION_CONSTRUCTOR,
     JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_CONSTRUCTOR,
     JS_REALM_SLOT_ASYNC_FUNCTION_CONSTRUCTOR,
+    JS_REALM_SLOT_CRYPTO_KEY_CONSTRUCTOR,
+    JS_REALM_SLOT_CRYPTO_KEY_PRIVATE_NAME,
+    JS_REALM_SLOT_DOM_EXCEPTION_CONSTRUCTOR,
+    JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE,
     JS_REALM_SLOT_COUNT,
 };
 
@@ -239,6 +243,7 @@ void js_realm_slots_destroy(JsRealmSlots* slots);
 void js_realm_slots_clear(JsRealmSlots* slots);
 Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot);
 Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
+LAMBDA_RT_API bool js_realm_intrinsic_slots_ensure_roots(void);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);
 LAMBDA_RT_API bool js_realm_runtime_is_active(void);
@@ -297,6 +302,13 @@ struct JsDomState : RootVector {
     Item default_view = {};
     Item title = {};
     Item fonts = {};
+    Item web_animation_wrappers = {};
+    Item web_animation_private_name = {};
+    Item media_play_requests = {};
+    Item media_poll_function = {};
+    Item media_poll_timer = {};
+    uint64_t web_animation_sequence = 0;
+    bool media_poll_running = false;
     bool design_mode = false;
     DomElement* active_element = NULL;
     DomDocument* current_document = NULL;
@@ -623,6 +635,10 @@ struct JsPerformanceState : RootVector {
     Item resource_observers = {};
     Item observer_prototype = {};
     Item observer_list_prototype = {};
+    Item user_entries = {};
+    Item entry_prototype = {};
+    Item mark_constructor = {};
+    Item measure_constructor = {};
     uint64_t resource_epoch = UINT64_MAX;
     uint32_t resource_limit = 250;
     bool resource_full_pending = false;

@@ -195,7 +195,7 @@ extern "C" Item js_microtask_flush_result(void) {
     // realm; its drain callback must not access the retired realm's queues.
     if (!js_active_runtime_state || !js_runtime_state.event_loop) return ItemNull;
     RootFrame roots(1);
-    Rooted<Item> first_error_root(roots, ItemNull);
+    Rooted<Item> first_error_root(roots, js_dom_media_poll_pending());
     int safety = 0;
     while ((runtime_job_queue_size(&next_tick_queue) > 0 ||
             runtime_job_queue_size(&microtask_queue) > 0) &&

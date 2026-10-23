@@ -36,18 +36,20 @@ js_next_tick_enqueue  # node-crypto
 ## lambda/js/js_globals.cpp
 js_atob                   # node-core
 js_btoa                   # node-core
-js_create_data_property   # node-core
+js_create_data_property   # node-core,node-crypto
 js_json_stringify         # node-core
 js_process_emit           # node-crypto
 js_symbol_for             # node-core
-js_well_known_symbol_key  # node-core
+js_well_known_symbol_key  # node-core,node-crypto
 
 ## lambda/js/js_host_hooks.cpp
 _Z37js_host_hooks_set_console_format_hookPF4ItemS_E  # node-core; js_host_hooks_set_console_format_hook(Item (*)(Item))
 
 ## lambda/js/js_object_meta.cpp
-js_class_id_from_meta  # node-core
-js_object_meta         # node-core
+js_class_id_from_meta  # node-core,node-crypto
+js_object_meta         # node-core,node-crypto
+js_native_private_array_state   # node-crypto
+js_native_private_array_object  # node-crypto
 
 ## lambda/js/js_props.cpp
 js_property_index_key  # node-core
@@ -68,14 +70,21 @@ js_elements_set_int                      # node-core
 js_get_key_cstr                          # node-core,node-crypto
 js_get_key_default                       # node-core,node-crypto
 js_is_js_array                           # node-core
+js_is_object_value                       # node-crypto
+js_iterable_to_array                     # node-crypto
 js_mark_non_enumerable                   # node-core,node-crypto
 js_new_object                            # node-core,node-crypto
 js_promise_create                        # node-core
 js_promise_reject                        # node-core
 js_promise_resolve                       # node-crypto
+js_promise_from_completion               # node-crypto
 js_set_key_cstr                          # node-core,node-crypto
 js_set_key_default                       # node-core,node-crypto
 js_set_prototype                         # node-core,node-crypto
+js_domexception_new                      # node-crypto
+_Z37js_realm_intrinsic_slots_ensure_rootsv # node-crypto
+js_object_define_property                # node-crypto
+js_private_key_for_class                 # node-crypto
 js_string_equals                         # node-crypto
 js_throw_error_with_code                 # node-crypto
 js_throw_invalid_arg_type                # node-core,node-crypto
@@ -113,6 +122,7 @@ _Z24js_install_native_method4ItemPKcPFS_S_S_S_S_Ei       # node-core; js_install
 _Z24js_install_native_method4ItemPKcPFS_S_S_S_S_S_Ei     # node-core; js_install_native_method(Item, char const*, Item (*)(Item, Item, Item, Item, Item), int)
 _Z24js_install_native_method4ItemPKcPFS_vEi              # node-core; js_install_native_method(Item, char const*, Item (*)(), int)
 _Z25js_new_native_constructorPF4ItemS_S_E                # node-core; js_new_native_constructor(Item (*)(Item, Item))
+_Z25js_new_native_constructorPF4ItemvE                   # node-crypto; js_new_native_constructor(Item (*)())
 _Z29js_install_native_constructor4ItemPKcPFS_S_Ei        # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item), int)
 _Z29js_install_native_constructor4ItemPKcPFS_S_S_Ei      # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item, Item), int)
 _Z29js_install_native_constructor4ItemPKcPFS_S_S_S_Ei    # node-crypto; js_install_native_constructor(Item, char const*, Item (*)(Item, Item, Item), int)
@@ -120,7 +130,7 @@ _Z29js_install_native_constructor4ItemPKcPFS_S_S_S_S_Ei  # node-crypto; js_insta
 js_alloc_env                                             # node-core
 js_alloc_env2                                            # node-core
 js_alloc_env3                                            # node-core
-js_set_function_name                                     # node-core
+js_set_function_name                                     # node-core,node-crypto
 
 ## lambda/js/js_runtime_state.cpp
 _Z23js_realm_intrinsic_slot13JsRealmSlotIdi           # node-core,node-crypto; js_realm_intrinsic_slot(JsRealmSlotId, int)

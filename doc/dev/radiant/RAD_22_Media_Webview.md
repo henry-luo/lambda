@@ -70,7 +70,10 @@ State is tracked via KVO on `AVPlayerItem.status` and `AVPlayer.timeControlStatu
 `MediaViewState` owns an HTML audio/video decoder, its source signature and
 selected local path. `EmbedProp::video` borrows it for a layout pass. Rebuilding
 or resizing an unchanged logical owner preserves playback/settings; changing
-the authored source list retires the decoder. Layout resolves sources against
+the authored source list retires the decoder and advances its generation while
+preserving the element's volume and muting, as required by the
+[HTML media model](https://html.spec.whatwg.org/multipage/media.html#dom-media-volume).
+Layout resolves sources against
 its own document, including iframe documents (**D4.5.1v4, D7.5.3**).
 Removing a connected media element pauses it at the stable-state reconciliation
 boundary even if a retained script wrapper keeps its decoder alive. Retirement
@@ -80,8 +83,8 @@ The shared host pump services one nonblocking native media event turn; macOS use
 [CFRunLoopRunInMode with zero duration](https://developer.apple.com/documentation/corefoundation/cfrunloopruninmode%28_%3A_%3A_%3A%29).
 Headless playback therefore receives AVFoundation readiness/end callbacks too.
 
-`dom.media_info(node)` returns state, time, duration, volume, dimensions, and
-audio availability, or null without a decoder. Procedural
+`dom.media_info(node)` returns state, source generation, time, duration, volume,
+dimensions, and audio availability, including idle state before a decoder exists. Procedural
 `dom.media_command(node, command, value)` handles play/pause/stop/seek, volume,
 muting, and looping through that retained owner (**S12.1.3**). Generic timeline
 controllers retain session IDs rather than native handles. Remote/provider

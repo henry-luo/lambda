@@ -15,6 +15,7 @@ import review: .mod_review
 import controller: lambda.edit.controller
 import image: lambda.editor.mod_image
 import changes: .mod_changes
+import handles: .mod_handles
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -52,7 +53,8 @@ edit <word_app> state st:app.initial() {
                 <div class:"ruler", style:"width:" ++ string(geometry.width*st.zoom) ++ "px",
                     *[for (n in 0 to 16) <span string(n)>]>
                 <div id:"paper-wrap", class:"paper-wrap", style:"width:" ++ string(geometry.width*st.zoom) ++ "px; min-height:" ++ string(geometry.height*st.zoom) ++ "px;",
-                    surface.surface(st.editor,st.zoom,st.read_only)>
+                    surface.surface(st.editor,st.zoom,st.read_only)
+                    if (st.read_only or st.dialog!=null) null else handles.tools(st.editor,st.zoom)>
                 <div class:"canvas-footer", "A little room for your next idea.">
             >
             if (st.review and not st.focused) ui.comments(st.editor,st.show_resolved,st.read_only) else null
@@ -69,6 +71,7 @@ edit <word_app> state st:app.initial() {
     >
 }
 on beforeinput() { return 'pass' }
+on word_object_position(evt) { handles.position(st.editor,evt.node or evt.target,st.zoom) }
 on dblclick(evt) {
     if (st.read_only) { return 'pass' }
     let story = dom.closest(evt.target,".word-story")

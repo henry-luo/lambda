@@ -415,6 +415,8 @@ bool view_is_viewport_fixed(View* view);
 RdtLogicalPoint view_geometry_fixed_scroll_adjustment(View* view);
 bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix);
 bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
+// maps border-box local coordinates to the document viewport, including CSS/SVG transforms.
+bool view_get_client_matrix(View* view, RdtMatrix* out_matrix);
 // inverse of the painted CSS plane, including ancestor scroll, transforms and perspective.
 bool view_client_to_local(View* view, float x, float y, float* local_x, float* local_y);
 

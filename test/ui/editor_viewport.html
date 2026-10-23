@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Editing viewport clipping and keyboard defaults</title>
+<style>
+html,body { margin:0; width:100%; height:100%; font:20px/24px monospace; }
+#ribbon { height:80px; background:#fafcfb; }
+#outer,#form-scroll { position:absolute; top:80px; width:280px; height:160px; overflow:auto; background:#def; }
+#outer { left:40px; } #form-scroll { left:360px; }
+#inner { margin:20px; width:240px; height:120px; overflow:auto; background:white; }
+#editor { caret-color:#ff00ff; outline:none; }
+p { margin:0; }
+.tail { height:400px; }
+input,textarea { margin:12px 20px; width:200px; display:block; }
+textarea { height:48px; }
+</style>
+<div id="ribbon"></div>
+<div id="outer"><div id="inner" tabindex="0"><div id="editor" contenteditable="true" tabindex="0"><p>alpha bravo</p><p>charlie delta</p><p>echo foxtrot</p><div class="tail"></div></div></div><div class="tail"></div></div>
+<div id="form-scroll"><input id="input"><textarea id="textarea"></textarea><div class="tail"></div></div>

@@ -14,6 +14,12 @@ pub fn selected(editor) {
     let n = if (editor.selection.kind=='node') node_at(editor.doc,path) else null
     if (image_node(n)) {path:path,node:n} else null
 }
+pub pn image_element(editor,surface,path=null) {
+    let target = if (path==null) selected(editor).path else path
+    let entries = [for (entry in images(editor.doc) where entry.node.tag=='img') entry]
+    let index = [for (i,entry in entries where entry.path==target) i][0]
+    return if (surface==null or index==null) null else dom.query_selector_all(surface,"img")[index]
+}
 // The projection preserves image order; a press selects its model atom before native caret placement.
 pub pn hit(editor,node,surface) {
     let target = dom.closest(node,"img")

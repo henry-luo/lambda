@@ -29,18 +29,15 @@ fn valid(p) => contains([for (entry in catalog) entry.id],p.kind) and
     p.weight is number and p.weight>=0 and p.weight<=12 and p.rotation is number and p.rotation>=-180 and p.rotation<=180 and
     p.text is string and len(split(p.text,""))<=200 and colors.hex_color(p.text_color) and p.size is number and p.size>=8 and p.size<=72
 pub fn graphic(p) {
-    // inset the rotated box so its corners remain inside the embedded image viewport.
-    let angle = p.rotation*math.pi/180
-    let c = abs(math.cos(angle))
-    let s = abs(math.sin(angle))
-    let fit = min((p.width-p.weight-2)/(p.width*c+p.height*s),(p.height-p.weight-2)/(p.width*s+p.height*c))
+    // rotation belongs to the image transform; keep the artwork at its full size.
+    let fit = min((p.width-p.weight-2)/p.width,(p.height-p.weight-2)/p.height)
     let b = {x:(p.width-p.width*fit)/2,y:(p.height-p.height*fit)/2,width:p.width*fit,height:p.height*fit}
     let style = {fill:p.fill,stroke:p.stroke,'stroke-width':p.weight}
     let label = drawing.with_attrs(drawing.make_shape("inline",p.kind,0,0,p.text),
         {'font-size':p.size,'text-color':p.text_color,'text-align':"center",'font-weight':"normal"});
     <svg xmlns:"http://www.w3.org/2000/svg",width:p.width,height:p.height,
         viewBox:"0 0 " ++ string(p.width) ++ " " ++ string(p.height),
-        <g transform:"rotate(" ++ string(p.rotation) ++ " " ++ string(p.width/2) ++ " " ++ string(p.height/2) ++ ")",
+        <g
             if (p.kind=="line") <line x1:b.x,y1:b.y+b.height/2,x2:b.x+b.width,y2:b.y+b.height/2,*:style>
             else if (contains(glyphs.kinds,p.kind)) <g transform:"translate(" ++ string(b.x) ++ " " ++ string(b.y) ++ ") scale(" ++
                 string(b.width/100) ++ " " ++ string(b.height/100) ++ ")",*:style,glyphs.glyph(p.kind)>

@@ -747,6 +747,26 @@ char* resource_manager_copy_ready_resource_path(NetworkResourceManager* mgr,
     return local_path;
 }
 
+char* resource_manager_copy_ready_resource_file(NetworkResourceManager* mgr,
+        const char* url, const char* prefix, const char* suffix, bool* out_pending) {
+    char* source = resource_manager_copy_ready_resource_path(mgr, url, out_pending);
+    if (!source) return NULL;
+    EnhancedFileCache* cache = mgr->file_cache;
+    // cache eviction and replacement take the write lock; the decoder gets an immutable snapshot.
+    if (cache) pthread_rwlock_rdlock(&cache->rwlock);
+    char* destination = file_exists(source) ? file_temp_create(prefix, suffix) : NULL;
+    FileCopyOptions options = {};
+    options.overwrite = true;
+    if (destination && file_copy(source, destination, &options) != 0) {
+        file_delete(destination);
+        mem_free(destination);
+        destination = NULL;
+    }
+    if (cache) pthread_rwlock_unlock(&cache->rwlock);
+    mem_free(source);
+    return destination;
+}
+
 char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
                                                    const char* url,
                                                    size_t* out_size) {

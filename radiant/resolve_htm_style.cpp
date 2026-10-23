@@ -2,11 +2,16 @@
 #include "view.hpp"
 #include "css_resolved_style.hpp"
 #include "rdt_video.h"
+#include "network_integration.h"
+#include "radiant.hpp"
+#include "audio.hpp"
+#include "../lambda/network/network_resource_manager.h"
 #include "event.hpp"
 #include "render.hpp"
 #include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/str.h"
+#include "../lib/file.h"
 #include "../lib/strview.h"
 #include "../lib/memtrack.h"
 #include "../lib/color.h"
@@ -691,86 +696,118 @@ static const char* html_media_next_source(DomElement* element, DomNode** cursor)
     return nullptr;
 }
 
-static void initialize_html_media(LayoutContext* lycon, DomNode* element,
-                                  ViewBlock* block, bool is_video) {
-    DomElement* media_element = element && element->is_element()
-        ? element->as_element() : nullptr;
-    DomDocument* doc = lycon->doc;
-    if (!doc || !doc->url || doc->services.svg_image_document) return;
+struct MediaSourcePath {
+    lam::Temp<char> path;
+    bool temporary = false;
+    ~MediaSourcePath() { if (temporary && path) file_delete(path.get()); }
+    char* release() { temporary = false; return path.release(); }
+};
 
-    if (!block->embed) {
-        block->ensure_embed(lycon);
+MediaViewState* radiant_media_prepare(DomElement* element) {
+    DomDocument* doc = element ? element->doc : nullptr;
+    if (!doc || !doc->url || doc->services.svg_image_document ||
+            (element->tag() != MARKUP_NAME_VIDEO && element->tag() != MARKUP_NAME_AUDIO)) return nullptr;
+    MediaViewState* retained = media_view_state_get(doc->state, static_cast<View*>(element), true);
+    if (!retained) return nullptr;
+    if (!retained->properties_initialized) {
+        retained->volume = 1.0f;
+        retained->muted = element->has_attribute("muted");
+        retained->properties_initialized = true;
     }
-    const char* preload = is_video ? element->get_attribute("preload") : nullptr;
+    const char* preload = element->get_attribute("preload");
     bool preload_none = preload && strcmp(preload, "none") == 0;
-    MediaViewState* retained = media_view_state_get(doc->state, block, true);
-    if (!retained) return;
     StrBuf* sources = strbuf_new();
-    if (!sources) return;
+    if (!sources) return nullptr;
     DomNode* source_cursor = nullptr;
     const char* src = nullptr;
-    while ((src = html_media_next_source(media_element, &source_cursor))) {
+    while ((src = html_media_next_source(element, &source_cursor))) {
         strbuf_append_format(sources, "%zu:", strlen(src));
         strbuf_append_str(sources, src);
     }
     if (!retained->sources || strcmp(retained->sources->str, sources->str) != 0) {
-        // The decoder is retained interaction state; only an authored source change retires it.
         media_view_state_reset(retained);
         retained->sources = sources;
     } else strbuf_free(sources);
     bool created = !retained->player;
+    bool loop = element->has_attribute("loop"), muted = element->has_attribute("muted");
+    bool autoplay = element->has_attribute("autoplay");
+    if (!retained->muted_override && (created || muted != retained->default_muted)) retained->muted = muted;
+    if (autoplay && !retained->default_autoplay &&
+            (retained->muted || retained->volume == 0.0f || radiant_document_may_start_audio(doc)))
+        retained->play_requested = true;
+    retained->source_pending = false;
     if (created) {
         source_cursor = nullptr;
-        while ((src = html_media_next_source(media_element, &source_cursor))) {
-            Url* abs_url = parse_url(doc->url, src);
-            lam::Temp<char> file_path(abs_url ? url_to_local_path(abs_url) : nullptr);
-            if (abs_url) url_destroy(abs_url);
-            if (!file_path) continue;
-
+        while ((src = html_media_next_source(element, &source_cursor))) {
+            Url* absolute = parse_url(doc->url, src);
+            MediaSourcePath source_path;
+            source_path.path = lam::Temp<char>(absolute ? url_to_local_path(absolute) : nullptr);
+            if (absolute && !source_path.path && (!preload_none || retained->play_requested) &&
+                    radiant_url_is_http(url_get_href(absolute))) {
+                // byte-only resources share navigation cancellation, cache ownership and transfer limits.
+                if (!doc->resource_manager) radiant_init_network_support(doc, nullptr, nullptr);
+                if (doc->resource_manager) {
+                    resource_manager_load(doc->resource_manager, url_get_href(absolute), RESOURCE_PREFETCH,
+                        PRIORITY_LOW, element);
+                    source_path.path = lam::Temp<char>(resource_manager_copy_ready_resource_file(
+                        doc->resource_manager, url_get_href(absolute), "media", file_path_ext(url_get_pathname(absolute)),
+                        &retained->source_pending));
+                    source_path.temporary = (bool)source_path.path;
+                }
+            }
+            if (absolute) url_destroy(absolute);
+            if (retained->source_pending) break;
+            if (!source_path.path) continue;
             RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
             if (!candidate) continue;
-            if (!preload_none && rdt_video_open_file(candidate, file_path.get()) != 0) {
+            bool open = !preload_none || retained->play_requested;
+            if (open && rdt_video_open_file(candidate, source_path.path.get()) != 0) {
                 rdt_video_destroy(candidate);
                 continue;
             }
             retained->player = candidate;
             retained->destroy = rdt_video_destroy;
             retained->pause = rdt_video_pause;
-            retained->source = file_path.release();
-            retained->opened = !preload_none;
+            retained->source_owned = source_path.temporary;
+            retained->source = source_path.release();
+            retained->opened = open;
             break;
         }
     }
+    retained->connected = dom_is_connected(element);
     RdtVideo* media = retained->player;
-    if (!media) return;
-    retained->connected = dom_is_connected(media_element);
-
-    {
-        bool loop = element->has_attribute("loop");
-        bool muted = element->has_attribute("muted");
-        bool autoplay = element->has_attribute("autoplay");
-        if (created || loop != retained->default_loop) rdt_video_set_loop(media, loop);
-        if (created || muted != retained->default_muted) rdt_video_set_muted(media, muted);
-        block->embed->video = lam::up(media);
-
-        if (is_video) {
-            block->embed->has_controls = element->has_attribute("controls");
-            const char* poster_src = element->get_attribute("poster");
-            if (poster_src && *poster_src) {
-                block->embed->poster = lam::up(load_document_image(lycon->doc, lycon->ui_context, poster_src));
-            }
-        }
-
-        if ((autoplay && (created || !retained->default_autoplay)) || (!preload_none && !retained->opened)) {
-            if (!retained->opened) retained->opened = rdt_video_open_file(media, retained->source) == 0;
-        }
-        if (autoplay && (created || !retained->default_autoplay) && retained->opened) {
+    if (media) {
+        rdt_video_set_loop(media, loop);
+        rdt_video_set_muted(media, retained->muted);
+        rdt_video_set_volume(media, retained->volume);
+        if ((!preload_none || retained->play_requested) && !retained->opened)
+            retained->opened = rdt_video_open_file(media, retained->source) == 0;
+        if (retained->play_requested && retained->opened && !retained->native_play_requested &&
+                rdt_video_get_state(media) != RDT_VIDEO_STATE_ERROR) {
+            if (retained->seek_time > 0.0) rdt_video_seek(media, retained->seek_time);
             rdt_video_play(media);
+            retained->native_play_requested = true;
             if (doc->state) doc->state->has_active_video = true;
         }
-        retained->default_loop = loop;
-        retained->default_muted = muted;
-        retained->default_autoplay = autoplay;
+    }
+    retained->default_loop = loop;
+    retained->default_muted = muted;
+    retained->default_autoplay = autoplay;
+    return retained;
+}
+
+static void initialize_html_media(LayoutContext* lycon, DomNode* element,
+                                  ViewBlock* block, bool is_video) {
+    DomElement* media_element = element ? element->as_element() : nullptr;
+    MediaViewState* retained = radiant_media_prepare(media_element);
+    if (!retained || !retained->player) return;
+    if (!block->embed) block->ensure_embed(lycon);
+    block->embed->video = lam::up(retained->player);
+    if (is_video) {
+        block->embed->has_controls = element->has_attribute("controls");
+        const char* poster = element->get_attribute("poster");
+        if (poster && *poster)
+            block->embed->poster = lam::up(load_document_image(lycon->doc, lycon->ui_context, poster));
     }
 }
 

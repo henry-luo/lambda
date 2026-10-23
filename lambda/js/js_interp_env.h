@@ -90,11 +90,24 @@ static inline void js_interp_env_storage(JsInterpEnv* env,
         (Item*)(void*)&env->arguments_object, 6);
 }
 
-static inline Item js_interp_env_slot_read(JsInterpEnv* env, uint32_t slot,
+static inline Item js_interp_env_slot_borrow(JsInterpEnv* env, uint32_t slot,
         bool immortal) {
     GcEnvironmentStorage storage;
     js_interp_env_storage(env, &storage);
     return gc_environment_storage_read(&storage, slot, immortal);
+}
+
+static inline Item js_interp_env_slot_read(JsInterpEnv* env, uint32_t slot,
+        bool immortal) {
+    Item value = js_interp_env_slot_borrow(env, slot, immortal);
+    // an ordinary read can retain an alias; subsequent appends must copy it.
+#ifdef __cplusplus
+    TypeId type = get_type_id(value);
+#else
+    TypeId type = item_type_id(value);
+#endif
+    if (type == LMD_TYPE_STRING) fn_string_freeze(it2s(value));
+    return value;
 }
 
 static inline void js_interp_env_slot_store(JsInterpEnv* env, uint32_t slot,

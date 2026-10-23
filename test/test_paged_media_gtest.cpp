@@ -1836,6 +1836,40 @@ TEST_F(SecondaryViewTest, FoListsLowerToCommonNativeGridsAndKeepOriginalPartDiag
     EXPECT_STREQ(translated->diagnostic.qname, "f:list-item-label"); EXPECT_STREQ(translated->diagnostic.property, "end-indent");
 }
 
+TEST_F(SecondaryViewTest, ImageTransformsRetainPageSpaceGeometryAcrossWorkspaceReuse) {
+    init_vector_engine();
+    stylesheet("p{margin:0}@page{size:200px 120px;margin:10px}img{display:block;width:60px;height:40px;margin:20px;transform:rotate(90deg)}");
+    for (bool vector : {false, true}) {
+        SCOPED_TRACE(vector);
+        DomElement* picture = vector ? svg_image("width='60px' height='40px'") : image();
+        ASSERT_NE(picture, nullptr);
+        ViewTree* tree = secondary();
+        PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        LayoutViewNode* node = source_image_fragment(tree, picture); ASSERT_NE(node, nullptr);
+        ASSERT_NE(node->paint_transform, nullptr);
+        EXPECT_NEAR(node->paint_transform->e11, 0.0f, 0.0001f);
+        EXPECT_NEAR(node->paint_transform->e12, -1.0f, 0.0001f);
+        ImageSurface* rotated = render_secondary_page_snapshot(tree, 1, 1.0f); ASSERT_NE(rotated, nullptr);
+        EXPECT_NE(snapshot_pixel(rotated, 50, 25), 0xffffffffu);
+        EXPECT_EQ(snapshot_pixel(rotated, 90, 50), 0xffffffffu);
+        ViewPreviewOptions preview_options = view_preview_options_default();
+        ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview_options); ASSERT_NE(retained, nullptr);
+        ASSERT_TRUE(picture->set_attribute("style", "transform:translateX(20px);transform-origin:0 0"));
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ImageSurface* moved = render_secondary_page_snapshot(tree, 1, 1.0f); ASSERT_NE(moved, nullptr);
+        EXPECT_EQ(snapshot_pixel(moved, 50, 25), 0xffffffffu);
+        EXPECT_NE(snapshot_pixel(moved, 105, 50), 0xffffffffu);
+        ImageSurface* earlier = render_secondary_page_snapshot(retained, 1, 1.0f); ASSERT_NE(earlier, nullptr);
+        expect_same_surface_pixels(rotated, earlier);
+        image_surface_destroy(rotated); image_surface_destroy(moved); image_surface_destroy(earlier);
+        ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+        ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
+        ASSERT_TRUE(source->DomNode::remove_child(picture));
+    }
+}
+
 TEST_F(SecondaryViewTest, NativeImageContentSizingPositionsClipsAndRetainsTheExactSelectedObject) {
     init_vector_engine();
     stylesheet("p{margin:0}@page { size:200px 120px; margin:10px } img { display:block; width:60px; height:40px; object-position:100% 100%; overflow:hidden }");

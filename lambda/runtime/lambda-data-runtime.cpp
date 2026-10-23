@@ -2728,13 +2728,10 @@ static bool map_grow_gc_data(Map** map_slot, int byte_cap, int64_t copy_bytes,
     return true;
 }
 
-void map_put_heap(Map* map, String* key, Item value, Input* input) {
-    if (!map || !map->is_heap) {
-        map_put(map, key, value, input);
-        return;
-    }
+void map_put_heap(Map* map, String* key, Item value, Input* input,
+        bool dynamic_values) {
     map_put_with_data_growth(map, key, value, input,
-        map_grow_gc_data, NULL);
+        map && map->is_heap ? map_grow_gc_data : NULL, NULL, dynamic_values);
 }
 
 bool map_put_undefined_unique_absent_bulk_heap(Map* map, String** keys,

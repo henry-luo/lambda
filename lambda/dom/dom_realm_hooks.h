@@ -44,6 +44,7 @@ extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w);
 
 /** Body behind `Element.prototype.animate`. */
 extern "C" Item dom_element_animate(Item keyframes_item, Item options_item);
+extern "C" Item dom_element_get_animations(Item options);
 
 /**
  * The HTML tag -> WebIDL constructor-name table, read out by index so the

@@ -1,3 +1,6 @@
 unicode-seeks-ok
 unicode-boundaries-ok
 unicode-source-replacement-ok
+unicode-regexp-cursor-ok
+unicode-regexp-split-ok
+unicode-concat-allocation-ok
