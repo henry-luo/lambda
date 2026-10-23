@@ -5235,7 +5235,6 @@ static void dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
         js_document_active_element = nullptr;
     }
 }
-JS_FORWARD_VOID( dom_after_disabled_attribute_set, (void* elem_ptr), dom_clear_focus_if_disabled_now, ((DomElement*)elem_ptr))
 
 static bool dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
     const char* style = elem ? elem->get_attribute("style") : nullptr;
@@ -12059,6 +12058,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                     _select_ask_for_reset(elem);
                 }
             }
+            // IDL writes are attribute writes too: refresh the engine's constraint mirrors
+            dom_reinit_behavior_if_constraint_attr(elem, attr);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }

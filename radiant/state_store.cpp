@@ -3888,6 +3888,15 @@ void radiant_queue_behavior_init_control(DomDocument* doc, View* view) {
 void form_control_invalidate_behavior_init(DocState* state, View* view) {
     if (!state || !view) return;
     ViewState* view_state = form_view_state_get(state, view);
+    // disabled/readonly/required have no dirty flag in HTML: the content
+    // attribute decides. The ViewState only mirrors it (seeded at creation), so
+    // every write must refresh the mirror, or a removed `disabled` leaves the
+    // control disabled for :disabled matching and event dispatch.
+    if (view_state) {
+        form_control_set_disabled(state, view, view_element_has_attr(view, "disabled"));
+        form_control_set_readonly(state, view, view_element_has_attr(view, "readonly"));
+        form_control_set_required(state, view, view_element_has_attr(view, "required"));
+    }
     if (!view_state || !view_state->flags.behavior_inited) return;
     view_state->flags.behavior_inited = 0;
     DomElement* elem = view->is_element() ? lam::dom_require_element(view) : nullptr;

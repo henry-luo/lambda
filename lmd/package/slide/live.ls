@@ -373,7 +373,7 @@ on slide_command(evt) {
     let next = commit_event(evt.target, ~.plan, session.ps, {*: detail, time_ms: evt.time_stamp},
         ~.options, session.token, session.painted, session.tools)
     if (c.as_text(detail.command) == "speed" and next.ps.playback_rate == detail.rate)
-        dom.set_property(dom.query_selector(evt.target, ".slide-speed-input"), "value", c.fmt(detail.rate))
+        dom.set_state(dom.query_selector(evt.target, ".slide-speed-input"), "value", c.fmt(detail.rate))
     session = {*: session, *: next}
     return 'handled'
 }
