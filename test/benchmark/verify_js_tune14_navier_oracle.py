@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Tune14's Navier semantic control outside its canonical timed region."""
+"""Check the completed 15-frame Navier workload without advancing its state."""
 
 import argparse
 import hashlib

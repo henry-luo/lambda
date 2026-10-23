@@ -742,11 +742,11 @@ def jetstream_post_timing_oracle(oracle_id):
     if oracle_id is None:
         return ""
     jetstream_post_timing_oracle_marker(oracle_id)
-    # Frame 15 retains the benchmark's native checksum. The exposed density vector
-    # adds a whole-result oracle without changing the single-frame timed work.
+    # The timed workload already reaches frame 15 and checks its checksum.
+    # Inspect that same state; advancing it here would validate another workload.
     return (
-        "\nfor (var __navier_frame = 1; __navier_frame < 15; __navier_frame++) {\n"
-        "    runNavierStokes();\n"
+        "\nif (nsFrameCounter !== 15) {\n"
+        "    throw new Error(\"Navier oracle requires exactly 15 timed frames\");\n"
         "}\n"
         "var __navier_dens = solver.getDens();\n"
         "var __navier_digest = 2166136261;\n"
@@ -795,8 +795,9 @@ def _detect_jetstream_run_function(js_path):
     number. An earlier version hard-coded 8 repeats for every file, which silently made
     the JS engines run a different workload from the Lambda ports — the .ls scripts each
     implement exactly one runIteration(). It was 8/50 of Lambda's work on richards and
-    splay, 8/25 on crypto_sha1, 8/20 on deltablue, and 8x TOO MUCH on navier_stokes and
-    hashmap (whose runIteration bodies are a single unlooped call).
+    splay, 8/25 on crypto_sha1, 8/20 on deltablue, and 8x TOO MUCH on the former
+    single-frame navier_stokes workload and hashmap. Navier now runs 15 timed
+    frames so its frame-15 checksum is exercised by every engine.
     """
     with open(js_path) as f:
         code = f.read()

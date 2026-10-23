@@ -632,10 +632,12 @@ def write_report(args, data):
     w()
     w("JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` "
       "workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, "
-      "richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda "
+      "richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes 15, hashmap 1). Each Lambda "
       "`.ls` port implements exactly one `runIteration()`, so every engine times the same work. "
       "A previous revision hard-coded 8 repeats for every file, which made the JS engines run "
-      "8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.")
+      "8/50 of Lambda's work on richards and splay, and 8x too much on the former single-frame "
+      "Navier workload and hashmap. Navier now times all 15 frames and checks checksum 77; "
+      "older snapshots that timed one JS frame require a fresh measurement for comparison.")
     if any(e in engines for e in STATIC_CEILING_ENGINES):
         w()
         w("C2MIR and Go are native statically typed ports of the same workloads, present as a "

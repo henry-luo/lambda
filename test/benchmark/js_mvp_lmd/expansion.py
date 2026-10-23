@@ -119,7 +119,7 @@ def prepare_new(out, binary, references, targets=TARGETS, population='new16'):
             row['lambda_comparability'] = {
                 'awfy/havlak': 'unmatched repeats: Lambda performs 2 full recognitions; JS performs 51; equal output is insufficient',
                 'jetstream/hashmap': 'unmatched storage/allocation: Lambda preallocates parallel arrays; JS grows chained entry objects; counts and sums match',
-                'jetstream/navier_stokes': 'unmatched: Lambda times setup and 15 frames; JS times one frame',
+                'jetstream/navier_stokes': '15 frames in both; unmatched setup boundary and buffer-swap/solver structure',
                 'jetstream/splay': 'unmatched: Lambda includes setup and uses LCG/tree port; JS uses Jenkins fixture',
             }.get(identifier, 'canonical counts and script-defined timing; source hashes retained')
             if identifier == 'awfy/havlak':

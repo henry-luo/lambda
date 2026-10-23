@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "description": "D2.2.2: unchanged integer equality runs use a bounded exclusive dispatch; rebinding and duplicate predicates preserve their original effects.",
+  "checks": [
+    {"in_func": "_choose_#", "expect": ["bne"]}
+  ]
+}

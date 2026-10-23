@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "D3.4.6: live packed descriptors retain the full miss decoder and snapshot semantics.",
+  "checks": [{"in_func": "_read_left_#", "expect": ["map_shape_field_to_item"]}]
+}

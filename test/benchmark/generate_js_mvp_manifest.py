@@ -29,7 +29,7 @@ def manifest_metadata(profile):
         "contract": {
             "base_manifest": "test/benchmark/js_mvp_manifest_v1.json",
             "purpose": ("Tune14 fixed 63-row JS population with the canonical Navier "
-                        "single-frame timer and a post-timing density oracle."),
+                        "15-frame timer, checksum and post-timing density oracle."),
         },
     }
 

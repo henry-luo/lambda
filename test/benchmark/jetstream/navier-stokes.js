@@ -409,7 +409,9 @@ function FluidField(canvas) {
 
 class Benchmark {
     runIteration() {
-        runNavierStokes();
+        // include every frame needed to reach the checksum in the timed workload.
+        for (let i = 0; i < 15; ++i)
+            runNavierStokes();
     }
 }
 

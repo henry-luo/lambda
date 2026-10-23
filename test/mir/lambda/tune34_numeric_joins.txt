@@ -1,0 +1,5 @@
+[[[0, int, false, false], [4, float, true, true], [2, float, false, false], [6, float, true, true]], 1, float]
+[[[0, int, false, false], [2.5, float, true, true], [1.25, float, false, false], [3.75, float, true, true]], 2.5, float]
+[[[0, int, false, true], [-1, float, false, true], [-2, float, false, false], [-3, float, false, false]], -4, float]
+[[1, 2], [null, null]]
+

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3: dense producer guards cover the complete read/write tuple; widening and retained owners keep their ordinary setters.",
+  "checks": [
+    {"in_func": "_rows_#", "expect": ["least", "fill"]},
+    {"in_func": "_changing_lane_#", "expect": ["fn_array_set"]}
+  ]
+}

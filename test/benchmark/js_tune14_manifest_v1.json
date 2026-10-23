@@ -3,7 +3,7 @@
   "profile": "tune14_v1",
   "contract": {
     "base_manifest": "test/benchmark/js_mvp_manifest_v1.json",
-    "purpose": "Tune14 fixed 63-row JS population with the canonical Navier single-frame timer and a post-timing density oracle."
+    "purpose": "Tune14 fixed 63-row JS population with the canonical Navier 15-frame timer, checksum and post-timing density oracle."
   },
   "workloads": [
     {
@@ -844,7 +844,7 @@
     {
       "id": "jetstream/navier_stokes",
       "source": "test/benchmark/jetstream/navier-stokes.js",
-      "sha256": "24ff01d4efb18f994786659b04bdf79d74821461c99e9d8c29c2ea0081ff161c",
+      "sha256": "d30c56c76cd700d0a0b3b018c47452eb800a2e9468fc11d6c1a7ad94feb85809",
       "inputs": [],
       "arguments": [],
       "working_directory": ".",
@@ -852,18 +852,18 @@
         "kind": "jetstream_run_iteration",
         "strict_mode": "source_preserved",
         "run_expression": "runNavierStokes()",
-        "repeat_count": 1,
-        "timed_region": "one source-defined runIteration payload before post-timing validation",
+        "repeat_count": 15,
+        "timed_region": "15 source-defined frames including frame-15 checksum before density validation",
         "post_timing_oracle": {
           "id": "navier_stokes_density_v1",
-          "timed_frames": 1,
-          "post_timing_frames": 14,
+          "timed_frames": 15,
+          "post_timing_frames": 0,
           "source_checksum_frame": 15,
           "density_quantization": "floor(value * 1000)",
           "expected_stdout_text": "__NAVIER_DENSITY_DIGEST__:-257786486",
-          "trailer_sha256": "66ed31b9941d85e2e298bc7304aa7b1034407d5f8fa9fa178ae810981bdd024a"
+          "trailer_sha256": "93774f0592f9c2c073e99b3f9517b02947f1e58f14377c66ec70b816885f1426"
         },
-        "canonical_sha256": "ecf3f4e89ca2b2e269d6eab03478e7c94f2a554a7fc4889d29ab3cc83d34cf6e"
+        "canonical_sha256": "be69cb8aad5fc0c6643dc710c4b8f66318431e5581910407f64bd49a61022ea2"
       },
       "correctness_oracle": "source PASS/FAIL marker and zero exit status; source frame-15 checksum and post-timing full-density marker __NAVIER_DENSITY_DIGEST__:-257786486"
     },

@@ -174,6 +174,10 @@ void* gc_object_zone_alloc(gc_object_zone_t* oz, size_t size, uint16_t type_tag,
 void* gc_object_zone_alloc_class(gc_object_zone_t* oz, int cls, size_t size,
                                   uint16_t type_tag, gc_header_t** all_objects);
 
+// reuse a swept slot from either slab or bump storage, retaining its owner kind.
+void* gc_object_zone_reuse(gc_object_zone_t* oz, int cls, size_t size,
+                          uint16_t type_tag, gc_header_t** all_objects);
+
 /**
  * Return a slot to the free list for its size class.
  * The slot's gc_header_t is reused as a free-list link node.
