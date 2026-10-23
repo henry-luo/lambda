@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Tune34 continuation: guarded lowering retains its original semantic miss paths.",
+  "checks": [
+    {
+      "in_func": "_modular_#",
+      "expect": [
+        "and"
+      ]
+    }
+  ]
+}

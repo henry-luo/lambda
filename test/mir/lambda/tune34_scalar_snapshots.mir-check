@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Tune34 continuation: guarded lowering retains its original semantic miss paths.",
+  "checks": [
+    {
+      "in_func": "_visit_#",
+      "expect": [
+        "lambda_array_scalar_snapshot"
+      ]
+    },
+    {
+      "in_func": "_recursive_select_b_#",
+      "expect": [
+        "cow_mark_shared",
+        "member_set_cow"
+      ],
+      "forbid": [
+        "call\\tfn_array_set_p, fn_array_set"
+      ]
+    }
+  ]
+}

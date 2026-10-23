@@ -2105,6 +2105,13 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"fn_string_char_word", FPTR(fn_string_char_word),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED | JIT_IMPORT_LOOP_STABLE_SCALAR,
+      JIT_EXCEPTION_PRESERVES}},
     {"fn_string_char_eq", FPTR(fn_string_char_eq),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -2445,11 +2452,31 @@ JitImport jit_runtime_imports[] = {
     {"cow_bind_rmw_handle", FPTR(cow_bind_rmw_handle)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
     {"cow_prepare_write_profiled", FPTR(cow_prepare_write_profiled)},
+    {"lambda_array_scalar_snapshot", FPTR(lambda_array_scalar_snapshot),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"array_set_cow", FPTR(array_set_cow)},
     {"member_set_cow", FPTR(member_set_cow)},
     {"member_set_cow_profiled", FPTR(member_set_cow_profiled)},
     {"map_set_cow", FPTR(map_set_cow)},
     {"map_set_cow_profiled", FPTR(map_set_cow_profiled)},
+    {"map_set_cow_resolved", FPTR(map_set_cow_resolved),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    {"map_set_cow_resolved_profiled", FPTR(map_set_cow_resolved_profiled),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set_packed_index", FPTR(cow_path_set_packed_index)},
     {"cow_path_set", FPTR(cow_path_set)},
@@ -3836,7 +3863,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // full-contract interning uses heap-owned pool/hashmap metadata, without guest allocation
         "lambda_array_rep_cert_resolve",
         // Exact String-character equality reads only the already-rooted Item.
-        "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at",
+        "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at", "fn_string_char_word",
         "fn_str_eq_ptr",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // These three read existing metadata; the element variant can allocate
