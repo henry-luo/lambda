@@ -50,6 +50,9 @@ fn inline_node(node, options) any^ {
         style:("display:inline-block;width:" ++ string(node.width) ++ "px;height:" ++ string(node.height) ++
             "px;background-color:" ++ node.fill ++ ";")>,options)
     else if (node.kind == "chart") graphic(node,<span class:"docx-chart",node.svg>,options)
+    else if (node.kind == "vector") graphic(node,<span class:node.class,node.svg>,options)
+    else if (node.kind == "fallback") graphic(node,<span class:node.class,
+        ["aria-label"]:node.label,style:"display:inline-block;white-space:pre-wrap;",node.text>,options)
     else if (node.kind == "page-break") <br class:"docx-page-break">
     else <br>
 }
@@ -183,7 +186,7 @@ fn render_blocks(blocks, index, counters, options) map^ {
 fn inline_text(nodes, options) => join([for (node in nodes)
     if (node.kind == "text") node.text else if (node.kind == "link") inline_text(node.children,options)
     else if (node.kind == "reference") reference_label(node,options)
-    else if (node.kind == "chart") node.text
+    else if (contains(["chart","vector","fallback"],node.kind)) node.text
     else if (contains(["break","page-break"],node.kind)) "\n" else ""],"")
 fn plain_text(blocks, options) => join([for (node in blocks)
     if (node.kind == "paragraph") {

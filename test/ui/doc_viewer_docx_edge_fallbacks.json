@@ -1,0 +1,13 @@
+{
+  "name": "DOCX retains saved drawing fallbacks and accepts a near-edge portrait float",
+  "html": "test/input/docx/saved-anchors.docx",
+  "viewport": {"width": 1100, "height": 1000},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#docx-preview .docx-document"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".docx-import-notes li"}, "count": 8},
+    {"type": "assert_count", "target": {"selector": ".docx-document img"}, "count": 9},
+    {"type": "assert_count", "target": {"selector": ".docx-anchor img"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".docx-document"}, "contains": "At The Park"},
+    {"type": "assert_text", "target": {"selector": ".docx-document"}, "contains": "Laura   Wood"}
+  ]
+}

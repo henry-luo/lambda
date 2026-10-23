@@ -14,6 +14,7 @@ pub fn load(pkg) map^ {
     if (root != null and (root.uri != c.A or root.tag != "theme"))
         raise c.fail("invalid-package","Invalid document theme",pkg.main)
     else {fills:c.children(c.child(c.child(elements,"fmtScheme",c.A),"fillStyleLst",c.A),null,c.A),
+        lines:c.children(c.child(c.child(elements,"fmtScheme",c.A),"lnStyleLst",c.A),null,c.A),
         effects:c.children(c.child(c.child(elements,"fmtScheme",c.A),"effectStyleLst",c.A),null,c.A),
         colors:map([for (entry in c.children(scheme,null,c.A),
             let rgb = c.child(entry,"srgbClr",c.A), let system = c.child(entry,"sysClr",c.A),
@@ -24,13 +25,27 @@ pub fn load(pkg) map^ {
 }
 
 // DrawingML colors use unqualified attributes; unsupported transforms must not become guessed colors.
-pub fn drawing_color(node, theme, placeholder = null) {
+fn drawing_tones(channels, tones, index = 0) {
+    if (index == len(tones)) hex.fmt_rgb(channels[0],channels[1],channels[2])
+    else {
+        let tone = tones[index]
+        let value = c.as_int(c.attr(tone,"val",""),-1);
+        if (not contains(["shade","tint"],tone.tag) or tone.uri != c.A or value < 0 or value > 100000) null
+        // tint retains the specified input fraction and mixes the remainder with white.
+        else drawing_tones([for (channel in channels)
+            if (tone.tag == "shade") channel*value/100000.0 else 1.0-(1.0-channel)*value/100000.0],tones,index+1)
+    }
+}
+pub fn drawing_color(node, theme, placeholder = null, allow_tones = false) {
     let colors = c.children(node,null,c.A)
     let color = c.first(colors)
     let value = c.attr(color,"val","")
     let rgb = if (color.tag == "srgbClr") value else if (color.tag == "sysClr") c.attr(color,"lastClr","")
         else if (color.tag == "schemeClr" and value != "phClr") theme.colors[value] else null;
-    if (len(colors) != 1 or len(c.children(color,null,null)) > 0) null
+    let tones = c.children(color,null,null);
+    if (len(colors) != 1 or len(tones) > 16 or len(tones) > 0 and not allow_tones) null
+    else if (len(tones) > 0 and valid_hex(rgb))
+        drawing_tones([for (i in [0,2,4]) hex.hex_byte_at(rgb,i)/255.0],tones)
     else if (color.tag == "schemeClr" and value == "phClr") placeholder
     else if (valid_hex(rgb)) "#" ++ rgb else null
 }

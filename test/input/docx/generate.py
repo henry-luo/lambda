@@ -28,9 +28,9 @@ def relationship(rid, kind, target, external=False):
     return f'<Relationship Id="{rid}" Type="{R}/{kind}" Target="{target}"' + (' TargetMode="External"' if external else '') + '/>'
 
 
-def package(name, body, *, main="word/document.xml", extras=None, rels="", root_rels=None, mime=MAIN, raw=None, omit=()):
+def package(name, body, *, main="word/document.xml", extras=None, rels="", root_rels=None, mime=MAIN, raw=None, omit=(), extra_types=""):
     entries = {
-        "[Content_Types].xml": f'<Types xmlns="{CT}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="svg" ContentType="image/svg+xml"/><Override PartName="/{main}" ContentType="{mime}"/></Types>',
+        "[Content_Types].xml": f'<Types xmlns="{CT}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="gif" ContentType="image/gif"/><Default Extension="svg" ContentType="image/svg+xml"/>{extra_types}<Override PartName="/{main}" ContentType="{mime}"/></Types>',
         "_rels/.rels": f'<Relationships xmlns="{P}">' + (root_rels if root_rels is not None else relationship("main", "officeDocument", "/" + main)) + '</Relationships>',
         main: raw if raw is not None else f'<w:document xmlns:w="{W}" xmlns:r="{R}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>{body}</w:body></w:document>',
     }
@@ -149,11 +149,12 @@ MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
-def anchor(graphic, x, y, layer, behind=True, relative="column"):
-    return (f'<w:drawing><wp:anchor simplePos="0" behindDoc="{int(behind)}" relativeHeight="{layer}">'
+def anchor(graphic, x, y, layer, behind=True, relative="column", wrap='<wp:wrapNone/>', clearance=None):
+    distances = '' if clearance is None else ''.join(f' dist{side}="{clearance}"' for side in 'TRBL')
+    return (f'<w:drawing><wp:anchor simplePos="0" behindDoc="{int(behind)}" relativeHeight="{layer}"{distances}>'
             f'<wp:positionH relativeFrom="{relative}"><wp:posOffset>{x}</wp:posOffset></wp:positionH>'
             f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{y}</wp:posOffset></wp:positionV>'
-            '<wp:extent cx="1905000" cy="952500"/><wp:wrapNone/>'
+            '<wp:extent cx="1905000" cy="952500"/>' + wrap +
             '<a:graphic><a:graphicData>' + graphic + '</a:graphicData></a:graphic></wp:anchor></w:drawing>')
 
 
@@ -164,9 +165,9 @@ def rectangle(fill='', style='', geometry='rect', rotation=0):
             f'</wps:spPr><wps:style>{style}</wps:style><wps:bodyPr/></wps:wsp>')
 
 
-def alternate(choice):
+def alternate(choice, fallback='<w:r><w:t>Fallback</w:t></w:r>'):
     return (f'<mc:AlternateContent xmlns:mc="{MC}"><mc:Choice Requires="wps" xmlns:wps="{WPS}">'
-            + choice + '</mc:Choice><mc:Fallback><w:r><w:t>Fallback</w:t></w:r></mc:Fallback></mc:AlternateContent>')
+            + choice + '</mc:Choice><mc:Fallback>' + fallback + '</mc:Fallback></mc:AlternateContent>')
 
 
 theme = (f'<a:theme xmlns:a="{A}"><a:themeElements><a:clrScheme><a:accent1><a:srgbClr val="123456"/>'
@@ -189,6 +190,157 @@ body += anchor(rectangle(style=theme_ref.replace('idx="1"','idx="2"')),0,0,1)
 body += anchor(cropped_image.replace('l="25000"','l="90000"'),0,0,1)
 body += anchor(cropped_image,0,0,1,relative='page') + '</w:r></w:p>'
 package("drawing-unsupported.docx",body,rels=layer_rels,extras=layer_parts)
+
+# A near-edge square float leaves no room for text on its starting side inside the clearance.
+square_wrap = '<wp:wrapSquare wrapText="bothSides"/>'
+raw_image = '<a:blip r:embed="image"/>'
+edge_image = anchor(raw_image,19050,76200,0,False,wrap=square_wrap,clearance=57150)
+modern_shape = anchor(rectangle(flat_fill,geometry='ellipse'),0,0,0,False)
+saved_picture = anchor(raw_image,0,0,0,False)
+empty_footer = f'<w:ftr xmlns:w="{W}"><w:p><w:r><w:fldChar w:fldCharType="begin"/>'
+empty_footer += '<w:instrText>PAGE</w:instrText><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>'
+empty_header = f'<w:hdr xmlns:w="{W}"><w:p><w:pPr><w:shd w:val="clear" w:fill="auto"/>'
+empty_header += '<w:pBdr><w:top w:val="nil"/></w:pBdr></w:pPr><w:r><w:rPr><w:b/></w:rPr></w:r></w:p></w:hdr>'
+edge_rels = layer_rels + relationship("footer","footer","footer.xml") + relationship("header","header","header.xml")
+edge_parts = {**layer_parts,"word/footer.xml":empty_footer,"word/header.xml":empty_header}
+edge_body = '<w:p><w:r>' + edge_image + '<w:t>Wrapped text</w:t></w:r></w:p>'
+edge_body += '<w:p><w:r>' + alternate(modern_shape,saved_picture) + '</w:r></w:p>'
+package("drawing-edge-fallback.docx",edge_body,rels=edge_rels,extras=edge_parts)
+package("drawing-interior.docx",'<w:p><w:r>' +
+        anchor(raw_image,66675,0,0,False,wrap=square_wrap,clearance=57150) + '</w:r></w:p>',
+        rels=layer_rels,extras=layer_parts)
+package("drawing-fallback-partial.docx",'<w:p><w:r>' +
+        alternate(modern_shape,anchor(raw_image * 2,0,0,0,False)) + '</w:r></w:p>',rels=layer_rels,extras=layer_parts)
+visible_parts = {**layer_parts,"word/footer.xml":empty_footer.replace('<w:fldChar w:fldCharType="end"/>',
+    '<w:fldChar w:fldCharType="separate"/><w:t>7</w:t><w:fldChar w:fldCharType="end"/>'),
+    "word/header.xml":empty_header.replace('w:val="nil"','w:val="single"'),
+    "word/shading.xml":empty_header.replace('w:fill="auto"','w:fill="ABCDEF"')}
+package("visible-stories.docx",paragraph("Body"),
+        rels=edge_rels + relationship("shading","header","shading.xml"),extras=visible_parts)
+package("invalid-header-root.docx",paragraph("Body"),rels=edge_rels,
+        extras={**edge_parts,"word/header.xml":empty_footer})
+
+# SmartArt labels and OLE previews are atomic visuals, not inline XML metadata.
+DGM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+V = "urn:schemas-microsoft-com:vml"
+O = "urn:schemas-microsoft-com:office:office"
+smartart = (f'<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="457200"/>'
+            f'<a:graphic><a:graphicData><d:relIds xmlns:d="{DGM}" r:dm="diagram"/>'
+            '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>')
+diagram_data = (f'<d:dataModel xmlns:d="{DGM}" xmlns:a="{A}"><d:ptLst>'
+                '<d:pt type="doc"><d:t><a:p><a:r><a:t>Document metadata</a:t></a:r></a:p></d:t></d:pt>'
+                '<d:pt modelId="one"><d:t><a:p><a:r><a:t>First &amp; label</a:t></a:r><a:br/>'
+                '<a:r><a:t>next line</a:t></a:r></a:p><a:p><a:r><a:t>&lt;img src=x&gt;</a:t></a:r></a:p></d:t></d:pt>'
+                '<d:pt type="pres"><d:t><a:p><a:r><a:t>Presentation duplicate</a:t></a:r></a:p></d:t></d:pt>'
+                '<d:pt type="node"><d:t><a:p><a:r><a:t>Second</a:t></a:r></a:p></d:t></d:pt>'
+                '<d:pt type="asst"><d:t><a:p><a:r><a:t>Assistant</a:t></a:r></a:p></d:t></d:pt>'
+                '</d:ptLst></d:dataModel>')
+ole_preview = (f'<w:r><w:object xmlns:v="{V}" xmlns:o="{O}" w:dxaOrig="1440" w:dyaOrig="720">'
+               '<v:shapetype id="metadata"><v:formulas><v:f eqn="Metadata formula"/></v:formulas></v:shapetype>'
+               '<v:shape id="unrelated"><v:imagedata r:id="absent"/></v:shape>'
+               '<v:shape id="preview"><v:imagedata r:id="image"/></v:shape>'
+               '<o:OLEObject ProgID="Package" ShapeID="preview" r:id="ole"/>'
+               '</w:object></w:r>')
+legacy_parts = {"word/diagrams/data.xml":diagram_data,"word/media/pixel.png":PNG}
+legacy_rels = relationship("diagram","diagramData","diagrams/data.xml") + relationship("image","image","media/pixel.png")
+# the binary OLE target is deliberately absent: only its saved image is read.
+legacy_rels += relationship("ole","oleObject","embeddings/object.bin")
+legacy_body = '<w:p>' + smartart + ole_preview + '</w:p>'
+package("legacy-graphics.docx",legacy_body,rels=legacy_rels,extras=legacy_parts)
+package("legacy-graphics-external.docx",legacy_body,
+        rels=relationship("diagram","diagramData","https://example.invalid/diagram.xml",True) +
+             relationship("image","image","https://example.invalid/preview.png",True),extras=legacy_parts)
+package("legacy-graphics-missing.docx",legacy_body,rels=legacy_rels.replace('Id="image"','Id="other"'),
+        extras={"word/media/pixel.png":PNG})
+package("legacy-graphics-root.docx",legacy_body,rels=legacy_rels,
+        extras={**legacy_parts,"word/diagrams/data.xml":f'<d:wrong xmlns:d="{DGM}"/>'})
+
+# A separate composite template varies names, proportions and direction; source order differs from child order.
+diagram_graph = (f'<d:dataModel xmlns:d="{DGM}" xmlns:a="{A}"><d:ptLst>'
+    '<d:pt modelId="doc" type="doc"/><d:pt modelId="main"><d:t><a:p><a:r><a:t>Header</a:t></a:r></a:p></d:t></d:pt>'
+    '<d:pt modelId="right"><d:t><a:p><a:r><a:t>Right</a:t></a:r></a:p></d:t></d:pt>'
+    '<d:pt modelId="left"><d:t><a:p><a:r><a:t>Left</a:t></a:r></a:p></d:t></d:pt>'
+    '</d:ptLst><d:cxnLst><d:cxn srcId="doc" destId="main"/>'
+    '<d:cxn srcId="main" destId="right" srcOrd="1"/><d:cxn srcId="main" destId="left" srcOrd="0"/>'
+    '</d:cxnLst></d:dataModel>')
+diagram_template = (f'<d:layoutDef xmlns:d="{DGM}"><d:layoutNode name="canvas"><d:varLst><d:dir val="rev"/></d:varLst>'
+    '<d:alg type="composite"/><d:shape/><d:constrLst>'
+    '<d:constr type="w" for="ch" forName="heading" refType="w"/>'
+    '<d:constr type="h" for="ch" forName="heading" refType="h" fact="0.25"/>'
+    '<d:constr type="w" for="ch" forName="row" refType="w"/>'
+    '<d:constr type="h" for="ch" forName="row" refType="h" fact="0.75"/>'
+    '<d:constr type="t" for="ch" forName="row" refType="h" fact="0.25"/>'
+    '<d:constr type="primFontSz" for="ch" forName="heading" val="24"/>'
+    '<d:constr type="primFontSz" for="des" forName="cell" val="18"/>'
+    '</d:constrLst><d:forEach axis="ch" cnt="1">'
+    '<d:layoutNode name="heading" styleLbl="flat"><d:alg type="tx"/><d:shape type="rect"/>'
+    '<d:presOf axis="self"/><d:constrLst><d:constr type="lMarg" refType="primFontSz" fact="0.05"/>'
+    '<d:constr type="rMarg" refType="primFontSz" fact="0.05"/></d:constrLst></d:layoutNode>'
+    '<d:layoutNode name="row"><d:choose><d:if func="var" arg="dir" op="equ" val="rev">'
+    '<d:alg type="lin"><d:param type="linDir" val="fromR"/></d:alg></d:if>'
+    '<d:else><d:alg type="lin"><d:param type="linDir" val="fromL"/></d:alg></d:else></d:choose>'
+    '<d:shape/><d:constrLst><d:constr type="w" for="ch" forName="cell" refType="w"/>'
+    '<d:constr type="h" for="ch" forName="cell" refType="h"/></d:constrLst>'
+    '<d:forEach axis="ch"><d:layoutNode name="cell" styleLbl="flat"><d:alg type="tx"/>'
+    '<d:shape type="rect"/><d:presOf axis="desOrSelf"/></d:layoutNode></d:forEach>'
+    '</d:layoutNode></d:forEach></d:layoutNode></d:layoutDef>')
+diagram_colors = (f'<d:colorsDef xmlns:d="{DGM}" xmlns:a="{A}"><d:styleLbl name="flat">'
+    '<d:fillClrLst><a:srgbClr val="4080C0"><a:shade val="50000"/></a:srgbClr></d:fillClrLst>'
+    '<d:txFillClrLst><a:srgbClr val="FFFFFF"/></d:txFillClrLst></d:styleLbl></d:colorsDef>')
+diagram_style = (f'<d:styleDef xmlns:d="{DGM}" xmlns:a="{A}"><d:styleLbl name="flat"><d:style>'
+    '<a:lnRef idx="0"/><a:effectRef idx="0"/><a:fontRef idx="minor"/></d:style></d:styleLbl></d:styleDef>')
+diagram_parts = {"word/diagrams/data.xml":diagram_graph,"word/diagrams/layout.xml":diagram_template,
+    "word/diagrams/colors.xml":diagram_colors,"word/diagrams/style.xml":diagram_style}
+diagram_rels = ''.join(relationship(key,kind,'diagrams/'+file+'.xml') for key,kind,file in [
+    ('diagram','diagramData','data'),('layout','diagramLayout','layout'),
+    ('colors','diagramColors','colors'),('style','diagramQuickStyle','style')])
+diagram_body = '<w:p>' + smartart.replace('r:dm="diagram"','r:dm="diagram" r:lo="layout" r:cs="colors" r:qs="style"') + '</w:p>'
+package("diagram-composite.docx",diagram_body,rels=diagram_rels,extras=diagram_parts)
+package("diagram-cycle.docx",diagram_body,rels=diagram_rels,extras={**diagram_parts,
+    "word/diagrams/data.xml":diagram_graph.replace('</d:cxnLst>','<d:cxn srcId="left" destId="main"/></d:cxnLst>')})
+package("diagram-unsupported.docx",diagram_body,rels=diagram_rels,extras={**diagram_parts,
+    "word/diagrams/layout.xml":diagram_template.replace('type="composite"','type="cycle"')})
+
+
+def emf_record(kind, payload):
+    payload += b'\0' * (-len(payload) % 4)
+    return struct.pack('<II',kind,8+len(payload)) + payload
+
+
+def emf_preview(label):
+    font = bytearray(360)
+    struct.pack_into('<Iiiiii',font,0,1,-10,0,0,0,400)
+    font[32:32+12] = 'Arial\0'.encode('utf-16le')
+    bitmap = bytearray(108)
+    struct.pack_into('<II',bitmap,0,114,176)
+    struct.pack_into('<iiii',bitmap,24,4,0,16,16)
+    bitmap[42:44] = bytes([255,1])
+    struct.pack_into('<6f',bitmap,52,1,0,0,1,0,0)
+    struct.pack_into('<7I',bitmap,80,0,108,52,160,16,2,2)
+    dib = struct.pack('<IiiHHIIiiIIIII',40,2,2,1,32,3,16,0,0,0,0,16711680,65280,255)
+    pixels = bytes([255,0,0,255, 0,128,0,128, 0,0,255,255, 0,0,0,0])
+    text = label.encode('utf-16le')
+    text_record = bytearray(68)
+    struct.pack_into('<I',text_record,16,1)
+    struct.pack_into('<ff',text_record,20,1,1)
+    struct.pack_into('<iiIII',text_record,28,20,18,len(text)//2,76,0)
+    records = [emf_record(10,struct.pack('<ii',0,0)),emf_record(9,struct.pack('<ii',40,32)),
+        emf_record(82,font),emf_record(37,struct.pack('<I',1)),emf_record(24,struct.pack('<I',0)),
+        bytes(bitmap)+dib+pixels,emf_record(22,struct.pack('<I',6)),emf_record(84,bytes(text_record)+text),
+        emf_record(14,struct.pack('<III',0,16,20))]
+    header = bytearray(108)
+    struct.pack_into('<IIiiii',header,0,1,108,0,0,40,32)
+    struct.pack_into('<IIII',header,40,1179469088,65536,len(header)+sum(map(len,records)),1+len(records))
+    return bytes(header)+b''.join(records)
+
+
+emf_bytes = emf_preview('Clip 🐦 & <x>')
+(ROOT / 'preview.emf').write_bytes(emf_bytes)
+(ROOT / 'preview-truncated.emf').write_bytes(emf_bytes[:-4])
+emf_types = '<Default Extension="emf" ContentType="image/x-emf"/>'
+for name, value in [('metafile-preview',emf_bytes),('metafile-truncated',emf_bytes[:-4])]:
+    package(name+'.docx','<w:p>'+ole_preview+'</w:p>',rels=relationship('image','image','media/preview.emf'),
+        extras={'word/media/preview.emf':value},extra_types=emf_types)
 
 unsupported = '<w:p><w:r><w:drawing/></w:r><w:hyperlink r:id="evil"><w:r><w:t>Unsafe</w:t></w:r></w:hyperlink><w:r><w:footnoteReference w:id="2"/></w:r></w:p>'
 package("unsupported.docx", unsupported, rels=relationship("evil","hyperlink","javascript:alert(1)",True))

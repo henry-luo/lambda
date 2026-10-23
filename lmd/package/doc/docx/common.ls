@@ -10,6 +10,9 @@ pub let WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDra
 pub let MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 pub let CH = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 pub let WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+pub let DGM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+pub let V = "urn:schemas-microsoft-com:vml"
+pub let O = "urn:schemas-microsoft-com:office:office"
 let codes = ["invalid-source", "invalid-options", "invalid-package", "missing-part",
     "invalid-xml", "invalid-target", "unsupported", "style-cycle"]
 
@@ -28,6 +31,7 @@ pub fn uri(value) => if (value == "http://purl.oclc.org/ooxml/wordprocessingml/m
     else if (value == "http://purl.oclc.org/ooxml/drawingml/main") A
     else if (value == "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing") WP
     else if (value == "http://purl.oclc.org/ooxml/drawingml/chart") CH
+    else if (value == "http://purl.oclc.org/ooxml/drawingml/diagram") DGM
     else value
 
 pub fn xml_node(node, inherited = {}) => xml.tree(node,inherited,uri)
@@ -37,6 +41,10 @@ pub fn child(node, tag, ns = W) => first(children(node,tag,ns))
 pub fn attr(node, key, ns = W) => node.attrs[ns ++ "#" ++ key]
 pub fn text(node) => if (node is string) node else if (node is array) join([for (n in node) text(n)],"")
     else if (node is map) text(node.children) else ""
+pub fn drawing_text(node) => if (node.uri == A and node.tag == "t") text(node)
+    else if (node.uri == A and node.tag == "br") "\n"
+    else if (node.uri == A and node.tag == "tab") "\t"
+    else join([for (child in children(node,null,null)) drawing_text(child)],"")
 pub fn descendants(node, tag, ns) => [for (child in children(node,null,null),
     found in (if (child.tag == tag and child.uri == ns) [child] else []) ++ descendants(child,tag,ns)) found]
 pub fn collect(results, field) => [for (result in results, value in result[field]) value]

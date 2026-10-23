@@ -4,6 +4,8 @@ import package: .package
 import styles: .styles
 import media: lambda.doc.media
 import charts: .charts
+import diagrams: .diagrams
+import metafile: .metafile
 import drawing: .drawing
 import presentation: .presentation
 
@@ -32,27 +34,57 @@ fn paragraph_tag(resolved, options) {
     else {tag:heading,attrs:{}}
 }
 
-fn picture(node, pkg, options, width, height, properties) map^ {
-    let images = c.descendants(node,"blip",c.A)
-    let blip = c.first(images)
-    let rel = package.by_id(pkg.relationships,c.get(blip.attrs,c.R ++ "#embed",c.attr(blip,"link",c.R)))
-    let mime = if (rel == null or rel.external) null else package.content_type(pkg,rel.target)
-    let extra = if (len(images) > 1 or len(c.descendants(node,"txbxContent",c.W)) > 0)
-        [warning(pkg,"unsupported-drawing-content","Only the first raster image in the drawing is supported")^] else [];
-    if (blip == null) result([], [warning(pkg,"unsupported-drawing","Drawing has no supported raster image")^])
-    else if (rel.external or c.attr(blip,"link",c.R) != null) result([], [warning(pkg,"external-image","External image was not loaded")^])
+fn image_reference(pkg, options, id, linked, width, height, alt) map^ {
+    let rel = package.by_id(pkg.relationships,id)
+    let mime = if (rel == null or rel.external) null else package.content_type(pkg,rel.target);
+    if (rel.external or linked) result([], [warning(pkg,"external-image","External image was not loaded")^])
     else if (rel == null or rel.type != c.R ++ "/image") result([], [warning(pkg,"missing-image","Unresolved image relationship")^])
     else if (options.images == "omit") result([], [warning(pkg,"omitted-image","Image omitted by conversion options")^])
-    else if (not contains(["image/png","image/jpeg","image/gif","image/bmp","image/tiff","image/webp"],mime))
+    else if (not contains(["image/png","image/jpeg","image/gif","image/bmp","image/tiff","image/webp",
+        "image/x-emf","image/emf"],mime))
         result([], [warning(pkg,"unsupported-image-type","Image type is outside the raster profile")^])
     else if (pkg.parts[rel.target] == null) result([], [warning(pkg,"missing-image","Image part is missing")^])
     else {
         let bytes = input(pkg.parts[rel.target],"binary")^;
         if (bytes == null) result([], [warning(pkg,"missing-image","Image part is empty")^]) else
-            result([{kind:"image",src:media.data_uri(bytes,mime)^,
-                alt:c.get(properties.attrs,"#descr",c.get(properties.attrs,"#title","")),
-                width:if (width > 0) width else null,height:if (height > 0) height else null}],extra)
+        if (contains(["image/x-emf","image/emf"],mime)) {
+            let image = metafile.read(bytes,width,height);
+            if (image == null) result([],[warning(pkg,"unsupported-image-type","EMF records are outside the bitmap/text preview profile")^])
+            else result([{kind:"vector",class:"docx-object",svg:image.svg,text:image.text,width:width,height:height}])
+        } else
+            result([{kind:"image",src:media.data_uri(bytes,mime)^,alt:alt,
+                width:if (width > 0) width else null,height:if (height > 0) height else null}])
     }
+}
+fn picture(node, pkg, options, width, height, properties) map^ {
+    let images = c.descendants(node,"blip",c.A)
+    let blip = c.first(images);
+    if (blip == null) result([], [warning(pkg,"unsupported-drawing","Drawing has no supported raster image")^])
+    else {
+        let image = image_reference(pkg,options,c.get(blip.attrs,c.R ++ "#embed",c.attr(blip,"link",c.R)),
+            c.attr(blip,"link",c.R) != null,width,height,
+            c.get(properties.attrs,"#descr",c.get(properties.attrs,"#title","")))^;
+        result(image.nodes,image.diagnostics ++ (if (len(image.nodes) > 0 and
+            (len(images) > 1 or len(c.descendants(node,"txbxContent",c.W)) > 0))
+            [warning(pkg,"unsupported-drawing-content","Only the first raster image in the drawing is supported")^] else []))
+    }
+}
+
+fn embedded_object(node, pkg, options) map^ {
+    let ole = c.child(node,"OLEObject",c.O)
+    let label = "Embedded object" ++ (if (c.attr(ole,"ProgID","") == null) ""
+        else " (" ++ c.attr(ole,"ProgID","") ++ ")")
+    // shapetype/formulas describe the preview; they are not independently visible content.
+    let shape = c.first([for (shape in c.children(node,"shape",c.V)
+        where c.attr(shape,"id","") == c.attr(ole,"ShapeID","")) shape])
+    let image = c.child(shape,"imagedata",c.V)
+    let preview = if (image == null) result() else image_reference(pkg,options,c.attr(image,"id",c.R),false,
+        c.pixels(c.attr(node,"dxaOrig"),15.0),c.pixels(c.attr(node,"dyaOrig"),15.0),label)^;
+    if (len(preview.nodes) > 0) preview
+    else result([{kind:"fallback",class:"docx-object",label:label,text:"[" ++ label ++ "]"}],
+        [warning(pkg,"unsupported-object-preview",label ++ ": " ++
+            (if (len(preview.diagnostics) > 0) preview.diagnostics[0].message
+             else "No supported saved preview") ++ "; placeholder retained")^])
 }
 
 fn drawing_node(node, pkg, sheet, options) map^ {
@@ -62,8 +94,10 @@ fn drawing_node(node, pkg, sheet, options) map^ {
     let properties = c.first(c.descendants(node,"docPr",c.WP))
     let references = c.descendants(node,"chart",c.CH)
     let reference = c.first(references)
+    let diagram = c.first(c.descendants(node,"relIds",c.DGM))
     let shape = drawing.shape(node,sheet.theme)
     let contents = if (reference != null) charts.read(pkg,reference,width,height)^
+        else if (diagram != null) diagrams.read(pkg,diagram,width,height,sheet.theme)^
         else if (shape != null and width > 0 and height > 0) result([{*:shape,width:width,height:height}])
         else if (len(c.descendants(node,"wsp",c.WPS)) > 0)
             result([],[warning(pkg,"unsupported-shape","Shape geometry, fill, outline or effects are outside the flat rectangle profile")^])
@@ -138,6 +172,7 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
     else if (node.uri == c.W and contains(["drawing","pict"],node.tag) and
         len(c.descendants(node,"txbxContent",c.W)) > 0) text_box(node,pkg,sheet,options)^
     else if (node.uri == c.W and node.tag == "drawing") drawing_node(node,pkg,sheet,options)^
+    else if (node.uri == c.W and node.tag == "object") embedded_object(node,pkg,options)^
     else if (node.uri == c.MC and node.tag == "AlternateContent") {
         // choose a single representation, so fallback material never duplicates the choice.
         let modern = c.first([for (branch in c.children(node,"Choice",c.MC)
@@ -145,7 +180,9 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
         let fallback = c.child(node,"Fallback",c.MC)
         let chosen = if (modern != null) modern else if (fallback != null) fallback else c.child(node,"Choice",c.MC)
         let contents = inline_many(c.children(chosen,null,null),pkg,sheet,marks,options)^;
-        result(contents.nodes,contents.diagnostics ++ (if (modern != null or len(c.descendants(chosen,"txbxContent",c.W)) > 0) []
+        // a saved raster is a complete compatibility representation; its own diagnostics report failures.
+        result(contents.nodes,contents.diagnostics ++ (if (modern != null or drawing.raster_choice(chosen) or
+            len(c.descendants(chosen,"txbxContent",c.W)) > 0) []
             else [warning(pkg,"unsupported-alternate-content","Selected one compatibility representation")^]))
     } else {
         let contents = inline_many(c.children(node,null,null),pkg,sheet,marks,options)^
