@@ -10,7 +10,8 @@ pn next_rand(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-pn matmul(a: float[], b: float[], c: float[], n: int) {
+// publish the computed matrix through the caller's destination (S9.1.3).
+pn matmul(a: float[], b: float[], var c: float[], n: int) {
     var i = 0
     while (i < n) {
         var j = 0
@@ -33,7 +34,7 @@ pn main() {
     let size = N * N
     var a = fill(size, 0.0)
     var b = fill(size, 0.0)
-    var c = fill(size, 0.0)
+    var c: float[] = fill(size, 0.0)
 
     // Initialize with pseudo-random values in [-1.0, 1.0)
     var seed = 42
