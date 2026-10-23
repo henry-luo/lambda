@@ -1613,6 +1613,22 @@ TEST(JsInterpreter, ModuleHotEntriesPreserveLiveSlotsAndPropertyCallbacks) {
     }
 }
 
+TEST(JsInterpreter, ObjectMethodSourceStaysOutsideFunctionSatelliteAdmission) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    Item method = transpile_js_to_mir(&runtime, "({valueOf(){return 17}}).valueOf",
+        "object-method-admission.js", NULL);
+    ASSERT_EQ(get_type_id(method), LMD_TYPE_FUNC);
+    EXPECT_EQ(js_call_function(method, make_js_undefined(), NULL, 0).get_double(), 17);
+    EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), JS_FUNCTION_BODY_AST);
+    EXPECT_EQ(js_runtime_state.auto_mir_owner, nullptr);
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ModuleHotEntriesKeepShadowedIntrinsicBindingsPrivate) {
     JsExecutionBackendScope selected("auto");
     Runtime runtime = {};
@@ -6662,6 +6678,48 @@ run();
         ASSERT_FALSE(item_is_error(result));
         EXPECT_EQ(result.item, b2it(true));
         runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsRegExp, SplitSkipsUnobservableMissesAndKeepsProtocolEffects) {
+    const char* cases[] = {
+        R"JS(let input='x'.repeat(32000),out=input.split(/\r\n?|\n|\f/);out.length===1&&out[0]===input)JS",
+        R"JS(JSON.stringify('a\r\nb\nc\fd'.split(/\r\n?|\n|\f/))==='["a","b","c","d"]')JS",
+        R"JS(JSON.stringify('é😀one\r\ntwo漢\nlast'.split(/\r\n?|\n|\f/))==='["é😀one","two漢","last"]')JS",
+        R"JS(''.split(/(?:)/).length===0&&'ab'.split(/(?:)/).join('|')==='a|b'&&'ab'.split(/$/).join('|')==='ab'&&'baaac'.split(/a*/).join('|')==='b|c')JS",
+        R"JS(let out='😀a'.split(/(?:)/);out.length===3&&out[0].charCodeAt(0)===0xd83d&&out[1].charCodeAt(0)===0xde00&&out[2]==='a'&&'😀a'.split(/(?:)/u).join('|')==='😀|a')JS",
+        R"JS(let seat=/x/y,r=/x/;r.constructor={[Symbol.species]:function(){return seat}};let out='axb'.split(r,1),end=seat.lastIndex;out.length===1&&out[0]==='a'&&end===2&&'abc'.split(r)[0]==='abc'&&seat.lastIndex===0)JS",
+        R"JS(let seat=/$/y,r=/$/;r.constructor={[Symbol.species]:function(){return seat}};let out='abc'.split(r);out.length===1&&out[0]==='abc'&&seat.lastIndex===0)JS",
+        R"JS(let saved=RegExp.prototype.exec,seats=[],out;try{RegExp.prototype.exec=function(s){seats.push(this.lastIndex);return saved.call(this,s)};out='abcx'.split(/x/)}finally{RegExp.prototype.exec=saved}out.join('|')==='abc|'&&seats.join(',')==='0,1,2,3')JS",
+        R"JS(let descriptor=Object.getOwnPropertyDescriptor(RegExp.prototype,'exec'),reads=0,out;try{Object.defineProperty(RegExp.prototype,'exec',{configurable:true,get(){reads++;return descriptor.value}});out='abcx'.split(/x/)}finally{Object.defineProperty(RegExp.prototype,'exec',descriptor)}out.join('|')==='abc|'&&reads===4)JS",
+        R"JS(let seat=/x/y,r=/x/,calls=0;seat.exec=function(s){calls++;return null};r.constructor={[Symbol.species]:function(){return seat}};let out='abc'.split(r);out[0]==='abc'&&calls===3&&seat.lastIndex===2)JS",
+        R"JS(let seat=/x/y,r=/x/,caught=false;r.constructor={[Symbol.species]:function(){return seat}};Object.defineProperty(seat,'lastIndex',{writable:false});try{'abc'.split(r)}catch(e){caught=e instanceof TypeError}caught)JS",
+        R"JS(let seat=/x/y,r=/x/,calls=0;r.constructor={[Symbol.species]:function(){return seat}};let limit={valueOf(){seat.exec=function(){calls++;return null};gc();return 99}};let out='abc'.split(r,limit);out[0]==='abc'&&calls===3)JS",
+        R"JS(JSON.stringify('a1b2'.split(/(\d)/))==='["a","1","b","2",""]')JS",
+        R"JS(/(old)/.exec('old');let input='a\nb\nc',out=input.split(/\n/);out.join('|')==='a|b|c'&&RegExp.lastMatch==='\n'&&RegExp.leftContext==='a\nb'&&RegExp.rightContext==='c'&&RegExp.$1==='')JS",
+    };
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        for (bool collect : {false, true}) {
+            for (const char* source : cases) {
+                SCOPED_TRACE(backend);
+                SCOPED_TRACE(collect);
+                SCOPED_TRACE(source);
+                Runtime runtime = {};
+                runtime_init(&runtime);
+                Item setup = transpile_js_to_mir(&runtime, "0;", "regexp-split-setup.js", NULL);
+                ASSERT_FALSE(item_is_error(setup));
+                gc_heap_t* gc = runtime.eval_context->heap->gc;
+                gc_set_force_collect_interval(gc, collect ? 1 : 0);
+                gc_set_poison_freed(gc, collect ? 1 : 0);
+                Item result = transpile_js_to_mir(&runtime, source, "regexp-split-scan.js", NULL);
+                EXPECT_FALSE(item_is_error(result));
+                if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+                gc_set_force_collect_interval(gc, 0);
+                gc_set_poison_freed(gc, 0);
+                runtime_cleanup(&runtime);
+            }
+        }
     }
 }
 

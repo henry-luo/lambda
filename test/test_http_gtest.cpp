@@ -216,6 +216,68 @@ TEST_F(HttpInputTest, DecodesBrotliDocumentResponses) {
     mem_free(content);
 }
 
+TEST_F(HttpInputTest, ErrorDocumentsRetainFinalResponseMetadataButResourcesReject) {
+    const char response[] = "HTTP/1.1 503 Service Unavailable\r\n"
+        "Content-Type: application/xhtml+xml\r\nContent-Language: fr\r\n"
+        "Content-Length: 5\r\n\r\nerror";
+    for (bool document : {false, true}) {
+        HttpHeaderCaptureServer destination;
+        ASSERT_TRUE(http_header_capture_server_start(&destination, 0, response, sizeof(response) - 1));
+        char redirect[256];
+        int length = snprintf(redirect, sizeof(redirect), "HTTP/1.1 302 Found\r\n"
+            "Location: http://127.0.0.1:%d/final\r\nSet-Cookie: error=kept; Path=/\r\n"
+            "Content-Length: 0\r\n\r\n", destination.port);
+        ASSERT_GT(length, 0);
+        ASSERT_LT((size_t)length, sizeof(redirect));
+        HttpHeaderCaptureServer source;
+        ASSERT_TRUE(http_header_capture_server_start(&source, 0, redirect, (size_t)length));
+        char url[128], final_url[128];
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d/start", source.port);
+        snprintf(final_url, sizeof(final_url), "http://127.0.0.1:%d/final", destination.port);
+        size_t size = 99;
+        long status = 0;
+        char* effective = NULL; char* language = NULL; char* type = NULL;
+        char* body = document ? download_http_document_with_cookie_jar(url, &size, NULL,
+            &effective, &language, &type, &status) : download_http_content(url, &size, NULL, &effective);
+        char request[8192] = {};
+        http_header_capture_server_finish(&source, request, sizeof(request));
+        http_header_capture_server_finish(&destination, request, sizeof(request));
+        if (document) {
+            ASSERT_NE(body, nullptr);
+            EXPECT_STREQ(body, "error");
+            EXPECT_EQ(size, 5u);
+            EXPECT_EQ(status, 503);
+            EXPECT_STREQ(effective, final_url);
+            EXPECT_STREQ(language, "fr");
+            EXPECT_STREQ(type, "application/xhtml+xml");
+            EXPECT_NE(strstr(request, "Cookie: error=kept"), nullptr);
+        } else {
+            EXPECT_EQ(body, nullptr);
+            EXPECT_EQ(size, 0u);
+            EXPECT_EQ(effective, nullptr);
+        }
+        mem_free(body); mem_free(effective); mem_free(language); mem_free(type);
+    }
+}
+
+TEST_F(HttpInputTest, TruncatedErrorDocumentRemainsTransportFailure) {
+    const char response[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n"
+        "Content-Length: 100\r\n\r\npartial";
+    HttpHeaderCaptureServer server;
+    ASSERT_TRUE(http_header_capture_server_start(&server, 0, response, sizeof(response) - 1));
+    char url[128];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/document", server.port);
+    size_t size = 99;
+    long status = 99;
+    char* body = download_http_document_with_cookie_jar(url, &size, NULL, NULL, NULL, NULL, &status);
+    char request[8192] = {};
+    http_header_capture_server_finish(&server, request, sizeof(request));
+    EXPECT_EQ(body, nullptr);
+    EXPECT_EQ(size, 0u);
+    EXPECT_EQ(status, 0);
+    mem_free(body);
+}
+
 TEST_F(HttpInputTest, TopLevelNavigationUsesPageLoadTimeout) {
     HttpHeaderCaptureServer server;
     // A 31-second first-byte delay exceeds the generic resource limit but is

@@ -1549,6 +1549,10 @@ static void js_performance_ensure_origin(void) {
     // clocks together keeps timeOrigin + now() consistent with Date.now().
     state->origin_monotonic_ms = js_performance_monotonic_now_ms();
     state->origin_epoch_ms = js_performance_epoch_now_ms();
+    // virtual zero stays frozen until a host turn; use Date's epoch precision
+    // so rounding cannot put its timestamp before the same clock's origin.
+    if (state->virtual_clock_enabled)
+        state->origin_epoch_ms = js_date_time_clip(state->origin_epoch_ms);
     state->origin_epoch = js_heap_epoch;
 }
 
@@ -1557,7 +1561,11 @@ extern "C" double js_performance_monotonic_to_relative(double monotonic_ms) {
     JsPerformanceState* state = js_performance_state();
     return state ? monotonic_ms - state->origin_monotonic_ms : monotonic_ms;
 }
-JS_FORWARD_RETURN(double, js_performance_now_ms, (void), js_performance_monotonic_to_relative, (js_performance_monotonic_now_ms()))
+extern "C" double js_performance_now_ms(void) {
+    // capture the origin before sampling now, including lazy fallback entry.
+    js_performance_ensure_origin();
+    return js_performance_monotonic_to_relative(js_performance_monotonic_now_ms());
+}
 
 extern "C" double js_performance_time_origin_ms(void) {
     js_performance_ensure_origin();

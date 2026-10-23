@@ -1538,6 +1538,41 @@ TEST_F(GCHeapTest, CompactPreservesListData) {
     gc_unregister_root(gc, &root);
 }
 
+TEST_F(GCHeapTest, CompactionSurvivesScratchAllocationFailureWithoutRetainingOwners) {
+    uint64_t root = ItemNull.item;
+    gc_register_root(gc, &root);
+    const size_t counts[] = {1, (size_t)gc->mark_capacity + 1};
+    for (size_t count : counts) {
+        // a chain keeps the mark stack shallow while its owner worklist grows.
+        for (size_t index = 0; index < count; index++) {
+            uint8_t* node = (uint8_t*)make_list(2, 2);
+            uint64_t* items = *(uint64_t**)(node + LAMBDA_GC_OFF_LIST_ITEMS);
+            items[0] = root;
+            items[1] = int_item((int64_t)index);
+            root = list_item(node);
+        }
+        memtrack_fault_inject(0);
+        gc_collect(gc, NULL, 0);
+        memtrack_fault_clear();
+        // cover both a failed first allocation and growth after a prior cycle.
+        // the following successful cycle must not reuse stale owner entries.
+        for (int cycle = 0; cycle < 2; cycle++) {
+            uint64_t node = root;
+            for (size_t remaining = count; remaining > 0; remaining--) {
+                uint64_t* items = *(uint64_t**)((uint8_t*)(uintptr_t)node + LAMBDA_GC_OFF_LIST_ITEMS);
+                EXPECT_EQ(items[1], int_item((int64_t)remaining - 1));
+                node = items[0];
+            }
+            EXPECT_EQ(node, ItemNull.item);
+            gc_collect(gc, NULL, 0);
+        }
+        root = ItemNull.item;
+        gc_collect(gc, NULL, 0);
+        EXPECT_EQ(gc->object_count, 0u);
+    }
+    gc_unregister_root(gc, &root);
+}
+
 TEST_F(GCHeapTest, CompactPromotesArrayNumBaseAndRebindsLiveView) {
     // Build the checked ArrayNum ABI used by the C collector: the view is newer
     // and therefore visited before its base in the all_objects list.

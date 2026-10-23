@@ -6176,10 +6176,13 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
         return "definition shape";
     }
     if (definition->is_generator || definition->is_async) return "suspended definition";
-    // D8.1.3v32 shares classic admission, while only the predicate proof grants
+    // object methods retain function-expression AST nodes but cannot be cloned as function source.
+    if (function->flags & JS_FUNC_FLAG_METHOD)
+        return "method definition shape";
+    // D8.1.3v33 shares classic admission, while only the predicate proof grants
     // the light-call contract. Classify before entry even at threshold one.
     if (script->is_module) {
-        if (!script->is_es_module || (function->flags & JS_FUNC_FLAG_METHOD))
+        if (!script->is_es_module)
             return "module definition shape";
         js_interp_module_predicate_expression(function);
     }
@@ -7376,6 +7379,8 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     bool reusing_context = false;
     if (!js_prepare_eval_context(runtime, true, &eval, &reusing_context)) return ItemError;
     (void)eval;
+    // direct module/agent entry shares the source entry's realm clock (D6.2.2v2).
+    (void)js_performance_time_origin_ms();
     if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     // DOM wrapper construction interns runtime property names, so it must run
     // after the common JS name pool becomes dynamic, as it does on the MIR path.

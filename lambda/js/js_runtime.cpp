@@ -19909,10 +19909,37 @@ static Item js_regexp_split_with_ops(Item this_val, Item str, Item limit, const 
     // to the one we cannot, instead of asking exec for an impossible offset.
     bool subject_is_utf8 = !unicode_matching && ops->split_utf8_native &&
         ops->split_utf8_native(splitter_root.get());
+    JsRegexData* scan_data = NULL;
+    // D8.4.1v2: a builtin splitter has no observable failed exec probes.
+    // find its next seat once, then keep the ordinary match/capture protocol.
+    bool skip_failed_probes = ops == &js_regexp_default_ops && s_str &&
+        !unicode_matching && js_regexp_builtin_bulk_eligible(splitter_root.get(), &scan_data) &&
+        !scan_data->needs_utf16_subject && !scan_data->bt && !scan_data->special_property_kind &&
+        js_regex_num_groups(scan_data) == 1 &&
+        // lone UTF-16 surrogates have no seat in a direct UTF-8 search.
+        (s_str->is_ascii || utf8_valid(s_str->chars, s_str->len));
     bool zero_width_at_last_seat = false;
     // The last successful match object, replayed for its captures when the
     // synthesized branch below stands in for an unseatable position.
     while (q < size) {
+        if (skip_failed_probes && !js_split_index_is_trailing_surrogate(it2s(string_root.get()), q)) {
+            String* input = it2s(string_root.get());
+            re2::StringPiece seat;
+            JsRegexMatchResult found = js_regex_match_internal(scan_data,
+                input->chars, (int)input->len, js_utf16_idx_to_byte(input, q),
+                re2::RE2::UNANCHORED, &seat, 1);
+            if (found == JS_REGEX_MATCH_RESOURCE_ERROR)
+                return js_throw_range_error("RegExp match exceeded engine resources");
+            int64_t next = found == JS_REGEX_MATCH_FOUND ? js_utf16_index_from_byte(input,
+                (int)(seat.data() - input->chars)) : size;
+            if (next >= size) {
+                // the skipped sticky failures leave lastIndex at zero; a
+                // match at the terminal boundary is never visited by @@split.
+                JS_RETURN_IF_ERROR(ops->set_last_index(splitter_root.get(), (Item){.item = i2it(0)}));
+                break;
+            }
+            q = next;
+        }
         Item z = ItemNull;
         match_root.set(z);
         bool synthesized = subject_is_utf8 &&

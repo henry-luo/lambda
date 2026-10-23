@@ -2028,6 +2028,7 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     ASSERT_NE(nullptr, page_file);
     const char* document =
         "<!doctype html><body>first-render-ready<script>"
+        "if(performance.now()===0&&Date.now()===performance.timeOrigin)console.log('HEADLESS_EPOCH_ALIGNED');"
         "var announced=false;(function tick(){var token=setTimeout(tick,0);"
         "if(token>0&&!announced){console.log('RECURSIVE_TIMER_QUEUED');announced=true;}})();"
         "</script></body>";
@@ -2050,6 +2051,7 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     // prove recursive work was queued, then require a clean close within the watchdog.
     EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "RECURSIVE_TIMER_QUEUED"), nullptr);
+    EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "HEADLESS_EPOCH_ALIGNED"), nullptr);
     shell_result_free(&shell_result);
 
     remove(page);
@@ -2531,6 +2533,55 @@ TEST(RadiantViewTest, PreservesScriptAndDocumentTailAfterNullBytesInFileAndHttpH
     }
     remove(page);
     remove(view_log);
+}
+
+TEST(RadiantViewTest, HttpErrorNavigationRendersOriginBodyAndExecutesScripts) {
+#ifndef _WIN32
+    test_radiant_view_ensure_temp_dir();
+    const char page[] = "<!doctype html><p id='origin'>origin error body</p>"
+        "<script src='relative.js'></script><script>"
+        "if(document.getElementById('origin').textContent!=='origin error body'||"
+        "window.relativeErrorScript!==17)throw Error('error body');"
+        "console.log('ORIGIN_ERROR_DOCUMENT_EXECUTED');</script>";
+    const char script[] = "window.relativeErrorScript=17;";
+    const char rejected[] = "throw Error('ERROR_RESOURCE_MUST_NOT_EXECUTE');";
+    const char resource_page[] = "<script src='/rejected.js'></script>";
+    const RadiantViewHttpResource resources[] = {
+        {"GET /redirect ", "text/html", "", 0, "Location: /final/error.html\r\n", 302},
+        {"GET /final/error.html ", "text/html", page, sizeof(page) - 1, "Content-Language: fr\r\n", 404},
+        {"GET /unavailable ", "text/html", page, sizeof(page) - 1, "", 503},
+        {"GET /final/relative.js ", "text/javascript", script, sizeof(script) - 1},
+        {"GET /relative.js ", "text/javascript", script, sizeof(script) - 1},
+        {"GET /resource ", "text/html", resource_page, sizeof(resource_page) - 1},
+        {"GET /rejected.js ", "text/javascript", rejected, sizeof(rejected) - 1, "", 404},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    RadiantViewServerScope server_scope = {server.pid};
+    const char* view_log = "./temp/test_radiant_view_http_error.log";
+    for (const char* path : {"redirect", "unavailable", "resource"}) {
+        SCOPED_TRACE(path);
+        char url[128];
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d/%s", server.port, path);
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
+            {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+        };
+        ShellResult result = test_radiant_view_run_logged_headless(url, nullptr, env);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_FALSE(result.timed_out);
+        if (strcmp(path, "resource")) {
+            EXPECT_NE(strstr(output, "ORIGIN_ERROR_DOCUMENT_EXECUTED"), nullptr) << output;
+            EXPECT_TRUE(test_radiant_view_file_contains(view_log, "HTTP: Server returned error"));
+        }
+        EXPECT_EQ(strstr(output, "ERROR_RESOURCE_MUST_NOT_EXECUTE"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+    remove(view_log);
+#endif
 }
 
 TEST(RadiantViewTest, InitializesScriptScreenFromHostViewport) {

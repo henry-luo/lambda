@@ -74,6 +74,15 @@ A cycle is **triggered** from two automatic sites, each paced by the same time b
 
 **Compact.** `gc_compact_data` copies live data buffers nursery→tenured and rewrites owner pointers (§4), then resets the nursery. The reset only rewinds the block cursors — it does **not** zero the reused memory. `gc_data_alloc` (and so `heap_data_alloc`/`heap_data_calloc`) zeroes at allocation time, right before the caller touches the buffer; `gc_data_alloc_uninit` / `heap_data_alloc_uninit` / `array_num_new_uninit` skip that pass for a caller that writes every byte before any read or GC safepoint (`fill`'s numeric/bool lanes, the varargs `array_*_fill` helpers). Zeroing at reset cost a memset of the whole nursery per collection on top of the callers' own initialization (brainfuck's 2.4 GB of `fill(30000, 0)` tapes were zeroed at reset, zeroed again by calloc, then written by fill).
 
+Compaction consumes a worklist of marked Array, ArrayNum, Map, Element and
+Function owners gathered while draining the mark stack. Nursery promotion and
+full tenured evacuation use the same owner list, avoiding additional walks of
+dead objects and objects without separate data buffers (**D4.3.1**). The list
+does not establish reachability: its count resets before marking and after
+compaction, and its entries are never GC roots (**D5.3.3**). Failed worklist
+allocation or growth retains the complete `all_objects` walk for that cycle.
+Existing owner-pointer fixups and view rebasing remain in the shared compactor.
+
 **Sweep.** `gc_sweep` (`gc_heap.c:1423`) walks `all_objects`: it finalizes dead externals via `gc_finalize_dead_object` (`gc_heap.c:1383`), unlinks dead nodes, returns object-zone slots to their free lists, frees large objects, unlinks bump objects, and clears `marked` on the survivors.
 
 **Adapt.** After sweeping, the **productivity rule** in `gc_collect` tunes the nursery threshold: if the cycle freed <40% of the nursery it grows the threshold 4×, <75% grows it 2×, capped at 256 MB — so unproductive collections are spread further apart rather than thrashing the cache. The time-budget pacing above is the complementary rule for the *productive* case: a script whose live graph keeps growing (havlak) frees ≥75% of a 3 MB nursery every time yet pays a full mark of the whole object heap per cycle; pacing on the mark share cut it from 27 to 5 collections.

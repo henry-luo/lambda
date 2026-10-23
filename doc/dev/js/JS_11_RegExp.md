@@ -127,6 +127,16 @@ The string methods delegate to the RegExp object via the well-known symbol proto
 
   Without `u` a split boundary can also land *between* an astral character's two surrogate halves, a position the UTF-8 subject has no byte offset for. **The subject is not widened for this** — storage stays UTF-8. Only a zero-width match can occur at such a position (a pattern needing surrogate granularity would already have had its subject expanded, and nothing that consumes input can start inside a character), so `@@split` carries the splitter's zero-width answer from the last position it *could* be seated at and stands in for `exec` there, replaying the retained match object so captures behave identically. `js_str_substring_utf16` already slices lone surrogates, so the halves fall out of the normal push path: `"😀b".split(/(?:)/)` is `["\ud83d","\ude00","b"]`, matching V8.
 
+  After species construction and limit coercion, native builtin splitters can
+  search past failed positions with the existing matcher (**D8.4.1v2**).
+  The guard requires builtin `exec`, writable own `lastIndex`, no captures,
+  a direct byte matcher, non-Unicode matching and well-formed UTF-8 input.
+  Match boundaries convert back to UTF-16 before the ordinary protocol runs;
+  surrogate-half replay remains in that protocol. A skipped terminal run of
+  failures resets `lastIndex` to zero. Exec overrides, descriptor changes,
+  captures, backtracking and lone-surrogate input retain individual probes
+  (**S1.11**, **D5.3.3**).
+
 All three observe and write `lastIndex` through the strict spec helper `js_regex_set_lastindex_strict` (`js_runtime.cpp:15804`), which throws a TypeError when `lastIndex` has been made non-writable. `js_regex_exec` (`js_runtime.cpp:15961`) is the shared engine: it reads `lastIndex` via `ToLength` (which can fire `valueOf`), uses it only for global/sticky regexes, matches via `js_regex_match_internal`, updates `lastIndex` to the match end (never auto-advancing on a zero-length match — callers own that), refreshes the static properties, and builds the result array. `js_regex_test` (`js_runtime.cpp:15711`) is a lighter sibling that returns a boolean.
 
 <img alt="Exec / match flow" src="diagram/d11_exec.svg" width="683">
