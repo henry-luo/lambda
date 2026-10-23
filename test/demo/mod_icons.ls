@@ -1,4 +1,5 @@
 // Shared album-style outline icons: one 24-unit grid, rounded 1.7-unit strokes.
+let table_grid = "M3 4h18v16H3z M3 9h18 M3 14h18 M9 4v16 M15 4v16"
 let strokes = {
     library:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
     albums:"M4 6h16v13H4z M7 3h10 M9 10l3 3 5-5",
@@ -23,6 +24,8 @@ let strokes = {
     export:"M12 15V3 M8 7l4-4 4 4 M5 12H3v9h18v-9h-2",
     undo:"M8 4L3 9l5 5 M3 9h11a6 6 0 0 1 0 12",
     redo:"M16 4l5 5-5 5 M21 9H10a6 6 0 0 0 0 12",
+    rotate_left:"M8 3L3 8l5 5 M3 8h9a7 7 0 1 1-7 8",
+    rotate_right:"M16 3l5 5-5 5 M21 8h-9a7 7 0 1 0 7 8",
     cut:"M9 8l11 13 M9 16L20 3 M5 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M5 13a4 4 0 1 0 0 8 4 4 0 0 0 0-8",
     copy:"M8 8h13v13H8z M16 8V3H3v13h5",
     paste:"M8 5H5v16h14V5h-3 M8 3h8v5H8z M8 12h8 M8 16h6",
@@ -51,7 +54,13 @@ let strokes = {
     header:"M5 3h14v18H5z M5 8h14 M8 5.5h8",
     footer:"M5 3h14v18H5z M5 16h14 M8 18.5h8",
     page_number:"M6 3h12v18H6z M11 8l-1 8 M15 8l-1 8 M8 11h9 M8 14h9",
-    table:"M3 4h18v16H3z M3 9h18 M3 14h18 M9 4v16 M15 4v16",
+    table:table_grid, select_table:table_grid,
+    select_cell:"M3 4h18v16H3z M3 10h7v6H3z M10 4v16 M3 10h18 M3 16h18",
+    select_row:"M3 4h18v16H3z M3 10h18v5H3z M9 4v16 M15 4v16",
+    select_column:"M3 4h18v16H3z M9 4h6v16H9z M3 9h18 M3 14h18",
+    border_all:"M3 3h18v18H3z M3 12h18 M12 3v18",
+    border_outer:"M3 3h18v18H3z M9 12h6 M12 9v6",
+    border_none:"M3 7V3h4 M17 3h4v4 M21 17v4h-4 M7 21H3v-4 M7 7l10 10",
     shapes:"M3 3h9v9H3z M15 9l6 6-6 6-6-6z",
     link:"M10 13l4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M13 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0",
     unlink:"M9 15l-2 2a4 4 0 0 1-6-6l2-2 M15 9l2-2a4 4 0 0 1 6 6l-2 2 M3 3l18 18",

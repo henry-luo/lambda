@@ -314,7 +314,7 @@ Found on the way and fixed with them, each covered by those fixtures:
 - A named call that skipped a required parameter split the tiers; it is now E206.
 - `name(map)`, `name(element)` and `name(object)` crashed, and so did `{a: int} <: map` and `<p> <: element`. Both read a shape past the end of the bare generic kinds. `object <: map` is now `false`, since `object` holds nominal values of every kind (S2.1.1v4), and `object`, `date` and `time` print and name as themselves rather than as `map` and `datetime` (`type_alias_name`).
 
-Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](#lr03-34) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](#lr07-39) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
+Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](<Lambda_Issue_Ledger (fixed).md#lr03-34>) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](#lr07-39) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
 
 Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_EXEC_BACKEND=interp` (1005/1005) and `LAMBDA_EXEC_BACKEND=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
 
@@ -607,6 +607,9 @@ An arrow is an expression (S16.6.7v2), so it is the value of a block or a list i
 <a id="lr02-36"></a>**LR02-36 · A quoted-path `import` without an alias is silently ignored · OPEN (found 2026-10-07, std test triage)**
 `import './circular_import.ls'` at the top of a script neither imports nor errors: the quoted-module branch at `lambda/runtime/build_ast.cpp:13179` only acts when `node->alias` is set, so the script runs as if the line were absent (it printed `42`). S16.9.8 gives the relative form `import .circular_import`, which does detect the cycle (E217, now asserted by `NegativeScriptTest.SelfImportIsCircularE217`). The unaliased quoted form should be rejected or resolved, not dropped.
 
+<a id="lr02-37"></a>**LR02-37 · The C expression parser gives `|`, `&`, `!` and `to` one binding power, so a type operation means one thing in a `type` declaration and another in a value expression (S10.1.1v4) · OPEN (found 2026-09-27 by the string-pattern audit; filed 2026-10-23)**
+`infix_bp` maps all four tokens to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c:1856`–`1858`), while the type-pattern parser and the reference grammar rank `to` above `&` above `!` above `|`. Re-checked 2026-10-23: with `type T = "a" | "b" & "c"` and `let x = "a" | "b" & "c"`, `"a" is T` is `true` and `"a" is x` is `false`; `let r = 5 | 1 to 3` fails at run time ("range bounds must be exact integers or single-codepoint strings") while the same type admits 5 and 1 to 3. S10.1.1v4 promises a type operation the same meaning wherever it is written; no ruling fixes the tiers themselves (SPO7, [LR05-17](#lr05-17)). Recommendation: make the reference-grammar order a clause of S10.1.1 and align the C expression parser. Record: [Lambda_Design_String_Pattern.md §5.5](Lambda_Design_String_Pattern.md#55-the-same-operators-in-value-expressions).
+
 ## 3. Value & type model (LR_03)
 
 <a id="lr03-40"></a>**LR03-40 · Qualified keys are not represented as (namespace, name): the map face ignores a symbol's namespace, `ns.attr:` in an element literal is desugared to a nested map, and parsed XML keeps `prefix:local` flat (S8.2.2v4) · OPEN (found 2026-10-06, while ruling key identity; ruled the same day)**
@@ -669,9 +672,6 @@ Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's 
 <a id="lr03-33"></a>**LR03-33 · Container patterns and function types compare by kind under `==` (S5.5.2, S2.1.1v4) · OPEN (found 2026-09-26, while fixing LR03-29)**
 `lambda_type_repr_equal` compares a map, element, bracket-pattern or function type by kind alone. So `{a: int} == {b: string}`, `<p> == <div>`, `[int] == [string]` and `fn (x: int) int == fn (x: string) int` are all `true`. The cause is `type(x)`: S2.1.1v4 has it name the kind, but for an element it returns the element's own tagged shape, kept for `name(type(e))` (074321c54a), and for a named map alias its TypeMap. Nothing tells that shape from a declared pattern of the same kind, and structural comparison would make `type(<p>) == element` `false`, which about 70 library and fixture lines rely on (`type(c) == element`). The same split shows under `is`: `<div> is type(<p>)` is `false`, because the shape is tested as the pattern `<p>`, while `type(<p>) == element` is `true`. A fix has `type(x)` of a structural element or map return the kind, keeps the tag elsewhere for `name()`, and then compares patterns structurally. Function types also wait on S11.1.4v2's pending variance. Related, and unruled: `type()` names `datetime` for a date value, so `type(t'2025-01-01') == date` is `false`; S2.1.1v4 does not say whether `type()` names the `date`/`time` sub-kind, as it names `list` and `range`.
 
-<a id="lr03-34"></a>**LR03-34 · A pattern type as a parameter or declaration annotation is rejected statically (S11.1.2v2, S11.4.1v3) · OPEN (found 2026-09-26, while fixing LR03-26)**
-With `type D = \(d+)`, `fn f(x: D) => x` then `f("12")` is E207 ("argument 1 expected type, got string"), and `let y: D = "12"` is E201 ("cannot initialize 'y' of type type with string"), on both tiers. An inline `x: \(d+)` fails the same way. The static relation reads the pattern's `LMD_TYPE_TYPE` tag as the `type` kind. `is`, match arms and fields test the same pattern correctly.
-
 <a id="lr03-35"></a>**LR03-35 · An object literal drops a field its type does not declare (S2.1.4) · OPEN (found 2026-09-26, while fixing LR03-19)**
 With `type P { a: int, b: string }`, `<P a: 1, b: "x", extra: 5>` prints `<P a: 1, b: "x">` and `.extra` is `null`, on both tiers and with no diagnostic. S2.1.4(3) makes an instance open: it may hold fields the type does not declare. A member addition does keep one (`p.z = 9`, fixture `proc/object_open_instance.ls`). No ruling says whether the literal keeps the field, as a shape transition, or rejects it; dropping it silently fits neither.
 
@@ -699,6 +699,9 @@ let a = [3]
 [2 is Lit, {a: 2} is {a: Lit}, ["b"] is "a"[], [3] is (1 | 2)[]]        // false, as expected
 ```
 S11.2.1 and S10.1.1v4 make a scalar's literal type the singleton of its value, but as the item type of `T[]` or `T[n]`, or as a type slot of a bracket pattern, a numeric or bool literal type admits every value of its kind. The same type is correct on its own (`2 is Lit`), as a map field, as a string or symbol literal, inside a literal union and as a range; declaration order makes no difference (the alias and the inline `1[]` agree), and both tiers answer the same. Every failing case is a packed `ArrayNum` (an int, float or bool lane), while text arrays, which are boxed, are checked value by value, so a lane-tag shortcut that skips the value test is the likely cause; it is not yet located. The validator path carries a guard for exactly this case: `element_contract_is_plain` (`lambda/validator/validate_pattern.cpp`) keeps a literal element contract off the tag-only path and cites `[3] is 1[]`, added in `a20e59b4f1` (2026-09-23), yet `is` still answers `true` there, so `is` reaches a different shortcut, or the guard regressed. No fixture pins the case.
+
+<a id="lr03-45"></a>**LR03-45 · `let u: type = int` is rejected statically: E201 "cannot initialize 'u' of type type with int" · OPEN (found 2026-09-27 during the string-pattern audit fixes; filed 2026-10-23)**
+A `type`-annotated binding cannot hold a base type value. The static check strips the type-value wrapper from the initializer and so compares `int` with `type`. A range or pattern initializer already defers to the run-time check (`let t: type = \("\d"+)` and `let w: type = R` for a range alias work since 2026-09-27); a base type does not. Re-checked 2026-10-23 on the debug build. The cause lies outside patterns, in the static boundary relation (`static_boundary_relation`, `lambda/runtime/build_ast.cpp`). Record: [Lambda_Design_String_Pattern.md A.2](Lambda_Design_String_Pattern.md#a2-the-2026-09-27-audit-defects) (defect #9).
 
 ## 4. Numbers, decimal & datetime (LR_04)
 
@@ -777,13 +780,13 @@ and compare `sum(img, 0)[0]` with the column sum computed after `as_float`.
 
 <a id="lr05-17"></a>**LR05-17 · String-pattern design questions with no formal open-issue entry · OPEN (logged 2026-10-23, string doc consolidation)**
 These pattern questions are open in the vibe records but have no `SO#` entry in `doc/Lambda_Formal_Semantics.md` Appendix B (SO32 captures and SO47 the empty needle already have one):
-- **SPO7, value half:** the tiers of `|`, `&`, binary `!` and `to` in value expressions. The island half is SP19.
+- **SPO7, value half:** the tiers of `|`, `&`, binary `!` and `to` in value expressions. The island half is SP19. The resulting divergence between front ends is [LR02-37](#lr02-37).
 - **SPO10:** what `.`, `...` and `"\s"` match across line terminators. Today `.` stops at a newline and `...` does not; the recommendation is a dotall `.` and the ECMAScript `\s` set.
 - **SPO12, spelling half:** how to write a case-insensitive `is` or `match`. The folding rule is S17.7.1. SP16's `\tag( … )` family, which the recommendation leaned on, was superseded by SP24.
 - **SPO1:** multi-letter and Unicode class names (`\p{Letter}`), deferred on 2026-08-07.
 - **Rev 1 questions never ruled (2026-01-27):** whether recursive patterns are allowed, and how detailed a pattern-mismatch diagnostic should be.
 
-Full text and recommendations: [Lambda_Expr_String_Pattern.md §8](Lambda_Expr_String_Pattern.md#8-open-questions-spo7spo14) and [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md) Appendix S §6. Summary: [Lambda_Type_String_Pattern.md §6.2](Lambda_Type_String_Pattern.md#62-deferred-and-open).
+Full text and recommendations: [Lambda_Design_String_Pattern.md §9](Lambda_Design_String_Pattern.md#9-open-issues-spo1spo14).
 
 ---
 
@@ -1011,7 +1014,7 @@ table (`lambda/runtime/sys_func_registry.c:1432`, `:1434`, re-resolved 2026-10-2
 composite `(name, arg_count)` map in `build_ast.cpp` cannot disambiguate them.
 Enabling them requires `first_param_type`-based disambiguation (one is
 `LMD_TYPE_PATH`) in `get_sys_func_info`, which does not exist.
-*Design status (noted 2026-10-23):* the file form `pn replace(path, …)` was proposed on 2026-02-28 and never ruled. GRP32 (2026-10-05) names `input()` → `replace()` → `output()` as the way to change file text, so whether the dedicated form is still wanted needs a user ruling before the registry work. Record: [Lambda_Type_String_Pattern.md §5.4](Lambda_Type_String_Pattern.md#54-file-replacepath---proposed-not-built).
+*Design status (noted 2026-10-23):* the file form `pn replace(path, …)` was proposed on 2026-02-28 and never ruled. GRP32 (2026-10-05) names `input()` → `replace()` → `output()` as the way to change file text, so whether the dedicated form is still wanted needs a user ruling before the registry work. Record: [Lambda_Design_String_Pattern.md §7.4](Lambda_Design_String_Pattern.md#74-file-replacepath---proposed-not-built).
 
 <a id="lr09-3"></a>**LR09-3 · Ordered comparison is deliberately partial · OPEN**
 The scalar comparators enumerate numeric/datetime/string cases and return
@@ -1044,7 +1047,7 @@ The markup formatters skip any text string above a size cap, log an error and ca
 `doc/Lambda_Sys_Func.md` gives `format(data, {type: 'json', compact: true})` as compact JSON. `lambda/format/format-json.cpp` has no compact path, so the output is indented exactly as with `indent: 2`. `indent: 0` is ignored as well. Either implement the option or drop it from the reference.
 
 <a id="lr09-34"></a>**LR09-34 · File-based `find(path, pattern, options?)` is designed but not built; it waits on a proposal that does not exist yet · OPEN (logged 2026-10-23, string doc consolidation)**
-GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, with the uniform `{value, index}` shape, `file` for a directory or wildcard, and opt-in `line` / `byte_offset` fields. Its determinism is to come from session caching, which a separate proposal is to design together with `input()`, `exists()` and `path#`; that proposal has not been written, so phase G5B of [Lambda_Lib_Grep.md](Lambda_Lib_Grep.md) is blocked. Today `find` takes a string or symbol only (`SYSFUNC_FIND`, `SYSFUNC_FIND3` in `lambda/runtime/sys_func_registry.c`), and `io.grep` (a `pn`) is the only file search. Record: [Lambda_Type_String_Pattern.md §5.3](Lambda_Type_String_Pattern.md#53-file-based-findpath---designed-not-built).
+GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, with the uniform `{value, index}` shape, `file` for a directory or wildcard, and opt-in `line` / `byte_offset` fields. Its determinism is to come from session caching, which a separate proposal is to design together with `input()`, `exists()` and `path#`; that proposal has not been written, so phase G5B of [Lambda_Lib_Grep.md](Lambda_Lib_Grep.md) is blocked. Today `find` takes a string or symbol only (`SYSFUNC_FIND`, `SYSFUNC_FIND3` in `lambda/runtime/sys_func_registry.c`), and `io.grep` (a `pn`) is the only file search. Record: [Lambda_Design_String_Pattern.md §7.3](Lambda_Design_String_Pattern.md#73-file-based-findpath---designed-not-built).
 
 ## 10. Error handling (LR_10)
 

@@ -124,13 +124,16 @@
       "check_dom": true
     },
     {
-      "type": "click",
+      "type": "key_combo",
+      "key": "F10",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_caret",
       "target": {
-        "selector": "#edit-surface p",
-        "offset_x": 25,
-        "offset_y": 10
+        "selector": "#edit-surface p"
       },
-      "button": 1
+      "char_offset": 0
     },
     {
       "type": "click",

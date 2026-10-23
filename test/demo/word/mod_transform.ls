@@ -20,6 +20,9 @@ pub fn settings(n,fallback={width:0,height:0}) {
 }
 pub fn normalized(angle) => ((angle+180)%360+360)%360-180
 pub fn rotation_style(angle) => if (angle==0) "" else "rotate(" ++ string(angle) ++ "deg)"
+// screen-space handles follow the object's rotation in 45-degree sectors.
+pub fn resize_cursor(handle,angle) => ["ew-resize","nwse-resize","ns-resize","nesw-resize"][
+    ((round((angle+if (contains(["nw","se"],handle)) 45 else 135)/45)%4)+4)%4]
 fn angle(x,y,cx,cy) => math.atan2(y-cy,x-cx)*180/math.pi
 pub fn gesture_value(drag,x,y,snapping=false) {
     if (drag.handle=="rotate") {

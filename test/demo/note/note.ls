@@ -8,8 +8,6 @@ import app: .mod_app
 import model: .mod_model
 import ui: .mod_ui
 import images: .mod_images
-import result: lambda.dom.edit_result
-import lambda.editor.mod_step
 
 let CSS = input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
 
@@ -31,9 +29,7 @@ on editaction(evt) {
         st = model.update_editor(st,run.editor,app.stamp())
         app.finish(st,evt.target)
     }
-    return if (image!=null and (evt.input_type=="copy" or evt.input_type=="deleteByCut"))
-        result.with_clipboard_image(run.result,attrs_get(image.node.attrs,'src'),model.image_html(image),attrs_get(image.node.attrs,'alt') or "")
-        else run.result
+    return run.result
 }
 on selectionchange(evt) {
     let adopted = app.adopt(st,evt)

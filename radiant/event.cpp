@@ -1462,8 +1462,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     uintptr_t self_tag = block->tag();
     bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
         self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
+    // cell padding belongs to the cell, even when nearby editable text is a caret candidate.
+    bool is_table_cell = block->view_type == RDT_VIEW_TABLE_CELL;
     if (phase_self_allowed && !path_only && !self_unhittable && !evcon->target &&
-        (is_replaced_block ||
+        (is_replaced_block || is_table_cell ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
@@ -2015,23 +2017,35 @@ static bool copy_model_payload_to_clipboard(DocState* state, Item result, const 
     char* image = radiant_edit_result_string_copy(result, "clipboard_image");
     char* html = radiant_edit_result_string_copy(result, "clipboard_html");
     char* text = radiant_edit_result_string_copy(result, "clipboard_text");
-    if (image) {
-        bool copied = clipboard_store_write_image(image, html, text);
+    if (image && clipboard_store_write_image(image, html, text)) {
         mem_free(image);
         mem_free(html);
         mem_free(text);
-        return copied;
+        return true;
+    }
+    mem_free(image);
+    bool copied = (html && html[0]) || (text && text[0]);
+    if (html && html[0]) {
+        // model selections can name rich fragments without an image, including table cells.
+        clipboard_copy_rich(html, text ? text : "");
+    } else if (copied) {
+        clipboard_copy_text(text);
+    }
+    if (copied) {
+        log_clipboard_copy(state, canonical_selection_focus_target(state), prefix,
+                           text ? (uint32_t)strlen(text) : 0, html ? (uint32_t)strlen(html) : 0);
     }
     mem_free(html);
-    bool copied = text && text[0];
-    if (copied) {
-        clipboard_copy_text(text);
-        log_debug("%s: copied model text=%zu", prefix, strlen(text));
-        log_clipboard_copy(state, canonical_selection_focus_target(state), prefix,
-                           (uint32_t)strlen(text), 0);
-    }
     mem_free(text);
     return copied;
+}
+
+static DomBoundary pointer_boundary_within_target(DomBoundary boundary, View* target) {
+    // a padding hit belongs to the pressed element even when global text snapping finds a neighbor.
+    if (target && target->is_element() && !view_geometry_dom_is_descendant(boundary.node, target)) {
+        return {static_cast<DomNode*>(target), 0};
+    }
+    return boundary;
 }
 
 // F17/ES24: legacy Lambda payload fields now project through the same event
@@ -2555,12 +2569,15 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("text", evcon->paste_text);
     }
 
+    bool secondary_context = evcon && strcmp(event_name, "contextmenu") == 0 &&
+        evcon->event.type == RDT_EVENT_MOUSE_DOWN;
     // captured pointer gestures need the hit position rather than their selection anchor.
     bool event_uses_hit_source_pos = evcon &&
         (strcmp(event_name, "mousedown") == 0 || strcmp(event_name, "mousemove") == 0 ||
          strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0 ||
          strcmp(event_name, "pointerdown") == 0 || strcmp(event_name, "pointermove") == 0 ||
          strcmp(event_name, "pointerup") == 0 ||
+         secondary_context ||
          strcmp(event_name, "mousepress") == 0);
 
     // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
@@ -2661,6 +2678,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             } else {
                 hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root), event_x, event_y);
             }
+            // padding may snap to adjacent text; context actions must stay in the hit element.
+            if (secondary_context) hit = pointer_boundary_within_target(hit, evcon->target);
             SourcePosC hit_pos;
             if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
                 mb.put("source_pos", event_source_position(doc, &hit_pos));
@@ -13610,7 +13629,16 @@ static void update_native_cursor(UiContext* uicon, CssEnum keyword,
             case CSS_VALUE_TEXT: shape = GLFW_IBEAM_CURSOR; break;
             case CSS_VALUE_POINTER: shape = GLFW_HAND_CURSOR; break;
             case CSS_VALUE_COL_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
+            case CSS_VALUE_EW_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
             case CSS_VALUE_ROW_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
+            case CSS_VALUE_NS_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
+#ifdef GLFW_RESIZE_NWSE_CURSOR
+            case CSS_VALUE_NWSE_RESIZE: shape = GLFW_RESIZE_NWSE_CURSOR; break;
+            case CSS_VALUE_NESW_RESIZE: shape = GLFW_RESIZE_NESW_CURSOR; break;
+            case CSS_VALUE_MOVE: shape = GLFW_RESIZE_ALL_CURSOR; break;
+#endif
+            case CSS_VALUE_GRAB:
+            case CSS_VALUE_GRABBING: shape = GLFW_HAND_CURSOR; break;
             case CSS_VALUE_CROSSHAIR: shape = GLFW_CROSSHAIR_CURSOR; break;
             default: break;
         }
@@ -14364,25 +14392,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // A click that lands in an empty / non-text editable element (an
             // empty <li>, an empty <p>, a block holding only an image) resolves
-            // to an *element* boundary rather than text. Place the caret there
+            // to an element boundary, or a nearby text boundary in cell padding. Place the caret there
             // so the element is focusable/typable, before the text-snapping and
             // host-last-text fallbacks below (which would jump to a neighbour).
-            bool placed_element_caret = false;
+            bool placed_rich_caret = false;
             if (pointer_selection_start && !evcon.default_prevented) {
+                DomElement* pressed_host = rich_editable_from_target(evcon.target);
                 DomDocument* mdoc = event_context_target_document(&evcon);
                 View* mroot = (mdoc && mdoc->view_tree)
                     ? static_cast<View*>(mdoc->view_tree->root) : nullptr;
                 if (mroot) {
                     DomBoundary eb = dom_hit_test_to_boundary(
                         mroot, (float)btn_event->x, (float)btn_event->y);
-                    if (eb.node && eb.node->node_type == DOM_NODE_ELEMENT) {
+                    if (pressed_host) eb = pointer_boundary_within_target(eb, evcon.target);
+                    if (pressed_host && eb.node && (eb.node->node_type == DOM_NODE_ELEMENT ||
+                        (evcon.target && evcon.target->view_type != RDT_VIEW_TEXT))) {
                         EditingSurface esurf;
                         if (editing_surface_from_target(static_cast<View*>(eb.node),
-                                &esurf) && editing_surface_is_rich(&esurf)) {
+                                &esurf) && editing_surface_is_rich(&esurf) && esurf.owner == pressed_host) {
                             const char* exc = nullptr;
                             if (state_store_set_selection(state, &eb, &eb, &exc)) {
                                 editing_interaction_set_active_surface(state, &esurf);
-                                placed_element_caret = true;
+                                placed_rich_caret = true;
                                 evcon.need_repaint = true;
                                 log_debug("rich_mouse_empty_element_caret: node=%p offset=%u",
                                           (void*)eb.node, eb.offset);
@@ -14393,7 +14424,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
 
             // blur handlers can remove the pressed control while focus settles.
-            if (pointer_selection_start && evcon.target && !placed_element_caret && !evcon.default_prevented &&
+            if (pointer_selection_start && evcon.target && !placed_rich_caret && !evcon.default_prevented &&
                 evcon.target->view_type != RDT_VIEW_TEXT &&
                 !is_view_focusable(evcon.target)) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
@@ -14453,7 +14484,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle click in text - position caret or start selection.
             // This is a mousedown default action, so a canceled mousedown must
             // leave the existing text-control selection intact.
-            if (pointer_selection_requested && !placed_element_caret &&
+            if (pointer_selection_requested && !placed_rich_caret &&
                 !evcon.default_prevented && evcon.target && evcon.target->view_type == RDT_VIEW_TEXT &&
                 evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = lam::view_require_text(evcon.target);

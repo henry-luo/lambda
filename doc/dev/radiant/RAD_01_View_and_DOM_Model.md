@@ -118,6 +118,14 @@ Two rules keep a retained element's used style trustworthy:
 
 The DOM→source direction (`source_pos_from_dom_boundary`) walks DOM ancestors from a boundary to the first `DomElement` whose `native_element` is registered in `render_map`, converting UTF-16 API offsets to the UTF-8 internal storage for text leaves; the source→DOM direction (`dom_boundary_from_source_pos`) walks the subtree consulting `render_map` to match a path. `MarkBuilder` helpers build the Lambda `pos`/`selection` values, and `dom_selection_apply_source_selection` applies a Lambda selection back onto a `DomSelection` ([RAD_18](RAD_18_Editing_Selection_Ranges.md)). The header carries an explicit maturity caveat (`event.hpp`): several of these functions were committed as no-ops returning `false` until `render_map` gained its path field, so the wiring must be confirmed against the current `.cpp` rather than assumed.
 
+An empty editor container can render a caret placeholder without a source text
+child. DOM boundaries within that projection map to the container path at child
+offset zero, regardless of which side of the placeholder was hit. The source
+node's empty `content` identifies this case; authored zero-width text retains
+its ordinary leaf path and byte offset. This keeps native projection separate
+from model editing policy (**D7.2.5**) and lets a caret leave and reenter empty
+paragraphs and list items without inventing a source child.
+
 Both directions require a recorded path; when an editor document is registered,
 only that current document may own path `[]`. Plain template events retain their
 recorded coordinates when no editor root is active. An application or toolbar render entry without a path still

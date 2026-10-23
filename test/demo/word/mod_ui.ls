@@ -15,6 +15,9 @@ import changes: .mod_changes
 import controls: lambda.ui.controls
 import icons: ~~.mod_icons
 import context: ~~.mod_context_menu
+import focused: .mod_context
+import tables: .mod_table
+import dom
 
 pub let icon = icons.icon
 
@@ -29,39 +32,46 @@ view <word_button> {
         if (~.shortcut!=null) <span class:"context-key",~.shortcut> else null>
 }
 on mousedown() { return 'prevent-default' }
-on click(evt) { emit("word_command",{id:~.command,params:~.params or {},node:evt.target,event:evt}) }
+on click(evt) { emit("word_command",{id:~.command,params:~.params or {},selection:~.selection,node:evt.target,event:evt}) }
 pub fn button(id,command,label,icon=null,params={},pressed=false,disabled=false,css="") =>
     apply(<word_button id:id, command:command, label:label, icon:icon, params:params,
         pressed:pressed, disabled:disabled, class:css>)
 pub fn command(id,label=null,icon=null,params={},pressed=false,disabled=false) =>
     button(id,id,label or model.spec(id).label,icon,params,pressed,disabled)
-fn menu_item(id,command,label,graphic,disabled=false,shortcut=null) =>
+fn menu_item(id,command,label,graphic,disabled=false,shortcut=null,params={},selection=null) =>
     apply(<word_button id:"context-" ++ id,command:command,label:label,icon:graphic,
-        disabled:disabled,class:"context-item",shortcut:shortcut>)
-pub fn context_menu(st) {
+        disabled:disabled,class:"context-item",shortcut:shortcut,params:params,selection:selection>)
+pub fn context_menu(st) => if (st.context==null) null else {
     let selected = if (st.read_only) st.context.copy_text!="" else context.has_selection(st.editor.selection)
-    let disabled = st.read_only;
-    if (st.context==null) null else context.frame("word-context-menu","word",
-        <div id:"word-context-menu",class:"context-menu",role:"menu",["aria-label"]:"Document actions",
+    let disabled = st.read_only
+    let item = focused.describe({*:st.editor,selection:st.context.item_selection or st.editor.selection},st.context.story);
+    context.frame("word-context-menu","word",
+        <div id:"word-context-menu",class:"context-menu",role:"menu",["aria-label"]:item.label ++ " actions",["data-context-kind"]:item.kind,
             style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
+            if (len(item.actions)>0) <div class:"context-specific",role:"group",["aria-label"]:item.label,
+                <div class:"context-caption",item.label>;
+                *[for (entry in item.actions) menu_item(entry.id,entry.command,entry.label,entry.icon,
+                    disabled or entry.disabled,null,if (starts_with(entry.command,"table.select"))
+                        {*:entry.params,path:st.context.cell_path} else entry.params,st.context.item_selection)];
+                <div class:"context-rule",role:"separator">> else null;
             menu_item("undo","edit.undo","Undo","undo",disabled or not edit_can_undo(st.editor),"⌘Z");
             menu_item("redo","edit.redo","Redo","redo",disabled or not edit_can_redo(st.editor),"⇧⌘Z");
+            if (st.context.story!=null) null else <div class:"context-common",
             <div class:"context-rule",role:"separator">
             menu_item("cut","clipboard.cut","Cut","cut",disabled or not selected,"⌘X");
             menu_item("copy","clipboard.copy","Copy","copy",not selected,"⌘C");
             menu_item("paste","clipboard.paste","Paste","paste",disabled,"⌘V");
             menu_item("delete","clipboard.delete","Delete","trash",disabled or not selected);
             menu_item("select-all","clipboard.selectAll","Select All","select_all",false,"⌘A");
+            if (not item.text) null else <div class:"context-text",
             <div class:"context-rule",role:"separator">
             <div class:"context-format",*[for (entry in [{id:"bold",icon:"bold",mark:'strong'},
                 {id:"italic",icon:"italic",mark:'em'},{id:"underline",icon:"underline",mark:'u'}])
                 button("context-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
                     entry.icon,{},edit_mark_active(st.editor,entry.mark),disabled,"context-item icon-only")]>
             menu_item("paragraph","ui.paragraph","Paragraph…","settings",disabled);
-            menu_item("link","ui.link",if (model.current_node(st.editor,'a')==null) "Link…" else "Edit Link…","link",disabled,"⌘K");
-            menu_item("comment","ui.comment","New Comment…","comment_add",disabled or not model.can_comment(st.editor));
-            if (model.current_node(st.editor,'img')!=null)
-                menu_item("object","ui.pictureSettings","Object Settings…","shapes",disabled) else null
+            if (model.current_node(st.editor,'a')==null) menu_item("link","ui.link","Link…","link",disabled,"⌘K") else null;
+            menu_item("comment","ui.comment","New Comment…","comment_add",disabled or not model.can_comment(st.editor))>>
         >,false)
 }
 fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
@@ -70,6 +80,22 @@ fn group(label,items) => <div class:"ribbon-group group-" ++ lower(label), <div 
 fn selector(id,command,values,current,css="",param="value") =>
     apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
         options:values,value:current,on_change:{action:command,param:param}>)
+
+pn sync_ruler(node) {
+    let chrome = dom.get_element_by_id(dom.root_node(node),"canvas-chrome")
+    if (chrome!=null) dom.set_scroll_state(chrome,dom.scroll_state(node).x,0.0)
+}
+// keep horizontal ruler alignment separate from the document's vertical caret clip (D7.2.5).
+view <document_scrollport> { ~.rendered }
+on render(evt) {
+    if (evt.event_phase==2) sync_ruler(evt.target)
+    return 'pass'
+}
+on scroll(evt) {
+    sync_ruler(evt.target)
+    return 'handled'
+}
+pub fn document_viewport(rendered) => apply(<document_scrollport rendered:rendered>)
 
 pub fn ribbon(editor,tab,nav,read_only,show_changes=true) {
     let block = model.current_block(editor)
@@ -155,6 +181,8 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true) {
         group("Breaks",[command("insert.pageBreak","Page break","page_break",{},false,read_only),button("layout-paragraph","ui.paragraph","Paragraph…",null,{},false,read_only)])
     >
     else if (tab == "Table") <div class:"ribbon-groups",
+        group("Select",[*[for (scope in ["Cell","Row","Column","Table"])
+            command("table.select" ++ scope,scope,"select_" ++ lower(scope),{},false,read_only)]])
         group("Rows",[command("table.insertRowAbove","Above","up"),command("table.insertRowBelow","Below","down"),command("table.deleteRow","Delete row","trash")])
         group("Columns",[command("table.insertColumnLeft","Left","prev"),command("table.insertColumnRight","Right","next"),command("table.deleteColumn","Delete column","trash")])
         group("Table style",[selector("table-style","table.style",[for (s in document.table_styles) {value:s.id,label:s.label}],
@@ -164,6 +192,10 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true) {
             {value:"topLeft",label:"Top left"},{value:"topCenter",label:"Top center"},{value:"topRight",label:"Top right"},
             {value:"centerLeft",label:"Middle left"},{value:"center",label:"Middle center"},{value:"centerRight",label:"Middle right"},
             {value:"bottomLeft",label:"Bottom left"},{value:"bottomCenter",label:"Bottom center"},{value:"bottomRight",label:"Bottom right"}],model.cell_alignment(editor))])
+        group("Borders",[button("cell-borders","ui.cellBorders","Borders…","border_all",{},false,read_only),
+            command("table.borders","All","border_all",{preset:"all"},false,read_only),
+            button("borders-outside","table.borders","Outside","border_outer",{preset:"outside"},false,read_only),
+            button("borders-none","table.borders","None","border_none",{preset:"none"},false,read_only)])
     >
     else <div class:"ribbon-groups",
         group("Show",[button("view-navigation","view.navigationPane","Navigation","sidebar",{},nav),
@@ -240,6 +272,12 @@ fn form_dialog(d:map,title:string,description:string,fields:array,action:string,
     [files.dialog_button("cancel","Cancel",false),files.dialog_button(action,label,true)])
 
 pub fn dialog(dialog,file,editor=null,read_only=false) => if (dialog == null) null
+    else if (dialog.kind=="cell_borders") form_dialog(dialog,"Cell borders",
+        "Apply borders to " ++ string(len(tables.selected(editor))) ++ " selected cell(s).",[
+            dialog_select("border-preset","Apply to",[for (value in tables.border_presets) {value:value,label:value}],dialog.values.preset),
+            dialog_select("border-style","Line style",[for (value in tables.border_styles) {value:value,label:value}],dialog.values.style),
+            dialog_field("border-width","Width (pt)",dialog.values.width,true,0.25,6),
+            dialog_field("border-color","Color",dialog.values.color)],"cell_borders","Apply")
     else if (dialog.kind == "unsaved") files.dialog_frame("unsaved","Keep your changes?","Save this document before continuing.",[],
         [files.dialog_button("cancel","Cancel",false),files.dialog_button("discard","Discard changes",false),files.dialog_button("save","Save",true)])
     else if (dialog.kind == "exists" or dialog.kind == "changed") files.dialog_frame(dialog.kind,"Replace the existing file?",

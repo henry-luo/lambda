@@ -18,6 +18,7 @@ import wordart: .mod_wordart
 import changes: .mod_changes
 import transform: .mod_transform
 import controller: lambda.edit.controller
+import tables: .mod_table
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
     tab:"Home",dialog:null,context:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
@@ -34,15 +35,25 @@ pub let focus_document = controller.focus
 pub let is_control = controller.is_control
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
 pub pn adopt(st,evt,changes_only=false) {
+    // a structural selection's native caret is only a projection; toolbar/key snapshots retain the cells.
+    if (tables.structural(st.editor) and not changes_only) { return st }
     let accepted = controller.adopt(st.editor,evt)
     if (changes_only and not accepted.changed) { return st }
     return {*:st,editor:accepted.editor}
+}
+pub pn selection_changed(st,evt) {
+    if (st.read_only or st.context!=null) { return st }
+    let adopted = adopt(st,evt,true)
+    if (adopted.editor==st.editor) { return st }
+    let next = {*:adopted,editor:model.clean(adopted.editor)}
+    controller.restore(tables.native_editor(next.editor))
+    return next
 }
 let replaced_editor = controller.replace
 pub pn finish(st,node) {
     // Bind only once an editing action owns a selection. View-only changes
     // before the first caret placement have no model selection to publish.
-    controller.restore(st.editor,not st.read_only and st.dialog==null)
+    controller.restore(tables.native_editor(st.editor),not st.read_only and st.dialog==null)
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     dom.set_close_guard(node,dirty)
     dom.set_window_title(node,(if (dirty) "● " else "") ++ st.file_state.envelope.title ++ " — Word")
@@ -82,6 +93,11 @@ pn dialog_model(st,id,values,params,node) {
 pn dialog_command(st,action,node) {
     if (action == "cancel") { focus_document(node); return {*:st,dialog:null,pending:""} }
     if (action == "discard") { return continued(st,st.pending,node) }
+    if (action=="cell_borders") {
+        let values = {preset:field(node,"border-preset"),style:field(node,"border-style"),
+            width:field(node,"border-width"),color:field(node,"border-color")}
+        return dialog_model(st,"table.borders",values,{*:values,width:float(values.width)},node)
+    }
     if (action == "save") { return command({*:st,dialog:null},"file.save",{},node) }
     if (action == "insert_table") {
         let values = {rows:field(node,"table-rows"),cols:field(node,"table-columns"),header:field(node,"table-header")}
@@ -184,6 +200,10 @@ pn dialog_command(st,action,node) {
 pub pn command(st,id,params,node) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
     if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or (params.tab=="Review" and not st.revisions)} }
+    if (id=="ui.cellBorders") {
+        if (st.read_only or model.table_context(st.editor)==null) { return st }
+        return {*:st,dialog:{kind:"cell_borders",values:tables.border_settings(st.editor)}}
+    }
     if (contains(["ui.headerFooter","ui.pageNumber","ui.equation","ui.equationSettings","ui.wordArt","ui.wordArtSettings","ui.objectSettings"],id) or
         (id=="ui.pictureSettings" and (equation.settings(model.current_node(st.editor,'img').node)!=null or wordart.settings(model.current_node(st.editor,'img').node)!=null))) {
         if (st.read_only) { return st }
@@ -283,7 +303,8 @@ pub pn command(st,id,params,node) {
         return {*:st,nav:true}
     }
     if (id == "view.navigationPane") { return {*:st,nav:not st.nav} }
-    if (id == "view.readMode") { return {*:st,read_only:not st.read_only,status:if (st.read_only) "Ready to write" else "Read mode"} }
+    if (id == "view.readMode") { return {*:st,editor:tables.native_editor(st.editor),read_only:not st.read_only,
+        status:if (st.read_only) "Ready to write" else "Read mode"} }
     if (id == "view.focusMode") { return {*:st,focused:not st.focused} }
     if (starts_with(id,"view.zoom")) { return {*:st,zoom:if (id == "view.zoomReset") 1.0
         else min(1.5,max(0.5,st.zoom + if (id == "view.zoomIn") 0.1 else -0.1))} }

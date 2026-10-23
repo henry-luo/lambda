@@ -363,6 +363,11 @@ path to an image source. `render_paint_marker_image()` shares URL-marker image
 rectangles with raster and uses the common image resource producer. The raster
 marker painter converts logical marker dimensions once; retained marker source
 and suppression refresh during layout (**D4.5.1v4 / D4.1.4v5**, CI-17).
+Geometric raster markers share the text's CSS transform while their inherited
+scroll clip remains in destination coordinates. A shared contour builder feeds
+the fill/stroke path. `ZoomedListBulletsShareTextTransformsAndScrollClipping`
+checks visible disc pixels and the absence of marker ink above the scrollport
+at 110% zoom; Word's viewport replay also checks both sides of that boundary.
 
 `CssImageSetMarkersAndBordersKeepVisiblePixelsAcrossOutputs` compares seven
 URL/linear-gradient controls, both untranslated and translated, at two densities (28 references), including filtered gradient

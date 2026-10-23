@@ -44,7 +44,7 @@ in §9 rather than decided here.
 | Build profiles | D7.1.4v2, D7.1.6, D7.1.7v6 | Live speech in `lambda.exe`; a null engine in headless profile C; excluded from `lambda-cli` and `lambda-wasm` |
 | Packages | D7.2.4v3 | An optional pure `lambda.speech` package for narration data |
 
-Related designs: [the music package](../Lambda_Design_Pkg_Music.md), whose MIDI
+Related designs: [the music package](../Lambda_Pkg_Music.md), whose MIDI
 transport this proposal reuses, and [the WebGL design](Radiant_Design_WebGL.md)
 for the document-owned native resource pattern.
 

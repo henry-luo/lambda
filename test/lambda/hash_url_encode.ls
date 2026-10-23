@@ -1,4 +1,4 @@
-// hash and url_encode (WebScrape E7, Archive AR-E7): SHA-2 digests as
+// hash and url_encode (Archive AR-E7): SHA-2 digests as
 // binary, of bytes or of text's UTF-8, and RFC 3986 percent-encoding.
 
 "=== hash ===";

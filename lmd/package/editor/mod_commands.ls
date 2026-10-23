@@ -1561,28 +1561,14 @@ fn toggle_mark_top_block_range(st, mark) {
   }
 }
 
-fn toggle_mark_all(st, mark) {
-  if (not has_text_leaf(st.doc)) { null }
-  else {
-    let adding = any_unmarked_text(st.doc, mark)
-    let steps = collect_mark_steps(st.doc, [], mark, adding, [])
-    if (len(steps) == 0) { null }
-    else { tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps)) }
-  }
-}
-
-fn toggle_mark_node(st, mark) {
-  if (not valid_selected_node(st)) { null }
-  else {
-    let selected_node = node_at(st.doc, st.selection.path)
-    if (selected_node == null or not has_text_leaf(selected_node)) { null }
-    else {
-      let adding = any_unmarked_text(selected_node, mark)
-      let steps = collect_mark_steps(selected_node, st.selection.path, mark, adding, [])
-      if (len(steps) == 0) { null }
-      else { tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps)) }
-    }
-  }
+fn toggle_mark_nodes(st, mark) {
+  // disjoint selections share one add/remove decision and one transaction.
+  let paths = if (st.selection.kind=='all') [[]] else selection_paths(st.selection)
+  let chosen = [for (path in paths where (len(path)>0 or st.selection.kind=='all') and
+      has_text_leaf(node_at(st.doc,path))) path]
+  let adding = any([for (path in chosen) any_unmarked_text(node_at(st.doc,path),mark)])
+  let steps = reduce([[],*chosen],(steps,path)=>collect_mark_steps(node_at(st.doc,path),path,mark,adding,steps))
+  if (len(steps)==0) null else tx_apply_steps(tx_begin(st.doc,st.selection),steps,0,len(steps))
 }
 
 pub fn cmd_toggle_stored_mark(st, name, value) {
@@ -1599,8 +1585,7 @@ pub fn cmd_toggle_mark(st, name, value) {
   let mark = {name: name, value: value}
   let sel = st.selection
   if (sel == null) { null }
-  else if (sel.kind == 'all') { toggle_mark_all(st, mark) }
-  else if (sel.kind == 'node') { toggle_mark_node(st, mark) }
+  else if (contains(['all','node','multi-node'],sel.kind)) { toggle_mark_nodes(st, mark) }
   else if (not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { toggle_mark_same_parent_range(st, mark) }
   else if (sel_top_block_range(sel)) { toggle_mark_top_block_range(st, mark) }
   else if (not sel_single_leaf(sel)) { null }
@@ -1662,7 +1647,7 @@ fn collect_replace_steps(n, path, needle, replacement, acc) {
   else { acc }
 }
 
-fn tx_apply_steps(tx, steps, i, n) {
+pub fn tx_apply_steps(tx, steps, i, n) {
   if (i >= n) { tx }
   else { tx_apply_steps(tx_step(tx, steps[i]), steps, i + 1, n) }
 }

@@ -210,3 +210,9 @@ true
 true
 "html direct rows count:"
 true
+"html indented table keeps rows and cells:"
+true
+"md indented table keeps rows and cells:"
+true
+"indented table preserves cell whitespace:"
+true

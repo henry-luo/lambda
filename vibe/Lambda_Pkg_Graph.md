@@ -1,296 +1,251 @@
-# Lambda Graph Package - Design Proposal
+# Lambda Graph Package — Design
 
-**Status:** Stage 1 is implemented for the initial rich-node release. The package
-split, semantic HTML transform, Velmt callback, generated SVG paint, signed
-stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
-complete. Stage 2 flowchart support is implemented: the common Mark IR contract,
-declarative schema validation, recursive model queries, Mermaid normalization
-fixes, measured edge and cluster labels, visual recursive clusters, named
-ports, compound and parallel-edge routing, broader shape clipping, safe style
-cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
-Radiant scene rendering, relational scene validation, and the pinned semantic
-corpus runner are implemented. Section 18.12 records the current boundary;
-Stage 2E provides end-to-end Mermaid `classDiagram`, `erDiagram`, and flat
-`stateDiagram` support for measured compartments, UML relationships, entity
-attributes, crow's-foot cardinalities, state transitions, pseudostates, and
-notes. The expanded class surface is complete; additional graph-oriented
-Mermaid families and extended ER/state syntax remain subsequent tranches.
-Stage 3 Graphviz support is implemented: source-faithful DOT parsing, pure
-normalization, canonical Graph IR, rich measured content, layered layout and
-routing, semantic HTML/Radiant rendering, DOT formatting, and the pinned
-manifest-driven conformance suite all use the retained Radiant layout path.
-Section 19.16 records the deliberately deferred non-layered engines and exact
-backend-parity work.
+**Status:** Consolidated working design, 2026-10-23. Rich-node layout, the semantic HTML transform, generated SVG paint with signed stacking, automatic layout connection, Mermaid flowchart/class/ER/flat-state support, Graphviz DOT with the layered `dot` engine, and Structurizr DSL with static, dynamic, and deployment C4 views are implemented. The C `layout_graph()`/`graph_to_svg()` pipeline is retired. §15 records open items and deferred work.
 
-## 1. Summary
+**Scope:** Topology-oriented diagrams — node ranking or placement, recursive grouping, relationship routing, ports, markers, and overlap avoidance — from Mermaid, Graphviz DOT/GV, D2, Structurizr DSL, and authored Mark sources. This document replaces the former Stage 1–3 graph proposal and the separate Structurizr/C4 proposal (`Lambda_Pkg_Graph2.md`). Implementation phase plans, module inventories, parser LOC and binary-size ledgers, test-runner mechanics, and status reports are omitted.
 
-The Lambda graph package is split into two public modules with separate
-responsibilities:
+**Specification linkage:** [D7.5.3v2](../doc/Lambda_Formal_Design.md#d75-jube-modules-trust-and-io) covers the automatic Lambda↔Radiant layout connection (§7.2); [D5.3.3](../doc/Lambda_Formal_Design.md#d53-gc-rooting) covers the explicit rooting of generated paint (§7.2); [D7.2.4v4](../doc/Lambda_Formal_Design.md#d72-script-packages) covers the shipped `lambda.*` namespace and the graph/chart package split (§2); [S12.1.1v3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) covers the purity of the layout export and every normalizer (§1); [S7.6.2v3/S7.6.3v2](../doc/Lambda_Formal_Semantics.md#s76-discharge-the-handler-and-postfix-) cover the postfix error handler used by the CLI bridge (§7.4). Graph-specific choices below are working design, not formal-spec rulings.
 
-- `lambda.graph.layout` computes graph geometry from node sizes and
-  relationships. It owns ranking, ordering, node coordinates, edge routing,
-  clipping, and graph bounds.
-- `lambda.graph.transform` converts graph data into a semantic HTML
-  element tree, exports the automatically resolved Radiant layout callback, and converts routed
-  edge geometry into generated SVG paint layers.
+## 1. Purpose and design principles
 
-The primary output is HTML, not a pre-laid-out SVG. Radiant first lays out the
-rich contents of every graph node using its existing block, inline, flex, grid,
-table, replaced-element, text, and SVG layout paths. The graph custom layout
-then receives those resolved node border boxes as Velmts, computes node and edge
-geometry in Lambda, and returns placements plus generated paint layers.
+The graph package turns graph data from any supported source language into a semantic HTML document whose rich node content is laid out by Radiant and whose graph geometry — ranks, coordinates, routed edges, clusters, labels — is computed by pure Lambda functions.
 
-`transform.to_svg()` is deferred. Static SVG generation cannot measure rich
-nested HTML content and is not required to retire the C graph layout path. Final
-SVG, PDF, PNG, and JPEG output should initially be produced by rendering the
-transformed HTML through Radiant.
+1. **Rich nodes.** Graph nodes contain arbitrary rich content, not only text labels. Radiant's existing block, inline, flex, grid, table, replaced-element, text, and whole-SVG layout paths measure every node; the graph layout never approximates text size.
+2. **Pure geometry.** Ranking, ordering, positioning, routing, clipping, and label placement are pure `fn` code (S12.1.1v3). The layout callback does not mutate the DOM, perform I/O, start timers, or request relayout.
+3. **One interchange format.** Every source language normalizes to one public Mark Graph IR (§4). Parsers record syntax; pure Lambda normalizers apply source-language semantics. There is no private per-language AST data model.
+4. **HTML first.** The primary output is semantic HTML, not a pre-laid-out SVG. Final SVG, PDF, PNG, and JPEG are produced by rendering that HTML through Radiant.
+5. **Nodes and links in one result.** One custom layout pass positions nodes and routes links, returning placements plus generated paint layers that interleave with nodes through one signed `z` order.
+6. **Retained runtime.** The JIT-compiled layout export and its module state are reused across repeated layout passes; parsing and normalization happen once per source graph.
+7. **Source fidelity and diagnostics.** Unsupported or malformed syntax produces structured, source-spanned diagnostics. Nothing is silently discarded, silently reinterpreted as a different diagram family, or presented as a partially canonical graph that appears valid.
+8. **Safe by construction.** Authored callbacks, URLs, scripts, plugins, includes, and images are inert metadata during parse, normalization, transform, and layout. No external process, network fetch, or executable extension is ever invoked.
+9. **Semantic conformance.** Conformance compares renderer-neutral semantics and tolerant geometric relations (§13), never raw SVG strings, screenshots, or pixel parity with Mermaid, Graphviz, or Structurizr.
+10. **No external engines.** Graphviz, Mermaid, Node.js, Java, the Structurizr CLI, and browsers are never production dependencies; they appear only as pinned reference-generation maintenance tools.
 
-The C `layout_graph()` and `graph_to_svg()` pipeline has been retired. Mermaid,
-D2, DOT, and GV syntax parsing remains in C, while every layout and rendering
-path now enters the Lambda HTML transform and normal Radiant renderer.
+## 2. Package boundaries
 
-## 2. Goals
+### 2.1 Graph versus chart
 
-1. Support graph nodes containing arbitrary rich content, not only text labels.
-2. Reuse Radiant's existing child layout engines for all node measurement.
-3. Keep graph ranking, positioning, and link routing in pure Lambda functions.
-4. Represent input graphs as semantic HTML containing `<graph>`, `<node>`, and
-   `<edge>` elements.
-5. Route and paint links as part of the same pure custom layout result that
-   positions nodes.
-6. Allow edges and nodes to interleave through one explicit custom stacking
-   order rather than a fixed underlay/overlay pair.
-7. Retain and reuse the JIT-compiled layout function and its Lambda runtime
-   across repeated layout passes.
-8. Remove the old C graph layout and SVG generation pipeline after CLI and
-   rendering parity is established.
-9. Normalize graph-oriented source formats through one public Mark Graph IR.
-10. Support the graph-oriented Mermaid families without moving chart-oriented
-    Mermaid diagrams into the graph package.
+Package ownership follows the required layout model, not the source language name.
 
-## 3. Non-goals
+- **`lambda.graph`** owns diagrams whose defining problem is graph topology: Mermaid flowchart, class, state, and entity-relationship diagrams (and, later, requirement, architecture, block, and mindmap families); Graphviz DOT/GV; D2; and Structurizr/C4 static, dynamic-collaboration, and deployment views.
+- **`lambda.chart`** owns data-, axis-, and time-oriented diagrams: Mermaid sequence, Gantt, pie, Sankey, timeline, and XY families. They are never represented as fake layered graphs merely because their source syntax is Mermaid.
 
-- `transform.to_svg()` is not part of the first implementation phase.
-- The custom layout callback does not mutate the DOM, perform I/O, start timers,
-  or request child measurement or relayout.
-- The graph package does not replace the Mermaid, D2, or DOT parsers. Their C
-  parsers may continue producing Lambda `<graph>` data elements.
-- Full Graphviz/Dagre parity is not required. The package implements the
-  deterministic cluster-aware ordering, orthogonal obstacle routing, and label
-  collision handling needed by the current Mermaid flowchart contract, without
-  claiming identical geometry to either renderer.
-- SVG primitives do not become individually measured CSS layout children.
-
-## 4. Module Structure
+The Mermaid input parser dispatches by diagram family:
 
 ```text
-lambda/graph/
-  graph.ls                 compatibility facade
-  layout.ls                public graph geometry API
-  dagre.ls                 initial layered algorithm and orthogonal routing
-  transform.ls             public HTML transform and automatic layout export
-  transform/
-    html.ls                semantic graph HTML construction
-    paint.ls               routed geometry to SVG paint layers
-    theme.ls               graph CSS and visual defaults
+Mermaid source
+  -> source-stage Mark with source-order declarations
+  -> graph-oriented family -> canonical Mark Graph IR -> lambda.graph
+  -> chart-oriented family -> canonical Mark Chart IR -> lambda.chart
 ```
 
-The existing `graph.ls` should remain temporarily as a compatibility facade. It
-can forward the current `make_options()`, `layout()`, and `layout_custom()` APIs
-to the new layout module while callers migrate.
+Chart-oriented families that `lambda.chart` does not yet support produce an `unsupported` result with a `mermaid.chart-family` diagnostic naming `lambda.chart` as the owner. The supported `sequenceDiagram` header enters the chart sequence adapter, which lays out participant columns, lifelines, messages, loop/alt/par blocks, notes, and activation bars without graph ranking or routing (D7.2.4v4).
 
-### 4.1 Layout package
+### 2.2 Why C4 belongs in the graph package
 
-The public geometry API is pure:
+Static C4 diagrams are topology-oriented: their defining operations are model projection, visual containment, relationship routing, boundary layout, and overlap avoidance. People, systems, containers, components, and instances become nodes; groups, system/container boundaries, and deployment nodes become clusters; model relationships become edges; view rules select the projection; `autoLayout` maps to layered direction and separation. A Structurizr dynamic view renders as a collaboration graph here; its sequence rendering is an ordered-axis layout that belongs to `lambda.chart` (§11.6).
 
-```lambda
-layout.make_options() -> GraphLayoutOptions
+### 2.3 Non-goals
 
-layout.compute(model, opts = null) -> GraphLayoutResult
+- Pixel parity with Mermaid, Graphviz, Dagre, or Structurizr. The package implements deterministic cluster-aware ordering, obstacle-aware routing, and label collision handling sufficient for the declared conformance surface.
+- An eager `transform.to_svg()` that bypasses Radiant measurement (deferred, §15).
+- SVG primitives as individually measured CSS layout children (§9.3).
+- Byte-identical source formatting or comment preservation.
+- Execution of any authored callback, script, plugin, or JVM extension.
 
-layout.from_velmts(parent, children, ctx, opts = null)
-    -> GraphLayoutResult
+## 3. Pipeline
+
+```text
+Mermaid / DOT / GV / D2 / Structurizr / authored Mark
+  -> manual C/C+ format parser                     (syntax only)
+  -> source-stage Mark  (ir-stage: "source")       (source order, spans, raw values)
+  -> pure Lambda semantic normalization            (per-language semantics)
+  -> [Structurizr only] canonical C4 Workspace Mark -> selected view projection
+  -> canonical Mark Graph IR (ir-stage: "canonical")
+  -> graph.transform.to_html()
+  -> semantic HTML <graph>/<node>/<edge>/<cluster>/... tree
+  -> Radiant lays out each rich node and label subtree
+  -> measured Velmts passed to the retained Lambda layout export
+  -> ranks, orders, positions, clusters, routes, places labels
+  -> placements + generated SVG paint layers
+  -> Radiant interleaves paint and node views by signed z
+  -> final SVG / PDF / raster / interactive view
 ```
 
-`layout.compute()` accepts a canonical graph model with explicit node sizes.
-`layout.from_velmts()` builds that model from the already-laid-out `<node>` and
-`<edge>` children supplied by Radiant.
+The package is organized around these stages:
 
-The layout package must not generate SVG or depend on Radiant rendering types.
-Its edge output is geometry and styling metadata, not markup.
+| Area | Responsibility |
+|---|---|
+| `lambda.graph.layout` | Pure geometry: `compute(model, opts)` over explicit node sizes and `from_velmts(parent, children, ctx, opts)` over measured Radiant children. Emits geometry and styling metadata, never markup, and does not depend on Radiant rendering types. |
+| `lambda.graph.transform` | `to_html(graph, opts)` semantic transform; the automatically resolved `layout(parent, children, ctx)` export; routed geometry to generated SVG paint; in-process `render_svg`/`render_scene` conveniences. |
+| normalization, schema, model, style, diagnostics | Common Graph IR validation and canonicalization, recursive model queries, the safe style cascade, and structured diagnostics. |
+| `mermaid`, `graphviz`, `structurizr` adapters | Pure per-language normalization and family-specific content lowering. |
+| `scene`, `conformance` | Graph Scene Mark adaptation, comparison, and the shared manifest-driven conformance harness. |
+| `graph.ls` | Compatibility facade forwarding `make_options()`, `layout()`, and `layout_custom()`. |
 
-### 4.2 Transform package
+Shared layered-layout concerns (ranking, ordering, positioning, shapes, clusters, labels, routing) are factored so that no Mermaid family or source language duplicates ranking or routing logic.
 
-The public transform API is:
+## 4. Mark Graph IR
 
-```lambda
-transform.to_html(graph, opts = null) -> element
-```
+The public representation between parsers, normalizers, transforms, and formatters is a Lambda Mark element tree; a JSON-shaped map is not the interchange format. The base schema is `vibe/Mark_Graph_Schema.md`.
 
-Radiant automatically resolves the generated HTML's `lambda-graph` layout to
-`lambda.graph.transform.layout(parent, children, ctx)` (**D7.5.3v2**).
-No application or document-loader installation call is required. The export is
-a pure `fn`; the host owns module loading, retained execution and paint roots.
+### 4.1 Source and canonical stages
 
-`to_html()` is a pure graph-data transformation. It returns a Lambda HTML
-element tree, not a serialized HTML string. Keeping the element tree in the
-same Lambda document runtime preserves structured values, the compiled callback,
-and future reactive updates.
+Source and canonical graphs use the same Mark vocabulary and are distinguished by the root `ir-stage` attribute.
 
-## 5. Canonical Mark Graph IR
+- **Source stage** preserves declarations in source order, exact source spans (`source-start`, `source-end`, `source-line`, `source-column`), raw attribute values, repeated declarations, and format-specific statement elements. It may contain repeated node ids.
+- **Canonical stage** applies source-language semantics — redeclaration merging, chained/multi-node edge expansion, defaults, class assignment, subgraph membership, generated identity — and contains unique identities.
 
-The public representation between graph parsers, format adapters, transforms,
-and formatters is a Lambda Mark element tree. A JSON-shaped map is not the graph
-interchange format. Mermaid, D2, DOT, GV, and author-created graph data normalize
-to the same recursive Mark structure:
+A parser may build canonical-shaped Mark directly when its grammar is already canonical, but it still passes through the same validation and normalization contract. Normalization of an already-canonical tree is idempotent and returns it unchanged.
+
+### 4.2 Canonical elements
 
 ```mark
-<graph version:1 flavor:"mermaid" kind:"flowchart"
+<graph version:1 ir-stage:"canonical" flavor:"mermaid" kind:"flowchart"
        directed:true rank-dir:"TB">
   <meta title:"Example" acc-title:"Example flow">
-
   <styles>
-    <style-rule target:"node" class:"warning"
-                fill:"#fff4cc" stroke:"#8a6500">
+    <style-rule target:"node" class:"warning" fill:"#fff4cc" stroke:"#8a6500">
   >
-
-  <subgraph id:"backend" label:"Backend" direction:"LR">
-    <node id:"a" shape:"rounded" classes:["service"];
-      <label format:"text"; "Start">
-    >
-    <node id:"b" shape:"diamond";
-      <label format:"text"; "Valid?">
+  <subgraph id:"backend" role:"cluster" label:"Backend" direction:"LR">
+    <node id:"api" shape:"rounded" classes:["service"] source-start:42 source-end:71;
+      <label format:"markdown"; "The **API** service">
+      <content; <strong; "API"> " service">
+      <port id:"request" side:"west" offset:0.5>
     >
   >
-
-  <edge id:"e0" from:"a" to:"b"
-        arrow-head:"normal" arrow-tail:"none"
-        line-style:"solid" min-length:1;
-    <label position:"center" format:"text"; "continue">
+  <node id:"client"; <port id:"request" side:"east" offset:0.5> >
+  <edge id:"request" from:"client" to:"api" from-port:"request" to-port:"request"
+        arrow-tail:"none" arrow-head:"normal" line-style:"dashed" stroke-width:2
+        constraint:true min-length:2;
+    <label position:"center"; "HTTP">
+    <content; "HTTP">
   >
 >
 ```
 
-The Mark IR preserves recursive subgraphs, rich labels, style rules, endpoint
-and marker semantics, source metadata, and stable identities. A node may contain
-arbitrary Mark content in addition to or instead of a simple `<label>`.
+| Element | Role |
+|---|---|
+| `<graph>` | Identity, flavor, kind, direction, defaults, and options. |
+| `<meta>` | Title, accessibility title/description, provenance, source information. |
+| `<styles>` / `<style-rule>` / `<style-assignment>` / `<class-assignment>` | Class definitions, direct node/edge styles, and class membership, kept distinguishable until the cascade is resolved (§6.5). |
+| `<subgraph>` | Recursive grouping with local direction. `role: "cluster"` is a visual container; `role: "scope"` is a semantic/default/rank scope that is never painted (§11.4). |
+| `<node>` | Stable id, shape role, classes, ports, and content. May contain arbitrary Mark in addition to or instead of a label. |
+| `<edge>` | Stable id, endpoints and ports, constraints, compositional markers, route mode, labels. |
+| `<port>` | Node-local attachment: id, side, normalized offset; ids are unique within the node. |
+| `<constraint>` | Same-rank, min/max/source/sink, ordering, minimum length, or fixed placement requirements not owned by one edge. |
+| `<annotation>` | Additional measured labels with an owner identity and role: `external-label`, `head-label`, `tail-label`, and notes. |
+| `<properties namespace:…>` / `<property>` | Arbitrary source-language attributes (e.g. Graphviz) with `name`, `value`, source span, and, after normalization, `origin` (`direct`, `default`, `inherited`) and defining scope/statement. |
+| `<interaction>` | Inert link, tooltip, target, and callback metadata. |
+| `<diagnostic>` | Stable code, severity, message, and source location. |
 
-The layout implementation may derive compact immutable records from this tree
-after normalization and Velmt measurement. Those records are an internal
-calculation form, not a second public graph format. Node `width` and `height` in
-that internal form are border-box dimensions read from Velmt; Radiant remains
-the authority for resolved rich-content size.
+`<label>` preserves the source-level label text and format (`text`, `markdown`, `html`, `record`, `graphviz-html`). `<content>` holds the safe normalized Mark subtree that `to_html()` places in the measured box. Canonical `<label>`/`<content>` children are authoritative; legacy `label`/`label-format` attributes remain only as provenance. This separation lets text semantics be tested without depending on final HTML wrappers.
 
-The layout result contains both nodes and routed edges:
+### 4.3 Normalization invariants
+
+1. Node, edge, subgraph, and annotation identities are stable and unique within a graph.
+2. References resolve to canonical identities or produce structured diagnostics.
+3. Node redeclarations merge according to source-language semantics.
+4. Chained, multi-node, and endpoint-set links expand into explicit edges that record their source statement, segment index, expansion index/count, and a stable `source-id`.
+5. Subgraph containment remains recursive and deterministic.
+6. Defaults, classes, and inline styles stay distinguishable until the style cascade is resolved; resolved values may be attached for layout and paint.
+7. Source spans survive normalization for diagnostics and editor integration. Repeated references keep the first declaration span rather than overwriting provenance.
+8. Unknown source extensions are preserved in namespaced metadata or diagnosed — never dropped.
+9. Labeled values carry source semantics in `<label>` and measured Mark in `<content>`; a second normalization pass is idempotent.
+10. The declarative schema validates element hierarchy, attribute types and enums, required identities and endpoints, and `<label>`/`<content>` cardinality *before* rebuilding, so malformed canonical children cannot be silently collapsed. The public validation result is `{graph, diagnostics, valid}`.
+
+### 4.4 Internal layout records
+
+After normalization and Velmt measurement, the layout may derive compact immutable records. They are an internal calculation form, not a second public graph format. Node `width`/`height` are border-box dimensions read from Velmts; Radiant remains the authority for rich-content size.
 
 ```lambda
 {
-  width: 420.0,
-  height: 280.0,
+  width: 420.0, height: 280.0,
   nodes: [{id, index, x, y, width, height, rank, order, z}],
   edges: [{id, from, to, segments, arrow_start, arrow_end, style}],
   placements: [{index, x, y, z}]
 }
 ```
 
-Node `x, y` in `placements` are border-box top-left coordinates in the custom
-container's local coordinate system. Routed edge points use the same system.
+Placement `x, y` are border-box top-left coordinates in the custom container's local coordinate system; routed points use the same system.
 
-## 6. HTML Transformation
+## 5. Public interface
 
-`transform.to_html()` should produce this semantic structure:
+```lambda
+layout.make_options() -> GraphLayoutOptions
+layout.compute(model, opts = null) -> GraphLayoutResult
+layout.from_velmts(parent, children, ctx, opts = null) -> GraphLayoutResult
+
+transform.to_html(graph, opts = null) -> element
+transform.layout(parent, children, ctx)          // automatically resolved export (§7.2)
+transform.render_svg(graph, width, height, opts = null)
+transform.render_scene(graph, width, height, opts = null)
+transform.compare_scenes(actual, expected, policy = null)
+
+structurizr.normalize(source_workspace)
+structurizr.view_keys(workspace)
+structurizr.project(workspace, view_key = null) -> Graph IR | diagnostics
+structurizr.project_all(workspace)
+structurizr.to_html(workspace, view_key = null, opts = null)
+```
+
+`to_html()` is a pure transformation returning an in-memory Lambda element tree, not a serialized string, so structured values, the compiled callback, and future reactive updates stay in one document runtime. It passes Mark through the normalization boundary before semantic lowering and adds no state. `render_svg()`/`render_scene()` run HTML parsing, Radiant measurement, the retained callback, paint, SVG lowering, and scene adaptation in one process. `structurizr.project()` never installs the callback or renders; HTML and rendering stay with the common transform.
+
+## 6. Semantic HTML transform
+
+### 6.1 Structure
 
 ```html
-<graph class="lambda-graph" data-radiant-layout="lambda-graph">
-  <node class="graph-node" data-node-id="a">...</node>
+<graph class="lambda-graph" data-radiant-layout="lambda-graph"
+       data-direction="TB" data-node-sep="60" data-rank-sep="80" data-edge-sep="10">
+  <node class="graph-node" data-node-id="a">...rich content...</node>
   <node class="graph-node" data-node-id="b">...</node>
   <edge data-from="a" data-to="b" data-directed="true"></edge>
+  <edge-label data-edge-id="e0">continue</edge-label>
+  <cluster data-cluster-id="backend"></cluster>
+  <cluster-label data-cluster-id="backend">Backend</cluster-label>
+  <port data-node-id="a" data-port-id="out"></port>
 </graph>
 ```
 
-The transform preserves rich node content. If a source node already has child
-elements, those elements become the `<node>` contents. A source node containing
-only a label can use that label as text content.
+The transform receives only canonical Graph IR; it does not know whether a node came from Mermaid, DOT, D2, Structurizr, or authored Mark except where a namespaced property is intentionally exposed for provenance. Graph options become stable root attributes. Edge options stay on their semantic `<edge>` elements rather than one opaque graph attribute, so the callback reads identity, endpoints, direction, style, markers, ports, constraints, and route hints through Velmt attributes. Authored rich node children become the `<node>` contents; recursive subgraph membership is carried as stable metadata.
 
-Graph options become stable attributes on the graph root, for example:
+### 6.2 Layout participation
 
-```html
-<graph class="lambda-graph"
-       data-radiant-layout="lambda-graph"
-       data-direction="TB"
-       data-node-sep="60"
-       data-rank-sep="80">
-```
+All semantic children are direct custom-layout children.
 
-Edge options remain on their semantic `<edge>` elements rather than being
-serialized into one opaque graph attribute. This keeps the transformed tree
-inspectable and allows the callback to read edge identity, endpoints, direction,
-style, arrows, and future routing hints through Velmt attributes.
-
-### 6.1 Layout participation
-
-Both `<node>` and `<edge>` are direct custom-layout children:
-
-- `<node>` is a normal measured block whose border box participates in graph
-  geometry and parent bounds.
-- `<edge>` is a non-visual, zero-size metadata box. It participates in the
-  callback so its relationship attributes are available, but it does not draw
-  itself or contribute positive size.
-
-The package stylesheet should establish that contract:
+- `<node>`, `<edge-label>`, `<cluster-label>`, and annotation elements are measured boxes whose border boxes participate in geometry and bounds.
+- `<edge>`, `<cluster>`, `<port>`, and `<constraint>` are zero-size, non-visual metadata boxes that expose relationship attributes to the callback but neither draw nor contribute size.
 
 ```css
-graph.lambda-graph {
-  display: layout(lambda-graph);
-  position: relative;
-}
-
-graph.lambda-graph > node.graph-node {
-  display: inline-block;
-}
-
+graph.lambda-graph { display: layout(lambda-graph); position: relative; }
+graph.lambda-graph > node.graph-node { display: inline-block; }
 graph.lambda-graph > edge {
-  display: block;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  pointer-events: none;
+  display: block; width: 0; height: 0; overflow: hidden;
+  visibility: hidden; pointer-events: none;
 }
 ```
 
-The callback returns `(0, 0)` placements for metadata edges so every in-flow
-custom-layout child has an explicit result. Edge visuals are emitted separately
-as generated paint layers.
+The callback returns `(0, 0)` placements for metadata boxes so every in-flow custom-layout child has an explicit result. Edge and cluster visuals are generated paint (§9), never the metadata boxes themselves.
 
-Rich edge labels may later be represented by measured visual children associated
-with an edge id. They should not overload the zero-size metadata edge box.
+### 6.3 Rich content and sanitization
 
-## 7. Custom Layout Call Flow
+Markdown and HTML labels are lowered by reusing Lambda's Markdown and HTML-fragment parsers. The sanitizer reconstructs only safe inline formatting (`strong`, `em`, `code`, `u`, `sub`, `sup`, `br`), plus safe tables/rows/cells for Graphviz record and HTML-like labels (§11.5). It strips authored attributes and unknown wrappers and removes `script`, `style`, and `template` subtrees. Raw authored HTML never reaches the document.
 
-The implemented and proposed flow is:
+### 6.4 Shapes
 
-```text
-graph source
-  -> C input parser or Lambda graph value
-  -> transform.to_html()
-  -> semantic <graph>/<node>/<edge> tree
-  -> Radiant resolves data-radiant-layout="lambda-graph"
-  -> Radiant prelays out every direct child
-  -> node and edge Velmts passed to the retained Lambda fn
-  -> layout.from_velmts() builds the canonical graph model
-  -> layout.compute() ranks, orders, positions, and routes
-  -> transform.paint builds generated SVG paint layers
-  -> callback returns placements, parent size, and paint layers
-  -> Radiant writes node x/y/z to child views
-  -> Radiant stores generated paint layers on the graph view
-  -> renderer interleaves generated layers and node child views by z
-```
+Node shape roles render through HTML geometry and matching layout clipping: rectangle, rounded, stadium, ellipse/circle, double-circle, diamond, hexagon, trapezoid and inverse trapezoid, asymmetric, cylinder, subroutine, parallelogram, triangle, octagon, house, card/notch, cloud, hourglass, bolt, lean, tag/document, delay, brace, fork, divided, lined, and general polygons. Source shape names map to shared *geometry families* rather than unrelated code paths; the raw source name stays as canonical provenance. One pure polygon helper generates both normalized CSS clip polygons and the vertices used for routed-edge clipping, so paint and layout never carry independent polygon formulas.
 
-The callback should have this shape:
+### 6.5 Safe style cascade
+
+Styles are parsed into typed values, never appended as authored CSS. Declarations are tokenized on commas or semicolons without splitting functional colors; properties and values outside the graph allowlist are rejected. The allowlist yields fill, stroke, stroke width, text color, opacity, dash array, and (for formats that define them) font family/size, node size, shape, and route mode. Class definitions cascade before node-specific direct styles. Safe node paint becomes reconstructed inline CSS; safe edge stroke, width, opacity, and dash metadata survives Velmt adaptation, routing, and generated paint. Font families pass through an allowlist with fallback stacks; unsafe values never enter CSS declarations.
+
+## 7. Custom layout callback and runtime
+
+### 7.1 Call flow
 
 ```lambda
-fn lambda_graph_layout(parent, children, ctx) {
+fn layout(parent, children, ctx) {
   let result = layout.from_velmts(parent, children, ctx)
   {
     width: result.width,
@@ -301,199 +256,27 @@ fn lambda_graph_layout(parent, children, ctx) {
 }
 ```
 
-The function allocates and returns immutable data. It does not mutate the
-semantic graph tree or force another layout pass.
+Radiant prelays out every direct child, passes the node, label, and metadata Velmts to the export, writes the returned `x/y/z` to child views, stores the generated paint layers on the graph view, and renders paint and child views in one signed order. The function allocates and returns immutable data; it neither mutates the semantic tree nor forces another pass. Negative placements and explicit parent sizes follow the established custom-layout overflow rules.
 
-## 8. Edge Routing
+Port attachment uses measured geometry: the Velmt adapter walks the already-laid-out node subtree, accumulates each port cell's local border box, and retains normalized horizontal and vertical centers. Direct non-Radiant callers fall back to canonical source-order offsets. Velmt descendant exposure stays lazy and bounded.
 
-Graph layout is responsible for links as well as nodes. Routing occurs after
-node positions are known and should produce renderer-independent geometry.
+### 7.2 Automatic connection and lifetime
 
-The initial router may retain the current orthogonal route shape, but its output
-should be normalized into segments:
+Under **D7.5.3v2**, graph HTML carries `data-radiant-layout="lambda-graph"` and Radiant automatically invokes `lambda.graph.transform.layout` after measuring the children. This works for package rendering, native document loading, and serialized HTML opened in a fresh process. There is no public registration or `install()` API.
 
-```lambda
-{
-  id: "e0",
-  from: "a",
-  to: "b",
-  segments: [{
-    points: [{x: 120.0, y: 40.0}, {x: 120.0, y: 80.0}],
-    z: -1
-  }],
-  arrow_end: true,
-  style: "solid"
-}
-```
+The host resolves the export on the document's retained evaluator. A static HTML document acquires an evaluator lazily; a synchronous render from Lambda shares the caller's live evaluator; existing window-loader ownership is unchanged. Reflow reuses imported module state and compiled code. Module lifetime replaces the former separately rooted callback registry and per-heap cleanup slots, so two live graph documents cannot overwrite each other's callback.
 
-Geometry work belongs in `graph.layout`:
+Generated SVG layers keep explicit roots on the owning heap and replace their previous layer set on reflow (**D5.3.3**). Closing one document never disconnects another document's layout or releases its paint. Relayout reuses canonical topology, resolved style data, measured Velmts, and the compiled callback; layout cache keys include layout-affecting source properties and measured child dimensions.
 
-- clip endpoints against the actual node shape;
-- route orthogonal or curved paths;
-- separate parallel edges;
-- route self-loops;
-- detect or honor crossing information;
-- choose label and arrowhead anchors;
-- split a route when different portions require different stacking.
+~~The original API required `graph_transform.install()` calling `radiant.register_layout("lambda-graph", callback)`.~~ Superseded by automatic package-export connection (D7.5.3v2, user ruling 2026-10-16).
 
-SVG path construction, marker definitions, colors, dash patterns, and theme
-mapping belong in `graph.transform.paint`.
+### 7.3 Standalone HTML
 
-## 9. Unified Node and Edge Stacking
+Serializing the transformed tree to a standalone `.html` file loses the retained Lambda runtime: `display: layout(lambda-graph)` names a callback but does not load its package. Portable deferred-layout HTML requires a future declarative, security-scoped module loader (for example, document metadata that opts into a trusted Lambda layout package). Until then, standalone output is a Lambda script that imports the transform, a final SVG/PDF/raster render, or a future eager SVG with explicit node sizes.
 
-A single `underlay` plus a single `overlay` is not sufficient. It supports only
-"all edges behind all nodes" or "all edges above all nodes." Graphs may require
-selected edges above nodes, ordinary edges below nodes, or one routed edge that
-passes behind one node and above another.
+### 7.4 CLI bridge
 
-Custom layout should therefore expose generated paint layers with signed `z`
-values, and child placements should use the same `z` coordinate:
-
-```lambda
-{
-  placements: [
-    {index: 0, x: 40.0, y: 20.0, z: 0},
-    {index: 1, x: 240.0, y: 120.0, z: 0}
-  ],
-  paint_layers: [
-    {z: -1, content: <svg ...ordinary edge segments...>},
-    {z: 1, content: <svg ...raised or selected segments...>}
-  ]
-}
-```
-
-The graph custom-layout container owns one local stacking sequence:
-
-1. Paint the container background and border.
-2. Merge generated `paint_layers` and normal child views.
-3. Sort by signed `z`, lowest first.
-4. Preserve result/tree order for equal `z`; at an equal value, generated paint
-   is before child content so a node covers an edge unless the edge requests a
-   greater `z`.
-5. Paint outlines and other parent-level effects according to the normal
-   Radiant boundary rules.
-
-Each node subtree remains atomic relative to graph-generated paint. Its own CSS
-stacking contexts continue to order descendants internally.
-
-Typical defaults are:
-
-- ordinary edge segments: `z = -1`;
-- graph nodes: `z = 0`;
-- selected edges, handles, and interaction highlights: `z = 1`.
-
-For a genuinely weaving edge, the router splits the route into segments. The
-segments below nodes are grouped into a negative-z SVG layer, while raised
-segments are grouped into a positive-z layer. Crossing gaps, masks, or bridge
-arcs can be represented in those generated SVG fragments without changing node
-layout.
-
-Radiant now stores signed custom child `z`, generated paint entries, and uses a
-shared stable stacking helper for SVG, PDF, raster, and reverse-order hit
-testing. Generated edge paint is non-interactive initially; edge hit testing
-can later reuse routed segment geometry.
-
-## 10. Generated Paint Layer Contract
-
-The minimal generic custom-layout extension is:
-
-```lambda
-type CustomPaintLayer = {
-  z: int,
-  content: element
-}
-
-type CustomLayoutResult = {
-  width: float?,
-  height: float?,
-  baseline: float?,
-  placements: [Placement],
-  paint_layers: [CustomPaintLayer]?
-}
-```
-
-For the graph package, `content` is an `<svg>` element whose viewport matches
-the graph content box. Paint layers:
-
-- use the custom container's local coordinate system;
-- do not affect parent sizing;
-- obey the parent's CSS overflow and clipping;
-- are immutable layout output, not DOM children;
-- are replaced on the next successful custom layout pass;
-- must be copied or lowered into document-owned PaintIR before the callback's
-  temporary result becomes unreachable;
-- may be grouped by `z` so many edges share one SVG subscene.
-
-This extension is generic enough for connectors, annotations, diagrams, and
-other custom layouts without adding graph-specific fields to Radiant.
-
-## 11. SVG Scope
-
-Radiant currently treats the root `<svg>` as a replaced CSS box and renders its
-native SVG element tree separately. Therefore:
-
-- an entire SVG can be rich content inside one `<node>` and can be measured and
-  positioned as that node's child content;
-- `<path>`, `<g>`, `<rect>`, and other SVG primitives are not individual custom
-  layout children;
-- generated SVG paint layers are the intended bridge for edge paths.
-
-This design does not require making SVG graphics elements participate in CSS
-custom layout. The graph callback returns a finished SVG fragment in graph-local
-coordinates, and Radiant lowers that fragment through its existing SVG renderer.
-
-`transform.to_svg()` may be added later as an eager convenience API for graphs
-whose node dimensions are already known. It is not the rich-content path and is
-not required for the first release.
-
-## 12. Automatic Connection, Runtime, and Caching
-
-Under **D7.5.3v2**, graph HTML carries `data-radiant-layout="lambda-graph"`;
-Radiant automatically invokes the package's pure `layout` export after measuring
-the children. This works for package rendering, native document loading and
-serialized HTML opened in a fresh process. There is no public registration or
-`install()` API.
-
-The host resolves the callback on the document's retained evaluator. A static
-HTML document acquires an evaluator lazily, and a synchronous render from Lambda
-shares the caller's live evaluator. Existing window-loader ownership remains
-unchanged. Reflow reuses imported module state and compiled code; it does not
-require an application to reinstall a callback. Module lifetime replaces the
-former separately rooted callback registry and per-heap cleanup slots.
-
-Generated SVG layers retain explicit roots on the owning heap and replace their
-previous layer set on reflow (**D5.3.3**). Closing one document must not disconnect
-another document's graph layout or release its generated paint.
-
-
-## 13. Standalone HTML
-
-`to_html()` initially returns an in-memory Lambda element tree. This is enough
-for Lambda scripts, `render`, `view`, and `layout`, because their document loader
-retains the evaluator that executes the package layout export (**D7.5.3v2**).
-
-Serializing that tree to a standalone `.html` file loses the retained Lambda
-runtime. CSS such as `display: layout(lambda-graph)` names a callback but does
-not load its package. Portable deferred-layout HTML therefore requires a future
-declarative and security-scoped module loader, for example document metadata
-that opts into a trusted Lambda layout package.
-
-Until that loader exists, standalone output should be one of:
-
-- a Lambda script/document that imports the graph transform;
-- final SVG/PDF/PNG/JPEG rendered from the in-memory HTML document;
-- a future eager static SVG produced after explicit node sizes are known.
-
-## 14. Retiring the C `layout_graph()` Pipeline
-
-The direct graph branches in `render`, `view`, and `layout` have been replaced
-with the same Lambda bridge pattern used for package-driven PDF conversion.
-
-The bridge source is conceptually:
-
-The graph bridge uses the postfix handler surface required by
-**S7.6.2v2/S7.6.3v2**; the former `^err` destructuring is retired under
-**S7.6.5v2**.
+`render`, `view`, `layout`, and `convert -t html` route graph files (`.mmd`, `.d2`, `.dot`, `.gv`, `.structurizr`, and detected `.dsl`) through one Lambda bridge script and the normal HTML loader, with no separate graph-to-SVG branch and no temporary SVG file. Requested `.svg` output comes from Radiant's HTML-to-SVG renderer. The document runtime stays alive through layout, rendering, interaction, and window teardown. The bridge uses the postfix handler (**S7.6.2v3/S7.6.3v2**):
 
 ```lambda
 import graph_transform: lambda.graph.transform
@@ -502,2051 +285,437 @@ let graph = input("diagram.mmd", {type: "mermaid"}) ^ { null }
 graph_transform.to_html(graph, {theme: "zinc-dark"})
 ```
 
-### 14.1 CLI migration
+Graph syntax parsing and data formatting remain native; all layout and painting is Lambda.
 
-1. Add a shared graph bridge-script builder for Mermaid, D2, DOT, and GV input.
-2. Route `render` graph files through the normal Lambda-script HTML loader and
-   `render_html_to_output_target()`.
-3. Route `view` graph files through the in-memory Lambda script viewer, avoiding
-   a temporary SVG file.
-4. Route `layout` graph files through the same transformed document path so its
-   result is a normal Radiant view tree.
-5. Produce requested `.svg` output through Radiant's HTML-to-SVG renderer. Do
-   not keep a separate direct graph-to-SVG branch.
-6. Keep the graph document runtime alive until layout, rendering, interaction,
-   and window teardown are complete.
+## 8. Layered layout and routing
 
-### 14.2 C removal
+The engine is a deterministic layered (Sugiyama-family) layout. Exact Graphviz or Dagre ranking and crossing choices are not a requirement; declared semantic constraints and Graph Scene relations (§13) are.
 
-After CLI and golden tests pass, remove:
+### 8.1 Ranking
 
-- `radiant/layout_graph.cpp` and `radiant/layout_graph.hpp`;
-- `radiant/graph_to_svg.cpp` and `radiant/graph_to_svg.hpp`;
-- `radiant/graph_layout_types.hpp`;
-- C graph theme files if no other caller remains;
-- graph layout and graph-to-SVG stubs from `lambda/headless_stubs.cpp`;
-- corresponding includes, forward declarations, build entries, analysis rules,
-  and lint allow-list entries.
+- All four directions (`TB`/`TD`, `BT`, `LR`, `RL`) at graph and subgraph level; `TD` normalizes to `TB`.
+- Edge `min-length` and `weight`; `constraint=false` edges are excluded from ranking.
+- `rank=same|min|max|source|sink` constraints, with same-rank promotion propagated through successors so `min-length` stays valid; self-loops and cycle back-edges are ignored during promotion relaxation.
+- Graphviz recursive-rank default versus `newrank=true`: the default excludes rank sets whose members span structural clusters; `newrank` applies them in one global rank space.
+- Measured center labels raise the minimum rank gap when the declared gap would crowd the text.
 
-The C Mermaid, D2, and DOT input parsers and graph formatters remain. They deal
-with graph syntax and Lambda data, not layout or painting.
+### 8.2 Ordering
 
-The C coordinate algorithm, graph SVG generator, exported `layout_graph()` ABI,
-headless stubs, build references, and lint/analysis mappings have all been
-removed. Only graph syntax parsing and data formatting remain native.
+Crossing reduction runs a requested number of deterministic barycentric iterations, weighted by edge weight. Direct cluster members stay contiguous, with inter-cluster padding reserved. Nodes group by their complete outer-to-inner cluster ancestry and then by authored alignment `group`, keeping nested clusters and alignment groups contiguous without conflating them. After optimization, authored `ordering=in|out` sequences are reapplied so crossing reduction cannot reverse a declared order. Stable source order is the final tie breaker.
 
-## 15. Implementation Plan
+### 8.3 Clusters
 
-The phases below constitute Stage 1.
+Cluster boxes are computed from measured member nodes and child clusters, recursively, with a reserved label band and padding. Only `role: "cluster"` subgraphs are contained and painted; scope-only subgraphs are flattened into the nearest visual container for ownership while keeping their identity, properties, membership, and lowered constraints as metadata.
 
-### Phase 1 - Package split (complete)
+### 8.4 Routing
 
-- add `graph/layout.ls` and move the current public geometry API there;
-- keep `dagre.ls` as the initial private implementation used by `layout.ls`;
-- add `geometry.ls` and `routing.ls` as complexity warrants;
-- retain `graph/graph.ls` as a compatibility facade;
-- preserve and update current pure Lambda layout tests.
+Routing runs after node positions are known and produces renderer-independent segment geometry:
 
-### Phase 2 - HTML transform (complete)
-
-- add `graph/transform.ls` and `graph/transform/html.ls`;
-- normalize canonical `<graph>` Mark input and retain map input only as a
-  compatibility adapter;
-- produce the specified `<graph>/<node>/<edge>` semantic tree;
-- add package CSS for measured nodes and zero-size metadata edges;
-- add exact Lambda `*.ls` and expected `*.txt` transform tests.
-
-### Phase 3 - Graph custom callback (complete)
-
-- classify node and edge Velmts by tag and attributes;
-- construct the canonical model using resolved node border-box sizes;
-- return placements for nodes and metadata edges;
-- preserve full routed edge geometry in the custom layout result;
-- make registration runtime/document scoped.
-
-### Phase 4 - Generated paint and stacking (complete for non-interactive paint)
-
-- extend the custom layout result parser with `paint_layers`;
-- retain generated SVG element content as document resources and lower it
-  through each existing renderer;
-- implement signed custom child `z`;
-- merge child views and generated paint layers in render and hit-test order;
-- test the shared signed ordering of generated layers and child views,
-  including generated-before-child ordering at equal `z`.
-
-### Phase 5 - Routing parity (parallel and self-loop paths complete; compound routing deferred)
-
-- honor all four layout directions in rank and coordinate assignment (complete);
-- run the requested number of crossing-reduction iterations (complete);
-- add shape-specific clipping (complete for the initial shape set);
-- add parallel-edge and self-loop routing (complete for non-compound edges);
-- add subgraph/cluster geometry and edge-label placement as required;
-- compare Mermaid, D2, and DOT fixtures against accepted goldens.
-
-### Phase 6 - CLI migration and C removal (complete)
-
-- add the graph Lambda bridge to `render`, `view`, and `layout`;
-- add SVG, PDF, PNG, and headless view integration tests;
-- remove the old C graph layout/render ABI and files;
-- run Lambda and Radiant baseline suites and the Radiant layout int-cast lint.
-
-## 16. Acceptance Criteria
-
-The first graph package release is complete when:
-
-1. `transform.to_html()` emits the required semantic graph tree.
-2. Nodes containing nested block, inline, flex/grid, text, image, and whole-SVG
-   content receive their dimensions from Radiant and are positioned correctly.
-3. Links are routed from measured node boxes and rendered from generated SVG
-   paint layers.
-4. Signed `z` ordering can place ordinary edges below nodes, selected edges
-   above nodes, and split segments on both sides of node content.
-5. Repeated relayout reuses the retained runtime and compiled callback.
-6. Two simultaneously live graph documents cannot overwrite one another's
-   layout callback.
-7. Negative placements and explicit parent sizes follow the established custom
-   layout overflow rules.
-8. Mermaid, D2, DOT, and GV files render through the Lambda package in `render`,
-   `view`, and `layout`.
-9. No active caller or build target references `layout_graph()`,
-   `graph_to_svg()`, or the deleted C graph layout types.
-10. Focused tests, Lambda baseline tests, Radiant baseline tests, and layout lint
-    all pass.
-
-## 17. Future Work
-
-- eager `transform.to_svg()` for graph models with explicit node sizes;
-- portable standalone HTML with an opt-in trusted layout-module loader;
-- interactive edge hit testing using routed segment geometry;
-- rich measured edge labels and editable routing handles;
-- graph animation using stable node, edge, and segment identities;
-- LambdaJS registration over the same Velmt and paint-layer contracts;
-- additional layout algorithms behind the same canonical model.
-
-## 18. Stage 2 - Rich Mermaid and Graph Conformance
-
-Stage 2 evolves the working rich-node path into a format-independent graph
-pipeline with broad Mermaid graph support. It does not put every Mermaid diagram
-inside `lambda.graph`; package ownership follows the required layout
-model rather than the source language name.
-
-### 18.1 Package ownership
-
-`lambda.graph` owns diagrams whose defining problem is graph topology:
-node ranking or free placement, recursive grouping, relationship routing, ports,
-markers, and overlap avoidance. Mermaid flowcharts are the first conformance
-target. Class, state, entity-relationship, requirement, architecture, block,
-mindmap, and other topology-oriented Mermaid families may reuse the graph IR and
-graph layout with family-specific transforms.
-
-`lambda.chart` owns Sequence, Gantt, pie, Sankey, timeline, XY, and
-other data-, axis-, or time-oriented Mermaid families. The existing chart
-package already accepts `<chart>` Mark and renders SVG. Those families require
-new chart adapters and specialized chart layouts; they must not be represented
-as fake Dagre graphs merely because their source syntax is Mermaid.
-
-The Mermaid parser therefore belongs to the input layer and dispatches by
-diagram family:
-
-```text
-Mermaid source
-  -> source-stage Mark with source-order declarations
-  -> graph-oriented family -> canonical Mark Graph IR -> graph package
-  -> chart-oriented family -> canonical Mark Chart IR -> chart package
+```lambda
+{id: "e0", from: "a", to: "b",
+ segments: [{points: [{x: 120.0, y: 40.0}, {x: 120.0, y: 80.0}], z: -1}],
+ arrow_end: true, style: "solid"}
 ```
 
-The graph proposal specifies only the graph-oriented branch and the boundary by
-which chart-oriented source-stage Mark is handed to `lambda.chart`.
+Geometry concerns belong to layout; SVG path construction, marker definitions, colors, dashes, and theme mapping belong to paint.
 
-The first sequence adapter accepts the input parser's ordered source envelope,
-converts it to a canonical `<chart kind: "sequence">` value, and lays out
-participant columns, lifelines, messages, loops, and notes in `lambda.chart`.
-The render path repeats styled participants at both lifeline ends, places loop
-borders around their member actors, and keeps self messages curved.
-Graph ranking and routing are not used. The package import follows D7.2.4.
+- **Route modes.** Canonical `route-mode` is `none`, `line`, `polyline`, `orthogonal`, or `curved`. Paint omits `none` edges, keeps direct `line` segments, emits waypoint paths for `polyline`/`orthogonal`, and produces deterministic quadratic/cubic paths for `curved`; terminal curve segments keep a defined tangent for arrowheads.
+- **Obstacles.** Orthogonal routes avoid unrelated node and cluster boxes.
+- **Clipping.** Endpoints clip against the actual node shape, including polygon parameters and fixed inner shapes (§11.5).
+- **Ports.** Named ports and compass points determine the attachment side and offset, using measured port-cell geometry when available.
+- **Parallel edges.** Edges with the same ordered endpoints get deterministic sibling-local lanes separated by `edge-sep`; when an outer lane extends before the graph origin, nodes and edges shift together.
+- **Self-loops.** Spacing uses sibling-local order so unrelated edges cannot change loop geometry; for LR/RL graphs unported loops use the upper cross-axis side.
+- **Compound routes.** Routes cross each exclusive source and target cluster boundary in containment order. With Graphviz `compound=true`, an explicit `lhead`/`ltail` cluster becomes the endpoint and the route clips to that cluster's border; outer nested boundaries remain in the route. Parallel compound edges also receive lanes.
+- **Feedback.** Singleton feedback ranks shift to separate short and long return paths; long returns route directly when they clear intermediate boxes, otherwise on lanes that clear the endpoint corridor, separate fanout, and avoid loop outlines.
+- **Weaving.** A route may be split into segments with different `z` when part must pass behind one node and above another (§9.2).
+- **Bounds.** Route extents and placed labels are included in graph bounds.
 
-### 18.2 Stage 2 pipeline
+### 8.5 Label and annotation placement
 
-The complete graph path is:
+Labels and annotations are placed against a shared occupied-geometry set containing node boxes, cluster labels, other routed edge segment boxes, and labels already placed in source order. Edge labels anchor at the arc-length midpoint of the complete route (head/tail labels at the ends), using sampled geometry of the same curve the paint layer emits. Candidates expand through bounded rings around the anchor or owner; when a dense graph exhausts them, a deterministic position beyond the occupied right boundary guarantees a non-overlapping result rather than accepting a collision. Graph bounds expand to contain it.
 
-```text
-Mermaid, D2, DOT, GV, or Mark graph source
-  -> format-specific parser
-  -> source-stage Mark with source spans and format-specific declarations
-  -> pure normalization and semantic resolution
-  -> canonical Mark Graph IR
-  -> graph.transform.to_html()
-  -> semantic HTML <graph>/<node>/<edge> tree
-  -> Radiant lays out each rich node subtree
-  -> measured node and edge-label Velmts
-  -> retained JIT-compiled graph layout fn
-  -> node/group placements and routed edge geometry
-  -> generated SVG paint layers
-  -> final SVG, PDF, raster, or interactive view
+## 9. Generated paint and stacking
+
+### 9.1 Paint-layer contract
+
+The generic custom-layout result extension is:
+
+```lambda
+type CustomPaintLayer = { z: int, content: element }
+
+type CustomLayoutResult = {
+  width: float?, height: float?, baseline: float?,
+  placements: [Placement],
+  paint_layers: [CustomPaintLayer]?
+}
 ```
 
-The source and canonical stages use the same Mark representation and are
-distinguished by the root `ir-stage` attribute. Source-stage Mark preserves
-declarations in source order, exact source spans, and format-specific constructs;
-it may therefore contain repeated node ids. The normalizer applies
-source-language semantics, including Mermaid node redeclaration, chained-edge
-expansion, class assignment, defaults, subgraph membership, and generated
-identity. It then emits canonical Mark Graph IR with unique node identities.
-There is no separate Mermaid AST data model.
+For graphs, `content` is an `<svg>` whose viewport matches the graph content box. Paint layers use the container's local coordinates, do not affect parent sizing, obey the parent's overflow and clipping, are immutable layout output rather than DOM children, are replaced on the next successful pass, are lowered into document-owned paint before the callback's temporary result becomes unreachable, and may group many edges into one SVG subscene per `z`. The contract is generic enough for connectors, annotations, and other custom layouts without graph-specific Radiant fields.
 
-The Mermaid parser must not merge explicit node declarations. For example:
+### 9.2 Signed stacking
 
-```text
-A[Initial]
-A{Final}
-```
+A single underlay plus overlay cannot express "selected edges above nodes, ordinary edges below" or one edge weaving behind one node and over another. Placements and paint layers therefore share one signed `z` coordinate within the container's local stacking sequence:
 
-produces two source-stage `<node>` values, each with its own label, shape, and
-source span. Mermaid normalization folds them into one canonical node whose
-effective label is `Final`, shape is `diamond`, and provenance points to the
-final effective declaration. Bare endpoint references synthesized while parsing
-edges remain deduplicated because they carry no later declaration value that
-would otherwise be lost.
+1. Paint the container background and border.
+2. Merge generated paint layers and child views.
+3. Sort by signed `z`, lowest first.
+4. Preserve result/tree order at equal `z`; generated paint precedes child content, so a node covers an edge unless the edge requests a greater `z`.
+5. Paint outlines and parent-level effects under normal Radiant boundary rules.
 
-A parser may build the Mark IR directly when the source grammar is already
-canonical, but it must still pass through the same validation and normalization
-contract. Unsupported syntax must produce a diagnostic; it must never be
-silently discarded or accepted as a different diagram family.
+Each node subtree is atomic relative to generated paint; its own CSS stacking contexts order its descendants. Defaults: ordinary edge segments and cluster boxes `z = -1`, nodes `z = 0`, selected edges, handles, and highlights `z = 1`. Crossing gaps, masks, and bridge arcs live inside generated fragments without changing node layout. SVG, PDF, raster, and reverse-order hit testing share one stable stacking helper. Generated paint is currently non-interactive; edge hit testing can reuse routed segment geometry.
 
-### 18.3 Mark Graph IR contract
+### 9.3 SVG scope
 
-The Stage 2 IR extends the base schema in
-`vibe/Mark_Graph_Schema.md`. Its stable top-level elements are:
+Radiant treats a root `<svg>` as a replaced box with its own native SVG renderer. A whole SVG may be rich content inside a `<node>` and is measured as that node's content, but `<path>`, `<g>`, `<rect>`, and other primitives are never individual custom-layout children. Generated SVG paint layers are the bridge for edges, markers, and cluster boxes.
 
-- `<graph>` for identity, flavor, graph kind, direction, defaults, and options;
-- `<meta>` for title, accessibility, provenance, and source information;
-- `<styles>` containing normalized `<style-rule>` elements;
-- recursive `<subgraph>` elements for clusters and local layout direction;
-- `<node>` elements with stable ids, shape roles, classes, ports, and content;
-- `<edge>` elements with stable ids, endpoints, constraints, markers, and labels;
-- `<constraint>` elements for same-rank, ordering, minimum length, or fixed
-  placement requirements that do not naturally belong to one edge.
+### 9.4 Markers
 
-Node labels, edge labels, and subgraph labels are content elements rather than
-opaque serialized attributes when they contain formatting:
+Endpoint markers are compositional, not a single enum. A marker is a sequence of up to four components — `normal`, `inv`, `open`, `circle`/`dot`, `diamond`, `box`, `tee`, `vee`, `crow`, `none`, … — each with open/filled and left/right half-clip modifiers, painted in order at the routed endpoint and scaled by `arrowsize`. Mermaid circle/cross markers, UML class relationship ends, ER crow's-foot cardinalities, and Graphviz arrow grammar all lower to this one vocabulary, so the common paint path needs no family-specific painter. Unsupported components keep their raw specification and use a deterministic fallback marker with a non-fatal diagnostic.
 
-```mark
-<node id:"client";
-  <port id:"request" side:"east" offset:0.5>
->
-<node id:"api" shape:"rounded" source-start:42 source-end:71;
-  <label format:"markdown"; "The **API** service">
-  <content; <strong; "API"> " service">
-  <port id:"request" side:"west" offset:0.5>
->
-```
+### 9.5 Paint values
 
-`<label>` preserves the source-level label and format. `<content>` contains the
-safe normalized Mark subtree that `to_html()` places in the measured graph node.
-This separation allows formatting and text semantics to be tested without
-depending on final HTML wrapper elements.
+Paint supports fill, stroke, width, dash, opacity, peripheries, and weighted multi-stop linear/radial gradients plus hard-stop `striped`/`wedged` fills from color lists.
 
-Edges use explicit endpoint and marker semantics:
+## 10. Final SVG metadata
 
-```mark
-<edge id:"request" from:"client" to:"api"
-      from-port:"request" to-port:"request"
-      arrow-tail:"none" arrow-head:"normal"
-      line-style:"dashed" stroke-width:2
-      constraint:true min-length:2;
-  <label position:"center"; "HTTP">
->
-```
-
-Normalization invariants are:
-
-1. Node, edge, and subgraph identities are stable and unique within a graph.
-2. References resolve to canonical identities or produce structured diagnostics.
-3. Node redeclarations merge according to source-format semantics.
-4. Chained and multi-node links expand into explicit edge elements.
-5. Subgraph containment remains recursive and deterministic.
-6. Defaults, classes, and inline styles remain distinguishable until the style
-   cascade is resolved; resolved values may be attached for layout and paint.
-7. Source spans survive normalization for diagnostics and editor integration.
-8. Unknown source extensions are either preserved in a namespaced metadata
-   element or diagnosed; they are not silently thrown away.
-9. Labeled nodes, edges, and subgraphs carry source semantics in `<label>` and
-   measured Mark in `<content>`; a second normalization pass is idempotent.
-
-### 18.4 Stage 2 module structure
-
-The package should grow along established boundaries rather than enlarge
-`dagre.ls` indefinitely:
-
-```text
-lambda/graph/
-  graph.ls                     compatibility facade
-  model.ls                     Mark Graph IR queries and constructors
-  normalize.ls                 validation and canonicalization
-  schema.ls                    declarative element, attribute, and child contract
-  diagnostics.ls               structured graph diagnostics
-  style.ls                     graph style cascade and safe properties
-  layout.ls                    public measured-layout adapter
-  scene.ls                     Graph Scene Mark SVG adapter and comparator
-  layout/
-    layered.ls                 ranking and rank constraints
-    ordering.ls                crossing reduction and stable ordering
-    positioning.ls             node and cluster coordinates
-    routing.ls                 edge routing coordinator
-    shapes.ls                  shape bounds and endpoint clipping
-    clusters.ls                recursive subgraph geometry
-    labels.ls                  edge and cluster label placement
-  transform.ls                 public layout export and HTML API
-  transform/
-    html.ls                    Mark Graph IR to semantic HTML
-    content.ls                 safe rich-label/content lowering
-    paint.ls                   routed geometry to SVG paint layers
-    theme.ls                   graph visual defaults
-  mermaid/
-    flowchart.ls               flowchart-specific normalization
-    class.ls                   class-node and relation semantics
-    state.ls                   state-node and transition semantics
-    er.ls                      entity and cardinality semantics
-```
-
-`dagre.ls` may remain as the Stage 1 implementation while the shared layered
-components are extracted. The extraction should happen when the richer cases
-require it, without duplicating ranking or routing logic among Mermaid families.
-
-### 18.5 Mermaid flowchart coverage
-
-Flowchart support is developed as feature groups so the conformance matrix can
-show useful partial progress without claiming support based only on parsing the
-header. The Stage 2 target includes:
-
-- all directions (`TB`, `TD`, `BT`, `LR`, and `RL`) at graph and subgraph level;
-- stable node identity, later declarations, quoted ids, Unicode, and escapes;
-- legacy delimiter shapes and the general `@{ shape: ..., label: ... }` form;
-- plain, quoted, HTML, and Markdown labels with wrapping and line breaks;
-- solid, dotted, thick, open, directed, bidirectional, circle, and cross links;
-- edge ids, edge labels, minimum lengths, chained links, and multi-node links;
-- recursive subgraphs, explicit subgraph ids, local direction, and links to
-  subgraphs;
-- `classDef`, `class`, `:::`, `style`, and `linkStyle` semantics;
-- graph defaults, front matter, supported initialization options, title,
-  accessibility title and description, comments, and statement separators;
-- links, tooltips, and safe interaction metadata without executing callbacks
-  during parse, transform, or layout;
-- self-loops, parallel edges, cluster crossing, ports, edge-label placement,
-  shape-specific clipping, and deterministic routing.
-
-Each feature is recorded as `baseline`, `extended`, `unsupported`, or
-`invalid` in the test manifest. Merely producing an SVG is not a passing test.
-
-### 18.6 Semantic HTML and render metadata
-
-`transform.to_html()` continues to produce measured HTML rather than eager SVG.
-Stage 2 adds recursive cluster metadata, named ports, and separately measured
-edge and cluster label children. Zero-size `<edge>`, `<cluster>`, and `<port>`
-metadata remains available to the callback, while visual labels are measured
-children associated by stable identities.
-
-Final SVG output preserves renderer-neutral identity metadata:
+Final SVG preserves renderer-neutral identity metadata for accessibility, hit testing, editor integration, and semantic conformance:
 
 ```html
 <g data-graph-role="node" data-node-id="api">...</g>
 <rect data-graph-role="cluster" data-cluster-id="backend">...</rect>
-<path data-graph-role="edge" data-edge-id="request"
-      data-from="client" data-to="api">...</path>
+<path data-graph-role="edge" data-edge-id="request" data-from="client" data-to="api">...</path>
 <g data-graph-role="edge-label" data-edge-id="request">...</g>
 ```
 
-These attributes support accessibility, hit testing, editor integration, and
-semantic conformance tests. They are not styling hooks and do not determine
-paint order. Renderer-generated wrapper tags, classes, marker ids, and grouping
-remain implementation details.
+Roles cover graph, node, edge, edge-label, cluster, cluster-label, and annotation, with stable source identities, direction, shape, marker, label, and route metadata; Radiant records measured absolute border-box geometry. These attributes are not styling hooks and do not determine paint order. Wrapper tags, classes, marker ids, and grouping remain implementation details. Accessibility title and description surface as `aria-label`, `aria-description`, and graph title metadata.
 
-### 18.7 Semantic Graph Scene Mark
+## 11. Source formats
 
-Raw SVG strings and raster screenshots are not conformance fixtures. Mermaid and
-Radiant legitimately use different SVG tags, wrappers, classes, transforms,
-marker definitions, and floating-point formatting. Both outputs are therefore
-adapted into a smaller renderer-neutral Graph Scene Mark:
+### 11.1 Parser principles
+
+All graph parsers are compact manual C/C+ recursive-descent or line-oriented parsers that emit source-stage Mark directly.
+
+- **Syntax only.** Parsers do not apply defaults, merge nodes, expand edge products, convert units, rename attributes into CSS names, resolve identifiers, evaluate view expressions, or apply style cascades. All interpretation lives in pure Lambda normalizers.
+- **Shared lexical helpers, separate grammars.** Whitespace/comment skipping, quoted strings, bounded identifier/value readers, boundary-aware keyword matching, source spans, diagnostics, generated source ids, balanced-block recovery, and Mark builders are shared and format-neutral. Grammar state machines are not unified: a generic graph parser would hide distinct grammars behind conditionals. A new format searches existing helpers and promotes a narrowly parameterized one before adding a local copy.
+- **Explicit limits.** Maximum statement/subgraph nesting depth, HTML-label nesting and table cells, chained endpoint count, edge count after expansion, identifier/string/value length, statement count, and input size each produce a diagnostic.
+- **Recovery.** Invalid input returns the recoverable source graph plus diagnostics, recovering at the next newline or balanced closing brace.
+- **Size is a constraint.** Parser physical LOC and release-binary contribution are actively budgeted and enforced by a test; a ceiling increase must first reduce duplication. LOC is never reduced by compressing statements or deleting comments.
+
+**Why not Tree-sitter.** A 2026-07-15 experiment measured pinned Tree-sitter DOT and Mermaid grammars against the manual parsers. Generated DOT tables alone were ~36 KiB larger than the manual parser before a CST-to-Mark adapter; the full Mermaid grammar was ~179 KiB larger and parsed only 8 of 34 existing Lambda Mermaid fixtures without error nodes. The completed manual DOT parser added full DOT fidelity for a 16-byte release-binary delta. Tree-sitter remains an independent grammar reference, not a production dependency.
+
+### 11.2 Mermaid flowchart
+
+Feature groups are tracked in the conformance manifest as `baseline`, `extended`, `unsupported`, or `invalid`; producing an SVG is not a pass.
+
+- **Identity and redeclaration.** The parser never merges explicit declarations: `A[Initial]` then `A{Final}` produce two source nodes. Normalization applies graph-global last-declaration semantics (label `Final`, shape `diamond`, provenance of the effective declaration). Bare endpoint references stay deduplicated because they carry no later value. Every edge materializes both endpoints; subgraph references do not create duplicate implicit nodes. Quoted ids, Unicode, and escapes are supported.
+- **Shapes.** Legacy delimiter shapes and the general `id@{ shape: …, label: … }` form; aliases (`rect`, `diam`, `dbl-circ`, `cyl`, …) canonicalize to shared shape roles.
+- **Labels.** Plain, quoted (delimiter quotes removed), Markdown-string, and HTML labels with wrapping and line breaks, lowered to `<label>`/`<content>`.
+- **Links.** Solid, dotted, thick, open, directed, bidirectional, circle, and cross; extra link units normalize to `min-length` and are enforced by ranking. Chained links expand operator by operator with independent styling; multi-node `&` sets expand to their Cartesian product, and chained operators consume the preceding target set. `edgeId@operator` gives stable edge identity, with deterministic suffixes when one declaration expands to several edges. Edge `@{ animate, animation, curve }` properties and edge-id class assignments resolve through `source-id`.
+- **Subgraphs.** Recursive, with explicit ids, quoted labels, local direction, and links to subgraphs.
+- **Styles.** `classDef`, `class`, `:::` (normalized to ordinary class assignments), `style`, and `linkStyle` (node ids, edge indices, explicit edge ids, `default`), feeding the safe cascade (§6.5). Original declarations remain as provenance.
+- **Configuration.** YAML front matter and `%%{init: …}%%` are preserved as source metadata and parsed structurally; supported title, node/rank spacing, curve, and HTML-label settings lower into the transform.
+- **Accessibility.** `accTitle` and line or block `accDescr` survive under source-spanned `<meta>` with last-declaration semantics.
+- **Interactions.** `click` link and callback declarations become inert `<interaction>` metadata (tooltip, target, balanced callback arguments); nothing executes.
+- **Diagnostics.** Parser errors and warnings are structured `<diagnostic>` values; chart families use `mermaid.chart-family`.
+
+### 11.3 Mermaid class, ER, and state diagrams
+
+Family adapters are added only when their semantics fit, or deliberately extend, the common Graph IR. They reuse rich nodes, compositional markers, recursive clusters, annotations, routing, and the semantic runner. A shared compartment adapter rebuilds measured title/body content for class, ER, and state nodes.
+
+- **`classDiagram`.** Single and comma-separated declarations, aliases and escaped names, nested generics, source-spanned fields and methods, inline and separate stereotypes, visibility and static/abstract classifiers, direction, global and class-owned notes, recursive labeled/dotted namespaces, relationship labels and cardinalities, and the inheritance, composition, aggregation, association, dependency, realization, lollipop, two-ended, and plain-link operators. `classDef`, `cssClass`, inline class suffixes, direct styles, and link/callback/click interactions share the common metadata path. Stereotypes, headers, fields, and methods become distinct measured UML compartments; `hideEmptyMembersBox` controls empty compartments. Namespaces are recursive clusters; notes are annotations; UML ends are compositional markers.
+- **`erDiagram`.** Entity declarations and aliases, typed and nullable attributes, PK/FK/UK key and comment metadata, direction, labeled identifying and non-identifying relationships, and all four symbolic cardinality roles. Attributes become measured compartments; cardinalities are preserved semantically and lowered to `tee`, `crow`, and open-dot marker components.
+- **`stateDiagram` / `stateDiagram-v2` (flat).** Direction, declarations, quoted aliases, repeated descriptions, labeled transitions, start/end pseudostates, choice/fork/join roles, left/right notes, class/style directives, and accessibility metadata. Marker states receive fixed measurable content so empty semantic labels do not collapse during child layout. Notes are annotations with ownership, kind, text format, and final bounds in Graph Scene Mark. Composite states produce `mermaid.state.composite-unsupported` instead of being flattened or misrepresented.
+
+### 11.4 Graphviz DOT: source contract and semantics
+
+DOT is the description language; `dot`, `neato`, `fdp`, `sfdp`, `circo`, `twopi`, `osage`, and `patchwork` are distinct engines. Parsing DOT does not imply every engine is ported (§11.5).
+
+**Parser surface.** Quoted, numeric, ordinary, Unicode, and HTML-string ids (with source-kind metadata); quoted-string concatenation and escaped physical newlines; case-insensitive keywords; comments; node ports and compass points; chained edge right-hand sides; subgraphs, anonymous subgraphs, and brace-only sets as edge endpoints; repeated attribute lists and separator-free assignments; graph-level assignments; strict graphs.
+
+**Source-stage Mark** uses `ir-stage: "source"`, `flavor: "dot"` and preserves exact statement order, a source span on every statement/endpoint/list/property, repeated declarations and property names in order, raw names and values, and edge chains as one statement until normalization. Anonymous subgraphs receive stable generated source identities without being classified as clusters.
 
 ```mark
-<graph-scene direction:"LR" width:286 height:104>
-  <node id:"a" shape:"rounded" x:0 y:30 width:86 height:44;
-    <label; "Start">
-  >
-  <node id:"b" shape:"diamond" x:180 y:10 width:106 height:84;
-    <label; "Valid?">
-  >
-  <edge id:"e0" from:"a" to:"b"
-        marker-start:"none" marker-end:"normal"
-        start-side:"right" end-side:"left" route-kind:"orthogonal";
-    <route;
-      <point x:86 y:52>
-      <point x:180 y:52>
-    >
-  >
->
-```
-
-The Mermaid SVG adapter and Lambda HTML/SVG adapter must perform equivalent
-normalization:
-
-- flatten nested SVG transforms into graph-local coordinates;
-- map `rect`, `path`, `polygon`, `ellipse`, and renderer-specific wrappers to
-  graph shape roles;
-- collapse `<text>`, `<tspan>`, HTML labels, and `<foreignObject>` into normalized
-  label content and whitespace;
-- resolve CSS and presentation attributes into optional semantic paint values;
-- replace generated DOM ids and marker URLs with source-level node, edge, and
-  subgraph identities;
-- remove wrapper groups, raw classes, implementation tag names, definition
-  order, and insignificant numeric precision;
-- parse path geometry, normalize its origin, and classify straight,
-  orthogonal, curved, parallel, and self-loop routes;
-- represent only meaningful bends or sampled curve structure rather than the
-  original path command spelling.
-
-Raw classes and element names may be used by a version-specific adapter to find
-objects, but they are not emitted into Graph Scene Mark and are never compared.
-
-The comparator has three levels:
-
-1. **Exact semantics:** identities, topology, group membership, labels, shape
-   roles, endpoint markers, directions, and declared constraints must match.
-2. **Relational geometry:** ranks, ordering, containment, non-overlap, endpoint
-   attachment, attachment side, and route kind must match.
-3. **Tolerant geometry and paint:** dimensions, points, colors, stroke widths,
-   and dash patterns use explicit per-category tolerances and comparison flags.
-
-This contract intentionally ignores DOM construction while still detecting a
-node attached to the wrong edge, a reversed rank, a lost label, an incorrect
-shape, overlap, containment failure, or materially different route.
-
-### 18.8 Adapted Mermaid conformance corpus
-
-All Stage 2 Mermaid graph tests live under:
-
-```text
-test/lambda/graph/mermaid/
-  README.md
-  LICENSE.mermaid
-  UPSTREAM_COMMIT
-  manifest.mark
-  cases/
-    flowchart/
-      basic/
-      nodes/
-      edges/
-      labels/
-      subgraphs/
-      styles/
-      interactions/
-      invalid/
-  expected/
-    ir/
-    html/
-    scene/
-  reference/
-    package.json
-    package-lock.json
-    extract_cases.mjs
-    generate_scene_refs.mjs
-    mermaid_svg_adapter.mjs
-```
-
-The corpus adapts Mermaid's source fixtures and rendering-test diagram strings,
-not its screenshots. `UPSTREAM_COMMIT` pins the exact source revision, and each
-manifest case records the upstream file, upstream test name, Mermaid options,
-feature tags, expected status, and reference version. The Mermaid license and
-provenance remain beside the adapted corpus.
-
-`expected/ir` contains canonical Mark Graph IR for parser and normalization
-tests. `expected/html` contains selected semantic HTML structure expectations;
-it excludes unstable CSS serialization. `expected/scene` contains reviewed
-Graph Scene Mark. Geometry references may be generated from the pinned Mermaid
-SVG DOM, while semantic-only references may deliberately omit geometry. No PNG,
-JPEG, PDF, or screenshot goldens are part of this suite.
-
-The reference tools are maintenance tools, not production dependencies and not
-part of ordinary test execution. Reference generation runs pinned Mermaid in a
-browser DOM because Mermaid uses browser text measurement. The adapter reads the
-live SVG DOM, computed styles, and `getBBox()` results and writes canonical Mark
-scene files. Updating references is an explicit reviewed operation; normal test
-runs never rewrite expected output.
-
-### 18.9 Dedicated test runner
-
-Stage 2 adds a dedicated native test runner:
-
-```text
-source: test/test_graph_mermaid_gtest.cpp
-binary: test/test_graph_mermaid_gtest.exe
-cases:  test/lambda/graph/mermaid/manifest.mark
-```
-
-The runner is registered through `build_lambda_config.json` and the normal test
-orchestrator. A focused Make target should be provided:
-
-```text
-make test-graph-mermaid
-./test/test_graph_mermaid_gtest.exe
-./test/test_graph_mermaid_gtest.exe --gtest_filter='*subgraph*'
-```
-
-The native runner uses project `lib/` containers and strings rather than `std::`
-types. It owns the parsed manifest and Mark input state for the suite. The
-in-process transform/layout/render stages run in a paired Lambda integration
-fixture, which resolves the package callback automatically and renders multiple cases in
-one Lambda runtime. The focused Make target runs both layers; it does not start a
-new `lambda.exe` process for every manifest entry.
-
-Across the native corpus runner and retained render fixture, each manifest entry
-performs the applicable stages:
-
-1. Parse source into source-stage Mark and collect structured diagnostics.
-2. Normalize to Mark Graph IR and compare with `expected/ir`.
-3. Transform to semantic HTML and compare selected normalized structure with
-   `expected/html`.
-4. Run Radiant measurement, custom graph layout, and SVG rendering in-process.
-5. Adapt Lambda HTML/SVG to Graph Scene Mark.
-6. Compare the actual scene with `expected/scene` using the case policy.
-7. Write actual IR, HTML, scene, and mismatch reports only under
-   `temp/graph_mermaid/<case-id>/` when a case fails or diagnostic output is
-   explicitly requested.
-
-Every manifest case becomes a named parameterized GTest result. Baseline cases
-must pass. Extended and explicitly unsupported cases remain visible and report
-their expected status; they must not be silently omitted from discovery.
-Invalid cases pass only when the expected diagnostic category and source span
-are produced without a crash or partial graph masquerading as success.
-
-The runner supports case and feature filtering, deterministic fixed font and
-viewport configuration, concise semantic diffs, and a verbose mode that retains
-all normalized artifacts. It never generates image fixtures and never updates
-checked-in references during a normal test invocation.
-
-### 18.10 Stage 2 implementation sequence
-
-#### Stage 2A - IR and diagnostics
-
-- finalize the Mark Graph IR schema and validator;
-- emit source-order Mark separately from graph normalization;
-- distinguish source and canonical contracts with `ir-stage`;
-- preserve graph direction, source spans, diagnostics, and stable identities;
-- add common IR queries and constructors in `graph/model.ls`;
-- add exact IR fixtures and the initial dedicated runner.
-
-#### Stage 2B - Mermaid flowchart semantics
-
-- implement node redeclaration, chained and multi-node edge expansion;
-- preserve recursive subgraphs and local direction;
-- implement full label forms, general shape syntax, classes, styles, and
-  accessibility metadata;
-- diagnose chart-oriented and unsupported Mermaid families rather than parsing
-  them as flowcharts;
-- import and classify the pinned upstream flowchart corpus.
-
-#### Stage 2C - Rich HTML transform
-
-- lower safe Markdown and HTML label content into Mark/HTML children;
-- emit recursive groups and separately measured edge and cluster labels;
-- preserve stable graph-role metadata through final SVG rendering;
-- compare normalized semantic HTML for selected cases.
-
-#### Stage 2D - Layout and routing parity
-
-- extract ranking, ordering, positioning, shapes, clusters, labels, and routing
-  from the Stage 1 implementation into shared modules;
-- add shape-specific bounds and clipping, self-loops, parallel edges, ports,
-  compound routing, cluster crossing, and deterministic label placement;
-- compare Graph Scene Mark semantics and tolerant geometry against the pinned
-  Mermaid references.
-
-#### Stage 2E - Additional graph-oriented Mermaid families
-
-- add family adapters only when their semantics fit or deliberately extend the
-  common Mark Graph IR;
-- reuse rich HTML nodes, generated paint, stacking, routing, and the semantic
-  runner;
-- route chart-oriented Mermaid ASTs to `lambda.chart` and test that
-  dispatch independently in the chart suite.
-
-The first Stage 2E tranche implements Mermaid `classDiagram`. The manual parser
-emits source-stage single and comma-separated class declarations, alias and
-escaped names, nested generic notation, source-spanned fields, methods and
-stereotypes, visibility and static/abstract classifiers, direction, global and
-class-owned notes, recursive labeled/dotted namespaces, relationship labels and
-cardinalities, and the inheritance, composition, aggregation, association,
-dependency, realization, lollipop, two-ended, and plain-link operator families.
-It also preserves `classDef`, `cssClass`, inline class suffixes, direct styles,
-and link/callback/click interactions as common metadata. The pure
-`graph/mermaid/class.ls` adapter lowers stereotypes, class headers, fields, and
-methods into distinct measured UML compartments before common canonicalization;
-`hideEmptyMembersBox` selects whether empty member compartments are retained.
-UML endpoint roles reuse the common compositional marker vocabulary, namespace
-clusters reuse recursive graph groups, notes reuse canonical annotations, and
-final layout/render continues through the retained Radiant callback.
-
-The second Stage 2E tranche implements the baseline Mermaid `erDiagram`
-surface. The manual parser emits source-stage entity declarations and aliases,
-typed and nullable attributes, key/comment metadata, direction, labeled
-identifying and non-identifying relationships, and all four symbolic
-cardinality roles. `graph/mermaid/er.ls` lowers entity attributes into measured
-HTML compartments. Cardinalities are preserved semantically and lowered to the
-existing compositional `tee`, `crow`, and open-dot marker vocabulary, so the
-common paint path renders crow's-foot endpoints without an ER-specific painter.
-The retained test covers source IR, canonical adaptation, semantic HTML,
-measured geometry, marker propagation, and final SVG text.
-
-The third Stage 2E tranche implements flat Mermaid `stateDiagram` and
-`stateDiagram-v2` graphs. The manual parser preserves direction, declarations,
-quoted aliases, repeated descriptions, labeled transitions, start/end
-pseudostates, choice/fork/join roles, left/right notes, class/style directives,
-and accessibility metadata in source-stage Mark. The shared
-`graph/mermaid/compartment.ls` adapter rebuilds measured title/body content for
-class, ER, and state nodes; marker states receive fixed measurable content so
-empty semantic labels do not collapse during Radiant child layout. Notes reuse
-canonical annotations and are included in Graph Scene Mark with ownership,
-kind, text format, and final bounds. Composite states currently produce the
-structured `mermaid.state.composite-unsupported` diagnostic instead of being
-flattened or silently misrepresented.
-
-### 18.11 Stage 2 acceptance criteria
-
-Stage 2 rich Mermaid graph support is complete when:
-
-1. The public parser-to-transform boundary is canonical Mark Graph IR.
-2. Mermaid graph and chart families dispatch to the correct package.
-3. Unsupported syntax yields structured diagnostics rather than silent loss.
-4. Recursive groups, rich node labels, edge labels, classes, styles, markers,
-   accessibility metadata, and stable ids survive normalization and transform.
-5. Flowchart directions, shapes, edge forms, subgraphs, self-loops, parallel
-   edges, and compound routes satisfy the declared conformance matrix.
-6. Final SVG retains renderer-neutral graph identity metadata.
-7. The dedicated runner discovers all manifest cases and reuses one retained
-   compiled runtime across the suite.
-8. Parser IR, semantic HTML, and Graph Scene Mark comparisons pass for all
-   baseline cases.
-9. No image fixture or raw SVG string equality is required.
-10. Every adapted Mermaid case records upstream provenance, pinned revision,
-    feature tags, status, and comparison policy.
-
-### 18.12 Current implementation status
-
-The initial Stage 2 tranche is implemented as follows:
-
-- the Mermaid parser emits `version`, `kind`, `diagram-type`, `directed`,
-  `direction`, and `rank-dir` on the root Mark `<graph>`;
-- `TD` is normalized to `TB`, and all five flowchart directions are preserved;
-- every edge materializes both endpoint nodes, and subgraph references no longer
-  create duplicate implicit nodes;
-- the Mermaid parser emits `ir-stage: "source"` and preserves repeated explicit
-  node declarations with independent values and source spans; normalization
-  applies Mermaid's graph-global last-declaration semantics and emits
-  `ir-stage: "canonical"` with unique node ids;
-- recursive `<subgraph>` structure and local direction are retained, including
-  quoted subgraph labels and ids;
-- `classDef` and `class` statements survive as `<style-rule>` and
-  `<class-assignment>` metadata instead of being discarded;
-- quoted node labels lose only their Mermaid delimiter quotes;
-- Mermaid Markdown-string delimiters and HTML-like label content now normalize to
-  explicit `label-format` metadata on nodes and edges while preserving the
-  source-level Markdown or HTML text in `label`;
-- chained flowchart links normalize each operator into an explicit edge whose
-  source is the preceding target, including independently styled operators;
-- multi-node source and target sets use the same node-reference parser and
-  normalize to the Cartesian set of explicit edges; chained operators consume
-  the preceding target set as their next source set;
-- extra solid, dotted, and thick link units normalize to `min-length`; the
-  constraint survives semantic HTML and Velmt adaptation and is enforced by
-  layered rank assignment rather than retained as inert parser metadata;
-- Mermaid `edgeId@operator` syntax preserves stable edge identity, including
-  deterministic suffixed identities when one multi-node declaration expands
-  into several canonical edges;
-- normal, circle, and cross endpoint markers normalize independently as
-  `arrow-tail` and `arrow-head`, survive HTML and Velmt adaptation, and render
-  as distinct SVG marker geometry;
-- Mermaid graph, node, edge, and recursive subgraph values now retain numeric
-  `source-start`, `source-end`, `source-line`, and `source-column` attributes;
-  repeated node references preserve the first declaration span rather than
-  replacing provenance during semantic upsert;
-- each edge expanded from a chained or multi-node statement records the
-  statement span, segment index, expansion index/count, and stable `source-id`,
-  so normalization can relate generated edges back to one declaration;
-- YAML front matter and `%%{init: ...}%%` directives survive as source metadata
-  and are parsed structurally by `graph/mermaid/config.ls`; supported title,
-  node/rank spacing, curve, and HTML-label settings lower into the transform;
-- safe `click` link and callback declarations survive as inert `<interaction>`
-  metadata, including tooltip, target, and balanced callback arguments;
-  edge-ID class assignments and `@{ animate, animation, curve }` properties
-  resolve through generated `source-id` values;
-- parser errors and warnings are retained as structured `<diagnostic>` Mark
-  values with stable code, severity, message, and source location; chart-family
-  dispatch uses the explicit `mermaid.chart-family` code;
-- `graph/diagnostics.ls` and `graph/normalize.ls` establish the pure public
-  validation result `{graph, diagnostics, valid}`; the initial invariant pass
-  diagnoses invalid roots and directions, missing or duplicate identities, and
-  missing or unresolved edge endpoints, while preserving parser diagnostics;
-- `transform.to_html()` passes Mark through this normalization boundary before
-  semantic lowering, without adding state;
-- Mermaid `accTitle` and line or block `accDescr` directives survive under
-  source-spanned `<meta>` children; model queries apply last-declaration
-  semantics and semantic HTML exposes them through `aria-label`,
-  `aria-description`, and graph title metadata;
-- `style` and `linkStyle` statements survive as source-spanned
-  `<style-assignment>` values with node/edge target kind, canonical target text,
-  and raw declarations; model queries resolve node ids, edge indices, explicit
-  edge ids, and `default`, while HTML retains the original declarations in
-  `data-style-declarations` for provenance;
-- `graph/style.ls` tokenizes comma- or semicolon-separated declarations without
-  splitting functional colors, rejects properties and values outside the safe
-  graph allowlist, and emits typed fill, stroke, stroke width, text color,
-  opacity, and dash-array values rather than appending authored CSS verbatim;
-- class-definition declarations cascade before node-specific `style`
-  assignments; safe node paint becomes reconstructed inline CSS, while safe
-  `linkStyle` stroke, width, opacity, and dash metadata survives Velmt
-  adaptation, Dagre normalization and routing, and generated SVG paint;
-- node-local `:::` classes normalize to ordinary `<class-assignment>` metadata
-  and therefore share the common model and HTML class-lowering path;
-- Mermaid's general `id@{ shape: ..., label: ... }` node form is parsed, with
-  `rect`, `diam`, `dbl-circ`, and `cyl` aliases canonicalized to the existing
-  graph shape vocabulary while other shape names remain available to later
-  renderers;
-- unsupported chart-oriented Mermaid headers produce an `unsupported` graph
-  result with a diagnostic identifying `lambda.chart` as their owner; the
-  supported `sequenceDiagram` header enters the chart sequence adapter;
-- `graph/model.ls` provides recursive node, edge, subgraph, style, class, and
-  direction queries over Mark without replacing the public IR with maps;
-- `graph/normalize.ls` recursively rebuilds `<graph>`, `<subgraph>`, `<node>`,
-  and `<edge>` values into canonical Mark. It preserves arbitrary source
-  attributes, materializes one `<label>` source element and one measured
-  `<content>` element for labeled values, wraps authored rich node children in
-  `<content>`, and returns an already-canonical recursive tree unchanged;
-- `graph/schema.ls` defines the Graph IR element hierarchy, known attribute
-  types and enums, required identities and endpoints, and canonical
-  `<label>/<content>` cardinality. Normalization validates the authored tree
-  before rebuilding it, so malformed canonical children cannot be silently
-  collapsed;
-- canonical `<label>` and `<content>` children are authoritative. Legacy
-  `label` and `label-format` attributes remain as compatibility/provenance
-  attributes, but model and transform consumers prefer the canonical children;
-- `transform.to_html()` recursively lowers nested graph nodes and edges, carries
-  subgraph membership as stable metadata, applies class assignments, places
-  canonical `<content>` in measured nodes, and emits separately measured
-  `<edge-label>` children from canonical edge content;
-- `graph/transform/content.ls` reuses Lambda's Markdown and HTML-fragment parsers
-  to lower rich node and edge labels into measured semantic Mark; its sanitizer
-  reconstructs only safe inline formatting (`strong`, `em`, `code`, `u`, `sub`,
-  `sup`, and `br`), strips authored attributes and unknown wrappers, and removes
-  script, style, and template subtrees;
-- the Velmt adapter places measured edge labels at routed anchors, paints start
-  and end endpoint markers, clips rectangle, ellipse/circle, diamond, hexagon,
-  trapezoid, inverse-trapezoid, and asymmetric endpoints, routes self-loops,
-  and includes route extents in graph bounds;
-- canonical nodes may contain scoped `<port>` children with a side and
-  normalized offset; normalization diagnoses duplicate node-local port ids and
-  unresolved edge port references, while semantic HTML emits zero-size port
-  metadata for the Velmt callback;
-- `transform.to_html()` emits zero-size recursive cluster metadata and
-  separately measured `<cluster-label>` children. The layout callback computes
-  nested containing boxes from measured member nodes and child clusters,
-  reserves the label band, and returns full-viewport SVG cluster paint layers
-  with independent signed `z` values;
-- compound routes cross each exclusive source and target cluster boundary in
-  containment order. Named ports are retained for ordinary, parallel,
-  compound, and self-loop routes, and parallel compound edges receive
-  deterministic sibling-local lanes;
-- semantic node HTML now renders the legacy Mermaid rounded, stadium,
-  cylinder, subroutine, hexagon, trapezoid, inverse-trapezoid, and asymmetric
-  families in addition to rectangle, ellipse/circle, diamond, and
-  double-circle shapes;
-- semantic HTML and clipping also cover the general Mermaid shapes exercised by
-  the pinned corpus, including card/notch, cloud, hourglass, bolt, lean,
-  triangle, tag/document, delay, cylinder, brace, fork, divided, and lined
-  variants;
-- repeated edges with the same ordered endpoints receive deterministic,
-  sibling-local lanes separated by `edge_sep`; semantic HTML carries this
-  option as `data-edge-sep`, and route-bound normalization shifts nodes and
-  edges together when an outer lane extends before the original graph origin;
-- self-loop spacing also uses sibling-local order rather than global source
-  index, so unrelated preceding edges cannot change loop geometry; measured
-  edge labels interpolate the half-length point of the complete polyline rather
-  than selecting a point-count midpoint on bent routes;
-- generated edge paths retain `data-graph-role`, stable edge id, endpoints, and
-  normalized marker names for semantic SVG adaptation and future hit testing;
-- semantic HTML emits graph, node, edge, edge-label, cluster, and cluster-label
-  roles with stable source identities, direction, shape, marker, label, and
-  route metadata; Radiant preserves these attributes on final SVG wrappers and
-  records measured absolute border-box geometry;
-- `graph/scene.ls` adapts final Radiant SVG into renderer-neutral Graph Scene
-  Mark, discarding wrapper tags and classes while retaining normalized nodes,
-  clusters, edges, labels, markers, measured boxes, route classes, and points;
-  its comparator performs exact textual semantics plus configurable tolerant
-  box and route-point comparison with structured mismatch values. Canonical
-  paint values, endpoint sides, node non-overlap, recursive cluster containment,
-  endpoint attachment, and optional rank order are checked as renderer-neutral
-  relations instead of wrapper- or class-specific SVG structure;
-- Dagre ordering keeps direct cluster members contiguous, reserves inter-cluster
-  padding, and iterates crossing reduction deterministically. Orthogonal routes
-  avoid unrelated node and cluster boxes, and edge-label placement avoids nodes,
-  cluster labels, and prior edge labels while expanding graph bounds when a
-  collision-free label lies outside the original geometry;
-- `graph.transform.render_svg()` and `render_scene()` run HTML parsing, Radiant
-  measurement, the cached custom layout callback, generated paint, SVG lowering,
-  and scene adaptation in one process. The paired `scene_render.ls` fixture
-  renders multiple Mermaid cases with automatic package connection and exercises
-  both accepted and rejected geometry tolerances;
-- `reference/mermaid_svg_adapter.mjs` adapts a live Mermaid browser SVG DOM to
-  the same scene vocabulary, flattening transforms and normalizing labels,
-  source identities, shapes, endpoint markers, bounds, and sampled routes. It is
-  a pinned maintenance tool and is not an ordinary test dependency;
-- the adapted Mermaid corpus pins commit
-  `f3dea58385fd5c7dd1f4e9c9c1876751ae6943cc` (Mermaid 11.16.0), carries the
-  upstream MIT license, and records source file, upstream test name, features,
-  status, policy, and reference version for every adapted case;
-- `reference/extract_cases.mjs` uses Acorn to verify or regenerate all 18
-  adapted source strings from their exact upstream tests. Pinned Mermaid and
-  Puppeteer maintenance tooling renders selected references and adapts their
-  live DOM into Graph Scene Mark; neither dependency is used by ordinary tests;
-- `test/test_graph_mermaid_gtest.cpp` reads
-  `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime,
-  dynamically registers every case as a named/filterable GTest, and compares
-  recursive Mark semantics without raw SVG or image fixtures;
-- the normal retained Lambda batch runner discovers every paired `.ls`/`.txt`
-  fixture under `test/lambda/graph/mermaid`, so package transform, layout, and
-  paint behavior is part of baseline test discovery;
-- `make test-graph-mermaid` builds and runs both the focused native Mark runner
-  and the filtered Lambda package integration batch; the build generator now
-  applies a target's platform library exclusions consistently to consuming
-  tests.
-- the retained `scene_render.ls` fixture is manifest-driven: it discovers every
-  `scene-semantic` case, resolves the layout package automatically, renders all
-  selected cases in one runtime, and compares five reviewed semantic scene
-  fixtures without per-case process startup.
-
-The checked-in manifest is a bootstrap corpus covering implicit endpoints,
-directions, shapes and labels, recursive subgraphs, class and style metadata,
-accessibility directives, and chart family diagnostics. Lambda integration
-fixtures additionally cover recursive HTML membership, rich Markdown/HTML node
-and edge labels, hostile-tag removal, class lowering, accessibility lowering,
-measured edge-label placement, bidirectional markers,
-shape clipping, self-loop bounds, parallel-edge separation and label anchors,
-safe style rejection and precedence, and styled edge paint propagation. They
-also cover recursive canonical rebuilding, arbitrary-attribute retention,
-authored block content, canonical HTML consumption, normalization idempotency,
-recursive visual clusters, measured cluster labels, named ports, compound and
-parallel boundary routes, broader shape roles, cluster paint metadata, and
-port-reference diagnostics, plus schema type, enum, child-placement,
-cardinality, and required-attribute diagnostics.
-
-The Stage 2 flowchart items covered by this proposal are complete: source
-fidelity and safe metadata, cluster-aware layout quality, Graph Scene paint and
-relational conformance, a broader reproducible Mermaid corpus, and a
-manifest-driven retained end-to-end runner. The package deliberately compares
-semantic and tolerant geometric relations rather than promising pixel parity
-with Mermaid. Stage 2E now additionally covers the expanded `classDiagram`
-surface: class blocks, comma declarations, alias and escaped labels, nested
-generics, visibility and static/abstract member classifiers, inline/separate
-stereotypes, recursive namespaces, class/global notes, two-ended and lollipop
-relationships, class-specific style and interaction directives, configurable
-empty compartments, UML markers, and retained in-memory rendering. The native
-manifest and retained Lambda fixture exercise source IR, canonical adaptation,
-semantic HTML, namespace and annotation geometry, marker propagation, and final
-SVG text.
-
-The initial `erDiagram` surface is also complete: entity aliases, typed and
-nullable attributes, PK/FK/UK text and comments, direction, symbolic
-crow's-foot cardinalities, identifying/non-identifying edge styles, rich entity
-compartments, compositional endpoint markers, and retained rendering are all
-covered by the same semantic runner.
-
-The initial flat `stateDiagram` surface is complete: aliases and descriptions,
-start/end, choice, fork, and join states, labeled transitions, left/right notes,
-measured state compartments, annotation placement, semantic final-SVG
-attributes, and Graph Scene adaptation are covered by native manifest cases and
-one retained-runtime Lambda render fixture. Composite input is covered by a
-separate diagnostic fixture so unsupported nesting cannot appear valid.
-
-Class syntax beyond Mermaid's documented source and configuration surface is
-not a Stage 2E requirement. ER relationship aliases written as words,
-exhaustive quoted/Unicode identifier cases, Markdown-rich entity names, and
-multiple shorthand classes remain ER
-follow-up work. Composite states, nested transitions, concurrency regions,
-history states, richer state-description markup, and `hide empty description`
-remain state follow-up work. Requirement, architecture, block, and mindmap
-adapters also remain subsequent Stage 2E tranches. Chart-oriented family
-dispatch rejects the remaining unsupported families with structured ownership
-diagnostics. Sequence participants, messages, loops, over/side notes, activation
-bars, and alternate/parallel blocks render through `lambda.chart` (D7.2.4).
-Further sequence syntax remains chart follow-up work alongside Gantt, pie,
-Sankey, timeline, and XY support. The ordered sequence IR records branch and
-activation events so their visual scope survives graph normalization.
-
-## 19. Stage 3 - Graphviz DOT Support
-
-### 19.1 Scope and principles
-
-Stage 3 gives DOT input the same end-to-end status as Mermaid flowcharts:
-
-```text
-DOT source
-  -> source-stage Mark Graph IR
-  -> DOT semantic normalization
-  -> canonical Mark Graph IR
-  -> graph.transform.to_html()
-  -> Radiant child measurement
-  -> retained Lambda graph layout callback
-  -> generated graph paint
-  -> final HTML/SVG/PDF/PNG
-```
-
-The implementation supports the Graphviz `dot` layered-layout model first.
-DOT is the graph description language; `dot`, `neato`, `fdp`, `sfdp`, `circo`,
-`twopi`, `osage`, and `patchwork` are distinct layout engines. Parsing the DOT
-language must not imply that every Graphviz engine has been ported.
-
-Stage 3 follows these principles:
-
-1. Graphviz is not a production dependency. Lambda parses, normalizes, lays
-   out, and renders graphs without invoking a Graphviz executable or library.
-2. The parser preserves source structure and raw attributes. It does not apply
-   defaults, merge nodes, expand edge products, convert units, or rewrite
-   Graphviz names into CSS names.
-3. DOT semantics are implemented by pure Lambda normalization functions.
-4. Known Graphviz attributes lower into renderer-neutral Graph IR. Unknown
-   attributes remain available as namespaced properties because DOT permits
-   applications to define arbitrary attributes.
-5. Graphviz maintenance tools provide semantic and geometric references, never
-   raw SVG equality or image fixtures.
-6. Rich node content continues to be measured by Radiant before graph layout.
-   Graphviz geometry is a conformance reference, not a browser-layout oracle.
-
-Stage 3 does not initially promise pixel parity with Graphviz, support every
-Graphviz plugin, execute URLs or callbacks from authored DOT, or preserve source
-whitespace and comments through formatting.
-
-### 19.2 Pre-Stage 3 DOT baseline and required replacement
-
-Before Stage 3A, `lambda/input/input-graph-dot.cpp` was a useful bootstrap
-parser, but it was not a complete DOT parser. It handled simple identifiers,
-single-hop node-to-node edges, one attribute list, basic assignments/defaults,
-and named subgraph blocks. It did not preserve enough information to implement
-DOT semantics correctly, including:
-
-- numeric and HTML-string IDs;
-- quoted-string concatenation and escaped physical newlines;
-- case-insensitive keywords;
-- node ports and compass points;
-- chained edge right-hand sides;
-- subgraphs as edge endpoints and their Cartesian edge expansion;
-- anonymous subgraphs and brace-only endpoint sets;
-- repeated attribute lists and separator-free attribute assignments;
-- temporal, nested default-attribute scopes;
-- strict graph edge identity and update semantics;
-- source-order node redeclarations and implicit node creation;
-- Graphviz HTML-like labels, record labels, and label escape substitution;
-- structured diagnostics and complete source spans.
-
-The pre-Stage 3 parser also eagerly renamed attributes such as `rankdir`,
-`fontcolor`, `arrowhead`, `width`, and edge `style`. This loses the distinction
-between authored DOT values and resolved rendering values. Stage 3 moves all
-such interpretation into the DOT normalizer.
-
-The current DOT formatter is similarly a basic graph serializer. It emits only
-simple nodes, edges, labels, and clusters, always uses a directed edge spelling,
-and does not round-trip arbitrary attributes, ports, defaults, strictness, or
-source-stage statements. It will be revised after the source and canonical
-contracts are stable.
-
-### 19.3 Parser implementation options and size gate
-
-Mermaid and DOT may use either manual C/C+ parsers or generated Tree-sitter
-parsers. They do not have to make the same choice. Both implementations must
-emit the source-stage Mark contract in Section 19.4, so parser technology does
-not leak into normalization, transform, layout, or tests.
-
-#### 19.3.1 Option A - manual C/C+
-
-The manual option extends the current `SourceTracker` and `InputContext` style.
-Mermaid and DOT can share:
-
-- whitespace, line/block comment, source-location, and recovery helpers;
-- quoted string and escape handling where the languages agree;
-- bounded identifier/value readers;
-- source-spanned property and diagnostic constructors;
-- graph, statement, endpoint, and Mark child builders;
-- parser limits and progress/infinite-loop guards.
-
-The state machines cannot be usefully shared wholesale. DOT is a token grammar
-with nested brace scopes, arbitrary attributes, endpoint subgraphs, and
-case-insensitive keywords. Mermaid flowcharts are line-oriented and have
-different edge, shape, directive, label, class, and interaction forms. A shared
-"generic graph parser" would hide two grammars behind conditionals and would be
-harder to verify than two small parsers using common lexical/Mark helpers.
-
-Advantages:
-
-- smallest expected code and read-only table footprint;
-- direct source-to-Mark construction without a CST traversal layer;
-- no generated parse tables and no per-parse Tree-sitter tree allocation;
-- Mermaid already has broad tested flowchart coverage in this form;
-- precise control over recovery, limits, and source-stage edge expansion data.
-
-Costs:
-
-- the DOT grammar and recovery behavior must be maintained manually;
-- nested/ambiguous syntax requires more lookahead and progress invariants;
-- diagnostics and malformed-input recovery tend to become ad hoc unless they
-  are designed as first-class parser behavior;
-- grammar changes are distributed across parser code rather than reviewed as a
-  declarative grammar diff.
-
-If selected, shared code is extracted only after identifying actual duplicate
-logic in the Mermaid and DOT parsers. Parser state machines are not unified for
-the sake of nominal reuse.
-
-#### 19.3.2 Option B - Tree-sitter
-
-The Tree-sitter option vendors a pinned grammar per language:
-
-```text
-lambda/tree-sitter-dot/
-  grammar.js
-  src/parser.c                 generated, never edited manually
-  LICENSE
-```
-
-`input-graph-dot.cpp` then becomes a CST-to-Mark builder. It owns source
-locations, semantic diagnostics, allocation limits, and construction of
-source-stage Mark, while lexical recognition and syntax recovery come from the
-generated parser.
-
-Advantages:
-
-- grammar rules are declarative and easier to audit against language specs;
-- robust CST production and error recovery are supplied by a proven parser
-  runtime;
-- editor/incremental parsing can reuse the same grammar in the future;
-- generated parsers are easy to fuzz independently of Mark construction;
-- Lambda already links Tree-sitter, so its runtime has no incremental cost in
-  the main `lambda.exe` binary.
-
-Costs:
-
-- every grammar contributes its own parse tables even though the runtime is
-  shared;
-- Mermaid and DOT cannot share generated tables, only runtime and CST-to-Mark
-  helper code;
-- a CST-to-Mark adapter remains necessary and contributes code not represented
-  by generated-parser measurements;
-- available third-party grammars may lag the source language and require
-  substantial local extensions;
-- the CST and Tree-sitter parser have a higher transient memory cost than direct
-  Mark construction.
-
-The experiment used `rydesun/tree-sitter-dot`; its pinned revision and license
-are retained with the adapted fixture tranche. If the decision is revisited,
-Lambda would own compatibility extensions in `grammar.js` and regenerate
-`parser.c` through the build, following the same generated-source rule as the
-Lambda grammar.
-
-#### 19.3.3 Binary-size experiment
-
-An initial size experiment was run on 2026-07-15 on arm64 macOS with Apple
-Clang 17.0.0. All parser objects used:
-
-```text
--O3 -DNDEBUG -ffunction-sections -fdata-sections -fvisibility=hidden
-```
-
-ThinLTO was disabled for object-level comparison because LTO objects contain
-LLVM bitcode rather than final Mach-O sections. Generated parsers were also
-linked into minimal `-dead_strip` probes to verify that the measured tables stay
-live when the language entry point is referenced. The production release still
-uses ThinLTO and dead stripping; a final implementation must be measured as a
-full release binary delta.
-
-Pinned experiment inputs:
-
-- DOT Tree-sitter commit
-  `80327abbba6f47530edeb0df9f11bd5d5c93c14d`;
-- Mermaid Tree-sitter commit
-  `90ae195b31933ceb9d079abfa8a3ad0a36fee4cc`;
-- pre-Stage 3 manual parsers in `input-graph-dot.cpp` and
-  `input-graph-mermaid.cpp`;
-- pre-Stage 3 release `lambda.exe`: 17,261,320 bytes.
-
-The Mermaid upstream grammar covers class, ER, flowchart, Gantt, mindmap, pie,
-sequence, and state diagrams. A second generated candidate restricted the same
-grammar entry point and supertypes to flowcharts. This flow-only build is a
-parse-table lower bound, not a production-ready Lambda grammar.
-
-`size` reports the following optimized object footprint (`dec`, including text,
-data, unwind, and other object sections):
-
-| Implementation | Scope | Object footprint | Difference from manual baseline |
-|---|---:|---:|---:|
-| pre-Stage 3 manual DOT | incomplete DOT subset plus Mark building | 8,436 B | baseline |
-| Tree-sitter DOT | generated DOT grammar only | 44,821 B | +36,385 B |
-| pre-Stage 3 manual Mermaid | Stage 2 flowchart parser plus Mark building | 28,439 B | baseline |
-| Tree-sitter Mermaid, flow-only | generated grammar only | 21,213 B | -7,226 B before adapter |
-| Tree-sitter Mermaid, all supported families | generated grammar only | 207,009 B | +178,570 B before adapter |
-
-The dead-stripped probe file deltas over an empty executable were 50,240 bytes
-for DOT, 33,896 bytes for flow-only Mermaid, and 215,360 bytes for full Mermaid.
-Mach-O page alignment makes those file deltas coarser than object sections, but
-they confirm that dead stripping does not remove the active parse tables.
-
-The existing Tree-sitter runtime object is approximately 171,731 bytes. This is
-not an incremental graph-parser cost in `lambda.exe`, which already needs the
-runtime for Lambda, JavaScript/TypeScript, LaTeX, and other parsing paths. It
-would matter for a future standalone graph-only binary.
-
-Grammar validation results:
-
-- the DOT candidate passed all 11 upstream corpus cases and the checked-in
-  `test/input/test_graph.dot` fixture;
-- the full Mermaid candidate passed its own 45 cases;
-- the flow-only Mermaid candidate passed its eight upstream flowchart cases;
-- both Mermaid candidates parsed only 8 of 34 current Lambda Stage 2 Mermaid
-  fixtures without an error node (23.5%). The candidate grammar therefore does
-  not currently cover Lambda's Mermaid v11.16-oriented feature surface.
-
-After the manual DOT implementation and shared-helper refactor, the same
-non-LTO object measurement was repeated. These numbers include direct Mark
-construction, unlike the generated-parser objects:
-
-| Manual unit | Before Stage 3A | Completed Stage 3A | Difference |
-|---|---:|---:|---:|
-| DOT parser and Mark builder | 8,436 B | 11,782 B | +3,346 B |
-| Mermaid parser and Mark builder | 28,439 B | 26,300 B | -2,139 B |
-| shared graph parser/Mark helpers | 3,056 B | 4,509 B | +1,453 B |
-| combined | 39,931 B | 42,591 B | +2,660 B |
-
-The production ThinLTO/dead-stripped `lambda.exe` grew from 17,261,320 to
-17,261,336 bytes, a 16-byte file-size delta. Across the three implementation
-units and their shared header, source size fell from 2,428 to 2,357 lines. The
-completed parser therefore adds the missing DOT grammar and source fidelity
-while using 71 fewer lines than the pre-Stage 3 implementation.
-
-The initial generated-versus-manual rows were not a complete apples-to-apples
-comparison: manual objects included Mark construction while generated objects
-excluded CST-to-Mark adapters, and the original DOT parser was incomplete. The
-post-implementation rows close the manual side of that comparison. A generated
-replacement would still need an adapter and equivalent corpus/source-Mark
-coverage, so the recorded Tree-sitter sizes remain conservative lower bounds.
-
-#### 19.3.4 Final decision from the experiment
-
-Stage 3 uses manual C/C+ parsers for both Mermaid and DOT:
-
-- keep the existing manual Mermaid flowchart parser. The full generated parser
-  costs about 179 KiB more before its required CST-to-Mark adapter and accepts
-  only 8 of the 34 existing Lambda Mermaid fixtures without an error node;
-- replace the incomplete manual DOT parser with a compact recursive-descent DOT
-  parser. The generated DOT grammar alone costs about 36 KiB more than the
-  current parser before adding its CST-to-Mark adapter, while DOT's grammar is
-  small enough to express directly;
-- share lexical, source-span, diagnostic, and Mark-construction helpers between
-  graph parsers, but keep the Mermaid and DOT grammar state machines separate;
-- measure the completed manual parser objects and release binary after corpus
-  coverage is complete. LOC and binary size are implementation constraints, not
-  permission to weaken source fidelity or diagnostics.
-
-Tree-sitter remains a useful experiment and an independent grammar reference,
-not a production dependency for either graph parser. The pinned commits,
-commands, and measurements above make the decision reproducible. The release
-measurement should still be repeated on Linux and Windows after Stage 3A, but
-there is no longer a 64 KiB technology gate.
-
-#### 19.3.5 Parser footprint ledger
-
-Parser LOC is an actively maintained constraint. The metric is physical source
-lines as reported by `wc -l`; it includes the two grammar implementations and
-their shared graph parser source/header, but excludes tests, schemas, generated
-files, and downstream normalization. The Stage 3A ledger is:
-
-| Source unit | Before Stage 3A | Stage 3A | Stage 2E class | Stage 2E ER | Stage 2E state | Full class | Current vs. original |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `input-graph-dot.cpp` | 546 | 471 | 471 | 471 | 471 | 471 | -75 |
-| `input-graph-mermaid.cpp` | 1,578 | 1,534 | 1,785 | 2,055 | 2,360 | 2,696 | +1,118 |
-| `input-graph.cpp` | 206 | 247 | 249 | 249 | 249 | 249 | +43 |
-| `input-graph.h` | 98 | 105 | 109 | 109 | 109 | 109 | +11 |
-| total | 2,428 | 2,357 | 2,614 | 2,884 | 3,189 | 3,525 | +1,097 |
-
-The first Stage 2E family adds 251 native Mermaid-parser lines over the Stage 3A
-checkpoint. Its family-specific pure adapter is tracked separately at 57 lines
-because it does not contribute to the native parser footprint. The ER tranche
-adds 270 native lines and a separately tracked 64-line pure adapter. The state
-tranche adds 305 native lines. Extracting the shared compartment adapter reduces
-the current pure modules to 58 shared lines, 20 class lines, 27 ER lines, and 27
-state lines: 132 lines total, only 11 more than the former class/ER pair. The
-completed class surface adds 336 native lines for recursive namespace parsing,
-notes, generic/classifier semantics, dynamic endpoint markers, and style and
-interaction forms. Its pure class adapter is now 44 lines, and the shared
-configuration module is 52 lines after generalizing family option selection.
-Further Mermaid families should reuse the relationship/cardinality helpers,
-source-span builders, and common canonical adapter patterns before adding
-another parser branch.
-
-Reproduce the source measurement from the repository root with:
-
-```sh
-wc -l lambda/input/input-graph-dot.cpp \
-  lambda/input/input-graph-mermaid.cpp \
-  lambda/input/input-graph.cpp lambda/input/input-graph.h
-```
-
-The 2026-10-15 sequence-family audit reconciles the already implemented
-participant/actor declarations, ordered messages, notes and nested loop/alt/par
-blocks with the native budget. It reuses identifiers, source spans, node/edge
-builders and annotations; relationship and annotation line-label parsing now
-shares `parse_mermaid_label_line` across class, ER, state and sequence families.
-The sequence state machine remains separate because its ordered block events
-and activation suffixes have no counterpart in the other grammars. This audit
-removes the duplicated label-normalization shape before admitting the new
-family, without deleting comments or moving parser code out of the measurement.
-
-The current gate includes Structurizr and its resolver, which the earlier
-four-unit table omitted. Every ceiling is tightened to the measured source size;
-the combined budget is the sum, with no unused per-file allowance:
-
-| Source unit | Audited physical lines |
-|---|---:|
-| `input-graph-dot.cpp` | 471 |
-| `input-graph-mermaid.cpp` | 2,902 |
-| `input-graph-structurizr.cpp` | 429 |
-| `input-graph-structurizr-resolver.cpp` | 273 |
-| `input-graph.cpp` | 227 |
-| `input-graph.h` | 107 |
-| total | 4,409 |
-
-`GraphParserTest.ParserLocBudget` enforces every current per-file ceiling and
-the combined ceiling during the native graph parser suite. A parser change that
-increases a ceiling must reduce duplication first, then update this ledger and
-the test with a short rationale in the change description. A reduction should
-lower both values in the same change. The ceilings are review gates, not spare
-LOC that a later feature may consume without justification.
-
-Optimized object and packaged-release measurements are repeated at each parser
-milestone using the flags and method in Section 19.3.3. They are tracked beside
-LOC because source reduction alone does not guarantee a smaller binary.
-
-Parser limits must be explicit and diagnostic-producing:
-
-- maximum statement and subgraph nesting depth;
-- maximum HTML-label nesting and table-cell count;
-- maximum chained endpoint count;
-- maximum edge count after endpoint-set expansion;
-- maximum identifier, string, and attribute value length.
-
-Invalid input returns the recoverable source graph plus structured diagnostics
-where possible. It must never silently skip an unsupported statement or emit a
-partially canonical graph that appears valid.
-
-### 19.4 Source-stage DOT Mark
-
-DOT uses the existing public Mark Graph IR with `ir-stage: "source"` and
-`flavor: "dot"`. It does not introduce a private C AST or a second public data
-model. Source-only elements preserve the statement forms needed by the pure
-normalizer:
-
-```mark
-<graph ir-stage: "source", flavor: "dot", id: "G",
-    directed: true, strict: false;
-  <dot-attr-statement target-kind: "graph";
-    <property name: "rankdir", value: "LR">
-  >
+<graph ir-stage: "source", flavor: "dot", id: "G", directed: true, strict: false;
   <dot-attr-statement target-kind: "node";
     <property name: "shape", value: "box">
-    <property name: "color", value: "steelblue">
   >
-  <node id: "a";
-    <properties namespace: "graphviz";
-      <property name: "label", value: "Start">
-      <property name: "shape", value: "ellipse">
-    >
-  >
+  <node id: "a"; <properties namespace: "graphviz"; <property name: "label", value: "Start"> > >
   <dot-edge-statement id: "dot-stmt-4";
     <dot-endpoint kind: "node", id: "a", port: "out", compass: "e">
     <dot-endpoint kind: "node", id: "b">
     <dot-endpoint kind: "node", id: "c">
-    <properties namespace: "graphviz";
-      <property name: "label", value: "next">
-    >
+    <properties namespace: "graphviz"; <property name: "label", value: "next"> >
   >
 >
 ```
 
-The exact schema may use the ordinary `subgraph` element inside a
-`dot-endpoint` for an inline endpoint set. The required invariants are more
-important than the spelling:
+**Normalization**, in source order:
 
-- statement order is exact;
-- every statement, endpoint, attribute list, and property has a source span;
-- repeated declarations remain repeated;
-- multiple attribute lists and repeated property names remain ordered;
-- quoted, numeric, ordinary, and HTML IDs normalize to one string identity but
-  retain source-kind metadata;
-- raw DOT names and values are not converted during parsing;
-- edge chains remain one source statement until normalization;
-- anonymous subgraphs receive stable generated source identities without being
-  misclassified as visual clusters.
+1. Establish graph kind, strictness, identity, and lexical scopes.
+2. Keep independent graph, node, and edge default environments per subgraph scope (temporal defaults).
+3. Materialize implicit nodes at first reference with the defaults active at creation.
+4. Merge later declarations into the same identity without retroactively applying newer defaults.
+5. Resolve ports and compass points. The ambiguous one-token endpoint suffix is resolved only after record/HTML content has generated its real ports: a matching name is a port, otherwise `n|ne|e|se|s|sw|w|nw|c|_` is a compass point.
+6. Expand subgraph endpoint sets and chained right-hand sides into pairwise canonical edges with statement/segment/expansion provenance, bounded at 100,000 edges.
+7. In strict graphs, canonicalize directed or unordered endpoint identity, merge repeated edges into the first canonical edge, and apply later explicit attributes, retaining per-property defining statements.
+8. Classify only `cluster*` subgraphs as `role: "cluster"`; ordinary and anonymous subgraphs are `role: "scope"`.
+9. Resolve known attributes into canonical values while keeping the complete namespaced property set with origin and defining scope.
+10. Lower scope properties such as `rank=same` to `<constraint>` values; graph assignments such as `rankdir=LR` stay scope properties, never node declarations.
+11. Emit `ir-stage: "canonical"` and run the common schema and relational validators.
 
-`<properties namespace: "graphviz">` and `<property>` are generic Graph IR
-extensions rather than DOT-specific maps. A property records at least `name`,
-`value`, source span, and, after normalization, `origin` (`direct`, `default`,
-or `inherited`) plus its defining scope/statement identity. This representation
-preserves arbitrary DOT attributes while keeping known canonical attributes
-directly queryable on graph objects.
+**Attributes** are interpreted through declarative tables keyed by object kind and name, each defining value grammar, intentional default, canonical target, unit conversion, inheritance behavior, ownership (layout, content, paint, interaction, metadata), and status (supported, preserved-only, unsupported). Unknown application attributes are preserved without error.
 
-### 19.5 DOT semantic normalization
+**Units.** Canonical geometry is CSS pixels, because Radiant measures in CSS pixels. Inch-valued node dimensions and margins and point-valued font/pen sizes use explicit attribute-specific conversions; they are never parsed as unitless CSS numbers. Reference geometry in points converts at `96/72`, and Graphviz's bottom-up coordinates flip to top-down.
 
-Add the following package modules:
+**Styles and color.** Graphviz `style` is tokenized as a Graphviz style list, not CSS, and lowers to fill, stroke, dash, radius, visibility, and emphasis. Color lists lower to gradients and `striped`/`wedged` paint. Qualified SVG/X11 names and a compact embedded set of qualitative palettes (`accent8`, `dark28`, `paired12`, `set19`, `set28`, `set312`) resolve before canonicalization; this bounded table is an intentional size choice, and other schemes fall back to the theme with a diagnostic. `fontname`/`fontsize`/`fontcolor` lower through the font allowlist; PostScript Times, Helvetica, and Courier names get fallback stacks and bold/italic variants. `URL`/`href`/`tooltip`/`target` become inert interactions.
 
-```text
-lambda/graph/graphviz/
-  normalize.ls              source order, identity, defaults, edge expansion
-  attributes.ls             typed attribute interpretation and unit conversion
-  labels.ls                 plain, record, and Graphviz HTML-like labels
-  markers.ls                Graphviz arrow-shape grammar
-  shapes.ls                 shape aliases and geometry families
-  engine.ls                 layout-engine selection and diagnostics
-```
+### 11.5 Graphviz DOT: content, geometry, and engines
 
-`graph.normalize` dispatches source-stage DOT values to
-`graphviz.normalize`. The normalizer performs these operations in source order:
+**Labels.** Three materially different forms:
 
-1. Establish graph kind, strictness, graph identity, and lexical scopes.
-2. Maintain independent graph, node, and edge default environments per
-   subgraph scope.
-3. Materialize implicit nodes at first reference and apply the defaults active
-   at creation time.
-4. Merge later declarations into the same node identity without retroactively
-   applying newer defaults.
-5. Resolve node ports and compass points.
-6. Resolve subgraph endpoint node sets and expand chained edge right-hand sides
-   into explicit pairwise canonical edges.
-7. Preserve source-statement, segment, and expansion provenance on every
-   generated edge.
-8. In strict graphs, canonicalize directed or unordered endpoint identity,
-   merge repeated edges, and apply later explicit attributes to the existing
-   edge.
-9. Classify only subgraphs whose names begin with `cluster` as visual clusters;
-   ordinary and anonymous subgraphs remain semantic/default/rank scopes.
-10. Resolve supported attributes into canonical values while retaining the
-    complete namespaced property set.
-11. Emit `ir-stage: "canonical"` and run the common graph schema and relational
-    validators.
+1. *Plain* strings: `\N`, `\G`, `\E`, `\T`, `\H`, `\L` substitutions applied only after identity resolution; `\n`, `\l`, `\r` become measured line breaks with alignment; doubled backslashes stay literal.
+2. *Record* labels: flat and nested fields lower to measured table content, alternating horizontal/vertical orientation per nesting level; named fields lower to canonical ports.
+3. *HTML-like* labels: delimiters removed, then parsed with a dedicated allowlist — never passed through as raw HTML. Safe tables, rows, cells, inline emphasis, allowlisted alignment and vertical alignment, and bounded positive row/column spans survive; `<TD PORT>` uses the same measured-content port walker as records. Images follow Radiant's resource policy and are disabled in deterministic tests unless checked in.
 
-DOT graph-global assignment statements such as `rankdir=LR` and subgraph
-constraints such as `rank=same` are not ordinary node declarations. They remain
-scope properties and lower to canonical graph constraints where supported.
+Node and edge `xlabel` and edge `headlabel`/`taillabel` lower to graph-level `<annotation>` elements with explicit owner identities, so several semantic labels never share one string and the callback needs no Graphviz-specific fields.
 
-Canonical `<subgraph>` gains a `role` of `cluster` or `scope`. The transform and
-layout paint and contain only `role: "cluster"` values. Scope-only subgraphs are
-flattened into their nearest visual container for node/edge ownership while
-their source identity, properties, memberships, and lowered constraints remain
-available as metadata. This permits anonymous endpoint sets and `rank=same`
-blocks without drawing a box around them.
+**Shapes.** Graphviz names map into geometry families: rectangle/polygon; specialized polygons (diamond, triangle, hexagon, octagon, parallelogram, trapezium, house variants, stars); ellipse/circle/doublecircle/point; record/content (`record`, `Mrecord`, `plain`, `plaintext`, `none`); storage/document (cylinder, note, folder, component, tab, box3d). Biological and directional forms (`promoter`, `cds`, `terminator`, overhang/site/stability shapes, arrows) reuse box, ellipse, and polygon roles with the raw name as provenance. Nodes default to ellipse. Polygon parameters (`sides`, `regular`, `orientation`, `skew`, `distortion`) and `peripheries` become explicit geometry.
 
-The normalizer emits structured diagnostics for semantic conflicts, including
-the wrong edge operator for graph kind, invalid compass points, duplicate ports,
-unresolved compound cluster references, expansion limits, malformed record or
-HTML labels, and known layout-affecting attributes that are not implemented.
-Unknown application attributes are preserved without an error.
+**Sizing.** `fixedsize=true` yields a definite border box; `regular=true` applies a square preferred ratio with equal minima (a `1in × 0.5in` regular fixed node measures `96px × 96px`). `fixedsize=shape` uses a fixed centered inner shape inside a naturally measured outer box: spacing and collision use the outer box while edge clipping uses the inner shape, so a long label never moves the authored shape boundary. Circular nodes use equal-axis sizing.
 
-### 19.6 Attributes, units, and styles
+**Markers.** `dir=forward|back|both|none` decides presence; the arrow-name grammar parses up to four components with `o`, `l`, and `r` modifiers into the compositional vocabulary (§9.4).
 
-Graphviz attributes are strings at the language level and acquire meaning from
-the selected engine and object kind. `graphviz/attributes.ls` uses declarative
-tables keyed by object kind and attribute name. Each entry defines:
+**Splines.** `splines` lowers to canonical `route-mode`: `false`/empty → `none`, `line`, `polyline`, `ortho` → `orthogonal`, `spline`/`true` → `curved`.
 
-- accepted value grammar;
-- default value when Lambda intentionally matches it;
-- canonical Graph IR target;
-- unit conversion;
-- inheritance/default behavior;
-- layout, content, paint, interaction, or metadata ownership;
-- supported, preserved-only, or unsupported status.
-
-The first conformance matrix includes:
-
-- graph: `rankdir`, `nodesep`, `ranksep`, `splines`, `compound`, `newrank`,
-  `ordering`, `outputorder`, `bgcolor`, `font*`, `label`, `labelloc`,
-  `labeljust`, `margin`, `pad`, `dpi`, and `layout`;
-- node: `label`, `xlabel`, `shape`, `width`, `height`, `fixedsize`, `margin`,
-  `style`, `color`, `fillcolor`, `font*`, `penwidth`, `peripheries`, `group`,
-  `orientation`, `regular`, `sides`, `skew`, `distortion`, `image`, `URL`,
-  `tooltip`, and `target`;
-- edge: `label`, `xlabel`, `headlabel`, `taillabel`, `dir`, `arrowhead`,
-  `arrowtail`, `arrowsize`, `headport`, `tailport`, `minlen`, `weight`,
-  `constraint`, `samehead`, `sametail`, `lhead`, `ltail`, `decorate`, `style`,
-  `color`, `font*`, `penwidth`, `URL`, `tooltip`, and `target`;
-- cluster: graph paint/label attributes plus `cluster`, `margin`, `pencolor`,
-  `peripheries`, and compound-edge participation.
-
-Input dimensions are converted only during normalization. Canonical geometry
-uses CSS pixels because Radiant measures border boxes in CSS pixels. Graphviz
-reference geometry, which is generally expressed in points, is converted by
-the reference adapter using `96 / 72`. Authored inch-valued node dimensions and
-point-valued font/pen dimensions use explicit attribute-specific conversions;
-they are never parsed as interchangeable unitless CSS numbers.
-
-Graphviz `style` is tokenized as a Graphviz style list, not treated as authored
-CSS. Supported styles lower to canonical fill, stroke, dash, radius, visibility,
-and emphasis values. Unsupported style tokens remain in Graphviz properties and
-produce a warning only when they affect declared conformance behavior.
-
-Authored `URL`, `href`, `tooltip`, and `target` values remain inert metadata.
-They may lower to safe link semantics in HTML, but no callback, command, image
-fetch, or external navigation occurs during parse, normalization, or layout.
-
-### 19.7 Labels, records, ports, and annotations
-
-DOT has three materially different label forms:
-
-1. Plain strings with object substitutions such as `\\N`, `\\G`, `\\E`,
-   `\\T`, `\\H`, and `\\L`, plus line-alignment escapes.
-2. Record labels with nested fields and `<port>` declarations.
-3. Graphviz HTML-like labels, including tables, cells, font styles, images, and
-   cell ports.
-
-The parser preserves the authored form. `graphviz/labels.ls` applies object
-substitutions only after identity resolution, parses record fields into nested
-content and canonical ports, and parses Graphviz HTML-like syntax with a
-dedicated allowlist. Graphviz HTML-like labels are not passed to the browser as
-raw HTML.
-
-Safe content lowers to ordinary Mark/HTML elements that Radiant can measure:
-text runs, line breaks, inline emphasis, tables, rows, cells, and explicit cell
-alignment. Unsupported tags or attributes produce diagnostics and safe fallback
-text. Image labels use Radiant's normal resource policy and are disabled in
-deterministic conformance tests unless the image is a checked-in fixture.
-
-The existing canonical main `<label>/<content>` pair remains. Stage 3 adds a
-generic measured annotation element for Graphviz's additional labels:
-
-```mark
-<annotation id: "edge-1-head-label", role: "head-label";
-  <label format: "text"; "accepted">
-  <content; "accepted">
->
-```
-
-Roles initially include `external-label`, `head-label`, and `tail-label`.
-Annotations receive stable IDs, measured Velmts, placements, paint order, and
-Graph Scene roles. This avoids forcing several semantic labels into one string
-or adding Graphviz-specific fields to the layout callback.
-
-Graphviz node ports lower to the existing canonical `<port>` model. Port IDs,
-record/table geometry, and compass points determine attachment positions after
-Radiant has measured the complete node content.
-
-### 19.8 Shapes and arrow markers
-
-`graphviz/shapes.ls` maps Graphviz shape names and aliases into geometry
-families rather than implementing every name as unrelated code:
-
-- rectangle/polygon: `box`, `rect`, `rectangle`, `square`, `polygon`;
-- rounded or specialized polygon: `diamond`, `triangle`, `hexagon`, `octagon`,
-  `parallelogram`, `trapezium`, house variants, stars, and biological symbols;
-- ellipse: `ellipse`, `circle`, `doublecircle`, point variants;
-- record/content: `record`, `Mrecord`, `plain`, `plaintext`, `none`;
-- storage/document: cylinder, note, folder, component, tab, box3d, and related
-  families.
-
-Polygon parameters (`sides`, `regular`, `orientation`, `skew`, `distortion`),
-`peripheries`, fixed sizing, and content margins become explicit geometry data.
-Clipping and paint consume the shared family representation.
-
-Graphviz arrow specifications are a small compositional grammar, not a single
-marker enum. `graphviz/markers.ls` parses modifier and shape sequences into
-canonical marker components, including open/filled, left/right clipping,
-inversion, and multiple shapes. Paint places components in order at the routed
-endpoint. Unsupported marker components retain their raw specification and use
-a documented fallback marker. A stable diagnostic for that fallback remains
-part of Stage 3C completion.
-
-### 19.9 Layout-engine contract
-
-Stage 3 supports these engine modes:
-
-- `dot`: supported by the Lambda layered layout engine;
-- absent layout: select the Lambda `dot` layered engine for both directed and
-  undirected DOT graphs, while recording the choice;
-- `neato`, `fdp`, `sfdp`, `circo`, `twopi`, `osage`, `patchwork`: parsed and
-  preserved, but return `graph.graphviz.unsupported-engine` until a dedicated
-  engine is implemented;
-- fixed `pos` input and Graphviz `-n` semantics: deferred with a distinct
-  diagnostic rather than being mistaken for ordinary `dot` layout.
-
-The `dot` mapping extends the shared Lambda graph layout with:
-
-- `rankdir` and rank separation;
-- temporal defaults already resolved by normalization;
-- `rank=same|min|max|source|sink` subgraph constraints;
-- `minlen`, `weight`, and `constraint=false` edges;
-- stable source order, `ordering`, and node `group` hints;
-- nested visual clusters and `newrank` behavior;
-- record/HTML ports and compass attachment;
-- compound edges through `lhead` and `ltail` clusters;
-- parallel edges, self-loops, and label/annotation collision handling;
-- `splines=ortho`, `polyline`, `line`, and a deterministic curved/spline mode.
-
-Exact Graphviz ranking and crossing-minimization choices are not a requirement.
-Declared semantic constraints and Graph Scene relations are. Geometry policies
-may use tolerances for ranks, containment, attachment, route class, bends, and
-relative ordering without comparing every control point.
-
-### 19.10 Semantic HTML and rendering
-
-`graph.transform.to_html()` receives only canonical Graph IR. It does not know
-whether a node came from Mermaid, DOT, D2, or authored Mark except when a
-namespaced property is intentionally exposed for provenance.
-
-Stage 3 extends the existing transform with:
-
-- Graphviz shape-family and marker metadata;
-- safe plain, record, and HTML-like label content;
-- measured external/head/tail annotations;
-- periphery and gradient paint metadata;
-- compound cluster endpoints;
-- inert links and tooltips;
-- renderer-neutral source IDs and Graphviz property provenance.
-
-The same cached custom-layout registration and retained Lambda runtime are used
-for repeated layout. Parsing and normalization happen once per source graph;
-interactive relayout reuses canonical topology, resolved style data, measured
-Velmts, and the compiled callback. Cache keys include layout-affecting Graphviz
-properties and measured child dimensions.
-
-### 19.11 Formatter behavior
-
-The revised DOT formatter has two explicit modes:
-
-- canonical DOT: serialize canonical graph semantics and retained Graphviz
-  properties into stable DOT;
-- source-semantic DOT: serialize source-stage statements in preserved order,
-  without promising original whitespace or comments.
-
-The formatter supports graph kind and strictness, correct `->`/`--` operators,
-all DOT ID forms, safe quoting/escaping, ports and compass points, chained edge
-statements where provenance permits reconstruction, nested/anonymous subgraphs,
-defaults, assignments, repeated attribute lists, and HTML-string labels.
-
-Round-trip conformance is semantic:
-
-```text
-DOT -> source Mark -> DOT -> source Mark
-```
-
-The two source Mark values must normalize equivalently. Byte-for-byte source
-round trips are outside Stage 3.
-
-### 19.12 Graphviz conformance corpus
-
-All Stage 3 tests live under:
-
-```text
-test/lambda/graph/graphviz/
-  README.md
-  LICENSE.graphviz
-  UPSTREAM_COMMIT
-  manifest.mark
-  cases/dot/
-    language/
-    defaults/
-    edges/
-    subgraphs/
-    labels/
-    records/
-    html-labels/
-    shapes/
-    markers/
-    styles/
-    layout/
-    invalid/
-  expected/
-    source/
-    canonical/
-    html/
-    scene/
-  reference/
-    corpus.mark
-    sync_cases.mjs
-    generate_refs.mjs
-    graphviz_json_adapter.ls
-```
-
-The corpus pins one official Graphviz source commit and carries the applicable
-Graphviz license beside adapted fixtures. Cases are selected from the official
-language examples, `tests`, `tests/graphs`, `rtest/graphs`, and focused Lambda
-regressions. Every adapted case records upstream path, test name or fixture,
-commit, engine, options, features, status, and comparison policy.
-
-Reference generation uses pinned Graphviz only as an explicit maintenance tool:
-
-```text
-dot -Tdot_json case.dot      parser/cgraph semantic reference without layout
-dot -Tjson case.dot          laid-out semantic and geometry reference
-dot -Txdot_json case.dot     optional paint-operation reference
-```
-
-`dot_json` validates canonical topology, resolved object identities,
-subgraphs, and attributes. Laid-out `json` supplies node boxes, cluster boxes,
-edge splines, labels, and draw metadata. `xdot_json` is used only where paint
-semantics cannot be recovered from ordinary JSON attributes.
-
-`graphviz_json_adapter.ls` converts Graphviz JSON into the existing Graph Scene
-Mark vocabulary. It removes Graphviz object indices, draw-operation ordering,
-font-backend details, and engine-specific serialization while retaining stable
-identities, topology, labels, shapes, markers, paint, boxes, endpoint sides,
-routes, cluster containment, and rank relations. Point coordinates are converted
-to CSS pixels and the bottom-up Graphviz coordinate system is converted to
-Radiant's top-down coordinate system.
-
-No Graphviz binary, browser, network access, raw SVG fixture, or image comparison
-is part of an ordinary test run. Checked-in source, canonical Mark, HTML
-semantics, and Graph Scene Mark are the test inputs.
-
-### 19.13 Manifest-driven runners
-
-Before adding a second format-specific runner, extract the reusable Mermaid
-manifest discovery, status handling, semantic comparison, failure artifact, and
-retained-runtime logic into a shared graph conformance harness. Mermaid and
-Graphviz keep separate manifests and format-specific expectations but do not
-duplicate runner mechanics.
-
-Stage 3 provides:
-
-```text
-source: test/test_graph_graphviz_gtest.cpp
-binary: test/test_graph_graphviz_gtest.exe
-target: make test-graph-graphviz
-```
-
-The native runner dynamically registers every manifest case and checks parser
-diagnostics, source spans, source-stage structure, and canonical expectations.
-The Lambda fixture filters all render policies, resolves the layout package automatically, and renders every selected case in one retained runtime.
-
-Policies are shared with Mermaid and extended where necessary:
-
-- `source`: exact source-stage Mark semantics;
-- `canonical`: normalized topology, defaults, properties, and diagnostics;
-- `html-semantic`: renderer-neutral transformed HTML roles/content;
-- `scene-semantic`: final topology, labels, shapes, paint, and relations;
-- `scene-geometry`: semantic comparison plus declared tolerant geometry.
-
-Failures write actual source IR, canonical IR, HTML, scene, and structured diffs
-under `temp/graph_graphviz/<case-id>/`. Normal test runs never update checked-in
-references.
-
-### 19.14 Implementation sequence
-
-#### Stage 3A - Parser and source contract (implemented 2026-07-15)
-
-Stage 3A is complete:
-
-- the manual-versus-Tree-sitter size and corpus experiment is recorded above;
-- the old DOT subset is replaced by a 471-line recursive-descent parser behind
-  the existing public parser entry point;
-- Mermaid remains a compact manual flowchart parser, covering Lambda's existing
-  Mermaid corpus; non-graph Mermaid families remain owned by `lambda.chart`;
-- both parsers reuse shared source-span and diagnostic-to-Mark helpers without
-  merging their distinct grammar state machines;
-- DOT source Mark preserves statement order, raw attributes, repeated lists,
-  assignments, ports, chained endpoints, and named or anonymous subgraphs;
-- quoted, numeric, Unicode, concatenated, multiline, and nested HTML-like IDs,
-  comments, case-insensitive keywords, limits, recovery, and diagnostics are
-  covered by parser fixtures;
-- source-only DOT schema and provenance expectations pass;
-- the initial adapted `tree-sitter-dot` lexical corpus tranche is checked in at
-  `test/lambda/graph/graphviz`, with its pinned revision and license.
-
-Expansion of edge endpoint products, scoped defaults, node merging, and strict
-edge identity remains intentionally in Stage 3B normalization. Keeping those
-operations out of the parser preserves exact source declarations and avoids a
-second source AST.
-
-#### Stage 3B - DOT semantics and canonical IR (implemented 2026-07-15)
-
-The pure Lambda semantic implementation is complete:
-
-- temporal graph/node/edge defaults are resolved in source order, with global
-  node identity, implicit creation, and non-retroactive redeclaration merging;
-- edge chains and subgraph endpoint products expand into explicit edges with
-  statement, segment, and expansion provenance and a bounded expansion limit;
-- strict directed and unordered undirected edge identities update the first
-  canonical edge while retaining property-level defining statements;
-- ordinary and anonymous subgraphs remain nonvisual scopes, while only
-  `cluster*` subgraphs become visual clusters;
-- arbitrary Graphviz properties retain direct/default/inherited origin and
-  defining scope/statement metadata, while graph, node, edge, paint, spacing,
-  marker, and compound-edge attributes expose an initial typed canonical set;
-- `rank=same|min|max|source|sink` scope properties lower into validated
-  canonical `<constraint>` values; enforcement belongs to Stage 3D;
-- invalid compass points and rank values, graph-kind/operator mismatches,
-  unresolved ports, expansion overflow, and unsupported engines produce stable
-  diagnostics;
-- canonical normalization is idempotent, and semantic-only scopes are excluded
-  from visual cluster transformation.
-
-The implementation is covered by `canonical.ls`, `semantics.ls`, and
-`reference_semantics.ls` under `test/lambda/graph/graphviz`. The last fixture
-adapts checked-in Graphviz `json` into Graph Scene Mark and compares canonical
-semantics plus selected tolerant geometry with Lambda's final rendered scene.
-The generator version, command, and binary hashes are pinned beside the
-reference. Graphviz is not installed or invoked by ordinary tests.
-
-Lambda normalization size is tracked separately from native parser LOC:
-
-| Stage 3B module | Physical LOC |
-|---|---:|
-| `graphviz/attributes.ls` | 237 |
-| `graphviz/normalize.ls` | 660 |
-| total | 897 |
-
-These modules do not change the 2,357-line native parser ceiling in Section
-19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
-attribute families are added.
-
-#### Stage 3C - Content, shapes, markers, and HTML (implemented 2026-07-15)
-
-The implemented Stage 3C surface is:
-
-- plain labels resolve `\\N`, `\\G`, `\\E`, `\\T`, `\\H`, and `\\L` only
-  after object identity is known; `\\n`, `\\l`, and `\\r` become measured line
-  breaks, and doubled backslashes remain literal;
-- nodes default to Graphviz's ellipse shape, common aliases lower to shared
-  renderer roles, and canonical IR preserves both `shape-family` and the raw
-  `graphviz-shape` name;
-- ellipse, triangle, parallelogram, trapezium, octagon, and house families use
-  matching HTML geometry and layout clipping;
-- Graphviz `polygon` parameters (`sides`, `orientation`, `skew`, and
-  `distortion`) lower to explicit canonical geometry. A shared pure
-  `graph/polygon.ls` helper generates both normalized CSS clip polygons and the
-  vertices used for routed-edge clipping, so HTML paint and layout do not carry
-  independent polygon formulas;
-- `regular` reaches semantic HTML and layout input, while authored and
-  shape-implied `peripheries` reach CSS paint and Graph Scene Mark. Polygon,
-  pentagon, septagon, double/triple-octagon, modified circle/square/diamond,
-  note, tab, folder, box3d, and component aliases lower through shared shape
-  roles rather than separate layout implementations;
-- `dir=forward|back|both|none` resolves endpoint marker presence, and baseline
-  single-component normal, inverted, open, circle, diamond, box, tee, vee,
-  crow, and empty markers reach generated SVG paint;
-- the manual arrow-name parser recognizes up to four Graphviz components with
-  `o`, `l`, and `r` modifiers. Canonical components survive HTML/Velmt layout,
-  and SVG paint composes, half-clips, orders, and scales them with `arrowsize`;
-- routed edge reconstruction retains `arrowsize`, and Graph Scene adaptation
-  and comparison retain polygon parameters, regular/periphery metadata, and
-  composed marker names;
-- Graphviz dimensions and interior `margin` values lower from inches to CSS
-  pixels. `fixedsize=true` becomes a definite border box, while `regular=true`
-  applies a square preferred ratio and equal authored minima. The retained
-  Radiant render fixture verifies that a `1in` by `0.5in` regular fixed node is
-  measured as `96px` by `96px` before custom layout;
-- `fixedsize=shape` uses a fixed, centered inner shape and a naturally measured
-  outer content box. Layout spacing and collision use the outer box, while a
-  reserved internal port record carries shape ratios to edge clipping. This
-  preserves the authored shape boundary even when a long label expands the
-  node, without adding unstable fields to retained-JIT node records;
-- the remaining Graphviz specialized/biological names (`promoter`, `cds`,
-  `terminator`, overhang/site/stability shapes, directional arrows, and related
-  forms) lower to reusable box, ellipse, and polygon geometry roles. The raw
-  Graphviz name remains canonical provenance;
-- safe color lists lower to ordinary multi-stop linear/radial gradients and to
-  weighted hard-stop `striped`/`wedged` paint. Qualified SVG/X11 names and the
-  compact embedded `accent8`, `dark28`, `paired12`, `set19`, `set28`, and
-  `set312` palettes resolve before canonicalization. This bounded table is an
-  intentional package/binary-size choice; unsupported schemes fall back to the
-  theme and emit `graph.graphviz.unsupported-colorscheme`;
-- `fontname`, `fontsize`, and `fontcolor` lower through allowlisted syntax for
-  graph, node, edge-label, cluster-label, and annotation content. PostScript
-  Times, Helvetica, and Courier family names receive browser/Radiant fallback
-  stacks and bold/italic variants; unsafe values never enter CSS declarations;
-- unsupported arrow components preserve their raw marker for deterministic
-  fallback paint and emit the non-fatal
-  `graph.graphviz.unsupported-arrow` diagnostic;
-- `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
-  semantic HTML attributes, pure layout propagation, and generated marker tags.
-- flat and recursively nested record fields lower to measured table content;
-  each nested group alternates horizontal/vertical orientation, named fields
-  lower to canonical ports with distinct attachment offsets, and record edges
-  route through the existing shared port implementation;
-- Graphviz HTML-label delimiters are removed before fragment parsing; safe
-  table/row/cell and inline emphasis structure survives while script, style,
-  template, authored link, and unknown wrapper markup is stripped;
-- allowlisted table/row/cell alignment, cell vertical alignment, and bounded
-  positive row/column spans survive as semantic HTML; invalid enum and span
-  values are removed. `<TD PORT>` uses the same measured-content port walker as
-  record fields, so canonical ports, edge endpoint metadata, and zero-size HTML
-  port elements stay source ordered without a second Graphviz-only port model;
-- node and edge `URL`/`href`, `tooltip`, and `target` attributes lower to inert
-  canonical interactions and semantic HTML metadata without navigation or
-  callback execution;
-- node and edge `xlabel`, plus edge `headlabel` and `taillabel`, lower to
-  graph-level canonical annotations with explicit owner identities. Radiant
-  measures their text or safe HTML content and the shared collision-aware
-  placement path positions them beside nodes or at route center/head/tail.
-  Normalized HTML tests cover their font metadata and generated CSS.
-
-The new pure Stage 3C modules remain small:
-
-| Stage 3C module | Physical LOC |
-|---|---:|
-| `graphviz/labels.ls` | 35 |
-| `graphviz/shapes.ls` | 71 |
-| `graphviz/markers.ls` | 73 |
-| `graphviz/records.ls` | 83 |
-| `graphviz/colors.ls` | 121 |
-| shared `graph/polygon.ls` | 32 |
-| total | 415 |
-
-#### Stage 3D - Layered layout parity (implemented 2026-07-15)
-
-Canonical rank constraints are exposed as zero-size semantic HTML/Velmt
-children. The layered ranker enforces `rank=same|min|max|source|sink`, excludes
-edges with `constraint=false`, propagates same-rank promotion through
-successors so `minlen` remains valid, ignores self-loops and cycle back-edges
-during promotion relaxation, and uses edge weights in crossing-order
-barycenters. `rank_layout.ls` covers both direct layout and transformed
-metadata contracts; the Mermaid routing fixture protects self-loop geometry.
-
-Graphviz `splines` now lowers into the canonical `route-mode` values `none`,
-`line`, `polyline`, `orthogonal`, and `curved`. The DOT aliases `false`,
-`ortho`, `spline`, and `true` are resolved during normalization, while an empty
-quoted value means `none`; unsupported values produce the stable
-`graph.graphviz.invalid-splines` diagnostic. The selected mode is carried
-through semantic HTML and Velmt layout. Paint omits `none` edges, preserves
-direct `line` segments, emits waypoint paths for `polyline` and `orthogonal`,
-and produces deterministic quadratic/cubic paths for `curved`. The retained
-`route_classes.ls` fixture covers aliases, diagnostics, routing, and SVG paint.
-
-For LR/RL graphs, unported self-loops use the upper cross-axis side. Singleton
-feedback ranks shift to separate short and long return paths; a long return
-uses a direct route when it clears the intermediate boxes. Other returns use
-lanes that clear the endpoint corridor and separate fanout, and routes avoid
-loop outlines. DOT's measured center labels raise the minimum rank gap when
-the declared gap would crowd the text. The `fsm.ls`
-fixture covers these route relationships and label spacing without requiring
-Graphviz control-point equality (Stage 3 §19.9).
-DOT's measured label height also sets route and node clearance. Labels use the
-arc-length midpoint and sampled geometry of the same spline emitted by the
-paint layer, so diagonal bounding boxes do not displace nearby loop labels.
-Circular nodes use equal-axis sizing and centered inline layout; terminal
-quadratic segments retain a defined tangent for SVG arrowheads.
-
-Graph and node `ordering=in|out` now lower into canonical IR and semantic HTML.
-After barycentric crossing reduction, the layered engine reapplies each
-authored incoming or outgoing edge sequence, so optimization cannot reverse a
-declared order. DOT node `group` is carried separately from structural cluster
-membership and forms stable ordering blocks for top-level nodes. Invalid
-ordering values produce `graph.graphviz.invalid-ordering`. The
-`ordering_groups.ls` fixture covers graph defaults, node overrides, group
-blocks, and the retained layout metadata contract.
-
-Graph `compound` and `newrank` values now survive canonical IR, semantic HTML,
-Velmt adaptation, and layout options. Edge `lhead` and `ltail` values likewise
-reach the router. With `compound=true`, an explicit tail or head cluster is the
-route endpoint and clips to that cluster's border; outer nested boundaries
-remain in the route. Unknown cluster references produce
-`graph.graphviz.unresolved-compound-cluster`.
-
-Compound validation now follows nested cluster ownership and reports
-`graph.graphviz.compound-endpoint-outside-cluster` when an `lhead` target or
-`ltail` source is outside the named cluster. DOT's ambiguous one-token endpoint
-suffix is resolved only after record and HTML content have generated their
-actual ports: a matching name remains a port, otherwise
-`n|ne|e|se|s|sw|w|nw|c|_` becomes a compass point. Compass attachment is
-retained through canonical IR, semantic HTML, Velmt adaptation,
-parallel/self-loop routing, generated SVG, and Graph Scene Mark.
-`records_ports.ls` covers named-port precedence and north and diagonal compass
-geometry; `ordering_groups.ls` covers nested valid membership, unknown
-clusters, and outside-cluster diagnostics.
-
-The ranker now distinguishes Graphviz's recursive default from `newrank=true`.
-The default excludes rank sets whose members span structural clusters, while
-`newrank=true` applies those sets in the single global rank space. Crossing
-reduction groups nodes by their complete outer-to-inner cluster ancestry and
-then by authored DOT `group`, keeping nested clusters and inner alignment groups
-contiguous without conflating the two concepts. `ordering_groups.ls` covers the
-cross-cluster rank-policy difference and nested grouping order.
-
-Record and safe HTML-table ports now use measured Radiant cell geometry. The
-Velmt adapter walks the already-laid-out node subtree, accumulates each port
-cell's local border box, and retains normalized horizontal and vertical cell
-centers. Routing chooses the measured axis after resolving the endpoint side,
-while direct non-Radiant callers retain canonical source-order offsets as a
-fallback. Velmt descendant exposure remains lazy and bounded, with enough depth
-for nested table wrappers. `records_ports.ls` covers the pure adapter and
-`render.ls` verifies the retained Radiant render path.
-
-Labels and annotations are placed against a shared occupied-geometry set that
-contains node boxes, cluster labels, other routed edge segment boxes, and labels
-already placed in source order. Candidate positions expand through bounded
-rings around the owner or route anchor. When a dense graph exhausts those
-candidates, a deterministic position beyond the occupied right boundary
-guarantees a non-overlapping result instead of accepting the first collision.
-`annotations.ls` checks pairwise label separation and separation from nodes and
-edge routes.
-
-The pinned `dot -Tjson` adapter converts Graphviz's bottom-left point geometry
-to top-left CSS pixels and emits node, cluster, and edge-route Graph Scene Mark.
-`reference_semantics.ls` renders the same source through the retained Radiant
-callback and compares exact semantics, relational geometry, and explicitly
-tolerant absolute geometry. Exact route control-point equality is disabled for
-this reference because Graphviz splines and Radiant routes are different valid
-representations; endpoint relations remain checked. The comparison also
-protects direct canonical edge paint attributes through HTML and Velmt
-adaptation.
-
-#### Stage 3E - Formatter, runner, and integration (implemented 2026-07-15)
-
-- `manifest.mark` and `suite.ls` now run the positive DOT corpus through parse,
-  normalize, schema validation, and semantic HTML in one retained runtime;
-- `make test-graph-graphviz` reuses the native DOT parser runner and generic
-  retained Lambda runner instead of cloning the Mermaid C++ harness;
-- `render.ls` verifies the existing `.dot`/`.gv` CLI bridge pipeline through
-  Radiant SVG and Graph Scene. The retained callback now switches both
-  `::context` and MIR's `_lambda_rt`, which is required by grouping helpers;
-- Graphviz reference paths and comparison policies now live in `manifest.mark`;
-  `suite.ls` evaluates them through the same retained runtime and reports
-  structured scene diagnostics;
-- `test-graph-graphviz` runs `view.gv` through `lambda.exe view --headless`,
-  covering `.gv` extension dispatch and the in-memory view bridge without a
-  window;
-- the native DOT formatter now selects source or canonical mode from `ir-stage`.
-  Source mode walks declarations, repeated attribute lists, endpoint chains,
-  assignments, and recursive subgraphs in source order. Canonical mode emits
-  explicit topology and retained Graphviz properties while omitting inherited
-  subgraph properties that DOT reparsing reconstructs from the parent;
-- `formatter.ls` verifies source formatter idempotence and semantic canonical
-  round trips, including quoted, numeric, and HTML IDs plus Graphviz backslash
-  label escapes;
-- `lambda.graph.conformance` now owns manifest discovery, comparison
-  policy defaults, retained package execution, render/compare execution, and final
-  scene sanity checks. Mermaid and Graphviz retain only their format-specific
-  source/reference adapters.
-
-The implemented engine matrix is:
+**Engine contract.**
 
 | DOT `layout` value | Status | Behavior |
 |---|---|---|
-| absent or `dot` | supported | Lambda layered layout, routing, and measured content |
-| `neato`, `fdp`, `sfdp` | deferred | `graph.graphviz.unsupported-engine` |
-| `twopi`, `circo` | deferred | `graph.graphviz.unsupported-engine` |
-| `osage`, `patchwork`, other values | deferred | `graph.graphviz.unsupported-engine` |
+| absent or `dot` | supported | Lambda layered layout, routing, and measured content, for both directed and undirected graphs; the choice is recorded |
+| `neato`, `fdp`, `sfdp`, `twopi`, `circo`, `osage`, `patchwork`, other | deferred | preserved; `graph.graphviz.unsupported-engine` |
+| fixed `pos` / `-n` semantics | deferred | distinct diagnostic, never treated as ordinary `dot` |
 
-The implemented attribute matrix is:
+**Formatter.** Mode follows `ir-stage`. *Source-semantic DOT* walks declarations, repeated attribute lists, endpoint chains, assignments, and recursive subgraphs in source order. *Canonical DOT* emits explicit topology and retained Graphviz properties, omitting inherited subgraph properties that reparsing reconstructs. Both support graph kind and strictness, correct `->`/`--`, all id forms, safe quoting and escaping, ports and compass points, and HTML-string labels. Round trips are semantic — `DOT → source Mark → DOT → source Mark` must normalize equivalently — not byte-identical.
 
-| Area | Supported Stage 3 surface | Partial or deferred surface |
+**Support matrix.**
+
+| Area | Supported | Partial or deferred |
 |---|---|---|
-| graph structure | strict graphs, directed/undirected operators, temporal defaults, assignments, endpoint sets, recursive scopes and visual `cluster*` subgraphs | non-DOT layout-engine semantics |
-| ranking/order | `rankdir`, `nodesep`, `ranksep`, `rank=same|min|max|source|sink`, `minlen`, `weight`, `constraint`, `ordering`, node `group`, `newrank` | exact Graphviz crossing choices |
-| routing | `splines=false|none|line|polyline|ortho|orthogonal|spline|curved|true`, parallel edges, self-loops, compass points, record/HTML ports, `compound`, `lhead`, `ltail` | Graphviz spline control-point parity |
-| content | plain substitutions, multiline labels, flat/nested records, safe measured HTML tables/inline content, `xlabel`, `headlabel`, `taillabel` | full Graphviz HTML grammar and backend-specific text metrics |
-| node geometry | ellipse/box/rounded/diamond/circle, shared triangle/polygon/trapezium/house and specialized biological families, polygon parameters, `regular`, peripheries, inch dimensions, `fixedsize=true|shape` | backend-exact curves for specialized Graphviz silhouettes |
-| markers | up to four normal/open/circle/diamond/box/tee/vee/crow components, inversion, side modifiers, `dir`, `arrowsize` | unknown components use deterministic fallback paint |
-| paint/fonts | color/stroke/fill, width/dash/opacity, weighted and multi-stop linear/radial/striped/wedged paint, qualified SVG/X11 colors, six compact embedded qualitative palettes, allowlisted fonts with Times/Helvetica/Courier fallback | the full ColorBrewer table and backend-identical font metrics are intentionally not embedded |
-| interaction | inert `URL`/`href`, `tooltip`, and `target` metadata | script/callback execution |
-| formatter | source-semantic and canonical DOT with semantic round trips | comments and original whitespace |
+| structure | strict graphs, directed/undirected operators, temporal defaults, assignments, endpoint sets, recursive scopes and `cluster*` subgraphs | non-`dot` engine semantics |
+| ranking/order | `rankdir`, `nodesep`, `ranksep`, `rank=same\|min\|max\|source\|sink`, `minlen`, `weight`, `constraint`, `ordering`, `group`, `newrank` | exact Graphviz crossing choices |
+| routing | all `splines` modes, parallel edges, self-loops, compass points, record/HTML ports, `compound`, `lhead`, `ltail` | spline control-point parity |
+| content | plain substitutions, multiline labels, flat/nested records, safe HTML tables and inline content, `xlabel`, `headlabel`, `taillabel` | full HTML-like grammar; backend text metrics |
+| node geometry | shared shape families, polygon parameters, `regular`, peripheries, inch dimensions, `fixedsize=true\|shape` | backend-exact specialized silhouettes |
+| markers | up to four components, inversion, side modifiers, `dir`, `arrowsize` | unknown components use fallback paint |
+| paint/fonts | color/fill/stroke, width/dash/opacity, gradients, striped/wedged, SVG/X11 names, six embedded palettes, allowlisted fonts | full ColorBrewer table; backend-identical font metrics |
+| interaction | inert `URL`/`href`, `tooltip`, `target` | script/callback execution |
+| formatter | source-semantic and canonical DOT, semantic round trips | comments and whitespace |
 
-Arbitrary unknown Graphviz properties remain in canonical `<property>`
-provenance even when they have no layout or paint effect. Known rejected values
-produce these stable semantic diagnostics:
+**Diagnostics.**
 
-| Diagnostic | Condition |
+| Code | Condition |
 |---|---|
 | `graph.graphviz.edge-operator` | `--` in a digraph or `->` in an undirected graph |
 | `graph.graphviz.expansion-limit` | endpoint products exceed 100,000 edges |
 | `graph.graphviz.invalid-compass` | unsupported compass point |
-| `graph.graphviz.unsupported-colorscheme` | a non-embedded Graphviz colorscheme is requested |
 | `graph.graphviz.invalid-rank` | unsupported rank constraint value |
-| `graph.graphviz.unsupported-engine` | any layout engine other than `dot` |
 | `graph.graphviz.invalid-ordering` | ordering other than `in` or `out` |
+| `graph.graphviz.invalid-splines` | unsupported spline mode |
+| `graph.graphviz.unsupported-engine` | layout engine other than `dot` |
+| `graph.graphviz.unsupported-colorscheme` | non-embedded colorscheme |
+| `graph.graphviz.unsupported-arrow` | unsupported arrow component; warning with fallback paint |
 | `graph.graphviz.unresolved-compound-cluster` | unknown `lhead`/`ltail` cluster |
 | `graph.graphviz.compound-endpoint-outside-cluster` | compound endpoint is outside its named cluster |
-| `graph.graphviz.unsupported-arrow` | unsupported arrow composition; warning with fallback paint |
-| `graph.graphviz.invalid-splines` | unsupported spline mode |
 
-Parser recovery diagnostics and the shared `graph.edge.unresolved-port`
-normalization diagnostic remain additional source-spanned errors rather than
-silent fallbacks.
+Parser recovery diagnostics and the shared `graph.edge.unresolved-port` diagnostic remain additional source-spanned errors.
 
-### 19.15 Acceptance criteria
+### 11.6 Structurizr DSL and C4
 
-Stage 3 basic Graphviz support is complete when:
+Structurizr is a *workspace* language: one architecture model defines many views, and each view projects a different diagram from the same elements and relationships. The workspace model is therefore preserved, not lowered immediately to one graph. The official language reference is the semantic authority.
 
-1. The DOT parser covers the official grammar forms listed in Section 19.3 and
-   emits structured source-spanned Mark without eager semantic rewriting.
-2. Source-stage declarations, defaults, assignments, endpoint sets, and raw
-   attributes survive parsing in exact statement order.
-3. Pure Lambda normalization implements temporal defaults, implicit/redeclared
-   nodes, edge expansion, strict graphs, and subgraph/cluster semantics.
-4. Canonical IR preserves arbitrary Graphviz properties while exposing known
-   layout, content, paint, marker, interaction, and metadata values.
-5. Plain, record, and the declared safe Graphviz HTML-like label subset render
-   as measured content, including ports.
-6. Baseline Graphviz shapes, polygon parameters, peripheries, and compositional
-   arrow markers survive final rendering and Graph Scene adaptation.
-7. The Lambda `dot` engine honors declared rank, spacing, constraint, port,
-   compound-cluster, and route-class behavior.
-8. Unsupported Graphviz engines and known unsupported layout attributes produce
-   stable diagnostics rather than silent fallback.
-9. Canonical DOT and source-semantic DOT formatting round-trip semantically.
-10. The pinned official corpus records provenance and passes source, canonical,
-    selected HTML, and Graph Scene policies without image fixtures.
-11. Reference regeneration is reproducible from a pinned Graphviz commit or
-    binary/container digest and is not required by ordinary tests.
-12. The manifest-driven native and retained-runtime runners discover every case
-    and do not duplicate Mermaid runner infrastructure.
-13. `.dot` and `.gv` render/view commands use the Lambda graph package without
-    Graphviz installed.
-14. Repeated Radiant layout reuses the retained JIT-compiled callback and does
-    not reparse or renormalize unchanged DOT source.
-15. Lambda and Radiant baseline tests remain green for the implemented surface.
+#### 11.6.1 Three-level data model
 
-### 19.16 Deferred Graphviz work
+1. **Source Structurizr Mark** (`<workspace flavor: "structurizr" ir-stage: "source">`) records syntax: `<model>`, `<views>`, `<declaration keyword identifier>`, `<relationship from to>`, `<view kind scope key>`, `<include expression>`, `<auto-layout>`, `!include` and directive nodes, and generic `<statement>` for unknown forms — all with spans and explicit statement order, quoted versus bare arguments distinguished where it matters.
+2. **Canonical C4 Workspace Mark** (`<c4-workspace ir-stage: "canonical">`) holds `<c4-model>` (`<c4-element id identifier kind name parent>` with tags, description, technology, properties, perspectives; `<c4-relationship id source destination>`), `<c4-views>`, `<c4-styles>`, and diagnostics. Canonical ids are generated deterministically and kept separate from authored identifiers, which remain with spans for diagnostics, editor navigation, and round trips.
+3. **Per-view canonical Graph IR** (`<graph flavor: "structurizr-c4" diagram-type source-view-key>`) is produced by projecting one view. It preserves C4 identity, kind, parent, tags, technology, description, relationship identity, view key, and workspace provenance; generic layout never needs to understand Structurizr syntax.
 
-The following work is explicitly outside the initial Stage 3 acceptance gate:
+#### 11.6.2 Parser
 
-- force-directed `neato`, `fdp`, and `sfdp` layout engines;
-- radial/circular `twopi` and `circo` engines;
-- packing engines such as `osage` and `patchwork`;
-- exact Graphviz B-spline control-point parity;
-- PostScript shape files and Graphviz renderer/plugin loading;
-- unrestricted external images, URLs, scripts, or callbacks;
-- byte-identical DOT formatting and comment preservation;
-- pixel-identical output across Graphviz and Radiant font backends.
-- embedding every ColorBrewer palette variant; the compact Stage 3 table can
-  expand later behind an explicit package-size budget.
+Statements reduce to three shapes, so one generic statement reader (optional assignment, arguments, optional relationship operator, optional body) plus a compact keyword→kind/allowed-context table keeps parser size proportional to grammar shapes rather than vocabulary:
 
-These features can be added behind explicit engine or capability contracts.
-They must not weaken the source-faithful DOT parser, canonical Graph IR, or
-renderer-neutral conformance model established by Stage 3.
+```text
+[identifier =] keyword argument... [{ child statements }]
+source -> destination argument... [{ relationship properties }]
+!directive argument... [{ child statements }]
+```
 
-### 19.17 Normative and reference sources
+The parser handles comments, strings, bare tokens, assignments, arrows, braces, and newlines; preserves nested blocks and order; distinguishes declarations, relationships, directives, and view statements; retains optional arguments without guessing omitted roles; and preserves unknown statements. It performs no identifier lookup, containment validation, archetype expansion, default-view generation, expression evaluation, implication, style resolution, or file/network access.
 
-Stage 3 implementation and corpus selection use these upstream sources:
+Dispatch accepts the `structurizr` and `c4` flavors. `.structurizr` is unambiguous; `.dsl` is claimed only when its first significant token is the boundary-safe `workspace` keyword, because `.dsl` is not unique to Structurizr.
 
-- official DOT language grammar: <https://graphviz.org/doc/info/lang.html>;
-- Graphviz attributes and value types: <https://graphviz.org/docs/attrs/>;
-- Graphviz JSON output contract: <https://graphviz.org/docs/outputs/json/>;
-- official Graphviz repository and tests:
-  <https://gitlab.com/graphviz/graphviz/-/tree/main/tests>;
-- rejected Tree-sitter DOT experiment grammar reference:
-  <https://github.com/rydesun/tree-sitter-dot>;
-- Graphviz license: <https://graphviz.org/license/>.
+#### 11.6.3 Normalization
 
-The checked-in `UPSTREAM_COMMIT`, grammar revision, reference-tool version, and
-license files become the reproducibility authority once Stage 3 implementation
-starts. Moving upstream documentation does not silently change conformance.
+- **Identifiers.** Flat and hierarchical modes; each scope records authored identifiers, canonical ids, parent, and declaration source. `this` resolves to the current element, including as either relationship endpoint and in hierarchical forward references. Duplicate, unknown, ambiguous, and illegal cross-scope references diagnose with use and declaration provenance.
+- **Hierarchy.** Person, software system, container, component, custom element, group, deployment environment and group, deployment node, infrastructure node, software-system instance, container instance. Legal containment is validated. Groups are separate from C4 containment. Instances reference their logical element rather than copying identity or metadata.
+- **Relationships.** Source, destination, description, technology, tags, properties, URL, and perspectives (compact and expanded forms); explicit identifiers stay stable for dynamic views.
+- **Implied relationships.** Boolean implication runs after explicit relationships resolve: on by default, can be disabled, stops at shared ancestors, suppresses existing endpoint pairs, and records provenance. Custom Java strategies are diagnosed and never loaded.
+- **Archetypes.** Declarative element and relationship archetypes supply default description, technology, tags, properties, and perspectives through a pure merge in which explicit values win. Cycles, unknown bases, and kind mismatches are errors.
+- **Tags and terminology.** Default and authored tags are canonical; terminology overrides type labels.
 
-## Superseded callback installation
+#### 11.6.4 Includes and unsafe directives
 
-~~The original public API required `graph_transform.install()`, which called
-`radiant.register_layout("lambda-graph", callback)`.~~ Superseded by automatic
-package-export connection (**D7.5.3v2**, user ruling 2026-10-16). The old native
-bridge selected separately rooted functions by layout name and runtime heap;
-the retained module export now supplies the callback and its lifetime.
+`!include` and `workspace extends` are always recorded by the parser; resolution is a separate host operation with an explicit policy. Local includes are enabled only for local-file input that explicitly selects Structurizr/C4 or passes `.dsl` detection; in-memory and network inputs stay inert. The containing workspace directory is the allowed root, and canonicalized paths or symlinks may not escape it. Limits are 32 nested includes, 256 files, and 16 MiB of included source. Directory includes accept only `.dsl`/`.structurizr` entries in sorted order. Source Mark keeps each authored `!include` and nests resolved statements beneath it with canonical `source-file` identity and file-local spans; normalization treats resolved children as source-order-transparent. Remote URLs are disabled by default. JSON workspace extension awaits a canonical Structurizr JSON adapter.
+
+`!script`, `!plugin`, `!components`, custom-code `!impliedRelationships`, and other executable directives remain inert source nodes with `structurizr.unsafe-directive`.
+
+#### 11.6.5 View projection
+
+| View | Primary contents |
+|---|---|
+| system landscape | people and software systems |
+| system context | scoped system, connected people, and connected systems |
+| container | containers in the scoped system plus connected external elements |
+| component | components in the scoped container plus connected external elements |
+| filtered | tag-based projection over a resolved base static view |
+| custom | explicitly selected custom elements and relationships |
+| dynamic | ordered relationship instances as a collaboration diagram |
+| deployment | nested deployment boundaries and instances in one environment |
+
+All static kinds share one projection path following view semantics, not mere type filtering. `include *`, reluctant `*?`, explicit identifiers, and expressions are evaluated against the model and scope; relationships are included only when their endpoints are selected and view rules permit; exclusion runs after inclusion in source order. C4 elements become nodes with rich content; system, container, and (nested) group boundaries become clusters.
+
+**Expressions** are evaluated by a small pure recognizer for a restricted grammar — never as Lambda source and without a second general-purpose AST. It supports identifiers, `*`, afferent/efferent coupling, element type, parent, group, tag, technology, and property predicates; relationship tag, property, source, destination, and endpoint predicates; `&&`, `||`, and precedence-aware parentheses. Results keep model source order. Unknown element predicates select nothing and unknown relationship predicates match nothing; malformed syntax is `structurizr.invalid-expression`, valid but unsupported predicates are `structurizr.unsupported-expression`. No invalid or unsupported expression ever falls back to including everything.
+
+**Dynamic views** keep, per entry: sequence order, optional explicit order token, relationship identity (from endpoint or relationship-identifier syntax), per-instance description/technology override, parallel-sequence grouping (including anonymous parallel blocks), and source span. The graph projection renders a collaboration diagram whose edge labels carry stable ordinals; parallel occurrences stay separate edges. The same canonical entries can later feed a `lambda.chart` sequence projection.
+
+**Deployment views** map nested deployment nodes to clusters and infrastructure, software-system, and container instances to nodes. Logical relationships lift to instances only when environment, deployment groups (inherited from nodes), and view scope allow. Instance multiplicity is preserved — two container instances never collapse into one node — and health checks are retained. Deployment include/exclude filtering keeps required ancestor boundaries and drops relationships whose endpoints leave the projection.
+
+**View selection.** `--view-key <key>` selects the view for `view`, `render`, and `convert -t html`, and `structurizr.project()`/`to_html()` take an optional view key. When no key is given, the first declared view is selected, even if the workspace declares several (decided 2026-10-23; supersedes the original C4 proposal's diagnostic listing the view keys).
+
+#### 11.6.6 C4 HTML, styles, and layout
+
+```html
+<graph class="lambda-graph c4-diagram" data-radiant-layout="lambda-graph" data-c4-view="Containers">
+  <node class="graph-node c4-person" data-node-id="e1">...</node>
+  <cluster class="graph-cluster c4-software-system-boundary">...</cluster>
+  <edge data-from="e1" data-to="e3" data-directed="true"></edge>
+</graph>
+```
+
+C4 node content is rich measured HTML — name, type or configured terminology, optional technology, optional description — never one flattened text string. Tags, properties, URLs, and perspectives are metadata unless an allowlisted transform displays them. Default roles: `c4-person`, `c4-software-system`, `c4-container`, `c4-component`, `c4-deployment-node`, `c4-infrastructure-node`, `c4-instance`, `c4-group-boundary`, `c4-software-system-boundary`, `c4-container-boundary`.
+
+Element and relationship styles lower to canonical style assignments and pass through the common safe style parser. The allowlist covers background, text/line color, stroke, stroke width/thickness, node font size, node width/height, percent opacity, solid/dashed/dotted borders and relationships, the documented element shapes, and per-relationship direct/orthogonal/curved routing; shape and routing become geometry attributes, not CSS. Unsupported icons, fonts, or paint stay as canonical workspace properties with `structurizr.unsupported-style`. External icons and themes are never fetched.
+
+`autoLayout [tb|bt|lr|rl] [rankSeparation] [nodeSeparation]` maps directly to Graph IR direction and separations (Structurizr specifies pixels, matching CSS-pixel geometry). Layout also respects nested boundaries, boundary labels and padding, fixed view membership, relationship labels, routing hints, multiple relationship instances, deployment instance identity, and source order as the final tie breaker. Views without `autoLayout` use a deterministic source-order layered fallback and emit `structurizr.implicit-layout`.
+
+#### 11.6.7 Diagnostics
+
+| Code | Condition |
+|---|---|
+| `structurizr.syntax` | malformed token, statement, or block |
+| `structurizr.unknown-statement` | statement preserved but not understood |
+| `structurizr.invalid-context` | known statement in an illegal parent |
+| `structurizr.duplicate-identifier` | identifier conflicts in its effective scope |
+| `structurizr.unresolved-identifier` | model or view reference cannot be resolved |
+| `structurizr.invalid-containment` | C4 element under an illegal parent |
+| `structurizr.invalid-relationship` | incompatible source and destination kinds |
+| `structurizr.invalid-view-scope` | view scope does not match its kind |
+| `structurizr.duplicate-view-key` | two canonical views share a key |
+| `structurizr.invalid-expression` | malformed include/exclude expression |
+| `structurizr.unsupported-expression` | valid expression outside the allowlist |
+| `structurizr.unsupported-view` | image or other deferred view requested |
+| `structurizr.unsafe-directive` | executable or external extension kept inert |
+| `structurizr.include-cycle` | local include cycle |
+| `structurizr.include-limit` | include depth, file count, or byte limit exceeded |
+| `structurizr.include-missing` | local include path unreadable |
+| `structurizr.include-policy` | include is remote or escapes the allowed root |
+| `structurizr.unsupported-style` | style value cannot be represented safely |
+| `structurizr.implicit-layout` | deterministic fallback layout selected |
+
+### 11.7 D2
+
+D2 input is parsed natively into Graph IR and rendered through the same transform, callback, and paint path. It has no dedicated conformance corpus yet.
+
+## 12. Diagnostics model
+
+Diagnostics are Mark values with a stable dotted code, severity, message, and source location, collected alongside — never instead of — the recoverable graph. Codes are namespaced by owner: `graph.*` for common invariants (invalid roots or directions, missing or duplicate identities, unresolved endpoints, duplicate ports, `graph.edge.unresolved-port`, schema type/enum/placement/cardinality/required-attribute failures), `mermaid.*`, `graph.graphviz.*`, and `structurizr.*`. Invalid conformance cases pass only when the expected code and source span are produced without a crash or a partial graph masquerading as success.
+
+## 13. Conformance model
+
+### 13.1 Graph Scene Mark
+
+Raw SVG and screenshots are not fixtures: renderers legitimately differ in tags, wrappers, classes, transforms, marker definitions, and number formatting. Both reference and Lambda output are adapted into a smaller renderer-neutral Graph Scene Mark:
+
+```mark
+<graph-scene direction:"LR" width:286 height:104>
+  <node id:"a" shape:"rounded" x:0 y:30 width:86 height:44; <label; "Start"> >
+  <node id:"b" shape:"diamond" x:180 y:10 width:106 height:84; <label; "Valid?"> >
+  <edge id:"e0" from:"a" to:"b" marker-start:"none" marker-end:"normal"
+        start-side:"right" end-side:"left" route-kind:"orthogonal";
+    <route; <point x:86 y:52> <point x:180 y:52> >
+  >
+>
+```
+
+Every adapter performs equivalent normalization: flatten nested transforms into graph-local coordinates; map renderer primitives and wrappers to shape roles; collapse text, tspans, HTML labels, and foreignObject into normalized label text; resolve CSS and presentation attributes into optional semantic paint; replace generated DOM ids and marker URLs with source identities; drop wrappers, raw classes, tag names, definition order, and insignificant precision; parse path geometry, normalize its origin, and classify straight, orthogonal, curved, parallel, and self-loop routes using meaningful bends or sampled curve structure. Raw classes may help an adapter *find* objects but are never emitted or compared. Scenes include nodes, clusters, edges, labels, annotations (with owner, kind, format, and bounds), markers, polygon/periphery metadata, measured boxes, route classes, and points.
+
+### 13.2 Comparison levels
+
+1. **Exact semantics:** identities, topology, membership, labels, shape roles, markers, directions, declared constraints.
+2. **Relational geometry:** ranks, ordering, containment, node non-overlap, endpoint attachment and side, route kind.
+3. **Tolerant geometry and paint:** dimensions, points, colors, stroke widths, dashes, under explicit per-category tolerances and flags.
+
+Per-case policies are `source` (exact source-stage Mark), `canonical` (topology, defaults, properties, diagnostics), `html-semantic` (renderer-neutral transformed HTML roles and content, excluding unstable CSS serialization), `scene-semantic`, and `scene-geometry`. Where two renderers produce different valid route representations (Graphviz splines versus Lambda routes), control-point equality is disabled while endpoint relations stay checked.
+
+### 13.3 Corpora and references
+
+Each format keeps a manifest-driven corpus pinned to an exact upstream revision, with the upstream license beside adapted fixtures and per-case provenance (upstream file and test name, options, feature tags, expected status, comparison policy, reference version). One shared conformance harness owns manifest discovery, status handling, policy defaults, retained-runtime rendering, comparison, and failure artifacts; formats contribute only their source and reference adapters. Every case is discovered and reported, including `extended` and `unsupported` ones.
+
+- **Mermaid:** cases adapted from Mermaid's source fixtures and rendering-test diagram strings (not screenshots), pinned to Mermaid 11.16.0. References are generated by running pinned Mermaid in a browser DOM — Mermaid needs browser text measurement — and adapting the live SVG DOM, computed styles, and `getBBox()` into Graph Scene Mark. Semantic-only references may omit geometry.
+- **Graphviz:** cases from the official language examples, test graphs, and focused Lambda regressions. `dot -Tdot_json` provides an unlaid semantic reference, `dot -Tjson` laid-out boxes, splines, and labels, and `xdot_json` paint only where JSON cannot recover it. A Lambda adapter converts Graphviz JSON to Graph Scene Mark, discarding object indices, draw order, and font-backend detail. Generator version, command, and binary hashes are pinned.
+- **Structurizr:** a pinned Structurizr CLI exports DSL workspaces to JSON; a Lambda adapter converts that JSON and Lambda's canonical workspace into one semantic comparison Mark covering element paths, kinds, parents, names, descriptions, technology, tags, explicit and implied relationships, deployment environments, nodes, and instances, view kind/scope/key and resolved/filtered membership, dynamic order and parallel groups, layout intent, resolved styles, and projected containment — discarding generated numeric ids and renderer detail. Reference provenance records source and artifact SHA-256 values.
+
+Reference tools are explicit, reviewed maintenance operations. Ordinary test runs use only checked-in source, canonical Mark, HTML semantics, and scene/semantic Mark; they never invoke Mermaid, Graphviz, Java, a browser, or the network, never compare images or raw SVG, and never rewrite references. One retained Lambda runtime renders all selected cases without per-case process startup.
+
+## 14. Acceptance criteria
+
+1. `to_html()` emits the semantic graph tree; rich node content (block, inline, flex/grid, table, text, image, whole SVG) is measured by Radiant and positioned correctly.
+2. Links are routed from measured boxes and painted as generated layers; signed `z` places ordinary edges below nodes, selected edges above, and split segments on both sides.
+3. Repeated relayout reuses the retained runtime and compiled export without reparsing or renormalizing unchanged source; simultaneously live documents cannot disturb each other.
+4. The parser-to-transform boundary is canonical Mark Graph IR for every source language; parsers perform no semantic rewriting, identifier resolution, file or network access, or extension loading.
+5. Unsupported syntax, engines, views, and directives yield structured diagnostics rather than silent loss or execution.
+6. Groups, rich labels, annotations, classes, styles, markers, accessibility metadata, ports, and stable ids survive normalization, transform, and final SVG.
+7. Mermaid graph and chart families dispatch to the correct package; flowchart, class, ER, and flat-state surfaces satisfy their declared conformance matrices.
+8. DOT source, semantics, content, shapes, markers, `dot`-engine constraints, ports, compound clusters, route classes, and formatter round trips satisfy §11.4–§11.5.
+9. Structurizr workspaces normalize deterministically; landscape, context, container, component, filtered, custom, dynamic, and deployment views project correct model subsets; C4 content is measured and boundaries use cluster geometry.
+10. Graph files render through the Lambda package in `render`, `view`, `layout`, and `convert` with no Graphviz, Mermaid, Java, or Structurizr installed; no caller references the retired C layout/SVG ABI.
+11. Every corpus case records provenance and passes its policy without image fixtures or raw SVG equality; reference regeneration is reproducible from pinned versions and never required by ordinary tests.
+12. Parser LOC and binary contribution stay within their reviewed budgets.
+
+## 15. Open items and deferred work
+
+**Open items.**
+
+- **Structurizr diagnostics.** Some codes in §11.6.7 are not yet emitted; corpus expansion beyond the three pinned references (basic, rich static/filtered, dynamic/deployment) is outstanding.
+- **Mermaid families.** ER relationship word aliases, exhaustive quoted/Unicode identifiers, Markdown-rich entity names, and multiple shorthand classes; composite states, nested transitions, concurrency regions, history states, richer state descriptions, and `hide empty description`; requirement, architecture, block, and mindmap adapters.
+- **D2** conformance corpus.
+
+**Deferred.**
+
+- Eager `transform.to_svg()` for models with explicit node sizes.
+- Portable standalone HTML through an opt-in trusted layout-module loader.
+- Interactive edge hit testing from routed segments; rich editable edge labels and routing handles; animation through stable node, edge, and segment identities.
+- LambdaJS access over the same Velmt and paint-layer contracts; additional layout algorithms behind the same canonical model.
+- Graphviz `neato`, `fdp`, `sfdp`, `twopi`, `circo`, `osage`, `patchwork`, and fixed-position input; B-spline control-point parity; PostScript shape files and plugin loading; the full ColorBrewer table behind an explicit size budget; byte-identical formatting and comments; cross-backend pixel identity.
+- Structurizr JSON import/export parity and manual coordinates (a separate fixed-layout mode); remote include/extend under an explicit network capability; image views and PlantUML/Mermaid/Kroki rendering; external themes and icons; documentation and ADR rendering; component discovery; scripts, plugins, and JVM extensions; the full expression language; dynamic sequence rendering through `lambda.chart`; workspace editing and a source-preserving formatter; pixel parity with Structurizr's renderer.
+
+Deferred features may be added behind explicit engine or capability contracts but must not weaken source-faithful parsing, the canonical Graph IR, or the renderer-neutral conformance model.
+
+## 16. References
+
+- Mermaid: <https://mermaid.js.org/> (corpus pinned to 11.16.0).
+- DOT language grammar: <https://graphviz.org/doc/info/lang.html>; attributes and value types: <https://graphviz.org/docs/attrs/>; JSON output: <https://graphviz.org/docs/outputs/json/>; tests: <https://gitlab.com/graphviz/graphviz/-/tree/main/tests>; license: <https://graphviz.org/license/>.
+- Rejected Tree-sitter DOT experiment grammar: <https://github.com/rydesun/tree-sitter-dot>.
+- Structurizr DSL: [overview](https://docs.structurizr.com/dsl), [language reference](https://docs.structurizr.com/dsl/language), [cookbook](https://docs.structurizr.com/dsl/cookbook/) (system context, container, component, dynamic, and deployment views), [exporters](https://docs.structurizr.com/export).
+- Base Graph IR schema: [Mark_Graph_Schema.md](Mark_Graph_Schema.md); companion package: [Lambda_Pkg_Chart.md](Lambda_Pkg_Chart.md).
+
+Checked-in upstream revision, reference-tool version, and license files are the reproducibility authority; moving upstream documentation does not silently change conformance.

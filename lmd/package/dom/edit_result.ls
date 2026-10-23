@@ -52,6 +52,9 @@ pub fn model_applied(changed, selection_changed, history_recorded,
 // the text a copy or cut puts on the clipboard; Radiant transports it (D7.2.5).
 pub fn with_clipboard_text(edit_result, text) => { *: edit_result, clipboard_text: text }
 
+pub fn with_clipboard_html(edit_result, html, text="") =>
+    {*:edit_result,clipboard_html:html,clipboard_text:text}
+
 // The model chooses the image and HTML alternative; native owns MIME encoding and transport.
 pub fn with_clipboard_image(edit_result, source, html, text="") =>
     {*:edit_result,clipboard_image:source,clipboard_html:html,clipboard_text:text}

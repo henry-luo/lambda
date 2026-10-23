@@ -2,6 +2,9 @@
 // selection and completion policy stays above Radiant's DOM mechanisms (D7.2.5).
 import dom
 import lambda.editor.mod_editor
+import lambda.editor.mod_step
+import image: lambda.editor.mod_image
+import html: .html
 import result: lambda.dom.edit_result
 
 // DOM reads retain fn colour even when their receiver is mutable (D7.4.6).
@@ -77,16 +80,27 @@ pub pn focus(node, id = "edit-surface") {
     if (host == null) false else dom.focus_set(host, false)
 }
 
+// an atomic selection can have no native text range; copy its model payload before Cut removes it.
+pub fn clipboard_result(editor, input_type, outcome) {
+    let selected = image.selected(editor)
+    if (selected == null or not contains(["copy", "deleteByCut"], input_type) or
+        not outcome.claimed or outcome.failure != null) outcome
+    else result.with_clipboard_image(outcome, attrs_get(selected.node.attrs, 'src'),
+        html.inline_html([{*:selected.node,tag:'img'}]), attrs_get(selected.node.attrs, 'alt') or "")
+}
+
 pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edit-surface", selection = null) {
     if (read_only) { return {editor: editor, result: result.decline(true, false, "read-only", 0)} }
-    // copy has already populated the native clipboard; it must not redraw or
-    // create history, which would replace the selected nodes unnecessarily.
+    // copy must not redraw or create history; native still owns clipboard transport (D7.2.5).
     if (evt.input_type == "copy") {
-        return {editor: editor, result: result.model_applied(false, false, false, "",
-            editor.selection, editor.model_revision)}
+        return {editor: editor, result: clipboard_result(editor, evt.input_type,
+            result.model_applied(false, false, false, "", editor.selection, editor.model_revision))}
     }
     // keep the host event intact; an owned atomic selection is a separate model target.
-    edit_handle_dom_action(mount(editor, evt.target, preset, id), evt, selection)
+    let target = if (selection != null) selection
+        else if (evt.input_type == "deleteByCut" and image.selected(editor) != null) editor.selection else null
+    let run = edit_handle_dom_action(mount(editor, evt.target, preset, id), evt, target)
+    if (evt.input_type == "deleteByCut") {*:run, result:clipboard_result(editor, evt.input_type, run.result)} else run
 }
 
 pub pn request(editor, input_type, payload = {}) {

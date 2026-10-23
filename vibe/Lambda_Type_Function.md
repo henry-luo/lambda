@@ -818,7 +818,7 @@ builds and tests.
 ## References
 
 - [Lambda_Function_Param.md](Lambda_Function_Param.md) - Current function parameter handling
-- [Lambda_Proc.md](Lambda_Procedural.md) - Procedural function support
+- [Lambda_Design_Procedural.md](Lambda_Design_Procedural.md) - Procedural function support
 - `lambda/transpile-mir.cpp` - Current transpilation logic
 - `lambda/transpile.cpp` - Archived C2MIR source
 - `lambda/mir.c` - MIR JIT integration

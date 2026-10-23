@@ -3,7 +3,7 @@
 **Revision:** 2 (2026-10-23) — consolidation of the string design record.
 **Status:** design record; every point below is either ratified in the formal spec or implemented. Unratified or unbuilt items are listed as such in §8.
 **Formal linkage:** text scalars and the sequence walk S2.5.8, S8.3.1v3; empty and solid values S2.2.1, S2.2.2v2, S2.2.3; truthiness S3.1v2; content normalization S2.6.2, S2.6.4; positional reads S7.1.1v3, S7.1.2, S7.2.1, S7.2.2; the sys-func return contract S7.4.5, S7.10.1v3, S7.10.3; ordering S6.1.1; concatenation S10.6.1; the pipe and filter S10.1.2v4, S10.1.5v3, S10.1.6; the single-quote lexical rule S16.8.7; name keys S8.2.2v6; member-call form S12.3.3v2; the string library S17.1.1, S17.4.1, S17.6.1, S17.7.1, S17.7.2, S17.8.1; representation D2.1.3, D4.6.1v4, D6.4.1.
-**Scope:** the `string` and `symbol` value types — their model, positional access, the sequence view, operators and the system-function surface — and the design history behind them. String *patterns* (`\( … )`) and the pattern-aware `find`/`replace`/`split` are in [Lambda_Type_String_Pattern.md](Lambda_Type_String_Pattern.md).
+**Scope:** the `string` and `symbol` value types — their model, positional access, the sequence view, operators and the system-function surface — and the design history behind them. String *patterns* (`\( … )`) and the pattern-aware `find`/`replace`/`split` are in [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md).
 **Consolidates:** `Lambda_Type_String.md` rev 1 (2026-01-24, the original proposal), `Lambda_Type_String2.md` (2026-04-02, native return-type proposal, never adopted) and `Lambda_Type_String_Iterable.md` (2026-02-18, string as indexable-not-iterable, since reversed). Their superseded positions are kept in Appendix S; their implementation detail and examples are not carried.
 **Related:** [Lambda_Semantics_Formal.md §C1](Lambda_Semantics_Formal.md) (the `""` decision), [Lambda_Design_Syntax.md §7.27](Lambda_Design_Syntax.md) kind rulings 16–26 (text as a sequence), [Lambda_String_Func_Tuning.md](Lambda_String_Func_Tuning.md) (performance), user docs `doc/Lambda_Data.md` and `doc/Lambda_Sys_Func.md` §String Functions.
 
@@ -86,7 +86,7 @@ Consequences:
 - **No repetition operator.** `"ab" * 3` is an error value, not `"ababab"`. *Why:* `*` stays purely numeric, so `3 * x` never depends on whether `x` is text, and the overload buys little. A dedicated function was proposed and is not built (§8).
 - **Ordering.** `< <= > >=` compare strings in dictionary order; symbols are names and are not ordered (S6.1.1).
 - **Equality** compares characters; a string never equals a symbol.
-- **`|`, `&`, `!` are type operators**, not text operators: `"GET" | "POST"` is the type admitting either string — a string enum — never a concatenation or a character set (S10.1.1v4). String enums and string patterns are distinguished in [Lambda_Type_String_Pattern.md §2](Lambda_Type_String_Pattern.md).
+- **`|`, `&`, `!` are type operators**, not text operators: `"GET" | "POST"` is the type admitting either string — a string enum — never a concatenation or a character set (S10.1.1v4). String enums and string patterns are distinguished in [Lambda_Design_String_Pattern.md §3.5](Lambda_Design_String_Pattern.md).
 
 ## 5. The system-function surface
 
@@ -99,7 +99,7 @@ String functions are global system functions taking the text as their first argu
 | Family | Functions | Notes |
 |---|---|---|
 | Conversion | `string`, `symbol`, `name`, `format` | `symbol("")` is `null` (S2.2.2v2) |
-| Search | `contains`, `starts_with`, `ends_with`, `index_of`, `last_index_of`, `find` | `contains`, `index_of` and `last_index_of` also work on collections; `find` takes a pattern or a string and options (pattern doc §3) |
+| Search | `contains`, `starts_with`, `ends_with`, `index_of`, `last_index_of`, `find` | `contains`, `index_of` and `last_index_of` also work on collections; `find` takes a pattern or a string and options (pattern doc §4) |
 | Transform | `upper`, `lower`, `trim`, `trim_start`, `trim_end`, `replace`, `normalize`, `slice`, `take`, `drop` | keep the source's text kind |
 | Split and join | `split`, `join` | `split` returns an array of strings; `join` returns a string |
 | Code points | `ord`, `chr` | `ord` is `int | null` |
@@ -110,7 +110,7 @@ String functions are global system functions taking the text as their first argu
 - **Failures are values.** Absence in, or no answer, gives `null` — or `""` for a string result; a present but invalid input gives `error()` (S7.4.5, S7.10.1v3, S7.10.2).
 - **No in-band sentinels.** `index_of`, `last_index_of` and `ord` return `int | null`, never `-1` (S7.10.3). A found test `idx >= 0` stays valid; `idx < 0` silently breaks, so absence is tested with `is null`.
 - **Kind preservation.** A transform of a symbol returns a symbol (`upper('abc')` is `'ABC'`, S17.7.2). `split` and `join` produce content, so they produce strings. A transform whose result would be an empty symbol yields `null` (S2.2.2v2).
-- **Case.** `lower` and `upper` use Unicode full case mapping, the same in every locale, as ECMAScript does — a mapping may change length (`upper("straße")` is `"STRASSE"`) and a final capital sigma lowercases to `ς` (S17.7.2). Case-insensitive *matching* uses simple case folding instead (S17.7.1); mapping is not folding, so `lower(a) == lower(b)` is not the case-insensitive comparison. The two rulings and their reasons are in the pattern doc §4.4.
+- **Case.** `lower` and `upper` use Unicode full case mapping, the same in every locale, as ECMAScript does — a mapping may change length (`upper("straße")` is `"STRASSE"`) and a final capital sigma lowercases to `ς` (S17.7.2). Case-insensitive *matching* uses simple case folding instead (S17.7.1); mapping is not folding, so `lower(a) == lower(b)` is not the case-insensitive comparison. The two rulings and their reasons are in the pattern doc §4.6.
 - **Splitting** follows ECMAScript `String.prototype.split` (S17.1.1); `split(s, null)` keeps the Python-shaped whitespace form. **Replacement** follows `replaceAll` (S17.6.1). **Option maps** reject unknown names at compile time where the map is a literal (S17.8.1).
 - **Character classification** (`is_numeric`, `is_alpha`, rev 1) is not a function family: a string pattern answers it (`s is \("\d"+)`).
 

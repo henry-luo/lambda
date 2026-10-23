@@ -40,6 +40,95 @@
       "count": 15
     },
     {
+      "type": "assert_script",
+      "js": "var g=document.querySelector(\".shape-gallery\"),f=document.getElementById(\"shape-kind\").parentElement;g.scrollHeight>g.clientHeight && f.getBoundingClientRect().top>=g.getBoundingClientRect().bottom"
+    },
+    {
+      "type": "assert_script",
+      "js": "var g=document.querySelector(\".shape-gallery\"),b=g.getBoundingClientRect(),p=document.elementFromPoint(b.left+20,b.bottom+8);!g.contains(p)"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".shape-gallery",
+        "offset_x": 30,
+        "offset_y": 30
+      },
+      "dx": 0,
+      "dy": -6
+    },
+    {
+      "type": "assert_script",
+      "js": "var g=document.querySelector(\".shape-gallery\"),b=g.getBoundingClientRect(),l=document.getElementById(\"shape-choice-heart\").getBoundingClientRect();g.scrollTop>0 && l.top>=b.top && l.bottom<=b.bottom+1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-choice-heart"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"shape-kind\").value===\"heart\""
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-shape-gallery-scrolled.png"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector(\".shape-gallery\").scrollTop=0"
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 640
+    },
+    {
+      "type": "assert_script",
+      "js": "var d=document.querySelector(\".edit-dialog-shape\"),b=d.getBoundingClientRect();b.top>=19 && b.bottom<=621 && d.scrollHeight>d.clientHeight"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#shape-kind"
+      },
+      "value": "trapezoid"
+    },
+    {
+      "type": "assert_script",
+      "js": "var g=document.querySelector(\".shape-gallery\"),b=g.getBoundingClientRect();!g.contains(document.elementFromPoint(b.left+20,b.bottom+8))"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-shape-gallery-small.png"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": ".edit-dialog-shape",
+        "offset_x": 10,
+        "offset_y": 90
+      },
+      "dx": 0,
+      "dy": -20
+    },
+    {
+      "type": "assert_script",
+      "js": "var d=document.querySelector(\".edit-dialog-shape\"),b=d.getBoundingClientRect(),a=d.querySelector(\".primary\").getBoundingClientRect();d.scrollTop>0 && a.top>=b.top && a.bottom<=b.bottom"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector(\".edit-dialog-shape\").scrollTop=0"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 1000
+    },
+    {
       "type": "type",
       "target": {
         "selector": "#shape-width"

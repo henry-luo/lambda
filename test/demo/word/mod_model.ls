@@ -22,6 +22,7 @@ import wordart: .mod_wordart
 import changes: .mod_changes
 import objects: .mod_objects
 import transform: .mod_transform
+import tables: .mod_table
 
 // The same IDs drive the ribbon, shortcuts, and headless model tests.
 pub let registry = [
@@ -66,6 +67,12 @@ pub let registry = [
     {id:"table.deleteTable",label:"Delete table"},
     {id:"table.style",label:"Table style"},
     {id:"table.cellAlign",label:"Cell alignment"},
+    {id:"table.selectCell",label:"Select cell"},
+    {id:"table.selectRow",label:"Select row"},
+    {id:"table.selectColumn",label:"Select column"},
+    {id:"table.selectTable",label:"Select table"},
+    {id:"table.borders",label:"Cell borders"},
+    {id:"table.clear",label:"Clear cell contents"},
     {id:"table.nextCell",label:"Next cell"},
     {id:"table.previousCell",label:"Previous cell"},
     {id:"insert.link",label:"Insert link",input:"insertLink"},
@@ -73,6 +80,7 @@ pub let registry = [
     {id:"insert.picture",label:"Insert picture"},
     {id:"picture.size",label:"Picture settings"},
     {id:"object.transform",label:"Resize / rotate object"},
+    {id:"object.move",label:"Move object"},
     {id:"insert.shape",label:"Insert shape"},
     {id:"shape.set",label:"Shape settings"},
     {id:"layout.headerFooter",label:"Header and footer"},
@@ -99,9 +107,11 @@ pub fn shortcut(key,shift=false) =>
 
 pub let leaves = inline_format.leaves
 pub fn first_pos(doc) => {path:leaves(doc)[0].path or blocks(doc)[0].path,offset:0}
-// Page boundaries and cover roles must not repeat when Enter splits a paragraph.
+// page roles do not repeat on Enter; declared object attributes survive rich paste.
 let word_schema = {*:html.schema,p:{*:html.schema.p,attrs:[*html.schema.p.attrs,
-    *[for (name in ['data-word-page-break','data-word-blank-page','data-word-cover']) {name:name,keep_on_split:false}]]}}
+    *[for (name in ['data-word-page-break','data-word-blank-page','data-word-cover']) {name:name,keep_on_split:false}]]},
+    img:{*:html.schema.img,attrs:[*html.schema.img.attrs,
+        *[for (name in ['style','data-word-shape','data-word-equation','data-word-wordart','data-word-rotation']) {name:name}]]}}
 pub fn open_editor(doc) => {*:edit_open(doc,word_schema,text_selection(first_pos(doc),first_pos(doc))),transaction_filter:changes.filter}
 pub fn initial() => open_editor(document.sample())
 
@@ -123,7 +133,7 @@ pub fn current_node(editor,tag) {
     let path = commands.ancestor_tag(editor.doc,selection_path(editor.selection),tag)
     if (path == null) null else {path:path,node:node_at(editor.doc,path)}
 }
-pub fn table_context(editor) => commands.selected_table_context(editor)
+pub let table_context = tables.context
 pub fn current_block(editor) => [for (entry in blocks(editor.doc)
     where path_is_prefix(entry.path,selection_path(editor.selection))) entry][last]
 pub let current_marks = inline_format.current_marks
@@ -139,7 +149,8 @@ fn selected_blocks(editor) {
     let sel = editor.selection
     let entries = blocks(editor.doc)
     if (sel.kind == 'all') entries
-    else if (sel.kind == 'node') [for (entry in entries where path_is_prefix(sel.path,entry.path) or path_is_prefix(entry.path,sel.path)) entry]
+    else if (sel.kind == 'node' or sel.kind=='multi-node') [for (entry in entries where
+        any([for (path in selection_paths(sel)) path_is_prefix(path,entry.path) or path_is_prefix(entry.path,path)])) entry]
     else {
         let lo = pos_min(sel.anchor,sel.head)
         let hi = pos_max(sel.anchor,sel.head);
@@ -262,7 +273,7 @@ fn table_edit(editor,id,p) map^ {
     else if (not contains(["topLeft","topCenter","topRight","centerLeft","center","centerRight","bottomLeft","bottomCenter","bottomRight"],p.value))
         raise error("Word: choose a cell alignment")
     else {
-        let cells = [for (entry in selected_blocks(editor) where contains(['td','th'],entry.node.tag)) entry]
+        let cells = tables.selected(editor)
         properties_transaction(tx_begin(editor.doc,editor.selection),cells,[
             {key:"text-align",value:if (contains(["topLeft","centerLeft","bottomLeft"],p.value)) "left"
                 else if (contains(["topRight","centerRight","bottomRight"],p.value)) "right" else "center"},
@@ -279,7 +290,8 @@ fn table_navigate(editor,forward) map^ {
         else {
             let cell = cells[index + if (forward) 1 else -1]
             let first = leaves(cell.node,cell.path)[0]
-            edit_set_selection(editor,text_selection(pos(first.path,0),pos(first.path,0)))
+            let point = pos(if (first==null) cell.path else first.path,0)
+            edit_set_selection(editor,text_selection(point,point))
         }
     }
 }
@@ -327,7 +339,12 @@ fn comment_transaction(editor,id,p) map^ {
 pub fn execute(editor,id,params={}) map^ {
     let s = spec(id)
     if (s == null) raise error("Word: unknown command " ++ id)
+    else if (starts_with(id,"table.select")) edit_set_selection(editor,
+        tables.selection(editor,lower(slice(id,12)),params.path))
+    else if (id=="table.borders") edit_apply(editor,tables.borders(editor,params)^)
+    else if (id=="table.clear") edit_apply(editor,tables.clear_transaction(editor))
     else if (id == "object.transform") edit_apply(editor,transform.transaction(editor,params)^)
+    else if (id == "object.move") image.move_image(editor,params.path,params.target)
     else if (id == "insert.coverPage") edit_apply(editor,insert.cover_transaction(editor,params)^)
     else if (id == "insert.blankPage") edit_apply(editor,insert.blank_page_transaction(editor)^)
     else if (id == "insert.symbol") edit_apply(editor,insert.symbol_transaction(editor,params)^)
@@ -388,9 +405,11 @@ pub fn execute(editor,id,params={}) map^ {
             raise error("Word: choose 1–32 rows and 1–12 columns") else true
         let payload = {*:params,mark:s.mark,value:true,
             kind:if (id == "para.numbering") 'ordered' else 'bullet'}
-        let run = edit_handle_request(editor,edit_request_from_toolbar(s.input,payload))^
+        let target = if (starts_with(id,"table.")) tables.command_editor(editor) else editor
+        let run = edit_handle_request(target,edit_request_from_toolbar(s.input,payload))^
         if (not (run.result.failure is null)) raise error("Word: " ++ s.label ++ " is unavailable at this selection")
-        else if (id == "insert.table" or starts_with(id,"table.")) edit_apply(editor,table_transaction(run.transaction))
+        else if (id == "insert.table" or starts_with(id,"table.")) edit_apply(editor,
+            table_transaction({*:run.transaction,sel_before:editor.selection}))
         else run.editor
     }
 }

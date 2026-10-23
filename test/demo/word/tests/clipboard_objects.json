@@ -1,0 +1,633 @@
+{
+  "name": "Word selected object clipboard, editable metadata, binary images, Cut and undo",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "test/demo/word/tests/context_items.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data:image/svg+xml;base64,"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/plain",
+      "equals": "Studio picture"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelectorAll(\"#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])\"),s=a[0],t=a[1];s.getAttribute(\"src\")===t.getAttribute(\"src\")&&s.getAttribute(\"width\")===t.getAttribute(\"width\")&&s.getAttribute(\"height\")===t.getAttribute(\"height\")&&s.getAttribute(\"style\")===t.getAttribute(\"style\")"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-copy",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data-word-shape"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/plain",
+      "equals": "Shape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelectorAll(\"#edit-surface img[data-word-shape]\"),s=a[0],t=a[1];s.getAttribute(\"src\")===t.getAttribute(\"src\")&&s.getAttribute(\"width\")===t.getAttribute(\"width\")&&s.getAttribute(\"height\")===t.getAttribute(\"height\")&&s.getAttribute(\"style\")===t.getAttribute(\"style\")&&s.getAttribute(\"data-word-shape\")===t.getAttribute(\"data-word-shape\")"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data-word-wordart"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/plain",
+      "equals": "WordArt"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelectorAll(\"#edit-surface img[data-word-wordart]\"),s=a[0],t=a[1];s.getAttribute(\"src\")===t.getAttribute(\"src\")&&s.getAttribute(\"width\")===t.getAttribute(\"width\")&&s.getAttribute(\"height\")===t.getAttribute(\"height\")&&s.getAttribute(\"style\")===t.getAttribute(\"style\")&&s.getAttribute(\"data-word-wordart\")===t.getAttribute(\"data-word-wordart\")"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-wordart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-copy",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data-word-equation"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/plain",
+      "equals": "E=mc^2"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelectorAll(\"#edit-surface img[data-word-equation]\"),s=a[0],t=a[1];s.getAttribute(\"src\")===t.getAttribute(\"src\")&&s.getAttribute(\"width\")===t.getAttribute(\"width\")&&s.getAttribute(\"height\")===t.getAttribute(\"height\")&&s.getAttribute(\"style\")===t.getAttribute(\"style\")&&s.getAttribute(\"data-word-equation\")===t.getAttribute(\"data-word-equation\")"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]"
+      },
+      "count": 1
+    },
+    {
+      "type": "paste_image",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type"
+      },
+      "file": "test/ui/note/fixtures/clipboard.png"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/png",
+      "file": "test/ui/note/fixtures/clipboard.png"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data:image/png;base64,"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-cut",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/png",
+      "file": "test/ui/note/fixtures/clipboard.png"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[src^=\"data:image/png;\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "x",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data-word-shape"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/clipboard-objects.png"
+    }
+  ]
+}

@@ -1,0 +1,614 @@
+{
+  "name": "Word cell, row, column and table selection with editable borders",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1600,
+    "height": 1050
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.selectCell\"]",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.selectRow\"]",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.selectColumn\"]",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.selectTable\"]",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 12
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-table-select-row",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "equals": "Back room"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-borders",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#border-style"
+      },
+      "value": "dashed"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#border-width"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#border-color"
+      },
+      "text": "#2864ad",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-cell_borders",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "border-top-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "attribute": "style",
+      "contains": "border-top: 2pt dashed #2864ad"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(parseFloat(getComputedStyle(document.querySelector(\"#edit-surface tr:nth-child(2) td:nth-child(2)\")).borderTopWidth)-8/3)<0.02"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 3
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "border-top-style",
+      "equals": "solid"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "border-top-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/table-row-borders.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "mouse_drag",
+      "steps": 8,
+      "target": {
+        "selector": "#table-grip-cell"
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(3) td:nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#borders-none",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "border-right-style",
+      "equals": "none"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "equals": "Back room"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) td:nth-child(3)"
+      },
+      "equals": "Theo P."
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-grip-row-2",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-grip-column-1",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "<table>"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "Back room"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "Yard shed"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "North windows"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/plain",
+      "contains": "Back room"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface td,#edit-surface th"
+      },
+      "count": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "equals": ""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "equals": "Back room"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/table-cell-selection.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-grip-cell"
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) td:nth-child(3)",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true,
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 6
+    },
+    {
+      "type": "type",
+      "text": "X"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface td,#edit-surface th"
+      },
+      "count": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:first-child th:nth-child(2)"
+      },
+      "equals": "X"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) td:first-child"
+      },
+      "equals": "Kiln"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 6
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:first-child th:nth-child(2)"
+      },
+      "equals": "Location"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-grip-column-2",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface td,#edit-surface th"
+      },
+      "count": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(3)"
+      },
+      "equals": "Back room"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) td:nth-child(3)"
+      },
+      "equals": "Yard shed"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(3)"
+      },
+      "equals": "Mara O."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading",
+        "offset_x": 14,
+        "offset_y": 12
+      },
+      "button": 0,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#table-grips .table-grip"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    }
+  ]
+}

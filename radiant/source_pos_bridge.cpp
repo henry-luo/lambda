@@ -88,6 +88,12 @@ static bool source_item_is_editor_text_leaf(Item item) {
     return source_item_is_editor_kind(item, "text");
 }
 
+static bool source_item_is_empty_editor_node(Item item) {
+    if (!source_item_is_editor_kind(item, "node")) return false;
+    ItemReader content = MapReader::fromItem(item).get("content");
+    return content.isArray() && content.asArray().isEmpty();
+}
+
 extern "C" {
 
 // ---------------------------------------------------------------------------
@@ -355,6 +361,13 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
         node = node->parent;
     }
     if (!found_base) return false;
+    if (source_item_is_empty_editor_node(lookup.source_item)) {
+        // a rendered placeholder has no source child or byte offset; reentry names its empty container.
+        out->path = base;
+        out->offset = 0;
+        out->kind = SOURCE_POS_ELEMENT;
+        return true;
+    }
     // base is a clone of the recorded path. Text leaves rendered through
     // mark wrappers (<strong>/<em>/<code>/...) are recorded at the source
     // text leaf itself, so keep that path instead of appending the wrapper's
@@ -490,8 +503,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
     } else { // SOURCE_POS_TEXT
         if (source_path_equal(&pos->path, &recorded)) {
             if (source_item_is_editor_kind(lookup.source_item, "node")) {
-                ItemReader content = MapReader::fromItem(lookup.source_item).get("content");
-                DomText* placeholder = pos->offset == 0 && content.isArray() && content.asArray().length() == 0
+                DomText* placeholder = pos->offset == 0 && source_item_is_empty_editor_node(lookup.source_item)
                     ? first_text_descendant(de) : nullptr;
                 if (placeholder) {
                     // an empty model block projects a presentation-only leaf that owns its visible caret.

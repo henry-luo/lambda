@@ -8,7 +8,7 @@
 
 ## 1. Purpose and scope
 
-Readability.js is the library behind Firefox Reader View. Given a web page it finds the main article, strips navigation, advertising and other clutter, and reports the article's title, byline, excerpt, site name, language, direction and publication time. `lambda.doc.readability` brings the same extraction to Lambda scripts: data pipelines that read saved or fetched HTML, the document viewer, and the planned web-scrape package ([Lambda_Pkg_WebScrape.md](Lambda_Pkg_WebScrape.md)), which uses it for content extraction.
+Readability.js is the library behind Firefox Reader View. Given a web page it finds the main article, strips navigation, advertising and other clutter, and reports the article's title, byline, excerpt, site name, language, direction and publication time. `lambda.doc.readability` brings the same extraction to Lambda scripts: data pipelines that read saved or fetched HTML, the document viewer, and the archive package ([Lambda_Pkg_Archive.md](Lambda_Pkg_Archive.md)), which uses it for its readable format.
 
 The goal is behavioral fidelity, measured by Mozilla's own test suite rather than by resemblance to the algorithm's outline. The earlier port matched metadata on 60 of 63 pages but never compared article content (Appendix A); this one compares content node by node, as Mozilla's harness does.
 

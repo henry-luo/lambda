@@ -95,6 +95,12 @@ command from making its enclosing click appear undelivered and replaying it.
 Keyboard events target the live focused control before a retained document caret,
 so a menu can navigate without changing the document's selection.
 
+Secondary-button `contextmenu` records expose the hit `source_pos` separately
+from the retained `source_selection` (D7.2.5, S12.1.3). Rich-editable table cells
+retain their padding as a hit target; nearby caret candidates cannot redirect
+item actions into another paragraph. If text-edge snapping escapes the hit
+element, the context position uses that element's boundary.
+
 ### 4.1 Which runtime runs a handler
 
 Every handler runs on the target document's own runtime,

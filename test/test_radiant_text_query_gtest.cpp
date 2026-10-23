@@ -1922,6 +1922,126 @@ TEST_F(RadiantTextQuery, TableBackgroundsUseSourcePositioningAndCellCoverage) {
     }
 }
 
+TEST_F(RadiantTextQuery, CollapsedTableBordersRetainDashDotDoubleAndColor) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white}table{border-collapse:collapse;margin:12px 20px}
+        td{width:120px;height:30px;padding:0;border:6px solid #2864ad}
+        #dashed{border-style:dashed}#dotted{border-style:dotted}#double{border-style:double}
+        </style><div id="result"></div><table><tr><td id="solid"></td></tr></table>
+        <table><tr><td id="dashed"></td></tr></table><table><tr><td id="dotted"></td></tr></table>
+        <table><tr><td id="double"></td></tr></table>)HTML"), nullptr);
+    for (float scale : {1.0f,2.0f}) {
+        ui_context_set_device_scale(&ui,scale,scale);
+        ui.viewport_width=320; ui.viewport_height=300;
+        ui.window_width=320*scale; ui.window_height=300*scale;
+        ui.create_surface(ui.window_width,ui.window_height);
+        layout_html_doc(&ui,document,false);
+        render_html_doc(&ui,document->view_tree,nullptr);
+        ASSERT_FALSE(ui.render_failed);
+        for (const char* id : {"solid","dashed","dotted","double"}) {
+            SCOPED_TRACE(id);
+            SCOPED_TRACE(scale);
+            DomElement* cell=dom_find_element_by_id(document->root->as_element(),id);
+            ASSERT_NE(cell,nullptr);
+            float left=0.0f,top=0.0f;
+            view_get_visual_bounds(cell,&left,&top,nullptr,nullptr);
+            unsigned ink=0,gaps=0;
+            for (unsigned offset=10;offset<110;offset++) {
+                unsigned x=(unsigned)roundf((left+offset)*scale);
+                unsigned y=(unsigned)roundf(top*scale);
+                ASSERT_LT(x,(unsigned)ui.surface->width); ASSERT_LT(y,(unsigned)ui.surface->height);
+                const uint8_t* pixel=(const uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4;
+                if (pixel[0]<80 && pixel[1]<140 && pixel[2]>150) ink++;
+                if (pixel[0]>245 && pixel[1]>245 && pixel[2]>245) gaps++;
+            }
+            if (strcmp(id,"solid")==0) { EXPECT_GT(ink,90u); EXPECT_EQ(gaps,0u); }
+            else if (strcmp(id,"double")==0) {
+                EXPECT_GT(gaps,90u);
+                test_radiant_expect_surface_pixel(ui.surface,(unsigned)roundf((left+60)*scale),
+                    (unsigned)roundf((top-2)*scale),40,100,173);
+                test_radiant_expect_surface_pixel(ui.surface,(unsigned)roundf((left+60)*scale),
+                    (unsigned)roundf((top+2)*scale),40,100,173);
+            } else { EXPECT_GT(ink,20u); EXPECT_GT(gaps,10u); }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, MaxHeightAutoContainersClipTheirOverflowAfterSizing) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white}.box{width:120px;max-height:100px;overflow:auto;margin-bottom:20px}
+        .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}
+        .item{height:67px;background:#2864ad}#explicit{height:100px}#fits .item{height:25px}
+        </style><div id="result"></div>
+        <div id="grid" class="box grid"><div class="item"></div><div class="item"></div><div class="item"></div><div class="item"></div></div>
+        <div id="flow" class="box"><div class="item"></div><div class="item"></div></div>
+        <div id="explicit" class="box grid"><div class="item"></div><div class="item"></div><div class="item"></div><div class="item"></div></div>
+        <div id="fits" class="box grid"><div class="item"></div><div class="item"></div></div>)HTML"), nullptr);
+    ui.viewport_width=ui.window_width=320;
+    ui.viewport_height=ui.window_height=500;
+    ui.create_surface(ui.window_width,ui.window_height);
+    layout_html_doc(&ui,document,false);
+    render_html_doc(&ui,document->view_tree,nullptr);
+    ASSERT_FALSE(ui.render_failed);
+    for (const char* id : {"grid","flow","explicit"}) {
+        SCOPED_TRACE(id);
+        DomElement* box=dom_find_element_by_id(document->root->as_element(),id);
+        ASSERT_NE(box,nullptr);
+        EXPECT_FLOAT_EQ(box->height,100.0f);
+        ASSERT_NE(box->scroller,nullptr);
+        EXPECT_TRUE(box->scroll()->has_vt_scroll);
+        EXPECT_TRUE(box->scroll()->has_clip);
+        EXPECT_FLOAT_EQ(box->scroll()->clip.bottom,box->height);
+        ASSERT_NE(box->scroll()->pane,nullptr);
+        EXPECT_GT(box->scroll()->pane->v_max_scroll,0.0f);
+        float left=0.0f,top=0.0f;
+        view_get_visual_bounds(box,&left,&top,nullptr,nullptr);
+        test_radiant_expect_surface_pixel(ui.surface,(unsigned)roundf(left+10),
+            (unsigned)roundf(top+110),255,255,255);
+    }
+    DomElement* fits=dom_find_element_by_id(document->root->as_element(),"fits");
+    ASSERT_NE(fits,nullptr);
+    EXPECT_FLOAT_EQ(fits->height,25.0f);
+    EXPECT_FALSE(fits->scroll()->has_vt_scroll);
+}
+
+TEST_F(RadiantTextQuery, ZoomedListBulletsShareTextTransformsAndScrollClipping) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white;font:16px/24px Arial}
+        #port{position:absolute;left:20px;top:60px;width:200px;height:120px;overflow:auto}
+        #content{transform:scale(1.1);transform-origin:top left}.space{height:500px}
+        ul{margin:0;padding-left:30px}li{height:24px}li::marker{color:#ff00ff}
+        </style><div id="result"></div><div id="port"><div id="content"><div class="space"></div>
+        <ul><li>One</li><li>Two</li><li id="three">Three</li><li id="four">Four</li></ul>
+        <div class="space"></div></div></div>
+        <script>document.getElementById('port').scrollTop=600;</script>)HTML"), nullptr);
+    ui.viewport_width=ui.window_width=320;
+    ui.viewport_height=ui.window_height=200;
+    ui.create_surface(ui.window_width,ui.window_height);
+    layout_html_doc(&ui,document,false);
+    render_html_doc(&ui,document->view_tree,nullptr);
+    ASSERT_FALSE(ui.render_failed);
+    for (const char* id : {"three","four"}) {
+        SCOPED_TRACE(id);
+        DomElement* item=dom_find_element_by_id(document->root->as_element(),id);
+        ASSERT_NE(item,nullptr);
+        float left=0.0f,top=0.0f,width=0.0f,height=0.0f;
+        view_get_visual_bounds(item,&left,&top,&width,&height);
+        ASSERT_GE(top,60.0f); ASSERT_LE(top+height,180.0f);
+        unsigned ink=0;
+        for (unsigned y=(unsigned)ceilf(top);y<(unsigned)floorf(top+height);y++) {
+            for (unsigned x=(unsigned)ceilf(left-25);x<(unsigned)floorf(left-2);x++) {
+                const uint8_t* pixel=(const uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4;
+                if (pixel[0]>180 && pixel[1]<40 && pixel[2]>180) ink++;
+            }
+        }
+        EXPECT_GT(ink,0u);
+    }
+    for (unsigned y=20;y<60;y++) for (unsigned x=20;x<100;x++) {
+        const uint8_t* pixel=(const uint8_t*)ui.surface->pixels+y*ui.surface->pitch+x*4;
+        EXPECT_FALSE(pixel[0]>180 && pixel[1]<40 && pixel[2]>180) << x << "," << y;
+    }
+}
+
 TEST_F(RadiantTextQuery, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
     ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
     DomElement* grid = dom_find_element_by_id(document->root->as_element(), "grid");
