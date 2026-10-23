@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "D2.6.4v3/S9.1.3: guarded null/bool slots use the live descriptor reader and preserve a generic fallback for other layouts.",
+  "checks": [
+    {"in_func": "_read_record_#", "expect": ["map_shape_field_to_item", "fn_member_by_id"]},
+    {"in_func": "_nested_record_#", "expect": ["map_shape_field_to_item"]}
+  ]
+}

@@ -1,9 +1,9 @@
 # Tune33 — Closing the LambdaJS advantages in Result53
 
-**Status:** implementation in progress; boxed predicate lowering implemented
-and release pilots qualified. Required aggregate gates finished with one
-pre-existing PDF golden failure; the remaining compiler phases and full-plan
-performance gates remain open.
+**Status:** scoped compiler mechanisms for phases 1–6 implemented and full-population
+release evidence recorded in §8. Two numerical phase targets remain unmet,
+long-peer timing confidence is limited, and the aggregate Lambda baseline retains
+two control-reproduced failures. The earlier predicate-only evidence is in §7.
 
 **Date:** 2026-10-23.
 
@@ -467,9 +467,10 @@ was then used successfully. No engine implementation or benchmark result
 snapshot was changed during this analysis.
 
 The observed helper/copy counts and recursive expansion are established.
-Their individual CPU shares, the full pi-sum/native-loop explanation, and
-port equivalence for the remaining smaller wins are still open. Phase 0
-resolves those uncertainties before accepting changes for those workloads.
+At the proposal checkpoint, their individual CPU shares, the full
+pi-sum/native-loop explanation, and port equivalence for the remaining smaller
+wins were still open. Section 8 records the subsequent assembly, diagnostic
+and source audit; executed counts alone still do not establish CPU shares.
 
 ### Source touchpoints
 
@@ -552,7 +553,7 @@ The permanent local archive is
 `test/benchmark/exe/lambda-tune33-predicates-cb49b37900`, with its source patch
 and manifest alongside it. Both executable files are 25,625,256 bytes.
 
-Phase 1 and Phases 3–6 remain open. The predicate implementation does not
+At that checkpoint, Phase 1 and Phases 3–6 remained open. The predicate implementation does not
 complete the entire tuning plan or establish its overall population target.
 
 ### 7.3 Benchmark destination contracts
@@ -657,7 +658,404 @@ candidate. Logs and the control PDF reproduction record are under
 `temp/tune33_impl/`; the compact benchmark artifact records gate results and
 log hashes. `git diff --check` passes.
 
-The next compiler work is Phase 1's complete string/array admission proof
+At that checkpoint, the next compiler work was Phase 1's complete string/array admission proof
 through Levenshtein's untyped calls. Reusing existing element hints alone did
 not establish the receiver's non-error contract (§7.2). The remaining port
-equivalence audit and Phase 7 qualification also remain open.
+equivalence audit and Phase 7 qualification also remained open at that point.
+
+## 8. Coordinated implementation of the remaining compiler phases
+
+This section supersedes §7's remaining-work statement. The source algorithms
+and Result53 cells are unchanged by this implementation. Phase 2 was already
+present in the new control, so the new paired ratios measure the incremental
+effect of phases 1 and 3–6. Historical Result53 comparisons retain their own
+source and executable provenance.
+
+### 8.1 Shared mechanisms
+
+**Numeric producers and call facts (phase 1).** An admitted String or ArrayNum
+receiver now refines the compiler's conservative `len` defect classification.
+The whole-source defect table remains conservative; only the currently
+admitted carrier can exclude a deferred host read (D6.1.3, D8.3.3). Open Array
+carriers retain virtual-child-array handling. The system operand error walk
+also accepts an already established scalar carrier witness. No array element
+candidate is treated as an admission certificate (D3.3.3v3).
+
+This connects the existing fill, swap, guarded index and scalar arithmetic
+paths in untyped Levenshtein and text search. It does not remove a nullable
+array read's fallback. In particular, Levenshtein's `min3` still receives
+possibly absent lanes through its boxed entry; fully inlining that call would
+need a complete additional admission proof. The native array reads and
+arithmetic before that boundary are retained independently.
+
+A true ordering predicate also proves its stable operands present (S6.1.2).
+The existing region-fact owner now carries that proof into both conditional
+arm queries and emission. Thus `if (step > 1) step else 1` has a non-null
+integer result even when `step` came from a nullable read. This preserves the
+raw carrier through the following loop update without declaring an absent
+value present on an unguarded edge. Error-capable predicates and unrelated
+nullable selections remain boxed.
+
+**Forwarded strings and fusion (phase 3).** Closed string call edges now cover
+forwarding and joining bodies as well as indexing bodies. The extension
+requires a string-valued result or a native string length/index consumer;
+plain forwarding into boxed record/array storage keeps Item arguments. This
+avoids adding native-entry guards and unbox/rebox work without a consumer
+benefit (D8.3.3). The existing
+call-site result cache carries scalar/string results through acyclic helper
+chains. Each helper has its existing expression budget; an epoch sentinel
+breaks cycles and a 32-helper depth cap bounds compiler recursion. String join
+candidates and finalized native result metadata feed the same argument fact
+resolver. Exact call admission and boxed misses remain responsible for unseen
+values (D2.4.1–D2.4.3, D8.3.3). Boxed-entry reachability propagates through
+the existing direct-call graph separately from the fast-shape candidates. A
+public function's fallback can forward a symbol to a helper whose internal
+calls established a string candidate; that helper must retain its own boxed
+body. The new `forward_key` fixture pins this path through a dynamic function
+value. This fixes the five LaTeX regressions exposed by the initial prototype.
+Existing concatenation and owned-buffer helpers perform the work; no second
+string builder was introduced.
+
+**Scalar calls and recursion (phase 4).** The existing 48-node inline planner
+admits bounded nested scalar calls and one recursive expansion level. It
+allows at most two nested inline frames and 16 expansions per emitted MIR
+function. A deeper recursive edge remains a real guarded call. The predictive
+array-write scan and actual lowering share the bounded inline path and
+expansion accounting (D8.2.5v3, D8.3.3). The scan restores the emitter's budget
+after analysis and visits scalar argument effects in the caller's scope.
+This prevents an inlineable recursive helper from overflowing the compiler
+before lowering. Parameter binding locators are restored after expansion. An inline body cannot
+use the caller's tail-call state, and calls within the same tail-recursive
+activation retain the existing raw backedge.
+
+Pure bitwise and numeric-cast leaves can use the Item result join. Checked
+sized local declarations and negative-shift errors leave that join with their
+original error, including when an inferred native success result also has a
+defect arm. Explicit return contracts and raising signatures retain their
+existing exclusions. Saturation and poison checks remain unless an existing
+interval proves them unnecessary (S4.1.2, S4.1.5, S4.4.4). `rol` benefits;
+`sha1_ft` and calls with incomplete scalar admission retain ordinary calls.
+`tak` retains its existing tail-call path.
+
+**Finite loops and conversions (phase 5).** The shared finite loop planner
+accepts stable affine bounds with a proved finite interval. It retains source
+evaluation order and rejects bound writes. Literal/affine scalar loops can
+earn the same guarded finite sibling without needing an array scan. Bounds
+use their proved maximum rather than the generic INT32 ceiling. Dominated
+finite facts reach integer-to-double consumers, so MIR can merge duplicate
+conversions and move the invariant bound calculation. Floating-point addition,
+multiplication and division keep their original order and precision (S4.1.2).
+Scalar copies require a numeric conversion on a variable/expression and a
+128-node body budget. Collection construction, joins and general calls are
+excluded. Stores around a nested arithmetic loop remain eligible: the outer
+counter's finite bound is needed to prove the inner affine bound. Excluding
+all array stores also excluded Pi's successful proof and was rejected during
+assembly qualification. This profitability rule avoids duplicating allocating
+string/collection builders merely to remove a counter check.
+
+**Record consumers and ownership (phase 6).** The existing bounded shape
+candidate fixpoint also follows values assigned to members. These remain
+compile-predicted candidates, each checked against the live descriptor; they
+are not runtime inline caches (D8.4.1v2). Null and boolean slots can retag in
+place. Their guarded read therefore uses the existing live
+`map_shape_field_to_item` descriptor reader, preserving the new tag and width,
+rather than interpreting a slot using its original tag (D2.6.4v3).
+The shared reader gives non-nullable container-pointer and null/error Item
+slots a direct descriptor dispatch. Both descriptor and general field reads
+reuse the same unaligned-safe slot readers, retaining virtual-carrier tags,
+foreign raw-container normalization, empty slots and nullable native lanes.
+
+The COW census still records Splay's value-tree copies; its source rebuilds
+rotations through local owners and retained aliases. Puzzle's plain parameters
+retain caller snapshots. Neither supplies a proof for removing those copies, and no
+copy elision or root-reload suppression was added (S9.1.2–S9.1.3, D5.3.3).
+
+### 8.2 Regression coverage and qualification method
+
+Four new golden and MIR-emission fixtures cover string forwarding and aliases,
+native-length/fill/swap paths, widening and out-of-bounds reads, numeric
+recursion and int53 overflow, checked u32 wrapping and invalid shifts, finite
+and changing loop bounds, record retags, descriptor misses and retained map
+snapshots. All four are registered for interpreter/JIT/auto parity and are
+discovered by the forced moving-GC suite.
+
+The existing optional-int boundary fixture now includes a non-string argument
+and an error argument. Its original generic `ord` error-join assertion remains
+observable beside the newly eligible closed-string optimization. The scalar
+home fixture checks the inlined float leaf's `push_d`; the integer-index
+product fixture checks the generic sibling's surviving compact-window guard.
+The original boundary checks remain, with two additional golden results for
+the new rejected operands.
+
+The first coordinated control and candidate share HEAD
+`c86e403b0f2421e43949abfdda0343552374f77b`; their production source manifests
+differ only in `ast.hpp` and `transpile-mir.cpp`. Control SHA-256:
+`9653f082532ab6db75d3dc37893273bb40e3bb75e2172adbce22843cad5623be`.
+Candidate SHA-256:
+`70117dbd8798e1495d906301c3ebb2bb3ec29bfefbf015bc953d264aa34686f0`.
+These hashes identify the first pilot candidate, subsequently rejected for a
+confirmed typed-text-search regression. Pinned executables and full
+diagnostic/native-assembly captures are under
+`temp/tune33_all/`. Instrumented times do not qualify execution improvements.
+
+Release validation uses serial alternating pairs under `caffeinate -is`.
+The final three-pair control/control check over Levenshtein, JSON generation and
+Splay retained matching output, with median ratios 0.9939, 1.0052 and 1.0011.
+The final executable passes all 256 MIR-emission checks. The broader candidate
+also passes all 327 forced-GC checks; all five Tune33 fixtures match their
+goldens in interpreter, JIT, auto and forced-GC modes. Final aggregate and full-population results are recorded in §§8.5–8.7.
+
+The added `[int(inf)]` and `[int(nan)]` typed-call cases exposed a pre-existing
+compiler crash on the frozen control too. The array-element predictor cast a
+compact global `integer` meta-type to the larger `TypeType` layout. It now
+uses the existing checked declaration unwrap helper; it grants no new array
+certificate or payload kind. Both cases remain in the fixture.
+
+### 8.3 Final candidate provenance and rejected attempts
+
+The final control is the fresh HEAD release above, SHA-256
+`9653f082532ab6db75d3dc37893273bb40e3bb75e2172adbce22843cad5623be`.
+The final candidate is SHA-256
+`85686ea034e13da9c18312cb3d0f7a0625da030987669401759f21824683ef7a`.
+Its production manifest differs from that control in exactly three files:
+`lambda/runtime/transpile-mir.cpp`, `lambda/runtime/ast.hpp`, and
+`lambda/core/lambda-data.cpp`. The final Test262 build reproduced the timed
+candidate byte for byte. The corpus, build inputs, module binaries, executable
+and benchmark source hashes accompany each timing capture.
+
+The earlier candidates are excluded from final performance aggregates:
+
+- The first candidate regressed typed text search by 4.36% in a paired
+  confirmation. Copying allocating loop bodies without a numeric consumer
+  benefit was removed. Its expanded inference also exposed the missing
+  transitive boxed fallback described in §8.1; five LaTeX failures caught it.
+- An over-restricted replacement rejected every array store and lost Pi's
+  outer induction proof. Imported-function assembly showed that the intended
+  finite inner loop was absent. This partial capture was rejected.
+- The next candidate passed the pilot set but crashed the compiler on typed
+  `divrec`. LLDB identified recursive predictive array-write analysis without
+  the emitter's inline bound. The shared path/budget in §8.1 fixes the cause;
+  a tail-recursive scalar helper called inside a loop now covers it.
+  The same candidate regressed untyped Prettier by 3.34% in 21 pairs. String
+  admission into boxed record constructors added over 3.35 million `it2s`
+  calls. Consumer-driven admission removes those conversions: the final
+  Prettier control and candidate both execute 257 `it2s` calls and 18,809,091
+  frame entries. Both cases receive fresh final-candidate confirmation.
+
+### 8.4 Compilation and code-size review
+
+These measurements are separate from uninstrumented workload timing. Each
+compile entry is the median of five whole-process phase captures, summing
+the **own** compile cost of every imported module exactly once. Native bytes
+sum every generated function in those modules. Pi includes `micro_common`;
+the final entry-module dump alone would omit its hot function. The existing
+`transpile` counter includes MIR scheduling and native generation; its zero
+`mir_gen` field does not indicate free native code generation.
+
+| Untyped pilot | Native bytes, control → candidate | Own compile ms, control → candidate | Cost review |
+|---|---:|---:|---|
+| fib | 2,624 → 3,776 | 2.226 → 2.844 | One recursive level halves actual call boundaries; depth 2 / 16 expansions caps growth |
+| fibfp | 2,768 → 3,456 | 2.331 → 2.668 | Same bounded expansion; also halves executed integer-to-double helper conversions |
+| tak | 3,632 → 3,632 | 2.926 → 2.944 | Existing tail-call path retained |
+| Levenshtein | 10,400 → 12,976 | 7.941 → 10.927 | Guarded array and string lanes retain complete misses; nullable `min3` stays boxed |
+| JSON generation | 11,648 → 12,624 | 9.254 → 10.482 | String lanes require a consumer benefit; generic fallback bodies remain reachable |
+| Pi sum | 38,160 → 43,888 | 27.595 → 32.103 | Finite siblings require a numeric conversion, bounded body and no general calls or allocating builders |
+| CD | 69,408 → 77,152 | 55.127 → 62.153 | Bounded member-source candidates, exact live-shape guard and generic miss; no demonstrated whole-workload gain |
+| Splay | 40,320 → 54,736 | 26.748 → 35.984 | More guarded field sites, with required fallbacks; modest execution gain and a substantial compile/code tradeoff |
+| SHA-1 | 22,960 → 25,984 | 18.206 → 21.230 | Bounded scalar/bitwise expansion retains checked local declarations and invalid-shift errors |
+
+Every entry exceeding 10% received this review. Scope was narrowed by the
+consumer rule, the 128-node scalar-copy rule, and shared inline limits;
+unrestricted forwarding, allocating loop duplication and unrestricted
+recursive analysis were rejected. Remaining growth is explicit. In particular,
+CD and Splay do not justify a claim of uniformly better startup latency.
+Removing their safety fallbacks merely to meet a size target would violate
+D8.3.3. Process wall times are retained alongside workload timers in the
+final evidence, so compile tradeoffs remain visible. These measurements
+qualify the forced JIT lane, not automatic-tier promotion economics.
+
+### 8.5 Correctness closeout
+
+The final `make test-lambda-baseline` passes **8,095/8,097**: input
+**2,112/2,112**, runtime **5,983/5,985**. The two failures reproduce on the
+fresh frozen control: `PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`
+(object 9, byte 760) and `JavaScriptTests/JsFileTest.Run/crypto_key`.
+They remain unresolved; this is not a fully green aggregate baseline.
+
+The final focused gates pass MIR emission **256/256**, MIR ratchets
+**20/20**, forced moving GC **327/327**, Lambda scripts/tier parity
+**1,720/1,720**, and optimization contracts **54/54**. All **142/142**
+release Lambda benchmark variants pass the output census: 130 use their
+existing golden text, and 12 legacy JetStream rows use complete control
+stdout equality plus in-script result checks. Census timings are discarded.
+
+`make test262-baseline` passes **40,261/40,261**, with zero regressions,
+non-fully-passing cases or retries; 2,652 outside-baseline cases are skipped.
+The root-hazard audit passes for **18,020** native functions. The effect
+checker still reports **21** existing diagnostics: replacing the changed
+production definitions with HEAD produces the identical set, with zero new
+or removed diagnostics. Its nonzero status is preserved, not called a clean
+effect audit. No effect catalog or regression budget was relaxed.
+
+<!-- tune33-final-results:start -->
+### 8.6 Full-population performance closeout
+
+The durable evidence is [benchmark_results_tune33_all.json](../../test/benchmark/benchmark_results_tune33_all.json). It contains every paired sample/status/output digest, the 71-workload comparison matrix, binary/source/build/module provenance, all 33 historical-gap diagnostics, ownership-site attribution, compile samples, native-code counts, and correctness results. Historical Result53 cells are unchanged. The replay binaries are `test/benchmark/exe/lambda-tune33-control-c86e403b0f` and `test/benchmark/exe/lambda-tune33-all-c86e403b0f`; the latter has its production source patch and manifest alongside it.
+
+All captures use pinned release binaries, serialized alternating pairs under `caffeinate -is`, unchanged benchmark sources, and zero retries. The 32 pilot rows use 21 pairs; the full 142-row Lambda screen uses three pairs. Suspected slowdowns and additional screened gains have their recorded 21-or-more-pair confirmations. Aggregates use each row's most-sampled capture; they describe this mixed-sample population, not a uniform-confidence application speedup.
+
+| Lane | Rows | Candidate/control workload geomean | Ratio of summed medians | Process-wall geomean |
+|---|---:|---:|---:|---:|
+| untyped Lambda | 71 | 0.8936 | 0.9230 | 0.9431 |
+| typed Lambda | 71 | 0.9717 | 0.9948 | 0.9939 |
+| LambdaJS | 71 | 1.0029 | — | samples retained |
+
+LambdaJS covers all 71 peer rows: 67 short rows use at least three pairs; screened slowdowns receive 31-pair confirmation. The four registered 600-second JQ rows use a **one-pair output/performance census**, with no useful uncertainty claim. All 71 Node controls use three runs on pinned **Node v22.13.0**. Node and cross-language ratios are peer observations, not the causal A/B estimate of the Lambda compiler change. The JQ Lambda ports are direct queries while JS runs a JQ interpreter, so those large cross-language ratios describe different work.
+
+There are **12 confirmed untyped improvements** and **7 confirmed typed improvements** (two-sided paired-bootstrap upper bound below 1 on at least 21 pairs). Confirmed regressions above 3%: **0**. The artifact retains the actual bounds and sample counts, including unresolved small changes; a three-pair screen alone is not called confirmation. In particular, the 31-pair LambdaJS List estimate is 1.0345, with a 95% two-sided interval of 1.0189–1.0446. This is an unresolved small peer slowdown, not proof that its regression is below 3%.
+
+All peer point estimates above 3% are listed explicitly. A single pair supplies a census observation and cannot establish or exclude a regression.
+
+| LambdaJS row | Pairs | Candidate/control | Two-sided 95% interval |
+|---|---:|---:|---|
+| awfy/list | 31 | 1.0345 | 1.0189–1.0446 |
+| text/jq_mix | 1 | 1.0988 | one-pair census; no useful interval |
+
+The executed profiles identify the removed work independently of timing:
+
+| Untyped workload | Generic index calls, control → candidate | Generic add calls | Root reloads |
+|---|---:|---:|---:|
+| Levenshtein | 1,230,274 → 4 | 1,230,270 → 0 | 22,560,880 → 2,054,608 |
+| Fast diff | 17,171,200 → 3,072 | 34,853,888 → 0 | 529,749,036 → 29,484 |
+| Text search | 162,653,725 → 3,283,291 | 109,868,763 → 36,864 | 1,675,060,412 → 10,399,911 |
+
+#### Phase acceptance and limits
+
+- Phase 1: large unchanged-source Levenshtein and text-search improvements, with the specific generic index/arithmetic reductions above. Fast diff benefits from the same shared paths without a benchmark recognizer.
+- Phase 2: the earlier Brainfuck predicate improvement is already present in this fresh control (§7). An incremental ratio near 1 is expected.
+- Phase 3: existing string fusion improves JSON execution and copying. **The ≥90% generic-join reduction target is not met by the final profitability policy:** `fn_join` falls 360,004 → 140,004 (61.1%); copied bytes fall 7,559,070 → 6,615,320 and growth copies 360,124 → 220,124. The outer builder already performs the same 19,880 in-place appends. Bounded return/admission facts still leave some forwarded calls boxed. Do not substitute earlier rejected-candidate counts for these final counts.
+- Phase 4: bounded recursion improves fib/fibfp; deeper calls, tail calls, overflow and invalid-shift behavior remain covered. SHA-1 improves more modestly.
+- Phase 5: the imported Pi fast inner loop has 12 static instructions versus the control's 54-instruction enclosing span including cold arms. This is not an executed-instruction count. The retained finite proof removes sentinel/conversion work without floating reassociation.
+- Phase 6: record reads improve, but **the ≥15% record-pilot target is not met**. Splay's 951,168 map copies / 62,777,088 bytes and Puzzle's 174,909 numeric-array copies / 15,508,598 bytes remain. Splay's largest sites are `splay_node` (511,476 copies), `rotate_left` (204,491) and `rotate_right` (183,209). Required snapshots/retained owners lack a valid elision proof (S9.1.2–S9.1.3); no required roots or copies were suppressed (D5.3.3).
+
+Thus all scoped compiler mechanisms have implementations and full-population evidence; some numerical goals and remaining JS advantages are still open. This is not a claim that every proposed speedup target was reached.
+
+#### Current results for all 71 workloads
+
+Times are workload milliseconds. U/C and T/C compare each Lambda lane with its fresh frozen control. Smaller is better. U/JS is observational and retains the port-equivalence limits above. The artifact carries pair counts and confidence bounds for every row.
+
+| Workload | U ms | T ms | LambdaJS ms | Node ms | U/C | T/C | U/JS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| r7rs/fib | 1.307 | 1.302 | 0.854 | 1.748 | 0.8427 | 0.8368 | 1.530 |
+| r7rs/fibfp | 1.260 | 0.764 | 0.872 | 1.740 | 0.5436 | 0.5941 | 1.444 |
+| r7rs/tak | 0.142 | 0.141 | 0.093 | 0.778 | 1.0071 | 0.9930 | 1.534 |
+| r7rs/cpstak | 0.282 | 0.284 | 0.174 | 0.965 | 0.9965 | 1.0143 | 1.621 |
+| r7rs/sum | 0.266 | 0.266 | 0.545 | 1.163 | 1.0000 | 1.0000 | 0.488 |
+| r7rs/sumfp | 0.068 | 0.070 | 0.054 | 1.023 | 1.0000 | 1.0145 | 1.259 |
+| r7rs/nqueens | 1.092 | 1.040 | 0.884 | 1.801 | 1.0177 | 0.9952 | 1.235 |
+| r7rs/fft | 0.308 | 0.076 | 0.154 | 1.541 | 1.0132 | 1.0000 | 2.003 |
+| r7rs/mbrot | 0.713 | 0.568 | 1.425 | 1.871 | 0.9972 | 0.9982 | 0.500 |
+| r7rs/ack | 13.478 | 9.877 | 7.534 | 13.272 | 1.0028 | 1.0012 | 1.789 |
+| awfy/sieve | 0.027 | 0.025 | 0.084 | 0.363 | 1.0000 | 1.0000 | 0.323 |
+| awfy/permute | 0.263 | 0.064 | 1.016 | 0.776 | 0.9813 | 1.0000 | 0.259 |
+| awfy/queens | 0.174 | 0.058 | 0.479 | 0.626 | 1.0058 | 1.0000 | 0.363 |
+| awfy/towers | 0.466 | 0.161 | 2.097 | 1.102 | 0.9979 | 0.7667 | 0.222 |
+| awfy/bounce | 0.064 | 0.054 | 0.671 | 0.533 | 0.9846 | 1.0000 | 0.095 |
+| awfy/list | 0.813 | 0.116 | 0.497 | 0.498 | 0.9951 | 0.9831 | 1.636 |
+| awfy/storage | 0.573 | 0.371 | 0.684 | 0.636 | 0.9828 | 1.0082 | 0.838 |
+| awfy/mandelbrot | 38.646 | 37.619 | 33.664 | 30.574 | 1.0147 | 0.9949 | 1.148 |
+| awfy/nbody | 7.069 | 2.628 | 124.880 | 5.410 | 1.0026 | 1.0135 | 0.057 |
+| awfy/richards | 306.874 | 77.253 | 222.144 | 46.661 | 1.0183 | 1.0049 | 1.381 |
+| awfy/json | 5.592 | 1.988 | 9.613 | 2.599 | 1.0045 | 0.9995 | 0.582 |
+| awfy/deltablue | 80.450 | 19.592 | 96.059 | 11.663 | 1.0005 | 0.9900 | 0.838 |
+| awfy/havlak | 1712.240 | 597.677 | 2491.445 | 90.403 | 1.0183 | 0.9913 | 0.687 |
+| awfy/cd | 713.773 | 176.972 | 402.648 | 35.661 | 1.0095 | 1.0019 | 1.773 |
+| beng/binarytrees | 5.077 | 2.576 | 3.879 | 3.662 | 1.0083 | 1.0186 | 1.309 |
+| beng/fannkuch | 0.280 | 0.290 | 43.189 | 3.803 | 1.0182 | 0.9966 | 0.006 |
+| beng/fasta | 0.470 | 0.415 | 0.901 | 5.885 | 1.0064 | 1.0097 | 0.522 |
+| beng/knucleotide | 0.841 | 0.440 | 3.344 | 4.660 | 0.8582 | 0.9910 | 0.251 |
+| beng/pidigits | 0.379 | 0.375 | 0.340 | 1.792 | 1.0134 | 1.0274 | 1.115 |
+| beng/regexredux | 0.735 | 0.729 | 2.958 | 2.301 | 1.0014 | 0.9733 | 0.248 |
+| beng/revcomp | 0.558 | 0.456 | 3.970 | 3.214 | 1.0109 | 1.0000 | 0.141 |
+| beng/spectralnorm | 1.660 | 0.787 | 235.652 | 2.518 | 1.0006 | 1.0051 | 0.007 |
+| kostya/brainfuck | 157.232 | 106.949 | 43.085 | 32.015 | 0.9972 | 0.9971 | 3.649 |
+| kostya/matmul | 4.838 | 4.756 | 7.056 | 14.811 | 1.0202 | 0.9933 | 0.686 |
+| kostya/primes | 2.251 | 2.201 | 2.724 | 4.277 | 0.9838 | 0.9968 | 0.826 |
+| kostya/base64 | 12.659 | 5.187 | 10.029 | 17.223 | 1.0002 | 1.0031 | 1.262 |
+| kostya/levenshtein | 5.079 | 2.886 | 1.569 | 3.938 | 0.2263 | 1.0141 | 3.237 |
+| kostya/json_gen | 14.177 | 6.886 | 4.362 | 5.806 | 0.6092 | 1.0051 | 3.250 |
+| kostya/collatz | 291.301 | 278.180 | 229.495 | 1388.977 | 0.9955 | 1.0110 | 1.269 |
+| larceny/triangl | 169.381 | 150.955 | 140.003 | 68.635 | 0.9980 | 1.0004 | 1.210 |
+| larceny/array1 | 0.804 | 0.805 | 0.543 | 1.762 | 1.0000 | 1.0000 | 1.480 |
+| larceny/deriv | 20.994 | 5.985 | 14.619 | 3.650 | 0.9640 | 1.0117 | 1.436 |
+| larceny/diviter | 266.038 | 265.697 | 539.506 | 441.274 | 1.0003 | 0.9958 | 0.493 |
+| larceny/divrec | 1.212 | 1.207 | 4.756 | 7.538 | 1.0050 | 1.0000 | 0.255 |
+| larceny/gcbench | 119.712 | 77.321 | 92.712 | 22.785 | 1.0120 | 1.0051 | 1.291 |
+| larceny/paraffins | 0.191 | 0.160 | 0.101 | 0.994 | 0.9745 | 1.0191 | 1.893 |
+| larceny/pnpoly | 2.308 | 3.651 | 10.641 | 5.773 | 0.9948 | 0.9997 | 0.217 |
+| larceny/puzzle | 13.806 | 14.498 | 2.369 | 3.207 | 1.0015 | 1.0019 | 5.828 |
+| larceny/quicksort | 1.015 | 0.605 | 1.231 | 1.618 | 1.0120 | 0.9886 | 0.825 |
+| larceny/ray | 0.214 | 0.215 | 0.225 | 3.544 | 0.9862 | 0.9773 | 0.951 |
+| julia/parse_integers | 37.629 | 34.183 | 45.505 | 12.950 | 0.9769 | 1.0116 | 0.827 |
+| julia/matrix_statistics | 16.555 | 15.706 | 66.798 | 20.533 | 1.0214 | 0.9808 | 0.248 |
+| julia/iteration_pi_sum | 2.894 | 2.891 | 3.250 | 4.592 | 0.4248 | 0.4240 | 0.890 |
+| julia/formatted_output | 76.225 | 61.774 | 99.194 | 35.977 | 0.9938 | 0.9976 | 0.768 |
+| text/fast_diff | 48.945 | 43.131 | 174.812 | 38.789 | 0.0672 | 1.0054 | 0.280 |
+| text/microdiff | 36.735 | 38.752 | 117.823 | 15.963 | 0.9956 | 0.9925 | 0.312 |
+| text/hyphen | 47.987 | 9.438 | 51.522 | 6.508 | 0.9944 | 1.0070 | 0.931 |
+| text/prettier_ast | 843.215 | 363.087 | 563.849 | 98.971 | 1.0157 | 1.0008 | 1.495 |
+| text/text_search | 1443.980 | 1121.990 | 4592.915 | 771.576 | 0.2182 | 0.8191 | 0.314 |
+| text/three_way_merge | 2109.120 | 1489.360 | 1598.470 | 961.788 | 1.0019 | 0.9935 | 1.319 |
+| text/log_pipeline | 4297.020 | 1053.430 | 4509.844 | 944.257 | 1.0056 | 1.0010 | 0.953 |
+| text/jq_mix | 45496.400 | 44404.400 | 280800.245 | 3929.610 | 1.0150 | 0.9998 | 0.162 |
+| text/jq_records | 356.021 | 410.957 | 54353.987 | 2002.355 | 0.9931 | 1.0114 | 0.007 |
+| text/jq_bf | 186.517 | 143.948 | 252588.569 | 2959.902 | 0.9935 | 1.0060 | 0.001 |
+| text/jq_tree | 1997.720 | 1623.890 | 404427.090 | 5773.777 | 1.0079 | 0.9939 | 0.005 |
+| jetstream/cube3d | 9.480 | 7.150 | 69.577 | 17.250 | 0.9952 | 1.0052 | 0.136 |
+| jetstream/navier_stokes | 76.396 | 68.298 | 28.984 | 13.805 | 1.0044 | 0.9974 | 2.636 |
+| jetstream/splay | 261.382 | 276.653 | 54.798 | 18.382 | 0.9441 | 0.9988 | 4.770 |
+| jetstream/hashmap | 73.428 | 27.449 | 355.824 | 15.162 | 1.0262 | 1.0147 | 0.206 |
+| jetstream/crypto_sha1 | 46.754 | 26.269 | 10.865 | 8.577 | 0.9662 | 0.9384 | 4.303 |
+| jetstream/raytrace3d | 79.141 | 13.651 | 124.526 | 18.130 | 1.0050 | 0.9861 | 0.636 |
+
+### 8.7 Disposition of all 33 historical LambdaJS advantages
+
+Every historical JS-winning untyped row has a fresh executed profile and a source audit. The following notes explain what the retained mechanisms change and what their proofs do not cover. Helper counts are whole-process counts, including warmup where present; they are not CPU percentages. An unresolved native-code gap remains labeled unresolved. Full per-side counters and source identities are in the artifact's `source_audit` and `diagnostics` sections.
+
+| Historical row | Current U/JS | Disposition |
+|---|---:|---|
+| r7rs/fib | 1.530 | Bounded recursive expansion halves raw calls; remaining int53 poison/overflow and real deeper calls are preserved (S4.1.2). |
+| r7rs/fibfp | 1.444 | Bounded expansion halves raw calls and it2d conversions; floating evaluation order is unchanged. |
+| r7rs/tak | 1.534 | Already raw scalar recursion with no root reloads; the existing tail-call path is retained. Residual JS gap needs native-code attribution. |
+| r7rs/cpstak | 1.621 | Both current ports run direct Tak twice; neither executes CPS closures. Raw recursion and the existing tail-call path remain. The old Lambda comment is not a diagnosis. |
+| r7rs/sumfp | 1.259 | Both sources descend with a floating counter. No hot generic helpers or root reloads were measured; an integer-counter explanation would be incorrect. Residual gap is unresolved. |
+| r7rs/nqueens | 1.235 | Lambda mutates a plain placed parameter under snapshot semantics; JS uses shared Int32Array storage. The profile retains allocation and mutation work. Numeric-call tuning does not prove those snapshots redundant (S9.1.2). |
+| r7rs/fft | 2.003 | Lambda takes a plain data parameter and uses open numeric operations; JS uses Float64Array and integer bit shifts. Generic index/arithmetic helpers remain. The zero-input result is not proof of caller write-back equivalence. |
+| r7rs/ack | 1.789 | Already native scalar recursion, with no hot helpers or roots. Real recursive edges and integer semantics remain; scalar expansion is not unrestricted. |
+| awfy/list | 1.636 | Linked-list recursion retains 38,216 generic member reads and nullable records. Member-assignment candidates do not prove recursive constructor-result shapes. JS uses reference-linked class instances. |
+| awfy/mandelbrot | 1.148 | The Lambda spelling retains 250,000 generic adds in packed-byte construction. The scalar loop policy does not infer a complete range for a repeatedly shifted byte accumulator. JS uses machine-word bitwise arithmetic. |
+| awfy/richards | 1.381 | Lambda uses a COW-safe handle store indexed through one var root, whereas the JS scheduler uses reference-linked tasks/packets. 8,656,300 generic index calls remain; source representation is not matched. |
+| awfy/cd | 1.773 | Guarded record reads remove the remaining generic member helpers, but 16.7 million index calls and 15.1 million equality calls remain. Their CPU shares are not established by counts; no claim of a complete record-workload speedup. |
+| beng/binarytrees | 1.309 | Both ports allocate/check trees, but the boxed recursive tree boundary, allocation and descriptor reads remain. Scalar-only inlining excludes container results. Value semantics alone does not prove this read-only workload needs copies. |
+| beng/pidigits | 1.115 | The Lambda port uses arbitrary-precision decimal n values and quotient via remainder/subtraction; JS uses BigInt and division with sign adjustment. Do not narrow this to int53 merely to match JS. |
+| kostya/brainfuck | 3.649 | Phase 2 is already in this fresh control. JS also uses a byte tape, mask, else-if dispatch and joined output; Lambda retains integer tape, remainder, independent ifs and string output. No incremental predicate win is expected here. |
+| kostya/base64 | 1.262 | Raw string length/entry admission removes one boxed boundary per iteration, while 1,333,500 string concatenations and 666,600 index calls remain. JS uses Uint8Array and fragments/join; ports are not representation matched. |
+| kostya/levenshtein | 3.237 | Native producer/length/array/scalar paths eliminate most generic indexing/arithmetic and roots. min3 still takes possibly absent arguments through its boxed entry; no partial tuple is asserted fully admitted (D8.3.3). JS also uses typed arrays and a hoisted character read. |
+| kostya/json_gen | 3.250 | Forwarded string facts enable existing join fusion, but bounded admission leaves some boxed calls/joins. Both already use the owned outer builder. Floor versus Math.trunc for negative coordinates also prevents a full-content JS parity claim from the length oracle alone. |
+| kostya/collatz | 1.269 | 999,999 generic comparisons remain. Lambda shr(n,1) and JS division by two have different intermediate machine-word semantics; the full dynamic trajectory has no established finite range proof. |
+| larceny/triangl | 1.210 | Both run backtracking, with Lambda bool/int arrays versus JS Uint8Array/Int32Array and different break spelling. Already-native loops have no hot generic helper traffic; remaining indexed/induction guards need their own proofs. |
+| larceny/array1 | 1.480 | Already-native array loops; JS uses Int32Array. Helper elimination cannot explain this residual gap. No numeric-conversion consumer exists to justify the additional scalar-copy policy. |
+| larceny/deriv | 1.436 | Heterogeneous expression-tree tags/fields retain 865,000 generic member reads, allocation and boxed recursion. A single guarded candidate is not a general recursive sum-type specialization. |
+| larceny/gcbench | 1.291 | Boxed container-result recursion and allocation remain, including 3,222,190 map allocations. Descriptor reads improve independently; this is not evidence that all copies or allocation work is redundant. |
+| larceny/paraffins | 1.893 | Scalar multiset helpers inline, while nullable indexed operands still need checked admission. JS uses Int32Array and else-if partitioning; Lambda uses independent conditions and int53 arithmetic. |
+| larceny/puzzle | 5.828 | 174,909 numeric-array copies preserve mutated plain-parameter snapshots. JS uses shared arrays and undo. Removing the copies would change the unchanged Lambda source contract (S9.1.2-S9.1.3). |
+| julia/iteration_pi_sum | 0.890 | Imported hot-function assembly proves the finite affine induction/conversion reduction. Floating addition/division and evaluation order are unchanged. Both Lambda columns use the same source. |
+| text/fast_diff | 0.280 | Native length/array/scalar flow removes the generic LCS inner-loop operations. The untyped Lambda port still uses LCS and the JS port uses Myers/bisection; the timed typed port includes preprocessing. A remaining cross-language ratio is not an isolated compiler comparison. |
+| text/prettier_ast | 1.495 | Record constructors keep boxed string forwarding when it would only add conversions. Recursive mixed AST nodes retain 26.6 million generic member reads and boxed calls. Final diagnostics match control counts; the rejected admission policy is excluded. |
+| text/text_search | 0.314 | Producer/nullable-branch/call facts remove most Boyer-Moore generic arithmetic and root reloads. Remaining 3,283,291 generic reads preserve paths without complete bounds/shape proofs. |
+| text/three_way_merge | 1.319 | 33 million checked lengths, push/COW and generic index paths remain on collection-producing helpers. String-valued scalar forwarding does not certify these string-array layouts or eliminate observable copies. |
+| jetstream/navier_stokes | 2.636 | The hot loops were already native; Lambda content swaps differ from JS reference swaps and the JS port combines a solver pass. The retained 1.47 million floor/conversion calls are not eliminated by an integer-to-double proof. |
+| jetstream/splay | 4.770 | All 2,622,536 generic member calls become live-descriptor guarded reads. The 951,168 value-tree map copies remain, especially splay_node and rotations with retained local owners. Source rebuilds differ from JS mutable links (S9.1.2-S9.1.3). |
+| jetstream/crypto_sha1 | 4.303 | Bounded rol and scalar expansion reduce calls/roots; nullable array inputs and fallible machine-word operations retain ordinary helpers. Explicit wrap/shift and error semantics are preserved (S4.1.5). |
+
+<!-- tune33-final-results:end -->

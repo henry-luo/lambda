@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "S4.1.2/D2.2.2: a bounded affine inner loop with an outer array store uses native conversions in its finite sibling. A changing bound keeps ordinary sentinel-aware lowering.",
+  "checks": [
+    {"in_func": "_affine_sum_#", "expect": ["i2d"], "count": {"call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow": 4}},
+    {"in_func": "_moving_bound_#", "expect": ["lambda_int_lane_add_slow"]}
+  ]
+}
