@@ -87,7 +87,13 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .canvas-heading span:last-child { letter-spacing:0; font-size:10px; }
 .ruler { display:flex; justify-content:space-between; padding:0 72px; height:19px; max-width:none; margin:0 auto; color:#9ba9ad; font-size:8px; border-bottom:1px solid #c7d1d5; }
 .ruler span { border-left:1px solid #c1ced2; padding-left:3px; height:10px; }
-.paper-wrap { margin:13px auto 0; }
+.paper-wrap { position:relative; margin:13px auto 0; }
+.object-handles { position:absolute; border:1px solid #378392; z-index:3; pointer-events:none; visibility:hidden; transform-origin:center; }
+.object-handle { position:absolute; width:11px; height:11px; padding:0; border:1px solid #378392; background:#fff; pointer-events:auto; touch-action:none; }
+.object-nw { left:-6px; top:-6px; cursor:nwse-resize; }.object-ne { right:-6px; top:-6px; cursor:nesw-resize; }
+.object-sw { left:-6px; bottom:-6px; cursor:nesw-resize; }.object-se { right:-6px; bottom:-6px; cursor:nwse-resize; }
+.object-rotate { left:calc(50% - 6px); top:-34px; border-radius:50%; cursor:grab; }
+.object-rotation-stem { position:absolute; left:50%; top:-23px; height:23px; border-left:1px solid #378392; }
 .canvas-footer { text-align:center; color:#a0adb0; font-family:Georgia,serif; font-style:italic; font-size:12px; margin-top:24px; }
 .statusbar { display:flex; height:33px; flex-shrink:0; align-items:center; justify-content:space-between; padding:0 20px;
   background:#f5f8f5; border-top:1px solid #d1dcd5; color:#7b8e81; font-size:10px; }

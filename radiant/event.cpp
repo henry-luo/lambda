@@ -2240,6 +2240,11 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
+    if (event_name && strcmp(event_name, "scrollkey") == 0) {
+        EditingSurface surface;
+        // expose live focus ownership; the package decides which keys belong to text entry (D7.2.5).
+        mb.put("editing", doc->state && editing_surface_from_focus(doc->state, &surface));
+    }
     // Every DOM Event has a timeStamp; a native record takes its creation
     // time, as a constructed event does (dom_events.cpp event_now_ms), on the
     // document's clock (virtual under EventSim). Lambda handlers read it as
@@ -15556,6 +15561,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         radiant_caret_operation_extend());
                 }
             }
+            // editable caret navigation consumes the key; plain document selections still allow page scrolling.
+            if (rich_nav_handled && caret_in_rich_surface) { evcon.need_repaint = true; break; }
             if (!rich_nav_handled && caret_in_rich_surface) {
                 log_debug("event: rich key fallback fenced; key=%d", key_event->key);
             }

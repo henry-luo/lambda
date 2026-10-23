@@ -1,0 +1,247 @@
+{
+  "name": "Nested editor clips and keyboard default ownership",
+  "html": "test/ui/editor_viewport.html",
+  "viewport": {
+    "width": 680,
+    "height": 360
+  },
+  "events": [
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#editor"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#editor"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "assert_pixel",
+      "x": 61,
+      "y": 108,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('outer').scrollTop=40;"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 61,
+      "y": 68,
+      "min_r": 250,
+      "max_r": 250,
+      "min_g": 252,
+      "max_g": 252,
+      "min_b": 251,
+      "max_b": 251
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('outer').scrollTop=0;document.getElementById('inner').scrollTop=14;"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 61,
+      "y": 96,
+      "min_r": 221,
+      "max_r": 221,
+      "min_g": 238,
+      "max_g": 238,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 61,
+      "y": 104,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('inner').scrollTop=0;document.getElementById('inner').style.borderRadius='12px';"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 61,
+      "y": 102,
+      "min_r": 221,
+      "max_r": 221,
+      "min_g": 238,
+      "max_g": 238,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 61,
+      "y": 115,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('inner').style.borderRadius='0px';"
+    },
+    {
+      "type": "type_physical",
+      "text": "a b "
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#inner"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#outer"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#inner"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "key_press",
+      "key": "PageDown"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#inner"
+      },
+      "view_scroll_y": 102,
+      "tolerance": 2
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('inner').focus({preventScroll:true});document.getElementById('inner').setAttribute('data-focus-owner',document.activeElement.id);"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inner"
+      },
+      "attribute": "data-focus-owner",
+      "equals": "inner"
+    },
+    {
+      "type": "key_press",
+      "key": "Space"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#inner"
+      },
+      "view_scroll_y": 204,
+      "tolerance": 2
+    },
+    {
+      "type": "key_press",
+      "key": "Space",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#inner"
+      },
+      "view_scroll_y": 102,
+      "tolerance": 2
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "a b "
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "a b "
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#form-scroll"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "c d "
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "c d "
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#form-scroll"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/editor-viewport.png"
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 0,
+      "tolerance": 1
+    }
+  ]
+}

@@ -278,6 +278,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false) => if (dialog == null) nu
             dialog_field("art-size","Font size (px)",dialog.values.size,true,12,120)
             dialog_field("art-width","Width (px)",dialog.values.width,true,80,650)
             dialog_field("art-height","Height (px)",dialog.values.height,true,40,400)
+            dialog_field("art-rotation","Rotation (degrees)",dialog.values.rotation,true,-180,180)
             dialog_field("art-fill","Text color",dialog.values.fill)
             dialog_field("art-outline","Outline / gradient color",dialog.values.outline)>],"wordart",if (dialog.editing) "Apply" else "Insert WordArt")
     else if (dialog.kind=="tracking") form_dialog(dialog,"Track text changes",
@@ -313,7 +314,8 @@ pub fn dialog(dialog,file,editor=null,read_only=false) => if (dialog == null) nu
             if (dialog.kind == "picture") dialog_field("picture-path","Picture file (PNG, JPEG, GIF, WebP, SVG)",dialog.values.path) else null,
             dialog_field("picture-alt","Alternative text",dialog.values.alt),
             <div class:"dialog-grid",dialog_field("picture-width","Width (px)",dialog.values.width,true,16,650)
-                dialog_field("picture-height","Height (px, optional)",dialog.values.height,true,16,2000)>],"picture",if (dialog.kind=="picture") "Insert picture" else "Apply")
+                dialog_field("picture-height","Height (px, optional)",dialog.values.height,true,16,2000)>,
+            dialog_field("picture-rotation","Rotation (degrees)",dialog.values.rotation,true,-180,180)],"picture",if (dialog.kind=="picture") "Insert picture" else "Apply")
     else files.dialog_frame(dialog.kind,
         if (dialog.kind == "open") "Open document" else if (dialog.kind == "export") "Export document" else "Save editable document",
         if (dialog.kind == "open") "Open .word.json, HTML, Markdown, text, or a supported DOCX. Imports create an editable copy."

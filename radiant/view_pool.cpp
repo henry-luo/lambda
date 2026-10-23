@@ -1769,9 +1769,8 @@ bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool incl
     return true;
 }
 
-bool view_client_to_local(View* view, float x, float y, float* local_x, float* local_y) {
-    if (!view || !local_x || !local_y || !isfinite(x) || !isfinite(y) ||
-        view_backface_is_hidden(view, BACKFACE_HIT_TEST)) return false;
+bool view_get_client_matrix(View* view, RdtMatrix* out_matrix) {
+    if (!view || !out_matrix) return false;
     RdtMatrix frame;
     if (!view_get_foreign_object_matrix(view, &frame)) {
         float origin_x, origin_y;
@@ -1782,6 +1781,15 @@ bool view_client_to_local(View* view, float x, float y, float* local_x, float* l
         RdtMatrix position = rdt_matrix_translate(origin_x, origin_y);
         frame = rdt_matrix_multiply(&plane, &position);
     }
+    *out_matrix = frame;
+    return true;
+}
+
+bool view_client_to_local(View* view, float x, float y, float* local_x, float* local_y) {
+    if (!view || !local_x || !local_y || !isfinite(x) || !isfinite(y) ||
+        view_backface_is_hidden(view, BACKFACE_HIT_TEST)) return false;
+    RdtMatrix frame;
+    if (!view_get_client_matrix(view, &frame)) return false;
     RdtMatrix inverse;
     if (!rdt_matrix_inverse(&frame, &inverse)) return false;
     float w = inverse.e31*x + inverse.e32*y + inverse.e33;

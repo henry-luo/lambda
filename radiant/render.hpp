@@ -4018,6 +4018,8 @@ RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bo
                                            const RdtMatrix* transform = nullptr);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                                float origin_x, float origin_y);
+RenderClipScope render_clip_push_viewport_scope(RasterRenderContext* rdcon, ViewBlock* block,
+                                               RdtLogicalPoint document_offset);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
 
 // ===== render_composite.hpp =====

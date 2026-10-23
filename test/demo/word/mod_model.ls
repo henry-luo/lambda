@@ -20,6 +20,8 @@ import stories: .mod_stories
 import equation: .mod_equation
 import wordart: .mod_wordart
 import changes: .mod_changes
+import objects: .mod_objects
+import transform: .mod_transform
 
 // The same IDs drive the ribbon, shortcuts, and headless model tests.
 pub let registry = [
@@ -70,6 +72,7 @@ pub let registry = [
     {id:"insert.removeLink",label:"Remove link"},
     {id:"insert.picture",label:"Insert picture"},
     {id:"picture.size",label:"Picture settings"},
+    {id:"object.transform",label:"Resize / rotate object"},
     {id:"insert.shape",label:"Insert shape"},
     {id:"shape.set",label:"Shape settings"},
     {id:"layout.headerFooter",label:"Header and footer"},
@@ -209,16 +212,19 @@ fn paragraph_transaction(editor,p) map^ {
 
 fn picture_transaction(editor,id,p) map^ {
     let image = current_node(editor,'img')
+    let rotation = p.rotation or 0
     if (not valid_measure(p.width,16,650) or not (p.height == 0 or valid_measure(p.height,16,2000)))
         raise error("Word: picture width must be 16–650 px; height must be automatic or 16–2000 px")
     else if (id == "picture.size" and image == null) raise error("Word: select a picture first")
     else if (id == "insert.picture" and (not (p.src is string) or trim(p.src)=="")) raise error("Word: choose a picture")
+    else if (not (rotation is number) or rotation< -180 or rotation>180) raise error("Word: picture rotation must be −180–180°")
     else {
         let tx = if (id == "picture.size") tx_begin(editor.doc,editor.selection)
             else commands.cmd_insert_image(editor,p.src,p.alt or "")
         if (tx == null) raise error("Word: a picture cannot be inserted at this selection") else {
             let path = if (id == "picture.size") image.path else tx.sel_after.path
-            tx_step(image.resize_transaction(tx,path,p.width,if (p.height == 0) null else p.height),step_set_attr(path,'alt',p.alt or ""))
+            let resized = tx_step(image.resize_transaction(tx,path,p.width,if (p.height == 0) null else p.height),step_set_attr(path,'alt',p.alt or ""))
+            objects.rotate_transaction(resized,path,rotation)
         }
     }
 }
@@ -321,6 +327,7 @@ fn comment_transaction(editor,id,p) map^ {
 pub fn execute(editor,id,params={}) map^ {
     let s = spec(id)
     if (s == null) raise error("Word: unknown command " ++ id)
+    else if (id == "object.transform") edit_apply(editor,transform.transaction(editor,params)^)
     else if (id == "insert.coverPage") edit_apply(editor,insert.cover_transaction(editor,params)^)
     else if (id == "insert.blankPage") edit_apply(editor,insert.blank_page_transaction(editor)^)
     else if (id == "insert.symbol") edit_apply(editor,insert.symbol_transaction(editor,params)^)

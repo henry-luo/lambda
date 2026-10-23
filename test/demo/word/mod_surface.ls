@@ -29,7 +29,7 @@ fn make(tag,attrs,kids) {
 // Imported event handlers never reach the live DOM.
 fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','colspan','rowspan','data-word-style',
     'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment',
-    'data-word-cover','data-word-blank-page','data-word-shape','data-word-equation','data-word-wordart',
+    'data-word-cover','data-word-blank-page','data-word-shape','data-word-equation','data-word-wordart','data-word-rotation',
     'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
     (a.name=='id' and starts_with(string(a.value),insert.bookmark_prefix)))
     (string(a.name),string(a.value))])}

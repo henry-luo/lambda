@@ -24,7 +24,9 @@ fn operation_for(key, shift, alt, ctrl, meta) {
 }
 
 pub pn navigate(body, evt) {
-    let op = operation_for(evt.key, evt.shift, evt.alt, evt.ctrl, evt.meta);
+    // a Space key inserts text in an editing surface; its character event follows this keydown.
+    let op = if (evt.editing == true and evt.key == " ") null
+             else operation_for(evt.key, evt.shift, evt.alt, evt.ctrl, evt.meta);
     if (op == null) { 'pass' }
     else { dom.scroll_operation(body, op) }
 }

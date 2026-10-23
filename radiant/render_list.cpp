@@ -123,6 +123,8 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
 
     float marker_cx = x + width - marker_font_size;
     float marker_cy = y + marker_height / 2.0f;
+    // the inherited scroll bound is already projected into destination pixels, as for glyph/image clips.
+    RenderClipScope marker_clip = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
 
     switch (marker_type) {
         case CSS_VALUE_DISC: {
@@ -238,6 +240,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
         default:
             break;
     }
+    render_clip_pop_scope(rdcon, &marker_clip);
 }
 
 void render_litem_view(RasterRenderContext* rdcon, ViewBlock* list_item) {

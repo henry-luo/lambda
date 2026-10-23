@@ -6,6 +6,7 @@
 > **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
 > **Focus presentation verified:** 2026-10-15 (§4 CSS outlines and editable-only carets).
 > **Scoped source refresh:** 2026-10-19 — shared float paint phases and document/semantic-visit ownership (§2.4).
+> **Viewport clipping verified:** 2026-10-23 — caret overflow ancestry and raster vector list markers (`editor_viewport` and Word `viewport` replays).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree through shared paint phases and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >

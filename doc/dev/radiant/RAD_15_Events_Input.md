@@ -1,6 +1,7 @@
 # Radiant — Events & Input Dispatch
 
 > **Last verified against tree:** 2026-09-01
+> **Scoped source refresh:** 2026-10-23 — keyboard caret/scroll precedence and focused editing-surface facts (§6).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: platform input, IME, automation, and synthetic DOM dispatch construct one native event record and enter the same author-then-UA pipeline. It covers the `RdtEvent` union and `EventContext` record, hit testing, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
@@ -172,6 +173,15 @@ native layer keeps platform key translation, focus/selection geometry, and
 paint; package handlers own policy under S12.1.3. `RDT_EVENT_KEY_UP` is
 lightweight, while `RDT_EVENT_TEXT_INPUT` delivers a committed Unicode
 codepoint into the focused editing surface.
+
+The `scrollkey` behavior record includes an `editing` fact derived from the
+live focused surface. `lambda.dom.scroll` leaves Space to text entry there;
+its later character event performs the edit. A completed native editable-caret
+operation ends keyboard default dispatch before scrolling, so arrow keys do
+not both move the caret and page the containing scrollport. Native owns focus
+classification and geometry; the package owns the Space policy (**D7.2.5**).
+`editor_viewport` and the Word `viewport` replay cover physical key sequences;
+the document keyboard-scroll fixtures retain Space/PageDown outside editors.
 
 Both key phases resolve their target through `live_keyboard_event_target`:
 live focus or an editing selection wins, otherwise the document body receives

@@ -5,8 +5,11 @@ import colors: lambda.ui.core.component
 pub let styles = ["solid","outlined","hollow","gradient","shadowed"]
 pub let transforms = ["none","archUp","archDown","wave"]
 pub let defaults = {text:"Your words",style:"gradient",transform:"none",width:360,height:110,size:48,
-    font:"Georgia",fill:"#2864ad",outline:"#243b57"}
-pub fn settings(n) => objects.settings(n,"data-word-wordart")
+    font:"Georgia",fill:"#2864ad",outline:"#243b57",rotation:0}
+pub fn settings(n) {
+    let stored = objects.settings(n,"data-word-wordart")
+    if (stored==null) null else {*:defaults,*:stored}
+}
 fn lettering(p,fill,stroke) {
     let attrs = {fill:fill,stroke:stroke,'stroke-width':if (stroke=="none") 0 else 1.2,
         'font-family':p.font,'font-size':p.size,'font-weight':"bold",'text-anchor':"middle",
@@ -28,12 +31,14 @@ pub fn graphic(p) {
         lettering(p,if (p.style=="hollow") "none" else if (p.style=="gradient") "url(#wordart-fill)" else p.fill,
             if (contains(["outlined","hollow"],p.style)) p.outline else "none")>
 }
-pub fn transaction(editor,p,selected=null) map^ {
+pub fn transaction(editor,params,selected=null) map^ {
+    let p = {*:defaults,*:params}
     if (not (p.text is string) or trim(p.text)=="" or len(split(p.text,""))>120 or contains(p.text,"\n") or
         not contains(styles,p.style) or not contains(transforms,p.transform) or
         not contains(["Georgia","Arial","Times New Roman"],p.font) or
         not (p.width is number) or p.width<80 or p.width>650 or not (p.height is number) or p.height<40 or p.height>400 or
-        not (p.size is number) or p.size<12 or p.size>120 or not colors.hex_color(p.fill) or not colors.hex_color(p.outline))
+        not (p.size is number) or p.size<12 or p.size>120 or not colors.hex_color(p.fill) or not colors.hex_color(p.outline) or
+        not (p.rotation is number) or p.rotation< -180 or p.rotation>180)
         raise error("Word: enter 1–120 characters, valid dimensions and colors, and a supported WordArt style")
     else objects.transaction(editor,"data-word-wordart",p,graphic(p),p.width,p.height,p.text,selected)^
 }

@@ -53,6 +53,13 @@ at a caret sets the marks for subsequent typing.
   upward/downward arch, and wave transforms; editable text, font, size, colors,
   and dimensions. Equations and WordArt remain editable inline SVG objects in
   snapshots and HTML; PDF preserves their appearance.
+- Object transforms: select a picture, shape, or WordArt to show four corner
+  resize handles and a circular rotation handle. Corner drags preserve the
+  aspect ratio; Shift snaps rotation to 15° increments. Escape cancels a drag.
+  Each completed drag creates one undo step. Picture, Shape, and WordArt
+  settings also accept exact dimensions and a rotation from −180° to 180°.
+  WordArt resizing scales its lettering; shape text keeps its font size.
+  Handles follow zoom and scrolling and are hidden in read mode and dialogs.
 - Bookmarks: name the current paragraph, list targets, Go to, delete, or move an
   existing name to another paragraph. Names use up to 40 ASCII letters, digits,
   or underscores and cannot start with a digit. Each paragraph has one bookmark.
@@ -115,6 +122,8 @@ mail merge, rich or section-specific header/footer stories, and Word-compatible
 automatic pagination in the editing canvas are outside this demo. Screen sheets
 grow when their contents overflow; PDF adds pages to fit. Shapes are inline;
 floating objects and attached connectors are outside this milestone.
+Rotation paints around the center of the inline image box; surrounding text
+continues to use the box's unrotated dimensions.
 Text tracking covers text-only paragraphs, headings, and table cells, including
 formatting runs. Character formatting applies without revisions. Structural
 edits, links, and embedded-content edits require tracking to be turned off;
@@ -194,6 +203,16 @@ Equations and WordArt follow the same image transaction, preserving editable
 parameters alongside the rendered SVG. Decorative glyph paths are shared with
 Photo through `lambda.doc.shapes` rather than copied.
 
+`mod_transform.ls` routes object gestures through those same transactions.
+Generated artwork is regenerated from its parameters, so resizing preserves
+shape/WordArt editability; a picture retains its original image source.
+`mod_handles.ls` projects selection chrome outside the editable surface and
+temporarily previews dimensions/rotation in the DOM. Pointer release commits
+once, while Escape, pointer cancellation, or lost capture restores the original
+source and style without changing history or dirty state (**S1.4**, **D7.2.5**).
+Angles are stored with a CSS image transform, shared by the canvas and exported
+HTML/PDF; rotating a shape no longer shrinks its artwork to fit a fixed viewport.
+
 Tracked changes use the editor's optional transaction filter before history is
 recorded (**D7.2.5**). Insertion and deletion span marks carry revision ID, kind,
 and author; the Changes pane is derived from those marks. Accept/reject transforms
@@ -268,6 +287,10 @@ including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are
 `temp/word-initial.png` and `temp/word-edited.png`. Test reruns replace only
 their own named files under `temp/word/`.
+The object-transform replay covers mouse/touch resizing, rotation, Shift
+snapping, Escape, zoom, undo/redo, read mode, and editable/HTML/PDF persistence.
+The viewport replay checks caret/list clipping above the workspace and stable
+physical typing, including Space and arrow keys, at normal and increased zoom.
 The Insert replay additionally verifies a three-page PDF containing an explicit
 blank page and a four-page PDF after prepending a cover. Its screenshot is
 `temp/word-insert-cover.png`.

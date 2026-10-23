@@ -5,11 +5,8 @@ import model: .mod_model
 import adapter: lambda.editor.mod_dom_adapter
 import image: lambda.editor.mod_image
 
-pub fn image_index(editor,path) => [for (i,entry in model.images(editor.doc) where entry.path==path) i][0]
 pub pn image_element(editor,node,path=null) {
-    let selected = model.selected_image(editor)
-    let index = image_index(editor,if (path!=null) path else selected.path)
-    return if (index==null) null else dom.query_selector_all(controller.surface(node),"img")[index]
+    return image.image_element(editor,controller.surface(node),path)
 }
 pub pn hit(editor,node) {
     return image.hit(editor,node,controller.surface(node))

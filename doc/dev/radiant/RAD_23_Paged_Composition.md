@@ -1,6 +1,6 @@
 # Radiant paged composition
 
-> **Last verified against tree:** 2026-10-18
+> **Last verified against tree:** 2026-10-23
 
 This document describes the browsing-layout page flow and its publication path. The design authority is [Radiant_Layout_Paged_Media §1.3](../../../vibe/radiant/Radiant_Layout_Paged_Media.md#13-design-principle-2026-10-14-paged-layout-is-normal-layout-with-breaks); progress and completion gates belong to [Radiant_Impl_Paged_Integration](../../../vibe/impl/Radiant_Impl_Paged_Integration.md). **D4.5.1v4 / D4.1.4v5** govern published-edition and retained-page ownership. No formal ruling defines Radiant's page-breaking algorithm.
 
@@ -34,6 +34,19 @@ The page model, preview arrangement, retained generations, snapshot cache and ra
 
 `LayoutCounterScope::close` (`layout_list.cpp:824`) and `CounterContext::pop_scope_propagate` (`layout_counters.cpp:230`) retain the existing browsing counter rules. An ancestor's same-name counter takes precedence over a preceding sibling's nested reset; the parent frame bounds child resets, and pseudo-elements keep their separate retention rules. This follows the [published CSS Lists 3 §4.4.1](https://www.w3.org/TR/css-lists-3/#inheriting-counters). The [current editor's draft](https://drafts.csswg.org/css-lists-3/#inheriting-counters) uses preceding-sibling inheritance instead; the selected compatibility target remains the published rule, as recorded in the integration record. Heading `counter-set` declarations update the existing `footnote` counter under both rules.
 
+Image publication also snapshots the image's own CSS transform matrix in page
+coordinates, using the common transform-origin resolver. Native and PDF fragment
+visitors bracket the complete image fragment with that immutable matrix, so
+its boundary, clip, and SVG/raster content transform together in preview and
+PDF. Later workspace layouts cannot change a retained edition's transform
+(**D4.5.1v4**). This covers transforms on the replaced image itself; general
+transformed ancestor subtrees remain outside this image milestone.
+
 ## Validation pointers
+
+`SecondaryViewTest.ImageTransformsRetainPageSpaceGeometryAcrossWorkspaceReuse`
+checks raster/SVG rotation, transform origin and retained editions after source
+relayout. `RenderOutputParity.PagedImageRotationReachesPdfForRasterAndSvgResources`
+checks independently rasterized PDF pixels through the PDF fragment visitor.
 
 `SecondaryViewTest.PagedFlow*` in `test/test_paged_media_gtest.cpp` covers continuous-layout parity, struts, tables, print cascade, marks/references, width restarts, notes/floats, repeated fixed content, independent per-page margin fonts and heading-based footnote counter sets. The repeated-image fixture retires the host cache before raster/PDF painting. The rich-paint check also mutates and re-lays out the source DOM, retires the host image cache and releases the original edition before checking retained pixels and PDF output. `RenderOutputParity.PagedFlowRichBoundaryPaintMatchesContinuousOutputs` and `PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionContinuations` compare independent output paths. These checks are focused evidence; `SecondaryViewTest.NativeAdapter*` also covers provider replay, native source intervals, static repetition and retained output. Remaining paint/effect combinations, advanced native/FO refinements and aggregate/release gates remain tracked in the integration record.
