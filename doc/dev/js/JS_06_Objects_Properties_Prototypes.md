@@ -110,6 +110,11 @@ is documented in [JS_12 TypedArrays](JS_12_TypedArrays.md), [JS_13 Web DOM](JS_1
 
 **Prototype walk** `js_prototype_lookup_ex`: per level, FUNC properties, ARRAY/ELEMENT delegation, Proxy `get` trap forward (with receiver), and MAP own slots via `js_ordinary_get_own` — bounded to **depth 32**. Builtin methods and accessors participate because realm construction installed them as real properties; a miss never fabricates a callable. `js_get_prototype` resolves explicit override/null and the metadata's realm-relative intrinsic policy; public `__proto__` remains an accessor and is never the internal slot or classifier.
 
+An explicitly defined own `__proto__` data property has an ordinary descriptor
+and governs subsequent Set operations. Its public slot is independent of
+`JS_INTERNAL_PROTO_KEY`; hiding that data descriptor incorrectly routes writes
+to the inherited Annex B setter (**D3.4.7**, **D6.2.2v2**).
+
 ---
 
 ## 6. Property set

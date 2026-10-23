@@ -14627,9 +14627,11 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
         strbuf_append_str_n(source, entry->name->chars, entry->name->len);
         strbuf_append_str(source, ";\n");
     }
-    if (definition->node_type == AST_NODE_FUNC_EXPR) strbuf_append_char(source, '(');
+    // anonymous default declarations need expression syntax in an isolated unit.
+    bool as_expression = definition->node_type == AST_NODE_FUNC_EXPR || !definition->name;
+    if (as_expression) strbuf_append_char(source, '(');
     strbuf_append_str_n(source, text, length);
-    if (definition->node_type == AST_NODE_FUNC_EXPR) strbuf_append_char(source, ')');
+    if (as_expression) strbuf_append_char(source, ')');
     strbuf_append_char(source, ';');
     MvpLmdExecution* execution = js_runtime_state.auto_mir_owner;
     bool existing = execution != NULL;
@@ -14646,6 +14648,8 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (!program) { strbuf_free(source); return ItemError; }
     program->execution_owner = execution; program->satellite_script = binding_owner;
     program->module_realm = true;
+    // satellite parameters arrive from other units; local literals cannot exclude types.
+    program->bigints = program->symbols = true;
     program->receiver_abi = program->global_receiver = program->global_reflection = program->property_callbacks = true;
     program->host_enabled = true;
     bool faulted = false;

@@ -399,7 +399,7 @@ static inline void js_note_event_handler_property_set(Item object,
         object, js_name_item(name, name_len), value);
 }
 
-static inline void js_note_event_handler_property_set(Item object, Item key,
+void js_note_event_handler_property_set(Item object, Item key,
                                                        Item value) {
     if (get_type_id(key) != LMD_TYPE_STRING) return;
     String* name = it2s(key);
@@ -4923,6 +4923,10 @@ static bool js_intrinsic_is_error_name(const char* name, int len) {
 
 extern "C" Item js_get_key_core(Item object, Item key,
                                                 Item receiver) {
+    // an own data value is independent of Receiver, including primitive
+    // prototype traversal; accessors and exotic owners keep the full Get.
+    Item named_value = ItemNull;
+    if (js_try_get_own_named_data_no_gc(object, key, &named_value)) return named_value;
     RootFrame property_roots(4);
     Rooted<Item> object_root(property_roots, object);
     Rooted<Item> key_root(property_roots, key);
@@ -6508,7 +6512,7 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
 // Write into an existing slot whose lane is the same byte size as the value's,
 // retagging the entry when the shape permits. Used by array companion maps and
 // by T10-2's predicted-slot initialization -- nothing here is array-specific.
-static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
+bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
         void* data, Item value) {
     if (!entry || !entry->type || !data) return false;
     TypeId field_type = entry->type->type_id;
@@ -8290,9 +8294,16 @@ static inline bool js_named_fast_receiver_map_is_fast(Map* map,
     if (receiver_kind == JS_NAMED_FAST_RECEIVER_ARRAY_PROPS) {
         return map_kind_is_array_props(map->map_kind);
     }
-    return (receiver_kind == JS_NAMED_FAST_RECEIVER_MAP ||
-            receiver_kind == JS_NAMED_FAST_RECEIVER_FUNCTION_PROPS) &&
-        js_object_uses_ordinary_shape((Item){.map = map});
+    if (receiver_kind == JS_NAMED_FAST_RECEIVER_FUNCTION_PROPS)
+        return js_object_uses_ordinary_shape((Item){.map = map});
+    if (receiver_kind != JS_NAMED_FAST_RECEIVER_MAP ||
+            (map->map_kind != MAP_KIND_PLAIN && map->map_kind != MAP_KIND_DESC)) return false;
+    TypeMap* shape = (TypeMap*)map->type;
+    if (!shape || shape->nominal) return false;
+    const JsClassMeta* meta = js_object_meta((Item){.map = map});
+    // intrinsic prototypes can carry plain data even when their class is branded.
+    return !meta || (!meta->ops && !(meta->flags & (JS_CLASS_FLAG_EXOTIC_PROPERTIES |
+        JS_CLASS_FLAG_ERROR_CARRIER | JS_CLASS_FLAG_NATIVE_PAYLOAD)));
 }
 
 static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
@@ -8387,7 +8398,8 @@ static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
     if (out_map) *out_map = map;
     if (out_entry) *out_entry = entry;
     if (out_receiver_kind) *out_receiver_kind = receiver_kind;
-    if (out_value) *out_value = value;
+    // packed fields can lend a movable scalar home; publish the number before escape.
+    if (out_value) *out_value = js_scalar_storage_read(value, false);
     if (out_reason) *out_reason = JS_OPT_REASON_NONE;
     return true;
 }
@@ -8395,6 +8407,24 @@ static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
 
 
 
+
+extern "C" bool js_try_get_own_named_data_no_gc(Item object, Item key, Item* out_value) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map ||
+            get_type_id(key) != LMD_TYPE_STRING) return false;
+    TypeMap* shape = (TypeMap*)object.map->type;
+    // host/nominal owners and Window live properties retain their property hooks.
+    if (!shape || shape->nominal ||
+            js_is_global_this_object_value(object)) return false;
+    NameRef name = it2s(key);
+    if (!name || property_key_kind(name) != NAME_KEY_STRING) return false;
+    JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_KEY;
+    js_named_fast_profile_probe();
+    bool found = js_named_fast_lookup(object, name, property_key_id(name), NULL, NULL,
+        NULL, out_value, &reason, true);
+    if (found) js_named_fast_profile_hit();
+    else js_named_fast_profile_miss(reason);
+    return found;
+}
 
 extern "C" Item js_get_name_id(Item object, NameId name_id) {
     js_named_fast_profile_probe();

@@ -24,6 +24,12 @@ The value representation these optimizations operate on (the tagged `Item`, the 
 
 Grouped by tier. Each entry gives the mechanism (with a code anchor), the doc that owns it, and the measured effect where a log recorded one.
 
+Large-bundle AST publication uses an index-owned pointer/identity table for
+bindings, scopes, and classes (`ast-core.cpp`). Repeated identifier uses no
+longer scan every prior declaration. Clones retain their own lookup table,
+appends preserve existing dense IDs, and rebinding clears the old identities
+(**D8.2.4v2**).
+
 ### 2.1 Call & dispatch tier
 
 <img alt="Optimization catalog" src="diagram/d15_opt_catalog.svg" width="720">
@@ -161,16 +167,57 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   module, parameter, hosted, and observable eval-completion assignments retain
   their general operation. String values remain immutable to readers
   (**S1.4**, **S1.6**, **D5.3.3**, **D8.1.3v29**).
-- **AST numeric expression calls.** A definition-owned proof admits a single
-  return expression over numeric parameters, numeric/boolean literals,
-  comparisons, logical operators, and conditionals. Calls with primitive Number
-  arguments borrow the call activation's rooted arguments and use the ordinary
-  AST evaluator without allocating a lexical environment. Coercion, captures,
-  mutation, non-simple parameters, object environments, and hosted calls keep
-  their general path. Literal-cache allocation retains the same callee and
-  argument owners (**S1.6**, **D5.3.3**).
+- **AST parameter expression calls.** A definition-owned proof admits numeric
+  predicates over primitive Number parameters without a lexical environment.
+  Strict single-return expressions also borrow the call activation's rooted
+  parameters when their AST contains no binding writes, nested closures, eval,
+  or activation observations beyond `this`. The existing call activation owns
+  the strict receiver and method home. Captured bindings and property/call expressions
+  still use the ordinary evaluator and its getter, coercion, receiver and error
+  behavior. Non-simple parameters, missing arguments, object environments and
+  hosted calls retain their general path. The callee and argument span own values
+  across allocating getters and callbacks (**S1.6**, **D5.3.3**, **D8.4.1v2**).
+  `parameter_expression_calls.js` checks both admitted expressions and fallbacks.
+  Comparisons whose leaves are borrowed Number parameters or primitive literals
+  use the same binary kernels with local scalar homes and an asserted no-GC
+  boundary. Logical operators discard their unused left operand before evaluating
+  the right operand, so no root window retains it across callbacks or collection
+  (**D5.3.3**, **D8.4.1v2**).
+
+- **Module numeric predicate promotion.** AUTO admits synchronous top-level
+  ES-module function declarations and expressions only when the same
+  parameter-only numeric/boolean proof succeeds. The shared classifier runs
+  before the hot entry, so a threshold of one is honored without executing
+  the body first. Imports, other outer bindings, calls, properties, methods,
+  nested definitions, eval and suspended definitions retain their existing
+  boundaries. The existing boxed satellite preserves namespace/callable
+  identity and the source module's binding slab; forced AST stays interpreted
+  (**D8.1.3v30**). `module_numeric_predicates.js` checks values, coercion errors,
+  source identity, live imports and scalar lifetime across GC.
+  Satellite parameters keep BigInt and Symbol possibilities even when the
+  cloned source has no such literals. Strict numeric definitions retain their
+  activation-observation proof after publication, allowing the existing light
+  call entry to consume it while preserving callee and argument roots
+  (**D5.3.3**, **D8.4.1v2**).
+
 
 ### 2.4 Runtime builtin tier
+
+- **Shared own named-data reads.** `js_get_key_core` reuses
+  `js_named_fast_lookup` for canonical String keys in plain shape storage
+  without exotic callbacks or native payloads. This also admits plain data
+  on branded intrinsic prototypes during primitive Get; a data value is
+  independent of Receiver. Accessors, deleted/reserved slots, global/nominal
+  owners, exotic carriers and id-less keys retain the full operation.
+  Packed numeric fields publish a number home before leaving the read
+  (**D5.3.3**, **D5.3.5**, **D6.2.2v2**).
+- **Existing ordinary field stores.** After the shared Set kernel proves a
+  default writable own slot, `js_ordinary_add_own_data_property` reuses
+  `js_shape_write_same_size_slot` for an unchanged concrete storage type.
+  Intrinsic invalidation and event-handler publication still run. Reserved
+  constructor slots, global/nominal/static owners, nonextensible objects,
+  descriptors, list images and storage transitions retain their owner paths
+  (**D3.4.3v5**, **D5.3.3**, **D6.2.2v2**).
 
 - **Guarded packed-array splice.** After length/index coercion and species
   construction, `js_array_try_fast_splice` revalidates the captured length and

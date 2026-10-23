@@ -982,6 +982,67 @@ TEST(JsScriptOwnership, PublishesRangeAndReverseQueryFacts) {
     js_transpiler_destroy(tp);
 }
 
+TEST(JsScriptOwnership, DeclarationIdsRemainLocalAcrossCloneAppendAndRebind) {
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    for (int i = 0; i < 600; i++) {
+        strbuf_append_format(source,
+            "function f%d(value) { let local = value; "
+            "class Local { read() { return local; } } return local; } f%d(%d);\n",
+            i, i, i);
+    }
+    JsTranspiler* tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source->str, source->length, JS_PARSE_SCRIPT));
+    AstIndex* index = &tp->ast_index;
+    ASSERT_GE(index->binding_count, 1800u);
+    ASSERT_GE(index->scope_count, 600u);
+    ASSERT_EQ(index->class_count, 600u);
+
+    AstIndex clone = {}, fragment = {};
+    ASSERT_TRUE(ast_index_clone(&clone, index));
+    // another index can assign different IDs to the same retained declarations.
+    ASSERT_TRUE(ast_index_build_profile(&fragment, index->functions[0].node, &js_profile));
+    for (uint32_t i = 0; i < index->binding_count; i++) {
+        EXPECT_EQ(ast_index_find_binding_entry(index, index->bindings[i]), i);
+        EXPECT_EQ(ast_index_find_binding_entry(&clone, index->bindings[i]), i);
+    }
+    for (uint32_t i = 0; i < clone.scope_count; i++) {
+        ASSERT_TRUE(ast_index_publish_scope(&clone, clone.scopes[i]));
+        EXPECT_EQ(clone.scopes[i]->scope_id, i);
+    }
+    uint32_t scopes = clone.scope_count;
+    for (uint32_t i = 0; i < scopes; i++) ASSERT_TRUE(ast_index_publish_scope(&clone, clone.scopes[i]));
+    EXPECT_EQ(clone.scope_count, scopes);
+
+    JsTranspiler* extra = js_transpiler_create(NULL);
+    ASSERT_NE(extra, nullptr);
+    const char appended[] = "let appended = 1; appended;";
+    ASSERT_TRUE(js_transpiler_parse_c(extra, appended, sizeof(appended) - 1, JS_PARSE_SCRIPT));
+    ASSERT_TRUE(ast_index_append_profile(&clone, extra->ast_root, NULL, &js_profile));
+    NameEntry* binding = extra->ast_index.bindings[0];
+    EXPECT_EQ(ast_index_find_binding_entry(&clone, binding), index->binding_count);
+    EXPECT_EQ(ast_index_find_binding_entry(index, binding), AST_BINDING_ID_INVALID);
+
+    ASSERT_TRUE(ast_index_prepare_binding(&clone));
+    AstNode* use = NULL;
+    for (uint32_t i = 0; i < extra->ast_index.count; i++) {
+        if (extra->ast_index.node_bindings[i] != AST_BINDING_ID_INVALID) {
+            use = extra->ast_index.nodes[i];
+            break;
+        }
+    }
+    ASSERT_NE(use, nullptr);
+    ASSERT_TRUE(ast_index_bind_node(&clone, use, NULL, AST_FUNCTION_ID_INVALID, NULL));
+    EXPECT_EQ(ast_index_find_binding_entry(&clone, binding), 0u);
+    EXPECT_EQ(ast_index_find_binding_entry(&clone, index->bindings[0]), AST_BINDING_ID_INVALID);
+    ast_index_destroy(&clone);
+    ast_index_destroy(&fragment);
+    js_transpiler_destroy(extra);
+    js_transpiler_destroy(tp);
+    strbuf_free(source);
+}
+
 static AstIndexProfileSupport count_index_profile_nodes(const AstIndex* index,
         AstNodeId node_id, void* context) {
     (void)index;
@@ -1287,6 +1348,95 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleNumericPredicatesRespectBackendAndHotThreshold) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = strcmp(backend, "auto") == 0;
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 10000;
+            const char source[] =
+                "import {counter} from './dep.mjs';"
+                "export let untouched = 17;"
+                "export function digit(value) { return value >= 48 && value <= 57; }"
+                "export const expression = function(value) { return value < 128; };"
+                "export function identity(value) { return value; }"
+                "export default function(value) { return value >= 0; }";
+            Item namespace_obj = js_interp_execute_es_module_source(&runtime,
+                source, sizeof(source) - 1,
+                "test/js/interp_esm/numeric-predicates.mjs", NULL);
+            ASSERT_FALSE(item_is_error(namespace_obj));
+            for (const char* name : {"digit", "expression", "identity", "default"}) {
+                Item function_item = js_get_key_default(namespace_obj, js_make_string(name));
+                ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC) << name;
+                auto* function = (JsFunction*)function_item.function;
+                EXPECT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST);
+                for (uint32_t call = 1; call <= threshold; call++) {
+                    Item argument = flt2it(49.0);
+                    Item result = js_call_function(function_item,
+                        make_js_undefined(), &argument, 1);
+                    ASSERT_FALSE(item_is_error(result)) << backend << ":" << name;
+                    Item expected = strcmp(name, "identity") == 0
+                        ? argument : (Item){.item = b2it(true)};
+                    EXPECT_EQ(js_strict_equal(result, expected).item, b2it(true));
+                    bool promoted = runtime.js_promotion_auto && call == threshold;
+                    EXPECT_EQ(js_fn_body_kind(function), promoted
+                        ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+                    EXPECT_EQ(function->code->p2_promotion.call_count,
+                        runtime.js_promotion_auto ? call : 0u);
+                }
+                EXPECT_EQ(js_strict_equal(function_item, js_get_key_default(
+                    namespace_obj, js_make_string(name))).item, b2it(true));
+                EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+                    js_make_string("untouched")), flt2it(17.0)).item, b2it(true));
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModulePromotionRetainsNonlocalAndActivationBoundaries) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    runtime.js_promotion_backedge_threshold = 10000;
+    const char source[] =
+        "import {counter} from './dep.mjs';"
+        "let limit = 128;"
+        "export function moduleRead(value) { return value < limit; }"
+        "export function importRead(value) { return value < counter; }"
+        "export function globalRead(value) { return value < Infinity; }"
+        "export function call(value) { return Math.abs(value) < 128; }"
+        "export function evaluated(value) { return eval('value < 128'); }"
+        "export function observed(value) { return arguments[0] < 128; }"
+        "export function defaulted(value = 1) { return value < 128; }"
+        "export const method = {test(value) { return value < 128; }}.test;"
+        "export const nested = (() => function(value) { return value < 128; })();";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime,
+        source, sizeof(source) - 1,
+        "test/js/interp_esm/numeric-boundaries.mjs", NULL);
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    for (const char* name : {"moduleRead", "importRead", "globalRead", "call",
+            "evaluated", "observed", "defaulted", "method", "nested"}) {
+        Item function_item = js_get_key_default(namespace_obj, js_make_string(name));
+        ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC) << name;
+        Item argument = flt2it(1.0);
+        Item result = js_call_function(function_item, make_js_undefined(), &argument, 1);
+        ASSERT_FALSE(item_is_error(result)) << name;
+        EXPECT_EQ(js_strict_equal(result, (Item){.item = b2it(true)}).item, b2it(true));
+        auto* function = (JsFunction*)function_item.function;
+        EXPECT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST) << name;
+        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << name;
+    }
     runtime_cleanup(&runtime);
 }
 
@@ -2833,7 +2983,11 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
 
     const char source[] =
         "import { bump, counter } from './dep.mjs'; "
-        "bump(); export const answer = counter + 1;";
+        "import * as namespace from './dep.mjs'; "
+        "function shadow(counter) { counter += 1; return counter; } "
+        "function local() { let value = 0; for (let i = 0; i < 32; i++) value += 1; return value; } "
+        "bump(); export const answer = counter + 1; "
+        "export const identities = shadow(2) === 3 && local() === 32 && namespace.counter === counter;";
     ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/main.mjs", NULL);
@@ -2843,6 +2997,7 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     Item answer = js_get_key_default(namespace_obj, js_make_string("answer"));
     ASSERT_FALSE(item_is_error(answer));
     EXPECT_EQ(js_strict_equal(answer, flt2it(42.0)).item, b2it(true));
+    EXPECT_EQ(js_get_key_cstr(namespace_obj, "identities").item, b2it(true));
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/main.mjs"),
         nullptr);
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
@@ -5853,6 +6008,50 @@ TEST(JsInterpreter, EnumeratesOnlySuppliedMappedArguments) {
     EXPECT_TRUE(js_strict_equal(result, js_make_string(
         ":0|0,1:2|0,1,2:3|0,1,2,3:4")).item == b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, CapturedParametersUseTheirOwnersMappedArguments) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "function outer(value) { const aliased = arguments; return function inner(other) { "
+        "if (arguments[0] !== other) return false; aliased[0] = 17; "
+        "if (value !== 17) return false; value = 23; return aliased[0] === 23; }; } "
+        "outer(3)(7);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "mapped-arguments-owner.js", NULL);
+    EXPECT_EQ(result.item, b2it(true));
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, BorrowsParametersOnlyForUnobservableExpressionBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "let text = 'abc'; function load(index) { 'use strict'; "
+        "return index < text.length ? text.charCodeAt(index) : 0; } "
+        "function bump(value) { 'use strict'; return ++value; } "
+        "class Box { read(index) { return this.text.charCodeAt(index); } } "
+        "let box = new Box(); box.text = text; box.read(1); load(1); bump(2);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "parameter-expression.js", NULL);
+    EXPECT_EQ(js_strict_equal(result, flt2it(3.0)).item, b2it(true));
+    const char admitted[] = "load;";
+    Item load = js_interp_execute_source(&runtime, admitted, sizeof(admitted) - 1,
+        "read-parameter-expression.js", NULL);
+    ASSERT_EQ(get_type_id(load), LMD_TYPE_FUNC);
+    EXPECT_EQ(((JsFunction*)load.function)->code->parameter_leaf_state, 3);
+    const char refused[] = "bump;";
+    Item bump = js_interp_execute_source(&runtime, refused, sizeof(refused) - 1,
+        "read-parameter-update.js", NULL);
+    ASSERT_EQ(get_type_id(bump), LMD_TYPE_FUNC);
+    EXPECT_EQ(((JsFunction*)bump.function)->code->parameter_leaf_state, 1);
+    const char method[] = "Box.prototype.read;";
+    Item read = js_interp_execute_source(&runtime, method, sizeof(method) - 1,
+        "read-method-expression.js", NULL);
+    ASSERT_EQ(get_type_id(read), LMD_TYPE_FUNC);
+    EXPECT_EQ(((JsFunction*)read.function)->code->parameter_leaf_state, 3);
     runtime_cleanup(&runtime);
 }
 

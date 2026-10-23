@@ -296,6 +296,14 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
     js_ast_visit_children(node, js_ast_collect_function_facts_child, &walk);
 }
 
+JsLiteralNode* js_ast_statement_string_literal(JsAstNode* statement) {
+    if (!statement || statement->node_type != AST_NODE_EXPR_STMT) return NULL;
+    JsAstNode* expression = ((JsExpressionStatementNode*)statement)->expression;
+    return expression && expression->node_type == AST_NODE_LITERAL &&
+        ((JsLiteralNode*)expression)->literal_type == AST_LITERAL_STRING
+        ? (JsLiteralNode*)expression : NULL;
+}
+
 JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
         JsAstNode* body) {
     JsAstFunctionFacts facts = {};

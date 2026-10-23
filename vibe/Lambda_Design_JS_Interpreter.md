@@ -46,6 +46,18 @@ data objects with static or local computed keys, and static or local-key
 computed member chains. Whole-module MIR fallback is not a promotion. This is
 governed by **D8.1.3v18** and **D8.5.1v4**.
 
+**Module numeric predicate revision (USER, 2026-10-23): D8.1.3v30** extends
+hot-entry promotion to synchronous ES-module top-level declarations and
+function expressions only when the existing parameter-only numeric/boolean
+proof admits their single returned expression. Imports, globals, captures,
+properties, calls, writes and activation observations are absent from that
+proof; methods, nested definitions, suspended definitions, eval and dynamic
+source retain their boundaries. Classification precedes the configured hot
+entry, including a threshold of one. The existing boxed satellite keeps the
+module slab, namespace and callable identity, and handles ordinary coercions
+when later arguments have other types. Forced AST stays interpreted; module
+loop handoff and whole-module admission are unchanged.
+
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
 **Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v22**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
@@ -1136,6 +1148,14 @@ static property-key image to the definition's active module slab at its
 encoded base before publication. Spread, methods, accessors, and any nonlocal
 receiver/key/value remain ineligible. The satellite context is retained in the
 owning `EvalContext` until teardown. Every other definition is pinned to T0.
+
+The **D8.1.3v30** module extension reuses the numeric parameter-expression
+proof before promotion. It admits only simple parameters and one returned
+numeric/boolean expression made from parameters, Number/boolean literals,
+comparisons, logical operators and conditional selection. No module/import or
+other outer binding may be read. The ordinary hot-call threshold and boxed
+satellite publication remain authoritative; the source module is not
+re-evaluated and its existing binding slab is not reinitialized.
 
 The full JavaScript satellite design consumes `JsScript`-owned:
 

@@ -267,7 +267,13 @@ static bool js_function_has_compiled_light_contract(const JsFunction* fn) {
             js_fn_eval_initializer_context(fn)) {
         return false;
     }
-    uint32_t required = JS_FUNC_FLAG_ANALYSIS_KNOWN | JS_FUNC_FLAG_COMPILED_BODY;
+    // the retained strict numeric proof also rules out activation observations.
+    // promotion preserves that proof even without legacy per-value analysis flags.
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
+    bool analyzed = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) ||
+        ((fn->flags & JS_FUNC_FLAG_STRICT) && definition &&
+         definition->parameter_leaf_state == 2);
+    uint32_t required = JS_FUNC_FLAG_COMPILED_BODY;
     uint32_t excluded = JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN |
         JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_DERIVED_CTOR | JS_FUNC_FLAG_USES_WITH |
         JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_TYPED_ARRAY_METHOD |
@@ -275,7 +281,7 @@ static bool js_function_has_compiled_light_contract(const JsFunction* fn) {
         JS_FUNC_FLAG_READS_THIS | JS_FUNC_FLAG_READS_NEW_TARGET |
         JS_FUNC_FLAG_USES_ARGUMENTS | JS_FUNC_FLAG_DIRECT_EVAL;
     Item home_class = js_fn_home_class(fn);
-    return (fn->flags & required) == required && (fn->flags & excluded) == 0 &&
+    return analyzed && (fn->flags & required) == required && (fn->flags & excluded) == 0 &&
         (home_class.item == 0 || home_class.item == ItemNull.item ||
          get_type_id(home_class) == LMD_TYPE_UNDEFINED);
 }
