@@ -159,9 +159,11 @@ button { font: inherit; color: inherit; }
 .cl-bar h2 { margin: 0 6px 0 0; font-size: 16px; }
 .cl-bar > button:not(.tool) { padding: 6px 12px; border: 0; border-radius: 7px; background: #e9eaee; cursor: pointer; }
 .cl-bar > button[disabled] { opacity: 0.4; cursor: default; }
-.cl-templates { display: flex; padding: 2px; border-radius: 8px; background: #e9eaee; }
-.cl-template { padding: 5px 11px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
-.cl-template[aria-pressed="true"] { background: var(--panel); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); font-weight: 600; }
+.cl-templates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 14px; }
+.cl-template { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px 4px; border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 11px; cursor: pointer; }
+.cl-template:hover { background: #f2f3f6; }
+.cl-template .cl-canvas { pointer-events: none; border-radius: 3px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+.cl-template[aria-pressed="true"] { border-color: var(--accent); background: #eef4ff; font-weight: 600; }
 .cl-spacer { flex: 1; }
 .cl-body { flex: 1; min-height: 0; display: flex; }
 .cl-tray { width: 180px; flex: none; padding: 12px; overflow-y: auto; background: var(--sidebar); border-right: 1px solid var(--line); }
@@ -184,7 +186,7 @@ button { font: inherit; color: inherit; }
 .cl-field > span { font-size: 12px; color: var(--muted); }
 .cl-field select, .cl-field input[type="text"] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; background: #fff; }
 .cl-check { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.cl-swatches { display: flex; gap: 8px; }
+.cl-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .cl-swatch { width: 30px; height: 30px; border-radius: 15px; border: 1px solid var(--line); cursor: pointer; }
 .cl-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent); }
 .cl-wide { width: 100%; margin: 0 0 12px; padding: 8px; border: 0; border-radius: 8px; background: #e9eaee; cursor: pointer; }
