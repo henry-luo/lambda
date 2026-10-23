@@ -1,2 +1,6 @@
 bounded:true,false
 token:true,false
+compound:true,false
+capture:123
+nested:true,false
+invalid:2

@@ -241,8 +241,7 @@ static Item response_method(Item callee, Item receiver, Item*, int, uint64_t*) {
         if (!item_is_error(value.get()) && operation == RESPONSE_JSON)
             value.set(js_json_parse(value.get()));
     }
-    return item_is_error(value.get()) ? js_promise_reject(js_error_lane_payload(value.get()))
-        : js_promise_resolve(value.get());
+    return js_promise_from_completion(value.get());
 }
 
 Item js_install_response(Item global) {

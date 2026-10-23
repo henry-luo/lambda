@@ -312,6 +312,7 @@ static TypeMap js_inline_style_marker = {};
 
 struct JsWebAnimationHost {
     CssWebAnimationState* state;
+    uint64_t sequence;
 };
 
 struct JsWebKeyframeEffectHost {
@@ -327,6 +328,8 @@ struct JsWebKeyframeEffectHost {
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
+#define dom_web_animation_wrappers (js_runtime_state.dom.web_animation_wrappers)
+#define dom_web_animation_private_name (js_runtime_state.dom.web_animation_private_name)
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.dom)))
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
@@ -1451,6 +1454,13 @@ extern "C" void dom_batch_reset() {
     js_document_design_mode = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
+    dom_web_animation_wrappers = ItemNull;
+    dom_web_animation_private_name = ItemNull;
+    js_runtime_state.dom.web_animation_sequence = 0;
+    js_runtime_state.dom.media_play_requests = ItemNull;
+    js_runtime_state.dom.media_poll_function = ItemNull;
+    js_runtime_state.dom.media_poll_timer = ItemNull;
+    js_runtime_state.dom.media_poll_running = false;
     _js_current_document = nullptr;
     dom_events_reset();
     js_xhr_reset();
@@ -1474,6 +1484,13 @@ extern "C" void dom_shutdown() {
     dom_match_media_reset();
     dom_observers_reset();
     reset_foreign_document_cache();
+    dom_web_animation_wrappers = ItemNull;
+    dom_web_animation_private_name = ItemNull;
+    js_runtime_state.dom.web_animation_sequence = 0;
+    js_runtime_state.dom.media_play_requests = ItemNull;
+    js_runtime_state.dom.media_poll_function = ItemNull;
+    js_runtime_state.dom.media_poll_timer = ItemNull;
+    js_runtime_state.dom.media_poll_running = false;
     _js_current_document = nullptr;
     _js_main_document = nullptr;
 }
@@ -9890,6 +9907,12 @@ extern "C" Item dom_core_node_type(Item n) {
     }
     // DomNodeType carries the spec's own numbering, including DOCTYPE as 10.
     return (Item){.item = i2it((int64_t)node->node_type)};
+}
+
+extern "C" bool dom_is_element(Item item) {
+    // document/fragment wrappers share element storage but are not Element receivers.
+    Item kind = dom_core_node_type(item);
+    return get_type_id(kind) == LMD_TYPE_INT && it2i(kind) == 1;
 }
 
 static Item dom_doctype_property(DomComment* doctype, const char* property) {
@@ -18326,18 +18349,33 @@ extern "C" Item dom_xpath_evaluator_ctor(void) {
 
 
 static JsWebAnimationHost* js_web_animation_host(Item value) {
-    if (get_type_id(value) == LMD_TYPE_VMAP && value.vmap &&
-        value.vmap->host_type == (const void*)&js_web_animation_vmap_marker) {
-        return (JsWebAnimationHost*)value.vmap->host_data;
+    if (!dom_realm_object_has_class(value, JS_CLASS_ANIMATION)) return nullptr;
+    Item record = dom_realm_native_private_array_state(value, JS_CLASS_ANIMATION, 2,
+        "Illegal Animation receiver");
+    if (item_is_error(record)) return nullptr;
+    Item holder = js_elements_get_int(record, 1);
+    return get_type_id(holder) == LMD_TYPE_VMAP && holder.vmap &&
+        holder.vmap->host_type == (const void*)&js_web_animation_vmap_marker
+        ? (JsWebAnimationHost*)holder.vmap->host_data : nullptr;
+}
+
+static Item dom_web_animation_remember(Item value) {
+    RootFrame roots(1);
+    Rooted<Item> animation(roots, value);
+    if (!dom_ensure_roots()) return ItemError;
+    if (get_type_id(dom_web_animation_wrappers) != LMD_TYPE_ARRAY) {
+        dom_web_animation_wrappers = js_array_new(0);
+        dom_realm_set_prototype(dom_web_animation_wrappers, ItemNull);
     }
-    if (get_type_id(value) == LMD_TYPE_MAP) {
-        Item holder = dom_realm_get_cstr(value, "__lambda_web_animation_host");
-        if (get_type_id(holder) == LMD_TYPE_VMAP && holder.vmap &&
-            holder.vmap->host_type == (const void*)&js_web_animation_vmap_marker) {
-            return (JsWebAnimationHost*)holder.vmap->host_data;
-        }
+    int64_t reusable = -1;
+    for (int64_t i = 0; i < js_array_length(dom_web_animation_wrappers); i++) {
+        Item entry = js_elements_get_int(dom_web_animation_wrappers, i);
+        if (entry.item == animation.get().item) return ItemNull;
+        if (entry.item == ITEM_NULL) reusable = i;
     }
-    return nullptr;
+    // canceled slots are reused; long-lived pages retain only their peak active set.
+    return reusable >= 0 ? js_elements_set_int(dom_web_animation_wrappers, reusable, animation.get())
+        : js_array_push(dom_web_animation_wrappers, animation.get());
 }
 
 enum JsWebKeyframeValueKind {
@@ -18715,6 +18753,7 @@ static Item js_web_animation_current_time_set(Item value) {
             current_time = (double)it2i(numeric);
         }
         css_web_animation_set_current_time(host->state, current_time);
+        JS_RETURN_IF_ERROR(dom_web_animation_remember(receiver_root.get()));
         log_debug("web-anim: currentTime set to %.1fms", current_time);
     }
     return value_root.get();
@@ -18727,6 +18766,9 @@ extern "C" Item dom_web_animation_cancel(void) {
     if (!host || !host->state)
         return dom_realm_throw_type_error("Animation.cancel requires an Animation receiver");
     css_web_animation_cancel(host->state);
+    for (int64_t i = 0; i < js_array_length(dom_web_animation_wrappers); i++)
+        if (js_elements_get_int(dom_web_animation_wrappers, i).item == receiver_root.get().item)
+            JS_RETURN_IF_ERROR(js_elements_set_int(dom_web_animation_wrappers, i, ItemNull));
     return make_js_undefined();
 }
 
@@ -18773,7 +18815,7 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
                                     Item options_item,
                                     JsWebKeyframeEffectHost* snapshot = nullptr) {
     if (!element || !element->doc) return ItemNull;
-    RootFrame roots(5);
+    RootFrame roots(7);
     Rooted<Item> keyframes_root(roots, keyframes_item);
     Rooted<Item> options_root(roots, options_item);
     CssKeyframes* keyframes = snapshot ? snapshot->keyframes : nullptr;
@@ -18796,6 +18838,7 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
         element->doc->document_pool, sizeof(JsWebAnimationHost));
     if (!host) return ItemNull;
     host->state = state;
+    host->sequence = ++js_runtime_state.dom.web_animation_sequence;
 
     Rooted<Item> holder_root(roots, vmap_new());
     if (get_type_id(holder_root.get()) != LMD_TYPE_VMAP || !holder_root.get().vmap) {
@@ -18803,11 +18846,21 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
     }
     holder_root.get().vmap->host_type = (const void*)&js_web_animation_vmap_marker;
     holder_root.get().vmap->host_data = host;
-    // A plain object keeps pause/reverse on the normal JS method path; the
-    // private native holder supplies the DOM-owned state to accessors.
-    Rooted<Item> animation_root(roots, js_new_object());
-    dom_realm_set_cstr(animation_root.get(), "__lambda_web_animation_host",
-                    holder_root.get());
+    if (!dom_ensure_roots()) return ItemError;
+    if (!dom_web_animation_private_name.item || dom_web_animation_private_name.item == ITEM_NULL) {
+        NameRef key = name_pool_create_unique_private(context->name_pool, {"#WebAnimation", 13});
+        if (!key) return ItemError;
+        dom_web_animation_private_name = (Item){.item = s2it(key)};
+    }
+    Rooted<Item> owner_root(roots, dom_wrap_element(element));
+    Rooted<Item> record_root(roots, js_array_new(0));
+    dom_realm_set_prototype(record_root.get(), ItemNull);
+    js_array_push(record_root.get(), owner_root.get());
+    js_array_push(record_root.get(), holder_root.get());
+    // the private owner edge keeps the document pool alive even after cancel removes the registry root.
+    Rooted<Item> animation_root(roots, dom_realm_native_private_array_object(JS_CLASS_ANIMATION,
+        dom_web_animation_private_name, record_root.get(), ItemNull));
+    JS_RETURN_IF_ERROR(animation_root.get());
     dom_realm_set_native(animation_root.get(), js_string_key("pause"),
                       js_web_animation_pause);
     dom_realm_set_native(animation_root.get(), js_string_key("play"),
@@ -18824,7 +18877,47 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
     dom_realm_set_cstr(animation_root.get(), "ready",
                     dom_realm_promise_resolve(make_js_undefined()));
     dom_realm_apply_prototype(animation_root.get(), "Animation");
+    JS_RETURN_IF_ERROR(dom_web_animation_remember(animation_root.get()));
     return animation_root.get();
+}
+
+struct JsWebAnimationMatch { int64_t slot; uint64_t sequence; };
+static int dom_web_animation_match_order(const void* left, const void* right) {
+    uint64_t a = ((const JsWebAnimationMatch*)left)->sequence;
+    uint64_t b = ((const JsWebAnimationMatch*)right)->sequence;
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+extern "C" Item dom_element_get_animations(Item options) {
+    RootFrame roots(4);
+    Rooted<Item> receiver(roots, dom_realm_receiver()), opts(roots, options);
+    DomElement* element = dom_is_element(receiver.get()) ? dom_op_element(receiver.get()) : nullptr;
+    if (!element) return dom_realm_throw_type_error("getAnimations requires an Element receiver");
+    Rooted<Item> value(roots, ItemNull), result(roots, ItemNull);
+    bool subtree = false;
+    if (opts.get().item != ITEM_NULL && get_type_id(opts.get()) != LMD_TYPE_UNDEFINED) {
+        value.set(dom_realm_get_cstr(opts.get(), "subtree"));
+        JS_RETURN_IF_ERROR(value.get());
+        subtree = js_is_truthy(value.get());
+    }
+    result.set(js_array_new(0));
+    if (get_type_id(dom_web_animation_wrappers) != LMD_TYPE_ARRAY) return result.get();
+    int64_t count = js_array_length(dom_web_animation_wrappers), matched = 0;
+    lam::Temp<JsWebAnimationMatch> matches = lam::temp_array<JsWebAnimationMatch>((size_t)count, MEM_CAT_TEMP);
+    if (count && !matches) return ItemError;
+    for (int64_t i = 0; i < count; i++) {
+        value.set(js_elements_get_int(dom_web_animation_wrappers, i));
+        JsWebAnimationHost* host = js_web_animation_host(value.get());
+        if (!host || !host->state || !host->state->current_time_resolved) continue;
+        DomElement* target = host->state->element;
+        if (target == element || (subtree && dom_subtree_contains_node(element, target)))
+            matches.get()[matched++] = {i, host->sequence};
+    }
+    // holes from canceled effects must not reorder a later effect ahead of an older one.
+    if (matched > 1) qsort(matches.get(), (size_t)matched, sizeof(JsWebAnimationMatch), dom_web_animation_match_order);
+    for (int64_t i = 0; i < matched; i++)
+        JS_RETURN_IF_ERROR(js_array_push(result.get(), js_elements_get_int(dom_web_animation_wrappers, matches.get()[i].slot)));
+    return result.get();
 }
 
 extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {

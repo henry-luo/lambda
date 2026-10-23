@@ -351,7 +351,7 @@ Item v2it(List* list) {
 
 static bool string_is_owned_buffer(String* str, gc_header_t** out_header) {
     if (out_header) *out_header = NULL;
-    if (!str || !str->is_buffer) return false;
+    if (!str || !str->is_buffer || str->buffer_borrows) return false;
     // is_buffer is set only by string_buffer_join after the constructor
     // audit has cleared every non-GC String's flags. Avoiding a heap-wide
     // ownership lookup keeps the append fast path proportional to the copy.

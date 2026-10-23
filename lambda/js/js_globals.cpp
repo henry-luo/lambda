@@ -90,6 +90,13 @@ static Item js_jube_namespace(const char* specifier) {
 }
 
 static Item js_get_jube_crypto_namespace(void) { return js_jube_namespace("crypto"); }
+static Item js_get_jube_crypto_key_constructor(void) {
+    RootFrame roots(1);
+    Rooted<Item> module(roots, js_get_jube_crypto_namespace());
+    JS_RETURN_IF_ERROR(module.get());
+    Item* slot = js_realm_intrinsic_slot_existing(JS_REALM_SLOT_CRYPTO_KEY_CONSTRUCTOR, 0);
+    return slot ? *slot : make_js_undefined();
+}
 // node-core owns Buffer, but its global must exist before node-core activates.
 static Item js_get_jube_buffer_namespace(void) { return js_jube_namespace("buffer"); }
 
@@ -144,6 +151,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"Response", JS_HOST_GROUP_HEADERS}, {"performance", JS_HOST_GROUP_PERFORMANCE},
     {"Performance", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceObserver", JS_HOST_GROUP_PERFORMANCE},
     {"PerformanceObserverEntryList", JS_HOST_GROUP_PERFORMANCE},
+    {"PerformanceEntry", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceMark", JS_HOST_GROUP_PERFORMANCE},
+    {"PerformanceMeasure", JS_HOST_GROUP_PERFORMANCE},
     {"MessageChannel", JS_HOST_GROUP_MESSAGING},
     {"MessagePort", JS_HOST_GROUP_MESSAGING}, {"URLSearchParams", JS_HOST_GROUP_URL},
     {"URL", JS_HOST_GROUP_URL}, {"DOMException", JS_HOST_GROUP_EXCEPTION},
@@ -165,6 +174,7 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"process", 7, js_get_profiled_process_object, false, false, JUBE_GLOBAL_NODE_ONLY},
     {"Buffer", 6, js_get_jube_buffer_namespace, true, false, JUBE_GLOBAL_NODE_ONLY},
     {"crypto", 6, js_get_jube_crypto_namespace, false},
+    {"CryptoKey", 9, js_get_jube_crypto_key_constructor, false},
     {"Math", 4, js_get_math_object_value, false},
     {"JSON", 4, js_get_json_object_value, false},
     {"Intl", 4, js_get_intl_object_value, false},
@@ -1556,15 +1566,6 @@ extern "C" double js_performance_time_origin_ms(void) {
 }
 JS_FORWARD_ITEM(js_performance_now, (void), push_d, (js_performance_now_ms()))
 
-static Item js_performance_noop_1(Item unused) {
-    return ItemNull;
-}
-
-static Item js_performance_noop_3(Item name, Item start_or_options, Item end_mark) {
-    (void)start_or_options;
-    (void)end_mark;
-    return ItemNull;
-}
 static JsPerformanceState* js_performance_resources(void) {
     JsPerformanceState* state = js_performance_state();
     if (!state || !js_root_vector_ensure_registered(state)) return nullptr;
@@ -1581,7 +1582,190 @@ static JsPerformanceState* js_performance_resources(void) {
         state->resource_secondary = js_array_new(0);
     if (get_type_id(state->resource_observers) != LMD_TYPE_ARRAY)
         state->resource_observers = js_array_new(0);
+    if (get_type_id(state->user_entries) != LMD_TYPE_ARRAY)
+        state->user_entries = js_array_new(0);
     return state;
+}
+
+// private records preserve timing metadata when public properties are shadowed.
+enum JsTimingField { TIMING_NAME, TIMING_TYPE, TIMING_START, TIMING_DURATION, TIMING_DETAIL, TIMING_FIELDS };
+static const char* const js_timing_fields[] = {"name", "entryType", "startTime", "duration", "detail"};
+static Item js_performance_insert_entry(Item buffer, Item entry);
+static void js_performance_observer_enqueue(Item entry);
+
+static Item js_timing_record(Item receiver, int required_class = 0) {
+    JsClass cls = js_class_id(receiver);
+    if ((cls != JS_CLASS_PERFORMANCE_MARK && cls != JS_CLASS_PERFORMANCE_MEASURE) ||
+            (required_class && cls != required_class))
+        return js_throw_type_error("Illegal PerformanceEntry receiver");
+    return js_native_private_array_state(receiver, cls, TIMING_FIELDS, "Illegal PerformanceEntry receiver");
+}
+
+static Item js_timing_value(Item entry, int field) {
+    JsClass cls = js_class_id(entry);
+    if (cls == JS_CLASS_PERFORMANCE_MARK || cls == JS_CLASS_PERFORMANCE_MEASURE) {
+        RootFrame roots(1);
+        Rooted<Item> record(roots, js_timing_record(entry));
+        JS_RETURN_IF_ERROR(record.get());
+        return js_elements_get_int(record.get(), field);
+    }
+    return js_get_key_cstr(entry, js_timing_fields[field]);
+}
+
+static Item js_timing_get(Item callee, Item receiver, Item*, int, uint64_t*) {
+    uintptr_t bits = js_fn_native((JsFunction*)callee.function)->target.bits;
+    RootFrame roots(1);
+    Rooted<Item> record(roots, js_timing_record(receiver, (int)(bits >> 8)));
+    JS_RETURN_IF_ERROR(record.get());
+    return js_elements_get_int(record.get(), bits & 255);
+}
+
+static Item js_timing_to_json(Item, Item receiver, Item*, int, uint64_t*) {
+    RootFrame roots(3);
+    Rooted<Item> record(roots, js_timing_record(receiver)), result(roots, ItemNull), value(roots, ItemNull);
+    JS_RETURN_IF_ERROR(record.get());
+    result.set(js_new_object());
+    for (int i = 0; i < TIMING_DETAIL; i++) {
+        value.set(js_elements_get_int(record.get(), i));
+        JS_RETURN_IF_ERROR(js_create_data_property(result.get(), js_name_item(js_timing_fields[i]), value.get()));
+    }
+    return result.get();
+}
+
+static Item js_timing_new(bool mark, Item name, double start, double duration, Item detail) {
+    RootFrame roots(7);
+    Rooted<Item> label(roots, name), data(roots, detail), record(roots, ItemNull), value(roots, ItemNull);
+    JsPerformanceState* state = js_performance_resources();
+    Rooted<Item> constructor(roots, mark ? state->mark_constructor : state->measure_constructor);
+    Rooted<Item> key(roots, js_private_key_for_class(constructor.get(), js_name_item("#UserTiming")));
+    JS_RETURN_IF_ERROR(key.get());
+    data.set(get_type_id(data.get()) == LMD_TYPE_UNDEFINED ? ItemNull : js_structuredClone(data.get()));
+    JS_RETURN_IF_ERROR(data.get());
+    record.set(js_array_new(0));
+    js_set_prototype(record.get(), ItemNull);
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), label.get()));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), js_name_item(mark ? "mark" : "measure")));
+    value.set(push_d(start)); JS_RETURN_IF_ERROR(js_array_push(record.get(), value.get()));
+    value.set(push_d(duration)); JS_RETURN_IF_ERROR(js_array_push(record.get(), value.get()));
+    JS_RETURN_IF_ERROR(js_array_push(record.get(), data.get()));
+    value.set(js_get_key_cstr(constructor.get(), "prototype"));
+    Rooted<Item> result(roots, js_native_private_array_object(mark ? JS_CLASS_PERFORMANCE_MARK :
+        JS_CLASS_PERFORMANCE_MEASURE, key.get(), record.get(), value.get()));
+    return result.get();
+}
+
+static Item js_timing_timestamp(Item value, bool allow_name, double* out) {
+    RootFrame roots(2);
+    Rooted<Item> input(roots, value), entry(roots, ItemNull);
+    TypeId type = get_type_id(input.get());
+    if (!allow_name || type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        input.set(js_to_number(input.get())); JS_RETURN_IF_ERROR(input.get());
+        item_try_to_double(input.get(), out);
+        if (!isfinite(*out)) return js_throw_type_error("Timing timestamps must be finite");
+        if (*out < 0) return js_throw_type_error("Timing timestamps must be nonnegative");
+        return ItemNull;
+    }
+    input.set(js_to_string(input.get())); JS_RETURN_IF_ERROR(input.get());
+    JsPerformanceState* state = js_performance_resources();
+    // the buffer is chronological; equal timestamps preserve insertion order.
+    for (int64_t i = js_array_length(state->user_entries); i > 0; i--) {
+        entry.set(js_elements_get_int(state->user_entries, i - 1));
+        if (js_class_id(entry.get()) == JS_CLASS_PERFORMANCE_MARK &&
+                it2b(js_strict_equal(input.get(), js_timing_value(entry.get(), TIMING_NAME)))) {
+            item_try_to_double(js_timing_value(entry.get(), TIMING_START), out);
+            return ItemNull;
+        }
+    }
+    return js_throw_value(js_domexception_new(js_name_item("The requested mark does not exist"), js_name_item("SyntaxError")));
+}
+
+static Item js_performance_mark_construct(Item, Item* args, int argc, Item target, uint64_t*) {
+    if (!argc) return js_throw_type_error("PerformanceMark requires a name");
+    RootFrame roots(5);
+    Rooted<Item> name(roots, args[0]), options(roots, argc > 1 ? args[1] : make_js_undefined());
+    Rooted<Item> detail(roots, ItemNull), value(roots, ItemNull), new_target(roots, target);
+    name.set(js_to_string(name.get())); JS_RETURN_IF_ERROR(name.get());
+    double start = js_performance_now_ms();
+    if (get_type_id(options.get()) != LMD_TYPE_UNDEFINED && get_type_id(options.get()) != LMD_TYPE_NULL) {
+        if (!js_is_object_value(options.get())) return js_throw_type_error("PerformanceMark options must be an object");
+        detail.set(js_get_key_cstr(options.get(), "detail")); JS_RETURN_IF_ERROR(detail.get());
+        value.set(js_get_key_cstr(options.get(), "startTime")); JS_RETURN_IF_ERROR(value.get());
+        if (get_type_id(value.get()) != LMD_TYPE_UNDEFINED)
+            JS_RETURN_IF_ERROR(js_timing_timestamp(value.get(), false, &start));
+    }
+    value.set(js_timing_new(true, name.get(), start, 0, detail.get()));
+    JS_RETURN_IF_ERROR(value.get());
+    return js_apply_constructed_default_prototype(value.get(), new_target.get(), JS_CLASS_OBJECT);
+}
+
+static Item js_performance_mark(Item receiver, Item* args, int argc) {
+    if (!js_performance_is_target(receiver)) return js_throw_type_error("mark requires a Performance receiver");
+    RootFrame roots(1);
+    JsPerformanceState* state = js_performance_resources();
+    Rooted<Item> entry(roots, js_construct_value(state->mark_constructor, args, argc,
+        state->mark_constructor, nullptr, false));
+    JS_RETURN_IF_ERROR(entry.get());
+    JS_RETURN_IF_ERROR(js_performance_insert_entry(state->user_entries, entry.get()));
+    js_performance_observer_enqueue(entry.get());
+    return entry.get();
+}
+
+static Item js_performance_measure(Item receiver, Item* args, int argc) {
+    if (!js_performance_is_target(receiver) || !argc)
+        return js_throw_type_error("measure requires a Performance receiver and a name");
+    RootFrame roots(7);
+    Rooted<Item> name(roots, args[0]), options(roots, argc > 1 ? args[1] : make_js_undefined());
+    Rooted<Item> start_value(roots, make_js_undefined()), end_value(roots, make_js_undefined());
+    Rooted<Item> duration_value(roots, make_js_undefined()), detail(roots, make_js_undefined()), entry(roots, ItemNull);
+    name.set(js_to_string(name.get())); JS_RETURN_IF_ERROR(name.get());
+    bool dictionary = js_is_object_value(options.get()) || get_type_id(options.get()) == LMD_TYPE_NULL;
+    if (dictionary && get_type_id(options.get()) != LMD_TYPE_NULL) {
+        detail.set(js_get_key_cstr(options.get(), "detail")); JS_RETURN_IF_ERROR(detail.get());
+        duration_value.set(js_get_key_cstr(options.get(), "duration")); JS_RETURN_IF_ERROR(duration_value.get());
+        end_value.set(js_get_key_cstr(options.get(), "end")); JS_RETURN_IF_ERROR(end_value.get());
+        start_value.set(js_get_key_cstr(options.get(), "start")); JS_RETURN_IF_ERROR(start_value.get());
+    } else if (!dictionary && argc > 1 && get_type_id(options.get()) != LMD_TYPE_UNDEFINED) {
+        start_value.set(js_to_string(options.get())); JS_RETURN_IF_ERROR(start_value.get());
+    }
+    bool has_start = get_type_id(start_value.get()) != LMD_TYPE_UNDEFINED;
+    bool has_end = get_type_id(end_value.get()) != LMD_TYPE_UNDEFINED;
+    bool has_duration = get_type_id(duration_value.get()) != LMD_TYPE_UNDEFINED;
+    bool populated = has_start || has_end || has_duration || get_type_id(detail.get()) != LMD_TYPE_UNDEFINED;
+    if (dictionary && populated && ((argc > 2) || (!has_start && !has_end) ||
+            (has_start && has_end && has_duration))) return js_throw_type_error("Invalid measure options");
+    double start = 0, end = js_performance_now_ms(), duration = 0;
+    if (argc > 2) {
+        end_value.set(js_to_string(args[2])); JS_RETURN_IF_ERROR(end_value.get()); has_end = true;
+    }
+    if (has_end) JS_RETURN_IF_ERROR(js_timing_timestamp(end_value.get(), true, &end));
+    if (has_start) JS_RETURN_IF_ERROR(js_timing_timestamp(start_value.get(), true, &start));
+    if (has_duration) {
+        JS_RETURN_IF_ERROR(js_timing_timestamp(duration_value.get(), false, &duration));
+        if (has_start) end = start + duration; else start = end - duration;
+    }
+    entry.set(js_timing_new(false, name.get(), start, end - start, detail.get()));
+    JS_RETURN_IF_ERROR(entry.get());
+    JsPerformanceState* state = js_performance_resources();
+    JS_RETURN_IF_ERROR(js_performance_insert_entry(state->user_entries, entry.get()));
+    js_performance_observer_enqueue(entry.get());
+    return entry.get();
+}
+
+static Item js_performance_clear_user(Item callee, Item receiver, Item* args, int argc, uint64_t*) {
+    if (!js_performance_is_target(receiver)) return js_throw_type_error("Timing clear requires a Performance receiver");
+    RootFrame roots(3);
+    Rooted<Item> name(roots, make_js_undefined()), keep(roots, js_array_new(0)), entry(roots, ItemNull);
+    if (argc) { name.set(js_to_string(args[0])); JS_RETURN_IF_ERROR(name.get()); }
+    bool mark = !js_fn_native((JsFunction*)callee.function)->target.bits;
+    JsPerformanceState* state = js_performance_resources();
+    for (int64_t i = 0; i < js_array_length(state->user_entries); i++) {
+        entry.set(js_elements_get_int(state->user_entries, i));
+        bool kind = js_class_id(entry.get()) == (mark ? JS_CLASS_PERFORMANCE_MARK : JS_CLASS_PERFORMANCE_MEASURE);
+        if (!kind || (argc && !it2b(js_strict_equal(name.get(), js_timing_value(entry.get(), TIMING_NAME)))))
+            JS_RETURN_IF_ERROR(js_array_push(keep.get(), entry.get()));
+    }
+    state->user_entries = keep.get();
+    return make_js_undefined();
 }
 
 extern "C" bool js_performance_is_target(Item value) {
@@ -1611,18 +1795,18 @@ static Item js_performance_clear_resources(void) {
     return make_js_undefined();
 }
 
-static Item js_performance_insert_resource(Item buffer, Item entry) {
+static Item js_performance_insert_entry(Item buffer, Item entry) {
     RootFrame roots(3);
     Rooted<Item> list(roots, buffer), value(roots, entry), previous(roots, ItemNull);
     double start = 0.0;
-    item_try_to_double(js_get_key_cstr(value.get(), "startTime"), &start);
+    item_try_to_double(js_timing_value(value.get(), TIMING_START), &start);
     int64_t index = js_array_length(list.get());
     JS_RETURN_IF_ERROR(js_array_push(list.get(), value.get()));
     // requests can finish out of order; timeline queries are ordered by startTime.
     while (index > 0) {
         previous.set(js_elements_get_int(list.get(), index - 1));
         double previous_start = 0.0;
-        item_try_to_double(js_get_key_cstr(previous.get(), "startTime"), &previous_start);
+        item_try_to_double(js_timing_value(previous.get(), TIMING_START), &previous_start);
         if (previous_start <= start) break;
         JS_RETURN_IF_ERROR(js_elements_set_int_direct(list.get(), index, previous.get()));
         index--;
@@ -1646,7 +1830,7 @@ static Item js_performance_resource_full_task(void) {
         while (copied < js_array_length(state->resource_secondary) &&
                 (uint64_t)js_array_length(state->resource_entries) < state->resource_limit) {
             entry.set(js_elements_get_int(state->resource_secondary, copied++));
-            JS_RETURN_IF_ERROR(js_performance_insert_resource(state->resource_entries, entry.get()));
+            JS_RETURN_IF_ERROR(js_performance_insert_entry(state->resource_entries, entry.get()));
         }
         remainder.set(js_array_new(0));
         for (int64_t i = copied; i < js_array_length(state->resource_secondary); i++)
@@ -1686,7 +1870,7 @@ extern "C" void js_performance_record_resource(const char* url, const char* init
     js_performance_observer_enqueue(entry.get());
     if (!state->resource_full_pending &&
             (uint64_t)js_array_length(state->resource_entries) < state->resource_limit) {
-        js_performance_insert_resource(state->resource_entries, entry.get());
+        js_performance_insert_entry(state->resource_entries, entry.get());
         return;
     }
     js_array_push(state->resource_secondary, entry.get());
@@ -1712,45 +1896,116 @@ static Item js_performance_filter_entries(Item source, Item name, Item type) {
     if (get_type_id(type_root.get()) != LMD_TYPE_UNDEFINED) {
         type_root.set(js_to_string(type_root.get()));
         JS_RETURN_IF_ERROR(type_root.get());
-        String* text = it2s(type_root.get());
-        if (text->len != 8 || memcmp(text->chars, "resource", 8)) return result.get();
     }
     for (int64_t i = 0; i < js_array_length(buffer.get()); i++) {
         entry.set(js_elements_get_int(buffer.get(), i));
         if (get_type_id(name_root.get()) != LMD_TYPE_UNDEFINED && !it2b(js_strict_equal(
-                name_root.get(), js_get_key_cstr(entry.get(), "name")))) continue;
-        JS_RETURN_IF_ERROR(js_array_push(result.get(), entry.get()));
+                name_root.get(), js_timing_value(entry.get(), TIMING_NAME)))) continue;
+        if (get_type_id(type_root.get()) != LMD_TYPE_UNDEFINED && !it2b(js_strict_equal(
+                type_root.get(), js_timing_value(entry.get(), TIMING_TYPE)))) continue;
+        JS_RETURN_IF_ERROR(js_performance_insert_entry(result.get(), entry.get()));
     }
     return result.get();
 }
 
-static Item js_performance_resource_entries(Item name, Item type) {
-    RootFrame roots(2);
+static Item js_performance_timeline_entries(Item name, Item type) {
+    RootFrame roots(7);
     Rooted<Item> name_root(roots, name), type_root(roots, type);
+    // normalize observable query arguments once before consulting both buffers.
+    if (get_type_id(name_root.get()) != LMD_TYPE_UNDEFINED) {
+        name_root.set(js_to_string(name_root.get())); JS_RETURN_IF_ERROR(name_root.get());
+    }
+    if (get_type_id(type_root.get()) != LMD_TYPE_UNDEFINED) {
+        type_root.set(js_to_string(type_root.get())); JS_RETURN_IF_ERROR(type_root.get());
+    }
     JsPerformanceState* state = js_performance_resources();
-    return state ? js_performance_filter_entries(state->resource_entries,
-        name_root.get(), type_root.get()) : ItemError;
+    if (!state) return ItemError;
+    Rooted<Item> left(roots, js_performance_filter_entries(state->resource_entries, name_root.get(), type_root.get()));
+    JS_RETURN_IF_ERROR(left.get());
+    Rooted<Item> right(roots, js_performance_filter_entries(state->user_entries, name_root.get(), type_root.get()));
+    JS_RETURN_IF_ERROR(right.get());
+    Rooted<Item> result(roots, js_array_new(0)), l(roots, ItemNull), r(roots, ItemNull);
+    int64_t i = 0, j = 0;
+    while (i < js_array_length(left.get()) || j < js_array_length(right.get())) {
+        l.set(js_elements_get_int(left.get(), i)); r.set(js_elements_get_int(right.get(), j));
+        double ls = 0, rs = 0;
+        if (i < js_array_length(left.get())) item_try_to_double(js_timing_value(l.get(), TIMING_START), &ls);
+        if (j < js_array_length(right.get())) item_try_to_double(js_timing_value(r.get(), TIMING_START), &rs);
+        bool take_left = j >= js_array_length(right.get()) || (i < js_array_length(left.get()) && ls <= rs);
+        JS_RETURN_IF_ERROR(js_array_push(result.get(), take_left ? l.get() : r.get()));
+        if (take_left) i++; else j++;
+    }
+    return result.get();
 }
 
 static Item js_performance_entries(void) {
-    return js_performance_resource_entries(make_js_undefined(), make_js_undefined());
+    if (!js_performance_is_target(js_get_this())) return js_throw_type_error("Timeline query requires a Performance receiver");
+    return js_performance_timeline_entries(make_js_undefined(), make_js_undefined());
 }
 
 static Item js_performance_illegal_constructor(void) {
     return js_throw_type_error("Illegal constructor");
 }
 
+static Item js_install_user_timing(Item global) {
+    RootFrame roots(6);
+    Rooted<Item> owner(roots, global), base(roots, js_install_native_constructor(owner.get(),
+        "PerformanceEntry", js_performance_illegal_constructor));
+    Rooted<Item> prototype(roots, js_get_key_cstr(base.get(), "prototype"));
+    Rooted<Item> constructor(roots, ItemNull), method(roots, ItemNull), key(roots, ItemNull);
+    JsPerformanceState* state = js_performance_resources();
+    state->entry_prototype = prototype.get();
+    js_set_key_cstr(prototype.get(), "constructor", base.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    for (int i = 0; i < TIMING_DETAIL; i++) {
+        method.set(js_new_native_payload_function(js_timing_get, i, 0));
+        js_install_native_accessor(prototype.get(), js_name_item(js_timing_fields[i]), method.get(), ItemNull, 0);
+    }
+    method.set(js_new_native_payload_function(js_timing_to_json, 0, 0));
+    js_set_function_name(method.get(), js_name_item("toJSON"));
+    js_set_key_cstr(prototype.get(), "toJSON", method.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("toJSON"));
+    js_set_key_default(prototype.get(), js_well_known_symbol_key(4), js_name_item("PerformanceEntry"));
+    js_mark_non_enumerable(prototype.get(), js_well_known_symbol_key(4));
+    const struct { const char* name; JsClass cls; } interfaces[] = {
+        {"PerformanceMark", JS_CLASS_PERFORMANCE_MARK}, {"PerformanceMeasure", JS_CLASS_PERFORMANCE_MEASURE}
+    };
+    for (const auto& definition : interfaces) {
+        bool mark = definition.cls == JS_CLASS_PERFORMANCE_MARK;
+        constructor.set(mark ? js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
+            js_performance_mark_construct, 1) : js_new_native_constructor(js_performance_illegal_constructor));
+        js_set_function_name(constructor.get(), js_name_item(definition.name));
+        js_set_prototype(constructor.get(), base.get());
+        prototype.set(js_new_object());
+        js_set_prototype(prototype.get(), state->entry_prototype);
+        JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+        js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+        js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+        method.set(js_new_native_payload_function(js_timing_get, (uintptr_t)TIMING_DETAIL | ((uintptr_t)definition.cls << 8), 0));
+        js_install_native_accessor(prototype.get(), js_name_item("detail"), method.get(), ItemNull, 0);
+        key.set(js_well_known_symbol_key(4));
+        js_set_key_default(prototype.get(), key.get(), js_name_item(definition.name));
+        js_mark_non_enumerable(prototype.get(), key.get());
+        if (mark) state->mark_constructor = constructor.get();
+        else state->measure_constructor = constructor.get();
+        js_set_key_cstr(owner.get(), definition.name, constructor.get());
+    }
+    return make_js_undefined();
+}
+
 static Item js_performance_entries_by_name(Item name, Item type) {
-    return js_performance_resource_entries(name, type);
+    if (!js_performance_is_target(js_get_this())) return js_throw_type_error("Timeline query requires a Performance receiver");
+    return js_performance_timeline_entries(name, type);
 }
 
 static Item js_performance_entries_by_type(Item type_item) {
+    if (!js_performance_is_target(js_get_this())) return js_throw_type_error("Timeline query requires a Performance receiver");
     RootFrame roots(3);
     Rooted<Item> type_string(roots, js_to_string(type_item));
     JS_RETURN_IF_ERROR(type_string.get());
     String* type = it2s(type_string.get());
     if (!type || type->len != 10 || memcmp(type->chars, "navigation", 10) != 0) {
-        return js_performance_resource_entries(make_js_undefined(), type_string.get());
+        return js_performance_timeline_entries(make_js_undefined(), type_string.get());
     }
     Rooted<Item> entries(roots, js_array_new(0)), navigation(roots, js_new_object());
     js_set_key_cstr(navigation.get(), "type", make_string_item("navigate"));
@@ -1759,7 +2014,7 @@ static Item js_performance_entries_by_type(Item type_item) {
     js_array_push(entries.get(), navigation.get());
     return entries.get();
 }
-enum JsPerformanceObserverSlot { PERFORMANCE_CALLBACK, PERFORMANCE_QUEUE, PERFORMANCE_ACTIVE,
+enum JsPerformanceObserverSlot { PERFORMANCE_CALLBACK, PERFORMANCE_QUEUE, PERFORMANCE_ACTIVE, PERFORMANCE_TYPES,
     PERFORMANCE_OBSERVER_SLOTS };
 
 static Item js_performance_observer_record(Item observer) {
@@ -1849,16 +2104,23 @@ static void js_performance_queue_observers(void) {
     js_setTimeout(js_new_native_function(js_performance_observer_deliver), (Item){.item = i2it(0)});
 }
 
+static unsigned js_performance_type_mask(Item type) {
+    return js_string_equals(type, "resource") ? 1 : js_string_equals(type, "mark") ? 2 :
+        js_string_equals(type, "measure") ? 4 : 0;
+}
+
 static void js_performance_observer_enqueue(Item entry) {
     RootFrame roots(3);
     Rooted<Item> value(roots, entry), record(roots, ItemNull), queue(roots, ItemNull);
     JsPerformanceState* state = js_performance_state();
     bool queued = false;
+    unsigned mask = js_performance_type_mask(js_timing_value(value.get(), TIMING_TYPE));
     for (int64_t i = 0; i < js_array_length(state->resource_observers); i++) {
         record.set(js_performance_observer_record(js_elements_get_int(state->resource_observers, i)));
         if (item_is_error(record.get())) return;
+        if (!(it2i(js_elements_get_int(record.get(), PERFORMANCE_TYPES)) & mask)) continue;
         queue.set(js_elements_get_int(record.get(), PERFORMANCE_QUEUE));
-        js_performance_insert_resource(queue.get(), value.get());
+        js_performance_insert_entry(queue.get(), value.get());
         queued = true;
     }
     if (queued) js_performance_queue_observers();
@@ -1878,22 +2140,24 @@ static Item js_performance_observer_observe(Item options) {
     bool multiple = get_type_id(types.get()) != LMD_TYPE_UNDEFINED;
     if (multiple == (get_type_id(type.get()) != LMD_TYPE_UNDEFINED))
         return js_throw_type_error("PerformanceObserver requires exactly one of entryTypes and type");
-    bool resources = false;
+    unsigned mask = 0;
     if (multiple) {
         types.set(js_iterable_to_array(types.get()));
         JS_RETURN_IF_ERROR(types.get());
         for (int64_t i = 0; i < js_array_length(types.get()); i++) {
             value.set(js_to_string(js_elements_get_int(types.get(), i)));
             JS_RETURN_IF_ERROR(value.get());
-            resources |= it2b(js_strict_equal(value.get(), js_name_item("resource")));
+            mask |= js_performance_type_mask(value.get());
         }
     } else {
         type.set(js_to_string(type.get()));
         JS_RETURN_IF_ERROR(type.get());
-        resources = it2b(js_strict_equal(type.get(), js_name_item("resource")));
+        mask = js_performance_type_mask(type.get());
     }
-    if (!resources) return make_js_undefined();
+    if (!mask) return make_js_undefined();
     JsPerformanceState* state = js_performance_resources();
+    if (!multiple) mask |= (unsigned)it2i(js_elements_get_int(record.get(), PERFORMANCE_TYPES));
+    js_elements_set_int_direct(record.get(), PERFORMANCE_TYPES, (Item){.item = i2it(mask)});
     if (!it2b(js_elements_get_int(record.get(), PERFORMANCE_ACTIVE))) {
         js_array_push(state->resource_observers, observer.get());
         js_elements_set_int_direct(record.get(), PERFORMANCE_ACTIVE, (Item){.item = ITEM_TRUE});
@@ -1903,8 +2167,10 @@ static Item js_performance_observer_observe(Item options) {
         JS_RETURN_IF_ERROR(value.get());
         if (js_is_truthy(value.get())) {
             types.set(js_elements_get_int(record.get(), PERFORMANCE_QUEUE));
-            for (int64_t i = 0; i < js_array_length(state->resource_entries); i++)
-                js_performance_insert_resource(types.get(), js_elements_get_int(state->resource_entries, i));
+            value.set(js_performance_timeline_entries(make_js_undefined(), type.get()));
+            JS_RETURN_IF_ERROR(value.get());
+            for (int64_t i = 0; i < js_array_length(value.get()); i++)
+                JS_RETURN_IF_ERROR(js_performance_insert_entry(types.get(), js_elements_get_int(value.get(), i)));
             if (js_array_length(types.get())) js_performance_queue_observers();
         }
     }
@@ -1922,6 +2188,7 @@ extern "C" Item js_performance_observer_new(Item callback) {
     js_array_push(record.get(), callback_root.get());
     js_array_push(record.get(), js_array_new(0));
     js_array_push(record.get(), (Item){.item = ITEM_FALSE});
+    js_array_push(record.get(), (Item){.item = i2it(0)});
     NameRef key = mvp_lmd_internal_name(LMD_INTERNAL_PERFORMANCE_OBSERVER);
     return js_native_private_array_object(JS_CLASS_PERFORMANCE_OBSERVER,
         Item{.item = s2it(key)}, record.get(), prototype.get());
@@ -13084,53 +13351,67 @@ extern "C" Item js_option_new(Item text_arg, Item value_arg) {
     return obj;
 }
 
-// DOMException(message, nameOrOptions) constructor
+static Item js_domexception_constructor(void) {
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
+    Item* retained = js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_CONSTRUCTOR, 0);
+    if (retained->item) return *retained;
+    RootFrame roots(3);
+    Rooted<Item> constructor(roots, js_new_native_constructor(js_domexception_new));
+    Rooted<Item> prototype(roots, js_new_object());
+    Rooted<Item> parent(roots, js_get_intrinsic_prototype_for_class(JS_CLASS_ERROR));
+    JS_RETURN_IF_ERROR(constructor.get());
+    JS_RETURN_IF_ERROR(parent.get());
+    js_set_function_name(constructor.get(), js_name_item("DOMException"));
+    js_set_prototype(prototype.get(), parent.get());
+    JS_RETURN_IF_ERROR(js_initialize_native_constructor_prototype(constructor.get(), prototype.get()));
+    js_set_key_cstr(prototype.get(), "constructor", constructor.get());
+    js_mark_non_enumerable(prototype.get(), js_name_item("constructor"));
+    Item tag = js_well_known_symbol_key(4);
+    js_set_key_default(prototype.get(), tag, js_name_item("DOMException"));
+    js_mark_non_enumerable(prototype.get(), tag);
+    js_mark_non_writable(prototype.get(), tag);
+    // internal factories retain the realm identity even after the global is replaced.
+    *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0) = prototype.get();
+    *retained = constructor.get();
+    return constructor.get();
+}
+
+// DOMException(message, nameOrOptions) constructor and internal factory.
 extern "C" Item js_domexception_new(Item message, Item name_arg) {
-    RootFrame roots(1);
-    Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
-    // D5.3.3: constructing the exception's names and fields may collect its receiver.
-    Item obj = object_root.get();
-
-    // message (default: "")
-    if (get_type_id(message) == LMD_TYPE_STRING) {
-        js_set_key_cstr(obj, "message", message);
-    } else {
-        js_set_key_cstr(obj, "message", make_string_item(""));
-    }
-
-    // name can be a string or an options object { name, cause }
-    Item actual_name = make_string_item("Error");
+    RootFrame roots(7);
+    Rooted<Item> message_root(roots, message), options(roots, name_arg);
+    Rooted<Item> constructor(roots, js_domexception_constructor());
+    JS_RETURN_IF_ERROR(constructor.get());
+    Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
+    // D5.3.3: field conversion/getters may collect the unpublished exception.
+    js_set_prototype(object.get(),
+        *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0));
+    Rooted<Item> actual_name(roots, js_name_item("Error"));
+    Rooted<Item> cause(roots, make_js_undefined()), value(roots, ItemNull);
+    js_set_key_cstr(object.get(), "message", get_type_id(message_root.get()) == LMD_TYPE_STRING
+        ? message_root.get() : js_name_item(""));
     bool has_cause = false;
-    Item cause_val = make_js_undefined();
-
-    TypeId name_type = get_type_id(name_arg);
-    if (name_type == LMD_TYPE_STRING) {
-        actual_name = name_arg;
-    } else if (name_type == LMD_TYPE_MAP) {
-        // options object: { name: "...", cause: ... }
-        Item name_prop = js_get_key_cstr(name_arg, "name");
-        if (get_type_id(name_prop) == LMD_TYPE_STRING) {
-            actual_name = name_prop;
-        }
-        // check if 'cause' is an own property
-        Item has_cause_item = js_has_own_property(name_arg, make_string_item("cause"));
-        if (get_type_id(has_cause_item) == LMD_TYPE_BOOL && it2b(has_cause_item)) {
-            has_cause = true;
-            cause_val = js_get_key_cstr(name_arg, "cause");
+    if (get_type_id(options.get()) == LMD_TYPE_STRING) {
+        actual_name.set(options.get());
+    } else if (get_type_id(options.get()) == LMD_TYPE_MAP) {
+        value.set(js_get_key_cstr(options.get(), "name"));
+        JS_RETURN_IF_ERROR(value.get());
+        if (get_type_id(value.get()) == LMD_TYPE_STRING) actual_name.set(value.get());
+        value.set(js_has_own_property(options.get(), js_name_item("cause")));
+        JS_RETURN_IF_ERROR(value.get());
+        has_cause = get_type_id(value.get()) == LMD_TYPE_BOOL && it2b(value.get());
+        if (has_cause) {
+            cause.set(js_get_key_cstr(options.get(), "cause"));
+            JS_RETURN_IF_ERROR(cause.get());
         }
     }
-
-    js_set_key_cstr(obj, "name", actual_name);
-
-    // set cause if present
-    if (has_cause) {
-        js_set_key_cstr(obj, "cause", cause_val);
-    }
+    js_set_key_cstr(object.get(), "name", actual_name.get());
+    if (has_cause) js_set_key_cstr(object.get(), "cause", cause.get());
 
     // DOMException legacy code mappings
     int code = 0;
-    if (get_type_id(actual_name) == LMD_TYPE_STRING) {
-        String* ns = it2s(actual_name);
+    if (get_type_id(actual_name.get()) == LMD_TYPE_STRING) {
+        String* ns = it2s(actual_name.get());
         if (ns) {
             struct { const char* name; int code; } codes[] = {
                 {"IndexSizeError", 1}, {"HierarchyRequestError", 3},
@@ -13153,12 +13434,9 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
             }
         }
     }
-    js_set_key_cstr(obj, "code", (Item){.item = i2it(code)});
-
-    // stack property (empty for DOMException)
-    js_set_key_cstr(obj, "stack", make_string_item(""));
-
-    return obj;
+    js_set_key_cstr(object.get(), "code", (Item){.item = i2it(code)});
+    js_set_key_cstr(object.get(), "stack", js_name_item(""));
+    return object.get();
 }
 
 // forward declaration
@@ -14089,8 +14367,22 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             performance->object = perf_root.get();
             js_set_key_cstr(perf_root.get(), "onresourcetimingbufferfull", ItemNull);
             if (!shared) js_install_native_method(perf_root.get(), "now", js_performance_now);
-            js_install_native_method(perf_root.get(), "mark", js_performance_noop_1);
-            js_install_native_method(perf_root.get(), "measure", js_performance_noop_3);
+            JS_RETURN_IF_ERROR(js_install_user_timing(global.get()));
+            const struct { const char* name; JsNativeThisSpan body; } timing_methods[] = {
+                {"mark", js_performance_mark}, {"measure", js_performance_measure}
+            };
+            for (const auto& method : timing_methods) {
+                observer_root.set(js_new_native_this_span_function(method.body));
+                js_set_formal_length(observer_root.get(), 1);
+                js_set_function_name(observer_root.get(), js_name_item(method.name));
+                js_set_key_cstr(perf_root.get(), method.name, observer_root.get());
+            }
+            observer_root.set(js_new_native_payload_function(js_performance_clear_user, 0, 0));
+            js_set_function_name(observer_root.get(), js_name_item("clearMarks"));
+            js_set_key_cstr(perf_root.get(), "clearMarks", observer_root.get());
+            observer_root.set(js_new_native_payload_function(js_performance_clear_user, 1, 0));
+            js_set_function_name(observer_root.get(), js_name_item("clearMeasures"));
+            js_set_key_cstr(perf_root.get(), "clearMeasures", observer_root.get());
             js_install_native_method(perf_root.get(), "getEntries", js_performance_entries);
             js_install_native_method(perf_root.get(), "getEntriesByName",
                 js_performance_entries_by_name);
@@ -14122,7 +14414,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             // libraries capture IDL methods before using the instance. Keep one
             // namespace and move its existing implementations to that prototype.
             static const char* const methods[] = {
-                "now", "mark", "measure", "getEntries", "getEntriesByName", "getEntriesByType",
+                "now", "mark", "measure", "clearMarks", "clearMeasures", "getEntries", "getEntriesByName", "getEntriesByType",
                 "clearResourceTimings", "setResourceTimingBufferSize"
             };
             for (const char* name : methods) {
@@ -14141,6 +14433,8 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             js_install_native_method(performance->observer_prototype, "takeRecords", js_performance_observer_take_records);
             js_set_key_default(performance->observer_prototype, js_well_known_symbol_key(4), js_name_item("PerformanceObserver"));
             supported_types_root.set(js_array_new(0));
+            js_array_push(supported_types_root.get(), js_name_item("mark"));
+            js_array_push(supported_types_root.get(), js_name_item("measure"));
             js_array_push(supported_types_root.get(), js_name_item("resource"));
             js_object_freeze(supported_types_root.get());
             js_set_key_cstr(observer_root.get(), "supportedEntryTypes", supported_types_root.get());
@@ -14195,15 +14489,10 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
     case JS_HOST_GROUP_EXCEPTION: {
         // globalThis.DOMException constructor
         {
-            RootFrame dom_exception_roots(2);
-            Rooted<Item> ctor_root(dom_exception_roots,
-                js_new_native_constructor(js_domexception_new));
-            Rooted<Item> proto_root(dom_exception_roots, js_new_object());
-            // D5.4.3: neither side of the constructor/prototype cycle is
-            // published when the first allocating property store runs.
-            js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-            js_set_key_cstr(ctor_root.get(), "prototype", proto_root.get());
-            js_set_key_cstr(global.get(), "DOMException", ctor_root.get());
+            RootFrame dom_exception_roots(1);
+            Rooted<Item> constructor(dom_exception_roots, js_domexception_constructor());
+            JS_RETURN_IF_ERROR(constructor.get());
+            js_set_key_cstr(global.get(), "DOMException", constructor.get());
         }
         break;
     }
@@ -16506,6 +16795,14 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     js_intrinsic_state_ensure_epoch();
     JsClass cls = (JsClass)class_id;
     if (cls == JS_CLASS_TYPED_ARRAY) return js_get_typed_array_base_proto();
+    if (cls == JS_CLASS_PERFORMANCE_ENTRY) return js_performance_resources()->entry_prototype;
+    if (cls == JS_CLASS_PERFORMANCE_MARK || cls == JS_CLASS_PERFORMANCE_MEASURE) {
+        JsPerformanceState* state = js_performance_resources();
+        return js_get_constructor_intrinsic_prototype(cls == JS_CLASS_PERFORMANCE_MARK ? state->mark_constructor : state->measure_constructor);
+    }
+    if (cls == JS_CLASS_INTL_LOCALE || cls == JS_CLASS_INTL_NUMBER_FORMAT)
+        return js_get_constructor_intrinsic_prototype(js_get_key_cstr(js_get_intl_object_value(),
+            cls == JS_CLASS_INTL_LOCALE ? "Locale" : "NumberFormat"));
     const char* name = NULL;
     int len = 0;
     if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;

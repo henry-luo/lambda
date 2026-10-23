@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "../lib/file.h"
 #include "state_store_internal.hpp"
 #include "view.hpp"
 #include "layout.hpp"
@@ -3389,8 +3390,18 @@ void media_view_state_reset(MediaViewState* media) {
     if (!media) return;
     if (media->player && media->destroy) media->destroy(media->player);
     strbuf_free(media->sources);
+    if (media->source_owned && media->source) file_delete(media->source);
     mem_free(media->source);
+    // current volume/muting survive resource selection; pending play jobs observe a new generation.
+    uint64_t generation = media->source_generation + 1;
+    bool initialized = media->properties_initialized, muted = media->muted, override_muted = media->muted_override;
+    float volume = media->volume;
     memset(media, 0, sizeof(*media));
+    media->source_generation = generation;
+    media->properties_initialized = initialized;
+    media->muted = muted;
+    media->muted_override = override_muted;
+    media->volume = volume;
 }
 
 typedef enum {

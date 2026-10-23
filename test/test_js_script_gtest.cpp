@@ -5,6 +5,7 @@
 #include "../lib/strbuf.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/module_registry.h"
+#include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_function.hpp"
@@ -1095,6 +1096,48 @@ TEST(JsInterpreter, PreservesMutableClosuresOnTheSharedHeap) {
     ASSERT_FALSE(item_is_error(after_gc));
     EXPECT_EQ(js_strict_equal(after_gc, flt2it(44.0)).item, b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, CapturedStringAppendUsesBoundedLargeAllocations) {
+    JsExecutionBackendScope backend("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char warmup[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, warmup,
+        sizeof(warmup) - 1, "append-warmup.js", NULL)));
+    uint64_t before = gc_heap_get_tune_stats(runtime.eval_context->heap->gc).large_add_calls;
+    const char source[] =
+        "function render(){let output='';const piece='x'.repeat(64);"
+        "function emit(piece){output+=piece;}"
+        "for(let i=0;i<16000;i++)emit(piece);return output.length;}render();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "captured-string-append.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_TRUE(js_is_truthy(js_strict_equal(result, flt2it(1024000.0))));
+    // copying every growing prefix formerly allocated about 16,000 large strings.
+    uint64_t after = gc_heap_get_tune_stats(runtime.eval_context->heap->gc).large_add_calls;
+    EXPECT_LT(after - before, 128u);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, NumericPredicateCallsDoNotAllocateLexicalEnvironments) {
+    JsExecutionBackendScope backend("ast");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char warmup[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, warmup,
+        sizeof(warmup) - 1, "predicate-warmup.js", NULL)));
+    size_t before = runtime.eval_context->heap->gc->object_count;
+    const char source[] =
+        "function count(){function digit(x){return x>=48&&x<=57;}"
+        "var hits=0;var i=0;for(;i<16000;i++){if(digit(i&127))hits++;}return hits;}count();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "numeric-predicate.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_TRUE(js_is_truthy(js_strict_equal(result, flt2it(1250.0))));
+    // a parameter-only expression needs no escaping lexical record per call.
+    EXPECT_LT(runtime.eval_context->heap->gc->object_count - before, 256u);
     runtime_cleanup(&runtime);
 }
 
@@ -2721,6 +2764,56 @@ TEST(JsInterpreter, UsesSharedCommonJsResolverAndModuleRegistry) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, LargeModuleExportsKeepBoundedStorageAcrossKindChanges) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char warmup[] = "export const warmup = true;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_es_module_source(&runtime,
+        warmup, sizeof(warmup) - 1, "temp/exports-warmup.mjs", NULL)));
+    size_t before = 0, after = 0;
+    pool_get_stats(runtime.eval_context->pool, &before, NULL);
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    for (unsigned i = 0; i < 1024; i++)
+        strbuf_append_format(source, "export function f%u(){return %u;}\n", i, i);
+    strbuf_append_str(source, "export let current; export {current as alias}; "
+        "export function update(value){current=value;} "
+        "export let sawTdz=false; try{readLate();}catch(e){sawTdz=e instanceof ReferenceError;} "
+        "export function readLate(){return late;} export let late=1;");
+    Item result = js_interp_execute_es_module_source(&runtime, source->str,
+        source->length, "temp/exports-large.mjs", NULL);
+    strbuf_free(source);
+    ASSERT_FALSE(item_is_error(result));
+    pool_get_stats(runtime.eval_context->pool, &after, NULL);
+    // 1,024 packed undefined→function retags formerly copied over a million shape entries.
+    EXPECT_LT(after - before, (size_t)32 * 1024 * 1024);
+    {
+        RootFrame roots(4);
+        Rooted<Item> namespace_obj(roots, result);
+        Rooted<Item> update(roots, js_get_key_cstr(namespace_obj.get(), "update"));
+        Rooted<Item> value(roots, ItemNull), observed(roots, ItemNull);
+        EXPECT_EQ(js_get_key_cstr(namespace_obj.get(), "sawTdz").item, b2it(true));
+        observed.set(js_get_key_cstr(namespace_obj.get(), "f1023"));
+        ASSERT_EQ(get_type_id(observed.get()), LMD_TYPE_FUNC);
+        observed.set(js_call_function(observed.get(), make_js_undefined(), NULL, 0));
+        EXPECT_TRUE(js_is_truthy(js_strict_equal(observed.get(), flt2it(1023.0))));
+        for (unsigned kind = 0; kind < 6; kind++) {
+            value.set(kind == 0 ? make_js_undefined() : kind == 1 ? (Item){.item = b2it(false)} :
+                kind == 2 ? flt2it(42.5) : kind == 3 ? js_make_string("changed") :
+                kind == 4 ? js_new_object() : update.get());
+            Item argument = value.get();
+            ASSERT_FALSE(item_is_error(js_call_function(update.get(), make_js_undefined(), &argument, 1)));
+            heap_gc_collect();
+            const char* names[] = {"current", "alias"};
+            for (const char* name : names) {
+                observed.set(js_get_key_cstr(namespace_obj.get(), name));
+                EXPECT_TRUE(js_is_truthy(js_strict_equal(observed.get(), value.get())));
+            }
+        }
+    }
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -2803,6 +2896,31 @@ TEST(JsInterpreter, KeepsAliasedExportsSeparateFromLoopShadowBindings) {
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, BrowserRequireDoesNotEnterImplicitNodeLoader) {
+    for (const char* backend : {"ast", "mir"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_document_base_url = "test/js/interp_esm/document.html";
+        const char source[] = R"JS(
+            globalThis.__browser_require = typeof require === 'undefined';
+            var evaluated = false;
+            try { require((evaluated = true, 'crypto')); globalThis.__browser_require = false; }
+            catch (error) { globalThis.__browser_require &&= error instanceof ReferenceError && !evaluated; }
+            globalThis.require = function (name) { return 'browser:' + name; };
+            globalThis.__browser_require &&= require('module') === 'browser:module';
+            delete globalThis.require;
+            try { require('crypto'); globalThis.__browser_require = false; }
+            catch (error) { globalThis.__browser_require &&= error instanceof ReferenceError; }
+        )JS";
+        Item result = transpile_js_to_mir(&runtime, source, "<inline-script-0>", NULL);
+        ASSERT_FALSE(item_is_error(result));
+        EXPECT_EQ(js_get_key_cstr(js_get_global_this(), "__browser_require").item, b2it(true));
+        runtime_cleanup(&runtime);
+    }
 }
 
 TEST(JsInterpreter, SupportsModuleMetadataAndInlineDynamicImports) {

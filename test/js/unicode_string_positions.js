@@ -42,3 +42,38 @@ for (let pass = 0; pass < 12; pass++) {
     }
 }
 console.log('unicode-source-replacement-ok');
+
+// RegExp uses the same source cursor in both directions and through captures.
+const scan = ('é😀a,').repeat(128) + '終';
+const expression = /(é)(😀)a,/gu;
+let match;
+let count = 0;
+while ((match = expression.exec(scan)) !== null) {
+    if (match.index !== count * 5 || expression.lastIndex !== count * 5 + 5 ||
+            match[1] !== 'é' || match[2] !== '😀') throw new Error('RegExp cursor lost UTF-16 coordinates');
+    count++;
+}
+if (count !== 128 || expression.lastIndex !== 0) throw new Error('RegExp cursor failed at end');
+expression.lastIndex = 5;
+if (expression.exec(scan).index !== 5) throw new Error('RegExp cursor failed after backward seek');
+console.log('unicode-regexp-cursor-ok');
+const split = scan.split(/,/);
+if (split.length !== 129 || split[0] !== 'é😀a' || split[128] !== '終')
+    throw new Error('RegExp split lost a code unit');
+if (scan.split(/(,)/).length !== 257 || '😀b'.split(/(?:)/).join('|') !== '\uD83D|\uDE00|b')
+    throw new Error('RegExp split lost captures or a surrogate boundary');
+console.log('unicode-regexp-split-ok');
+
+// retain an earlier value while large concatenations cross allocation safepoints.
+const concatChunk = 'é😀x'.repeat(64);
+let assembled = 'prefix:';
+let earlier = '';
+for (let index = 0; index < 64; index++) {
+    if (index === 32) earlier = assembled;
+    assembled += concatChunk;
+}
+if (assembled.length !== 7 + 64 * 256 || earlier.length !== 7 + 32 * 256 ||
+        assembled.slice(7, 11) !== 'é😀x' || earlier.slice(-4) !== 'é😀x' ||
+        ('' + assembled) !== assembled || (earlier + '') !== earlier)
+    throw new Error('String concatenation lost immutable payloads');
+console.log('unicode-concat-allocation-ok');

@@ -4051,6 +4051,7 @@ static TypeId mir_expr_semantic_type(const AstNode* node) {
 // keeps the boxed truthiness boundary (S3, D2.4.1-D2.4.3).
 static TypeId mir_native_arithmetic_operand_type(MirTranspiler* mt,
         AstNode* node);
+static bool mir_equality_needs_item(MirTranspiler* mt, AstBinaryNode* binary);
 
 // T21-3b: a `var` local passed to an untyped `var` parameter is written back
 // through the CW33 home transport, which needs the binding to be a rooted
@@ -4108,7 +4109,9 @@ static bool mir_numeric_comparison_native_lane(MirTranspiler* mt, AstNode* node)
         comparison->op == OPERATOR_NE || comparison->op == OPERATOR_LT ||
         comparison->op == OPERATOR_LE || comparison->op == OPERATOR_GT ||
         comparison->op == OPERATOR_GE;
-    if (!ordered) return false;
+    // equality can join a native numeric success with an Item error; logical
+    // consumers must share the emitter's boxing decision (S3.4, D2.4.1).
+    if (!ordered || mir_equality_needs_item(mt, comparison)) return false;
     TypeId left_type = mir_native_arithmetic_operand_type(mt, comparison->left);
     TypeId right_type = mir_native_arithmetic_operand_type(mt, comparison->right);
     return is_native_numeric_type_id(left_type) &&

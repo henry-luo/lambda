@@ -142,6 +142,33 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   (**S1.11**, **D1.3v3**, **D5.3.2–D5.3.5**, **D8.4.1v2**). *Measured
   (Tune12):* `knucleotide` is 0.1400x control; direct 8K-key update/reinsert
   probes fall from 132/259 ms to 4/7 ms.
+- **AST primitive numeric indices.** Computed reads and simple writes with
+  primitive Number indices reuse the existing dense-array and TypedArray
+  kernels before interning a property string. Proxies, object keys, super,
+  host hooks, holes, and descriptor overlays retain their semantic continuation;
+  the shared TypedArray setter revalidates bounds after value coercion.
+  Receiver, key, and value ownership remains precise (**D5.3.3**). An optimized
+  196,608-iteration Uint32Array/Uint8Array indexing probe fell from 634 ms to
+  92 ms with the same checksum. Numeric indexing alone did not resolve the
+  overview page's script watchdog; this measurement covers the isolated kernel.
+- **AST private string append ownership.** Discarded `+=` statements in private
+  lexical bindings reuse `fn_strcat` and its geometric GC buffer. Ordinary
+  environment reads call `fn_string_freeze` before an alias can escape, including
+  loop handoff reads. A pending append marks its precisely rooted old buffer as
+  borrowed while evaluating the RHS, so reentrant appends copy that snapshot;
+  cleanup releases that borrow on success or throw. The saturating counter also
+  preserves snapshots when parked appends resume out of order. Property, global,
+  module, parameter, hosted, and observable eval-completion assignments retain
+  their general operation. String values remain immutable to readers
+  (**S1.4**, **S1.6**, **D5.3.3**, **D8.1.3v29**).
+- **AST numeric expression calls.** A definition-owned proof admits a single
+  return expression over numeric parameters, numeric/boolean literals,
+  comparisons, logical operators, and conditionals. Calls with primitive Number
+  arguments borrow the call activation's rooted arguments and use the ordinary
+  AST evaluator without allocating a lexical environment. Coercion, captures,
+  mutation, non-simple parameters, object environments, and hosted calls keep
+  their general path. Literal-cache allocation retains the same callee and
+  argument owners (**S1.6**, **D5.3.3**).
 
 ### 2.4 Runtime builtin tier
 
@@ -163,6 +190,15 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   benchmark ratio.
 - **TypedArray ArrayNum bulk paths.** Same-type bulk copy uses the shared ArrayNum byte kernels and cross-type conversion hoists element policy out of the loop — `js_typed_array_try_raw_set_same_type`, `js_typed_array_raw_copy_same_type`, and `js_typed_array_raw_copy_reversed`. The former private env-gated raw family is retired; detach/out-of-bounds is validated once where no user code can run between check and access, and callback methods revalidate at the spec points. *Owner:* [JS_12 — TypedArrays](JS_12_TypedArrays.md). *Measured (earlier Tune4 T4-P2, unrelated to callable Tune4):* compliance suites were neutral, while large bulk workloads improved materially.
 - **Regex property-walk cursor.** `js_regexp_test_property_all` (`js_runtime.cpp:15653`) threads a resumable range cursor (`js_regex_sorted_range_contains_cursor`, `:12656`) through the generated-property walk for `^\p{X}+$` / `^\P{X}+$` forms; near-monotonic input advances the cursor in O(1), collapsing a per-code-point binary search to near-linear. The cursor is engaged only for the generated gc/script/scx/binary kinds (`:15674`); other kinds keep the flat binary search. *Owner:* [JS_11 — RegExp](JS_11_RegExp.md). *Measured (Tune3 §2.5, kept):* the generated-property test cluster (439 tests) fell 61.84 s → 37.67 s (−39%) on a quiet machine, with zero flipped exit codes across 583 property tests.
+- **RegExp UTF-16 coordinates.** Native `exec` and `test` reuse the existing
+  precisely rooted string-position cursor for byte/code-unit conversion in
+  both directions (**D5.3.3**, **D5.3.5**). Repeated sticky probes during split
+  previously rescanned the entire prefix; Atlas profiles spent almost all
+  sampled execution time in that conversion. A release-profile control
+  splitting 120,000 ASCII characters followed by an accented character fell
+  from 4,300 ms to 350 ms with the same result. This is an isolated workload
+  measurement, not a whole-page speedup. Unicode position and split fixtures
+  cover captures, backward seeks and surrogate boundaries.
 - **Tune12 admitted bulk RegExp match/replace.**
   `js_regexp_symbol_match` and `js_regexp_symbol_replace` (`js_runtime.cpp`)
   select a bulk RE2 loop only for primitive ASCII input, an ordinary global

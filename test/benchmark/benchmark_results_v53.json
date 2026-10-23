@@ -79,7 +79,131 @@
     "typed_variants": true,
     "legacy_variants": false,
     "mir_key_source": "untyped <bench>.ls",
-    "finished_at": "2026-10-23T04:22:22"
+    "finished_at": "2026-10-23T04:22:22",
+    "merged_engines": [
+      {
+        "engines": [
+          "mir",
+          "mir_typed",
+          "mir_typed_auto_e2e"
+        ],
+        "source": "test/benchmark/benchmark_results_v53_mir_fix.json",
+        "source_started_at": "2026-10-23T07:28:41",
+        "source_finished_at": "2026-10-23T07:29:03",
+        "source_runs": 3,
+        "source_platform": "Darwin arm64",
+        "source_lambda_commit": "f3515ebcf316c5ff8e4ec5ab91cf524de1dfe9e7",
+        "merged_at": "2026-10-23T07:29:25",
+        "cells": 3,
+        "note": "Repaired three failed cells: awfy/queens MIR untyped workload time, and text/jq_bf MIR typed workload and auto-tier process times. Queens now preserves boxed equality errors in logical consumers (S3.4, D2.4.1-D2.4.3); jq_bf2 declares and propagates slice errors (S7.5.3v2, S7.6.3v2). Release archive `test/benchmark/exe/lambda-v53-f3515ebcf3` has SHA-256 `67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290` and includes the uncommitted repair recorded in `test/benchmark/exe/lambda-v53-f3515ebcf3-sources.patch` (SHA-256 `b4ca93ff90e6adc02b38d6c0a759810ae345943d2afb8d44b400bc24d41223bc`). The focused capture retains fresh Node controls and both MIR variants after a 45-second cooldown; VS Code's C++ indexer was observed using about one core during the pre-gate. All original successful measurements retain their original provenance.",
+        "source_json_sha256": "7468c96e62fd15840026ad99c4fa6256900dac56c7ed972428bd53b57534068f",
+        "source_lambda_archive": "test/benchmark/exe/lambda-v53-f3515ebcf3",
+        "source_lambda_archive_sha256": "67c80a82cad137524222a5fd192b8c0d78404328e73394107bd27d489e9f0290",
+        "source_patch": {
+          "path": "test/benchmark/exe/lambda-v53-f3515ebcf3-sources.patch",
+          "sha256": "b4ca93ff90e6adc02b38d6c0a759810ae345943d2afb8d44b400bc24d41223bc",
+          "dirty_source": true
+        },
+        "replaced_cells": [
+          {
+            "suite": "awfy",
+            "benchmark": "queens",
+            "engine": "mir",
+            "value": null,
+            "status": "exit_-6",
+            "status_detail": {
+              "status_counts": {
+                "exit_-6": 3
+              },
+              "samples": [
+                {
+                  "run": 1,
+                  "wall_ms": 111.071083,
+                  "exec_ms": null,
+                  "status": "exit_-6"
+                },
+                {
+                  "run": 2,
+                  "wall_ms": 115.337583,
+                  "exec_ms": null,
+                  "status": "exit_-6"
+                },
+                {
+                  "run": 3,
+                  "wall_ms": 122.1235,
+                  "exec_ms": null,
+                  "status": "exit_-6"
+                }
+              ]
+            }
+          },
+          {
+            "suite": "text",
+            "benchmark": "jq_bf",
+            "engine": "mir_typed",
+            "value": null,
+            "status": "exit_1",
+            "status_detail": {
+              "status_counts": {
+                "exit_1": 3
+              },
+              "samples": [
+                {
+                  "run": 1,
+                  "wall_ms": 31.134917,
+                  "exec_ms": null,
+                  "status": "exit_1"
+                },
+                {
+                  "run": 2,
+                  "wall_ms": 29.844584,
+                  "exec_ms": null,
+                  "status": "exit_1"
+                },
+                {
+                  "run": 3,
+                  "wall_ms": 29.686417,
+                  "exec_ms": null,
+                  "status": "exit_1"
+                }
+              ]
+            }
+          },
+          {
+            "suite": "text",
+            "benchmark": "jq_bf",
+            "engine": "mir_typed_auto_e2e",
+            "value": null,
+            "status": "exit_1",
+            "status_detail": {
+              "status_counts": {
+                "exit_1": 3
+              },
+              "samples": [
+                {
+                  "run": 1,
+                  "wall_ms": 11.481458,
+                  "exec_ms": null,
+                  "status": "exit_1"
+                },
+                {
+                  "run": 2,
+                  "wall_ms": 10.785292,
+                  "exec_ms": null,
+                  "status": "exit_1"
+                },
+                {
+                  "run": 3,
+                  "wall_ms": 10.437459,
+                  "exec_ms": null,
+                  "status": "exit_1"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
   },
   "r7rs": {
     "fib": {
@@ -2762,9 +2886,9 @@
     },
     "queens": {
       "category": "micro",
-      "mir": null,
+      "mir": 0.173,
       "_status": {
-        "mir": "exit_-6",
+        "mir": "ok",
         "mir_auto_e2e": "ok",
         "mir_typed": "ok",
         "mir_typed_auto_e2e": "ok",
@@ -2776,26 +2900,26 @@
       "_status_detail": {
         "mir": {
           "status_counts": {
-            "exit_-6": 3
+            "ok": 3
           },
           "samples": [
             {
               "run": 1,
-              "wall_ms": 111.071083,
-              "exec_ms": null,
-              "status": "exit_-6"
+              "wall_ms": 17.745459,
+              "exec_ms": 0.173,
+              "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 115.337583,
-              "exec_ms": null,
-              "status": "exit_-6"
+              "wall_ms": 17.867166,
+              "exec_ms": 0.172,
+              "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 122.1235,
-              "exec_ms": null,
-              "status": "exit_-6"
+              "wall_ms": 17.678416,
+              "exec_ms": 0.174,
+              "status": "ok"
             }
           ]
         },
@@ -14149,8 +14273,8 @@
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
-        "mir_typed": "exit_1",
-        "mir_typed_auto_e2e": "exit_1",
+        "mir_typed": "ok",
+        "mir_typed_auto_e2e": "ok",
         "lambdajs": "ok",
         "lambdajs_e2e": "timeout",
         "nodejs": "ok",
@@ -14209,51 +14333,51 @@
         },
         "mir_typed": {
           "status_counts": {
-            "exit_1": 3
+            "ok": 3
           },
           "samples": [
             {
               "run": 1,
-              "wall_ms": 31.134917,
-              "exec_ms": null,
-              "status": "exit_1"
+              "wall_ms": 195.371167,
+              "exec_ms": 147.984,
+              "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 29.844584,
-              "exec_ms": null,
-              "status": "exit_1"
+              "wall_ms": 195.215792,
+              "exec_ms": 147.512,
+              "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 29.686417,
-              "exec_ms": null,
-              "status": "exit_1"
+              "wall_ms": 193.602583,
+              "exec_ms": 145.648,
+              "status": "ok"
             }
           ]
         },
         "mir_typed_auto_e2e": {
           "status_counts": {
-            "exit_1": 3
+            "ok": 3
           },
           "samples": [
             {
               "run": 1,
-              "wall_ms": 11.481458,
-              "exec_ms": null,
-              "status": "exit_1"
+              "wall_ms": 192.375583,
+              "exec_ms": 144.746,
+              "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 10.785292,
-              "exec_ms": null,
-              "status": "exit_1"
+              "wall_ms": 192.396375,
+              "exec_ms": 145.162,
+              "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 10.437459,
-              "exec_ms": null,
-              "status": "exit_1"
+              "wall_ms": 192.838791,
+              "exec_ms": 145.768,
+              "status": "ok"
             }
           ]
         },
@@ -14359,8 +14483,8 @@
         }
       },
       "mir_auto_e2e": 252.6105,
-      "mir_typed": null,
-      "mir_typed_auto_e2e": null,
+      "mir_typed": 147.512,
+      "mir_typed_auto_e2e": 192.396375,
       "lambdajs": 247544.46733332425,
       "lambdajs_e2e": null,
       "nodejs": 2909.259625,

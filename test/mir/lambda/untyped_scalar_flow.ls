@@ -44,6 +44,24 @@ fn flow_tail_join(text) {
     let parts = split(text, ":")
     "x" ++ (if (len(parts) > 1) "y" ++ parts[1] else "")
 }
+pn flow_compare(rows, delta) {
+    let left = rows[0]
+    let right = rows[1]
+    // a numeric success witness does not discharge the boxed error arm (S3.4).
+    return [left - right == delta or left == right,
+        left - right == delta and left != right,
+        not (left - right == delta), (left - right == delta) == true]
+}
+pn flow_compare_loop(rows) {
+    var row = 0
+    while (row < 8) {
+        let left = rows[row]
+        let right = rows[row + 1]
+        if (left - right == row or false) { return 0 }
+        row = row + 1
+    }
+    return 1
+}
 pn main() {
     print([flow_magnitude(-23456), flow_magnitude(12345), flow_magnitude(9007199254740991)])
     print("\n")
@@ -68,6 +86,14 @@ pn main() {
         chr(-1) == "", chr(55296) == "", chr(1114112) == "", chr(null) == ""])
     print("\n")
     print([flow_tail_join("a:b"), flow_tail_join("a")])
+    print("\n")
+    print([flow_compare([4, 1], 3), flow_compare([4, 1], 2),
+        flow_compare([1, 1], 2), flow_compare([null, 1], 3)])
+    print("\n")
+    let comparison_errors = flow_compare([error("stop"), 1], 3)
+    print([for (value in comparison_errors) type(value) == error])
+    print("\n")
+    print(flow_compare_loop([0, 4, 7, 5, 2, 6, 1, 3]))
     print("\n")
     print([numbers.concise_number("1.230e5"), numbers.concise_number("2.000")])
     print("\n")

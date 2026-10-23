@@ -44,12 +44,16 @@ The eight standard flags are parsed once in `js_regexp_compile_frontend` (`js_re
 
 Two non-RE2 shortcuts sit in front: a literal-substring fast path (`literal_fast`, no flags, no metacharacters) and the `special_property_kind` codepoint scanner. `js_regex_match_internal` (`js_runtime.cpp:13353`) is the single dispatch point — it tests `special_property_kind`, then `literal_fast`, then `bt`, then `wrapper && has_filters`, then falls through to a direct `re2->Match`. `js_regex_num_groups` (`js_runtime.cpp:13341`) mirrors that ordering to report the correct capture count for each back-end.
 
-**Direct-compiler size limit (2026-10-21; D1.3, D1.4v3).** An RE2 candidate
-rejected with `ErrorPatternTooLarge` compiles through the existing spec matcher
-with its normalized JS source and flags. Unicode class expansion can exceed the
-direct compiler's budget without invalidating the expression. The final compiled
-object/cache records `bt`; failed compilation and execution exhaustion retain
-their explicit error paths. See [routing §9.1](../../../vibe/jube/JS_Regex.md#91-preserve-the-decision).
+**Direct-compiler size limits (2026-10-23; D1.3v3, D1.4v4).** An RE2 candidate
+rejected with `ErrorPatternTooLarge` or `ErrorRepeatSize` tries the existing spec
+matcher with its normalized JS source and flags. Unicode class expansion and
+nested counted repetitions can exceed RE2's limits without invalidating the
+expression. The compiled object/cache records `bt`; malformed repetition bounds
+retain the ordinary SyntaxError path when that parser rejects them. Failed
+size-limited compilation and execution exhaustion retain their explicit errors.
+`regex_large_counted_repetition` covers the live compound-count pattern,
+captures, adjacent boundaries and invalid bounds. See
+[routing §9.1](../../../vibe/jube/JS_Regex.md#91-preserve-the-decision).
 
 ---
 

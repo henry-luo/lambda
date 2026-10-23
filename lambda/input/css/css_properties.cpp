@@ -4389,9 +4389,17 @@ CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property) {
         {CSS_PROPERTY_FLEX, flex_longhands, sizeof(flex_longhands) / sizeof(*flex_longhands)},
         {CSS_PROPERTY_TEXT_EMPHASIS, text_emphasis_longhands, sizeof(text_emphasis_longhands) / sizeof(*text_emphasis_longhands)},
     };
-    for (const Group& group : groups)
-        for (size_t i = 0; i < group.count; i++) if (group.members[i] == property) return group.shorthand;
-    return (CssPropertyCode)0;
+    struct Index {
+        CssPropertyCode values[CSS_PROPERTY_COUNT] = {};
+        Index() {
+            for (const Group& group : groups)
+                for (size_t i = 0; i < group.count; i++)
+                    if (!values[group.members[i]]) values[group.members[i]] = group.shorthand;
+        }
+    };
+    // group membership is immutable; cascade reads need one indexed lookup.
+    static const Index index;
+    return property > 0 && property < CSS_PROPERTY_COUNT ? index.values[property] : (CssPropertyCode)0;
 }
 
 bool css_property_shorthand_contains(CssPropertyCode shorthand, CssPropertyCode property) {

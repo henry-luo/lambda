@@ -975,6 +975,7 @@ typedef struct String {
             uint8_t is_ascii:1;   // enables O(1) indexing when every byte is ASCII
             uint8_t is_buffer:1;  // exclusively owned GC string-builder storage
             uint8_t is_pooled:1;  // NameRecord metadata prefix immediately precedes this String
+            uint8_t buffer_borrows:5; // pending appends retain their pre-RHS value
         };
     };
     char chars[];       // UTF-8 string data (null-terminated)

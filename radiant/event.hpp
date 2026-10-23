@@ -2325,6 +2325,17 @@ typedef struct MediaViewState {
     bool default_loop;
     bool default_autoplay;
     int last_state;
+    uint64_t source_generation;
+    bool properties_initialized;
+    bool muted;
+    bool muted_override;
+    bool play_requested;
+    bool native_play_requested;
+    bool source_pending;
+    bool source_owned;
+    float volume;
+    double seek_time;
+    int play_error;
 } MediaViewState;
 
 typedef struct ViewState {
@@ -2896,6 +2907,7 @@ bool state_get_bool(DocState* state, void* node, const char* name);
 ViewState* view_state_get(DocState* state, View* view);
 MediaViewState* media_view_state_get(DocState* state, View* view, bool create = false);
 void media_view_state_reset(MediaViewState* media);
+MediaViewState* radiant_media_prepare(DomElement* element);
 // Retain view-scoped interaction state when an incremental template rebuild
 // replaces a structurally corresponding DOM subtree.
 void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,

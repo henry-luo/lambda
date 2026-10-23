@@ -27,6 +27,7 @@ typedef struct String {
             uint8_t is_ascii:1;
             uint8_t is_buffer:1;
             uint8_t is_pooled:1; // NameRecord prefix is present immediately before this String
+            uint8_t buffer_borrows:5;
         };
     };
     char chars[];             // flexible array member
