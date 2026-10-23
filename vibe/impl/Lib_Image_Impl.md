@@ -2,7 +2,7 @@
 
 Date: 2026-10-15
 
-Design: [Common Image I/O Library](../Lib_Image.md). Scope and direct source
+Design: [Common Image I/O Library](../lib/Lib_Image.md). Scope and direct source
 modification were authorized by the user; all imported code is under
 `lib/image/<library>/`, with no patch replay step.
 
@@ -183,7 +183,7 @@ decoded checksums match. This is one synthetic workload; Linux/Windows and
 full engine aggregates were not run for this build-only profile.
 
 The full inventory, GeoTIFF references, measurements, and remaining AOM/JPEG
-source-specialization candidates are in [the image build review](../lib/Lib_Image.c).
+source-specialization candidates are in [the image build review](<Lib_Image_Build (retired).md>).
 Local implementation and performance evidence is under
 `temp/image-opt-implementation/`.
 

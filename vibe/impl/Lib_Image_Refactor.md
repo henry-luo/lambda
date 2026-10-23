@@ -4,7 +4,7 @@ Date: 2026-10-15
 Status: implemented and verified on macOS ARM64; binary measurements below use
 the release CLI with ThinLTO.
 
-Design: [Common image library](../Lib_Image.md). This analysis covers the common
+Design: [Common image library](../lib/Lib_Image.md). This analysis covers the common
 core, all eight raster format adapters, their imported codecs, and the native
 release source selection in `build_lambda_config.json`. Direct adaptation of
 the imported image sources follows the source policy approved for this work.

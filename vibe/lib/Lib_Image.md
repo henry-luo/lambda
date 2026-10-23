@@ -2,23 +2,24 @@
 
 **Date:** 2026-10-15
 
-**Status:** implementation authorized by the user on 2026-10-15. The common native API, Lambda/Radiant migration, eight readers, six writers, and thumbnail planner are implemented. The 2026-10-16 decoder-only AVIF profile retires AVIF encoding to reduce native binary size; validation and supported subsets are recorded in [the implementation record](impl/Lib_Image_Impl.md).
+**Status:** implementation authorized by the user on 2026-10-15. The common native API, Lambda/Radiant migration, eight readers, six writers, and thumbnail planner are implemented. The 2026-10-16 decoder-only AVIF profile retires AVIF encoding to reduce native binary size; validation and supported subsets are recorded in [the implementation record](../impl/Lib_Image_Impl.md).
 
 The 2026-10-16 size profile compiles all image codecs with size optimization
 and excludes TIFF JPEG12, PixarLog, LogLuv, NeXT, and ThunderScan. Ordinary
-8-bit JPEG-in-TIFF, Deflate, LZW, PackBits, and CCITT Fax remain. JPEG12's
-specialist GeoTIFF use and the complete dependency/build inventory are recorded
-in [the image build review](lib/Lib_Image.c). The byte-codec boundary remains
+8-bit JPEG-in-TIFF, Deflate, LZW, PackBits, and CCITT Fax remain. The
+dependency inventory, profile decisions, and size policy are in
+[section 5.4](#54-build-profile-dependencies-and-size-policy); measurements and
+audit evidence are in the [retired build review](<../impl/Lib_Image_Build (retired).md>). The byte-codec boundary remains
 **D7.1.2v2**; JPEG12 pixel requests return an explicit checked-channel error
 under **S7.4.4**. No formal ruling changes are introduced.
 
 **Confirmed source policy (2026-10-15):** the user directs that official codec source be imported under `./lib/image/` and modified directly, following the local-source approach of `lib/re2/`. Separate vendor patch files are not required for this image-library work.
 
-**Confirmed build policy (2026-10-15):** image sources, generated feature headers, CPU/platform selection, and linking are declared only in `build_lambda_config.json`. The ordinary Lambda build compiles the explicit image I/O source subset into one static archive. All upstream CMake and related build configurations are removed; no separate codec build system or installed-codec prefix is used (**D7.1.1**, **D7.1.6–D7.1.7v6**).
+**Confirmed build policy (2026-10-15):** image sources, generated feature headers, CPU/platform selection, and linking are declared only in the build configuration (`build_lambda_config.json`, whose image targets and generators live in its imported `build_deps_config.json`). The ordinary Lambda build compiles the explicit image I/O source subset into one static archive. All upstream CMake and related build configurations are removed; no separate codec build system or installed-codec prefix is used (**D7.1.1**, **D7.1.6–D7.1.7v6**).
 
 **Scope:** one shared raster image library for Lambda, Radiant, bitmap fonts, and document import/export; retain PNG, JPEG, GIF, and WebP, and add AVIF, BMP, TIFF, and ICO.
 
-**Spec linkage:** D7.1.1–D7.1.3 (layering and resource I/O), D7.1.6–D7.1.7v6 (build profiles), D4.1.3–D4.1.4v5 and D4.2.6 (allocation and ownership), D5.3.3 (native rooting), S7.4.1–S7.4.5 (failure channels), S17.8.1 (option validation). See the [formal design](../doc/Lambda_Formal_Design.md), [formal semantics](../doc/Lambda_Formal_Semantics.md), and [documentation convention](../doc/Doc_Convention.md).
+**Spec linkage:** D7.1.1–D7.1.3 (layering and resource I/O), D7.1.6–D7.1.7v6 (build profiles), D4.1.3–D4.1.4v5 and D4.2.6 (allocation and ownership), D5.3.3 (native rooting), S7.4.1–S7.4.5 (failure channels), S17.8.1 (option validation). See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
 
 This records the approved image-library scope within the existing formal rulings. It does not change the language semantics or amend the formal specs.
 
@@ -79,7 +80,7 @@ Content determines the input format. Extensions and supplied MIME types are hint
 
 ### 3.1 Operations
 
-The common operations are declared in [`lib/image.h`](../lib/image.h). The abbreviated signatures below describe that API; the header is authoritative for C types and const qualifiers. `ImageContext` carries operation limits, cancellation, and a diagnostic callback; `ImageSource` and `ImageSink` abstract byte access.
+The common operations are declared in [`lib/image.h`](../../lib/image.h). The abbreviated signatures below describe that API; the header is authoritative for C types and const qualifiers. `ImageContext` carries operation limits, cancellation, and a diagnostic callback; `ImageSource` and `ImageSink` abstract byte access.
 
 ```c
 ImageStatus image_probe(ImageContext* context, ImageSource* source,
@@ -208,6 +209,38 @@ Record the upstream URL, imported release/commit, retained license notices, and 
 
 Build the imported sources through `build_lambda_config.json` and generated build machinery, with explicit dependency versions and feature checks. Avoid linking an additional system copy of a codec already built from the local source. Required release formats must not silently disappear when a package is absent. Deliberately reduced profiles expose their capability set. Image support remains excluded from the current WASM evaluation profile (**D7.1.7v6**); runtime-only native CLI builds can use the codec core without Radiant (**D7.1.6**).
 
+### 5.4 Build profile, dependencies, and size policy
+
+Status (2026-10-16, macOS ARM64): decoder-only AVIF, size optimization for every codec, and the reduced TIFF profile are implemented. Measurements, link-map evidence, and the full audit are kept in the [retired build review](<../impl/Lib_Image_Build (retired).md>). This section holds the standing design decisions; it changes no formal ruling.
+
+**Codec inventory.** The public registry is `lib/image_core.cpp:image_codecs`: eight readable and six writable formats. A codec being compiled does not make every upstream feature a Lambda feature.
+
+| Library (`lib/image/`) | Version | Role and dependencies |
+|---|---|---|
+| libpng | 1.6.55 | PNG read/write; zlib |
+| libjpeg-turbo | 3.1.2 | JPEG read/write; also the backend for JPEG-in-TIFF |
+| giflib | 5.2.2 | GIF decoding; Lambda supplies frame composition |
+| libwebp | 1.6.0 | Still WebP read/write, with its bundled SharpYUV |
+| libavif + libaom | 1.3.0 + 3.12.1 | AVIF container and metadata; libaom is the only AV1 backend, decoder-only; a minimal bundled libyuv subset is the scaling fallback |
+| libtiff | 4.7.1 | TIFF directories, strips/tiles, compression adapters; zlib and libjpeg-turbo |
+| libnsbmp | 0.1.7 | BMP and ICO DIB decoding |
+
+**One implementation per job.** ICO's PNG entries and writer reuse the PNG adapter; BMP and ICO DIB entries share libnsbmp; ThorVG's PNG/JPEG loaders link the same libpng and libjpeg-turbo; PNG, TIFF Deflate, and ZIP share one zlib. TIFF's `tif_jpeg.c` and `tif_zip.c` adapt TIFF strip/tile framing, predictors, and tables to libjpeg-turbo and zlib, so they are not duplicate codecs and must not be replaced by the JPEG or ZIP-archive code paths. Shared linkage does not make added functionality free: codec adapters install both encode and decode callbacks, so enabling a TIFF compression pulls encoder code into a decoder-only consumer.
+
+**Compiled is not exposed.** `image_tiff_decode` admits only MINISWHITE, MINISBLACK, RGB, and PALETTE photometrics (YCbCr, CMYK/separated, and LogLuv are rejected there), and uses the direct scanline path only for 8-bit contiguous RGB/RGBA; compiled JPEG support does not imply every JPEG-compressed TIFF is accepted. Interchange pixels are RGBA8; ICC and AVIF CICP presence is reportable but there is no color-management pipeline. CMYK JPEG, HDR tone mapping, AVIF clean apertures and sequences, GIF writing, and scientific TIFF sample preservation stay outside the public subset.
+
+**AVIF is decoder-only.** `CONFIG_AV1_ENCODER=0`, `CONFIG_AV1_DECODER=1`, high-bit-depth decoding and ARM64 runtime dispatch on; libavif defines `AVIF_CODEC_AOM` and `AVIF_CODEC_AOM_DECODE` but not `AVIF_CODEC_AOM_ENCODE`; `libavif/src/write.c` and the AOM encoder closure are excluded. AVIF writing reports `CODEC_UNAVAILABLE`.
+
+**TIFF compression profile.** Built: uncompressed, LZW, PackBits, CCITT RLE/Fax3/Fax4, ordinary 8-bit JPEG, and Deflate. Excluded: JPEG12, PixarLog, SGILog/LogLuv, NeXT, and ThunderScan (their sources and enabling definitions are removed from the build configuration); WebP, LZMA, Zstd, OJPEG, JBIG, and LERC were never enabled. CCITT stays for scanned bilevel documents despite its table size. JPEG12 is specialist geospatial compatibility: Lambda's RGBA strip/tile path rejects 12-bit samples and the writer is 8-bit Deflate, so the codec never produced working pixels through the public API. A 12-bit JPEG TIFF is recognized before pixel allocation and returns an explicit `unsupported_feature` with a specific message, preserving the rich-diagnostic rule (**S7.4.4**) while the raw mechanism stays in `lib` (**D7.1.2v2**). The `tif_jpeg_12.c` source stays imported for a future GeoTIFF/high-depth profile. Removing a TIFF codec must remove its registry reference in `tif_codec.c:_TIFFBuiltinCODECS` through JSON feature definitions, because dead stripping cannot see which compression tags future files use.
+
+**Feature macros.** Never define a feature to 0 when the upstream condition is `#ifdef` or `defined(...)`; omit the definition entirely.
+
+**Size policy.** `lambda-image-codecs` builds with `"optimize": "Size"` (`-Os`) for all codecs; per-file ISA flags, runtime CPU dispatch, LTO, and dead stripping are retained. Together with the AVIF and TIFF trims this shrank the production executable by about 0.58 MiB (to 24.07 MiB), at a measured median slowdown of at most 4.3% on one synthetic RGB workload; that is not a broad performance guarantee. A size-motivated trim is acceptable only when it keeps declared compatibility, an explicit recoverable error for the dropped capability, and the malformed-input and resource-limit checks. Do not call a source removable merely because its link-map contribution is zero: LTO may have inlined it elsewhere.
+
+**Open size candidates (not implemented).** (1) libaom's decoder-only build still initializes and retains the 100 KB forward quantization matrix (`av1/common/quant_common.c:av1_qm_init`), about 98 KiB; `CONFIG_QUANT_MATRIX=0` does not remove it, so it needs a reviewed source change with decoder validation. (2) libjpeg-turbo's 12-/16-bit wrapper files and unused processing modes (precision, palette quantization, arithmetic coding) are retained by common dispatch and the TIFF integration; trace every caller before excluding anything, and never supply dummy functions. (3) A HashMap replacement for TIFF's directory-loop set and excluding members the linker already skips (`tif_print.o`, `aom_encoder.o`, ...) save nothing material and are deprioritized.
+
+**Gates for profile changes.** Change the JSON and regenerate; rebuild the archive from a clean member list (stale `ar` members and same-second mtimes invalidate comparisons; Developer Guide §7); run the image GTests and the Lambda image golden, with focused JPEG-in-TIFF coverage when TIFF JPEG configuration changes; compare gallery pixels and malformed-input behavior; measure identically stripped release artifacts for any flag or SIMD change. Generic x86_64, Linux, and Windows configurations are declared but unvalidated; do not claim portability from the macOS ARM64 measurements.
+
 ## 6. Fast thumbnail loading
 
 ### 6.1 Size contract
@@ -284,24 +317,24 @@ Radiant adapters retain responsibility for surfaces, alpha-mode conversion, deco
 
 ## Appendix A. Preimplementation inventory
 
-Historical inventory captured before the migration on 2026-10-15. The replacement implementation is described in [the implementation record](impl/Lib_Image_Impl.md); this table preserves the consolidation rationale.
+Historical inventory captured before the migration on 2026-10-15. The replacement implementation is described in [the implementation record](../impl/Lib_Image_Impl.md); this table preserves the consolidation rationale.
 
 | Location / symbols | Current behavior and consolidation target |
 |---|---|
-| [`lib/image.h`](../lib/image.h), [`lib/image.c`](../lib/image.c): `image_load`, `image_load_from_memory`, `image_get_dimensions*` | PNG/JPEG/GIF/WebP dispatch, mostly null/boolean failures, file/memory duplication; consolidate sources, probing, decode setup, and errors |
+| [`lib/image.h`](../../lib/image.h), [`lib/image.c`](../../lib/image.c): `image_load`, `image_load_from_memory`, `image_get_dimensions*` | PNG/JPEG/GIF/WebP dispatch, mostly null/boolean failures, file/memory duplication; consolidate sources, probing, decode setup, and errors |
 | `lib/image.c`: `image_load_scaled`, `image_load_from_memory_scaled` | File JPEG has native scaling and file PNG has row reduction; memory JPEG scales, memory PNG falls back to full loading; other formats also fall back. The fallback returns full pixels rather than guaranteeing a final thumbnail resize |
 | `lib/image.c`: `IMAGE_MAX_DECODED_BYTES`, `IMAGE_MAX_ENCODED_BYTES`, `IMAGE_MAX_GIF_FRAMES` | Existing limits are 512 MiB decoded storage, 128 MiB encoded bytes, and 4096 GIF frames; retain protection while making policies consistent and explicit |
 | `lib/image.c`: `image_gif_load*`, `gif_preflight`, `image_jpeg_exif_orientation_from_memory` | Preserve GIF safety/compositing and JPEG orientation coverage; share bounded metadata utilities |
-| [`radiant/surface.cpp`](../radiant/surface.cpp): `image_surface_ensure_decoded` | Retains intrinsic versus decoded dimensions and promotes decode size; preserve its at-least requirement |
-| [`radiant/render_image_encode.cpp`](../radiant/render_image_encode.cpp): `render_encode_surface_png`; [`radiant/render_img.cpp`](../radiant/render_img.cpp): `save_surface_to_jpeg`; [`radiant/render_output.cpp`](../radiant/render_output.cpp) | Encoding exists outside the common image module; route codec work through shared pixel/sink interfaces |
-| [`lambda/runtime/lambda-vector.cpp`](../lambda/runtime/lambda-vector.cpp): `fn_load`, `fn_save` | Existing path/binary loading, request-map pixel limit/orientation normalization, typed-array conversion, PNG saving; replace generic failures with common diagnostic translation |
-| [`lib/font/font_rasterize_tvg.cpp`](../lib/font/font_rasterize_tvg.cpp): `render_cbdt_png` | Embedded glyph PNG decoding requires the codec implementation to remain available below Lambda |
-| [`lib/image_process.h`](../lib/image_process.h), [`lib/image_process.cpp`](../lib/image_process.cpp) | Existing row callbacks, geometry, filtering, alpha-aware processing, and bilinear helpers are reuse candidates |
-| [`lib/endian.h`](../lib/endian.h), [`lib/math_checked.hpp`](../lib/math_checked.hpp), [`lib/file.h`](../lib/file.h) | Reuse endian reads/writes, checked arithmetic, bounded file reads, and suitable atomic publication helpers |
+| [`radiant/surface.cpp`](../../radiant/surface.cpp): `image_surface_ensure_decoded` | Retains intrinsic versus decoded dimensions and promotes decode size; preserve its at-least requirement |
+| [`radiant/render_image_encode.cpp`](../../radiant/render_image_encode.cpp): `render_encode_surface_png`; [`radiant/render_img.cpp`](../../radiant/render_img.cpp): `save_surface_to_jpeg`; [`radiant/render_output.cpp`](../../radiant/render_output.cpp) | Encoding exists outside the common image module; route codec work through shared pixel/sink interfaces |
+| [`lambda/runtime/lambda-vector.cpp`](../../lambda/runtime/lambda-vector.cpp): `fn_load`, `fn_save` | Existing path/binary loading, request-map pixel limit/orientation normalization, typed-array conversion, PNG saving; replace generic failures with common diagnostic translation |
+| [`lib/font/font_rasterize_tvg.cpp`](../../lib/font/font_rasterize_tvg.cpp): `render_cbdt_png` | Embedded glyph PNG decoding requires the codec implementation to remain available below Lambda |
+| [`lib/image_process.h`](../../lib/image_process.h), [`lib/image_process.cpp`](../../lib/image_process.cpp) | Existing row callbacks, geometry, filtering, alpha-aware processing, and bilinear helpers are reuse candidates |
+| [`lib/endian.h`](../../lib/endian.h), [`lib/math_checked.hpp`](../../lib/math_checked.hpp), [`lib/file.h`](../../lib/file.h) | Reuse endian reads/writes, checked arithmetic, bounded file reads, and suitable atomic publication helpers |
 
 ## Appendix B. Adoption sequence and validation
 
-The following was the adoption plan. Current completion and verification evidence live in [the implementation record](impl/Lib_Image_Impl.md):
+The following was the adoption plan. Current completion and verification evidence live in [the implementation record](../impl/Lib_Image_Impl.md):
 
 1. **Common core and diagnostics:** import the existing four upstream codec bases under `./lib/image/`, record their versions/licenses, modify the source directly to use shared types/readers/sinks/diagnostics, and migrate the existing formats while preserving output. Move resource entry points to their proper provider. Do not leave a `lib` shim forwarding upward into Lambda (**D7.1.3**); memory compatibility wrappers may remain within `lib` temporarily.
 2. **Thumbnail planner:** share file/memory JPEG and PNG paths, add WebP scaling and final bounded resize, expose strategy/fallback, and preserve Radiant's at-least mode. Establish honest per-format performance baselines.
@@ -319,6 +352,6 @@ Validation must cover:
 
 Use existing GTest/golden conventions and add a dedicated native image suite if needed. Every added golden-driven `.ls` fixture needs its `.txt` expectation. Engine integration runs the applicable Lambda and Radiant baseline gates; dependency build checks cover native macOS, Linux, and Windows profiles and the existing layering gates.
 
-Performance measurements use release builds only, following [Developer Guide §7](../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas); never run `make release` in a worktree. Keep generated artifacts under `./temp/`. Compare full-decode-plus-resize against thumbnail mode for small/large images and multiple target sizes; report wall time, peak tracked memory, process/codec working memory where measurable, bytes read, and selected strategy. Separate cold acquisition from warm decoding. Do not promise a universal speedup: JPEG/WebP scaling, ICO resolution selection, and pyramidal TIFF can save different kinds of work, while PNG and ordinary AVIF have different limits.
+Performance measurements use release builds only, following [Developer Guide §7](../../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas); never run `make release` in a worktree. Keep generated artifacts under `./temp/`. Compare full-decode-plus-resize against thumbnail mode for small/large images and multiple target sizes; report wall time, peak tracked memory, process/codec working memory where measurable, bytes read, and selected strategy. Separate cold acquisition from warm decoding. Do not promise a universal speedup: JPEG/WebP scaling, ICO resolution selection, and pyramidal TIFF can save different kinds of work, while PNG and ordinary AVIF have different limits.
 
 The implementation record pins the format subsets, RGBA8/SDR boundary, encoding options, thumbnail fallback policy, upstream versions, and source adaptations. The required outcome is one consistent image subsystem built from upstream code imported and modified directly under `./lib/image/`, explicit errors and capabilities, and measurable thumbnail behavior without duplicated codec paths.

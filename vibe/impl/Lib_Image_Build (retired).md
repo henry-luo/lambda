@@ -1,5 +1,6 @@
-/*
 # Image Libraries: Build, Dependencies, and Size Optimization
+
+> **Status: RETIRED 2026-10-23.** The standing design decisions (library inventory, one-implementation-per-job dependencies, AVIF decoder-only and TIFF compression profiles, size policy, open size candidates, change gates) now live in [`Lib_Image.md` §5.4](../lib/Lib_Image.md#54-build-profile-dependencies-and-size-policy). This file is kept for its measurements, link-map attribution, validation record, and audit-evidence pointers.
 
 Date: 2026-10-16
 Last verified against tree: 39ce33435bce plus the 2026-10-16 optimization
@@ -8,7 +9,7 @@ Status: decoder-only AVIF, size optimization for all codecs, and the reduced
 TIFF profile are implemented. Source-level AOM/JPEG specializations remain
 follow-on proposals, as individually marked.
 
-This is a comment-only document at the requested .c path, outside the build.
+This is a documentation-only record; it is not part of the build.
 Scope: the native raster image libraries, their shared dependencies, and their
 contribution to the release executable. It does not change feature policy or
 the formal specifications.
@@ -21,9 +22,9 @@ Spec linkage:
   Removing a codec capability must preserve an explicit, recoverable error.
 
 Related records:
-[image design](../Lib_Image.md),
-[implementation and supported subsets](../impl/Lib_Image_Impl.md),
-[earlier utility consolidation](../impl/Lib_Image_Refactor.md),
+[image design](../lib/Lib_Image.md),
+[implementation and supported subsets](Lib_Image_Impl.md),
+[earlier utility consolidation](Lib_Image_Refactor.md),
 [formal design](../../doc/Lambda_Formal_Design.md), and
 [formal semantics](../../doc/Lambda_Formal_Semantics.md).
 
@@ -76,7 +77,7 @@ compression support does not imply support for every JPEG-compressed TIFF.
 
 ## 2. Build setup
 
-The authoritative inputs are in `build_lambda_config.json`:
+The authoritative inputs are in `build_lambda_config.json` (imported from `build_deps_config.json` via `config_imports`):
 
 1. `targets[name=lambda-image-codecs]` lists the library C files, common
    include directories, per-file flags, and CPU/platform source sets.
@@ -430,7 +431,7 @@ under `temp/aom-decode-only/`.
 
 Relevant maintained entry points:
 
-- [JSON build configuration](../../build_lambda_config.json)
+- [JSON build configuration](../../build_lambda_config.json) (image targets and generators are in its imported [`build_deps_config.json`](../../build_deps_config.json))
 - [codec configuration generator](../../utils/generate_image_config.py)
 - [native image API](../../lib/image.h)
 - [registry and common mechanisms](../../lib/image_core.cpp)
@@ -438,4 +439,3 @@ Relevant maintained entry points:
 - [JPEG adapter](../../lib/image/image_jpeg.cpp)
 - [image tests](../../test/test_image_io_gtest.cpp)
 - [build/worktree guidance](../../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas)
-*/
