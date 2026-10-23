@@ -1753,7 +1753,7 @@ pn todo_report() {
 
 Matching is **line-oriented**: a match never spans a line terminator, so a pattern's `...` and a literal newline stop at the end of the line. A line ends at `"\n"` or `"\r\n"`; the `"\r"` of a pair is never part of a match or of `text`, and `line_ending` reports which terminator a line had. With `count: true` the result is one `{file, count}` per file, in path order, for the files with at least one such line, and `limit` and `limit_per_file` count lines; `count` cannot be combined with `files`, and the options that add fields to match maps do not apply to it. In a directory, files listed in ignore files, hidden entries, the dependency directories above, symbolic links and binary files are skipped, but a path given as the source is always searched. A source that does not exist raises an error (E401). An option name `io.grep` does not define is a compile-time error in a map literal at the call, and is ignored with a warning when the options arrive as a value (S17.8.1).
 
-`io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/Lambda_Lib_Grep.md`).
+`io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/lib/Lib_Grep.md`).
 
 `io.grep` only searches. Like `grep` and ripgrep, it never changes a file and has no replace option (ripgrep's `--replace` changes only what ripgrep prints). To change text in a file, read it with `input()`, apply `replace()`, and write the result back with `output()`.
 

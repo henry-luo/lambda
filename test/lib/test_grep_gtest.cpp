@@ -1,4 +1,4 @@
-// test_grep_gtest.cpp — lib/grep (vibe/Lambda_Lib_Grep.md).
+// test_grep_gtest.cpp — lib/grep (vibe/lib/Lib_Grep.md).
 //
 // The tier tests compare every literal-accelerated plan with an independent
 // reference: RE2 run line by line by this file, with the "\r" of a "\r\n"

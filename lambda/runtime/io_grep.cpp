@@ -1,5 +1,5 @@
 // io_grep.cpp — io.grep(source, pattern, options?) over lib/grep
-// (vibe/Lambda_Lib_Grep.md §9B, GRP26).
+// (vibe/lib/Lib_Grep.md §9B, GRP26).
 //
 // A procedure: its result depends on the file system, and fn must be
 // deterministic (S12.1.1v2). Matching is line-oriented: a match never spans a

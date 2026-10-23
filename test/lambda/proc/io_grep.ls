@@ -1,5 +1,5 @@
 // io.grep(source, pattern, options?) — line-oriented search over files with
-// lib/grep (vibe/Lambda_Lib_Grep.md §9B, GRP26). Fixture: test/input/grep_tree,
+// lib/grep (vibe/lib/Lib_Grep.md §9B, GRP26). Fixture: test/input/grep_tree,
 // whose .ignore skips *.skip and ignored_dir/ (a .ignore, not a .gitignore, so
 // git keeps the skipped fixtures).
 

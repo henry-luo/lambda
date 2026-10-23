@@ -1,4 +1,4 @@
-// grep.h — line-oriented text search on RE2 (vibe/Lambda_Lib_Grep.md).
+// grep.h — line-oriented text search on RE2 (vibe/lib/Lib_Grep.md).
 //
 // The library finds matches inside lines: a match never spans a line
 // terminator (GRP1). A line ends at "\n" or "\r\n"; the "\r" of a pair belongs

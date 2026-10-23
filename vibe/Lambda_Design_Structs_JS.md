@@ -2043,7 +2043,7 @@ instrumentation overhead and collect final timings without those counters.
 ## 18. JSCU44 — Per-activation `with` scope chain
 
 **Status: IMPLEMENTED 2026-09-11.** Fixes
-[`JS_Issue_Ledger.md` JS05-L1](JS_Issue_Ledger.md). Supersedes the
+[`JS_Issue_Ledger.md` JS05-L1](jube/JS_Issue_Ledger.md). Supersedes the
 `js_with_stack` row of
 [`Lambda_Design_Stack_API.md`](Lambda_Design_Stack_API.md) Appendix A.2.
 

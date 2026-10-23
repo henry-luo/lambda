@@ -564,7 +564,7 @@ Each option maps onto a library option already ruled. The names are ruled (USER,
 
 ### 9B.4 Relation to file-based `find()`
 
-**Current state.** `find` is a pure function today: `SYSFUNC_FIND` and `SYSFUNC_FIND3` are registered as non-procedural (`lambda/runtime/sys_func_registry.c:718`, `721`) and take a string or symbol. The file-based form proposed in `vibe/Lambda_Design_String_Pattern.md` §7.3 is not implemented ([LR09-34](Lambda_Issue_Ledger.md#lr09-34)).
+**Current state.** `find` is a pure function today: `SYSFUNC_FIND` and `SYSFUNC_FIND3` are registered as non-procedural (`lambda/runtime/sys_func_registry.c:718`, `721`) and take a string or symbol. The file-based form proposed in `vibe/Lambda_Design_String_Pattern.md` §7.3 is not implemented ([LR09-34](../Lambda_Issue_Ledger.md#lr09-34)).
 
 **GRP27 (USER, 2026-10-04). File-based `find(path, pattern, options?)` stays an `fn` and calls `lib/grep` underneath.** An `fn` must be deterministic (S12.1.1v2), and a file search taken alone is not. What makes it deterministic is caching for the script evaluation session, and **that caching is out of scope here**: it will be worked out in a separate proposal covering `find(path)`, `input()`, `exists()` and `path#` together. This doc designs no cache.
 

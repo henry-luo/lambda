@@ -1,7 +1,7 @@
 # LambdaJS — Central Issue Ledger
 
 > **Working issue record for the JavaScript runtime under `lambda/js/`.**
-> The design record stays in [`doc/dev/js/JS_00_Overview.md`](../doc/dev/js/JS_00_Overview.md)
+> The design record stays in [`doc/dev/js/JS_00_Overview.md`](../../doc/dev/js/JS_00_Overview.md)
 > and its `JS_01`–`JS_16` set; the per-area "Known Issues & Future Improvements"
 > sections there remain valid and are not yet consolidated into this file.
 > This ledger is the home for defects found outside those sections.
@@ -44,11 +44,11 @@ Two native JS carriers still violate that rule.
 
 1. **`Error` standard own fields.** `LambdaError` has raw one-word
    `js_name_item`, `js_message_item`, `js_cause_item`, and `js_stack_item`
-   fields ([`lambda-error.h:220`](../lambda/runtime/lambda-error.h)). Both
+   fields ([`lambda-error.h:220`](../../lambda/runtime/lambda-error.h)). Both
    ordinary property assignment and the completion setter write an incoming
-   `Item` directly ([`js_runtime.cpp:7289`](../lambda/js/js_runtime.cpp) and
-   [`:7431`](../lambda/js/js_runtime.cpp)). `err_gc_trace` marks the words
-   ([`lambda-error.cpp:1250`](../lambda/runtime/lambda-error.cpp)), but has no
+   `Item` directly ([`js_runtime.cpp:7289`](../../lambda/js/js_runtime.cpp) and
+   [`:7431`](../../lambda/js/js_runtime.cpp)). `err_gc_trace` marks the words
+   ([`lambda-error.cpp:1250`](../../lambda/runtime/lambda-error.cpp)), but has no
    destination-owned scalar payload to preserve.
 
    ```js
@@ -75,10 +75,10 @@ Two native JS carriers still violate that rule.
 
 2. **JS `Map` / `Set` collection entries.** `JsCollectionEntry` is copied into
    the hash table and `JsCollectionOrderNode` duplicates its `key`/`value` in
-   insertion-order storage ([`js_runtime.cpp:998`](../lambda/js/js_runtime.cpp),
-   [`:19490`](../lambda/js/js_runtime.cpp)). `js_collection_method` builds the
+   insertion-order storage ([`js_runtime.cpp:998`](../../lambda/js/js_runtime.cpp),
+   [`:19490`](../../lambda/js/js_runtime.cpp)). `js_collection_method` builds the
    entry from raw arguments, calls `hashmap_set`, then calls
-   `js_collection_order_upsert` ([`js_runtime.cpp:19708`](../lambda/js/js_runtime.cpp)).
+   `js_collection_order_upsert` ([`js_runtime.cpp:19708`](../../lambda/js/js_runtime.cpp)).
    Neither destination owns a scalar payload.
 
    ```js
@@ -109,7 +109,7 @@ ownership. Add default-MIR and forced-GC regressions for both probes.
 
 **Found:** 2026-09-11. **Reproduced against:** a build of unmodified `master`
 at `ef03733de`. **Fixed:** 2026-09-11 by JSCU44
-([`Lambda_Design_Structs_JS.md`](Lambda_Design_Structs_JS.md) §18), the
+([`Lambda_Design_Structs_JS.md`](../Lambda_Design_Structs_JS.md) §18), the
 structural option below. Regression:
 `test/js/regression_with_generator_scope.js`.
 
@@ -139,14 +139,14 @@ writable from outside the generator for as long as it stays suspended, and a
 `with` whose scope object shadows a real global will shadow it globally.
 
 **Root cause.** The with-scope chain is one runtime-wide stack
-(`JsRuntimeState.with_scope.stack`, [`js_runtime_state.hpp:269`](../lambda/js/js_runtime_state.hpp)),
+(`JsRuntimeState.with_scope.stack`, [`js_runtime_state.hpp:269`](../../lambda/js/js_runtime_state.hpp)),
 pushed and popped by MIR-emitted calls to `js_with_push` / `js_with_pop`
-([`js_mir_statement_lowering.cpp:3693`](../lambda/js/js_mir_statement_lowering.cpp),
+([`js_mir_statement_lowering.cpp:3693`](../../lambda/js/js_mir_statement_lowering.cpp),
 `:3702`). Generator suspension unwinds the native activation without unwinding
 that stack: nothing spills the entries the suspended frame owns, and nothing
 restores them on resume. The call kernel's swap
 (`js_with_set_stack(js_fn_with(fn)->env, …)`,
-[`js_runtime.cpp:14045`](../lambda/js/js_runtime.cpp)) covers ordinary calls but
+[`js_runtime.cpp:14045`](../../lambda/js/js_runtime.cpp)) covers ordinary calls but
 is not reached by a suspension, and it is additionally skipped whenever
 `common_lane` is taken (`:14042`).
 
@@ -244,7 +244,7 @@ a lane that brackets nothing.
 
 **Fix.** One emitter, `jm_emit_with_unwind_to(mt, floor)`, called at each
 completion site with the floor that completion actually leaves; see
-[`Lambda_Design_Structs_JS.md` §18](Lambda_Design_Structs_JS.md) for the table.
+[`Lambda_Design_Structs_JS.md` §18](../Lambda_Design_Structs_JS.md) for the table.
 Both compensations are then retired: `js_with_activation_leave` becomes a head
 restore, and the direct-call lane emits nothing. `js_with_save_depth` /
 `js_with_restore_depth` survive as the try/`using` brackets, which is the one
@@ -356,7 +356,7 @@ The block record holding `let x` is inside the object environment, so it answers
 `./lambda.exe js` on 2026-10-03, with `JS_TRANSPILE_TIMING=1 --no-log`.
 No `S#`/`D#` ruling covers load-time complexity.
 
-**Repro:** [`test/js/slow/top_level_4000_functions.js`](../test/js/slow/top_level_4000_functions.js)
+**Repro:** [`test/js/slow/top_level_4000_functions.js`](../../test/js/slow/top_level_4000_functions.js)
 (354 KB). It declares 4,000 identical functions
 `pad0`…`pad3999` (`function padN(a,b){ var o={x:a,y:b}; for (...) ...; return o.x; }`),
 then one `add` function and a run of `r=add(r,1);` calls. The file only
@@ -377,14 +377,14 @@ Two phases grow about 4× per doubling, and that holds for both backends.
 
 1. **`exec_ms`: global declaration instantiation.** For each top-level
    function, `js_define_global_var_property`
-   ([`js_globals.cpp:14770`](../lambda/js/js_globals.cpp)) makes two
+   ([`js_globals.cpp:14770`](../../lambda/js/js_globals.cpp)) makes two
    O(n) checks:
    - `js_global_environment_find`
-     ([`js_runtime_state.cpp:216`](../lambda/js/js_runtime_state.cpp)) scans
+     ([`js_runtime_state.cpp:216`](../../lambda/js/js_runtime_state.cpp)) scans
      every binding backwards and compares keys with `memcmp`. The upsert that
      follows scans them again.
    - `js_has_own_property` on the global object goes to
-     `js_map_shape_lookup` ([`js_runtime.cpp:4069`](../lambda/js/js_runtime.cpp)).
+     `js_map_shape_lookup` ([`js_runtime.cpp:4069`](../../lambda/js/js_runtime.cpp)).
      Its time is self time, which points to the shape-chain fallback, not the
      hash. `typemap_hash_lookup_by_hash` takes that fallback whenever the
      TypeMap has no `field_index` (`lambda-data.hpp:975`). *Unconfirmed:* whether
@@ -394,7 +394,7 @@ Two phases grow about 4× per doubling, and that holds for both backends.
    these two functions.
 2. **`index_ms`: `AstIndex` pointer-hash probing.** At 12,000 functions, the
    self time during the parse phase is concentrated in
-   `ast_index_find` ([`ast-core.cpp:1196`](../lambda/runtime/ast-core.cpp)), the
+   `ast_index_find` ([`ast-core.cpp:1196`](../../lambda/runtime/ast-core.cpp)), the
    linear-probe loop. The load factor is kept at or below ½
    (`ast-core.cpp:303`), so long chains point to clustering in `ast_ptr_hash`
    (`ast-core.cpp:105`) for sequentially allocated nodes. *Unconfirmed:* the
