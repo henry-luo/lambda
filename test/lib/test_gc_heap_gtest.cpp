@@ -83,6 +83,10 @@ protected:
         return obj;
     }
 
+    uint64_t* list_items(void* list) {
+        return (uint64_t*)((LambdaGcListLayout*)list)->items;
+    }
+
     // Helper: create a fake String object
     void* make_string(const char* text) {
         size_t len = strlen(text);
@@ -729,6 +733,95 @@ TEST_F(GCHeapTest, OwnershipTracksFreshSlotsAfterRepeatedRangeQueries) {
         gc->bump_blocks->base + sizeof(gc_header_t), &foreign));
     EXPECT_EQ(foreign, gc->bump_blocks);
     EXPECT_TRUE(gc_object_zone_owns(zone, first));
+}
+
+TEST_F(GCHeapTest, SweptBumpSlotsReuseAcrossAllSmallAllocationPaths) {
+    const size_t requested = 33;
+    int cls = gc_object_zone_class_index(requested);
+    size_t class_size = gc_object_zone_class_size(cls);
+    size_t slot_size = sizeof(gc_header_t) + class_size;
+    void* first = gc_heap_bump_alloc(gc, slot_size, requested, LMD_TYPE_STRING, cls);
+    ASSERT_NE(first, nullptr);
+    ASSERT_TRUE(gc_get_header(first)->gc_flags & GC_FLAG_BUMP);
+    ((uint8_t*)first)[class_size - 1] = 0xA5;
+    uint8_t* high_water = gc->bump_cursor;
+
+    gc_collect(gc, nullptr, 0);
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(gc->total_allocated, 0u);
+    EXPECT_TRUE(gc_get_header(first)->gc_flags & GC_FLAG_FREED);
+    gc_mark_item(gc, string_item(first));
+    EXPECT_EQ(gc_get_header(first)->marked, 0);
+    // Reuse must also preserve the allocation-replay ownership fallback.
+    mem_free(gc->bump_blocks->alloc_bits);
+    gc->bump_blocks->alloc_bits = nullptr;
+
+    void* known = gc_heap_calloc_class(gc, requested + 1, LMD_TYPE_STRING, cls);
+    ASSERT_EQ(known, first);
+    EXPECT_TRUE(gc_get_header(known)->gc_flags & GC_FLAG_BUMP);
+    EXPECT_TRUE(gc_is_managed(gc, known));
+    EXPECT_FALSE(gc_is_managed(gc, (uint8_t*)known + 1));
+    for (size_t i = 0; i < class_size; i++) EXPECT_EQ(((uint8_t*)known)[i], 0);
+    uint64_t root = string_item(known);
+    gc_collect(gc, &root, 1);
+    EXPECT_EQ(gc->object_count, 1u);
+    EXPECT_EQ(gc->total_allocated, sizeof(gc_header_t) + requested + 1);
+
+    gc_collect(gc, nullptr, 0);
+    void* generic = gc_heap_calloc(gc, requested + 2, LMD_TYPE_STRING);
+    ASSERT_EQ(generic, first);
+    EXPECT_TRUE(gc_get_header(generic)->gc_flags & GC_FLAG_BUMP);
+    gc_heap_pool_free(gc, generic);
+    EXPECT_EQ(gc->object_count, 0u);
+    gc_collect(gc, nullptr, 0);
+
+    void* bumped = gc_heap_bump_alloc(gc, slot_size, requested,
+        LMD_TYPE_STRING, cls);
+    ASSERT_EQ(bumped, first);
+    EXPECT_TRUE(gc_get_header(bumped)->gc_flags & GC_FLAG_BUMP);
+    EXPECT_EQ(gc->bump_cursor, high_water);
+    gc_collect(gc, nullptr, 0);
+    EXPECT_EQ(gc->total_allocated, 0u);
+    EXPECT_EQ(gc->object_zone->total_slots_allocated,
+        gc->object_zone->total_slots_freed);
+}
+
+TEST_F(GCHeapTest, RepeatedBumpBurstsKeepTheirInitialStorageBound) {
+    uint64_t roots[2] = {};
+    const size_t live_sizes[2] = {31, 127};
+    size_t live_bytes = 0;
+    for (int i = 0; i < 2; i++) {
+        int cls = gc_object_zone_class_index(live_sizes[i]);
+        void* value = gc_heap_bump_alloc(gc,
+            sizeof(gc_header_t) + gc_object_zone_class_size(cls),
+            live_sizes[i], LMD_TYPE_STRING, cls);
+        ASSERT_NE(value, nullptr);
+        roots[i] = string_item(value);
+        live_bytes += sizeof(gc_header_t) + live_sizes[i];
+    }
+
+    gc_bump_block_t* initial_head = nullptr;
+    uint8_t* initial_cursor = nullptr;
+    for (int round = 0; round < 64; round++) {
+        for (int i = 0; i < 256; i++) {
+            int cls = (i + round) % GC_NUM_SIZE_CLASSES;
+            size_t size = gc_object_zone_class_size(cls);
+            ASSERT_NE(gc_heap_bump_alloc(gc, sizeof(gc_header_t) + size,
+                size - 1, LMD_TYPE_STRING, cls), nullptr);
+        }
+        gc_collect(gc, roots, 2);
+        EXPECT_EQ(gc->object_count, 2u);
+        EXPECT_EQ(gc->total_allocated, live_bytes);
+        if (round == 0) {
+            initial_head = gc->bump_blocks;
+            initial_cursor = gc->bump_cursor;
+        } else {
+            EXPECT_EQ(gc->bump_blocks, initial_head);
+            EXPECT_EQ(gc->bump_cursor, initial_cursor);
+        }
+        EXPECT_TRUE(gc_is_managed(gc,
+            (void*)(uintptr_t)(roots[0] & UINT64_C(0x00FFFFFFFFFFFFFF))));
+    }
 }
 
 TEST_F(GCHeapTest, BumpAllocationBitmapMarksOnlyExactAllocatedSlots) {
@@ -1573,6 +1666,100 @@ TEST_F(GCHeapTest, CompactionSurvivesScratchAllocationFailureWithoutRetainingOwn
     gc_unregister_root(gc, &root);
 }
 
+TEST_F(GCHeapTest, ReachableWorklistGrowsAndCompactsEveryLiveBuffer) {
+    const int children = gc->mark_capacity + 1;
+    void* parent = make_list(children, children);
+    uint64_t* items = list_items(parent);
+    for (int i = 0; i < children; i++) {
+        void* child = make_list(1, 1);
+        list_items(child)[0] = int_item(i);
+        items[i] = list_item(child);
+        make_string("dead-interleaved-header");
+    }
+    uint64_t root = list_item(parent);
+    gc_collect(gc, &root, 1);
+    EXPECT_EQ(gc->object_count, (size_t)children + 1);
+    EXPECT_GT(gc->mark_capacity, children);
+    EXPECT_EQ(gc->mark_top, 0);
+    EXPECT_FALSE(gc_is_nursery_data(gc, ((LambdaGcListLayout*)parent)->items));
+    items = list_items(parent);
+    for (int i = 0; i < children; i++) {
+        void* child = (void*)(uintptr_t)(items[i] & UINT64_C(0x00FFFFFFFFFFFFFF));
+        uint64_t* values = list_items(child);
+        EXPECT_FALSE(gc_is_nursery_data(gc, values));
+        EXPECT_EQ(values[0], int_item(i));
+    }
+}
+
+TEST_F(GCHeapTest, MarkWorklistGrowthFailureAbandonsCollectionWithoutMutation) {
+    void* parent = make_list(2, 2);
+    void* child = make_list(1, 1);
+    list_items(parent)[0] = list_item(child);
+    list_items(parent)[1] = list_item(make_list(1, 1));
+    list_items(child)[0] = int_item(42);
+    uint64_t root = list_item(parent);
+    uint64_t weak = string_item(make_string("unreachable-but-not-yet-swept"));
+    gc_register_weak(gc, &weak, nullptr, nullptr);
+    gc_header_t** stack = gc->mark_stack;
+    gc->mark_capacity = 1;
+    size_t nursery_before = gc_data_zone_used(gc->data_zone);
+
+    memtrack_fault_inject(0);
+    gc_collect(gc, &root, 1);
+    memtrack_fault_clear();
+    EXPECT_EQ(gc->mark_stack, stack);
+    EXPECT_EQ(gc->mark_capacity, 1);
+    EXPECT_EQ(gc->mark_top, 0);
+    EXPECT_EQ(gc->collecting, 0);
+    EXPECT_EQ(gc->collections, 0u);
+    EXPECT_EQ(gc->object_count, 4u);
+    EXPECT_NE(weak, 0u);
+    EXPECT_EQ(gc_data_zone_used(gc->data_zone), nursery_before);
+    EXPECT_TRUE(gc_is_nursery_data(gc, ((LambdaGcListLayout*)parent)->items));
+    EXPECT_TRUE(gc_is_nursery_data(gc, ((LambdaGcListLayout*)child)->items));
+    EXPECT_EQ(gc_get_header(parent)->marked, 0);
+    EXPECT_EQ(gc_get_header(child)->marked, 0);
+
+    gc_collect(gc, &root, 1);
+    EXPECT_EQ(gc->collections, 1u);
+    EXPECT_EQ(gc->object_count, 3u);
+    EXPECT_EQ(weak, 0u);
+    EXPECT_EQ(list_items(child)[0], int_item(42));
+    EXPECT_FALSE(gc_is_nursery_data(gc, ((LambdaGcListLayout*)child)->items));
+    gc_unregister_weak(gc, &weak);
+}
+
+TEST_F(GCHeapTest, EphemeronWorklistFailureDoesNotClearUnprocessedEntries) {
+    uint64_t key = string_item(make_string("live-key"));
+    void* live_value = make_list(2, 2);
+    list_items(live_value)[0] = string_item(make_string("first-live-child"));
+    list_items(live_value)[1] = string_item(make_string("second-live-child"));
+    uint64_t value = list_item(live_value);
+    uint64_t dead_key = string_item(make_string("dead-key"));
+    uint64_t dead_value = string_item(make_string("dead-value"));
+    ASSERT_TRUE(gc_register_ephemeron(gc, &dead_key, &dead_value, nullptr, nullptr));
+    ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value, nullptr, nullptr));
+    gc->mark_capacity = 1;
+    memtrack_fault_inject(0);
+    gc_collect(gc, &key, 1);
+    memtrack_fault_clear();
+    EXPECT_EQ(gc->collections, 0u);
+    EXPECT_EQ(gc->object_count, 6u);
+    EXPECT_NE(dead_key, 0u);
+    EXPECT_NE(dead_value, 0u);
+    EXPECT_NE(value, 0u);
+    EXPECT_EQ(gc->ephemeron_count, 2);
+
+    gc_collect(gc, &key, 1);
+    EXPECT_EQ(gc->collections, 1u);
+    EXPECT_EQ(gc->object_count, 4u);
+    EXPECT_EQ(dead_key, 0u);
+    EXPECT_EQ(dead_value, 0u);
+    void* list = (void*)(uintptr_t)(value & UINT64_C(0x00FFFFFFFFFFFFFF));
+    EXPECT_FALSE(gc_is_nursery_data(gc, list_items(list)));
+    EXPECT_EQ(gc->ephemeron_count, 0);
+}
+
 TEST_F(GCHeapTest, CompactPromotesArrayNumBaseAndRebindsLiveView) {
     // Build the checked ArrayNum ABI used by the C collector: the view is newer
     // and therefore visited before its base in the all_objects list.
@@ -2252,6 +2439,35 @@ TEST_F(GCHeapTest, VMapDestroyCallbackOnDead) {
     // destroy callback should have been called once
     EXPECT_EQ(s_vmap_destroy_calls, 1);
     EXPECT_EQ(s_vmap_destroy_last_obj, vm);
+}
+
+TEST_F(GCHeapTest, DeadFinalizerObservesSourceDataBeforeSurvivorCompaction) {
+    struct Probe {
+        gc_heap_t* heap;
+        LambdaGcListLayout* live;
+        uint64_t* source;
+        bool called;
+    };
+    static Probe* active = nullptr;
+    void* live = make_list(1, 1);
+    list_items(live)[0] = int_item(42);
+    Probe probe{gc, (LambdaGcListLayout*)live, list_items(live), false};
+    active = &probe;
+    gc->vmap_destroy = [](void* obj, void* data) {
+        active->called = true;
+        EXPECT_EQ(active->live->items, active->source);
+        EXPECT_TRUE(gc_is_nursery_data(active->heap, active->source));
+        EXPECT_EQ(active->source[0], i2it(42));
+        test_vmap_destroy(obj, data);
+    };
+    make_vmap(this, gc, int_item(1), int_item(2));
+    uint64_t root = list_item(live);
+    gc_collect(gc, &root, 1);
+    EXPECT_TRUE(probe.called);
+    EXPECT_EQ(gc->object_count, 1u);
+    EXPECT_NE(list_items(live), probe.source);
+    EXPECT_EQ(list_items(live)[0], int_item(42));
+    active = nullptr;
 }
 
 TEST_F(GCHeapTest, VMapDeadAlsoCollectsUnreferencedChildren) {

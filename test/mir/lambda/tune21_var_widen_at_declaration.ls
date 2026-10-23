@@ -8,8 +8,9 @@
 // inner loop never runs before `j = j + m`), while reads emitted before the
 // assignment kept the stale native register. The GC root then held garbage
 // and fn_add received a non-Item. Both bodies below therefore lower `j` as a
-// boxed Item throughout: the float subtraction is fn_sub, never a native
-// dsub on an int-lane register, and the comparison is fn_ge.
+// boxed Item throughout. Tune34 proves the complete numeric recurrence
+// and decodes that Item for native float subtraction/comparison; the binding
+// itself still preserves the selected int or float member.
 pn f(flag) {
     var j = 0
     if (flag) { j = j - 0.5 }

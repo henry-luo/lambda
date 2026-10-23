@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "S4.2/D2.4: ordered finite guards precede D2I; the canonical poison conversion and floor remain on the cold arm.",
+  "checks": [
+    {"in_func": "_truncate_value_#", "expect": ["d2i", "lambda_double_to_int_lane_c"]},
+    {"in_func": "_floor_value_#", "expect": ["d2i", "floor", "lambda_double_to_int_lane_c"]}
+  ]
+}

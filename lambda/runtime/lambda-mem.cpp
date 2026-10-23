@@ -808,6 +808,12 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
             (unsigned)type_id);
         abort();
     }
+    // Runtime constructors share the precise, zeroed size-class path already
+    // used by JIT maps; only large containers need the general allocation path.
+    if (is_container_type_id(type_id)) {
+        int cls = gc_object_zone_class_index(size);
+        if (cls >= 0) return heap_calloc_class(size, type_id, cls);
+    }
     gc_heap_t *gc = context->heap->gc;
     void* ptr = gc_heap_calloc(gc, size, type_id);
     if (!ptr) return NULL;

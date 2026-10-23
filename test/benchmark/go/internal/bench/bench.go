@@ -3066,7 +3066,6 @@ func jetstreamNavierStokes() (int, float64) {
 	vertical, priorVertical := make([]float64, navierSize), make([]float64, navierSize)
 	framesTillAdd, framesBetween := 0, 5
 	started := time.Now()
-	firstFrameMs := 0.0
 	for frame := 0; frame < 15; frame++ {
 		for index := range density {
 			priorDensity[index], priorHorizontal[index], priorVertical[index] = 0, 0, 0
@@ -3079,16 +3078,12 @@ func jetstreamNavierStokes() (int, float64) {
 		}
 		navierVelocityStep(horizontal, vertical, priorHorizontal, priorVertical, .1, 20)
 		navierDensityStep(density, priorDensity, horizontal, vertical, .1, 20)
-		if frame == 0 {
-			// Node times one update; finish the checksum frames after that boundary.
-			firstFrameMs = float64(time.Since(started).Nanoseconds()) / 1e6
-		}
 	}
 	result := 0
 	for index := 7000; index < 7100; index++ {
 		result += int(density[index] * 10)
 	}
-	return result, firstFrameMs
+	return result, float64(time.Since(started).Nanoseconds()) / 1e6
 }
 
 type matrix4 [16]float64
@@ -3447,10 +3442,10 @@ func runJetStream(name string) bool {
 		fmt.Printf("splay: %s\n", pass(ok))
 		return ok
 	case "navier_stokes":
-		result, firstFrameMs := jetstreamNavierStokes()
+		result, elapsedMs := jetstreamNavierStokes()
 		ok = result == 77
 		fmt.Printf("navier-stokes: %s (checksum=%d)\n", pass(ok), result)
-		fmt.Printf("__TIMING__:%.6f\n", firstFrameMs)
+		fmt.Printf("__TIMING__:%.6f\n", elapsedMs)
 		return ok
 	case "cube3d":
 		ok = jetstreamCube3D()

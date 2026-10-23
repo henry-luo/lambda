@@ -27,9 +27,12 @@ function density_digest(state)
     end
     return reinterpret(Int32, digest)
 end
+function run_fluid!(state)
+    for _ in 1:15; update_fluid!(state); end
+    return state
+end
 function verify_fluid(state)
-    for _ in 2:15; update_fluid!(state); end
     return sum(trunc(Int, state.dens[i+1] * 10) for i in 7000:7099) == 77 && density_digest(state) == -257786486
 end
-run_benchmark(prepare_fluid, (io, state)->update_fluid!(state), verify_fluid,
+run_benchmark(prepare_fluid, (io, state)->run_fluid!(state), verify_fluid,
               result->println("__NAVIER_DENSITY_DIGEST__:", density_digest(result)))

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "description": "D2.4: mixed numeric recurrences preserve observable member tags while float consumers use native arithmetic; nullable writes keep fallback.",
+  "checks": [
+    {"in_func": "_half_walk_#", "expect": ["dsub", "dadd"], "forbid": ["call.*fn_sub", "call.*fn_ge"]}
+  ]
+}

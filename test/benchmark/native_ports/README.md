@@ -63,8 +63,8 @@ emulated. Matrix multiplication remains scalar without BLAS or symmetry
 shortcuts. Pi summation recomputes all 500 independent sums. Formatted output
 performs all 391 synchronous open/write/close batches inside the timer.
 
-Navier–Stokes times one frame and verifies the next 14 frames and the density
-digest afterward. Splay setup remains outside timing, with full payloads,
+Navier–Stokes times all 15 frames, then verifies checksum 77 and the density
+digest without advancing the simulation. Splay setup remains outside timing, with full payloads,
 8,000 initial nodes, and 50 × 80 modifications. Its deterministic PRNG follows
 the existing cross-language port contract. Text workloads preserve all registered
 rounds, inputs, algorithms, and checksum checks.

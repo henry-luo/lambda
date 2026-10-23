@@ -32,5 +32,6 @@ update(S)->U=S#state.u,V=S#state.v,Up=S#state.up,Vp=S#state.vp,D=S#state.d,Dp=S#
     add(U,Up),add(V,Vp),grid(fun(I)->set(Up,I,get(U,I)),set(Vp,I,get(V,I))end),boundary(1,Up),boundary(2,Vp),project(Up,Vp,U,V),
     advect(1,U,Up,Up,Vp),advect(2,V,Vp,Up,Vp),project(U,V,Up,Vp),add(D,Dp),solve(0,Dp,D,0.0,1.0),advect(0,D,Dp,U,V),Next.
 digest(S)->D=lists:foldl(fun(I,H)->A=H bxor(floor(get(S#state.d,I)*1000.0)band 16#ffffffff),((A bsl 5)-A+(A bsr 7))band 16#ffffffff end,2166136261,lists:seq(0,16899)),case D>=16#80000000 of true->D-16#100000000;false->D end.
-verify(S)->Final=lists:foldl(fun(_,A)->update(A)end,S,lists:seq(2,15)),Sum=lists:sum([trunc(get(Final#state.d,I)*10)||I<-lists:seq(7000,7099)]),native_bench:check(Sum=:=77 andalso digest(Final)=:= -257786486).
-run()->native_bench:prepared(fun prepare/0,fun update/1,fun verify/1,fun(S)->io:format("__NAVIER_DENSITY_DIGEST__:~B~n",[digest(S)])end,fun cleanup/1).
+simulate(S)->lists:foldl(fun(_,A)->update(A)end,S,lists:seq(1,15)).
+verify(S)->Sum=lists:sum([trunc(get(S#state.d,I)*10)||I<-lists:seq(7000,7099)]),native_bench:check(Sum=:=77 andalso digest(S)=:= -257786486).
+run()->native_bench:prepared(fun prepare/0,fun simulate/1,fun verify/1,fun(S)->io:format("__NAVIER_DENSITY_DIGEST__:~B~n",[digest(S)])end,fun cleanup/1).

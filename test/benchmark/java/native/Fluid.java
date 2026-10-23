@@ -33,6 +33,7 @@ final class Fluid {
         advect(1,s.u,s.up,s.up,s.vp);advect(2,s.v,s.vp,s.up,s.vp);project(s.u,s.v,s.up,s.vp);
         add(s.d,s.dp);solve(0,s.dp,s.d,0,1);advect(0,s.d,s.dp,s.u,s.v);return s;}
     static int digest(State s){int digest=(int)2166136261L;for(double value:s.d){digest^=(int)Math.floor(value*1000);digest=(digest<<5)-digest+(digest>>>7);}return digest;}
-    static void verify(State s){for(int i=1;i<15;i++)update(s);int sum=0;for(int i=7000;i<7100;i++)sum+=(int)(s.d[i]*10);NativeBench.check(sum==77&&digest(s)==-257786486);}
-    static void run(){NativeBench.prepared(State::new,Fluid::update,Fluid::verify,s->System.out.println("__NAVIER_DENSITY_DIGEST__:"+digest(s)));}
+    static State simulate(State s){for(int i=0;i<15;i++)update(s);return s;}
+    static void verify(State s){int sum=0;for(int i=7000;i<7100;i++)sum+=(int)(s.d[i]*10);NativeBench.check(sum==77&&digest(s)==-257786486);}
+    static void run(){NativeBench.prepared(State::new,Fluid::simulate,Fluid::verify,s->System.out.println("__NAVIER_DENSITY_DIGEST__:"+digest(s)));}
 }

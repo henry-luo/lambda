@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
 // Monotonic nanosecond clock for the mark-phase tuning counter.
@@ -487,7 +488,7 @@ gc_heap_t* gc_heap_create(void) {
     gc->mark_stack = (gc_header_t**)mem_alloc(
         GC_MARK_STACK_INITIAL * sizeof(gc_header_t*), MEM_CAT_CONTAINER);
     gc->mark_top = 0;
-    gc->mark_capacity = GC_MARK_STACK_INITIAL;
+    gc->mark_capacity = gc->mark_stack ? GC_MARK_STACK_INITIAL : 0;
 
     gc->all_objects = NULL;
     gc->total_allocated = 0;
@@ -877,6 +878,15 @@ int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
     return 1;
 }
 
+static inline void* gc_record_small_allocation(gc_heap_t* gc, void* ptr, size_t size) {
+    if (ptr) {
+        gc->total_allocated += sizeof(gc_header_t) + size;
+        gc->object_count++;
+        assert_raw_item_pointer(ptr);
+    }
+    return ptr;
+}
+
 void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     if (!gc) {
         log_error("gc_heap_alloc: invalid gc_heap");
@@ -891,12 +901,7 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
     void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
-    if (ptr) {
-        gc->total_allocated += sizeof(gc_header_t) + size;
-        gc->object_count++;
-        assert_raw_item_pointer(ptr);
-        return ptr;
-    }
+    if (ptr) return gc_record_small_allocation(gc, ptr, size);
 
     // large objects get dedicated memtrack allocations, independent from all
     // slab and data-zone VM extents.
@@ -907,15 +912,7 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
         return NULL;
     }
     memset(header, 0, total);
-    // initialize header
-    header->next = gc->all_objects;
-    header->type_tag = type_tag;
-    header->gc_flags = GC_FLAG_LARGE;
-    header->marked = 0;
-    header->alloc_size = (uint32_t)size;
-
-    // link to all_objects list
-    gc->all_objects = header;
+    gc_init_object_header(header, size, type_tag, GC_FLAG_LARGE, &gc->all_objects);
     if (!gc_large_object_add(gc, header)) {
         gc->all_objects = header->next;
         mem_free(header);
@@ -962,14 +959,9 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     // The class index is pre-computed by the JIT at compile time.
     void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
                                             &gc->all_objects);
-    if (ptr) {
-        gc->total_allocated += sizeof(gc_header_t) + size;
-        gc->object_count++;
-        assert_raw_item_pointer(ptr);
-    }
     // No large-object fallback needed — JIT only uses this for known small sizes.
     // No memset needed — object zone returns zeroed memory.
-    return ptr;
+    return gc_record_small_allocation(gc, ptr, size);
 }
 
 void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
@@ -981,26 +973,9 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
         gc_heap_maybe_collect_object_pressure(gc, "gc_heap_bump_alloc");
     }
     // ---- Fast path: try free list first (recycling after GC) ----
-    gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
-    if (free_hdr) {
-        gc->object_zone->free_lists[cls] = free_hdr->next;
-        size_t class_user_size = gc_object_zone_class_size(cls);
-        memset((void*)(free_hdr + 1), 0, class_user_size);
-        // reinitialize header
-        free_hdr->type_tag = type_tag;
-        free_hdr->gc_flags = 0;
-        free_hdr->marked = 0;
-        free_hdr->alloc_size = (uint32_t)alloc_size;
-        // link into all_objects
-        free_hdr->next = gc->all_objects;
-        gc->all_objects = free_hdr;
-        gc->object_zone->total_slots_allocated++;
-        gc->total_allocated += sizeof(gc_header_t) + alloc_size;
-        gc->object_count++;
-        void* ptr = (void*)(free_hdr + 1);
-        assert_raw_item_pointer(ptr);
-        return ptr;
-    }
+    void* reused = gc_object_zone_reuse(gc->object_zone, cls, alloc_size,
+        type_tag, &gc->all_objects);
+    if (reused) return gc_record_small_allocation(gc, reused, alloc_size);
 
     // ---- Bump-pointer path ----
     uint8_t* cursor = gc->bump_cursor;
@@ -1015,8 +990,7 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
             // Fallback to slab allocator
             void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, alloc_size,
                                                    type_tag, &gc->all_objects);
-            if (ptr) assert_raw_item_pointer(ptr);
-            return ptr;
+            return gc_record_small_allocation(gc, ptr, alloc_size);
         }
         new_block->next = gc->bump_blocks;
         gc->bump_blocks = new_block;
@@ -1039,23 +1013,12 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
         cur_block->alloc_bits[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
     }
 
-    // Initialize header in-place (memory is pre-zeroed from block allocation)
+    // initialize the live slot; its bitmap start survives later free-list reuse.
     gc_header_t* header = (gc_header_t*)cursor;
-    header->type_tag = type_tag;
-    header->gc_flags = GC_FLAG_BUMP;
-    header->marked = 0;
-    header->alloc_size = (uint32_t)alloc_size;
-
-    // Link into all_objects list
-    header->next = gc->all_objects;
-    gc->all_objects = header;
-
-    gc->total_allocated += slot_size;
-    gc->object_count++;
-
-    void* ptr = (void*)(header + 1);
-    assert_raw_item_pointer(ptr);
-    return ptr;
+    gc_init_object_header(header, alloc_size, type_tag, GC_FLAG_BUMP, &gc->all_objects);
+    gc->object_zone->total_slots_allocated++;
+    // Live-byte accounting uses the requested size, just as sweep subtracts it.
+    return gc_record_small_allocation(gc, (void*)(header + 1), alloc_size);
 }
 
 void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
@@ -1421,25 +1384,43 @@ void gc_set_collect_callback(gc_heap_t* gc, gc_collect_callback_t callback) {
 // Mark-and-Sweep Collector
 // ============================================================================
 
-// push a header onto the mark stack
-static void mark_stack_push(gc_heap_t* gc, gc_header_t* header) {
+// grow atomically so an incomplete trace can abandon collection safely.
+static int mark_stack_push(gc_heap_t* gc, gc_header_t* header) {
+    if (gc->mark_failed) return 0;
     if (gc->mark_top >= gc->mark_capacity) {
-        // grow mark stack
-        gc->mark_capacity *= 2;
-        gc->mark_stack = (gc_header_t**)mem_realloc(
-            gc->mark_stack, gc->mark_capacity * sizeof(gc_header_t*),
-            MEM_CAT_CONTAINER);
-        if (!gc->mark_stack) {
-            log_error("gc mark stack: realloc failed");
-            return;
+        if (gc->mark_capacity > INT_MAX / 2) {
+            gc->mark_failed = 1;
+            return 0;
         }
+        int capacity = gc->mark_capacity ? gc->mark_capacity * 2 : GC_MARK_STACK_INITIAL;
+        if ((size_t)capacity > SIZE_MAX / sizeof(gc_header_t*)) {
+            gc->mark_failed = 1;
+            return 0;
+        }
+        gc_header_t** stack = (gc_header_t**)mem_realloc(
+            gc->mark_stack, (size_t)capacity * sizeof(gc_header_t*),
+            MEM_CAT_CONTAINER);
+        if (!stack) {
+            gc->mark_failed = 1;
+            return 0;
+        }
+        gc->mark_stack = stack;
+        gc->mark_capacity = capacity;
     }
     gc->mark_stack[gc->mark_top++] = header;
+    return 1;
 }
 
 static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
     if (gc->mark_top <= 0) return NULL;
     return gc->mark_stack[--gc->mark_top];
+}
+
+static int gc_mark_header(gc_heap_t* gc, gc_header_t* header) {
+    if (!header || header->marked || (header->gc_flags & GC_FLAG_FREED)) return 0;
+    if (!mark_stack_push(gc, header)) return 0;
+    header->marked = 1;
+    return 1;
 }
 
 // extract raw pointer from a tagged Item value.
@@ -1583,24 +1564,14 @@ void gc_mark_item(gc_heap_t* gc, uint64_t item) {
     if (!is_gc_object(gc, ptr)) return;
 
     gc_header_t* header = gc_get_header(ptr);
-    if (!header) return;
-    if (header->marked) return;     // already visited
-    if (header->gc_flags & GC_FLAG_FREED) return; // freed object
-
-    header->marked = 1;
-    mark_stack_push(gc, header);
+    gc_mark_header(gc, header);
 }
 
 void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
     if (!ptr || !is_gc_object(gc, ptr)) return;
 
     gc_header_t* header = gc_get_header(ptr);
-    if (!header) return;
-    if (header->marked) return;
-    if (header->gc_flags & GC_FLAG_FREED) return;
-
-    header->marked = 1;
-    mark_stack_push(gc, header);
+    gc_mark_header(gc, header);
 }
 
 static int gc_drain_mark_stack(gc_heap_t* gc);
@@ -1618,17 +1589,14 @@ static int gc_ephemeron_mark_value(gc_heap_t* gc, uint64_t item) {
     void* ptr = item_to_ptr(gc, item);
     if (!ptr || !is_gc_object(gc, ptr)) return 0;
     gc_header_t* header = gc_get_header(ptr);
-    if (!header || header->marked || (header->gc_flags & GC_FLAG_FREED)) return 0;
-    header->marked = 1;
-    mark_stack_push(gc, header);
-    return 1;
+    return gc_mark_header(gc, header);
 }
 
 static int gc_process_ephemerons(gc_heap_t* gc) {
     if (!gc || !gc->ephemerons || gc->ephemeron_count <= 0) return 0;
     int traced_count = 0;
     int made_progress = 1;
-    while (made_progress) {
+    while (made_progress && !gc->mark_failed) {
         made_progress = 0;
         int snapshot_count = gc->ephemeron_count;
         for (int i = 0; i < snapshot_count; i++) {
@@ -1647,6 +1615,7 @@ static int gc_process_ephemerons(gc_heap_t* gc) {
         if (gc->ephemeron_count > snapshot_count) made_progress = 1;
     }
 
+    if (gc->mark_failed) return traced_count;
     int snapshot_count = gc->ephemeron_count;
     for (int i = 0; i < snapshot_count; i++) {
         gc_ephemeron_t* entry = &gc->ephemerons[i];
@@ -1703,12 +1672,7 @@ static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
     if (!ptr || !is_gc_object(gc, ptr)) return;
 
     gc_header_t* header = gc_get_header(ptr);
-    if (!header) return;
-    if (header->marked) return;
-    if (header->gc_flags & GC_FLAG_FREED) return;
-
-    header->marked = 1;
-    mark_stack_push(gc, header);
+    gc_mark_header(gc, header);
 }
 
 static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size) {
@@ -2111,7 +2075,7 @@ static void gc_record_compaction_owner(gc_heap_t* gc, gc_header_t* header) {
 
 static int gc_drain_mark_stack(gc_heap_t* gc) {
     int traced_count = 0;
-    while (gc->mark_top > 0) {
+    while (gc->mark_top > 0 && !gc->mark_failed) {
         gc_header_t* obj = mark_stack_pop(gc);
         gc_trace_object(gc, obj);
         gc_record_compaction_owner(gc, obj);
@@ -2554,9 +2518,8 @@ static int gc_full_compact_tenured_data(gc_heap_t* gc,
     gc->data_zone = nursery;
 
     // Both source passes are idempotent for repeated base/view visits, so the
-    // fresh zone contains each retained buffer once. The old VM extents are
-    // returned after sweep: dead owners are not fixed up, and their finalizers
-    // still read side tables in this zone (gc_finalize_dead_object).
+    // fresh zone contains each retained buffer once. Release the old extents
+    // after the caller finishes compaction; dead owners were finalized first.
     gc->retired_tenured_data = old_tenured;
     gc->tune.full_data_compactions++;
     gc->tune.full_data_bytes_released += old_used;
@@ -2625,6 +2588,27 @@ static void gc_poison_dead_object(gc_heap_t* gc, gc_header_t* header) {
     memset((void*)(header + 1), GC_FREED_POISON_BYTE, header->alloc_size);
 }
 
+typedef struct GcSweepStorageCounts {
+    size_t bump;
+    size_t slab;
+    size_t large;
+} GcSweepStorageCounts;
+
+static void gc_sweep_release(gc_heap_t* gc, gc_header_t* header,
+        GcSweepStorageCounts* counts) {
+    if (header->gc_flags & GC_FLAG_LARGE) {
+        counts->large++;
+        gc_large_object_remove(gc, header);
+        mem_free(header);
+    } else {
+        if (header->gc_flags & GC_FLAG_BUMP) counts->bump++;
+        else counts->slab++;
+        // Bump blocks stay address-stable, but their dead slots must recycle;
+        // unlinking alone retained every constructor allocation until teardown.
+        gc_object_zone_free(gc->object_zone, header);
+    }
+}
+
 static void gc_sweep(gc_heap_t* gc) {
     gc_header_t* current = gc->all_objects;
     gc_header_t* prev = NULL;
@@ -2633,9 +2617,7 @@ static void gc_sweep(gc_heap_t* gc) {
     size_t walked_count = 0;
     size_t alive_count = 0;
     size_t already_freed_count = 0;
-    size_t bump_owned_count = 0;
-    size_t object_zone_owned_count = 0;
-    size_t large_owned_count = 0;
+    GcSweepStorageCounts storage = {0};
     while (current) {
         walked_count++;
         gc_header_t* next_obj = current->next;
@@ -2645,27 +2627,14 @@ static void gc_sweep(gc_heap_t* gc) {
             // already freed — unlink from list and return to free list
             if (prev) prev->next = next_obj;
             else gc->all_objects = next_obj;
-            // all_objects only contains headers produced by the GC allocation
-            // paths, so header flags are enough to classify the owner.
-            if (current->gc_flags & GC_FLAG_LARGE) {
-                large_owned_count++;
-                gc_large_object_remove(gc, current);
-                mem_free(current);
-            } else if (current->gc_flags & GC_FLAG_BUMP) {
-                bump_owned_count++;
-                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
-            } else {
-                object_zone_owned_count++;
-                gc_object_zone_free(gc->object_zone, current);
-            }
+            gc_sweep_release(gc, current, &storage);
             current = next_obj;
             continue;
         }
 
         if (current->marked) {
-            // alive — reset mark for next cycle
+            // survivor marks remain available through data compaction.
             alive_count++;
-            current->marked = 0;
             prev = current;
         } else {
             // dead — finalize external sub-allocations
@@ -2679,22 +2648,7 @@ static void gc_sweep(gc_heap_t* gc) {
             freed_bytes += sizeof(gc_header_t) + current->alloc_size;
             freed_count++;
 
-            // return to the owning allocation arena.
-            if (current->gc_flags & GC_FLAG_LARGE) {
-                large_owned_count++;
-                // large objects allocated with malloc — free directly
-                gc_large_object_remove(gc, current);
-                mem_free(current);
-            } else if (current->gc_flags & GC_FLAG_BUMP) {
-                bump_owned_count++;
-                // Retained bump blocks remain address-discoverable after sweep.
-                // Mark dead headers freed so a stale exact root cannot enqueue
-                // and trace their poisoned payload in a later collection.
-                current->gc_flags |= GC_FLAG_FREED;
-            } else {
-                object_zone_owned_count++;
-                gc_object_zone_free(gc->object_zone, current);
-            }
+            gc_sweep_release(gc, current, &storage);
         }
 
         current = next_obj;
@@ -2708,9 +2662,9 @@ static void gc_sweep(gc_heap_t* gc) {
     GC_PROFILE_COUNT("gc_sweep_alive_objects", alive_count);
     GC_PROFILE_COUNT("gc_sweep_dead_objects", freed_count);
     GC_PROFILE_COUNT("gc_sweep_already_freed", already_freed_count);
-    GC_PROFILE_COUNT("gc_sweep_bump_owned", bump_owned_count);
-    GC_PROFILE_COUNT("gc_sweep_object_zone_owned", object_zone_owned_count);
-    GC_PROFILE_COUNT("gc_sweep_large_owned", large_owned_count);
+    GC_PROFILE_COUNT("gc_sweep_bump_owned", storage.bump);
+    GC_PROFILE_COUNT("gc_sweep_object_zone_owned", storage.slab);
+    GC_PROFILE_COUNT("gc_sweep_large_owned", storage.large);
     GC_PROFILE_COUNT("gc_sweep_freed_bytes", freed_bytes);
 
     log_debug("gc_sweep: freed %zu objects (%zu bytes), %zu remain",
@@ -2752,6 +2706,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     gc->mark_top = 0;
     gc->compaction_owner_count = 0;
     gc->compaction_owners_valid = true;
+    gc->mark_failed = 0;
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     uint64_t mark_start_ns = gc_now_nanos();
 #endif
@@ -2804,6 +2759,21 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     uint64_t gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
     int traced_count = gc_drain_mark_stack(gc);
     traced_count += gc_process_ephemerons(gc);
+    if (gc->mark_failed) {
+        // Incomplete reachability must never clear weak edges, move buffers,
+        // or reclaim objects. Preserve the heap for a later collection attempt.
+        for (gc_header_t* header = gc->all_objects; header; header = header->next) {
+            header->marked = 0;
+        }
+        gc->mark_top = 0;
+        // an abandoned trace must discard its partial compaction worklist too.
+        gc->compaction_owner_count = 0;
+        gc->compaction_owners_valid = false;
+        gc->mark_failed = 0;
+        gc->collecting = 0;
+        log_error("gc-mark-worklist: allocation failed; collection abandoned");
+        return;
+    }
     GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     gc->tune.mark_nanos += gc_now_nanos() - mark_start_ns;
@@ -2824,7 +2794,14 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     size_t nursery_used_before = gc_data_zone_used(gc->data_zone);
     size_t tenured_before = gc_data_zone_used(gc->tenured_data);
 
-    // Phase 2: Compact — a mature tenured zone evacuates both source zones
+    // Finalizers run while both source zones are intact (D4.3.3). Retaining
+    // survivor marks lets compaction visit only the swept live list, avoiding
+    // a second pointer chase over fragmented dead slots (D4.3.1).
+    uint64_t gc_sweep_token = GC_PROFILE_ENTER("gc_sweep");
+    gc_sweep(gc);
+    GC_PROFILE_LEAVE("gc_sweep", gc_sweep_token);
+
+    // Phase 3: Compact — a mature tenured zone evacuates both source zones
     // directly to fresh storage; otherwise promote the nursery as usual.
     uint64_t gc_compact_token = GC_PROFILE_ENTER("gc_compact_data");
     size_t survived_this_cycle = 0;
@@ -2835,14 +2812,13 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
             ? tenured_after_promotion - tenured_before : 0;
     }
     GC_PROFILE_LEAVE("gc_compact_data", gc_compact_token);
-    // no worklist entry remains live across sweep or a subsequent collection.
+    // no worklist entry remains live across collections.
     gc->compaction_owner_count = 0;
     gc->compaction_owners_valid = false;
 
-    // Phase 3: Sweep — free dead objects, return to free lists
-    uint64_t gc_sweep_token = GC_PROFILE_ENTER("gc_sweep");
-    gc_sweep(gc);
-    GC_PROFILE_LEAVE("gc_sweep", gc_sweep_token);
+    for (gc_header_t* header = gc->all_objects; header; header = header->next) {
+        header->marked = 0;
+    }
     if (gc->retired_tenured_data) {
         gc_data_zone_destroy(gc->retired_tenured_data);
         gc->retired_tenured_data = NULL;
@@ -2858,6 +2834,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     // same collection opportunity as zone allocations; only new payloads add
     // pressure toward the next legal MAY_GC boundary.
     gc->external.bytes_since_collection = 0;
+    gc->mark_top = 0;
     gc->collecting = 0;
 
     // Adaptive threshold: measure how much nursery data survived compaction.

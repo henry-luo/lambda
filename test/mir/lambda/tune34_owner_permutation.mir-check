@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "S9.1.2/D4.4.1: complete owner permutations avoid new share marks; an observed temporary retains its snapshot boundary.",
+  "checks": [
+    {"in_func": "_typed_cycle_#", "forbid": ["cow_bind_var"]},
+    {"in_func": "_live_temporary_#", "expect": ["cow_bind_var"]}
+  ]
+}

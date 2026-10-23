@@ -20,6 +20,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
+#include "../lambda/runtime/gc/gc_object_zone.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/jube/jube_interface.h"
@@ -1087,6 +1088,59 @@ protected:
         pool = NULL;
     }
 };
+
+TEST_F(LambdaConcurrencyRuntime, SmallRuntimeContainersKeepExactBumpHomes) {
+    RootFrame roots(2);
+    Rooted<Item> held_list(roots, ItemNull);
+    Rooted<Item> held_numbers(roots, ItemNull);
+    List* items = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
+    ASSERT_NE(items, nullptr);
+    items->type_id = LMD_TYPE_ARRAY;
+    held_list.set((Item){.array = items});
+    EXPECT_TRUE(items->is_heap);
+    EXPECT_EQ(items->length, 0);
+    EXPECT_EQ(items->capacity, 0);
+    EXPECT_EQ(items->items, nullptr);
+    EXPECT_TRUE(gc_get_header(items)->gc_flags & GC_FLAG_BUMP);
+
+    ArrayNum* numbers = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    ASSERT_NE(numbers, nullptr);
+    numbers->type_id = LMD_TYPE_ARRAY_NUM;
+    numbers->set_elem_type(ELEM_INT);
+    held_numbers.set((Item){.array_num = numbers});
+    EXPECT_TRUE(numbers->is_heap);
+    EXPECT_EQ(numbers->length, 0);
+    EXPECT_EQ(numbers->data, nullptr);
+    EXPECT_TRUE(gc_get_header(numbers)->gc_flags & GC_FLAG_BUMP);
+
+    // D5.3: the allocator changes physical homes, never the exact-root contract.
+    gc_collect(concurrency_test_gc, eval.side_root_base,
+        eval.side_root_top - eval.side_root_base);
+    EXPECT_EQ(held_list.get().array, items);
+    EXPECT_EQ(held_numbers.get().array_num, numbers);
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, items));
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, numbers));
+    EXPECT_FALSE(gc_is_managed(concurrency_test_gc, (uint8_t*)items + 1));
+}
+
+TEST_F(LambdaConcurrencyRuntime, LargeRuntimeContainersKeepZeroedFallback) {
+    RootFrame roots(1);
+    Rooted<Item> held(roots, ItemNull);
+    size_t size = GC_LARGE_OBJECT_THRESHOLD + sizeof(List);
+    List* items = (List*)heap_calloc(size, LMD_TYPE_ARRAY);
+    ASSERT_NE(items, nullptr);
+    items->type_id = LMD_TYPE_ARRAY;
+    held.set((Item){.array = items});
+    EXPECT_TRUE(items->is_heap);
+    EXPECT_TRUE(gc_get_header(items)->gc_flags & GC_FLAG_LARGE);
+    EXPECT_EQ(items->length, 0);
+    EXPECT_EQ(items->items, nullptr);
+    EXPECT_EQ(((uint8_t*)items)[size - 1], 0);
+    gc_collect(concurrency_test_gc, eval.side_root_base,
+        eval.side_root_top - eval.side_root_base);
+    EXPECT_EQ(held.get().array, items);
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, items));
+}
 
 TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     int order[3] = {};
