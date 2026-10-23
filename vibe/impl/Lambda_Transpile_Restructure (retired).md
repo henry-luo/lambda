@@ -13,8 +13,8 @@ The overarching goal: make the transpiler's generated code **structurally correc
 
 ### References
 
-- [Lambda_Box_Unbox.md](../Lambda_Box_Unbox.md) — Dual version optimization proposal (original)
-- [Lambda_Box_Unbox2.md](../Lambda_Box_Unbox2.md) — Container unboxing fix (correctness)
+- [Lambda_Box_Unbox (retired).md](<Lambda_Box_Unbox (retired).md>) — Dual version optimization proposal (original)
+- [Lambda_Box_Unbox2 (retired).md](<Lambda_Box_Unbox2 (retired).md>) — Container unboxing fix (correctness)
 - `doc/dev/Lamdba_Runtime.md` §Suggestions — Runtime improvement list (10 items).
   That file has since been removed; its material lives in
   [`doc/dev/lambda/LR_00_Overview.md`](../../doc/dev/lambda/LR_00_Overview.md).
@@ -36,7 +36,7 @@ The current transpiler generates up to three versions of typed user functions:
 **Issues:**
 - `_u` is only generated for INT/INT64 returns — missing FLOAT, BOOL, STRING, containers
 - The main function's signature is inconsistent: closures return Item, `can_raise` returns Item, typed returns native, untyped returns Item
-- `_w` uses blind `(void*)` casts for container params — crashes on null/type-mismatch (see [Lambda_Box_Unbox2.md](../Lambda_Box_Unbox2.md))
+- `_w` uses blind `(void*)` casts for container params — crashes on null/type-mismatch (see [Lambda_Box_Unbox2 (retired).md](<Lambda_Box_Unbox2 (retired).md>))
 - System functions have no dual-version scheme at all — each has a single `fn_*` function with ad-hoc return conventions
 - `transpile_box_item()` has ~340 lines of special-case switch logic to determine how to box return values
 - `transpile_call_argument()` has ~160 lines of type-coercion logic spread across nested if/else chains
@@ -225,7 +225,7 @@ RetItem _foo_b42(Item a, Item b) { return ri_ok(i2it(_foo_n42(it2i(a), it2i(b)))
 
 #### 1.6 Structurally Safe Unboxing
 
-Replace all blind `(void*)` casts with type-checking unbox helpers (from [Lambda_Box_Unbox2.md](../Lambda_Box_Unbox2.md)):
+Replace all blind `(void*)` casts with type-checking unbox helpers (from [Lambda_Box_Unbox2 (retired).md](<Lambda_Box_Unbox2 (retired).md>)):
 
 ```c
 // Scalar unboxing (already exists):

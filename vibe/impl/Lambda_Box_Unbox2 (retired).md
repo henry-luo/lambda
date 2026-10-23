@@ -1,12 +1,23 @@
 # Lambda Box/Unbox — Structural Fix Proposal
 
+> **Status: RETIRED 2026-10-23.** C-transpiler-era proposal (`transpile.cpp`,
+> removed per AGENTS rule 14), kept for provenance of **D2.3.2**. MIR Direct
+> closes the crash by admission rather than by checking helpers: a declared
+> container parameter is admitted at the `_b` boundary (DF2 in
+> [`Lambda_Design_Compiling_Dual_Func.md`](../Lambda_Design_Compiling_Dual_Func.md);
+> checked boxed entry, §7.2 of
+> [`Lambda_Design_Compiling_Nullable.md`](../Lambda_Design_Compiling_Nullable.md))
+> before any pointer cast. `p2it` landed as proposed; `it2map`/`it2list`/… landed
+> as plain casts (`lambda/lambda.h`, `lambda/lambda.hpp`). The `_w` wrapper and
+> all `transpile.cpp` anchors below are historical.
+
 ## Overview
 
 This proposal addresses a structural defect in the C transpiler's handling of typed function parameters and return values. The current implementation blindly casts Items to native container pointers (`Map*`, `List*`, etc.) without runtime type checks, causing **segfaults** when null or type-mismatched Items are passed to container-typed parameters.
 
 The fix: replace blind pointer casts with proper **unbox-with-typecheck** helpers for all types, making the wrapper (`_w`) a correct type-checking trampoline between the boxed (Item ABI) and unboxed (native-typed) calling conventions.
 
-See [Lambda_Box_Unbox.md](Lambda_Box_Unbox.md) for the broader dual-version optimization proposal.
+See [Lambda_Box_Unbox (retired).md](<Lambda_Box_Unbox (retired).md>) for the broader dual-version optimization proposal.
 
 ---
 
@@ -413,7 +424,7 @@ Once the wrapper is fixed, the `_u` version could be extended to more return typ
 
 The MIR transpiler (`transpile-mir.cpp`) happens to be safer because it keeps container params as boxed Items (LMD_TYPE_ANY). However, this means it misses the optimization opportunity. Once the C transpiler is fixed, align the MIR path to use the same unboxing helpers.
 
-### Phase 3: Broader Optimization (from Lambda_Box_Unbox.md)
+### Phase 3: Broader Optimization (from Lambda_Box_Unbox (retired).md)
 
 With the correctness foundation in place, implement the full `_b`/`_u` dual-version optimization:
 - Boxed `_b` version with full type checking (extends current `_w`)

@@ -14,7 +14,7 @@
 > unmodified identifier in one content sequence.
 >
 > This supersedes the dual-version half of
-> [`Lambda_Box_Unbox.md`](Lambda_Box_Unbox.md) (C-transpiler era; the C path is
+> [`Lambda_Box_Unbox (retired).md`](<impl/Lambda_Box_Unbox (retired).md>) (C-transpiler era; the C path is
 > frozen per CLAUDE rule 14). The type-checking-trampoline half remains valid and
 > is retained here as the *declared-parameter* lane.
 > Related: [`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) (LC1v2: no
