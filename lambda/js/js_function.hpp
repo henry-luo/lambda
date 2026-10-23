@@ -150,7 +150,7 @@ struct JsCallableCode {
     // This synchronous AST definition owns no function/body binding slots or
     // observable lexical activation state, so calls may use their outer env.
     bool elides_function_environment;
-    uint8_t parameter_leaf_state; // 0 unchecked, 1 general body, 2 numeric predicate, 3 strict read-only expression
+    uint8_t parameter_leaf_state; // 0 unchecked, 1 general, 2 numeric, 3 strict expression, 4 module predicate calls
     // Script-pool code is shared by all closures from one AST definition and
     // must not be reclaimed when one GC function value dies.
     bool definition_owned;

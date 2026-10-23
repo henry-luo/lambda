@@ -321,16 +321,35 @@ static int mime_ieq(const char* a, size_t alen, const char* b) {
     return 1;
 }
 
+static size_t mime_essence_length(const char* content_type) {
+    const char* semi = strchr(content_type, ';');
+    size_t len = semi ? (size_t)(semi - content_type) : strlen(content_type);
+    while (len > 0 && (content_type[len-1] == ' ' || content_type[len-1] == '\t')) len--;
+    return len;
+}
+
+int mime_type_is_javascript(const char* content_type) {
+    if (!content_type) return 0;
+    while (*content_type == ' ' || *content_type == '\t') content_type++;
+    size_t length = mime_essence_length(content_type);
+    // WHATWG MIME Sniffing's JavaScript MIME type list.
+    static const char* types[] = {
+        "application/ecmascript", "application/javascript",
+        "application/x-ecmascript", "application/x-javascript",
+        "text/ecmascript", "text/javascript", "text/javascript1.0",
+        "text/javascript1.1", "text/javascript1.2", "text/javascript1.3",
+        "text/javascript1.4", "text/javascript1.5", "text/jscript",
+        "text/livescript", "text/x-ecmascript", "text/x-javascript"
+    };
+    for (size_t index = 0; index < sizeof(types) / sizeof(types[0]); index++)
+        if (mime_ieq(content_type, length, types[index])) return 1;
+    return 0;
+}
+
 static const char* mime_extension_lookup(const char* content_type, int serve_profile) {
     if (!content_type) return NULL;
-
-    // Input accepts header parameters; serve's former lookup required an exact type.
-    const char* semi = serve_profile ? NULL : strchr(content_type, ';');
-    size_t len = semi ? (size_t)(semi - content_type) : strlen(content_type);
-
-    if (!serve_profile) {
-        while (len > 0 && (content_type[len-1] == ' ' || content_type[len-1] == '\t')) len--;
-    }
+    // input accepts parameters; serve's former lookup required an exact type.
+    size_t len = serve_profile ? strlen(content_type) : mime_essence_length(content_type);
 
     // lookup table — ordered roughly by frequency
     static const struct { const char* mime; const char* ext; int input_only; } table[] = {

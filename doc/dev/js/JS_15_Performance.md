@@ -184,21 +184,27 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   the right operand, so no root window retains it across callbacks or collection
   (**D5.3.3**, **D8.4.1v2**).
 
-- **Module numeric predicate promotion.** AUTO admits synchronous top-level
-  ES-module function declarations and expressions only when the same
-  parameter-only numeric/boolean proof succeeds. The shared classifier runs
+- **Module hot-entry promotion.** AUTO admits synchronous top-level ES-module
+  function declarations and expressions under the classic admission checks,
+  including local loops, property operations and live module-slot reads/writes.
+  Calls load live values and use ordinary invocation. The shared classifier runs
   before the hot entry, so a threshold of one is honored without executing
-  the body first. Imports, other outer bindings, calls, properties, methods,
+  the body first. Imports, captures outside the module slab, method definitions,
   nested definitions, eval and suspended definitions retain their existing
   boundaries. The existing boxed satellite preserves namespace/callable
   identity and the source module's binding slab; forced AST stays interpreted
-  (**D8.1.3v30**). `module_numeric_predicates.js` checks values, coercion errors,
+  (**D8.1.3v32**). `module_numeric_predicates.js` checks values, coercion errors,
   source identity, live imports and scalar lifetime across GC.
   Satellite parameters keep BigInt and Symbol possibilities even when the
-  cloned source has no such literals. Strict numeric definitions retain their
-  activation-observation proof after publication, allowing the existing light
-  call entry to consume it while preserving callee and argument roots
+  cloned source has no such literals. Published strict P2 definitions retain
+  the admission scan's activation observations as callable analysis flags.
+  The existing light or receiver call entry consumes that proof while retaining
+  callee/argument roots and its realm, module and `with` guards
   (**D5.3.3**, **D8.4.1v2**).
+  Hot-entry clones use the selected function's indexed binding references
+  (**D8.2.4**) to declare only its dependencies, retaining the original live
+  slots. This bounds satellite planning by the function rather than every
+  unrelated declaration in its source bundle.
 
 
 ### 2.4 Runtime builtin tier
@@ -439,3 +445,9 @@ Still-open performance work, distilled from the logs:
 - [JS_11 — RegExp](JS_11_RegExp.md) — property-walk cursor.
 - [JS_12 — TypedArrays, Binary Data & Atomics](JS_12_TypedArrays.md) — raw bulk paths.
 - [JS_16 — Testing](JS_16_Testing.md) — the test262 harness and benchmark drivers behind these numbers.
+
+Calls with an explicit caller result home retire their temporary number
+homes at the call boundary after scalar adoption (**D5.3.3**). Calls without
+a caller home retain the existing enclosing lifetime; proxy application
+keeps its ordinary return path. This applies to the generic, AST-direct,
+compiled light/receiver and compact MVP call entries.

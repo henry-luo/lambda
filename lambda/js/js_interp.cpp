@@ -627,16 +627,16 @@ static Item js_interp_read_import_binding(JsScript* script,
         context ? context->runtime : NULL, resolved, binding->export_name, 0);
 }
 
-static void js_interp_publish_export_bindings(JsInterpFrame* frame,
+extern "C" void js_interp_publish_export_bindings(JsScript* script,
         NameEntry* entry, Item value) {
-    if (!frame || !frame->script || !frame->script->is_es_module || !entry ||
-        entry->scope != frame->script->global_scope) return;
-    JsInterpModuleBinding* first = frame->script->interp_exports;
+    if (!script || !script->is_es_module || !entry ||
+        entry->scope != script->global_scope) return;
+    JsInterpModuleBinding* first = script->interp_exports;
     while (first && (first->source || first->entry != entry)) first = first->next;
     // local/parameter writes do not publish exports or resolve a module path.
     if (!first) return;
     ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
-        frame->script->reference);
+        script->reference);
     if (!module) return;
     RootFrame roots(2);
     Rooted<Item> namespace_obj(roots, module->namespace_obj), value_root(roots, value);
@@ -644,7 +644,7 @@ static void js_interp_publish_export_bindings(JsInterpFrame* frame,
         if (!binding->source && binding->entry == entry) {
             js_interp_store_export(namespace_obj.get(), binding->export_name, value_root.get());
             js_interp_propagate_reexports(context ? context->runtime : NULL,
-                frame->script->reference, binding->export_name, value_root.get(), 0);
+                script->reference, binding->export_name, value_root.get(), 0);
         }
     }
 }
@@ -1369,7 +1369,7 @@ static Item js_interp_env_binding_write(JsInterpFrame* frame, JsInterpEnv* env,
     if (item_is_error(written)) return written;
     written = js_interp_write_arguments_param(env, entry, value);
     if (item_is_error(written)) return written;
-    js_interp_publish_export_bindings(frame, entry, value);
+    js_interp_publish_export_bindings(frame->script, entry, value);
     return value;
 }
 
@@ -1688,7 +1688,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     if (eval_env) {
         Item stored = js_interp_env_set_eval_binding(eval_env, key, value);
         if (item_is_error(stored)) return stored;
-        js_interp_publish_export_bindings(frame, entry, value);
+        js_interp_publish_export_bindings(frame->script, entry, value);
         return value;
     }
     if (js_interp_host && (!entry || js_interp_host_global_binding(frame, entry))) {
@@ -1747,7 +1747,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
             js_global_lexical_declare_module_slot(key, entry->slot,
                 entry->is_const ? 1 : 0);
         }
-        js_interp_publish_export_bindings(frame, entry, value);
+        js_interp_publish_export_bindings(frame->script, entry, value);
         return value;
     }
     return js_interp_env_binding_write(frame, js_interp_find_binding_env(frame->env, entry),
@@ -1904,7 +1904,7 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         NameScope* scope, bool initialize_functions = true);
 static JsInterpCompletion js_interp_initialize_function_declarations(
         JsInterpFrame* frame, NameScope* scope);
-static Item js_interp_load_es_module(Runtime* runtime, const char* filename);
+static Item js_interp_load_es_module(Runtime* runtime, const char* filename, bool* fetch_failed);
 static Item js_interp_configure_function_metadata(Item function_item);
 
 struct JsInterpMemberResult {
@@ -6015,6 +6015,12 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         if (js_interp_p2_is_this_identifier(node)) break;
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
         NameEntry* entry = identifier->entry;
+        // D8.1.3v32: linked JS imports may have no NameEntry import marker.
+        if (scan->script->is_module && js_interp_import_binding(scan->script,
+                entry, identifier->name)) {
+            js_interp_p2_reject(scan, "import binding");
+            return;
+        }
         // An unresolved name is a global-object read the satellite performs
         // by name, exactly as T0 does (E1, Lambda_Impl_JS_Interp_Tune.md).
         if (!entry) break;
@@ -6156,6 +6162,7 @@ static Runtime* js_interp_promotion_policy(void) {
 }
 
 static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function);
+static bool js_interp_module_predicate_expression(JsFunction* function);
 
 static const char* js_interp_p2_admission_reason(JsFunction* function,
         AstFunctionId* out_function_id) {
@@ -6169,13 +6176,12 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
         return "definition shape";
     }
     if (definition->is_generator || definition->is_async) return "suspended definition";
-    // D8.1.3v30: modules admit only the existing parameter-only numeric proof.
-    // classify before entry so a hot threshold of one has the same boundary.
-    if (script->is_module && (!script->is_es_module ||
-            (function->flags & JS_FUNC_FLAG_METHOD) ||
-            !js_interp_parameter_leaf_expression(function) ||
-            function->code->parameter_leaf_state != 2)) {
-        return "module parameter proof";
+    // D8.1.3v32 shares classic admission, while only the predicate proof grants
+    // the light-call contract. Classify before entry even at threshold one.
+    if (script->is_module) {
+        if (!script->is_es_module || (function->flags & JS_FUNC_FLAG_METHOD))
+            return "module definition shape";
+        js_interp_module_predicate_expression(function);
     }
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
     AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
@@ -6280,6 +6286,8 @@ static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
         return false;
     }
     JsFunction* function = frame->active_function;
+    // D8.1.3v32 extends hot entry only; module activations never hand off.
+    if (js_fn_ast_script(function)->is_module) return false;
     AstFuncNode* definition = js_fn_ast_function(function);
     if (!definition || !function->code || !definition->body ||
             definition->body->node_type != AST_NODE_BLOCK) {
@@ -6707,6 +6715,7 @@ struct JsParameterLeafScan {
     int parameter_count;
     bool numeric_only;
     bool supported;
+    JsScript* predicate_script = NULL;
 };
 
 static void js_interp_check_parameter_leaf(JsAstNode* node, void* opaque) {
@@ -6742,7 +6751,24 @@ static void js_interp_check_parameter_leaf(JsAstNode* node, void* opaque) {
     }
     case AST_NODE_CONDITIONAL_EXPR:
         break;
-    case AST_NODE_CALL_EXPR:
+    case AST_NODE_CALL_EXPR: {
+        if (!scan->numeric_only) break;
+        JsCallNode* call = (JsCallNode*)node;
+        JsIdentifierNode* callee = call->function && call->function->node_type == AST_NODE_IDENT
+            ? (JsIdentifierNode*)call->function : NULL;
+        NameEntry* entry = callee ? callee->entry : NULL;
+        // the declaration proves admission, never the value: invocation reads
+        // the original module's live slot and uses the ordinary call kernel.
+        scan->supported = !call->optional && scan->predicate_script && entry && !entry->import &&
+            entry->scope == scan->predicate_script->global_scope && entry->node &&
+            entry->node->node_type == AST_NODE_FUNC;
+        if (scan->supported) {
+            for (JsAstNode* argument = (JsAstNode*)call->argument; argument && scan->supported;
+                    argument = (JsAstNode*)argument->next)
+                js_interp_check_parameter_leaf(argument, scan);
+        }
+        return;
+    }
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR:
         scan->supported = !scan->numeric_only;
@@ -6802,6 +6828,19 @@ static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function) {
         }
     }
     return expression;
+}
+
+static bool js_interp_module_predicate_expression(JsFunction* function) {
+    JsAstNode* expression = js_interp_parameter_leaf_expression(function);
+    if (!expression) return false;
+    if (function->code->parameter_leaf_state == 2 ||
+            function->code->parameter_leaf_state == 4) return true;
+    AstFuncNode* definition = js_fn_ast_function(function);
+    JsParameterLeafScan scan = {definition->vars, function->code->param_count,
+        true, true, js_fn_ast_script(function)};
+    js_interp_check_parameter_leaf(expression, &scan);
+    if (scan.supported) function->code->parameter_leaf_state = 4;
+    return scan.supported;
 }
 
 static bool js_interp_call_parameter_leaf(JsFunction* function, Item* args,
@@ -7713,7 +7752,13 @@ Item js_interp_execute_module_source(Runtime* runtime, const char* source,
         JS_INTERP_SOURCE_MODULE, strict, false, result_home);
 }
 
-static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
+static Item js_interp_module_descriptor_error(ModuleDescriptor* module) {
+    if (!module || get_type_id(module->evaluation_error) == LMD_TYPE_NULL) return ItemNull;
+    return item_is_error(module->evaluation_error)
+        ? module->evaluation_error : js_throw_value(module->evaluation_error);
+}
+
+static Item js_interp_load_es_module(Runtime* runtime, const char* filename, bool* fetch_failed) {
     if (runtime && !input_resource_policy_admits(runtime->resource_policy, filename))
         return js_throw_reference_error(js_make_string("Module blocked by document resource policy"));
     if (!runtime || !filename) return ItemError;
@@ -7728,8 +7773,13 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     Item specifier = js_make_string(module_filename);
     Item existing = js_module_get(specifier);
     if (get_type_id(existing) != LMD_TYPE_NULL) {
+        ModuleDescriptor* descriptor = module_get_for_runtime(runtime, module_filename);
+        Item error = js_interp_module_descriptor_error(descriptor);
+        if (item_is_error(error) && fetch_failed && descriptor)
+            *fetch_failed = descriptor->source_fetch_failed;
         mem_free(canonical_filename);
-        return existing;
+        // a failed dependency keeps its abrupt completion when another graph imports it.
+        return item_is_error(error) ? error : existing;
     }
     if (jm_path_is_lambda_source(module_filename)) {
         Item result = js_load_lambda_module(runtime, module_filename);
@@ -7740,11 +7790,16 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     char* source = js_load_script_source_from_cache(
         module_filename, "js-interpreter-module", "module", true, &source_length, runtime->resource_policy);
     if (!source) {
+        if (fetch_failed) *fetch_failed = true;
+        bool is_http = js_path_is_http_url(module_filename);
         mem_free(canonical_filename);
-        return js_throw_reference_error(js_make_string("Cannot find module"));
+        return is_http ? js_throw_type_error("Cannot load module source")
+            : js_throw_reference_error(js_make_string("Cannot find module"));
     }
     Item result = js_interp_execute_es_module_source(runtime, source,
         source_length, module_filename, NULL);
+    if (item_is_error(result) && fetch_failed)
+        *fetch_failed = js_module_source_fetch_failed(runtime, module_filename);
     mem_free(source);
     mem_free(canonical_filename);
     return result;
@@ -7767,9 +7822,13 @@ static Item js_interp_load_static_imports(Runtime* runtime, JsScript* script) {
         js_resolve_script_module_path(runtime, script->reference, source->chars,
             (int)source->len, resolved, (int)sizeof(resolved));
         js_interp_static_import_depth++;
-        Item namespace_obj = js_interp_load_es_module(runtime, resolved);
+        bool fetch_failed = false;
+        Item namespace_obj = js_interp_load_es_module(runtime, resolved, &fetch_failed);
         js_interp_static_import_depth--;
         if (item_is_error(namespace_obj) || get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+            // the document host distinguishes graph fetch failure from a thrown body.
+            ModuleDescriptor* importer = module_get_for_runtime(runtime, script->reference);
+            if (importer && fetch_failed) importer->source_fetch_failed = true;
             return item_is_error(namespace_obj) ? namespace_obj :
                 js_throw_reference_error(js_make_string("imported module is unavailable"));
         }
@@ -7888,11 +7947,7 @@ static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) 
 Item js_interp_es_module_evaluation_error(Runtime* runtime, JsScript* script) {
     ModuleDescriptor* module = runtime && script
         ? module_get_for_runtime(runtime, script->reference) : NULL;
-    if (!module || get_type_id(module->evaluation_error) == LMD_TYPE_NULL) {
-        return ItemNull;
-    }
-    return item_is_error(module->evaluation_error)
-        ? module->evaluation_error : js_throw_value(module->evaluation_error);
+    return js_interp_module_descriptor_error(module);
 }
 
 Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,

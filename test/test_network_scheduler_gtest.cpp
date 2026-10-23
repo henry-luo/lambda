@@ -12,6 +12,7 @@
 #include "../lib/file.h"
 #include "../lib/mem.h"
 #include "../lib/url.h"
+#include "../lib/mime-detect.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -106,6 +107,71 @@ TEST(NetworkResourceCache, ReopensPersistedNativeEntry) {
     mem_free(restored_path);
     enhanced_cache_clear(reader);
     enhanced_cache_destroy(reader);
+}
+
+TEST(NetworkResourceCache, ResponseMimeSurvivesReopenAndRejectsAnotherBody) {
+    const char* directory = "./temp/test_cache_mime_snapshot";
+    const char* url = "https://example.com/snapshot.js";
+    const char* source = "let value = 1;";
+    EnhancedFileCache* cache = enhanced_cache_create(directory, 1024 * 1024, 10);
+    ASSERT_NE(cache, nullptr);
+    HttpCacheHeaders headers = {};
+    headers.content_type = "Text/JavaScript; charset=utf-8";
+    char* path = enhanced_cache_store(cache, url, source, strlen(source), &headers);
+    ASSERT_NE(path, nullptr);
+    mem_free(path);
+    enhanced_cache_destroy(cache);
+
+    cache = enhanced_cache_create(directory, 1024 * 1024, 10);
+    ASSERT_NE(cache, nullptr);
+    char* type = enhanced_cache_copy_content_type(cache, url, source, strlen(source));
+    ASSERT_NE(type, nullptr);
+    EXPECT_STREQ(type, headers.content_type);
+    mem_free(type);
+    const char* changed = "let value = 2;";
+    EXPECT_EQ(enhanced_cache_copy_content_type(cache, url, changed, strlen(changed)), nullptr);
+
+    path = enhanced_cache_store(cache, url, changed, strlen(changed), nullptr);
+    ASSERT_NE(path, nullptr);
+    mem_free(path);
+    EXPECT_EQ(enhanced_cache_copy_content_type(cache, url, changed, strlen(changed)), nullptr);
+    headers.content_type = "";
+    path = enhanced_cache_store(cache, url, changed, strlen(changed), &headers);
+    ASSERT_NE(path, nullptr);
+    mem_free(path);
+    type = enhanced_cache_copy_content_type(cache, url, changed, strlen(changed));
+    ASSERT_NE(type, nullptr);
+    EXPECT_STREQ(type, "");
+    mem_free(type);
+    enhanced_cache_destroy(cache);
+}
+
+TEST(NetworkResourceCache, EvictionRemovesResponseMimeWithItsBody) {
+    EnhancedFileCache* cache = enhanced_cache_create("./temp/test_cache_mime_eviction", 1024, 1);
+    ASSERT_NE(cache, nullptr);
+    const char* source = "export {};";
+    HttpCacheHeaders headers = {};
+    headers.content_type = "application/javascript";
+    char* path = enhanced_cache_store(cache, "https://example.com/one.js", source, strlen(source), &headers);
+    ASSERT_NE(path, nullptr);
+    mem_free(path);
+    path = enhanced_cache_store(cache, "https://example.com/two.js", source, strlen(source), &headers);
+    ASSERT_NE(path, nullptr);
+    mem_free(path);
+    EXPECT_EQ(enhanced_cache_copy_content_type(cache, "https://example.com/one.js", source, strlen(source)), nullptr);
+    enhanced_cache_destroy(cache);
+}
+
+TEST(NetworkMime, ModuleJavaScriptEssencesKeepHeaderParametersAndLegacyTypes) {
+    EXPECT_TRUE(mime_type_is_javascript("Text/JavaScript; charset=utf-8"));
+    EXPECT_TRUE(mime_type_is_javascript(" application/x-ecmascript \t; charset=utf-8"));
+    EXPECT_TRUE(mime_type_is_javascript("text/javascript1.5"));
+    EXPECT_FALSE(mime_type_is_javascript("text/plain"));
+    EXPECT_FALSE(mime_type_is_javascript("text/html; charset=utf-8"));
+    EXPECT_FALSE(mime_type_is_javascript("application/json"));
+    EXPECT_FALSE(mime_type_is_javascript("text/javascript-invalid"));
+    EXPECT_FALSE(mime_type_is_javascript(""));
+    EXPECT_FALSE(mime_type_is_javascript(nullptr));
 }
 
 TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {

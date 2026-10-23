@@ -13932,6 +13932,12 @@ static void js_prepare_new_target_for_call(bool install_new_target,
     }
 }
 
+static RootFrameLifetime js_call_result_frame_lifetime(uint64_t* result_home) {
+    // D5.3.3: an explicit caller home receives the result before the callee's
+    // number temporaries retire; calls without one must keep those homes alive.
+    return result_home ? RootFrameLifetime::ACTIVATION : RootFrameLifetime::NESTED;
+}
+
 // JC13/JC22: the one call kernel -- the sole semantic authority for [[Call]]
 // and the body half of [[Construct]]. It is always inlined into its three
 // entries, which differ only in constant operands: js_call_entry_generic (an
@@ -13962,7 +13968,8 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     // a second slot. The super-`this` home stays for every activation: an arrow
     // that runs super() inside a derived constructor publishes through its own
     // activation as well as the constructor's (js_super_bind_this).
-    RootFrame call_roots(7);
+    RootFrame call_roots(7, get_type_id(func_item) == LMD_TYPE_FUNC
+        ? js_call_result_frame_lifetime(result_home) : RootFrameLifetime::NESTED);
     Rooted<Item> this_root(call_roots, this_val);
     Rooted<Item> activation_this_root(call_roots, js_current_this);
     Rooted<Item> activation_new_target_root(call_roots, js_new_target);
@@ -14245,7 +14252,7 @@ static Item js_call_compiled_light_direct(Item func_item, Item this_val, Item* a
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
-    RootFrame callee_roots(1);
+    RootFrame callee_roots(1, js_call_result_frame_lifetime(result_home));
     Rooted<Item> callee_root(callee_roots, func_item);
     RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
         ? (size_t)arg_count : 0);
@@ -14279,7 +14286,7 @@ static Item js_call_compiled_this_direct(Item func_item, Item this_val, Item* ar
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
-    RootFrame call_roots(3);
+    RootFrame call_roots(3, js_call_result_frame_lifetime(result_home));
     Rooted<Item> callee_root(call_roots, func_item);
     Rooted<Item> previous_this_root(call_roots, js_current_this);
     Rooted<Item> previous_home_root(call_roots, js_current_private_home_class);
@@ -14376,7 +14383,7 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD)) {
             // D6.2.2v2: host callbacks retain the MVP layout and caller-owned
             // arguments/result; never read the larger JsFunction invoke slot.
-            RootFrame roots(2);
+            RootFrame roots(2, js_call_result_frame_lifetime(result_home));
             if (!roots.valid()) return ItemError;
             Rooted<Item> callee(roots, func_item), receiver(roots, this_val);
             RootSpan owned_args((!args_prerooted && arg_count > 0) ? (size_t)arg_count : 0);

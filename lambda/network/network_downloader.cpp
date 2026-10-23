@@ -6,6 +6,7 @@
 #include "network_resource_manager.h"
 #include "cookie_jar.h"
 #include "enhanced_file_cache.h"
+#include "curl_response.h"
 #include "../../lib/log.h"
 #include "../../lib/file_utils.h"
 #include <curl/curl.h>
@@ -343,9 +344,10 @@ bool network_download_resource(NetworkResource* res) {
     // skip persistence and fall back to a per-resource temp file; page loading
     // must not wait behind cache body writes.
     if (res->cache) {
+        HttpCacheHeaders headers = curl_response_cache_headers(curl);
         char* cached_path = enhanced_cache_try_store(res->cache, res->url,
                                                      (const char*)response.body.data,
-                                                     response.body.length, NULL);
+                                                     response.body.length, &headers);
         if (cached_path) {
             if (res->local_path) mem_free(res->local_path);
             res->local_path = cached_path;

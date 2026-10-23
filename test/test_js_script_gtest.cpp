@@ -15,6 +15,7 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lib/mem_factory.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_internal.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_execution_internal.hpp"
@@ -1401,7 +1402,83 @@ TEST(JsInterpreter, ModuleNumericPredicatesRespectBackendAndHotThreshold) {
     }
 }
 
-TEST(JsInterpreter, ModulePromotionRetainsNonlocalAndActivationBoundaries) {
+TEST(JsInterpreter, ModulePredicateCallsPromoteThroughLiveDeclarationBindings) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = strcmp(backend, "auto") == 0;
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 10000;
+            const char source[] =
+                "function digit(value){return value>=48&&value<=57}"
+                "function chain(value){return digit(value)||value===95}"
+                "export function test(value){return chain(value)}"
+                "export function replace(value){digit=value}"
+                "export function throwing(){throw marker}"
+                "export const marker={};"
+                "export function receiver(){return this===undefined}"
+                "export function tiny(){gc();return 5e-324}";
+            Item namespace_obj = js_interp_execute_es_module_source(&runtime,
+                source, sizeof(source) - 1,
+                "test/js/interp_esm/predicate-calls.mjs", NULL);
+            ASSERT_FALSE(item_is_error(namespace_obj));
+            {
+                RootFrame roots(3);
+                Rooted<Item> ns(roots, namespace_obj);
+                Rooted<Item> predicate(roots, js_get_key_default(ns.get(), js_make_string("test")));
+                Rooted<Item> replace(roots, js_get_key_default(ns.get(), js_make_string("replace")));
+                ASSERT_EQ(get_type_id(predicate.get()), LMD_TYPE_FUNC);
+                auto* function = (JsFunction*)predicate.get().function;
+                Item argument = flt2it(49.0);
+                for (uint32_t call = 1; call <= threshold; call++) {
+                    EXPECT_EQ(js_call_function(predicate.get(), make_js_undefined(), &argument, 1).item,
+                        ITEM_TRUE);
+                    EXPECT_EQ(js_fn_body_kind(function), runtime.js_promotion_auto && call == threshold
+                        ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST);
+                    if (runtime.js_promotion_auto && call == threshold)
+                        EXPECT_EQ(function->invoke, js_call_entry_compiled_light);
+                }
+                for (const char* source : {"49n", "({valueOf(){gc();return 49}})", "Symbol('value')"}) {
+                    Item coerced = transpile_js_to_mir(&runtime, source,
+                        "predicate-call-coercion.js", NULL);
+                    ASSERT_FALSE(item_is_error(coerced));
+                    Item result = js_call_function(predicate.get(), make_js_undefined(), &coerced, 1);
+                    if (!strncmp(source, "Symbol", 6)) EXPECT_TRUE(item_is_error(result));
+                    else EXPECT_EQ(result.item, ITEM_TRUE);
+                }
+                // a replacement can observe the receiver, allocate, or return a scalar;
+                // none of those behaviors may be inferred from the declaration's body.
+                for (const char* name : {"receiver", "tiny"}) {
+                    Item replacement = js_get_key_default(ns.get(), js_make_string(name));
+                    ASSERT_FALSE(item_is_error(js_call_function(replace.get(), make_js_undefined(), &replacement, 1)));
+                    heap_gc_collect();
+                    Item result = js_call_function(predicate.get(), make_js_undefined(), &argument, 1);
+                    ASSERT_FALSE(item_is_error(result));
+                    if (!strcmp(name, "receiver")) EXPECT_EQ(result.item, ITEM_TRUE);
+                    else EXPECT_DOUBLE_EQ(result.get_double(), 5e-324);
+                }
+                Item replacement = js_get_key_default(ns.get(), js_make_string("throwing"));
+                ASSERT_FALSE(item_is_error(js_call_function(replace.get(), make_js_undefined(), &replacement, 1)));
+                Item thrown = js_call_function(predicate.get(), make_js_undefined(), &argument, 1);
+                EXPECT_TRUE(item_is_error(thrown));
+                EXPECT_EQ(js_error_lane_payload(thrown).item,
+                    js_get_key_default(ns.get(), js_make_string("marker")).item);
+                replacement = flt2it(1.0);
+                ASSERT_FALSE(item_is_error(js_call_function(replace.get(), make_js_undefined(), &replacement, 1)));
+                EXPECT_TRUE(item_is_error(js_call_function(predicate.get(), make_js_undefined(), &argument, 1)));
+                EXPECT_EQ(js_get_key_default(ns.get(), js_make_string("test")).item, predicate.get().item);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModulePromotionRetainsImportAndActivationBoundaries) {
     JsExecutionBackendScope selected("auto");
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1410,12 +1487,15 @@ TEST(JsInterpreter, ModulePromotionRetainsNonlocalAndActivationBoundaries) {
     runtime.js_promotion_call_threshold = 1;
     runtime.js_promotion_backedge_threshold = 10000;
     const char source[] =
-        "import {counter} from './dep.mjs';"
+        "import {counter,bump} from './dep.mjs';"
         "let limit = 128;"
         "export function moduleRead(value) { return value < limit; }"
         "export function importRead(value) { return value < counter; }"
         "export function globalRead(value) { return value < Infinity; }"
         "export function call(value) { return Math.abs(value) < 128; }"
+        "export function importCall(value) { return bump(value) || true; }"
+        "const expression = value => true;"
+        "export function expressionCall(value) { return expression(value); }"
         "export function evaluated(value) { return eval('value < 128'); }"
         "export function observed(value) { return arguments[0] < 128; }"
         "export function defaulted(value = 1) { return value < 128; }"
@@ -1425,7 +1505,7 @@ TEST(JsInterpreter, ModulePromotionRetainsNonlocalAndActivationBoundaries) {
         source, sizeof(source) - 1,
         "test/js/interp_esm/numeric-boundaries.mjs", NULL);
     ASSERT_FALSE(item_is_error(namespace_obj));
-    for (const char* name : {"moduleRead", "importRead", "globalRead", "call",
+    for (const char* name : {"moduleRead", "importRead", "globalRead", "call", "importCall", "expressionCall",
             "evaluated", "observed", "defaulted", "method", "nested"}) {
         Item function_item = js_get_key_default(namespace_obj, js_make_string(name));
         ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC) << name;
@@ -1434,10 +1514,170 @@ TEST(JsInterpreter, ModulePromotionRetainsNonlocalAndActivationBoundaries) {
         ASSERT_FALSE(item_is_error(result)) << name;
         EXPECT_EQ(js_strict_equal(result, (Item){.item = b2it(true)}).item, b2it(true));
         auto* function = (JsFunction*)function_item.function;
-        EXPECT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST) << name;
-        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << name;
+        bool admitted = !strcmp(name, "moduleRead") || !strcmp(name, "globalRead") ||
+            !strcmp(name, "call") || !strcmp(name, "expressionCall");
+        EXPECT_EQ(js_fn_body_kind(function), admitted
+            ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+        EXPECT_EQ(function->code->p2_promotion.state, admitted
+            ? FN_PROMOTION_COMPILED : FN_PROMOTION_PINNED_INTERP) << name;
     }
     runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleHotEntriesPreserveLiveSlotsAndPropertyCallbacks) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 1;
+            const char source[] = R"JS(
+                export let table = new Uint8Array([48, 49, 65, 57]);
+                let offset = 0;
+                function accept(value) { return value >= 48 && value <= 57; }
+                export function scan(text) {
+                    let sum = offset;
+                    for (let i = 0; i < text.length; i++) {
+                        let value = text.charCodeAt(i);
+                        if (accept(value)) sum += value;
+                    }
+                    return sum + table[0];
+                }
+                export function replace(next, values, callback) {
+                    offset = next; table = values; accept = callback;
+                }
+                export function property(receiver, key, value) {
+                    receiver[key] = value;
+                    return receiver[key](5e-324);
+                }
+                export function beforeInitialization() { return later; }
+                let tdz = false;
+                try { beforeInitialization(); } catch (error) { tdz = error instanceof ReferenceError; }
+                let later = 17;
+                if (!tdz || beforeInitialization() !== 17) throw 'module TDZ';
+                const identity = scan;
+                for (let i = 0; i < 3; i++)
+                    if (scan('a1Z2') !== 147) throw 'initial scan';
+                function letters(value) { return value > 64; }
+                for (let i = 0; i < 3; i++) replace(10, new Uint8Array([7]), letters);
+                gc();
+                if (scan('a1Z2') !== 204 || scan !== identity) throw 'live module slot';
+                let gets = 0, sets = 0, keys = 0;
+                const target = {};
+                const receiver = new Proxy(target, {
+                    get(object, key) { gets++; gc(); return object[key]; },
+                    set(object, key, value) { sets++; gc(); object[key] = value; return true; }
+                });
+                const key = { [Symbol.toPrimitive]() { keys++; gc(); return 'call'; } };
+                function callback(value) { gc(); return this === receiver ? value : 0; }
+                for (let i = 0; i < 3; i++)
+                    if (property(receiver, key, callback) !== 5e-324) throw 'property call';
+                if (gets !== 3 || sets !== 3 || keys !== 6) throw 'property order';
+                const marker = {};
+                const throwing = { get call() { gc(); throw marker; }, set call(value) {} };
+                let thrown = false;
+                try { property(throwing, 'call', callback); } catch (value) { thrown = value === marker; }
+                if (!thrown) throw 'getter completion';
+                function coercing(value) { return value >= 48; }
+                replace(0, new Uint8Array([0]), coercing);
+                let bigintError = false;
+                try { scan({length:1, charCodeAt(){gc();return 49n}}); }
+                catch (error) { bigintError = error instanceof TypeError; }
+                let symbolError = false;
+                try { scan({length:1, charCodeAt(){return Symbol()}}); }
+                catch (error) { symbolError = error instanceof TypeError; }
+                export const ok = bigintError && symbolError;
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source,
+                sizeof(source) - 1, "test/js/interp_esm/hot-module-slots.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+            for (const char* name : {"scan", "replace", "property", "beforeInitialization"}) {
+                auto* function = (JsFunction*)js_get_key_default(ns, js_make_string(name)).function;
+                ASSERT_NE(function, nullptr);
+                bool promoted = runtime.js_promotion_auto &&
+                    (strcmp(name, "beforeInitialization") || threshold == 1);
+                EXPECT_EQ(js_fn_body_kind(function), promoted
+                    ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+                if (promoted) EXPECT_EQ(function->invoke, js_call_entry_compiled_light) << name;
+                // module loops do not hand off their running T0 activation.
+                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModuleHotEntriesKeepShadowedIntrinsicBindingsPrivate) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] =
+        "const undefined=17, NaN=23, Infinity=42;"
+        "export function read(){return undefined+NaN+Infinity}"
+        "export function refused(){undefined=1}"
+        "if(read()!==82)throw 'private globals';"
+        "let caught=false;try{refused()}catch(e){caught=e instanceof TypeError}"
+        "export const ok=caught&&read()===82&&globalThis.undefined===void 0;";
+    Item ns = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/shadowed-intrinsics.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+    for (const char* name : {"read", "refused"}) {
+        Item function = js_get_key_default(ns, js_make_string(name));
+        ASSERT_EQ(get_type_id(function), LMD_TYPE_FUNC);
+        EXPECT_EQ(js_fn_body_kind((JsFunction*)function.function), JS_FUNCTION_BODY_CODE);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleLocalReadsRetainParameterEvalAndTdzSemantics) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 1;
+        const char source[] = R"JS(
+            function separated(value=1, read=()=>value) {
+                var value=2;
+                eval('var value=3');
+                let local=4;
+                eval('local=5');
+                return read()===1 && value===2 && local===5 && arguments[0]===undefined;
+            }
+            function unmapped(value) { eval('value=7'); return arguments[0]+value; }
+            function localTdz() {
+                let refused=false;
+                try { later; } catch(error) { refused=error instanceof ReferenceError; }
+                let later=17;
+                return refused && later===17;
+            }
+            function captured(value) {
+                const read=()=>value;
+                eval('value=5e-324');
+                gc();
+                return read;
+            }
+            const read=captured(0);
+            gc();
+            export const ok=separated() && unmapped(3)===10 && localTdz() && read()===5e-324;
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source,
+            sizeof(source)-1, "test/js/interp_esm/local-bindings.mjs", NULL);
+        EXPECT_FALSE(item_is_error(ns));
+        if (!item_is_error(ns)) EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
 }
 
 TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
@@ -1697,7 +1937,9 @@ TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
     const char source[] =
         "let make=Function('\"use strict\";return ()=>this');let saved=[];"
         "for(let i=0;i<32;i++)saved.push(make.call(i/7));"
-        "let zero=make.call(-0);gc();let ok=Object.is(zero(),-0);"
+        "let zero=make.call(-0),tiny=make.call(5e-324);"
+        "function capture(x){return()=>x}let captured=capture(1e-323);"
+        "gc();let ok=Object.is(zero(),-0)&&tiny()===5e-324&&captured()===1e-323;"
         "for(let i=0;i<32;i++)ok=ok&&saved[i]()===i/7;"
         "function strict(){'use strict';return eval('()=>this')}"
         "let a=strict.call(1/3),b=strict.call(2/3);gc();ok&&a()===1/3&&b()===2/3;";
@@ -1708,6 +1950,36 @@ TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
         runtime_init(&runtime);
         Item result = transpile_js_to_mir(&runtime, source, "escaped-numeric-this.js", NULL);
         EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, CallerResultHomeRetiresCalleeNumberTemporaries) {
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        {
+            RootFrame roots(1);
+            Rooted<Item> function(roots, transpile_js_to_mir(&runtime,
+                "function churn(n){let value=5e-324;"
+                "for(let i=0;i<n;i++)value=value+5e-324;return value}churn;",
+                "callee-number-temporaries.js", NULL));
+            ASSERT_EQ(get_type_id(function.get()), LMD_TYPE_FUNC);
+            Item argument = flt2it(32.0);
+            for (int call = 0; call < 4; call++) {
+                uint64_t result_home = 0;
+                LambdaSideStackSnapshot before = lambda_side_stack_snapshot();
+                Item result = js_call_function_into(function.get(),
+                    make_js_undefined(), &argument, 1, &result_home);
+                EXPECT_FALSE(item_is_error(result));
+                EXPECT_DOUBLE_EQ(result.get_double(), 33 * 5e-324);
+                EXPECT_EQ(lambda_side_stack_snapshot().number_top, before.number_top);
+                heap_gc_collect();
+                EXPECT_DOUBLE_EQ(result.get_double(), 33 * 5e-324);
+            }
+        }
         runtime_cleanup(&runtime);
     }
 }
