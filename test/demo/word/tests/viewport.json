@@ -40,23 +40,23 @@
       "type": "assert_pixel",
       "x": 1240,
       "y": 80,
-      "min_r": 250,
-      "max_r": 250,
-      "min_g": 252,
-      "max_g": 252,
-      "min_b": 251,
-      "max_b": 251
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
     },
     {
       "type": "assert_pixel",
       "x": 1240,
       "y": 150,
-      "min_r": 250,
-      "max_r": 250,
-      "min_g": 252,
-      "max_g": 252,
-      "min_b": 251,
-      "max_b": 251
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
     },
     {
       "type": "click",
@@ -116,14 +116,14 @@
     {
       "type": "assert_pixel",
       "x": 643,
-      "y": 195,
+      "y": 187,
       "search_radius": 0,
-      "min_r": 250,
-      "max_r": 250,
-      "min_g": 252,
-      "max_g": 252,
-      "min_b": 251,
-      "max_b": 251
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
     },
     {
       "type": "scroll",
@@ -135,46 +135,56 @@
     {
       "type": "assert_pixel",
       "x": 525,
-      "y": 189,
+      "y": 179,
       "search_radius": 0,
-      "min_r": 250,
-      "max_r": 250,
-      "min_g": 252,
-      "max_g": 252,
-      "min_b": 251,
-      "max_b": 251
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
     },
     {
       "type": "assert_pixel",
       "x": 525,
-      "y": 214,
-      "min_r": 250,
-      "max_r": 250,
-      "min_g": 252,
-      "max_g": 252,
-      "min_b": 251,
-      "max_b": 251
+      "y": 206,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "window.rulerClipScroll=document.getElementById(\"stage\").scrollTop;window.alignWordListClip=function(){var s=document.getElementById(\"stage\"),b=document.querySelector(\"#edit-surface li:nth-child(2)\").getBoundingClientRect();s.scrollTop+=b.top+b.height/2+4-s.getBoundingClientRect().top};window.alignWordListClip()"
     },
     {
       "type": "assert_pixel",
-      "x": 525,
-      "y": 216,
+      "target": {
+        "selector": "#edit-surface li:nth-child(2)",
+        "offset_x": -11,
+        "offset_y": 10
+      },
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 247,
+      "max_r": 245,
+      "max_g": 245,
+      "max_b": 247
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#edit-surface li:nth-child(3)",
+        "offset_x": -11,
+        "offset_y": 10
+      },
       "min_r": 36,
-      "max_r": 36,
       "min_g": 51,
-      "max_g": 51,
       "min_b": 75,
-      "max_b": 75
-    },
-    {
-      "type": "assert_pixel",
-      "x": 525,
-      "y": 243,
-      "min_r": 36,
       "max_r": 36,
-      "min_g": 51,
       "max_g": 51,
-      "min_b": 75,
       "max_b": 75
     },
     {
@@ -188,25 +198,46 @@
       }
     },
     {
+      "type": "script",
+      "js": "window.alignWordListClip()"
+    },
+    {
       "type": "assert_pixel",
-      "x": 485,
-      "y": 214,
-      "min_r": 250,
-      "max_r": 250,
-      "min_g": 252,
-      "max_g": 252,
-      "min_b": 251,
-      "max_b": 251
+      "target": {
+        "selector": "#edit-surface li:nth-child(2)",
+        "offset_x": -12,
+        "offset_y": 11
+      },
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 247,
+      "max_r": 245,
+      "max_g": 245,
+      "max_b": 247
     },
     {
       "type": "assert_pixel",
       "x": 485,
-      "y": 243,
+      "y": 206,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#edit-surface li:nth-child(3)",
+        "offset_x": -12,
+        "offset_y": 11
+      },
       "min_r": 36,
-      "max_r": 36,
       "min_g": 51,
-      "max_g": 51,
       "min_b": 75,
+      "max_r": 36,
+      "max_g": 51,
       "max_b": 75
     },
     {
@@ -218,6 +249,10 @@
       "target": {
         "selector": "#status-zoom-out"
       }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"stage\").scrollTop=window.rulerClipScroll"
     },
     {
       "type": "scroll",

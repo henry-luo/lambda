@@ -501,6 +501,8 @@ pub fn cmd_insert_text(st, txt) {
       let tx1 = tx_step(tx0, step_replace(lo.path, off, off, [text_marked(txt, marks)]))
       tx_set_selection(tx1, caret(pos([*lo.path, off], len(txt))))
     }
+    // a structural boundary is not a text leaf; replacing it would discard its subtree.
+    else if (not is_text(leaf)) { null }
     else if (stored_marks != null and len(txt) > 0 and leaf != null and is_text(leaf) and len(lo.path) > 0) {
       let leaf_parent = parent_path(lo.path)
       let leaf_index = last_index(lo.path)
@@ -914,9 +916,21 @@ pub fn cmd_move_text_selection(st, source_selection, target_pos) {
 
 fn delete_range(st, lo, hi) {
   let leaf = node_at(st.doc, lo.path)
+  // container offsets index children; replace_text would turn the container into a leaf.
+  if (leaf != null and is_node(leaf)) {
+    if (lo.offset < 0 or hi.offset > len(leaf.content) or lo.offset >= hi.offset) { null }
+    else if (len(lo.path) == 0 and lo.offset == 0 and hi.offset == len(leaf.content)) {
+      replace_all_with_text(st, "")
+    } else {
+      let tx0 = tx_begin(st.doc, st.selection)
+      let tx1 = tx_step(tx0, step_replace(lo.path, lo.offset, hi.offset, []))
+      tx_set_selection(tx1, caret(lo))
+    }
+  }
   // Whole leaf emptied → drop the leaf (block becomes empty []), matching JS
   // rather than leaving an empty text("") child.
-  if (leaf != null and is_text(leaf) and lo.offset == 0 and hi.offset == len(leaf.text) and len(lo.path) >= 1) {
+  else if (leaf == null or not is_text(leaf)) { null }
+  else if (lo.offset == 0 and hi.offset == len(leaf.text) and len(lo.path) >= 1) {
     let block_path = parent_path(lo.path)
     let leaf_idx = last_index(lo.path)
     let tx0 = tx_begin(st.doc, st.selection)
@@ -1547,28 +1561,14 @@ fn toggle_mark_top_block_range(st, mark) {
   }
 }
 
-fn toggle_mark_all(st, mark) {
-  if (not has_text_leaf(st.doc)) { null }
-  else {
-    let adding = any_unmarked_text(st.doc, mark)
-    let steps = collect_mark_steps(st.doc, [], mark, adding, [])
-    if (len(steps) == 0) { null }
-    else { tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps)) }
-  }
-}
-
-fn toggle_mark_node(st, mark) {
-  if (not valid_selected_node(st)) { null }
-  else {
-    let selected_node = node_at(st.doc, st.selection.path)
-    if (selected_node == null or not has_text_leaf(selected_node)) { null }
-    else {
-      let adding = any_unmarked_text(selected_node, mark)
-      let steps = collect_mark_steps(selected_node, st.selection.path, mark, adding, [])
-      if (len(steps) == 0) { null }
-      else { tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps)) }
-    }
-  }
+fn toggle_mark_nodes(st, mark) {
+  // disjoint selections share one add/remove decision and one transaction.
+  let paths = if (st.selection.kind=='all') [[]] else selection_paths(st.selection)
+  let chosen = [for (path in paths where (len(path)>0 or st.selection.kind=='all') and
+      has_text_leaf(node_at(st.doc,path))) path]
+  let adding = any([for (path in chosen) any_unmarked_text(node_at(st.doc,path),mark)])
+  let steps = reduce([[],*chosen],(steps,path)=>collect_mark_steps(node_at(st.doc,path),path,mark,adding,steps))
+  if (len(steps)==0) null else tx_apply_steps(tx_begin(st.doc,st.selection),steps,0,len(steps))
 }
 
 pub fn cmd_toggle_stored_mark(st, name, value) {
@@ -1585,8 +1585,7 @@ pub fn cmd_toggle_mark(st, name, value) {
   let mark = {name: name, value: value}
   let sel = st.selection
   if (sel == null) { null }
-  else if (sel.kind == 'all') { toggle_mark_all(st, mark) }
-  else if (sel.kind == 'node') { toggle_mark_node(st, mark) }
+  else if (contains(['all','node','multi-node'],sel.kind)) { toggle_mark_nodes(st, mark) }
   else if (not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { toggle_mark_same_parent_range(st, mark) }
   else if (sel_top_block_range(sel)) { toggle_mark_top_block_range(st, mark) }
   else if (not sel_single_leaf(sel)) { null }
@@ -1648,7 +1647,7 @@ fn collect_replace_steps(n, path, needle, replacement, acc) {
   else { acc }
 }
 
-fn tx_apply_steps(tx, steps, i, n) {
+pub fn tx_apply_steps(tx, steps, i, n) {
   if (i >= n) { tx }
   else { tx_apply_steps(tx_step(tx, steps[i]), steps, i + 1, n) }
 }

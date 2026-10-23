@@ -64,11 +64,11 @@ def main():
                          "bookmarks.word.json", "bookmarks.html", "shapes.word.json", "shapes.html", "shapes.pdf",
                          "stories.word.json", "stories.html", "stories.pdf", "changes.word.json", "changes.html", "changes.pdf",
                          "advanced-objects.word.json", "advanced-objects.html", "advanced-objects.pdf",
-                         "transforms.word.json", "transforms.html", "transforms.pdf"):
+                         "transforms.word.json", "transforms.html", "transforms.pdf", "lists.word.json", "lists.html"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
-        for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables",
+        for fixture in ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection",
                         "pictures_links", "paragraph_search", "layout", "review", "insert_pages", "bookmarks_symbols", "shapes",
-                        "stories", "advanced_objects", "changes", "object_transform", "viewport"):
+                        "stories", "advanced_objects", "changes", "object_transform", "object_move", "clipboard_objects", "viewport", "ruler", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",

@@ -531,7 +531,7 @@ Opacity math accepts numbers or percentages; adding them together is invalid und
 | Text selection, `Selection` and `Range` | ◐ | Native selection and live range/selection behavior have UI coverage, including drag and scroll-edge selection. Word/sentence movement in `Selection.modify()` remains approximate; complete browser Range/Selection conformance is not claimed. |
 | Clipboard | ◐ | An in-memory clipboard plus plain text through the OS; no rich (HTML) OS clipboard. |
 | IME | ◐ | macOS and Windows; no reconversion and no clause underlines. |
-| `cursor` | ◐ | Native image cursors accept raster or SVG `url()` alternatives with optional hotspot coordinates and a keyword fallback; the OS pointer follows mouse movement without a painted overlay. Text, pointer, crosshair, column/row resize and default arrow shapes are shown; other predefined shapes remain unsupported. |
+| `cursor` | ◐ | Native image cursors accept raster or SVG `url()` alternatives with optional hotspot coordinates and a keyword fallback; the OS pointer follows mouse movement without a painted overlay. Text, pointer, crosshair, column/row and horizontal/vertical resize shapes are shown. GLFW 3.4 also supplies diagonal resize and move shapes; grab/grabbing use its hand cursor. Other predefined shapes remain unsupported. |
 | `lambda edit` | ✅ | Rich-text editing for Markdown and HTML and a drawing editor for SVG, built as Lambda packages on the DOM layer; see [Lambda_Doc_Pipeline.md §3.6](Lambda_Doc_Pipeline.md#36-edit). |
 
 `lambda view --paged` opens the separate print-preview mode described in [§17.1](#171-paged-preview-and-export). It scrolls arranged physical pages and repaints on window/DPR changes; it does not forward page clicks, form input or editing to the source DOM.

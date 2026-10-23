@@ -4302,6 +4302,7 @@ struct RenderBorderStroke {
 };
 // the callback takes ownership of path, including on failure (D4.5.1v4).
 bool render_paint_boundary_path(void*, RdtPath*, Color, const RenderBorderStroke*);
+bool render_border_raster_path(void*, RdtPath*, Color, const RenderBorderStroke*);
 using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
 bool render_border_style_supported(CssEnum style);
 bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,

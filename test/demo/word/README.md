@@ -19,13 +19,26 @@ The studio handbook is editable. Start a blank document with **New**, or return
 to the example with **Studio example**. Select text to format it; formatting
 at a caret sets the marks for subsequent typing.
 
+The interface follows photo-album's white panels, cool gray sidebar, blue
+accents, rounded controls, and system typography. Both demos use the shared
+outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
+
 ## Available workflow
 
+- Document context menu: right-click or press Shift+F10 for undo/redo, clipboard
+  actions, selection deletion, character formatting, paragraph settings, links,
+  and comments. The focused item adds table rows/columns and table options,
+  list indentation, link editing/removal, typed object settings and rotation,
+  bookmark removal, comment/revision review, and header/footer settings.
+  Arrow keys, Home/End, Escape, and Tab
+  navigate or dismiss it. Read mode offers plain-text copying and Select All.
 - Home ribbon: undo/redo; bold, italic, underline, strike, subscript and
   superscript; font family and size; text color and highlighting; paragraph
   alignment and line spacing; clear character formatting; six paragraph styles;
   bullets, numbering, and list indent/outdent. Paragraph settings apply spacing
   before/after, left indentation, and first-line indentation in one undo step.
+  Tab/Shift+Tab adjust list indentation while keeping the caret in the item;
+  the same indentation appears in editable snapshots, HTML, and PDF exports.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.
@@ -54,7 +67,10 @@ at a caret sets the marks for subsequent typing.
   and dimensions. Equations and WordArt remain editable inline SVG objects in
   snapshots and HTML; PDF preserves their appearance.
 - Object transforms: select a picture, shape, or WordArt to show four corner
-  resize handles and a circular rotation handle. Corner drags preserve the
+  resize handles and a circular rotation handle. Drag the object body to move
+  it into a paragraph, list item, empty block, or table cell; a caret previews
+  the drop position. The first drag can select the object and move it together.
+  Corner cursors follow the object's rotation. Corner drags preserve the
   aspect ratio; Shift snaps rotation to 15° increments. Escape cancels a drag.
   Each completed drag creates one undo step. Picture, Shape, and WordArt
   settings also accept exact dimensions and a rotation from −180° to 180°.
@@ -68,7 +84,14 @@ at a caret sets the marks for subsequent typing.
   links survive editable snapshots and HTML export/import. Read mode permits
   bookmark navigation while disabling insertion and deletion.
 - Contextual Table ribbon: rows above/below, columns left/right, row/column/table
-  deletion, four table styles, and nine cell alignments. Tab/Shift+Tab move
+  deletion, four table styles, and nine cell alignments. Select cells, rows,
+  columns, or the whole table from the ribbon or context menu. Edge grips select
+  rows/columns; drag the small cell grip for a rectangular range, or Shift-click
+  another cell to extend a selection. Borders offers solid, dashed, dotted,
+  double, or no lines, a width and color, and all/outside/inside/individual-edge
+  presets. Formatting applies to the selected cells in one undo step. Copy
+  includes table HTML and tab-separated text; pasting a grid into selected cells
+  preserves the existing table. Delete clears cell contents. Tab/Shift+Tab move
   between cells; Tab at the final cell adds a row.
 - Layout: A4, Letter, and A5 paper; portrait/landscape; preset or custom margins
   in millimetres; explicit page breaks. Paper geometry changes the editing
@@ -86,7 +109,8 @@ at a caret sets the marks for subsequent typing.
 - Navigation: document headings, Unicode-aware case-insensitive search with a
   Match case toggle, previous/next match, replacement, and one-step undo for
   Replace all across formatting runs within a paragraph.
-- View: navigation pane, read mode, focus mode, and 50–150% zoom. Explicit page
+- View: navigation pane, read mode, focus mode, and 50–150% zoom. The ruler stays
+  above the document viewport and follows horizontal scrolling and zoom. Explicit page
   breaks create separate editable sheets with the chosen size and margins;
   ordinary Enter continues on the same sheet. PDF export paginates using
   that document's paper, orientation, margins, and explicit page breaks.
@@ -122,6 +146,8 @@ mail merge, rich or section-specific header/footer stories, and Word-compatible
 automatic pagination in the editing canvas are outside this demo. Screen sheets
 grow when their contents overflow; PDF adds pages to fit. Shapes are inline;
 floating objects and attached connectors are outside this milestone.
+Cell-range selection and border presets currently target rectangular grids;
+merged-cell editing is outside this milestone.
 Rotation paints around the center of the inline image box; surrounding text
 continues to use the box's unrotated dimensions.
 Text tracking covers text-only paragraphs, headings, and table cells, including
@@ -210,8 +236,24 @@ shape/WordArt editability; a picture retains its original image source.
 temporarily previews dimensions/rotation in the DOM. Pointer release commits
 once, while Escape, pointer cancellation, or lost capture restores the original
 source and style without changing history or dirty state (**S1.4**, **D7.2.5**).
+The parent projects the document before passing its rendered body to the gesture
+controller, so preview redraws retain source bindings (**S12.1.3**, **D7.2.5**).
+The workspace forwards its non-bubbling selection notifications to the document
+controller so ribbon bindings continue to follow the caret.
+Moves reuse `lambda.editor.mod_image` transactions and the drop-caret measurement
+shared with Notes. The gesture owns pointer capture until release and commits
+the captured source path, keeping selection and undo independent of the hover target.
 Angles are stored with a CSS image transform, shared by the canvas and exported
 HTML/PDF; rotating a shape no longer shrinks its artwork to fit a fixed viewport.
+
+Selected pictures and generated objects supply their clipboard payload from the
+model through `lambda.edit.controller` (**D7.2.5**). Copy preserves history and
+selection; Cut captures the same payload before deleting the atom. Native
+transport receives image bytes, HTML, and alternative text. Rich paste retains
+the image attributes declared by Word's schema, including editable object
+parameters, size, and rotation. `clipboard_objects.json` checks keyboard/menu
+copy, PNG bytes, SVG/HTML alternatives, paste, Cut, and undo; the model golden
+`word_clipboard_test.ls` also checks escaping and exclusion of undeclared attrs.
 
 Tracked changes use the editor's optional transaction filter before history is
 recorded (**D7.2.5**). Insertion and deletion span marks carry revision ID, kind,
@@ -289,8 +331,42 @@ under `temp/word/tests/`. The initial and edited screenshots are
 their own named files under `temp/word/`.
 The object-transform replay covers mouse/touch resizing, rotation, Shift
 snapping, Escape, zoom, undo/redo, read mode, and editable/HTML/PDF persistence.
+The object-move replay covers a first drag on an unselected object, mouse/touch
+moves into text, lists, and cells, drop preview, cancellation, invalid drops,
+selection, undo/redo, zoom, read mode, and the four resize cursors.
+The table-selection replay covers ribbon/context/grip selection, rectangular
+drag and Shift-click ranges, border styling and history, rich clipboard grid
+paste, replacement typing, deletion, and read mode. Logical node/multi-node
+selections retain source paths while native text geometry receives a caret in
+the first cell (**D7.2.5**). Cell lookup uses native DOM identity, so similarly
+structured cells cannot alias. A raster unit test checks actual dashed, dotted,
+and double collapsed-border pixels and color at 1× and 2× scaling.
 The viewport replay checks caret/list clipping above the workspace and stable
 physical typing, including Space and arrow keys, at normal and increased zoom.
+Geometric bullets share the document transform during zoom; visible and clipped
+marker pixels are checked on both sides of the document viewport boundary.
+The ruler replay checks second-page scrolling, horizontal alignment, zoom,
+resizing, focus mode, and stable typing. Workspace chrome sits outside the
+document's vertical caret clip while sharing its horizontal offset (**D7.2.5**).
+The page-break typing replay checks immediate typing after a paragraph split,
+an empty new page, and undo/redo. It also puts the native caret on the editor's
+unmapped wrapper to verify typing retains the document and logical caret.
+The context-menu replay checks clipboard edits, selection preservation,
+formatting, history, keyboard navigation, read-mode copying, and small-window bounds.
+The focused-item replay checks each item menu and its command target, including
+cell-padding clicks, row/column edits, object dialogs/rotation/deletion, review,
+headers/footers, and read mode. `context_items.word.json` is its editable fixture.
+The list replay checks visible indent/outdent, Tab/Shift+Tab, caret and history,
+Enter continuing indentation, and editable/HTML round trips.
+The empty-list replay checks immediate typing and typing after leaving and
+returning with the mouse or arrow keys, including a blank item between filled
+items, numbered lists, and undo/redo. Empty model containers map their rendered
+placeholder back to the container caret; the placeholder never creates a model
+text child (**D7.2.5**). The source-position bridge unit tests also distinguish
+that placeholder from authored zero-width text.
+The shape replay checks that the gallery clips before the following controls,
+wheel scrolling reaches the last shape, and the dialog remains scrollable in a
+small window.
 The Insert replay additionally verifies a three-page PDF containing an explicit
 blank page and a four-page PDF after prepending a cover. Its screenshot is
 `temp/word-insert-cover.png`.

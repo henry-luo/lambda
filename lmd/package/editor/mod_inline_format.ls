@@ -7,7 +7,7 @@ import .mod_transaction
 
 pub fn leaves(n,path=[]) => [for (entry in descendants(n,path) where is_text(entry.node)) {path:entry.path,leaf:entry.node}]
 
-pub fn selection_path(sel) => if (sel.kind == 'text') sel.head.path else if (sel.kind == 'node') sel.path else []
+pub fn selection_path(sel) => if (sel.kind == 'text') sel.head.path else selection_paths(sel)[0] or []
 
 pub fn current_marks(editor) array => if (editor.stored_marks != null) editor.stored_marks
     else node_at(editor.doc,selection_path(editor.selection)).marks or []
@@ -28,7 +28,7 @@ pub fn styled_marks(marks,key,value) {
 }
 
 pub fn leaf_segment(entry,sel) {
-    if (sel.kind == 'all' or (sel.kind == 'node' and path_is_prefix(sel.path,entry.path))) {from:0,to:len(entry.leaf.text)}
+    if (sel.kind == 'all' or any([for (path in selection_paths(sel)) path_is_prefix(path,entry.path)])) {from:0,to:len(entry.leaf.text)}
     else if (sel.kind != 'text') null
     else {
         let lo = pos_min(sel.anchor,sel.head)

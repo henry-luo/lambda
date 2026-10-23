@@ -4744,6 +4744,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 block, marker_height, false);
             block->content_height = marker_height;
         }
+        // max-height can constrain auto height too; initialize its scrollport after sizing.
+        if (block->scroller && block->scroll()->overflow_y != CSS_VALUE_VISIBLE) {
+            layout_update_axis_overflow(lycon, block, LAYOUT_AXIS_Y, overflow_flow_height, display);
+        }
     }
     if (block->scroller) {
         if (block->scroll()->intrinsic_gutter_width > 0.0f) {

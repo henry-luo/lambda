@@ -470,6 +470,12 @@ protected:
         t->length = len;
         return t;
     }
+
+    void record_para_source(Item source) {
+        render_map_record(source, tref, para_item, root_item, 0);
+        int path[] = {0};
+        render_map_record_path(source, tref, path, 1);
+    }
 };
 
 TEST_F(SourcePosBridgeRoundTrip, DomTextBoundaryToSourcePos) {
@@ -495,6 +501,41 @@ TEST_F(SourcePosBridgeRoundTrip, DomElementBoundaryToSourcePos) {
     EXPECT_EQ(pos.offset, 1u);
     EXPECT_EQ(pos.path.depth, 0);  // root's recorded path is empty
     source_pos_free(&pos);
+}
+
+TEST_F(SourcePosBridgeRoundTrip, UnrecordedOwnerDoesNotProjectAsDocumentRoot) {
+    // handler dispatch still recognizes the owner, but it has no editor path.
+    source_pos_bridge_reset();
+    DomBoundary boundary{root, 0};
+    SourcePosC position{};
+    EXPECT_FALSE(source_pos_from_dom_boundary(&boundary, &position));
+    source_pos_free(&position);
+    DomBoundary resolved{};
+    EXPECT_FALSE(dom_boundary_from_source_pos(root, &position, &resolved));
+}
+
+TEST_F(SourcePosBridgeRoundTrip, ApplicationRootPathDoesNotProjectAsEditorDocument) {
+    // a model redraw replaces the source root while the outer app keeps its old [] path.
+    render_map_set_source_doc_root(para_item);
+    DomBoundary boundary{root, 0};
+    SourcePosC position{};
+    EXPECT_FALSE(source_pos_from_dom_boundary(&boundary, &position));
+    source_pos_free(&position);
+}
+
+TEST_F(SourcePosBridgeRoundTrip, RecordedTemplatePathSurvivesSourceRootReset) {
+    // ordinary template callbacks retain path records after the editor-root index resets.
+    render_map_reset();
+    render_map_record(root_item, tref, root_item, ItemNull, -1);
+    DomBoundary boundary{root, 0};
+    SourcePosC position{};
+    ASSERT_TRUE(source_pos_from_dom_boundary(&boundary, &position));
+    EXPECT_EQ(position.path.depth, 0);
+    EXPECT_EQ(position.offset, 0u);
+    DomBoundary resolved{};
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &position, &resolved));
+    EXPECT_EQ(resolved.node, root);
+    source_pos_free(&position);
 }
 
 TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextBoundary) {
@@ -581,13 +622,12 @@ TEST_F(SourcePosBridgeRoundTrip, ModelContainerPositionUsesChildOffsetWithoutKin
     MapBuilder model = builder.map();
     model.put("kind", builder.createSymbolItem("node"));
     Item source = model.final();
-    render_map_record(source, tref, para_item, root_item, 0);
-    int path[] = {0};
-    render_map_record_path(source, tref, path, 1);
+    record_para_source(source);
 
     // Lambda SourcePos omits kind even at a container boundary beside an image.
     SourcePosC position;
     source_path_init(&position.path);
+    int path[] = {0};
     position.path.indices = path;
     position.path.depth = 1;
     position.kind = SOURCE_POS_TEXT;
@@ -596,6 +636,59 @@ TEST_F(SourcePosBridgeRoundTrip, ModelContainerPositionUsesChildOffsetWithoutKin
     ASSERT_TRUE(dom_boundary_from_source_pos(root, &position, &result));
     EXPECT_EQ(result.node, para);
     EXPECT_EQ(result.offset, 1u);
+}
+
+TEST_F(SourcePosBridgeRoundTrip, EmptyModelPlaceholderMapsToContainerCaret) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    MapBuilder model = builder.map();
+    model.put("kind", builder.createSymbolItem("node"));
+    model.put("content", builder.array().final());
+    record_para_source(model.final());
+    hello->text = lam::up("\xE2\x80\x8B");
+    hello->length = 3;
+
+    // both sides of the placeholder, and its DOM child slot, name the same empty model caret.
+    DomBoundary boundaries[] = {{hello, 0}, {hello, 1}, {para, 0}, {para, 1}};
+    for (const DomBoundary& boundary : boundaries) {
+        SourcePosC position{};
+        ASSERT_TRUE(source_pos_from_dom_boundary(&boundary, &position));
+        ASSERT_EQ(position.path.depth, 1);
+        EXPECT_EQ(position.path.indices[0], 0);
+        EXPECT_EQ(position.kind, SOURCE_POS_ELEMENT);
+        EXPECT_EQ(position.offset, 0u);
+        DomBoundary restored{};
+        ASSERT_TRUE(dom_boundary_from_source_pos(root, &position, &restored));
+        EXPECT_EQ(restored.node, para);
+        EXPECT_EQ(restored.offset, 0u);
+        source_pos_free(&position);
+    }
+}
+
+TEST_F(SourcePosBridgeRoundTrip, AuthoredZeroWidthTextRetainsItsLeafPosition) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    MapBuilder leaf = builder.map();
+    leaf.put("kind", builder.createSymbolItem("text"));
+    leaf.put("text", "\xE2\x80\x8B");
+    MapBuilder model = builder.map();
+    model.put("kind", builder.createSymbolItem("node"));
+    model.put("content", builder.array().append(leaf.final()).final());
+    record_para_source(model.final());
+    hello->text = lam::up("\xE2\x80\x8B");
+    hello->length = 3;
+
+    DomBoundary boundary{hello, 1};
+    SourcePosC position{};
+    ASSERT_TRUE(source_pos_from_dom_boundary(&boundary, &position));
+    ASSERT_EQ(position.path.depth, 2);
+    EXPECT_EQ(position.path.indices[0], 0);
+    EXPECT_EQ(position.path.indices[1], 0);
+    EXPECT_EQ(position.kind, SOURCE_POS_TEXT);
+    EXPECT_EQ(position.offset, 3u);
+    source_pos_free(&position);
 }
 
 TEST_F(SourcePosBridgeRoundTrip, FullRoundTripText) {

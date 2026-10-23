@@ -1,0 +1,403 @@
+{
+  "format": "lambda-word",
+  "version": 1,
+  "title": "Context menu items",
+  "document": {
+    "kind": "node",
+    "tag": "doc",
+    "attrs": [
+      {
+        "name": "data-word-stories",
+        "value": "{\n  \"header\": \"Context header\",\n  \"footer\": \"Page {PAGE}\",\n  \"header_align\": \"left\",\n  \"footer_align\": \"center\",\n  \"size\": 10,\n  \"distance\": 8,\n  \"different_first\": false\n}"
+      },
+      {
+        "name": "data-word-comments",
+        "value": "[\n  {\n    \"id\": \"c1\",\n    \"author\": \"Me\",\n    \"text\": \"Check this text\",\n    \"quote\": \"Commented text\",\n    \"resolved\": false\n  }\n]"
+      },
+      {
+        "name": "data-word-comment-seq",
+        "value": 1
+      },
+      {
+        "name": "data-word-change-seq",
+        "value": 1
+      }
+    ],
+    "content": [
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Plain text for selection",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "table",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "tr",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "node",
+                "tag": "td",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "A",
+                    "marks": []
+                  }
+                ]
+              },
+              {
+                "kind": "node",
+                "tag": "td",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "B",
+                    "marks": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "node",
+            "tag": "tr",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "node",
+                "tag": "td",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "C",
+                    "marks": []
+                  }
+                ]
+              },
+              {
+                "kind": "node",
+                "tag": "td",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "D",
+                    "marks": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "ul",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "li",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "node",
+                "tag": "p",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "List item",
+                    "marks": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "a",
+            "attrs": [
+              {
+                "name": "href",
+                "value": "#word-bookmark-intro"
+              }
+            ],
+            "content": [
+              {
+                "kind": "text",
+                "text": "Linked text",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "img",
+            "attrs": [
+              {
+                "name": "src",
+                "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNDAiIGhlaWdodD0iMTIwIiB2aWV3Qm94PSIwIDAgMjQwIDEyMCI+CiAgPHJlY3Qgd2lkdGg9IjI0MCIgaGVpZ2h0PSIxMjAiIHJ4PSIxMiIgZmlsbD0iIzI5NGY3MCIvPgogIDxwYXRoIGQ9Ik0zMiAzMGgzOHY2MEgzMnptNDggMGgzOHY2MEg4MHoiIGZpbGw9IiNkY2VhZmEiLz4KICA8cGF0aCBkPSJNMTQyIDQwaDY4TTE0MiA2MGg1NE0xNDIgODBoNjIiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSI2Ii8+Cjwvc3ZnPgo="
+              },
+              {
+                "name": "alt",
+                "value": "Studio picture"
+              },
+              {
+                "name": "width",
+                "value": 100
+              },
+              {
+                "name": "height",
+                "value": 50
+              },
+              {
+                "name": "style",
+                "value": ""
+              },
+              {
+                "name": "data-word-rotation",
+                "value": 0
+              }
+            ],
+            "content": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "img",
+            "attrs": [
+              {
+                "name": "src",
+                "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iNTAiIHZpZXdCb3g9IjAgMCAxMDAgNTAiPjxnPjxyZWN0IHg9IjQiIHk9IjIiIHdpZHRoPSI5MiIgaGVpZ2h0PSI0NiIgcng9IjgiIGZpbGw9IiM1MjdmNzgiIHN0cm9rZT0iIzI4NGU0NyIgc3Ryb2tlLXdpZHRoPSIyIj48L3JlY3Q+PGc+PHRleHQgeD0iNTAiIHk9IjI5LjkiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9Im5vcm1hbCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZmZmZiI+U2hhcGU8L3RleHQ+PC9nPjwvZz48L3N2Zz4="
+              },
+              {
+                "name": "alt",
+                "value": "Shape"
+              },
+              {
+                "name": "width",
+                "value": 100
+              },
+              {
+                "name": "height",
+                "value": 50
+              },
+              {
+                "name": "data-word-shape",
+                "value": "{\n  \"kind\": \"rect\",\n  \"width\": 100,\n  \"height\": 50,\n  \"fill\": \"#527f78\",\n  \"stroke\": \"#284e47\",\n  \"weight\": 2,\n  \"rotation\": 0,\n  \"text\": \"Shape\",\n  \"text_color\": \"#ffffff\",\n  \"size\": 14\n}"
+              },
+              {
+                "name": "style",
+                "value": ""
+              },
+              {
+                "name": "data-word-rotation",
+                "value": 0
+              }
+            ],
+            "content": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "img",
+            "attrs": [
+              {
+                "name": "src",
+                "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGNsYXNzPSJsYW1iZGEtbWF0aCIgcm9sZT0ibWF0aCIgd2lkdGg9IjMuNjc1NDZlbSIgaGVpZ2h0PSIwLjg0MDA5ZW0iIHZpZXdCb3g9IjAgLTgyOS4wOTIgMzY3NS40NiA4NDAuMDkyIiBzdHlsZT0id2lkdGg6My42NzU0NmVtO2hlaWdodDowLjg0MDA5ZW07dmVydGljYWwtYWxpZ246LTAuMDExZW07b3ZlcmZsb3c6dmlzaWJsZTtmb250LXNpemU6MThweCIgZmlsbD0iIzI0MzM0YiI+PHRpdGxlPkUgPSBtIGNeMjwvdGl0bGU+PHN0eWxlPkBmb250LWZhY2V7Zm9udC1mYW1pbHk6IkNvbXB1dGVyIE1vZGVybiBTZXJpZiI7Zm9udC13ZWlnaHQ6NDAwO2ZvbnQtc3R5bGU6bm9ybWFsO3NyYzp1cmwoIi9Vc2Vycy9oZW5yeWx1by9Qcm9qZWN0cy9sYW1iZGEvbG1kL3BhY2thZ2UvZG9jL2xhdGV4L2ZvbnRzL1NlcmlmL2NtdW5ybS53b2ZmMiIpfQpAZm9udC1mYWNle2ZvbnQtZmFtaWx5OiJDb21wdXRlciBNb2Rlcm4gU2VyaWYiO2ZvbnQtd2VpZ2h0OjQwMDtmb250LXN0eWxlOml0YWxpYztzcmM6dXJsKCIvVXNlcnMvaGVucnlsdW8vUHJvamVjdHMvbGFtYmRhL2xtZC9wYWNrYWdlL2RvYy9sYXRleC9mb250cy9TZXJpZi9jbXVudGkud29mZjIiKX08L3N0eWxlPjxnPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAgMCkiPjxnPjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCAwKSI+PHRleHQgeD0iMCIgeT0iMCIgZm9udC1mYW1pbHk9IkNvbXB1dGVyIE1vZGVybiBTZXJpZiIgZm9udC1zaXplPSIxMDAwIiBmb250LXdlaWdodD0iNDAwIiBmb250LXN0eWxlPSJpdGFsaWMiPkU8L3RleHQ+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDY3OCAwKSI+PGc+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg5NTUuNzc5IDApIj48dGV4dCB4PSIwIiB5PSIwIiBmb250LWZhbWlseT0iQ29tcHV0ZXIgTW9kZXJuIFNlcmlmIiBmb250LXNpemU9IjEwMDAiIGZvbnQtd2VpZ2h0PSI0MDAiIGZvbnQtc3R5bGU9Im5vcm1hbCI+PTwvdGV4dD48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTczMy43OCAwKSI+PGc+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyMDExLjU2IDApIj48dGV4dCB4PSIwIiB5PSIwIiBmb250LWZhbWlseT0iQ29tcHV0ZXIgTW9kZXJuIFNlcmlmIiBmb250LXNpemU9IjEwMDAiIGZvbnQtd2VpZ2h0PSI0MDAiIGZvbnQtc3R5bGU9Iml0YWxpYyI+bTwvdGV4dD48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjgyOC41NiAwKSI+PGc+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyODI4LjU2IDApIj48Zz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwIDApIj48dGV4dCB4PSIwIiB5PSIwIiBmb250LWZhbWlseT0iQ29tcHV0ZXIgTW9kZXJuIFNlcmlmIiBmb250LXNpemU9IjEwMDAiIGZvbnQtd2VpZ2h0PSI0MDAiIGZvbnQtc3R5bGU9Iml0YWxpYyI+YzwvdGV4dD48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNDYwIC0zNjIuODkyKSI+PHRleHQgeD0iMCIgeT0iMCIgZm9udC1mYW1pbHk9IkNvbXB1dGVyIE1vZGVybiBTZXJpZiIgZm9udC1zaXplPSI3MDAiIGZvbnQtd2VpZ2h0PSI0MDAiIGZvbnQtc3R5bGU9Im5vcm1hbCI+MjwvdGV4dD48L2c+PC9nPjwvZz48L2c+PC9zdmc+"
+              },
+              {
+                "name": "alt",
+                "value": "E=mc^2"
+              },
+              {
+                "name": "width",
+                "value": 67
+              },
+              {
+                "name": "height",
+                "value": 16
+              },
+              {
+                "name": "data-word-equation",
+                "value": "{\n  \"source\": \"E=mc^2\",\n  \"size\": 18,\n  \"color\": \"#24334b\",\n  \"display\": false\n}"
+              }
+            ],
+            "content": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "img",
+            "attrs": [
+              {
+                "name": "src",
+                "value": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCAxMjAgNDAiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0id29yZGFydC1maWxsIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMjg2NGFkIj48L3N0b3A+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMjQzYjU3Ij48L3N0b3A+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRleHQgeD0iNjAiIHk9IjI4LjQiIGZpbGw9InVybCgjd29yZGFydC1maWxsKSIgc3Ryb2tlPSJub25lIiBzdHJva2Utd2lkdGg9IjAiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iYm9sZCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgdGV4dExlbmd0aD0iOTYiIGxlbmd0aEFkanVzdD0ic3BhY2luZ0FuZEdseXBocyI+V29yZEFydDwvdGV4dD48L3N2Zz4="
+              },
+              {
+                "name": "alt",
+                "value": "WordArt"
+              },
+              {
+                "name": "width",
+                "value": 120
+              },
+              {
+                "name": "height",
+                "value": 40
+              },
+              {
+                "name": "data-word-wordart",
+                "value": "{\n  \"text\": \"WordArt\",\n  \"style\": \"gradient\",\n  \"transform\": \"none\",\n  \"width\": 120,\n  \"height\": 40,\n  \"size\": 24,\n  \"font\": \"Georgia\",\n  \"fill\": \"#2864ad\",\n  \"outline\": \"#243b57\",\n  \"rotation\": 0\n}"
+              },
+              {
+                "name": "style",
+                "value": ""
+              },
+              {
+                "name": "data-word-rotation",
+                "value": 0
+              }
+            ],
+            "content": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Commented text",
+            "marks": [
+              {
+                "name": "span",
+                "value": [
+                  {
+                    "name": "data-word-comment",
+                    "value": "c1"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Tracked text",
+            "marks": [
+              {
+                "name": "span",
+                "value": [
+                  {
+                    "name": "data-word-change",
+                    "value": "r1"
+                  },
+                  {
+                    "name": "data-word-change-kind",
+                    "value": "insert"
+                  },
+                  {
+                    "name": "data-word-change-author",
+                    "value": "Me"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [
+          {
+            "name": "id",
+            "value": "word-bookmark-intro"
+          }
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Bookmark destination",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "hr",
+        "attrs": [],
+        "content": []
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "After the line",
+            "marks": []
+          }
+        ]
+      }
+    ]
+  }
+}

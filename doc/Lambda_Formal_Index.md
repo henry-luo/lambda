@@ -10,7 +10,7 @@ not or only partly implemented (see the spec's Appendix A). To read a ruling
 in full — including lines too long for a viewer — run
 `python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).
 
-## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v71.1.2 (2026-10-22)
+## Semantics — [`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md) v71.1.3 (2026-10-23)
 
 | ID | Line | Title |
 |---|---|---|

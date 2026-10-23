@@ -28,7 +28,9 @@ fn valid_attrs(attrs) bool => attrs is array and all([for (a in attrs)
     a is map and (a.name is string or a.name is symbol) and (a.value is string or a.value is number or a.value is bool or a.value == null)])
 fn valid_mark(m) bool => m is map and contains(marks,symbol(m.name)) and
     (m.value is bool or (valid_attrs(m.value) ^ { false }))
-fn unpack_attrs(attrs) => [for (a in attrs) {name:symbol(a.name),value:a.value}]
+// restore integer list levels because HTML attributes arrive as strings.
+fn unpack_attrs(attrs,tag=null) => [for (a in attrs) {name:symbol(a.name),
+    value:if (tag=='li' and symbol(a.name)=='indent' and a.value is string) (int(a.value) ^ { a.value }) else a.value}]
 fn unpack_mark(m) => {name:symbol(m.name),value:if (m.value is array) unpack_attrs(m.value) else m.value}
 fn restored(n,depth=0) any^ {
     if (depth > 48 or not (n is map)) raise error("Word: invalid or deeply nested document")
@@ -39,7 +41,7 @@ fn restored(n,depth=0) any^ {
     }
     else if ((n.kind == "node" or n.kind == 'node') and contains(tags,symbol(n.tag)) and
              valid_attrs(n.attrs) and n.content is array) {
-        node_attrs(symbol(n.tag),unpack_attrs(n.attrs),[for (child in n.content) restored(child,depth+1)^])
+        node_attrs(symbol(n.tag),unpack_attrs(n.attrs,symbol(n.tag)),[for (child in n.content) restored(child,depth+1)^])
     }
     else raise error("Word: unsupported document node " ++ string(n.tag))
 }

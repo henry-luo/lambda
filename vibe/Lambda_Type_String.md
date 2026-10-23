@@ -1,753 +1,190 @@
-# Lambda Type: String and Symbol
+# Lambda Type: String and Symbol — Design
 
-## Executive Summary
-
-This document proposes enhancements to Lambda's string and symbol types, including:
-1. Documentation of existing string/symbol functionality
-2. Proposed new system functions for string manipulation
-3. Symbol-specific considerations
-4. Implementation recommendations
+**Revision:** 2 (2026-10-23) — consolidation of the string design record.
+**Status:** design record; every point below is either ratified in the formal spec or implemented. Unratified or unbuilt items are listed as such in §8.
+**Formal linkage:** text scalars and the sequence walk S2.5.8, S8.3.1v3; empty and solid values S2.2.1, S2.2.2v2, S2.2.3; truthiness S3.1v2; content normalization S2.6.2, S2.6.4; positional reads S7.1.1v3, S7.1.2, S7.2.1, S7.2.2; the sys-func return contract S7.4.5, S7.10.1v3, S7.10.3; ordering S6.1.1; concatenation S10.6.1; the pipe and filter S10.1.2v4, S10.1.5v3, S10.1.6; the single-quote lexical rule S16.8.7; name keys S8.2.2v6; member-call form S12.3.3v2; the string library S17.1.1, S17.4.1, S17.6.1, S17.7.1, S17.7.2, S17.8.1; representation D2.1.3, D4.6.1v4, D6.4.1.
+**Scope:** the `string` and `symbol` value types — their model, positional access, the sequence view, operators and the system-function surface — and the design history behind them. String *patterns* (`\( … )`) and the pattern-aware `find`/`replace`/`split` are in [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md).
+**Consolidates:** `Lambda_Type_String.md` rev 1 (2026-01-24, the original proposal), `Lambda_Type_String2.md` (2026-04-02, native return-type proposal, never adopted) and `Lambda_Type_String_Iterable.md` (2026-02-18, string as indexable-not-iterable, since reversed). Their superseded positions are kept in Appendix S; their implementation detail and examples are not carried.
+**Related:** [Lambda_Semantics_Formal.md §C1](Lambda_Semantics_Formal.md) (the `""` decision), [Lambda_Design_Syntax.md §7.27](Lambda_Design_Syntax.md) kind rulings 16–26 (text as a sequence), [Lambda_String_Func_Tuning.md](Lambda_String_Func_Tuning.md) (performance), user docs `doc/Lambda_Data.md` and `doc/Lambda_Sys_Func.md` §String Functions.
 
 ---
 
-## 1. Existing String Support
+## 1. The text model
 
-> **Note**: Lambda currently does **not** support member function syntax (e.g., `str.method()`). All string functions are global functions. Member function support will be added in a future release.
+### 1.1 Two text kinds, one storage form
 
-### 1.1 String Type Overview
+Lambda has two text scalars, `string` and `symbol`, with `binary` as their byte-level sibling. They differ in purpose, not in encoding:
 
-| Property | Description |
-|----------|-------------|
-| **Type ID** | `LMD_TYPE_STRING` |
-| **Encoding** | UTF-8 (internal byte storage) |
-| **Indexing** | Character-based (Unicode code points), not byte-based |
-| **Memory** | Heap-allocated, reference counted |
-| **Immutability** | All operations return new strings |
+| Aspect | `string` | `symbol` |
+|---|---|---|
+| Literal | `"text"` | `'text'` (S16.8.7) |
+| Purpose | content: user text, document text, data values | names: keys, tags, enum-like values, format and option identifiers |
+| Empty value | `""` is a genuine value (S2.2.1) | solid: no zero-length symbol except `symbol.empty` (S2.2.2v2) |
+| Identity | its characters | a `NameKey`: resolved namespace plus normalized characters (S8.2.2v6) |
+| `<`, `>` | dictionary order (S6.1.1) | not comparable: `error()` (S6.1.1) |
 
-### 1.2 Unicode Handling
+Both store UTF-8 and present **code points** as their unit. Length, indexing, slicing, iteration and every reported position (`find`'s `index`, `index_of`) count code points; UTF-8 byte offsets are internal only (S2.5.8, S8.3.1v3, S17.4.1). Single quotes are not an alternate string syntax: `'name' == "name"` is false, and crossing the boundary is explicit with `string(sym)` and `symbol(str)`.
 
-Lambda stores strings internally as UTF-8 bytes but exposes a **character-based** (Unicode code point) interface to users.
+*Why two kinds:* content and names have different lifecycles and different identity. A name is compared, hashed and looked up far more often than it is sliced, and it may carry a namespace; content is built, searched and transformed. Keeping them distinct lets the type say which one an API wants, and keeps map keys, element tags and option names out of the content algebra (no empty name by accident, no `<` over identifiers).
 
-#### Key Principles
+Interning, pooling and pointer comparison are implementation strategies (S1.6). Symbol identity is the `NameKey`, never an address; pointer equality is not a textual-symbol comparison (D4.6.1v4). String, symbol and binary stay tagged leaf pointers in the `Item` encoding — a measured ruling, since raw header pointers regressed the benchmark geomean by 11.1% (D2.1.3).
 
-| Aspect | Behavior |
-|--------|----------|
-| **Storage** | UTF-8 encoded bytes |
-| **Indexing unit** | Unicode code point (not byte) |
-| **Length unit** | Unicode code point count |
-| **Negative index** | Counts from end (-1 = last char) |
+### 1.2 Empty and solid values
 
-#### Examples
+- **`""` is a string.** It has `len 0`, `"" is string` is true, `"" == null` is false (S2.2.1), and it is falsy: the falsy set is exactly `null`, `false`, `""` (S3.1v2). A string-valued function with no content to return returns `""`, not `null` (S7.10.1v3) — `trim("   ")` is `""`.
+- **Symbols and binaries are solid.** Every value has `len ≥ 1`. The literals `''` and `b''` do not exist — writing them is a compile error — and a runtime operation that would make a zero-length symbol or binary yields `null` (`symbol("")` is `null`). The one exception is the predefined `symbol.empty`, the empty *name*, which a map walk yields as the key of an empty-named entry (JSON `{"": 1}`, a `.properties` line `=value`) and which prints by its name (S2.2.2v2, S8.2.2v3).
+- **Content normalizes, values do not.** Building element content or a script body drops `null` and `""` and merges adjacent strings (S2.2.3, S2.6.2, S2.6.4): `<e "">` is `<e>`. This is a tree-construction rule, independent of string equality; collections never normalize, so `[1, null, "", 2]` keeps four items (S2.6.1v2).
 
-```lambda
-let s = "Hello, 世界!"
+*Why `""` is a string (C1, 2026-07-03).* The original design identified `""` with `null` (Appendix S, S-1): one absence value, one null check, solid strings inside Lambda. It failed for three reasons. It could not be uniform — data sources deliver real empty strings, so either every input boundary corrupts `{"name": ""}` into `null`, or two kinds of empty string coexist; both happened (literal `""` was null while runtime empties were strings, and JSON `{"": 1}` round-tripped as `{"''": 1}`). Strings are sequences, and `""` is a sequence's zero — the identity of concatenation and the result of an empty slice — as `0` is int's and `[]` is array's, not its null. And the optional-type machinery exists to tell *absent* from *present-empty* (HTML `alt=""` against a missing `alt`). What decided it was interop: JS, Python and every language Lambda hosts or models treat `""` as a string. The ergonomic case for the old design is kept by falsiness: `if (s)` and `s or default` still need one test.
 
-// Length is character count, not byte count
-len(s)           // 10 (not 14 bytes)
+*Why symbols stay solid.* A symbol is a name, and the empty name names nothing; banning the `''` spelling (C1.6a, 2026-07-04) makes the invariant visible, since `''` silently meaning `null` next to a real `""` was a trap. `symbol.empty` (C1.6b, 2026-09-30) was added only because the `len`/walk law (S8.3.1v3) needs a key to hand out for an empty-named map entry; yielding `null` would look like an absent key, and yielding the string `""` would make keys change kind in one case.
 
-// Indexing is character-based
-s[7]             // "世" (not byte 7)
-s[8]             // "界"
-```
+### 1.3 No character type
 
-#### Negative Indexing (KIV)
+A character is a one-code-point string (or, from a symbol, a one-code-point symbol). There is no `char` type. *Why:* fewer types; `s[i]` returns the source's own kind, so it concatenates and compares with no conversion; and "character" is ambiguous in Unicode — code point or grapheme cluster — so a dedicated type would have to pick one and be wrong for the other use. Code points are converted with `ord` and `chr`.
 
-> **Status**: Keep In View - planned but not yet implemented.
+### 1.4 Unicode levels
 
-```lambda
-// Future support for negative indexing
-s[-1]            // Last character
-s[-3]            // Third from end
-s[0 to -2]       // All except last character
-```
+| Level | Role in Lambda |
+|---|---|
+| Code point | The unit of `len`, indexing, slicing, iteration and positions. |
+| Grapheme cluster | Not a unit. A family emoji or a decomposed accent is several code points. Grapheme functions are deferred (§8). |
+| Byte | Internal for text; observable only through `binary`. |
 
-#### Implementation Notes
+No operation normalizes implicitly. Key identity uses the characters as written, with no Unicode normalization or case folding (S8.2.2v6); case-insensitive matching folds but does not normalize (S17.7.1); `normalize(s, form)` is the explicit tool (NFC, NFD, NFKC, NFKD).
 
-1. **ASCII fast path**: Check if all bytes are < 128; if so, byte offset = character offset (O(1) indexing)
-2. **UTF-8 slow path**: Use `utf8_char_to_byte_offset()` to convert character index to byte offset
-3. **Library**: Use `utf8proc` for Unicode operations (normalization, case mapping)
-4. **Performance**: Cache character-to-byte mapping for repeated access on same string (future optimization)
+## 2. Positional access
 
-#### Unicode Levels
+Positional access is the same operation on text as on any sequence, at code-point granularity, and the result keeps the source's kind: indexing a symbol gives a symbol.
 
-| Level | Description | Use Case |
-|-------|-------------|----------|
-| **Code Point** | Single Unicode scalar value (U+0000 to U+10FFFF) | Default indexing unit |
-| **Grapheme Cluster** | User-perceived character (e.g., `é` = `e` + `́`) | Future: `graphemes(s)` function |
-| **Byte** | Raw UTF-8 byte | Low-level: `binary(s)` conversion |
+- **Indexing** is 0-based and a position, not a direction. A negative index carries no meaning: `s[-1]` is `null`, exactly like `s[len(s)]` (S7.2.1). Reaching from the end is the reserved word `last` (`s[last]`, `s[last - 1]`, `s[2 to last]`, S7.2.2). Every invalid read is `null`, never an error (S7.1.1v3).
+- **Range subscript** `s[i to j]` is inclusive at both ends, like any range.
+- **`slice(s, i, j?)`** is half-open `[i, j)` and **clamps**: out-of-range offsets clamp to the bounds and an empty selection is `""`. Clamping is symmetric — a negative offset clamps to 0, it never wraps (`slice("hello", -2, 3)` is `"hel"`). An absent source or absent offset makes the result `null`, so a missed search degrades end to end instead of returning a plausible wrong prefix; a non-integral offset is an error (S7.1.2).
+- **`take(s, n)` and `drop(s, n)`** are the prefix and suffix forms and keep the kind.
 
-**Current implementation**: Uses code points. Grapheme cluster support can be added later via dedicated functions.
+*Why no negative indices (C15).* Negative indexing was kept in view in rev 1 and planned again in the 2026-02 indexable proposal (Appendix S, S-4). It was rejected: with negative wrap, both failure directions of a computed index stop being symmetric — `i - 1` running below zero silently reads the end instead of being absent. `last` gives end-relative reach with ordinary arithmetic and no special case for an empty sequence (`last` is `-1`, so `s[last]` is `null`).
 
-#### Edge Cases
+## 3. Text is placed as one value and walked as a sequence
 
-```lambda
-// Emoji with modifiers (multiple code points)
-let emoji = "👨‍👩‍👧"      // Family emoji (7 code points: 👨 + ZWJ + 👩 + ZWJ + 👧)
-len(emoji)            // 7 (code points), not 1 (grapheme)
+**Ruling (S2.5.8, USER 2026-09-21/22, kind ruling 22).** Text is placed as one value and walked as a sequence, exactly like an array. Iteration, `len`, indexing, `in`, the pipe `|>`, the filter `|:` and every sequence operation see a string or symbol as its code points and a binary as its bytes. The `len` law follows: `len(x)` is the number of iterations `for (i in x)` performs (S8.3.1v3).
 
-// Combining characters
-let accent = "é"      // Could be 1 or 2 code points depending on normalization
-normalize(accent, 'nfc')  // Ensures single code point form
-```
+Consequences:
 
-### 1.3 String Literals
+- `"a" in "cat"` is **character membership**; substring search is `contains`.
+- `reverse`, `sort`, `unique` and the other sequence functions work on the characters: `reverse("abc")` is `"cba"`.
+- **Result kind.** A sequence operation over a text value yields that text kind when every result item is of that kind, concatenated, and an array otherwise; an empty result is `""`. So `"abc" |> upper(~)` is `"ABC"`, `"abc" |: ~ != "b"` is `"ac"`, and `"abc" |> ord(~)` is `[97, 98, 99]` (S2.5.8, S10.1.2v4, S10.1.6). The kind depends on the body's results; that was accepted as the only reading that gives `"ABC"` while keeping `ord` usable.
+- **Placement treats text as one item.** For `++` and for item positions a text value is a scalar: `[1] ++ "ab"` is `[1, "ab"]` (S10.6.1), and a string placed in content is one child (which may then merge with neighbouring strings, S2.6.4).
+- **`that` is single-value.** `s that p` tests the whole string, never its characters (S10.1.5v3); filtering characters is `|:`.
+- **Navigation does not explode text.** To the member walk `.*`/`.**` text is a scalar, so `.**` over a document never descends into characters ([Lambda_Expr_Query.md](Lambda_Expr_Query.md) §4).
+- Explicit decomposition is ordinary iteration: `[for (c in s) c]`. The `chars()` function was removed on 2026-03-09 and is not needed.
 
-```lambda
-// Basic string literals
-"Hello, World!"
-"Unicode: 你好世界 🎉"
+*Why the reversal.* The 2026-02 indexable proposal (Appendix S, S-5) made strings singular in iteration, pipes and predicates — `for s in "hello"` ran once, `reverse("hello")` returned it unchanged — because `that` then bound `~` to the whole item and a walking pipe would have been inconsistent with it. The 2026-09 kind survey (562 probes) found every sequence operation choosing its output kind by how its input was built, with no rule at all; the kind rulings replaced that with one law. Once `that` was ruled single-value by definition (S10.1.5v3) and filtering moved to `|:`, the consistency argument for singular strings disappeared, and the singular model's cost remained: text had a `len` and indices but no walk, breaking the `len`/`for` law that every other sequence obeys. Passthrough functions that silently returned their input unchanged were also a correctness trap.
 
-// Escape sequences
-"Line 1\nLine 2"      // newline
-"Tab\there"           // tab
-"Quote: \"text\""     // escaped quote
-```
+## 4. Operators
 
-### 1.4 Empty String Handling
+- **`++` concatenates.** Two values of one text kind keep it (`"a" ++ "b"` is `"ab"`, `'a' ++ 'b'` is `'ab'`); otherwise both operands render as text and the result is a string (`"n: " ++ 42` is `"n: 42"`, `1 ++ 2` is `"12"`). `null` is the identity (S10.6.1).
+- **No repetition operator.** `"ab" * 3` is an error value, not `"ababab"`. *Why:* `*` stays purely numeric, so `3 * x` never depends on whether `x` is text, and the overload buys little. A dedicated function was proposed and is not built (§8).
+- **Ordering.** `< <= > >=` compare strings in dictionary order; symbols are names and are not ordered (S6.1.1).
+- **Equality** compares characters; a string never equals a symbol.
+- **`|`, `&`, `!` are type operators**, not text operators: `"GET" | "POST"` is the type admitting either string — a string enum — never a concatenation or a character set (S10.1.1v4). String enums and string patterns are distinguished in [Lambda_Design_String_Pattern.md §3.5](Lambda_Design_String_Pattern.md).
 
-Lambda has special handling for empty strings that differs from most languages.
+## 5. The system-function surface
 
-#### Syntax
+### 5.1 Call style
 
-Both single-quote and double-quote empty strings are valid syntax:
-```lambda
-""      // empty string literal (double quotes)
-''      // empty symbol literal (single quotes)
-```
+String functions are global system functions taking the text as their first argument, consistent with `len`, `type` and the rest of the library. The member-call form `s.upper()` reaches the same builtins: after a receiver's own members, a member call falls through to a method-eligible builtin of that name (S12.3.3v2). Rev 1 deferred case and classification functions "until member-function syntax exists"; that deferral is void — `upper`/`lower` shipped as globals and the member form arrived through S12.3.3v2.
 
-#### Data Model: Empty String → Null
+### 5.2 Families
 
-**Key Design Decision**: Lambda normalizes all empty strings to `null`.
+| Family | Functions | Notes |
+|---|---|---|
+| Conversion | `string`, `symbol`, `name`, `format` | `symbol("")` is `null` (S2.2.2v2) |
+| Search | `contains`, `starts_with`, `ends_with`, `index_of`, `last_index_of`, `find` | `contains`, `index_of` and `last_index_of` also work on collections; `find` takes a pattern or a string and options (pattern doc §4) |
+| Transform | `upper`, `lower`, `trim`, `trim_start`, `trim_end`, `replace`, `normalize`, `slice`, `take`, `drop` | keep the source's text kind |
+| Split and join | `split`, `join` | `split` returns an array of strings; `join` returns a string |
+| Code points | `ord`, `chr` | `ord` is `int | null` |
+| URL and hashing | `url_encode`, `url_resolve`, `hash` | string only |
 
-```lambda
-let s = ""
-s == null        // true - empty string IS null
+### 5.3 Contract rules
 
-let sym = ''
-sym == null      // true - empty symbol IS null
-```
-
-**Rationale**:
-1. **Semantic clarity**: Empty string often means "no value" - same as null
-2. **Null safety**: Eliminates `if (s == null || s == "")` checks
-3. **Consistency**: One way to represent "no text value"
-
-#### Special Handling in Markup Formats
-
-Because empty strings become `null` internally, special handling is needed when serializing to/from various formats:
-
-| Format         | Input Behavior                   | Output Behavior            |
-| -------------- | -------------------------------- | -------------------------- |
-| **JSON value** | `""` → `null`                    | `null` → `null` (not `""`) |
-| **JSON key**   | `{"": val}` → key becomes `"''"` | `{"''": val}`              |
-| **HTML attr**  | `attr=""` → `null`               | `null` → `attr=""`         |
-| **XML/Other**  | Empty strings → `null`           | Similar to HTML            |
-
-##### JSON Handling
-
-**Values**: Empty strings in JSON values map to `null` and cannot roundtrip:
-```lambda
-// Input JSON: {"name": ""}
-// Lambda sees: {name: null}
-// Output JSON: {"name": null}  -- NOT {"name": ""}
-```
-
-**Keys**: Empty string keys are mapped to the literal string `''` (two single-quote characters):
-```lambda
-// Input JSON: {"": "empty key value"}
-// Lambda sees: {"''": "empty key value"}
-```
-
-This preserves the key while avoiding null key issues.
-
-##### HTML Attribute Handling
-
-HTML attributes with null values serialize back to empty strings:
-```lambda
-// Lambda element: <input value=null>
-// HTML output: <input value="">
-```
-
-This maintains HTML validity where empty attributes are common.
-
-##### Roundtrip Considerations
-
-| Scenario | Roundtrip Preserved? |
-|----------|---------------------|
-| Non-empty strings | ✅ Yes |
-| Empty string in JSON value | ❌ No (`""` → `null`) |
-| Empty string JSON key | ❌ No (`{"": val}` → `{"''": val}`) |
-| Empty HTML attribute | ✅ Yes (`""` → `null` → `""`) |
-
-**Note**: If exact empty string preservation is required, consider using a sentinel value like `" "` (single space) or a wrapper object.
-
-### 1.5 Current String Operators
-
-| Operator      | Syntax        | Description            | Example               | Result          |
-| ------------- | ------------- | ---------------------- | --------------------- | --------------- |
-| Concatenation | `a ++ b`      | Join two strings       | `"Hello" ++ " World"` | `"Hello World"` |
-| Index         | `str[i]`      | Get character at index | `"hello"[1]`          | `"e"`           |
-| Range Index   | `str[i to j]` | Get substring [i, j]   | `"hello"[1 to 3]`     | `"ell"`         |
-| Length        | `len(str)`    | Get character count    | `len("你好")`           | `2`             |
-
-#### Design Decision: No String Repeat Operator
-
-Lambda intentionally does **not** support `str * n` for string repetition.
-
-**Rationale**:
-1. **Type clarity**: `*` is kept purely numeric - it always returns a number
-2. **Predictable semantics**: Overloading `*` for strings creates ambiguity (`3 * x` - is `x` a number or string?)
-3. **Explicit is better**: Use a dedicated function if string repetition is needed
-
-**Alternative** (if needed in future):
-```lambda
-// Could add a repeat() function instead
-repeat("ab", 3)    // "ababab"
-```
-
-### 1.6 Current String System Functions
-
-| Function | Signature | Description | Example | Result |
-|----------|-----------|-------------|---------|--------|
-| `string(x)` | `any -> string` | Convert to string | `string(42)` | `"42"` |
-| `len(s)` | `string -> int` | Character count (UTF-8) | `len("hello")` | `5` |
-| `slice(s, start, end)` | `(string, int, int) -> string` | Extract substring [start, end) | `slice("hello", 1, 4)` | `"ell"` |
-| `contains(s, sub)` | `(string, string) -> bool` | Check if contains substring | `contains("hello", "ell")` | `true` |
-| `normalize(s, form)` | `(string, symbol) -> string` | Unicode normalization | `normalize("é", 'nfc')` | normalized string |
-
-#### 1.6.1 `slice` Details
-
-The `slice(s, start, end)` function is consistent with `slice()` for arrays and lists.
-
-Supports negative indexing:
-```lambda
-let s = "Hello, World!"
-slice(s, 0, 5)       // "Hello"
-slice(s, 7, 12)      // "World"
-slice(s, 0, -1)      // "Hello, World" (excludes last char)
-slice(s, -6, -1)     // "World"
-```
-
-#### 1.6.2 `normalize` Details
-
-Unicode normalization forms:
-```lambda
-normalize(text, 'nfc')   // Canonical Composition (most common)
-normalize(text, 'nfd')   // Canonical Decomposition
-normalize(text, 'nfkc')  // Compatibility Composition
-normalize(text, 'nfkd')  // Compatibility Decomposition
-```
-
-### 1.7 String Concatenation Behavior
-
-The `++` operator (OPERATOR_JOIN) handles mixed types:
-```lambda
-"value: " ++ 42        // "value: 42" (auto-converts int to string)
-"pi = " ++ 3.14        // "pi = 3.14"
-"flag: " ++ true       // "flag: true"
-```
-
-### 1.8 String Indexing and Slicing
-
-Strings support both single-character indexing and range-based slicing:
-
-```lambda
-let s = "Hello, 世界!"
-
-// Single character access (returns string of length 1)
-s[0]          // "H"
-s[7]          // "世"
-
-// Range-based slicing (returns substring)
-s[0 to 4]     // "Hello" (inclusive range)
-s[7 to 8]     // "世界"
-```
-
-**Design Decision**: Indexing returns a **string** (not a char type) to keep the type system simple. A single character is just a string of length 1.
-
-> **Note**: Negative indexing (`s[-1]`, `s[0 to -2]`) is KIV (Keep In View) - planned but not yet implemented.
+- **Failures are values.** Absence in, or no answer, gives `null` — or `""` for a string result; a present but invalid input gives `error()` (S7.4.5, S7.10.1v3, S7.10.2).
+- **No in-band sentinels.** `index_of`, `last_index_of` and `ord` return `int | null`, never `-1` (S7.10.3). A found test `idx >= 0` stays valid; `idx < 0` silently breaks, so absence is tested with `is null`.
+- **Kind preservation.** A transform of a symbol returns a symbol (`upper('abc')` is `'ABC'`, S17.7.2). `split` and `join` produce content, so they produce strings. A transform whose result would be an empty symbol yields `null` (S2.2.2v2).
+- **Case.** `lower` and `upper` use Unicode full case mapping, the same in every locale, as ECMAScript does — a mapping may change length (`upper("straße")` is `"STRASSE"`) and a final capital sigma lowercases to `ς` (S17.7.2). Case-insensitive *matching* uses simple case folding instead (S17.7.1); mapping is not folding, so `lower(a) == lower(b)` is not the case-insensitive comparison. The two rulings and their reasons are in the pattern doc §4.6.
+- **Splitting** follows ECMAScript `String.prototype.split` (S17.1.1); `split(s, null)` keeps the Python-shaped whitespace form. **Replacement** follows `replaceAll` (S17.6.1). **Option maps** reject unknown names at compile time where the map is a literal (S17.8.1).
+- **Character classification** (`is_numeric`, `is_alpha`, rev 1) is not a function family: a string pattern answers it (`s is \("\d"+)`).
+
+*Why global functions first, with collections later.* Rev 1 noted that `index_of`, `contains` and `replace` read naturally on arrays too; `contains`, `index_of` and `last_index_of` were made polymorphic, which is why they kept `Item` signatures when other string functions were considered for native ones (Appendix S, S-9).
+
+## 6. Representation notes that shape the design
+
+These are implementation facts that the design relies on; they are informative, not rulings.
+
+- Strings carry an ASCII flag, so length, indexing and slicing are O(1) for ASCII text; non-ASCII text walks UTF-8. A code-point position cache for non-ASCII hot paths is proposed and not built (§8).
+- Single-character ASCII strings are pre-allocated, so a character walk over ASCII text allocates nothing.
+- Public system functions return boxed `Item`s (D6.4.1). That is what lets a string function return an error value instead of a fake string, and it is why the native-pointer return convention of `Lambda_Type_String2.md` was not adopted (Appendix S, S-9).
+
+## 7. Cross-language position
+
+| Operation | Lambda | JavaScript | Python |
+|---|---|---|---|
+| Length unit | code point | UTF-16 unit | code point |
+| `s[-1]` | `null`; use `s[last]` | `undefined` (`at(-1)` wraps) | wraps |
+| Empty string | a string, falsy | a string, falsy | a string, falsy |
+| Substring test | `contains(s, t)`; `in` is character membership | `includes` | `in` |
+| Split | ECMAScript rules | ECMAScript | different empty-delimiter and zero-width rules |
+| Case mapping | Unicode full, locale-free | same | same (`str.upper`) |
+| Not found | `null` | `-1` | `-1` or exception |
+
+## 8. Deferred, not built, and open
+
+| Item | State | Home |
+|---|---|---|
+| String interpolation | open; note the `$` collision with quote splices | SO29 |
+| `text` refinement type, `string that (len(~) > 0)`, for APIs that want solid strings | considered in C1.6, not decided | [Semantics_Formal §C1.6](Lambda_Semantics_Formal.md), C1–C4 follow-ups |
+| Raw string literals (no escape processing) | proposed in rev 1, not built, not ruled | — |
+| Grapheme-cluster functions | deferred | — |
+| `pad_start` / `pad_end`, a repeat function, counting substring occurrences | kept in view, not built | — |
+| `replace_first` / `replace_last` | superseded by `replace`'s `limit` and `last` options (S17.6.1) | — |
+| `split_lines` | not needed: `split` with a pattern | — |
+| UTF-8 position cache and other P5 string tuning | not started | [String_Func_Tuning](Lambda_String_Func_Tuning.md), impl record |
+| `<` accepts symbols and uses a NUL-unsafe compare | conformance gap | S6.1.1 footnote |
+| Formatter size caps drop large text from `format()` | open, needs a decision | [LR09-31](Lambda_Issue_Ledger.md#lr09-31) |
+| Symbol-pooling claims (code comment, user doc) disagree with the allocator | open | [LR11-7](Lambda_Issue_Ledger.md#lr11-7) |
+| utf8proc buffers cross the allocator boundary | open | [LR05-7](Lambda_Issue_Ledger.md#lr05-7) |
 
 ---
 
-## 2. Symbol Type Overview
-
-### 2.1 Symbol Basics
-
-| Property | Description |
-|----------|-------------|
-| **Type ID** | `LMD_TYPE_SYMBOL` |
-| **Syntax** | `'symbolName` (single quote prefix) |
-| **Pooling** | Conditionally pooled (≤32 chars) in NamePool |
-| **Use Case** | Identifiers, enum-like values, keys |
-
-### 2.2 Symbol Literals
-
-```lambda
-'hello              // simple symbol
-'mySymbol           // camelCase symbol
-'json               // format specifier
-'nfc                // normalization form
-```
-
-### 2.3 Symbol vs String
-
-| Aspect | String | Symbol |
-|--------|--------|--------|
-| **Literal** | `"text"` | `'text` |
-| **Purpose** | Content data | Structural identifiers |
-| **Pooling** | Never | If ≤32 chars |
-| **Memory** | Arena allocated | Pool + pointer sharing |
-| **Comparison** | Character-by-character | Pointer (if pooled) |
-| **Use case** | User content, text | Keys, tags, enums |
-
-### 2.4 Symbol Operations
-
-```lambda
-// Conversion
-symbol("text")      // string to symbol: 'text
-string('text)       // symbol to string: "text"
-
-// Concatenation (returns symbol)
-'hello ++ 'world    // 'helloworld
-```
-
-### 2.5 Symbol Indexing
-
-Symbols support the same indexing syntax as strings:
-
-```lambda
-let sym = 'helloWorld
-
-// Single character access (returns symbol of length 1)
-sym[0]            // 'h
-sym[5]            // 'W
-
-// Range-based slicing (returns symbol)
-sym[0 to 4]       // 'hello
-sym[5 to 9]       // 'World
-```
-
-**Note**: Symbol indexing returns a symbol, preserving the type. This is consistent with string indexing returning a string.
-
----
-
-## 3. Proposed New String Functions
-
-### 3.1 Search & Match Functions
-
-| Function | Signature | Description | Symbol? |
-|----------|-----------|-------------|---------|
-| `starts_with(s, prefix)` | `(string, string) -> bool` | Check prefix | ✅ |
-| `ends_with(s, suffix)` | `(string, string) -> bool` | Check suffix | ✅ |
-| `index_of(s, sub)` | `(string, string) -> int` | First occurrence (-1 if not found) | ✅ |
-| `last_index_of(s, sub)` | `(string, string) -> int` | Last occurrence (-1 if not found) | ✅ |
-
-```lambda
-// Examples
-starts_with("hello.txt", "hello")   // true
-ends_with("hello.txt", ".txt")      // true
-index_of("hello world", "o")        // 4
-last_index_of("hello world", "o")   // 7
-```
-
-> **KIV**: `count(s, sub)` - Count occurrences of substring
-
-**Priority**: HIGH - These are fundamental string operations missing from Lambda.
-
-> **Design Note**: Many global string functions (`index_of`, `starts_with`, `ends_with`, `contains`, `replace`, etc.) can be extended to other collection types (arrays, lists) in the future. For example: `index_of([1,2,3], 2)` to find element position, `replace([1,2,3], 2, 9)` to replace elements.
-
-### 3.2 Case Functions (Deferred - requires member function support)
-
-> **Status**: Deferred until member function syntax is implemented.
-
-| Method | Signature | Description | Symbol? |
-|--------|-----------|-------------|---------|
-| `s.upper()` | `string -> string` | Convert to uppercase | ✅ |
-| `s.lower()` | `string -> string` | Convert to lowercase | ✅ |
-
-```lambda
-// Future syntax (when member functions are supported)
-"Hello World".upper()    // "HELLO WORLD"
-"Hello World".lower()    // "hello world"
-```
-
-**Implementation Note**: Should use ICU for proper Unicode case mapping (e.g., `ß` → `SS`, Turkish `i`/`İ`).
-
-### 3.3 Trimming Functions
-
-| Function | Signature | Description | Symbol? |
-|----------|-----------|-------------|---------|
-| `trim(s)` | `string -> string` | Remove leading/trailing whitespace | ✅ |
-| `trim_start(s)` | `string -> string` | Remove leading whitespace | ✅ |
-| `trim_end(s)` | `string -> string` | Remove trailing whitespace | ✅ |
-
-```lambda
-trim("  hello  ")       // "hello"
-trim_start("  hello")   // "hello"
-trim_end("hello  ")     // "hello"
-```
-
-**Priority**: HIGH - Very common operation in data processing.
-
-### 3.4 Splitting & Joining Functions
-
-| Function          | Signature                      | Description          | Symbol? |
-| ----------------- | ------------------------------ | -------------------- | ------- |
-| `split(s, sep)`   | `(string, string) -> [string]` | Split by separator   | ❌       |
-| `join(strs, sep)` | `([string], string) -> string` | Join with separator  | ❌       |
-
-```lambda
-split("a,b,c", ",")           // ["a", "b", "c"]
-join(["a", "b", "c"], ", ")   // "a, b, c"
-```
-
-> **KIV**: `split_lines(s)` - Split by line breaks (can use `split(s, "\n")` instead)
-
-**Priority**: HIGH - Essential for text processing pipelines.
-
-**Note**: `split` and `join` are inverses: `join(split(s, sep), sep) == s`
-
-### 3.5 Replacement Functions
-
-| Function | Signature | Description | Symbol? |
-|----------|-----------|-------------|---------|
-| `replace(s, old, new)` | `(string, string, string) -> string` | Replace all occurrences | ✅ |
-
-```lambda
-replace("hello hello", "l", "x")        // "hexxo hexxo"
-```
-
-> **KIV**: `replace_first(s, old, new)` and `replace_last(s, old, new)` - Replace first/last occurrence only
-
-**Priority**: MEDIUM - Common text transformation.
-
-### 3.6 Padding Functions (KIV)
-
-> **Status**: Keep In View - planned but not yet implemented.
-
-| Function                 | Signature                         | Description         | Symbol? |
-| ------------------------ | --------------------------------- | ------------------- | ------- |
-| `pad_start(s, len, pad)` | `(string, int, string) -> string` | Left-pad to length  | ✅       |
-| `pad_end(s, len, pad)`   | `(string, int, string) -> string` | Right-pad to length | ✅       |
-
-```lambda
-pad_start("42", 5, "0")   // "00042"
-pad_end("hi", 5, " ")     // "hi   "
-```
-
-### 3.7 Character Classification Functions (Deferred - requires member function support)
-
-> **Status**: Deferred until member function syntax is implemented.
-
-| Method            | Signature        | Description          | Symbol? |
-| ----------------- | ---------------- | -------------------- | ------- |
-| `s.is_numeric()`  | `string -> bool` | Check if all digits  | ✅       |
-| `s.is_alpha()`    | `string -> bool` | Check if all letters | ✅       |
-
-```lambda
-// Future syntax (when member functions are supported)
-"123".is_numeric()      // true
-"hello".is_alpha()      // true
-"hello123".is_alpha()   // false
-```
-
-**Note**: There is no `is_empty()` function because Lambda normalizes empty strings to `null`. Check for null instead: `if (s == null) ...`
-
-### 3.8 Slice/Take/Drop Functions
-
-| Function | Signature | Description | Symbol? |
-|----------|-----------|-------------|---------|
-| `take(s, n)` | `(string, int) -> string` | First n characters | ✅ |
-| `drop(s, n)` | `(string, int) -> string` | Drop first n characters | ✅ |
-
-```lambda
-take("hello", 3)   // "hel"
-drop("hello", 2)   // "llo"
-```
-
-**Priority**: MEDIUM - Convenient shortcuts for `slice`.
-
-**Note**: These mirror the existing `take`/`drop` for arrays, providing consistency.
-
----
-
-## 4. Function Applicability to Symbol
-
-### 4.1 Functions that Should Apply to Symbol
-
-Most string functions should work on symbols, with the return type matching the input:
-
-| Function                   | String Input | Symbol Input | Rationale                  |
-| -------------------------- | ------------ | ------------ | -------------------------- |
-| `len`                      | ✅            | ✅            | Both have length           |
-| `upper`/`lower`            | ✅            | ✅            | Case operations make sense |
-| `trim*`                    | ✅            | ✅            | Whitespace handling        |
-| `starts_with`/`ends_with`  | ✅            | ✅            | Prefix/suffix matching     |
-| `contains`                 | ✅            | ✅            | Substring search           |
-| `index_of`/`last_index_of` | ✅            | ✅            | Position finding           |
-| `slice`                    | ✅            | ✅            | Extraction                 |
-| `replace*`                 | ✅            | ✅            | Transformation             |
-| `take`/`drop`              | ✅            | ✅            | Slicing                    |
-
-### 4.2 Functions Not Applicable to Symbol
-
-| Function | Reason |
-|----------|--------|
-| `split` | Symbols don't represent content to be parsed |
-| `join` | Result is string content, not identifier |
-
-### 4.3 Return Type Rules
-
-For functions that transform the string/symbol:
-- **String input → String output** (preserves type)
-- **Symbol input → Symbol output** (preserves type)
-
-```lambda
-upper("hello")       // "HELLO" (string)
-upper('hello)        // 'HELLO (symbol)
-
-trim("  x  ")        // "x" (string)  
-trim('  x)           // 'x (symbol - though unusual)
-```
-
----
-
-## 5. Additional Suggestions
-
-### 5.1 String Interpolation Syntax
-
-Consider adding string interpolation for cleaner code:
-
-```lambda
-// Current
-"Hello, " ++ name ++ "! You are " ++ string(age) ++ " years old."
-
-// Proposed interpolation syntax
-`Hello, ${name}! You are ${age} years old.`
-```
-
-**Implementation**: Parse at compile time, transform to concatenation.
-
-### 5.2 Raw Strings
-
-For regex patterns, file paths, etc.:
-
-```lambda
-r"C:\Users\name\file.txt"   // no escape processing
-r"\d+\.\d+"                 // regex pattern as-is
-```
-
-### 5.3 Multi-line Strings
-
-```lambda
-"""
-This is a
-multi-line string
-with preserved whitespace.
-"""
-```
-
-### 5.4 No Separate Character Type
-
-**Design Decision**: Lambda intentionally does **not** have a separate `char` type.
-
-**Rationale**:
-1. **Simplicity**: Fewer types = simpler type system
-2. **Consistency**: `str[i]` returns a string, same type as the source
-3. **Unicode complexity**: "character" is ambiguous (code point vs grapheme cluster)
-4. **Practical**: Single characters are just strings of length 1
-
-```lambda
-let c = "hello"[0]     // c is string "h", not a char type
-len(c)                  // 1
-c ++ "ello"             // "hello" - seamless concatenation
-```
-
-If character-level iteration is needed:
-```lambda
-// Iterate over characters (each is a length-1 string)
-for (i in 0 to len(s)-1) {
-    let char = s[i]
-    // process char...
-}
-```
-
-### 5.5 String Builder Pattern
-
-For efficient repeated concatenation in procedural code:
-
-```lambda
-pn build_csv(rows: [[string]]) {
-    var sb = string_builder()
-    for (row in rows) {
-        sb.append(join(row, ","))
-        sb.append("\n")
-    }
-    sb.to_string()
-}
-```
-
----
-
-## 6. Implementation Priority
-
-### Phase 1: Essential (Immediate)
-
-| Function | Effort | Impact |
-|----------|--------|--------|
-| `starts_with` | Low | High |
-| `ends_with` | Low | High |
-| `trim` | Low | High |
-| `split` | Medium | High |
-| `join` | Medium | High |
-| `contains` | Low | High |
-
-### Phase 2: Important (Short-term)
-
-| Function | Effort | Impact |
-|----------|--------|--------|
-| `index_of` | Low | Medium |
-| `last_index_of` | Low | Medium |
-| `replace` | Medium | Medium |
-| `trim_start`/`trim_end` | Low | Medium |
-| `take`/`drop` | Low | Medium |
-
-### Phase 3: Nice-to-have (Deferred)
-
-> These functions require member function syntax support.
-
-| Function                      | Effort | Impact | Status |
-| ----------------------------- | ------ | ------ | ------ |
-| `.upper()`/`.lower()`         | Medium | High   | Deferred |
-| `.is_numeric()`/`.is_alpha()` | Medium | Low    | Deferred |
-
-### KIV (Keep In View)
-
-| Feature/Function               | Reason for deferral                        |
-| ------------------------------ | ------------------------------------------ |
-| **Member function syntax**     | Requires transpiler enhancement            |
-| `.upper()`/`.lower()`          | Requires member function syntax            |
-| `.is_numeric()`/`.is_alpha()`  | Requires member function syntax            |
-| `count(s, sub)`                | Low priority, can iterate with `index_of`  |
-| `split_lines(s)`               | Can use `split(s, "\n")` instead           |
-| `pad_start`/`pad_end`          | Low priority formatting functions          |
-| `replace_first`/`replace_last` | Low priority, `replace` covers most cases  |
-| Negative indexing              | Additional complexity                      |
-
----
-
-## 7. Implementation Notes
-
-### 7.1 ASCII Fast Path
-
-For performance, all string functions should implement an ASCII fast path:
-
-```c
-// Check if string is pure ASCII (all bytes < 128)
-static inline bool is_ascii_string(String* str) {
-    for (size_t i = 0; i < str->len; i++) {
-        if ((unsigned char)str->chars[i] >= 128) return false;
-    }
-    return true;
-}
-
-// Example: fast path for indexing
-Item fn_string_index(String* str, int64_t index) {
-    if (is_ascii_string(str)) {
-        // Fast path: byte offset == character offset
-        if (index < 0 || index >= str->len) return ItemError;
-        // Direct byte access
-        char c = str->chars[index];
-        return create_string_from_char(c);
-    } else {
-        // Slow path: UTF-8 character iteration
-        long byte_offset = utf8_char_to_byte_offset(str->chars, index);
-        // ... handle multi-byte characters
-    }
-}
-```
-
-**Optimization Strategy**:
-
-| Function | ASCII Fast Path | UTF-8 Slow Path |
-|----------|-----------------|-----------------|
-| `len()` | Return `str->len` directly | Count code points |
-| `str[i]` | Direct byte access | `utf8_char_to_byte_offset()` |
-| `upper()`/`lower()` | Simple ASCII case flip | `utf8proc_toupper/tolower` |
-| `trim()` | Check ASCII whitespace | Check Unicode whitespace |
-| `starts_with()` | `memcmp()` | `memcmp()` (same, byte-level) |
-| `split()` | Byte scan for separator | Byte scan (same, separator is bytes) |
-
-**Note**: Many operations (like `starts_with`, `contains`, `split`) work at byte level regardless, since UTF-8 is self-synchronizing. The fast path mainly benefits indexing and length operations.
-
-### 7.2 UTF-8 Handling
-
-All string functions must be UTF-8 aware:
-- Use `utf8_char_to_byte_offset()` for index conversion
-- Use `utf8proc` library for Unicode operations
-- Case conversion should use ICU or utf8proc for correctness
-
-### 7.2 Memory Allocation
-
-- Use `heap_alloc()` with `LMD_TYPE_STRING` for new strings
-- Initialize `ref_cnt = 0` for new allocations
-- Null-terminate all strings
-
-### 7.3 Symbol Handling
-
-For functions returning symbols:
-- Use `heap_create_symbol()` for poolable symbols (≤32 chars)
-- Consider result length when choosing allocation strategy
-
-### 7.4 Error Handling
-
-- Return `ItemError` for invalid inputs (e.g., null, wrong type)
-- Log errors with `log_error()` before returning
-- Don't throw exceptions
-
-### 7.5 C Runtime Integration
-
-Add declarations to `lambda.h`:
-```c
-String* fn_upper(String* str);
-String* fn_lower(String* str);
-String* fn_trim(String* str);
-Item fn_split(Item str, Item sep);
-Item fn_join(Item arr, Item sep);
-int64_t fn_starts_with(Item str, Item prefix);
-int64_t fn_ends_with(Item str, Item suffix);
-int64_t fn_index_of(Item str, Item sub);
-Item fn_replace(Item str, Item old_str, Item new_str);
-```
-
-Register in `mir.c` for JIT:
-```c
-{"fn_upper", (fn_ptr) fn_upper},
-{"fn_lower", (fn_ptr) fn_lower},
-// ...
-```
-
----
-
-## 8. Related Documents
-
-- [Lib_String.md](Lib_String.md) - Comprehensive string library design
-- [Lambda_Reference.md](../doc/Lambda_Reference.md) - Language reference
-- [Lambda_Sys_Func_Reference.md](../doc/Lambda_Sys_Func_Reference.md) - System functions
-- [LR_08_Memory_and_GC.md](../doc/dev/lambda/LR_08_Memory_and_GC.md) - Runtime memory management
-
----
-
-## Appendix A: Comparison with Other Languages
-
-| Function | Lambda (Proposed) | JavaScript | Python | Go |
-|----------|------------------|------------|--------|-----|
-| Length | `len(s)` | `s.length` | `len(s)` | `len(s)` |
-| Upper | `upper(s)` | `s.toUpperCase()` | `s.upper()` | `strings.ToUpper(s)` |
-| Trim | `trim(s)` | `s.trim()` | `s.strip()` | `strings.TrimSpace(s)` |
-| Split | `split(s, sep)` | `s.split(sep)` | `s.split(sep)` | `strings.Split(s, sep)` |
-| Join | `join(arr, sep)` | `arr.join(sep)` | `sep.join(arr)` | `strings.Join(arr, sep)` |
-| Contains | `contains(s, sub)` | `s.includes(sub)` | `sub in s` | `strings.Contains(s, sub)` |
-| Replace | `replace(s, old, new)` | `s.replaceAll(old, new)` | `s.replace(old, new)` | `strings.ReplaceAll(s, old, new)` |
-
-Lambda follows a functional style with functions taking the string as the first argument, consistent with other system functions like `len()`, `type()`, etc.
+## Appendix S — Superseded positions
+
+Each entry gives the position as it stood and what replaced it.
+
+- **S-1.** ~~Lambda normalizes every empty string to `null`: `"" == null` is true, `'' == null` is true; there is no `is_empty()` because the null test covers it.~~ **Replaced by S2.2.1 and S3.1v2** (C1, 2026-07-03): `""` is a falsy string, distinct from `null`.
+- **S-2.** ~~JSON `""` values read as `null` and do not round-trip; an empty JSON key reads as the two-character key `''`; HTML `attr=""` reads as `null` and writes back as `""`.~~ **Replaced** by the same ruling: `""` round-trips as itself, and an empty key is the empty name, walked as `symbol.empty` (S2.2.2v2, S8.2.2v3).
+- **S-3.** ~~`''` is the empty-symbol literal, normalizing to `null`.~~ **Replaced by C1.6a (2026-07-04):** `''` and `b''` are compile errors.
+- **S-4.** ~~Negative indexing (`s[-1]`, `s[0 to -2]`) is kept in view; `slice` accepts negative offsets counted from the end (`slice(s, 0, -1)` drops the last character).~~ **Replaced by S7.2.1 and S7.1.2:** a negative index is out of range (`null`), a negative slice offset clamps to 0, and end-relative reach is `last` (S7.2.2).
+- **S-5.** ~~String is indexable but not iterable: `for s in str` runs once with the whole string, the pipe and `that` apply to the whole string, and `reverse`, `sort`, `unique`, `min`, `max` return a string unchanged.~~ **Replaced by S2.5.8** (2026-09-21/22): text walks as a sequence of code points. The proposal's other parts survive: `take`/`drop` as substring, `concat` of two strings, decomposition by indexing (now by `for`).
+- **S-6.** ~~Indexing returns a single byte (`item_at` byte-indexed while `len` counted code points), and the fix wraps negative indices by adding the character count.~~ The byte defect was fixed (2026-02, and for non-ASCII symbols LR05-15, 2026-09-24); the negative wrap was never adopted (S-4).
+- **S-7.** ~~Case and classification functions (`upper`, `lower`, `is_numeric`, `is_alpha`) wait for member-function syntax; case mapping should use ICU or utf8proc.~~ **Replaced:** `upper`/`lower` are global functions using Unicode full case mapping through Lambda's own `utf8_case_map` (S17.7.2); member calls reach builtins (S12.3.3v2); classification is a pattern test.
+- **S-8.** ~~Symbols are pooled when 32 characters or shorter and compared by pointer.~~ **Replaced by D4.6.1v4:** identity is the `NameKey`; pointer equality is not a symbol comparison; pooling is invisible (S1.6). The stale claim is [LR11-7](Lambda_Issue_Ledger.md#lr11-7).
+- **S-9.** ~~(`Lambda_Type_String2.md`, 2026-04-02, proposal.) String-returning functions get native `String*`/`Symbol*` variants (`fn_upper_str`, `fn_upper_sym`, …) dispatched by static type, registered with `LMD_TYPE_STRING_OPT`/`LMD_TYPE_SYMBOL_OPT` annotations, returning C `NULL` for both an error and an empty result.~~ **Not adopted, and since contradicted.** `NULL` cannot mean empty once `""` is a value (S2.2.1); errors must stay `Item`s, so `format` itself moved from `String*` to `Item` (D6.4.1, LR07-18, 2026-09-25); and `contains`/`index_of` became polymorphic. The registry's per-row result contract (`SYS_RESULT_TEXT_SAME_AS_ARGUMENT`) now carries the kind information the proposal wanted for type inference.
+- **S-10.** ~~`trim` of an all-whitespace string returns `null`.~~ **Replaced by S7.10.1v3:** string-valued no-content is `""`.
+- **S-11.** ~~`index_of`/`last_index_of` return `-1` when not found.~~ **Replaced by S7.10.3:** `null`.
+
+## Appendix A — Implementation history
+
+| Date | Change |
+|---|---|
+| 2026-01-24 | Rev 1 proposal; the core functions (`starts_with`, `ends_with`, `trim*`, `split`, `join`, `index_of`, `last_index_of`, `replace`, `take`, `drop`) implemented as globals. |
+| 2026-01-27 | Empty-string handling under the original `"" ≡ null` model. |
+| 2026-02-18 | Indexable-not-iterable model; UTF-8 code-point indexing in `item_at`. |
+| 2026-02-27 | String performance tuning: ASCII flag, combined bounds and offset scan, interned one-character ASCII strings, pointer fast path in equality ([Lambda_Tune_String (done)](<impl/Lambda_Tune_String (done).md>)). |
+| 2026-03-09 | `chars()` removed. |
+| 2026-04-02 | String sys-func clean-up; the native return-convention proposal written, not built. |
+| 2026-07-03/04 | C1: `""` is a string; `''` and `b''` banned. |
+| 2026-09-21/23 | Kind rulings 16–26 (S2.5.6–S2.5.8, S10.6.1); text walks as a sequence; LR05-11 fixed. |
+| 2026-09-24/25 | String function tuning P0–P5d: correctness fixes LR05-14, LR05-15; shared `lib/` kernels; parser and formatter loops; HTML parse peak 562 → 233 MB ([impl record](impl/Lambda_Impl_String_Func_Tuning.md)). LR07-18: string functions declare their error lane. |
+| 2026-09-27 | S17.7.1 and S17.7.2: simple folding, full case mapping (`utf8_case_map`, shared with LambdaJS). |
+| 2026-09-30 | `symbol.empty` (C1.6b). |
+
+Key files: `lambda/runtime/lambda-eval.cpp` (string builtins), `lambda/runtime/lambda-data-runtime.cpp` (`item_at`), `lambda/runtime/lambda-vector.cpp` (sequence functions), `lambda/core/utf_string.cpp` (case mapping, normalization), `lib/str.c` (scan kernels), `lambda/runtime/sys_func_registry.c` (registry rows and result contracts).

@@ -1,0 +1,498 @@
+{
+  "name": "Word image and shape movement, resize cursors, cancellation, undo and zoom",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "test/demo/word/tests/context_items.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-drop-caret"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface img:not([data-word-shape]):not([data-word-equation]):not([data-word-wordart])').style.opacity==='0.45'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/object-drop-caret.png"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type"
+      },
+      "equals": "Plain text for selection"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-drop-caret"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "button": 1,
+      "target": {
+        "selector": "#object-move"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "picture"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#object-move"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-picture_settings"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#object-nw"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#object-nw')).cursor==='nwse-resize'"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#object-ne"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#object-ne')).cursor==='nesw-resize'"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#object-sw"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#object-sw')).cursor==='nesw-resize'"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#object-se"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#object-se')).cursor==='nwse-resize'"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type img"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type img"
+      },
+      "count": 1
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#object-move"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-drop-caret"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-drop-caret"
+      },
+      "count": 0
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type img"
+      },
+      "count": 1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#object-move"
+      },
+      "to_target": {
+        "selector": "#navigation",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type img"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-page > p:first-of-type"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "to_target": {
+        "selector": "#edit-surface .word-page > p:last-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type"
+      },
+      "equals": "After the line"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type img[data-word-shape]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-move"
+      },
+      "to_target": {
+        "selector": "#edit-surface li p",
+        "offset_x": 30,
+        "offset_y": 10
+      },
+      "pointerType": "touch"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface li img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "window.getSelection().containsNode(document.querySelector('#edit-surface li img'),false)"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface li"
+      },
+      "equals": "List item"
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelector('#edit-surface li img').getBoundingClientRect(),b=document.querySelector('#object-handles').getBoundingClientRect();Math.abs(a.x-b.x)<2&&Math.abs(a.y-b.y)<2"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/object-in-list.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-move"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#object-move"
+      },
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child",
+        "offset_x": 18,
+        "offset_y": 20
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child"
+      },
+      "equals": "C"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "scroll",
+      "x": 1000,
+      "y": 650,
+      "dy": -5,
+      "dx": 0
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#object-move"
+      },
+      "to_target": {
+        "selector": "#edit-surface .word-page > p:last-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelector('#edit-surface img[data-word-shape]').getBoundingClientRect(),b=document.querySelector('#object-handles').getBoundingClientRect();Math.abs(a.x-b.x)<2&&Math.abs(a.y-b.y)<2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-handles"
+      },
+      "count": 0
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "to_target": {
+        "selector": "#edit-surface .word-page > p:first-of-type",
+        "offset_x": 30,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type img[data-word-shape]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/object-moved.png"
+    }
+  ]
+}

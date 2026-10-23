@@ -768,8 +768,10 @@ TEST_F(CssEngineParserTest, ResizeCursorsRetainComputedKeywordIdentity) {
     for (int i = 0; i < CSS_VALUE__LAST_ENTRY; i++) {
         EXPECT_EQ(css_enum_info((CssEnum)i)->enum_id, i);
     }
-    const char* declarations[] = {"cursor: col-resize", "cursor: row-resize"};
-    const CssEnum expected[] = {CSS_VALUE_COL_RESIZE, CSS_VALUE_ROW_RESIZE};
+    const char* declarations[] = {"cursor: col-resize", "cursor: row-resize",
+        "cursor: nwse-resize", "cursor: nesw-resize", "cursor: ew-resize", "cursor: ns-resize"};
+    const CssEnum expected[] = {CSS_VALUE_COL_RESIZE, CSS_VALUE_ROW_RESIZE,
+        CSS_VALUE_NWSE_RESIZE, CSS_VALUE_NESW_RESIZE, CSS_VALUE_EW_RESIZE, CSS_VALUE_NS_RESIZE};
     for (size_t i = 0; i < sizeof(declarations) / sizeof(declarations[0]); i++) {
         CssDeclaration* declaration = css_parse_declaration_text(
             declarations[i], strlen(declarations[i]), pool);

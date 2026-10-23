@@ -243,6 +243,6 @@ can supply another compatible SF2 through `soundfont`.
 
 Font provenance and license are in
 [`music/fonts/SOURCES.md`](../lmd/package/music/fonts/SOURCES.md).
-The [design](../vibe/Lambda_Design_Pkg_Music.md) describes the broader target;
+The [design](../vibe/Lambda_Pkg_Music.md) describes the broader target;
 the [implementation record](../vibe/impl/Lambda_Impl_Pkg_Music.md) tracks
 validation and remaining work.

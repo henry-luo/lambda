@@ -1,0 +1,299 @@
+{
+  "name": "Word empty list items remain editable after mouse and keyboard reentry",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(3) p"
+      },
+      "start": 60,
+      "end": 60
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li"
+      },
+      "count": 4
+    },
+    {
+      "type": "type_physical",
+      "text": "Now"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(4)"
+      },
+      "equals": "Now"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface ul > li:first-child p",
+        "offset_x": 20,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(4)",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Returned"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(4)"
+      },
+      "equals": "Returned"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:first-child"
+      },
+      "equals": "Clean as you go. Leave a table ready for the next maker."
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type_physical",
+      "text": "Following"
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ul > li"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(5)"
+      },
+      "equals": "Following"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface ul > li:first-child p",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(4)",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Middle"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(4)"
+      },
+      "equals": "Middle"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(5)"
+      },
+      "equals": "Following"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "type_physical",
+      "text": "Keys"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ul > li:nth-child(4)"
+      },
+      "equals": "Keys"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Numbered"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.numbering\"]",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface ol > li:first-child p"
+      },
+      "start": 8,
+      "end": 8
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface ol > li"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface ol > li:first-child p",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)",
+        "offset_x": 12,
+        "offset_y": 10
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Returned to numbers"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)"
+      },
+      "equals": "Returned to numbers"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ol > li:first-child"
+      },
+      "equals": "Numbered"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface ol > li:nth-child(2)"
+      },
+      "equals": "Returned to numbers"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/empty-list-reentry.png"
+    }
+  ]
+}

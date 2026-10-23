@@ -1,5 +1,6 @@
 // A native three-pane Notes workspace, using the Finder/Word demo conventions.
 import dom
+import context: ~~.mod_context_menu
 import lambda.editor.mod_editor
 import controller: lambda.edit.controller
 import resources: ~~.mod_resources
@@ -7,8 +8,6 @@ import app: .mod_app
 import model: .mod_model
 import ui: .mod_ui
 import images: .mod_images
-import result: lambda.dom.edit_result
-import lambda.editor.mod_step
 
 let CSS = input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
 
@@ -30,9 +29,7 @@ on editaction(evt) {
         st = model.update_editor(st,run.editor,app.stamp())
         app.finish(st,evt.target)
     }
-    return if (image!=null and (evt.input_type=="copy" or evt.input_type=="deleteByCut"))
-        result.with_clipboard_image(run.result,attrs_get(image.node.attrs,'src'),model.image_html(image),attrs_get(image.node.attrs,'alt') or "")
-        else run.result
+    return run.result
 }
 on selectionchange(evt) {
     let adopted = app.adopt(st,evt)
@@ -116,12 +113,7 @@ on keydown(evt) {
         return 'pass'
     }
     if (st.menu=="context" and contains(["ArrowUp","ArrowDown","Home","End"],evt.key)) {
-        let menu = dom.get_element_by_id(dom.root_node(evt.target),"note-context-menu")
-        let buttons = dom.query_selector_all(menu,"button:not([disabled])")
-        let at = [for (i,button in buttons where button==evt.target) i][0] or 0
-        let next = if (evt.key=="Home") 0 else if (evt.key=="End") len(buttons)-1
-            else (at+len(buttons)+(if (evt.key=="ArrowUp") -1 else 1))%len(buttons)
-        dom.focus_set(buttons[next],false)
+        context.navigate(evt.target,"note-context-menu",evt.key)
         return 'prevent-default'
     }
     if (st.menu=="context" and evt.key=="Tab") {

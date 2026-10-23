@@ -614,6 +614,10 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_VERTICAL,
     // HTML legacy alignment centers a replaced box on the parent baseline, without x-height.
     CSS_VALUE_BASELINE_MIDDLE,
+    CSS_VALUE_NWSE_RESIZE,
+    CSS_VALUE_NESW_RESIZE,
+    CSS_VALUE_EW_RESIZE,
+    CSS_VALUE_NS_RESIZE,
     CSS_VALUE__LAST_ENTRY
 } CssEnum;
 

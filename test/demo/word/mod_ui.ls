@@ -13,34 +13,97 @@ import equation: .mod_equation
 import wordart: .mod_wordart
 import changes: .mod_changes
 import controls: lambda.ui.controls
+import icons: ~~.mod_icons
+import context: ~~.mod_context_menu
+import focused: .mod_context
+import tables: .mod_table
+import dom
+
+pub let icon = icons.icon
 
 view <word_button> {
-    <button id:~.id, class:"tool " ++ (~.class or ""), title:~.title or ~.label,
+    let graphic = if (~.icon is string) icon(~.icon,16) else ~.icon;
+    <button id:~.id, type:"button", class:"tool " ++ (~.class or ""), title:~.title or ~.label,
+        role:if (contains(~.class or "","context-item")) "menuitem" else null,
         ["aria-label"]:~.title or ~.label, ["aria-pressed"]:string(~.pressed or false),
         *:if (~.disabled) {disabled:""} else {},
-        <span class:"tool-icon", ~.icon or ~.label>
-        if (~.icon != null) <span class:"tool-label", ~.label> else null>
+        if (graphic != null) <span class:"tool-icon",["aria-hidden"]:"true",graphic> else null;
+        <span class:"tool-label", ~.label>;
+        if (~.shortcut!=null) <span class:"context-key",~.shortcut> else null>
 }
 on mousedown() { return 'prevent-default' }
-on click(evt) { emit("word_command",{id:~.command,params:~.params or {},node:evt.target,event:evt}) }
+on click(evt) { emit("word_command",{id:~.command,params:~.params or {},selection:~.selection,node:evt.target,event:evt}) }
 pub fn button(id,command,label,icon=null,params={},pressed=false,disabled=false,css="") =>
     apply(<word_button id:id, command:command, label:label, icon:icon, params:params,
         pressed:pressed, disabled:disabled, class:css>)
 pub fn command(id,label=null,icon=null,params={},pressed=false,disabled=false) =>
     button(id,id,label or model.spec(id).label,icon,params,pressed,disabled)
-fn mark_button(editor,id,label) => command(id,label,null,{},edit_mark_active(editor,model.spec(id).mark))
+fn menu_item(id,command,label,graphic,disabled=false,shortcut=null,params={},selection=null) =>
+    apply(<word_button id:"context-" ++ id,command:command,label:label,icon:graphic,
+        disabled:disabled,class:"context-item",shortcut:shortcut,params:params,selection:selection>)
+pub fn context_menu(st) => if (st.context==null) null else {
+    let selected = if (st.read_only) st.context.copy_text!="" else context.has_selection(st.editor.selection)
+    let disabled = st.read_only
+    let item = focused.describe({*:st.editor,selection:st.context.item_selection or st.editor.selection},st.context.story);
+    context.frame("word-context-menu","word",
+        <div id:"word-context-menu",class:"context-menu",role:"menu",["aria-label"]:item.label ++ " actions",["data-context-kind"]:item.kind,
+            style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
+            if (len(item.actions)>0) <div class:"context-specific",role:"group",["aria-label"]:item.label,
+                <div class:"context-caption",item.label>;
+                *[for (entry in item.actions) menu_item(entry.id,entry.command,entry.label,entry.icon,
+                    disabled or entry.disabled,null,if (starts_with(entry.command,"table.select"))
+                        {*:entry.params,path:st.context.cell_path} else entry.params,st.context.item_selection)];
+                <div class:"context-rule",role:"separator">> else null;
+            menu_item("undo","edit.undo","Undo","undo",disabled or not edit_can_undo(st.editor),"⌘Z");
+            menu_item("redo","edit.redo","Redo","redo",disabled or not edit_can_redo(st.editor),"⇧⌘Z");
+            if (st.context.story!=null) null else <div class:"context-common",
+            <div class:"context-rule",role:"separator">
+            menu_item("cut","clipboard.cut","Cut","cut",disabled or not selected,"⌘X");
+            menu_item("copy","clipboard.copy","Copy","copy",not selected,"⌘C");
+            menu_item("paste","clipboard.paste","Paste","paste",disabled,"⌘V");
+            menu_item("delete","clipboard.delete","Delete","trash",disabled or not selected);
+            menu_item("select-all","clipboard.selectAll","Select All","select_all",false,"⌘A");
+            if (not item.text) null else <div class:"context-text",
+            <div class:"context-rule",role:"separator">
+            <div class:"context-format",*[for (entry in [{id:"bold",icon:"bold",mark:'strong'},
+                {id:"italic",icon:"italic",mark:'em'},{id:"underline",icon:"underline",mark:'u'}])
+                button("context-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
+                    entry.icon,{},edit_mark_active(st.editor,entry.mark),disabled,"context-item icon-only")]>
+            menu_item("paragraph","ui.paragraph","Paragraph…","settings",disabled);
+            if (model.current_node(st.editor,'a')==null) menu_item("link","ui.link","Link…","link",disabled,"⌘K") else null;
+            menu_item("comment","ui.comment","New Comment…","comment_add",disabled or not model.can_comment(st.editor))>>
+        >,false)
+}
+fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
+    edit_mark_active(editor,model.spec(id).mark),false,"icon-only")
 fn group(label,items) => <div class:"ribbon-group group-" ++ lower(label), <div class:"group-tools", *items> <div class:"group-label", label>>
 fn selector(id,command,values,current,css="",param="value") =>
     apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
         options:values,value:current,on_change:{action:command,param:param}>)
+
+pn sync_ruler(node) {
+    let chrome = dom.get_element_by_id(dom.root_node(node),"canvas-chrome")
+    if (chrome!=null) dom.set_scroll_state(chrome,dom.scroll_state(node).x,0.0)
+}
+// keep horizontal ruler alignment separate from the document's vertical caret clip (D7.2.5).
+view <document_scrollport> { ~.rendered }
+on render(evt) {
+    if (evt.event_phase==2) sync_ruler(evt.target)
+    return 'pass'
+}
+on scroll(evt) {
+    sync_ruler(evt.target)
+    return 'handled'
+}
+pub fn document_viewport(rendered) => apply(<document_scrollport rendered:rendered>)
 
 pub fn ribbon(editor,tab,nav,read_only,show_changes=true) {
     let block = model.current_block(editor)
     let style = attrs_get(block.node.attrs,'data-word-style') or "Normal"
     let align = model.css_get(attrs_get(block.node.attrs,'style'),"text-align") or "left";
     if (tab == "Home") <div class:"ribbon-groups",
-        group("History",[command("edit.undo","Undo","↶",{},false,not edit_can_undo(editor)),
-            command("edit.redo","Redo","↷",{},false,not edit_can_redo(editor))])
+        group("History",[command("edit.undo","Undo","undo",{},false,not edit_can_undo(editor)),
+            command("edit.redo","Redo","redo",{},false,not edit_can_redo(editor))])
         group("Font",[
             <div class:"font-selects",
                 selector("font-family","format.font",[for (s in ["Georgia","Arial","Times New Roman","Courier New"]) {value:s,label:s}],
@@ -48,91 +111,97 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true) {
                 selector("font-size","format.size",[for (s in [8,9,10,11,12,14,16,18,20,24,28,36,48,72]) {value:s,label:string(s)}],
                     replace(model.char_value(editor,"font-size","11pt"),"pt",""),"font-size","size")>,
             <div class:"font-tools",
-                mark_button(editor,"format.bold","B"); mark_button(editor,"format.italic","I")
-                mark_button(editor,"format.underline","U"); mark_button(editor,"format.strikethrough","S̶")
-                mark_button(editor,"format.subscript","x₂"); mark_button(editor,"format.superscript","x²")
-                command("format.highlight","Highlight",null,{color:"#f9e896"}); command("format.clear","Clear","A×")>,
+                mark_button(editor,"format.bold","bold"); mark_button(editor,"format.italic","italic")
+                mark_button(editor,"format.underline","underline"); mark_button(editor,"format.strikethrough","strike")
+                mark_button(editor,"format.subscript","subscript"); mark_button(editor,"format.superscript","superscript")
+                command("format.highlight","Highlight","highlight",{color:"#f9e896"}); command("format.clear","Clear","clear")>,
             <div class:"palette", <span "Text color">;
                 *[for (color in ["#24334b","#2864ad","#b43d47","#28745d"])
                     apply(<word_button command:"format.color",params:{color:color},label:"Text color " ++ color,
-                        icon:"●",class:"swatch swatch-" ++ slice(color,1)>) ]>])
+                        icon:"circle",class:"swatch swatch-" ++ slice(color,1)>) ]>])
         group("Paragraph",[
             <div class:"paragraph-tools",
-                command("para.bullets","Bullets","• ≡"); command("para.numbering","Numbering","1 ≡")
-                command("para.outdent","Outdent","←"); command("para.indent","Indent","→")>,
+                command("para.bullets","Bullets","bullets"); command("para.numbering","Numbering","numbering")
+                command("para.outdent","Outdent","outdent"); command("para.indent","Indent","indent")>,
             <div class:"alignment-tools",
-                *[for (choice in [{id:"para.alignLeft",icon:"≡",value:"left"},{id:"para.alignCenter",icon:"≡",value:"center"},
-                    {id:"para.alignRight",icon:"≡",value:"right"},{id:"para.justify",icon:"☰",value:"justify"}])
+                *[for (choice in [{id:"para.alignLeft",icon:"align_left",value:"left"},{id:"para.alignCenter",icon:"align_center",value:"center"},
+                    {id:"para.alignRight",icon:"align_right",value:"right"},{id:"para.justify",icon:"justify",value:"justify"}])
                     command(choice.id,null,choice.icon,{},align==choice.value)]>,
             <div class:"paragraph-settings-row",
                 selector("line-spacing","para.lineSpacing",[for (s in [1,1.15,1.5,2]) {value:s,label:string(s) ++ " lines"}],
                     model.css_get(attrs_get(block.node.attrs,'style'),"line-height") or "1.5","spacing")
-                button("paragraph-settings","ui.paragraph","Paragraph…","↗",{},false,read_only,"paragraph-dialog")>])
+                button("paragraph-settings","ui.paragraph","Paragraph…","expand",{},false,read_only,"paragraph-dialog")>])
         group("Styles",[<div class:"style-gallery",
             *[for (s in take(document.styles,4)) button("style-" ++ s.id,"para.style",s.label,null,{style:s.id},s.id==style,false,"style-card style-" ++ s.id)]>,
             selector("paragraph-style","para.style",[for (s in document.styles) {value:s.id,label:s.label}],style,"style-selector","style")])
     >
     else if (tab == "Insert") <div class:"ribbon-groups insert-ribbon",
-        group("Pages",[button("insert-cover","ui.cover","Cover page…","▤",{},false,read_only),
-            command("insert.blankPage","Blank page","□",{},false,read_only),
-            button("insert-page-break","insert.pageBreak","Page break","↵",{},false,read_only)])
-        group("Header & Footer",[button("insert-header","ui.headerFooter","Header…","▔",{},false,read_only),
-            button("insert-footer","ui.headerFooter","Footer…","▁",{},false,read_only),
-            button("insert-page-number","ui.pageNumber","Page number…","#",{},false,read_only)])
-        group("Tables",[button("insert.table","ui.table","Table…","▦",{},false,read_only)])
-        group("Pictures",[button("insert-picture","ui.picture","Picture…","▧",{},false,read_only),
-            button("picture-settings","ui.pictureSettings","Picture settings…",null,{},false,read_only or model.current_node(editor,'img')==null)])
-        group("Shapes",[button("insert-shape","ui.shape","Shapes…","◇",{},false,read_only),
-            button("shape-settings","ui.shapeSettings","Shape settings…",null,{},false,read_only or shapes.settings(model.current_node(editor,'img').node)==null)])
-        group("Links",[button("insert-link","ui.link",if (model.current_node(editor,'a')==null) "Link…" else "Edit link…","↗",{},false,read_only),
-            command("insert.removeLink","Remove link",null,{},false,read_only or model.current_node(editor,'a')==null),
-            button("insert-bookmark","ui.bookmarks","Bookmark…","⚑")])
-        group("Comments",[button("insert-comment","ui.comment","Comment","▣",{},false,read_only or not model.can_comment(editor))])
-        group("Text & Symbols",[button("insert-symbol","ui.symbol","Symbol…","Ω",{},false,read_only),
-            command("insert.horizontalRule","Rule","—",{},false,read_only),
-            button("follow-link","ui.followLink","Go to bookmark","↗",{},false,
+        group("Pages",[button("insert-cover","ui.cover","Cover page…","cover",{},false,read_only),
+            command("insert.blankPage","Blank page","blank_page",{},false,read_only),
+            button("insert-page-break","insert.pageBreak","Page break","page_break",{},false,read_only)])
+        group("Header & Footer",[button("insert-header","ui.headerFooter","Header…","header",{},false,read_only),
+            button("insert-footer","ui.headerFooter","Footer…","footer",{},false,read_only),
+            button("insert-page-number","ui.pageNumber","Page number…","page_number",{},false,read_only)])
+        group("Tables",[button("insert.table","ui.table","Table…","table",{},false,read_only)])
+        group("Pictures",[button("insert-picture","ui.picture","Picture…","album",{},false,read_only),
+            button("picture-settings","ui.pictureSettings","Picture settings…","settings",{},false,read_only or model.current_node(editor,'img')==null)])
+        group("Shapes",[button("insert-shape","ui.shape","Shapes…","shapes",{},false,read_only),
+            button("shape-settings","ui.shapeSettings","Shape settings…","settings",{},false,read_only or shapes.settings(model.current_node(editor,'img').node)==null)])
+        group("Links",[button("insert-link","ui.link",if (model.current_node(editor,'a')==null) "Link…" else "Edit link…","link",{},false,read_only),
+            command("insert.removeLink","Remove link","unlink",{},false,read_only or model.current_node(editor,'a')==null),
+            button("insert-bookmark","ui.bookmarks","Bookmark…","bookmark")])
+        group("Comments",[button("insert-comment","ui.comment","Comment","comment",{},false,read_only or not model.can_comment(editor))])
+        group("Text & Symbols",[button("insert-symbol","ui.symbol","Symbol…","symbol",{},false,read_only),
+            command("insert.horizontalRule","Rule","rule",{},false,read_only),
+            button("follow-link","ui.followLink","Go to bookmark","expand",{},false,
                 insert.link_bookmark(attrs_get(model.current_node(editor,'a').node.attrs,'href'))==null)])
-        group("Equations & Art",[button("insert-equation","ui.equation","Equation…","π",{},false,read_only),
-            button("insert-wordart","ui.wordArt","WordArt…","A",{},false,read_only),
-            button("object-settings","ui.objectSettings","Edit object…",null,{},false,read_only or
+        group("Equations & Art",[button("insert-equation","ui.equation","Equation…","equation",{},false,read_only),
+            button("insert-wordart","ui.wordArt","WordArt…","wordart",{},false,read_only),
+            button("object-settings","ui.objectSettings","Edit object…","settings",{},false,read_only or
                 (equation.settings(model.current_node(editor,'img').node)==null and wordart.settings(model.current_node(editor,'img').node)==null))])
     >
     else if (tab == "Review") <div class:"ribbon-groups",
-        group("Comments",[button("new-comment","ui.comment","New comment","+",{},false,read_only or not model.can_comment(editor)),
-            button("show-comments","ui.comments","Comments pane","☷"),button("show-resolved","ui.resolvedComments","Show resolved")])
-        group("Navigate",[button("previous-comment","ui.previousComment","Previous comment","↑"),button("next-comment","ui.nextComment","Next comment","↓")]);
-        group("Tracking",[button("track-changes","review.trackChanges","Track text changes","✎",{enabled:not changes.settings(editor.doc).enabled},changes.settings(editor.doc).enabled,read_only),
+        group("Comments",[button("new-comment","ui.comment","New comment","comment_add",{},false,read_only or not model.can_comment(editor)),
+            button("show-comments","ui.comments","Comments pane","comment"),button("show-resolved","ui.resolvedComments","Show resolved")])
+        group("Navigate",[button("previous-comment","ui.previousComment","Previous comment","up"),button("next-comment","ui.nextComment","Next comment","down")]);
+        group("Tracking",[button("track-changes","review.trackChanges","Track text changes","tracking",{enabled:not changes.settings(editor.doc).enabled},changes.settings(editor.doc).enabled,read_only),
             button("tracking-options","ui.tracking","Author and tracking…",null,{},false,read_only),
-            button("show-change-markup","ui.showChanges","Show markup",null,{},show_changes)])
-        group("Changes",[button("show-revisions","ui.revisions",string(len(changes.entries(editor.doc))) ++ " changes","☷"),
-            command("review.acceptAll","Accept all",null,{},false,read_only or len(changes.entries(editor.doc))==0),
-            command("review.rejectAll","Reject all",null,{},false,read_only or len(changes.entries(editor.doc))==0)])
+            button("show-change-markup","ui.showChanges","Show markup","eye",{},show_changes)])
+        group("Changes",[button("show-revisions","ui.revisions",string(len(changes.entries(editor.doc))) ++ " changes","changes"),
+            command("review.acceptAll","Accept all","check",{},false,read_only or len(changes.entries(editor.doc))==0),
+            command("review.rejectAll","Reject all","close",{},false,read_only or len(changes.entries(editor.doc))==0)])
     >
     else if (tab == "Layout") <div class:"ribbon-groups",
-        group("Page",[button("page-setup","ui.pageSetup","Page setup…","▤",{},false,read_only),
+        group("Page",[button("page-setup","ui.pageSetup","Page setup…","document",{},false,read_only),
             selector("paper-size","layout.pageSetup",[for (p in page.papers) {value:p.id,label:p.id}],page.settings(editor.doc).paper,"","paper")])
-        group("Orientation",[*[for (choice in ["portrait","landscape"]) button("orientation-" ++ choice,"layout.pageSetup",choice,null,{orientation:choice},
+        group("Orientation",[*[for (choice in ["portrait","landscape"]) button("orientation-" ++ choice,"layout.pageSetup",choice,choice,{orientation:choice},
             page.settings(editor.doc).orientation==choice,read_only)]])
-        group("Margins",[button("margins-normal","layout.pageSetup","Normal",null,{top:25.4,right:25.4,bottom:25.4,left:25.4},false,read_only),
-            button("margins-narrow","layout.pageSetup","Narrow",null,{top:12.7,right:12.7,bottom:12.7,left:12.7},false,read_only)])
-        group("Breaks",[command("insert.pageBreak","Page break","↵",{},false,read_only),button("layout-paragraph","ui.paragraph","Paragraph…",null,{},false,read_only)])
+        group("Margins",[button("margins-normal","layout.pageSetup","Normal","margins",{top:25.4,right:25.4,bottom:25.4,left:25.4},false,read_only),
+            button("margins-narrow","layout.pageSetup","Narrow","margins",{top:12.7,right:12.7,bottom:12.7,left:12.7},false,read_only)])
+        group("Breaks",[command("insert.pageBreak","Page break","page_break",{},false,read_only),button("layout-paragraph","ui.paragraph","Paragraph…",null,{},false,read_only)])
     >
     else if (tab == "Table") <div class:"ribbon-groups",
-        group("Rows",[command("table.insertRowAbove","Above","↑"),command("table.insertRowBelow","Below","↓"),command("table.deleteRow","Delete row")])
-        group("Columns",[command("table.insertColumnLeft","Left","←"),command("table.insertColumnRight","Right","→"),command("table.deleteColumn","Delete column")])
+        group("Select",[*[for (scope in ["Cell","Row","Column","Table"])
+            command("table.select" ++ scope,scope,"select_" ++ lower(scope),{},false,read_only)]])
+        group("Rows",[command("table.insertRowAbove","Above","up"),command("table.insertRowBelow","Below","down"),command("table.deleteRow","Delete row","trash")])
+        group("Columns",[command("table.insertColumnLeft","Left","prev"),command("table.insertColumnRight","Right","next"),command("table.deleteColumn","Delete column","trash")])
         group("Table style",[selector("table-style","table.style",[for (s in document.table_styles) {value:s.id,label:s.label}],
             attrs_get(model.current_node(editor,'table').node.attrs,'data-word-table-style') or "grid","","style"),
-            command("table.deleteTable","Delete table")])
+            command("table.deleteTable","Delete table","trash")])
         group("Cell alignment",[selector("cell-alignment","table.cellAlign",[
             {value:"topLeft",label:"Top left"},{value:"topCenter",label:"Top center"},{value:"topRight",label:"Top right"},
             {value:"centerLeft",label:"Middle left"},{value:"center",label:"Middle center"},{value:"centerRight",label:"Middle right"},
             {value:"bottomLeft",label:"Bottom left"},{value:"bottomCenter",label:"Bottom center"},{value:"bottomRight",label:"Bottom right"}],model.cell_alignment(editor))])
+        group("Borders",[button("cell-borders","ui.cellBorders","Borders…","border_all",{},false,read_only),
+            command("table.borders","All","border_all",{preset:"all"},false,read_only),
+            button("borders-outside","table.borders","Outside","border_outer",{preset:"outside"},false,read_only),
+            button("borders-none","table.borders","None","border_none",{preset:"none"},false,read_only)])
     >
     else <div class:"ribbon-groups",
-        group("Show",[button("view-navigation","view.navigationPane","Navigation","☷",{},nav),
-            button("view-reading","view.readMode","Read mode","▤",{},read_only),button("view-focus","view.focusMode","Focus","□")])
-        group("Zoom",[button("zoom-out","view.zoomOut","Zoom out","−"),button("zoom-reset","view.zoomReset","100%","⊙"),
-            button("zoom-in","view.zoomIn","Zoom in","+")]);
+        group("Show",[button("view-navigation","view.navigationPane","Navigation","sidebar",{},nav),
+            button("view-reading","view.readMode","Read mode","book",{},read_only),button("view-focus","view.focusMode","Focus","focus")])
+        group("Zoom",[button("zoom-out","view.zoomOut","Zoom out","minus"),button("zoom-reset","view.zoomReset","100%","zoom_reset"),
+            button("zoom-in","view.zoomIn","Zoom in","plus")]);
         <div class:"ribbon-note", <strong "A little space to think."> <span "Choose your view. Your document stays yours.">>
     >
 }
@@ -141,12 +210,12 @@ pub fn navigation(editor,query,index,match_case=false,replacement="") {
     let hits = model.search(editor.doc,query,match_case);
     <aside id:"navigation", class:"navigation",
         <div class:"pane-heading", "Navigation" <span class:"pane-caption", "OUTLINE & FIND">>
-        <div class:"search-field", <span "⌕"> apply(<control.input id:"find-query",placeholder:"Find in document",
+        <div class:"search-field", <span class:"search-icon",icon("search",16)> apply(<control.input id:"find-query",placeholder:"Find in document",
             value:query,label:"Find in document",on_change:"find.query">)>
         <div class:"search-summary", id:"search-summary", if (query=="") "A map for your ideas" else string(len(hits)) ++ " matches">
         if (query != "") <div class:"find-controls",
             button("find-match-case","ui.matchCase","Match case",null,{},match_case); button("find-clear","ui.clearFind","Clear");
-            button("find-prev","edit.findPrevious","Previous","↑"); button("find-next","edit.findNext","Next","↓");
+            button("find-prev","edit.findPrevious","Previous","up"); button("find-next","edit.findNext","Next","down");
             apply(<control.input id:"replace-text",placeholder:"Replace with",value:replacement,
                 label:"Replace with",on_change:"find.replacement">)
             button("replace-one","edit.replace","Replace"); button("replace-all","edit.replaceAll","Replace all")>
@@ -161,7 +230,7 @@ pub fn comments(editor,show_resolved,read_only) {
     let entries = review.comments(editor.doc)
     let visible = [for (c in entries where show_resolved or not c.resolved) c];
     <aside id:"comments-pane",class:"review-pane", ["aria-label"]:"Document comments",
-        <div class:"review-heading", <strong "Comments"> button("close-comments","ui.comments","Close","×")>
+        <div class:"review-heading", <strong "Comments"> button("close-comments","ui.comments","Close","close")>
         <p class:"review-summary",string(len([for (c in entries where not c.resolved) c])) ++ " open comments">
         if (len(visible)==0) <p class:"review-empty","Select some text and choose New comment in the Review tab."> else null;
         *[for (c in visible) <article id:"comment-" ++ c.id,class:"comment-card" ++ (if (c.resolved) " resolved" else ""),["data-comment-id"]:c.id,
@@ -169,9 +238,9 @@ pub fn comments(editor,show_resolved,read_only) {
             <blockquote class:"comment-quote",c.quote>
             <p class:"comment-text",c.text>
             <div class:"comment-actions",
-                button("comment-go-" ++ c.id,"ui.commentText","Go to text",null,{id:c.id});
+                button("comment-go-" ++ c.id,"ui.commentText","Go to text","expand",{id:c.id});
                 button("comment-resolve-" ++ c.id,"review.resolveComment",if (c.resolved) "Reopen" else "Resolve",null,{id:c.id,resolved:not c.resolved},false,read_only);
-                button("comment-delete-" ++ c.id,"review.deleteComment","Delete",null,{id:c.id},false,read_only)>
+                button("comment-delete-" ++ c.id,"review.deleteComment","Delete","trash",{id:c.id},false,read_only)>
         >]
     >
 }
@@ -179,7 +248,7 @@ pub fn comments(editor,show_resolved,read_only) {
 pub fn revisions(editor,read_only=false) {
     let pending = changes.entries(editor.doc);
     <aside class:"review-pane revision-pane",["aria-label"]:"Tracked changes",
-        <div class:"review-heading",<strong "Changes">button("close-revisions","ui.revisions","Close","×")>
+        <div class:"review-heading",<strong "Changes">button("close-revisions","ui.revisions","Close","close")>
         <p class:"review-summary",string(len(pending)) ++ " pending changes">
         if (len(pending)==0) <p class:"review-empty","Turn on Track text changes to record insertions and deletions."> else null;
         *[for (entry in pending) <article class:"comment-card revision-card",["data-revision-id"]:entry.id,
@@ -187,9 +256,9 @@ pub fn revisions(editor,read_only=false) {
             if (entry.removed=="") null else <p class:"revision-deleted",entry.removed>
             if (entry.inserted=="") null else <p class:"revision-inserted",entry.inserted>;
             <div class:"comment-actions",
-                button("revision-go-" ++ entry.id,"ui.revisionText","Go to",null,{id:entry.id})
-                button("revision-accept-" ++ entry.id,"review.accept","Accept",null,{id:entry.id},false,read_only)
-                button("revision-reject-" ++ entry.id,"review.reject","Reject",null,{id:entry.id},false,read_only)>>]>
+                button("revision-go-" ++ entry.id,"ui.revisionText","Go to","expand",{id:entry.id})
+                button("revision-accept-" ++ entry.id,"review.accept","Accept","check",{id:entry.id},false,read_only)
+                button("revision-reject-" ++ entry.id,"review.reject","Reject","close",{id:entry.id},false,read_only)>>]>
 }
 
 fn dialog_field(id,label,value,numeric=false,min=0,max=2000) => <label class:"dialog-field",
@@ -203,6 +272,12 @@ fn form_dialog(d:map,title:string,description:string,fields:array,action:string,
     [files.dialog_button("cancel","Cancel",false),files.dialog_button(action,label,true)])
 
 pub fn dialog(dialog,file,editor=null,read_only=false) => if (dialog == null) null
+    else if (dialog.kind=="cell_borders") form_dialog(dialog,"Cell borders",
+        "Apply borders to " ++ string(len(tables.selected(editor))) ++ " selected cell(s).",[
+            dialog_select("border-preset","Apply to",[for (value in tables.border_presets) {value:value,label:value}],dialog.values.preset),
+            dialog_select("border-style","Line style",[for (value in tables.border_styles) {value:value,label:value}],dialog.values.style),
+            dialog_field("border-width","Width (pt)",dialog.values.width,true,0.25,6),
+            dialog_field("border-color","Color",dialog.values.color)],"cell_borders","Apply")
     else if (dialog.kind == "unsaved") files.dialog_frame("unsaved","Keep your changes?","Save this document before continuing.",[],
         [files.dialog_button("cancel","Cancel",false),files.dialog_button("discard","Discard changes",false),files.dialog_button("save","Save",true)])
     else if (dialog.kind == "exists" or dialog.kind == "changed") files.dialog_frame(dialog.kind,"Replace the existing file?",
