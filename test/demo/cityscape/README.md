@@ -120,25 +120,25 @@ A fixed per-note variation, not randomness, keeps every rendering identical. Eac
 session sends a fifth of its sound to the document's Freeverb room on the audio bus.
 `dom.midi_command(owner, token, "reverb", level)` changes that send.
 
-The browser rule applies here too: audio starts only on a click (S12.1.1v2/D7.4.6).
-D7.5.4 would let a local file start sound on its own; this demo still waits for the viewer.
-Press **♪ 声音 · Sound** at the top right to play the film from the start with music.
-The Lambda sound control starts the score at 0 and bumps `data-epoch`.
+Music and Chinese narration start automatically when the demo first renders.
+Local documents opened with `view` or `demo` may start audible output from a `pn`
+handler under D7.5.4. The Lambda sound control starts the score at 0 and bumps `data-epoch`.
 [`cityscape.js`](cityscape.js) sees the change and does two things:
 - it rewinds the native clip through `RadiantAnimationHost`;
 - it toggles `.replay`, which swaps every caption's `animation-name` to a twin keyframe
   set and so restarts the captions.
 
-Press the button again while the music plays to mute it. Press it after the music has
-ended to replay the film.
+Press **♪ 静音 · Mute** at the top right to stop the music and narration. Press
+**♪ 声音 · Sound** after muting, or after the music ends, to replay the film with both.
 
-Press **旁白 · Narration** below it while the music plays to hear the remaining Chinese
+Press **旁白 · 关 · Narration off** below it to stop just the narration; press
+**旁白 · Narration** while the music plays to resume with the remaining Chinese
 subtitles spoken by the system voice. The sound control saves `dom.audio_clock(owner)`
 when it starts the score. Each line is then queued with
 `dom.speak(owner, line.zh, {lang: "zh-CN", at: clock0 + line.t})`, so speech and music
 share one clock on the document's audio mix
 ([Radiant_Design_Speech §3.4](../../../vibe/radiant/Radiant_Design_Speech.md)).
-Press it again to stop the narration. Restarting or muting the music stops it too.
+Restarting the music also restarts the narration on the new film timeline.
 
 The narrator is the most natural **male** Mandarin voice installed, spoken at rate 0.9.
 `dom.speech_voices()` lists voices best first, and the page takes the first one with
@@ -169,7 +169,7 @@ writes one frame. The capture directory must be relative and under `temp/`.
 - The full model opens in about a second in a release build. Debug builds with the
   default `log.conf` are much slower, because each closed element's subtree is
   written to `log.txt`.
-- The film autoplays silently on load. Sound restarts it from 0. There is no pause or seek.
+- The film, music and narration autoplay on load. There is no pause or seek.
 - Heights are estimates for most buildings, so the skyline is plausible, not surveyed.
 
 Map data © OpenStreetMap contributors, ODbL 1.0. Film concept and title after Eian

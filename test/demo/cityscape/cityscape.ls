@@ -383,7 +383,7 @@ let css = "html,body{margin:0;background:#050607;color:#eef0f2;" ++
 // ---------------------------------------------------------------- soundtrack
 
 // an original score composed in _score.ls, played with the music package's bundled SoundFont.
-// the audio device opens only on the viewer's click (S12.1.1v2/D7.4.6).
+// local demos may start audible output from the render handler (D7.5.4).
 let soundtrack = score.performance()
 let soundfont = sys.lambda.home# ++ "/package/music/soundfonts/TimGM6mb.sf2"
 let sound_button = <button id: "sound", class: "sound", type: "button",
@@ -420,66 +420,83 @@ pn stop_narration(owner, lines) {
     dom.set_text_content(owner, "旁白 · Narration")
 }
 
+pn start_narration(owner, clock0) {
+    let elapsed = dom.audio_clock(owner) - clock0
+    let voice = narrator_voice()
+    var lines = []
+    dom.set_attribute(owner, "data-voice", if (voice == null) "default" else voice.name)
+    for (s in subtitles) {
+        if (s.t > elapsed + 0.2) {
+            // a slightly unhurried pace suits documentary narration.
+            let line = dom.speak(owner, s.zh, {voice: if (voice == null) null else voice.id,
+                lang: "zh-CN", rate: 0.9, at: clock0 + s.t})
+            if (line != null) { lines = lines ++ [line] }
+        }
+    }
+    dom.set_attribute(owner, "data-state", if (len(lines) > 0) "on" else "error")
+    dom.set_text_content(owner, if (len(lines) > 0) "旁白 · 关 · Narration off" else "旁白 · 无声 · No voice")
+    return lines
+}
+
+pn start_film(owner, epoch) {
+    let token = start_soundtrack(owner)
+    let clock0 = dom.audio_clock(owner)
+    if (token == null) {
+        dom.set_attribute(owner, "data-state", "error")
+        dom.set_text_content(owner, "♪ 无声 · No audio")
+        return {token: null, epoch: epoch, clock0: clock0, lines: []}
+    }
+    dom.set_attribute(owner, "data-epoch", string(epoch + 1))
+    dom.set_attribute(owner, "data-state", "on")
+    dom.set_text_content(owner, "♪ 静音 · Mute")
+    let narrate = dom.query_selector(dom.closest(owner, ".audio"), "#narrate")
+    return {token: token, epoch: epoch + 1, clock0: clock0, lines: start_narration(narrate, clock0)}
+}
+
 // starting the score bumps data-epoch; cityscape.js then rewinds the film and its captions to 0.
-// Narration speaks the subtitles still ahead at their film times, scheduled on the
+// narration speaks the subtitles still ahead at their film times, scheduled on the
 // document's audio clock (Radiant_Design_Speech §3.4): clock0 is that clock when the score began.
-view <sound_control> state token: null, epoch: 0, clock0: 0.0, lines: [], spoken: 0 { ~.rendered }
+view <sound_control> state playback: {token: null, epoch: 0, clock0: 0.0, lines: []}, started: false, spoken: 0 { ~.rendered }
+on render(evt) {
+    // render also follows control updates; start only once so mute remains effective.
+    if (evt.event_phase != 2 or started) { return 'pass' }
+    started = true
+    playback = start_film(dom.query_selector(evt.target, "#sound"), playback.epoch)
+    return 'handled'
+}
 on click(evt) {
     let narrate = dom.closest(evt.target, "#narrate")
     if (narrate != null) {
-        if (len(lines) > 0) {
-            stop_narration(narrate, lines)
-            lines = []
+        if (len(playback.lines) > 0) {
+            stop_narration(narrate, playback.lines)
+            playback = {*:playback, lines: []}
             return 'handled'
         }
-        let playing = if (token == null) null else dom.midi_info(narrate, token)
+        let playing = if (playback.token == null) null else dom.midi_info(narrate, playback.token)
         if (playing == null or playing.state != "playing") {
             dom.set_attribute(narrate, "data-state", "error")
             dom.set_text_content(narrate, "旁白 · 先开声音 · Sound first")
             return 'handled'
         }
-        let elapsed = dom.audio_clock(narrate) - clock0
-        let voice = narrator_voice()
-        dom.set_attribute(narrate, "data-voice", if (voice == null) "default" else voice.name)
-        for (s in subtitles) {
-            if (s.t > elapsed + 0.2) {
-                // a slightly unhurried pace suits documentary narration.
-                let line = dom.speak(narrate, s.zh, {voice: if (voice == null) null else voice.id,
-                    lang: "zh-CN", rate: 0.9, at: clock0 + s.t})
-                if (line != null) { lines = lines ++ [line] }
-            }
-        }
-        dom.set_attribute(narrate, "data-state", if (len(lines) > 0) "on" else "error")
-        dom.set_text_content(narrate, if (len(lines) > 0) "旁白 · 关 · Narration off" else "旁白 · 无声 · No voice")
+        playback = {*:playback, lines: start_narration(narrate, playback.clock0)}
         return 'handled'
     }
     let owner = dom.closest(evt.target, "#sound")
     if (owner == null) { return 'pass' }
     // the film restarts or goes quiet, so narration cued to the old start stops too.
-    if (len(lines) > 0) {
-        stop_narration(dom.query_selector(dom.closest(owner, ".audio"), "#narrate"), lines)
-        lines = []
+    if (len(playback.lines) > 0) {
+        stop_narration(dom.query_selector(dom.closest(owner, ".audio"), "#narrate"), playback.lines)
     }
-    let info = if (token == null) null else dom.midi_info(owner, token)
-    if (token != null) dom.audio_close(owner, token)
-    token = null
+    let info = if (playback.token == null) null else dom.midi_info(owner, playback.token)
+    if (playback.token != null) dom.audio_close(owner, playback.token)
+    playback = {*:playback, token: null, lines: []}
     // a click while the score plays mutes it; any other click restarts the film with sound.
     if (info != null and info.state == "playing") {
         dom.set_attribute(owner, "data-state", "off")
         dom.set_text_content(owner, "♪ 声音 · Sound")
         return 'handled'
     }
-    token = start_soundtrack(owner)
-    if (token == null) {
-        dom.set_attribute(owner, "data-state", "error")
-        dom.set_text_content(owner, "♪ 无声 · No audio")
-        return 'handled'
-    }
-    clock0 = dom.audio_clock(owner)
-    epoch = epoch + 1
-    dom.set_attribute(owner, "data-epoch", string(epoch))
-    dom.set_attribute(owner, "data-state", "on")
-    dom.set_text_content(owner, "♪ 静音 · Mute")
+    playback = start_film(owner, playback.epoch)
     return 'handled'
 }
 // each narrated line that finishes is counted on the narration button.
