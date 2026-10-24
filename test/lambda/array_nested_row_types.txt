@@ -1,0 +1,17 @@
+"float in a later row:"
+[2, 4.5]
+"through a map and an element:"
+[{
+    y: 2
+  }, {
+    y: 4.5
+  }]
+[<c y: 2>, <c y: 4.5>]
+"strings after ints:"
+[1, "a"]
+"arithmetic on a later float row:"
+[2, 3.5]
+"deeper nesting:"
+[1, 1.5]
+"rows that agree stay typed:"
+[3, 7]
