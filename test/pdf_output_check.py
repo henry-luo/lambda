@@ -194,8 +194,32 @@ def phase6(path):
     content = decoded_content(objects)
     assert b"5 5 m\n80 5 l\n45 45 l\nh\nS\n" in content, "SVG stroke lost its vector geometry"
     assert b"[5 4] 1.5 d" in content, "dashed outline lost its stroke pattern"
+    phase6_shadow(objects)
     print("PDF_PHASE6_CHECK: Unicode, producer, outline hierarchy, links and SVG strokes verified")
     return objects
+
+
+def phase6_shadow(objects):
+    """The fixture's #555 outer shadow must retain its color through soft-mask export."""
+    decoded = normalized_objects(objects)
+    images = [body for body in decoded if re.search(
+        rb"/Subtype /Image /Width 70 /Height 50 /ColorSpace /DeviceRGB\b", body)]
+    assert len(images) == 1, "missing phase 6 shadow image"
+    header, _, colors = images[0].partition(b"\nstream\n")
+    mask = re.search(rb"/SMask ([0-9]+) 0 R\b", header)
+    assert mask, "missing phase 6 shadow alpha"
+    alpha = decoded[int(mask[1]) - 1].partition(b"\nstream\n")[2]
+    assert len(colors) == 70 * 50 * 3 and len(alpha) == 70 * 50
+    for y in range(50):
+        for x in range(70):
+            if x < 60 and y < 40:  # the green foreground covers this part of the shadow.
+                continue
+            offset = y * 70 + x
+            expected = (85 * alpha[offset] + 127) // 255
+            # three integer blur passes can lose two premultiplied channel levels.
+            assert all(abs((channel * alpha[offset] + 127) // 255 - expected) <= 2
+                       for channel in colors[offset * 3:offset * 3 + 3]), (
+                           f"phase 6 shadow color changed at {(x, y)}")
 
 
 def phase6_raster(path):
@@ -210,11 +234,12 @@ def phase6_raster(path):
     samples = {(35, 35): (32, 64, 224), (95, 25): (232, 0, 22), (145, 25): (22, 0, 232),
                (185, 30): (255, 127, 127), (215, 30): (127, 127, 255), (265, 30): (255, 255, 255),
                (45, 160): (0, 160, 64), (45, 145): (32, 48, 224), (35, 95): (32, 176, 96),
+               (74, 90): (120, 120, 120), (40, 128): (206, 206, 206),
                (202, 87): (127, 104, 0), (236, 105): (255, 208, 0), (225, 142): (255, 0, 0), (225, 160): (0, 0, 255), (240, 195): (0, 0, 0)}
     for position, expected in samples.items():
         actual = ppm_pixel(image, *position)
         assert max(abs(a - b) for a, b in zip(actual, expected)) <= 3, (position, actual, expected)
-    print("PDF_PHASE6_RASTER: pdfinfo metadata and 14 independent poppler raster samples verified")
+    print(f"PDF_PHASE6_RASTER: pdfinfo metadata and {len(samples)} independent poppler raster samples verified")
 
 
 def normalized_objects(objects):

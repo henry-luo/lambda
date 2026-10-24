@@ -975,6 +975,39 @@ aggregate was not rebuilt separately against the fresh merged control.
 These failures are reported separately from the passing focused cases.
 No golden or existing instruction budget was relaxed.
 
+#### Follow-up: inherited baseline failures (2026-10-24)
+
+The two inherited failures are repaired in the current source. The release
+qualification above remains attached to its archived binary and timings.
+
+- `crypto_key`: the baseline build omitted the separately built `node-crypto`
+  DSO and loaded an older image without `CryptoKey`. Add that module to
+  `build-lambda-baseline` prerequisites, preserving module isolation
+  (**D7.3.4**). The fixture passes under both AST and MIR after rebuilding it.
+- PDF offsets/image streams: the phase 6 reference contained shadow colors
+  unpremultiplied twice. The direct shadow compositor still had the same
+  representation bug; it now preserves the destination's alpha representation.
+  A native regression fails before this fix and passes after it. An independent
+  shadow-color check rejects both extra alpha conversions; 16 Poppler pixel
+  samples validate the corrected PDF. Regenerating the reference changes only
+  object 9's RGB stream, with its alpha mask and every other object unchanged.
+
+Fresh validation: Lambda baseline **6,041/6,041**, input **2,112/2,112**,
+PDF builder/output **7/7** (including interpreter and JIT), Python PDF checker
+**9/9**, full vector suite **234/234**, and Radiant integer-cast lint clean.
+The completed Radiant run with macOS graphics access records **6,136 passed,
+141 partial, 2 skipped, 1 failed**. The remaining failure is
+`CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`: `jqueryui` uses
+375,038 CSS-role live bytes against a 373,940-byte limit. The archived pre-fix
+Tune34 binary reproduces those same initial and recascade byte counts.
+The earlier sandbox run was interrupted after macOS services blocked two
+Scene3D cases; both pass with graphics access, and the fresh complete run
+passes the full Scene3D unit suite **28/28**.
+The fresh release also passes `crypto_key` under AST and MIR, the PDF checks
+under interpreter and JIT, and Test262 **40,261/40,261 with zero retries**.
+Release executable SHA-256:
+`74e26314b74dbeb82cd01ff39abab0fed48502926af53b34574d7866d23da49b`.
+
 ### 6.3 Execution and cost results
 
 Pilots and selected controls use 21 alternating release pairs plus one warmup
