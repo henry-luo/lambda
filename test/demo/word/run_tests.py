@@ -112,9 +112,10 @@ def main():
                       and counts.get("passed", 0) > 0 and counts.get("failed", 1) == 0)
             record(fixture, passed, f"{counts.get('passed', 0)} assertions")
         for feature in ("columns", "margins", "object_layout", "shape_format", "equations"):
-            exported = run(feature + "-export", [executable, "--no-log", "run", f"test/demo/word/tests/_{feature}_export.ls"])
+            exported = run(feature + "-export", [executable, "--no-log", "run", f"test/demo/word/tests/proc/_{feature}_export.ls"],
+                           {**os.environ, "LAMBDA_WORD_EXPORT_UI": "1"})
             record(feature + "-export-api", exported is not None and exported.returncode == 0 and
-                   exported.stdout.strip() == (DEMO / f"tests/_{feature}_export.txt").read_text().strip())
+                   exported.stdout.strip() == (DEMO / f"tests/proc/_{feature}_export.txt").read_text().strip())
         long_pdf = ROOT / "temp/word/columns-long.pdf"
         column_data = long_pdf.read_bytes() if long_pdf.exists() else b""
         record("columns-long-pdf", column_data.startswith(b"%PDF-") and

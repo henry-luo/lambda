@@ -1,6 +1,6 @@
-import model: ~~.mod_model
-import files: ~~.mod_io
-import stories: ~~.mod_stories
+import model: ~~.~~.mod_model
+import files: ~~.~~.mod_io
+import stories: ~~.~~.mod_stories
 import radiant
 import lambda.editor.mod_doc
 

@@ -1,7 +1,7 @@
-import model: ~~.mod_model
-import page: ~~.mod_page
-import files: ~~.mod_io
-import stories: ~~.mod_stories
+import model: ~~.~~.mod_model
+import page: ~~.~~.mod_page
+import files: ~~.~~.mod_io
+import stories: ~~.~~.mod_stories
 import lambda.editor.mod_doc
 
 pn main() {

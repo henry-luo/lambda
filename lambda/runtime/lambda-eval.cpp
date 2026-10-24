@@ -11744,6 +11744,27 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
     return value;
 }
 
+static Item cow_shape_child(ShapeEntry* entry, void* data) {
+    if (!entry->name) return {.map = map_shape_field_to_map(data, entry)};
+    const LaneStorageDesc* storage = shape_entry_storage(entry);
+    // scalar lanes cannot own a COW child. Avoid boxing them during every
+    // shaped copy; dynamic slots still use the complete decoder (D3.4.6).
+    switch (storage->kind) {
+    case LANE_STORAGE_INT:
+    case LANE_STORAGE_BOOL:
+    case LANE_STORAGE_SIZED_I64:
+    case LANE_STORAGE_FLOAT64:
+        return ItemNull;
+    case LANE_STORAGE_POINTER:
+        if (!is_container_type_id((TypeId)storage->value_domain)) return ItemNull;
+        break;
+    default:
+        break;
+    }
+    return _map_read_field(entry, data);
+}
+
+
 // A one-level clone marks the source's children shared because two maps now
 // reference them. When the pre-image is UNIQUE, though, the caller is about to
 // replace it at its only binding, so it dies in the same step and no second
@@ -11762,12 +11783,12 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
 // condition under which it is unreachable after the swap. If anything else
 // still observes the old root (`var snap = h` before the write), the root
 // carries COW_STATE_SHARED, the marks stay, and COW keeps its guarantee (S9.1.2).
+
 static void cow_unmark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
     FOR_EACH_MAP_FIELD(type, entry) {
         if (entry->byte_offset < 0) continue;
-        Item child = entry->name ? _map_read_field(entry, data)
-                                 : (Item){.map = map_shape_field_to_map(data, entry)};
+        Item child = cow_shape_child(entry, data);
         Container* container = cow_item_container(child);
         if (container && !container->is_static && !container->is_immortal) {
             container->cow_state &= ~COW_STATE_SHARED;
@@ -11782,12 +11803,7 @@ void cow_mark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
     FOR_EACH_MAP_FIELD(type, entry) {
         if (entry->byte_offset < 0) continue;
-        if (!entry->name) {
-            Map* spread = map_shape_field_to_map(data, entry);
-            if (spread) cow_mark_shared({.map = spread});
-            continue;
-        }
-        cow_mark_shared(_map_read_field(entry, data));
+        cow_mark_shared(cow_shape_child(entry, data));
     }
 }
 

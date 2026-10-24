@@ -1,12 +1,14 @@
-import files: ~~.mod_io
-import model: ~~.mod_model
-import equation: ~~.mod_equation
+import fixture: ~~.fixtures.mod_export
+import files: ~~.~~.mod_io
+import model: ~~.~~.mod_model
+import equation: ~~.~~.mod_equation
 import image: lambda.editor.mod_image
 import lambda.editor.mod_step
 
 pn main() {
-    let saved = files.read_document("temp/word/equations.word.json")^
-    let imported = files.import_html_document(input("temp/word/equations.html",'text')^)^
+    let data = fixture.load("equations","Equations")^
+    let saved = data.saved
+    let imported = data.imported
     let n = image.images(imported)[0].node
     let p = equation.settings(n)
     print([files.import_html_document(files.html_document(saved.editor.doc,"Equations")^)^==imported,
