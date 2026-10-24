@@ -1267,6 +1267,99 @@ TEST_F(RadiantTextQuery, CompletedFlexReplayRetainsContentInNextCleanPass) {
     document->incremental_layout = false;
 }
 
+TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    IntrinsicSizes expected = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    layout_flex_item_content(&flow.layout, lam::view_require_block(item));
+    ASSERT_TRUE(item->flex_item()->retained.has_content);
+    uint64_t geometry = retained_subtree_geometry(item);
+    uint64_t hits = flow.layout.profiler.intrinsic_cache_hits;
+
+    // a scalar cache hit must not open a destructive measurement scope.
+    IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
+    EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+    EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+    EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
+
+    item->invalidate_intrinsic_inputs();
+    uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
+    layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
+    EXPECT_FALSE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
+}
+
+TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    IntrinsicSizes expected = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    flow.layout.width += 40.0f;
+    layout_measure_intrinsic_widths(&flow.layout, item, true);
+    flow.layout.width -= 40.0f;
+    document->incremental_layout = true;
+    advance_measurement_cache_generation(document->view_tree);
+    radiant::layout_pass_ensure_cache(&flow.layout, item);
+    uint64_t hits = flow.layout.profiler.intrinsic_cache_hits;
+    IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
+    EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+    EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+
+    auto expect_miss = [&]() {
+        uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
+        layout_measure_intrinsic_widths(&flow.layout, item, true);
+        EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
+    };
+    item->invalidate_intrinsic_inputs();
+    expect_miss();
+    flow.layout.width += 40.0f;
+    expect_miss();
+    flow.layout.root_font_size += 2.0f;
+    expect_miss();
+    setup_font(&ui, &flow.layout.font, item->font);
+    expect_miss();
+    document->style_query_epoch++;
+    expect_miss();
+    document->view_tree->layout_generation++;
+    expect_miss();
+    document->incremental_layout = false;
+    advance_measurement_cache_generation(document->view_tree);
+    expect_miss();
+}
+
+TEST_F(RadiantTextQuery, IntrinsicWidthKeepsResourceAndOrderedEffectsPassLocal) {
+    ASSERT_NE(load("test/html/layout_flex_retained_effects.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    for (const char* id : {"resource", "generated", "list"}) {
+        SCOPED_TRACE(id);
+        DomElement* item = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(item, nullptr);
+        FlexFlowTestContext flow(&ui, document, item);
+        IntrinsicSizes expected = layout_measure_intrinsic_widths(&flow.layout, item, true);
+        document->incremental_layout = true;
+        advance_measurement_cache_generation(document->view_tree);
+        uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
+        IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+        EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
+        EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+        EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+        document->incremental_layout = false;
+    }
+}
+
 TEST_F(RadiantTextQuery, AncestorReplayExpiresDescendantLiveAssociation) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);

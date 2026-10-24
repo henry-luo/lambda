@@ -3322,9 +3322,28 @@ void intrinsic_width_history_release(LayoutCache* cache, Pool* pool) {
     }
 }
 
+static IntrinsicWidthHistory* intrinsic_width_history_slot(LayoutCache* cache, Pool* pool) {
+    IntrinsicWidthHistory* oldest = cache->intrinsic_width_history;
+    IntrinsicWidthHistory* previous = nullptr;
+    unsigned count = oldest ? 1 : 0;
+    while (oldest && oldest->next) {
+        previous = oldest;
+        oldest = oldest->next;
+        count++;
+    }
+    if (count < LAYOUT_CACHE_SIZE)
+        return (IntrinsicWidthHistory*)pool_calloc(pool, sizeof(IntrinsicWidthHistory));
+    // keep alternating constraint queries across passes without unbounded retained history.
+    if (previous) previous->next = nullptr;
+    else cache->intrinsic_width_history = nullptr;
+    return oldest;
+}
+
 static bool intrinsic_width_version_equal(const IntrinsicWidthCacheEntry& a,
                                          const IntrinsicWidthCacheEntry& b) {
-    return a.generation == b.generation && a.style_epoch == b.style_epoch &&
+    return (a.generation == b.generation || (a.retain_across_passes && b.retain_across_passes)) &&
+        a.layout_generation == b.layout_generation && a.input_revision == b.input_revision &&
+        a.parent_revision == b.parent_revision && a.style_epoch == b.style_epoch &&
         a.style_version == b.style_version && a.font_generation == b.font_generation;
 }
 
@@ -3360,21 +3379,33 @@ struct IntrinsicWidthCacheScope {
     radiant::IntrinsicWidthCacheEntry entry;
     bool cacheable = true;
     bool children_independent = true;
+    bool children_retained = true;
     IntrinsicWidthCacheScope* parent = active;
     static thread_local IntrinsicWidthCacheScope* active;
 
     void enter() { active = this; }
 
-    static void note_dependency(bool independent) {
-        if (active && !independent) active->children_independent = false;
+    static void note_dependency(bool independent, bool retained) {
+        if (!active) return;
+        if (!independent) active->children_independent = false;
+        if (!retained) active->children_retained = false;
     }
 
     ~IntrinsicWidthCacheScope() {
         entry.context_independent = cacheable && children_independent &&
             layout_flow_is_context_independent(element);
+        // resource sizes, native values and ordered effects can change outside this subtree's DOM versions.
+        ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+        entry.retain_across_passes = cacheable && children_retained && !lycon->paged &&
+            !element->shadow_root_element() && !element->pseudo && !element->display.list_item &&
+            !(element->form_control() && element->tag() != MARKUP_NAME_BUTTON) &&
+            (!layout_element_is_replaced(element) || layout_is_svg_viewport(element->tag())) &&
+            !(block->blk && (block->block()->counter_reset || block->block()->counter_increment ||
+                            block->block()->counter_set)) &&
+            !custom_layout_name_for_element(element);
         active = parent;
         // a dependent descendant makes its ancestors dependent too, including on hits.
-        note_dependency(entry.context_independent);
+        note_dependency(entry.context_independent, entry.retain_across_passes);
         if (!cacheable) return;
         radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(lycon, element);
         if (!cache) return;
@@ -3387,8 +3418,7 @@ struct IntrinsicWidthCacheScope {
         if (previous.context.valid && radiant::intrinsic_width_version_equal(previous, entry) &&
             !radiant::intrinsic_width_query_matches(previous, entry) && lycon->pool) {
             // alternating flex constraints must not evict a completed subtree query.
-            auto* history = (radiant::IntrinsicWidthHistory*)pool_calloc(
-                lycon->pool, sizeof(radiant::IntrinsicWidthHistory));
+            auto* history = radiant::intrinsic_width_history_slot(cache, lycon->pool);
             if (history) {
                 *history = {cache->intrinsic_width_history, previous, basis};
                 cache->intrinsic_width_history = lam::own(history);
@@ -3402,7 +3432,7 @@ struct IntrinsicWidthCacheScope {
 thread_local IntrinsicWidthCacheScope* IntrinsicWidthCacheScope::active = nullptr;
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
-                                                bool content_only) {
+                                                bool content_only, bool preserve_layout) {
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
@@ -3416,6 +3446,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // dimensions and available space, even when both queries have a definite basis.
     radiant::IntrinsicWidthCacheEntry query = {};
     query.generation = measurement_generation;
+    query.layout_generation = lycon->doc && lycon->doc->view_tree
+        ? lycon->doc->view_tree->layout_generation : 0;
+    query.input_revision = element->intrinsic_input_revision;
+    query.parent_revision = radiant::css_resolved_style_inherited_revision(element->parent_element());
+    query.retain_across_passes = layout_can_retain_geometry(lycon, true) && !lycon->paged &&
+        !lycon->css_query_probe && !lycon->selected_style && !lycon->doc->view_tree->model;
     query.context.known_dimensions = {lycon->width, lycon->height, true, true};
     query.context.available_space = lycon->available_space;
     query.block_size = {lycon->block.content_width, lycon->block.content_height};
@@ -3455,14 +3491,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
     if (hit) {
-        IntrinsicWidthCacheScope::note_dependency(hit->context_independent);
+        IntrinsicWidthCacheScope::note_dependency(hit->context_independent, hit->retain_across_passes);
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, true, false);
         assert(element->layout_cache);
         return hit->sizes;
     }
 
     if (element->measuring_intrinsic_width()) {
-        IntrinsicWidthCacheScope::note_dependency(false);
+        IntrinsicWidthCacheScope::note_dependency(false, false);
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, true);
         return {0, 0};
     }
@@ -3477,6 +3513,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->profiler.intrinsic_miss_reasons[reason]++;
     }
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
+    // cached scalar queries do not touch fragments or invalidate containing flex content.
+    radiant::LayoutMeasureScope layout_scope(preserve_layout ? lycon : nullptr, element);
     LayoutMeasurementRootScope root_scope(lycon, element);
     radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
     IntrinsicMeasureScope measure_scope(lycon, element);

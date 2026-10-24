@@ -70,6 +70,22 @@ geometry. The interactive renderer and EventSim use that same checkpoint.
 Flow retains its normal style and constraint validation, including legacy
 controls without frozen computed-style records.
 
+**D4.5.3v2 / D4.5.1v4**, with computation identity under **VR15**, also govern
+the follow-up sizing work. Scalar width queries check their cache before opening
+a measurement scope; a hit neither snapshots the subtree nor invalidates its
+containing flex content. Native-control and replaced-size queries use the same
+ordering. A real measurement still restores provisional geometry and expires
+live fragment associations.
+
+Incremental passes retain width results and a bounded history of alternate
+constraints. Subtree input revisions, inherited style revisions, selected-view
+generation, styles, fonts, viewport, containing constraints and scale validate
+reuse. Full reflows and active animations keep pass-local queries. Resource
+sizes, native-value widgets, shadow/custom layout and generated counters/pseudos
+remain pass-local, with that dependency propagated through enclosing queries.
+Only scalar sizing results cross passes; the existing ownership and invalidation
+rules still govern text fragments and committed geometry.
+
 ## Reproduction and verification
 
 `python3 test/demo/word/benchmark_typing.py --repeat 3 --characters 120`
@@ -125,3 +141,38 @@ Qualification:
   masked or changed for this work.
 - The Radiant integer-cast lint, diff whitespace checks and formal-index check
   passed. The index check reports the existing duplicate DO25 warning.
+
+## Follow-up qualification — 2026-10-24
+
+Compared the release executable from `e1387a9a7` with the scalar-query changes
+above. Both ran the same Word sources at 1440 × 900. Three interleaved pairs used
+120 characters per document; one additional pair used 600. No compilation or
+tests ran during measurement. As above, these are native input-task timings,
+including event-loop drain and excluding startup and outer host painting.
+
+| Document / workload | Keys per build | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Blank, short | 360 | 71.247 ms | 64.362 ms | 76.810 ms | 70.686 ms |
+| Studio, short | 360 | 77.038 ms | 69.894 ms | 85.072 ms | 77.210 ms |
+| Blank, sustained | 600 | 81.041 ms | 72.985 ms | 130.040 ms | 119.793 ms |
+| Studio, sustained | 600 | 88.820 ms | 82.674 ms | 147.201 ms | 145.894 ms |
+
+Short-run median latency falls 9–10%; sustained median latency falls 7–10%.
+All sixteen text assertions passed across 3,840 physical keystrokes. Long
+paragraphs still show slower individual keys; these results do not establish
+uniform low latency or include the outer renderer's painting cost.
+
+Final qualification passes **179/179 Word checks**, including all model tiers,
+rapid typing, caret/scroll retention, Undo/Redo, page-break typing, live fields,
+navigation, object editing and exports. All **213 native text/layout checks**
+pass, including scalar-hit fragment retention, alternating constraints across
+passes, changed input/font/view rejection and resource/ordered-effect freshness.
+The Radiant baseline passes with **6,160 passed, 141 existing partials, two skips
+and zero failures**. Integer-cast lint, diff whitespace and formal-index checks
+pass; no formal ruling changed.
+
+Evidence is under `temp/word/performance/`: `followup-comparison.json`,
+`qualified-{short,sustained}-{before,after}-*`, `typing-word-final.json`,
+`typing-native-final.stdout`, `radiant-baseline-final/test_summary.json`,
+`typing-binaries.json` and `typing-source.patch`. The existing benchmark supports
+reproduction with `--repeat 3 --characters 120` and `--repeat 1 --characters 600`.

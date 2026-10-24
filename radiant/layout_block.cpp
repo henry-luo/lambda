@@ -6035,9 +6035,9 @@ bool layout_retained_subtree_is_stable(DomNode* root, bool formatting_root) {
     return layout_retained_subtree_walk(root, 0, formatting_root, false);
 }
 
-bool layout_can_retain_geometry(LayoutContext* lycon) {
+bool layout_can_retain_geometry(LayoutContext* lycon, bool scalar_query) {
     if (!lycon || !lycon->doc || !lycon->doc->incremental_layout ||
-        lycon->run_mode != radiant::RunMode::PerformLayout) return false;
+        (!scalar_query && lycon->run_mode != radiant::RunMode::PerformLayout)) return false;
     DocState* state = (DocState*)lycon->doc->state;
     // Active animations can alter retained geometry outside the dirty path.
     return !(state && state->animation_scheduler &&

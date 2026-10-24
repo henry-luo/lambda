@@ -651,7 +651,8 @@ LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* elem
             if (element->doc) element->doc->services.layout_cache_allocations++;
         }
     } else if (cache && cache->generation != generation) {
-        layout_cache_clear(cache, lycon->pool);
+        // scalar width queries carry subtree versions; fragment and unkeyed entries stay pass-local.
+        layout_cache_clear(cache, lycon->pool, true);
         cache->generation = generation;
     }
     return cache;

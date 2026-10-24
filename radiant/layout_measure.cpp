@@ -49,12 +49,13 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
     IntrinsicSize result = {};
     if (!block) return result;
 
-    radiant::LayoutMeasureScope measure_scope(lycon, block);
-    if (lycon) lycon->available_space = space;
-
+    // a cached scalar size needs compute mode, but must leave live fragments alone.
+    radiant::LayoutRunModeScope run_mode(lycon, radiant::RunMode::ComputeSize);
     if (layout_measure_cache_get(lycon, block, space, &result, "REPLACED_MEASURE")) {
         return result;
     }
+    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    if (lycon) lycon->available_space = space;
 
     ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, block);
     float width = facts.width;
@@ -80,12 +81,12 @@ IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block
     IntrinsicSize result = {};
     if (!block || !block->form) return result;
 
-    radiant::LayoutMeasureScope measure_scope(lycon, block);
-    if (lycon) lycon->available_space = space;
-
+    radiant::LayoutRunModeScope run_mode(lycon, radiant::RunMode::ComputeSize);
     if (layout_measure_cache_get(lycon, block, space, &result, "FORM_MEASURE")) {
         return result;
     }
+    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    if (lycon) lycon->available_space = space;
 
     float width = block->form->intrinsic_width > 0.0f ? block->form->intrinsic_width : block->width;
     float height = block->form->intrinsic_height > 0.0f ? block->form->intrinsic_height : block->height;
@@ -106,10 +107,9 @@ IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement*
     IntrinsicSizes sizes = {};
     if (!lycon || !element) return sizes;
 
-    // Descendant measurement is observational; restore its layout context and provisional view state.
-    radiant::LayoutMeasureScope measure_scope(lycon, element);
+    // only a cache miss needs provisional view snapshots and layout restoration.
     radiant::LayoutProfileScope profile_scope(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
-    sizes = measure_element_intrinsic_widths(lycon, element, content_only);
+    sizes = measure_element_intrinsic_widths(lycon, element, content_only, true);
     return sizes;
 }
 
