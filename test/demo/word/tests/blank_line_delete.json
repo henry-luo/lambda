@@ -1,0 +1,141 @@
+{
+  "name": "Word Backspace and Delete remove a blank paragraph from inside it or from either neighbour",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "start": 5,
+      "end": 5
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p"
+      },
+      "count": 7
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "Writing"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p"
+      },
+      "count": 6
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(3)"
+      },
+      "contains": "Painters set up"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "Writing"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p"
+      },
+      "count": 6
+    },
+    {
+      "type": "type_physical",
+      "text": "Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(2)"
+      },
+      "contains": "make things. Z"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "Writing"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-page > p"
+      },
+      "count": 6
+    },
+    {
+      "type": "type_physical",
+      "text": "Y"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(3)"
+      },
+      "contains": "YPainters set up"
+    }
+  ]
+}

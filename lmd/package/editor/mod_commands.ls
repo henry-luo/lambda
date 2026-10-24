@@ -959,10 +959,57 @@ fn delete_selection(st) {
   else { null }
 }
 
-fn last_text_pos_at(n, path) {
-  if (is_text(n)) { pos(path, len(n.text)) }
+// A blank inline-content block (e.g. an empty <p> after Enter) has no text leaf;
+// its caret sits on the block itself.
+fn is_blank_block(st, n) =>
+  is_node(n) and block_allows_inline(st, n.tag) and
+  (len(n.content) == 0 or (len(n.content) == 1 and is_text(n.content[0]) and n.content[0].text == ""))
+
+// Caret at the start/end of `n`: its first/last text leaf, or a blank block itself.
+fn edge_caret_at(st, n, path, at_end) {
+  if (is_text(n)) { pos(path, if (at_end) len(n.text) else 0) }
+  else if (is_blank_block(st, n)) { pos(path, 0) }
   else if (not is_node(n) or len(n.content) == 0) { null }
-  else { last_text_pos_at(n.content[len(n.content) - 1], [*path, len(n.content) - 1]) }
+  else {
+    let i = if (at_end) len(n.content) - 1 else 0
+    edge_caret_at(st, n.content[i], [*path, i], at_end)
+  }
+}
+
+// The inline block whose end (or start) `p` sits at, else null.
+fn edge_block_path(st, p, at_end) {
+  let n = node_at(st.doc, p.path)
+  if (is_node(n) and block_allows_inline(st, n.tag)) {
+    if (p.offset == (if (at_end) len(n.content) else 0)) p.path else null
+  }
+  else if (is_text(n) and len(p.path) >= 2) {
+    let block = node_at(st.doc, parent_path(p.path))
+    let i = last_index(p.path)
+    if (at_end and p.offset == len(n.text) and i == len(block.content) - 1) parent_path(p.path)
+    else if (not at_end and p.offset == 0 and i == 0) parent_path(p.path)
+    else null
+  }
+  else { null }
+}
+
+// Native Backspace/Delete target ranges cross only the seam between two sibling
+// blocks (e.g. [2,0]:93 → [3]:0 around a blank <p>); like the JS editor's
+// resolvePos, such a range is a join, not a content deletion.
+fn block_seam(st, sel) {
+  let lo_block = edge_block_path(st, sel_lo(sel), true)
+  let hi_block = edge_block_path(st, sel_hi(sel), false)
+  if (lo_block == null or hi_block == null or len(lo_block) != len(hi_block) or
+      not path_equal(parent_path(lo_block), parent_path(hi_block)) or
+      last_index(hi_block) != last_index(lo_block) + 1) { null }
+  else { {lo: lo_block, hi: hi_block} }
+}
+
+fn remove_block(st, parent, index, caret_pos) {
+  if (caret_pos == null) { null }
+  else {
+    let tx1 = tx_step(tx_begin(st.doc, st.selection), step_replace(parent, index, index + 1, []))
+    tx_set_selection(tx1, caret(caret_pos))
+  }
 }
 
 fn block_merge_allowed(a, b) =>
@@ -1029,43 +1076,51 @@ fn join_first_list_item_backward(st, p) {
   }
 }
 
-fn merge_blocks_backward(st, p) {
-  if (len(p.path) < 2 or last_index(p.path) != 0) { null }
+// A blank block on either side of the seam is removed rather than merged, so
+// the surviving neighbour keeps its own tag and attrs (Word's Backspace/Delete).
+fn merge_blocks_backward(st, block_path) {
+  let block_index = if (len(block_path) < 1) { -1 } else { last_index(block_path) }
+  let parent = if (block_index < 0) { null } else { node_at(st.doc, parent_path(block_path)) }
+  let block = node_at(st.doc, block_path)
+  if (parent == null or block == null or not is_node(parent) or not is_node(block)) { null }
+  else if (block_index <= 0) { join_first_list_item_backward(st, block_path) }
   else {
-    let block_path = parent_path(p.path)
-    let block_index = last_index(block_path)
-    let parent = node_at(st.doc, parent_path(block_path))
-    let block = node_at(st.doc, block_path)
-    if (parent == null or block == null or not is_node(parent) or not is_node(block)) { null }
-    else if (block_index <= 0) { join_first_list_item_backward(st, block_path) }
+    let prev = parent.content[block_index - 1]
+    let prev_path = [*parent_path(block_path), block_index - 1]
+    if (is_blank_block(st, prev)) {
+      remove_block(st, parent_path(block_path), block_index - 1, edge_caret_at(st, block, prev_path, false))
+    }
+    else if (is_blank_block(st, block)) {
+      remove_block(st, parent_path(block_path), block_index, edge_caret_at(st, prev, prev_path, true))
+    }
+    else if (not block_merge_allowed(prev, block)) { null }
     else {
-      let prev = parent.content[block_index - 1]
-      if (not block_merge_allowed(prev, block)) { null }
+      let caret_pos = edge_caret_at(st, prev, prev_path, true)
+      if (caret_pos == null) { null }
       else {
-        let caret_pos = last_text_pos_at(prev, [*parent_path(block_path), block_index - 1])
-        if (caret_pos == null) { null }
-        else {
-          let merged = node_attrs(prev.tag, prev.attrs, merge_adjacent_text(list_concat(prev.content, block.content)))
-          let tx0 = tx_begin(st.doc, st.selection)
-          let tx1 = tx_step(tx0, step_replace(parent_path(block_path), block_index - 1, block_index + 1, [merged]))
-          tx_set_selection(tx1, caret(caret_pos))
-        }
+        let merged = node_attrs(prev.tag, prev.attrs, merge_adjacent_text(list_concat(prev.content, block.content)))
+        let tx0 = tx_begin(st.doc, st.selection)
+        let tx1 = tx_step(tx0, step_replace(parent_path(block_path), block_index - 1, block_index + 1, [merged]))
+        tx_set_selection(tx1, caret(caret_pos))
       }
     }
   }
 }
 
-fn merge_blocks_forward(st, p) {
-  let block_path = parent_path(p.path)
+fn merge_blocks_forward(st, block_path, p) {
   let block = node_at(st.doc, block_path)
-  if (len(p.path) < 2 or block == null or not is_node(block) or last_index(p.path) != len(block.content) - 1) { null }
+  if (len(block_path) < 1 or block == null or not is_node(block)) { null }
   else {
     let block_index = last_index(block_path)
     let parent = node_at(st.doc, parent_path(block_path))
-    if (parent == null or block == null or not is_node(parent) or not is_node(block) or block_index + 1 >= len(parent.content)) { null }
+    if (parent == null or not is_node(parent) or block_index + 1 >= len(parent.content)) { null }
     else {
       let next = parent.content[block_index + 1]
-      if (not block_merge_allowed(block, next)) { null }
+      if (is_blank_block(st, block)) {
+        remove_block(st, parent_path(block_path), block_index, edge_caret_at(st, next, block_path, false))
+      }
+      else if (is_blank_block(st, next)) { remove_block(st, parent_path(block_path), block_index + 1, p) }
+      else if (not block_merge_allowed(block, next)) { null }
       else {
         let merged = node_attrs(block.tag, block.attrs, merge_adjacent_text(list_concat(block.content, next.content)))
         let tx0 = tx_begin(st.doc, st.selection)
@@ -1078,13 +1133,20 @@ fn merge_blocks_forward(st, p) {
 
 pub fn cmd_delete_backward(st) {
   let sel = st.selection
+  let seam = if (sel != null and sel.kind == 'text' and not sel_collapsed(sel)) block_seam(st, sel) else null
+  let joined = if (seam == null) null else merge_blocks_backward(st, seam.hi)
   if (sel == null) { null }
+  else if (joined != null) { joined }
   else if (sel.kind != 'text' or not sel_collapsed(sel)) { delete_selection(st) }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let p = sel.anchor
-    if (p.offset <= 0) { merge_blocks_backward(st, p) }
-    else { delete_range(st, pos(p.path, p.offset - 1), p) }
+    let leaf = node_at(st.doc, p.path)
+    if (p.offset > 0) { delete_range(st, pos(p.path, p.offset - 1), p) }
+    // a caret on an inline block itself (a blank block) joins that block
+    else if (is_node(leaf) and block_allows_inline(st, leaf.tag)) { merge_blocks_backward(st, p.path) }
+    else if (len(p.path) >= 2 and last_index(p.path) == 0) { merge_blocks_backward(st, parent_path(p.path)) }
+    else { null }
   }
 }
 
@@ -1095,7 +1157,7 @@ fn delete_forward_at_leaf_end(st, p) {
   let block_path = parent_path(p.path)
   let block = node_at(st.doc, block_path)
   let leaf_idx = last_index(p.path)
-  if (block == null or not is_node(block) or leaf_idx + 1 >= len(block.content)) { merge_blocks_forward(st, p) }
+  if (block == null or not is_node(block) or leaf_idx + 1 >= len(block.content)) { merge_blocks_forward(st, block_path, p) }
   else {
     let next = block.content[leaf_idx + 1]
     if (is_text(next) and len(next.text) > 0) {
@@ -1112,13 +1174,17 @@ fn delete_forward_at_leaf_end(st, p) {
 
 pub fn cmd_delete_forward(st) {
   let sel = st.selection
+  let seam = if (sel != null and sel.kind == 'text' and not sel_collapsed(sel)) block_seam(st, sel) else null
+  let joined = if (seam == null) null else merge_blocks_forward(st, seam.lo, sel_lo(sel))
   if (sel == null) { null }
+  else if (joined != null) { joined }
   else if (sel.kind != 'text' or not sel_collapsed(sel)) { delete_selection(st) }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let p = sel.anchor
     let leaf = node_at(st.doc, p.path)
-    if (leaf == null or not is_text(leaf)) { null }
+    if (is_blank_block(st, leaf)) { merge_blocks_forward(st, p.path, p) }
+    else if (leaf == null or not is_text(leaf)) { null }
     else if (p.offset >= len(leaf.text)) { delete_forward_at_leaf_end(st, p) }
     else { delete_range(st, p, pos(p.path, p.offset + 1)) }
   }

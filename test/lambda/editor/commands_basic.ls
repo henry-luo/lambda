@@ -132,6 +132,26 @@ let tx_db_only_node = cmd_delete_backward({doc: node('doc', [node('image', [])])
 "del-back only node doc:"; doc_text(tx_db_only_node.doc_after) == ""
 "del-back only node caret:"; path_equal(tx_db_only_node.sel_after.anchor.path, [0, 0]) and tx_db_only_node.sel_after.anchor.offset == 0
 
+// a blank block (content []) holds the caret on the block itself; Backspace/Delete
+// remove it, and a native target range spanning only the block seam is a join.
+let blank_doc = node('doc', [node('paragraph', [text("abc")]), node('paragraph', []), node('heading', [text("def")])])
+let at_blank = {doc: blank_doc, selection: text_selection(pos([1], 0), pos([1], 0))}
+let tx_blank_back = cmd_delete_backward(at_blank)
+"del-back blank count:"; len(tx_blank_back.doc_after.content) == 2
+"del-back blank caret:"; path_equal(tx_blank_back.sel_after.anchor.path, [0, 0]) and tx_blank_back.sel_after.anchor.offset == 3
+let tx_after_blank = cmd_delete_backward({doc: blank_doc, selection: text_selection(pos([2, 0], 0), pos([2, 0], 0))})
+"del-back after blank keeps tag:"; [for (n in tx_after_blank.doc_after.content) n.tag] == ['paragraph', 'heading']
+"del-back after blank caret:"; path_equal(tx_after_blank.sel_after.anchor.path, [1, 0]) and tx_after_blank.sel_after.anchor.offset == 0
+let tx_blank_fwd = cmd_delete_forward(at_blank)
+"del-fwd blank keeps tag:"; [for (n in tx_blank_fwd.doc_after.content) n.tag] == ['paragraph', 'heading']
+"del-fwd blank caret:"; path_equal(tx_blank_fwd.sel_after.anchor.path, [1, 0]) and tx_blank_fwd.sel_after.anchor.offset == 0
+let seam_back = cmd_delete_backward({doc: blank_doc, selection: text_selection(pos([0, 0], 3), pos([1], 0))})
+"del-back seam range:"; seam_back.doc_after == tx_blank_back.doc_after and seam_back.sel_after == tx_blank_back.sel_after
+let seam_after = cmd_delete_backward({doc: blank_doc, selection: text_selection(pos([1], 0), pos([2, 0], 0))})
+"del-back seam after blank:"; seam_after.doc_after == tx_after_blank.doc_after and seam_after.sel_after == tx_after_blank.sel_after
+let seam_fwd = cmd_delete_forward({doc: blank_doc, selection: text_selection(pos([1], 0), pos([2, 0], 0))})
+"del-fwd seam range:"; seam_fwd.doc_after == tx_blank_fwd.doc_after and seam_fwd.sel_after == tx_blank_fwd.sel_after
+
 // ---------------------------------------------------------------------------
 // cmd_delete_forward
 // ---------------------------------------------------------------------------

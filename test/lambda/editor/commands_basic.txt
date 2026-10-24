@@ -100,6 +100,24 @@ true
 true
 "del-back only node caret:"
 true
+"del-back blank count:"
+true
+"del-back blank caret:"
+true
+"del-back after blank keeps tag:"
+true
+"del-back after blank caret:"
+true
+"del-fwd blank keeps tag:"
+true
+"del-fwd blank caret:"
+true
+"del-back seam range:"
+true
+"del-back seam after blank:"
+true
+"del-fwd seam range:"
+true
 "del-fwd doc:"
 true
 "del-fwd caret:"
