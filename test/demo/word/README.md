@@ -73,10 +73,24 @@ applies to citation insertion and bibliography updates.
   bookmark removal, comment/revision review, and header/footer settings.
   Arrow keys, Home/End, Escape, and Tab
   navigate or dismiss it. Read mode offers plain-text copying and Select All.
-- Home ribbon: undo/redo; bold, italic, underline, strike, subscript and
-  superscript; font family and size; text color and highlighting; paragraph
-  alignment and line spacing; clear character formatting; six paragraph styles;
-  bullets, numbering, and list indent/outdent. Paragraph settings apply spacing
+- Home ribbon (`mod_home_ui.ls`, model in `mod_home.ls`) follows Word's Undo,
+  Clipboard, Font, Paragraph, Styles, and Editing groups. **Clipboard**: Paste
+  with Keep Source Formatting or Keep Text Only, Cut, Copy, and Format Painter,
+  which copies the caret's character formatting onto the next dragged selection
+  (Escape or a second click cancels it). **Font**: family and size, Grow/Shrink
+  Font, Change Case (sentence, lower, upper, capitalized, toggle), Clear All
+  Formatting, Character Border, bold, italic, underline, strike, subscript and
+  superscript, Text Highlight Color and Font Color split buttons that repeat
+  the last color chosen from their palettes, and Character Shading.
+  **Paragraph**: Bullets and Numbering with marker libraries (filled, hollow,
+  and square bullets; 1., a., A., i., and I.), Decrease/Increase Indent (list
+  level inside lists, half-inch steps elsewhere), Sort A to Z / Z to A for
+  selected paragraphs or list items, Show/Hide ¶, alignment, Line and Paragraph
+  Spacing (1.0–3.0 plus space before/after), paragraph Shading, and Borders
+  (single sides, All, Outside, None, and Horizontal Line). Each command is one
+  undo step. Not yet implemented: Word's East Asian typography tools (Phonetic
+  Guide, Enclose Characters, Asian Layout, Distributed), Text Effects,
+  underline styles, and Multilevel List. Paragraph settings apply spacing
   before/after, left indentation, and first-line indentation in one undo step.
   Tab/Shift+Tab adjust list indentation while keeping the caret in the item;
   the same indentation appears in editable snapshots, HTML, and PDF exports.
@@ -87,7 +101,7 @@ applies to citation insertion and bibliography updates.
   emphasis, highlighting, text color, and paragraph alignment. It preserves the
   selected range through repeated formatting, follows scrolling and zoom, and
   stays within the document viewport. Escape or using another pane dismisses it.
-  Ribbon, floating-toolbar and WordArt font pickers discover installed native
+  Ribbon, floating-toolbar and Word Art font pickers discover installed native
   families when the workspace opens, through `dom.query_local_fonts`. A document's
   requested family remains selectable when it is missing locally. Long native
   menus show a draggable scrollbar, accept wheel scrolling, and keep the current
@@ -132,13 +146,13 @@ applies to citation insertion and bibliography updates.
   HTML, and PDF retain table sizes, margins, direction, and repeated header groups.
 - Illustrations: **Icons / Emojis** offers twenty outline icons with editable
   color, dimensions, and rotation, and a Unicode emoji gallery with custom
-  sequences. Emojis insert as ordinary editable text. **SmartArt** arranges
+  sequences. Emojis insert as ordinary editable text. **Diagram** arranges
   2–8 text items as a process, hierarchy, cycle, or list. **Chart** offers column,
   bar, line, pie, and doughnut charts, with editable title, color, and up to
   twenty `Label, Value` rows. Negative values work in Cartesian charts; pie and
   doughnut charts require nonnegative values with a positive total. Preview
   checks data before insertion. Double-click or use the focused object's
-  context menu to edit it. Icons, SmartArt, and charts use the same move, resize,
+  context menu to edit it. Icons, diagrams, and charts use the same move, resize,
   rotation, copy/paste, and undo controls as other illustrations; metadata and
   self-contained SVG survive snapshots and HTML, and PDF keeps their appearance.
 - Header and Footer: repeating text, left/center/right alignment, font size,
@@ -151,27 +165,27 @@ applies to citation insertion and bibliography updates.
 - Equations: editable LaTeX source with formula examples, display/inline math
   typesetting, size, and color. The existing `lambda.doc.math` package supplies
   typesetting and embedded glyphs. Double-click an equation to revise its source.
-- WordArt: solid, outlined, hollow, gradient, and shadowed text, with straight,
+- Word Art: solid, outlined, hollow, gradient, and shadowed text, with straight,
   upward/downward arch, and wave transforms; editable text, font, size, colors,
-  and dimensions. Equations and WordArt remain editable inline SVG objects in
+  and dimensions. Equations and Word Art remain editable inline SVG objects in
   snapshots and HTML; PDF preserves their appearance.
-- Object transforms: select a picture, shape, WordArt, icon, SmartArt, or chart to show four corner
+- Object transforms: select a picture, shape, Word Art, icon, diagram, or chart to show four corner
   resize handles and a circular rotation handle. Drag the object body to move
   it into a paragraph, list item, empty block, or table cell; a caret previews
   the drop position. The first drag can select the object and move it together.
   Corner cursors follow the object's rotation. Corner drags preserve the
   aspect ratio; Shift snaps rotation to 15° increments. Escape cancels a drag.
-  Each completed drag creates one undo step. Picture, Shape, and WordArt
+  Each completed drag creates one undo step. Picture, Shape, and Word Art
   settings also accept exact dimensions and a rotation from −180° to 180°.
-  WordArt resizing scales its lettering; shape text keeps its font size.
+  Word Art resizing scales its lettering; shape text keeps its font size.
   Handles follow zoom and scrolling and are hidden in read mode and dialogs.
-- Shape Format appears when a shape or WordArt is selected. It offers shape
+- Shape Format appears when a shape or Word Art is selected. It offers shape
   presets, Edit Shape, Text Box, fill/outline color menus, outline weight and
-  dashes, an outer shadow, WordArt text styles, text colors, and exact dimensions.
+  dashes, an outer shadow, Word Art text styles, text colors, and exact dimensions.
   Shape text supports horizontal alignment, top/middle/bottom alignment, and
   90°/270° direction. The Format Pane provides custom colors, gradients,
   opacity, native fonts, bold/italic shape text, text inset, rotation, and alt
-  text. WordArt also exposes its existing curved text transforms in the pane.
+  text. Word Art also exposes its existing curved text transforms in the pane.
   Arrange tools remain available in this ribbon. Formatting preserves placement,
   reflection, and surrounding text, and survives undo, clipboard, saving, and
   HTML/PDF export. Custom paths, edit points, 3D, glow, and soft edges are not
@@ -185,8 +199,27 @@ applies to citation insertion and bibliography updates.
   applies a valid draft, while Discard Draft closes without applying it.
   Professional/linear views, actual inline/display flow, justification, size,
   color, and explicit equation labels persist in snapshots, clipboard, and
-  HTML/PDF exports. Labels are manual; Word's UnicodeMath grammar, automatic
-  equation numbering, and structured in-canvas math editing are not implemented.
+  HTML/PDF exports. Labels are manual; Word's UnicodeMath grammar and automatic
+  equation numbering are not implemented.
+- In-place equation editing (`mod_math_field.ls`, `mod_math_edit.ls`): click an
+  equation to put a caret at the nearest slot inside it. Left/Right walk the
+  slots in reading order (into numerators, denominators, scripts, radicals and
+  brackets); Up/Down move between numerator and denominator, superscript and
+  subscript, or root index and body, then to the nearest slot above or below;
+  Home/End go to the equation's ends. Typing inserts symbols; `^` and `_` open
+  scripts (`x_1^2` attaches both to `x`), `/` turns the preceding operand into a
+  numerator, and `\name` followed by a space becomes that command (`\frac`,
+  `\sqrt` and one-argument commands put the caret inside). Backspace/Delete
+  remove symbols, enter a structure first, and remove it once empty. Equation
+  ribbon structures and symbols insert at the caret with empty slots. Left at
+  the start or Right at the end leaves the equation beside it in the text;
+  Enter or Tab leaves to the right, and Escape keeps the equation selected.
+  Each edit is one undo step and rewrites the LaTeX source, normalizing script
+  arguments to braces. Caret slots come from one extra render with
+  layout-neutral `\lambdamark` slots (`vibe/Lambda_Pkg_Math.md` §3.3). Not yet
+  implemented: selecting a range inside an equation, linear-mode equations
+  (they keep the source pane), and editing inside matrices and other
+  environments, which act as single symbols.
 - Object Format appears when an image-backed object is selected. Its Arrange
   group is also available in Layout: nine page-margin positions, inline/square
   left or right/top and bottom/front/behind wrapping, layer order, six page-margin
@@ -290,6 +323,16 @@ applies to citation insertion and bibliography updates.
   validation, an existing-file prompt, and external-change detection. Unsaved
   changes guard New, Open, sample replacement, and window close. Export HTML,
   text, or paginated PDF; exports leave the editable checkpoint unchanged.
+- Print (Home ribbon or Cmd/Ctrl + P) opens a Chrome-style print page: a sheet
+  preview beside pages (all, odd, even, or a range), layout, paper size, pages
+  per sheet (1–16), margins, scale, headers and footers, and background colors.
+  Choices apply only to the printout. Lambda has no OS printer API, so the
+  destination is Save as PDF. The preview measures each block at the printed
+  width and breaks pages between blocks (keeping h1–h3 with what follows),
+  matching the paginated PDF for ordinary flow; multi-column documents preview
+  approximately. Default choices print the engine's own vector PDF. Ranges,
+  scaling, and n-up print the preview sheets, rasterized at 288 dpi because
+  Radiant's PDF writer does not yet apply CSS transforms or overflow clipping.
 
 | Shortcut | Action |
 | --- | --- |
@@ -298,6 +341,7 @@ applies to citation insertion and bibliography updates.
 | Cmd/Ctrl + Shift + Z, Cmd/Ctrl + Y | Redo |
 | Cmd/Ctrl + S / Shift + S | Save / Save as |
 | Cmd/Ctrl + F | Find |
+| Cmd/Ctrl + P | Print (Save as PDF) |
 | Cmd/Ctrl + K | Insert or edit a link |
 | Cmd/Ctrl + Enter | Page break |
 | Cmd/Ctrl + Alt + M | Comment on selected text |
@@ -360,8 +404,10 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 | `crates/engine/src/cmd/{table,table_style,insert,para}.rs` | Reused structural commands plus table presentation, embedded pictures, link editing, and paragraph settings in `mod_model.ls` |
 | `crates/engine/src/cmd/{page,review}.rs` | `mod_page.ls` document-owned paper settings and screen sheet grouping; `mod_review.ls` comment metadata with text-mark anchors |
 | `crates/engine/src/cmd/insert.rs` | `mod_insert.ls` pages, bookmarks, and Unicode symbols; `mod_shapes.ls` uses drawing contours and image transactions for embedded SVG shapes |
-| Secondary stories, math, WordArt, and text revisions | `mod_stories.ls`, `mod_equation.ls`, `mod_wordart.ls`, and `mod_changes.ls`; generated objects share `mod_objects.ls` |
+| Secondary stories, math, Word Art, and text revisions | `mod_stories.ls`, `mod_equation.ls`, `mod_wordart.ls`, and `mod_changes.ls`; generated objects share `mod_objects.ls` |
 | `crates/ui-egui/src/{ribbon,canvas}.rs` | `mod_ui.ls`, `mod_surface.ls`, `word.css`; native HTML/CSS layout and caret geometry |
+| Word's Home tab (beyond WordCraft) | `mod_home_ui.ls` ribbon groups and menus; `mod_home.ls` change case, Format Painter marks, paragraph borders, list styles, and sorting |
+| In-place equation editing (beyond WordCraft) | `mod_math_field.ls` LaTeX row/item tree, caret slots, edits and slot geometry; `mod_math_edit.ls` click, key, caret drawing and ribbon insertion |
 | `crates/engine/src/sample.rs` | Adapted studio handbook in `mod_document.ls` |
 | `crates/{docx,formats,pdf}` and `engine/src/io.rs` | Existing Lambda format adapters, conflict-aware `lambda.edit.session`, and Radiant PDF export through `mod_io.ls` |
 
@@ -396,13 +442,13 @@ paths. The paragraph schema marks page boundaries and cover roles
 `keep_on_split:false`, so Enter does not duplicate them (**D7.2.5**).
 Shapes store their parameters in an image's `data-word-shape` attribute;
 regenerating its SVG, dimensions, and metadata is one transaction (**S1.4**).
-Equations and WordArt follow the same image transaction, preserving editable
+Equations and Word Art follow the same image transaction, preserving editable
 parameters alongside the rendered SVG. Decorative glyph paths are shared with
 Photo through `lambda.doc.shapes` rather than copied.
 
 `mod_transform.ls` routes object gestures through those same transactions.
 Generated artwork is regenerated from its parameters, so resizing preserves
-shape/WordArt editability; a picture retains its original image source.
+shape/Word Art editability; a picture retains its original image source.
 `mod_handles.ls` projects selection chrome outside the editable surface and
 temporarily previews dimensions/rotation in the DOM. Pointer release commits
 once, while Escape, pointer cancellation, or lost capture restores the original
@@ -498,7 +544,7 @@ interpreter, auto, and JIT tiers; then replays typing/history/save,
 formatting/search/table, open/export/dirty-guard/focus, table-caret, scrolled-caret,
 table navigation/settings, pictures/links, paragraph/search, page setup, comments,
 cover/blank pages, bookmarks/internal links, symbols, repeated stories, equations,
-WordArt, shape settings, icons/emojis, SmartArt, charts, and tracked revisions
+Word Art, shape settings, icons/emojis, diagrams, charts, and tracked revisions
 in headless Radiant. It checks the result records and exported file contents,
 including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are

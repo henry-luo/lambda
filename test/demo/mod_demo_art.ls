@@ -462,6 +462,31 @@ fn mail(t) => canvas("mail", t, <g
         <rect x:30, y:60, width:56, height:38, rx:4, fill:PAPER, stroke:t.base, 'stroke-width':"1.5">;
         <path d:"M30 62 L58 84 L86 62", fill:"none", stroke:t.base, 'stroke-width':"2">>>)
 
+// a folded card swings open on its hinge (x = 160) and closes again; the cover's
+// front shows until it is edge-on, then its inside face takes over
+fn card_face(t: any, inside: any) => if (inside) <g
+        <rect x:160, y:30, width:92, height:124, rx:2, fill:"#fffaf3">;
+        <path d:"M206 86 C200 78 190 80 190 88 C190 96 206 104 206 104 C206 104 222 96 222 88 C222 80 212 78 206 86 Z", fill:t.soft>>
+    else <g
+        <rect x:160, y:30, width:92, height:124, rx:2, fill:t.pale, stroke:t.soft, 'stroke-width':"1">;
+        <path d:"M206 70 C198 58 182 62 182 74 C182 88 206 100 206 100 C206 100 230 88 230 74 C230 62 214 58 206 70 Z", fill:t.base>;
+        (text(206, 126, 13, t.deep, "Hello!", {'text-anchor':"middle", 'font-family':"'Snell Roundhand', cursive", 'font-weight':700}))>
+fn greetings(t) => canvas("greetings", t, <g
+    for (c in [[34, 40, 0], [286, 36, 1.2], [60, 150, 2.1], [270, 146, .6]]) <path d:"M0 -5 L1.4 -1.4 L5 0 L1.4 1.4 L0 5 L-1.4 1.4 L-5 0 L-1.4 -1.4 Z",
+        fill:t.soft, transform:"translate(" ++ pt(c[0], c[1]) ++ ")", (anim("opacity", "0;1;0", "2.6s", {begin:string(c[2]) ++ "s"}))>;
+    <ellipse cx:160, cy:160, rx:110, ry:6, fill:INK, opacity:".08">
+    // the closed card sits centred, and slides right as it opens so the spread is centred
+    <g (shift("-46 0;-46 0;0 0;0 0;-46 0", "5s", {keyTimes:"0;.3;.5;.85;1"}));
+    // the inside right page: a verse and a signature
+    <rect x:160, y:30, width:92, height:124, rx:2, fill:PAPER, stroke:FAINT, 'stroke-width':"1">;
+    for (i in 0 to 3) <rect x:172, y:56 + i * 12, width:if (i == 3) 44 else 68, height:4, rx:2, fill:PALE>;
+    <path d:"M176 122 C182 112 188 128 194 118 S206 114 212 122", fill:"none", stroke:t.base, 'stroke-width':"1.6", 'stroke-linecap':"round">;
+    <g transform:"translate(160 0)",
+        <g (grow("1 1;1 1;-1 1;-1 1;1 1", "5s", {keyTimes:"0;.3;.5;.85;1"}));
+            <g transform:"translate(-160 0)",
+                <g (anim("opacity", "1;0;1", "5s", {keyTimes:"0;.4;.925", calcMode:"discrete"})); (card_face(t, false))>
+                <g opacity:"0", (anim("opacity", "0;1;0", "5s", {keyTimes:"0;.4;.925", calcMode:"discrete"})); (card_face(t, true))>>>>>>)
+
 fn archive(t) => canvas("archive", t, <g
     <circle cx:58, cy:80, r:30, fill:"none", stroke:SOFT, 'stroke-width':"1.5">;
     <ellipse cx:58, cy:80, rx:13, ry:30, fill:"none", stroke:SOFT, 'stroke-width':"1.2">;
@@ -555,11 +580,11 @@ pub fn emblem() => <svg class:"emblem", viewBox:"0 0 320 320", 'aria-hidden':"tr
 let ARTS = {tetris: tetris, 'sentence-game': sentence_game, superlambda: superlambda, doom: doom,
     scene3d: scene3d, cityscape: cityscape, 'photo-album': photo_album, photo: photo, photos: photos,
     draw: draw, word: word, note: note, slides: slides, chart: chart,
-    finder: finder, mail: mail, music: music, archive: archive, readability: readability}
+    finder: finder, mail: mail, music: music, archive: archive, readability: readability, greetings: greetings}
 
 let TONE_OF = {tetris: "violet", 'sentence-game': "teal", superlambda: "sky", doom: "clay",
     scene3d: "blue", cityscape: "gold", 'photo-album': "rose", photo: "amber", photos: "cyan",
     draw: "sage", word: "blue", note: "gold", slides: "teal", chart: "indigo",
-    finder: "slate", mail: "cyan", music: "rose", archive: "amber", readability: "sage"}
+    finder: "slate", mail: "cyan", music: "rose", archive: "amber", readability: "sage", greetings: "rose"}
 
 pub fn of(key) => ARTS[key](TONES[TONE_OF[key]])

@@ -1,0 +1,13 @@
+{
+  "name": "SVG pattern tiles a fill from number-item geometry in a Lambda-built document",
+  "html": "test/lambda/ui/_svg_pattern_numeric_attrs.ls",
+  "viewport": {"width": 240, "height": 120},
+  "events": [
+    {"type": "assert_pixel", "x": 5, "y": 5, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 15, "y": 15, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 105, "y": 5, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 125, "y": 25, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 115, "y": 15, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 190, "y": 50, "min_r": 245, "min_g": 245, "min_b": 245}
+  ]
+}

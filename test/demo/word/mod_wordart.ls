@@ -39,6 +39,6 @@ pub fn transaction(editor,params,selected=null) map^ {
         not (p.width is number) or p.width<80 or p.width>650 or not (p.height is number) or p.height<40 or p.height>400 or
         not (p.size is number) or p.size<12 or p.size>120 or not colors.hex_color(p.fill) or not colors.hex_color(p.outline) or
         not (p.rotation is number) or p.rotation< -180 or p.rotation>180 or not (p.alt is string) or len(p.alt)>1000)
-        raise error("Word: enter 1–120 characters, valid dimensions and colors, and a supported WordArt style")
+        raise error("Word: enter 1–120 characters, valid dimensions and colors, and a supported Word Art style")
     else objects.transaction(editor,"data-word-wordart",p,graphic(p),p.width,p.height,if (p.alt=="") p.text else p.alt,selected)^
 }

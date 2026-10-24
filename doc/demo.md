@@ -21,6 +21,7 @@ its name:
 ./lambda demo chart
 ./lambda demo slides
 ./lambda demo archive
+./lambda demo greetings
 ./lambda demo --list
 ```
 

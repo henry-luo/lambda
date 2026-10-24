@@ -31,23 +31,20 @@ import views: .mod_view
 import navmodel: .mod_navigation
 import references: .mod_references
 import surface: .mod_surface
+import print: .mod_print
 import object_layout: .mod_object_layout
 import transform: .mod_transform
 import group_data: .mod_group_data
 import shape_format: .mod_shape_format
 import equation_ui: .mod_equation_ui
+import home: .mod_home
+import home_ui: .mod_home_ui
 
 pub let icon = icons.icon
 // retain an imported document's requested family even when it is not installed here.
 pub fn font_options(families,current) => [for (family in sort(unique([*(families or []),current]),(name)=>lower(name)))
     {value:family,label:family}]
-let font_sizes = [8,9,10,11,12,14,16,18,20,24,28,36,48,72]
-let emphasis = [{id:"bold",mark:'strong'},{id:"italic",mark:'em'},{id:"underline",mark:'u'},
-    {id:"strikethrough",icon:"strike",mark:'del'},{id:"subscript",mark:'sub'},{id:"superscript",mark:'sup'}]
-let alignments = [{id:"para.alignLeft",icon:"align_left",value:"left"},{id:"para.alignCenter",icon:"align_center",value:"center"},
-    {id:"para.alignRight",icon:"align_right",value:"right"},{id:"para.justify",icon:"justify",value:"justify"}]
-let text_colors = [{value:"#24334b",label:"Ink"},{value:"#2864ad",label:"Blue"},
-    {value:"#b43d47",label:"Red"},{value:"#28745d",label:"Green"}]
+let text_colors = take(home.font_colors,4)
 
 // choose one word boundary; intrinsic button width keeps both lines fully visible.
 fn ribbon_label(label) {
@@ -115,11 +112,12 @@ fn editing_menu(st) {
     context.frame("word-context-menu","word",
         <div id:"word-context-menu",class:"context-menu" ++ (if (layout_menu=="margins") " margins-menu" else
             if (starts_with(layout_menu or "","equation-") and not contains(["equation-convert","equation-justify"],layout_menu)) " equation-gallery-menu" else ""),role:"menu",
-            ["aria-label"]:if (finding) "Find" else if (borders) "Borders" else if (layout_menu=="columns") "Columns" else if (layout_menu=="margins") "Margins"
+            ["aria-label"]:if (starts_with(layout_menu or "","home-")) "Home formatting" else if (finding) "Find" else if (borders) "Borders" else if (layout_menu=="columns") "Columns" else if (layout_menu=="margins") "Margins"
                 else if (starts_with(layout_menu or "","equation-")) "Equation gallery"
                 else if (starts_with(layout_menu or "","shape-")) "Shape formatting" else if (starts_with(layout_menu or "","object-")) "Arrange object" else "Select",
             style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
-            if (starts_with(layout_menu or "","equation-")) equation_ui.menu(st,equation_widgets())
+            if (starts_with(layout_menu or "","home-")) home_ui.menu(st,home_widgets())
+            else if (starts_with(layout_menu or "","equation-")) equation_ui.menu(st,equation_widgets())
             else if (starts_with(layout_menu or "","shape-")) shape_menu(st)
             else if (starts_with(layout_menu or "","object-")) object_menu(st)
             else if (layout_menu=="margins") <div
@@ -147,7 +145,7 @@ fn editing_menu(st) {
             else if (borders) <div *[for (preset in tables.border_presets)
                 menu_item("border-" ++ preset,"table.borders",{all:"All Borders",outside:"Outside Borders",inside:"Inside Borders",
                     top:"Top Border",bottom:"Bottom Border",left:"Left Border",right:"Right Border",none:"No Borders"}[preset],
-                    if (preset=="none") "border_none" else if (preset=="outside") "border_outer" else "border_all",no_table,null,{*:st.table_pen,preset:preset})]>
+                    "border_" ++ preset,no_table,null,{*:st.table_pen,preset:preset})]>
             else if (finding) <div
                 menu_item("find","ui.find","Find…","search",false,"⌘F");
                 menu_item("find-next","edit.findNext","Find next","down",no_hits);
@@ -269,7 +267,7 @@ fn shape_format_ribbon(editor,read_only,opened,picks,draft) {
                 menu_button("shape-fill-menu","Shape Fill","shape_fill","shape-fill",opened,"",disabled)
                 menu_button("shape-outline-menu","Shape Outline","shape_outline","shape-outline",opened,"",disabled)
                 menu_button("shape-effects-menu","Shape Effects","shape_effects","shape-effects",opened,"",disabled)>>]) else null
-        group("WordArt Styles",[<div class:"ribbon-command-row",
+        group("Word Art Styles",[<div class:"ribbon-command-row",
             <div class:"shape-text-gallery",*[for (s in (if (is_shape) ["solid","outlined","hollow","shadowed"] else wordart.styles))
                 button("shape-text-style-" ++ s,"shape.format",s ++ " text",wordart.graphic({*:wordart.defaults,text:"A",width:44,height:44,size:32,style:s},"ribbon-art-" ++ s ++ "-"),
                     {values:{[if (is_shape) "text_style" else "style"]:s}},(if (is_shape) p.text_style else p.style)==s,disabled,"shape-text-card")]>
@@ -295,9 +293,9 @@ pub fn shape_pane(st) {
     let draft = shape_format.draft_values(st.editor,st.shape_draft)
     let is_shape = item.kind=="shape";
     <aside id:"shape-format-pane",class:"selection-pane shape-format-pane",["aria-label"]:"Format Shape",
-        <div class:"navigation-heading",<strong class:"pane-heading",if (item.kind=="wordart") "Format WordArt" else "Format Shape">
+        <div class:"navigation-heading",<strong class:"pane-heading",if (item.kind=="wordart") "Format Word Art" else "Format Shape">
             button("close-shape-pane","ui.shapePane","Close Format Pane","close",{},false,false,"icon-only")>;
-        if (item==null) <p class:"pane-hint","Select a shape or WordArt to format it."> else <div
+        if (item==null) <p class:"pane-hint","Select a shape or Word Art to format it."> else <div
             <h3 "Fill & Line">;
             <div class:"shape-pane-grid",
                 shape_field("shape-pane-fill",if (is_shape) "Fill (hex or none)" else "Fill (hex)",p.fill,"fill",disabled,draft)
@@ -374,7 +372,7 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
             menu_item("select-all","clipboard.selectAll","Select All","select_all",false,"⌘A");
             if (not item.text) null else <div class:"context-text",
             <div class:"context-rule",role:"separator">
-            <div class:"context-format",*[for (entry in take(emphasis,3))
+            <div class:"context-format",*[for (entry in take(home_ui.emphasis,3))
                 button("context-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
                     entry.id,{},edit_mark_active(st.editor,entry.mark),disabled,"context-item icon-only")]>
             menu_item("paragraph","ui.paragraph","Paragraph…","settings",disabled);
@@ -463,11 +461,7 @@ fn table_design_ribbon(editor,read_only,opened_menu,pen) {
         group("Borders",[menu_button("table-borders-menu","Borders","border_all","borders",opened_menu,"",read_only),
             button("cell-borders","ui.cellBorders","Borders…","settings",{},false,read_only)])>
 }
-fn font_step(editor,grow) {
-    let size = float(replace(model.char_value(editor,"font-size","11pt"),"pt",""))
-    let choices = [for (s in font_sizes where if (grow) s>size else s<size) s];
-    if (grow) choices[0] or font_sizes[last] else choices[last] or font_sizes[0]
-}
+fn font_step(editor,grow) => home.font_step(home_ui.font_size(editor),grow)
 
 pub fn selection_toolbar(st) => if (not mini.visible(st)) null else {
     let editor = st.editor
@@ -476,19 +470,19 @@ pub fn selection_toolbar(st) => if (not mini.visible(st)) null else {
         <div class:"mini-row",
             selector("mini-font-family","format.font",font_options(st.fonts,model.char_value(editor,"font-family","Georgia")),
                 model.char_value(editor,"font-family","Georgia"),"font-family","name");
-            selector("mini-font-size","format.size",[for (s in font_sizes) {value:s,label:string(s)}],
+            selector("mini-font-size","format.size",[for (s in home.font_sizes) {value:s,label:string(s)}],
                 replace(model.char_value(editor,"font-size","11pt"),"pt",""),"font-size","size");
             button("mini-grow","format.size","Grow font","plus",{size:font_step(editor,true)},false,false,"icon-only");
             button("mini-shrink","format.size","Shrink font","minus",{size:font_step(editor,false)},false,false,"icon-only");
             button("mini-clear","format.clear","Clear formatting","clear",{},false,false,"icon-only")>,
         <div class:"mini-row",
-            *[for (entry in take(emphasis,4)) button("mini-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
+            *[for (entry in take(home_ui.emphasis,4)) button("mini-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
                 entry.icon or entry.id,{},edit_mark_active(editor,entry.mark),false,"icon-only")];
             <span class:"mini-divider">;
             button("mini-highlight","format.highlight","Highlight","highlight",{color:"#f9e896"},false,false,"icon-only");
             selector("mini-color","format.color",text_colors,model.char_value(editor,"color","#24334b"),"mini-color","color");
             <span class:"mini-divider">;
-            *[for (choice in alignments) button("mini-" ++ choice.icon,choice.id,model.spec(choice.id).label,
+            *[for (choice in home_ui.alignments) button("mini-" ++ choice.icon,choice.id,model.spec(choice.id).label,
                 choice.icon,{},align==choice.value,false,"icon-only")]>])
 }
 
@@ -496,49 +490,11 @@ pub fn view_buttons(layout,read_only,status=false) => [for (choice in views.mode
     button(if (status) "status-view-" ++ choice.id else choice.ribbon,choice.command,choice.label,choice.icon,
         if (status) {enabled:true} else {},views.active(layout,read_only)==choice.id,false,if (status) "icon-only" else "ribbon-large")]
 fn equation_widgets() => {button:button,menu:menu_button,group:group,menu_item:menu_item}
+fn home_widgets() => {*:equation_widgets(),selector:selector,mark_button:mark_button,font_options:font_options}
 pub fn equation_pane(st) => equation_ui.pane(st,equation_widgets())
 
-pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_families=[],layout="print",focused=false,table_pen=table_design.pen,table_gridlines=false,object_picks=[],shape_draft=null,show_ribbon_group_labels=false) {
-    let block = model.current_block(editor)
-    let style = attrs_get(block.node.attrs,'data-word-style') or "Normal"
-    let align = model.css_get(attrs_get(block.node.attrs,'style'),"text-align") or "left";
-    if (tab == "Home") <div class:"ribbon-groups",
-        group("History",[command("edit.undo","Undo","undo",{},false,not edit_can_undo(editor)),
-            command("edit.redo","Redo","redo",{},false,not edit_can_redo(editor))])
-        group("Font",[
-            <div class:"font-selects",
-                selector("font-family","format.font",font_options(font_families,model.char_value(editor,"font-family","Georgia")),
-                    model.char_value(editor,"font-family","Georgia"),"font-family","name")
-                selector("font-size","format.size",[for (s in font_sizes) {value:s,label:string(s)}],
-                    replace(model.char_value(editor,"font-size","11pt"),"pt",""),"font-size","size")>,
-            <div class:"font-tools",
-                *[for (entry in emphasis) mark_button(editor,"format." ++ entry.id,entry.icon or entry.id)];
-                command("format.highlight","Highlight","highlight",{color:"#f9e896"}); command("format.clear","Clear","clear")>,
-            <div class:"palette", <span "Text color">;
-                *[for (color in text_colors)
-                    apply(<word_button command:"format.color",params:{color:color.value},label:"Text color " ++ color.value,
-                        icon:"circle",class:"swatch swatch-" ++ slice(color.value,1)>) ]>])
-        group("Paragraph",[
-            <div class:"paragraph-tools",
-                command("para.bullets","Bullets","bullets"); command("para.numbering","Numbering","numbering")
-                command("para.outdent","Outdent","outdent"); command("para.indent","Indent","indent")>,
-            <div class:"alignment-tools",
-                *[for (choice in alignments)
-                    command(choice.id,null,choice.icon,{},align==choice.value)]>,
-            <div class:"paragraph-settings-row",
-                selector("line-spacing","para.lineSpacing",[for (s in [1,1.15,1.5,2]) {value:s,label:string(s) ++ " lines"}],
-                    model.css_get(attrs_get(block.node.attrs,'style'),"line-height") or "1.5","spacing")
-                button("paragraph-settings","ui.paragraph","Paragraph…","expand",{},false,read_only,"paragraph-dialog")>])
-        group("Styles",[<div class:"style-gallery",
-            *[for (s in take(document.styles,4)) button("style-" ++ s.id,"para.style",s.label,null,{style:s.id},s.id==style,false,"style-card style-" ++ s.id)]>,
-            selector("paragraph-style","para.style",[for (s in document.styles) {value:s.id,label:s.label}],style,"style-selector","style")])
-        group("Editing",[
-            <div class:"find-split",
-                button("ribbon-find","ui.find","Find","search");
-                menu_button("ribbon-find-menu","Find options",null,"find",opened_menu,"icon-only")>,
-            button("ribbon-replace","ui.replace","Replace","replace",{},false,read_only),
-            menu_button("ribbon-select","Select","pointer","select",opened_menu)])
-    >
+pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_families=[],layout="print",focused=false,table_pen=table_design.pen,table_gridlines=false,object_picks=[],shape_draft=null,show_ribbon_group_labels=false,home_state=home.defaults) {
+    if (tab == "Home") home_ui.ribbon(editor,read_only,opened_menu,font_families,home_state,home_widgets())
     else if (tab == "Insert") <div class:"ribbon-groups insert-ribbon",
         group("Pages",[<div class:"ribbon-command-row",
             large("insert-cover","ui.cover","Cover Page","cover",{},false,read_only);
@@ -551,7 +507,7 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_f
                 large("insert-picture","ui.picture","Pictures","album",{},false,read_only)
                 large("insert-shape","ui.shape","Shapes","shapes",{},false,read_only)
                 large("insert-icons","ui.icon","Icons","emoji",{},false,read_only,"Icons / Emojis")
-                large("insert-smartart","ui.smartArt","SmartArt","smartart",{},false,read_only)
+                large("insert-smartart","ui.smartArt","Diagram","smartart",{},false,read_only)
                 large("insert-chart","ui.chart","Chart","chart",{},false,read_only)>,
             <div class:"ribbon-secondary-row",
                 button("picture-settings","ui.pictureSettings","Picture Settings","settings",{},false,read_only or model.current_node(editor,'img')==null)
@@ -569,7 +525,7 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_f
             large("insert-footer","ui.headerFooter","Footer","footer",{},false,read_only)
             large("insert-page-number","ui.pageNumber","Page Number","page_number",{},false,read_only)>])
         group("Text",[<div class:"ribbon-command-row",
-            large("insert-wordart","ui.wordArt","WordArt","wordart",{},false,read_only)
+            large("insert-wordart","ui.wordArt","Word Art","wordart",{},false,read_only)
             large("object-settings","ui.objectSettings","Edit Object","settings",{},false,read_only or
                 graphics.descriptor(model.current_node(editor,'img').node)==null)>])
         group("Symbols",[<div class:"ribbon-command-row",
@@ -793,7 +749,53 @@ fn sources_dialog(d:map,editor:map,read_only:bool) {
         [files.dialog_button("cancel","Close",false)])
 }
 
+// Chrome-style print page: measured sheet preview beside per-print settings that never edit the document.
+fn print_select(id,label,options,key,value) => <label class:"dialog-field",<span label>
+    apply(<control.select id:id,class:"edit-dialog-field",label:label,options:options,value:string(value),
+        on_change:{action:"ui.printSetting",param:"value",params:{key:key}}>)>
+fn print_input(id,label,placeholder,key,value) => <label class:"dialog-field print-detail",<span label>
+    apply(<control.input id:id,class:"edit-dialog-field",type:"text",label:label,placeholder:placeholder,value:value,
+        on_change:{action:"ui.printSetting",param:"value",params:{key:key}}>)>
+fn print_option(id,label,key,checked) => apply(<control.checkbox id:id,class:"table-style-option",label:label,checked:checked,
+    on_change:{action:"ui.printSetting",param:"value",params:{key:key}},label>)
+fn print_dialog(d:map,editor:map) {
+    let v = d.values
+    let printed = print.document(editor.doc,v) ^ { editor.doc }
+    let total = len(print.pages(printed,d.starts))
+    // an unfinished custom range previews every page until it parses.
+    let range_ok = print.page_numbers(v,total)!=null
+    let shown = if (range_ok) v else {*:v,pages:"all"}
+    let sheets = print.sheets(printed,shown,d.starts) ^ { [] }
+    let lay = print.layout(printed,v)
+    let width = if (lay.width>lay.height) 440 else 320;
+    files.dialog_frame("print","Print","",[<div class:"print-layout",
+        <div class:"print-preview" ++ (if (v.backgrounds) "" else " print-plain"),role:"region",["aria-label"]:"Print preview",
+            *[for (sheet in sheets) surface.print_sheet(printed,sheet,lay,total,width,print.scale(v))]
+            surface.print_measure(printed,print.scale(v))>
+        <div class:"print-settings",
+            <div class:"print-heading",<span class:"print-title","Print">
+                <span class:"print-summary",string(len(sheets)) ++ (if (len(sheets)==1) " sheet" else " sheets") ++ " of paper">>
+            <div class:"print-options",
+                if (d.error==null) null else <p id:"dialog-error",role:"alert",d.error>;
+                print_select("print-destination","Destination",print.destinations,"destination",v.destination)
+                print_select("print-pages","Pages",print.page_choices,"pages",v.pages)
+                if (v.pages!="custom") null else print_input("print-range","Page range","e.g. 1-5, 8","range",v.range);
+                if (range_ok or v.range=="") null else <p class:"print-hint",role:"status",print.range_message(total)>;
+                print_select("print-orientation","Layout",[{value:"portrait",label:"Portrait"},{value:"landscape",label:"Landscape"}],"orientation",v.orientation)
+                print_select("print-paper","Paper size",[for (p in page.papers) {value:p.id,label:p.id}],"paper",v.paper)
+                print_select("print-per-sheet","Pages per sheet",print.per_sheet_choices,"per_sheet",v.per_sheet)
+                print_select("print-margins","Margins",print.margin_choices,"margins",v.margins)
+                print_select("print-scale-mode","Scale",print.scale_choices,"scale_mode",v.scale_mode)
+                if (v.scale_mode!="custom") null else print_input("print-scale","Scale (%)","10–200","scale",v.scale);
+                <div class:"print-group-label","Options">
+                print_option("print-headers","Headers and footers","headers",v.headers)
+                print_option("print-backgrounds","Background colors","backgrounds",v.backgrounds)
+                dialog_field("print-path","Save to",v.path)>
+            <div class:"print-actions",files.dialog_button("cancel","Cancel",false) files.dialog_button("print","Save",true)>>>],[])
+}
+
 pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (dialog == null) null
+    else if (dialog.kind=="print") print_dialog(dialog,editor)
     else if (dialog.kind=="object_layout") form_dialog(dialog,"Object layout","Floating positions are measured from the object's paragraph. Objects move with their text.",[
         dialog_select("object-wrap","Text wrapping",[for (w in object_layout.wraps) {value:w.id,label:w.label}],dialog.values.wrap),
         <div class:"dialog-grid",
@@ -905,8 +907,8 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
         <div class:"dialog-grid",dialog_field("equation-size","Size (px)",dialog.values.size,true,10,72)
             dialog_field("equation-color","Color",dialog.values.color)>,
         dialog_select("equation-display","Typesetting",[{value:"true",label:"Display math"},{value:"false",label:"Inline math"}],dialog.values.display)],"equation",if (dialog.editing) "Apply" else "Insert equation")
-    else if (dialog.kind == "wordart") form_dialog(dialog,if (dialog.editing) "Edit WordArt" else "Insert WordArt",
-        "Choose text effects and a transform. Double-click the inserted WordArt to edit its text or appearance.",[
+    else if (dialog.kind == "wordart") form_dialog(dialog,if (dialog.editing) "Edit Word Art" else "Insert Word Art",
+        "Choose text effects and a transform. Double-click the inserted Word Art to edit its text or appearance.",[
         <div class:"art-gallery",*[for (s in wordart.styles) button("art-choice-" ++ s,"ui.chooseArt",s,
             wordart.graphic({*:wordart.defaults,text:"Abc",width:88,height:36,size:24,style:s},"dialog-art-" ++ s ++ "-"),{style:s},s==dialog.values.style,false,"art-choice")]>,
         dialog_field("art-text","Text",dialog.values.text),
@@ -919,7 +921,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
             dialog_field("art-height","Height (px)",dialog.values.height,true,40,400)
             dialog_field("art-rotation","Rotation (degrees)",dialog.values.rotation,true,-180,180)
             dialog_field("art-fill","Text color",dialog.values.fill)
-            dialog_field("art-outline","Outline / gradient color",dialog.values.outline)>],"wordart",if (dialog.editing) "Apply" else "Insert WordArt")
+            dialog_field("art-outline","Outline / gradient color",dialog.values.outline)>],"wordart",if (dialog.editing) "Apply" else "Insert Word Art")
     else if (dialog.kind=="tracking") form_dialog(dialog,"Track text changes",
         "Tracks text-only paragraphs and table cells. Insertions are underlined; deletions stay struck out until accepted. Character formatting is not tracked. Turn tracking off for structural edits, links, and embedded objects.",[
         dialog_field("tracking-author","Author",dialog.values.author),
@@ -934,7 +936,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
     else if (dialog.kind == "paragraph") form_dialog(dialog,"Paragraph settings","Apply spacing and indentation to the selected paragraphs.",[
         <div class:"dialog-grid",
             dialog_select("paragraph-align","Alignment",[for (v in ["left","center","right","justify"]) {value:v,label:v}],dialog.values.align)
-            dialog_select("paragraph-lines","Line spacing",[for (v in [1,1.15,1.5,2]) {value:v,label:string(v) ++ " lines"}],dialog.values.lines)
+            dialog_select("paragraph-lines","Line spacing",[for (v in home.line_spacings) {value:v,label:string(v) ++ " lines"}],dialog.values.lines)
             dialog_field("paragraph-before","Space before (pt)",dialog.values.before,true,0,200)
             dialog_field("paragraph-after","Space after (pt)",dialog.values.after,true,0,200)
             dialog_field("paragraph-indent","Left indent (pt)",dialog.values.indent,true,0,200)

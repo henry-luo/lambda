@@ -1,5 +1,5 @@
 {
-  "name": "Native fonts populate ribbon, floating toolbar and WordArt and apply installed families",
+  "name": "Native fonts populate ribbon, floating toolbar and Word Art and apply installed families",
   "html": "test/demo/word/word.ls",
   "viewport": {
     "width": 1440,

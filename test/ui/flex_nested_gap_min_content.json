@@ -1,0 +1,9 @@
+{
+  "name": "A nested nowrap row's gaps count in its flex automatic minimum",
+  "html": "test/ui/flex_nested_gap_min_content.html",
+  "viewport": {"width": 520, "height": 100},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#acts"}, "x": 128, "width": 372},
+    {"type": "assert_rect", "target": {"selector": "#a"}, "x": 128, "width": 120}
+  ]
+}

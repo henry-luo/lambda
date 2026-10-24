@@ -1,0 +1,12 @@
+/* Card pages: shared by the studio, the gallery, the preview and every exported file.
+   Positions and sizes are inline, already scaled by mod_render.ls. */
+.card-page { position: relative; overflow: hidden; flex: none; box-sizing: border-box; }
+.page-layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+.item { position: absolute; box-sizing: border-box; }
+.item.text { white-space: pre-wrap; overflow-wrap: break-word; }
+.art-wrap { width: 100%; height: 100%; }
+.art-wrap.flip { transform: scaleX(-1); }
+.art-svg { display: block; width: 100%; height: 100%; }
+.photo-frame { width: 100%; height: 100%; box-sizing: border-box; overflow: hidden; }
+.photo-clip { width: 100%; height: 100%; overflow: hidden; border-radius: inherit; }
+.photo-img { width: 100%; height: 100%; background-position: center; background-size: cover; background-repeat: no-repeat; }
