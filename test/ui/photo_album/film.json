@@ -15,7 +15,7 @@
     {"type": "assert_text", "target": {"selector": "#film-length"}, "equals": "1:04"},
     {"type": "assert_attribute", "target": {"selector": "#album-film"}, "attribute": "data-slide-duration", "equals": "64000"},
     {"type": "assert_attribute", "target": {"selector": "#album-film"}, "attribute": "data-slide-toolbar", "equals": "false"},
-    {"type": "assert_script", "js": "document.querySelector('#album-film .slide-toolbar-toggle')===null && getComputedStyle(document.querySelector('#album-film .slide-controls')).display==='none'"},
+    {"type": "assert_script", "js": "document.querySelector('#album-film .slide-toolbar-hide')===null && document.querySelector('#album-film .slide-toolbar-reveal')===null && getComputedStyle(document.querySelector('#album-film .slide-controls')).display==='none'"},
     {"type": "assert_script", "js": "[...document.querySelectorAll('[data-film-chapter]')].map(b=>b.getAttribute('data-film-seek')).join(',')==='3000,25000,47000'"},
     {"type": "assert_attribute", "target": {"selector": "#film"}, "attribute": "data-playing", "equals": "true"},
     {"type": "assert_attribute", "target": {"selector": "#film"}, "attribute": "data-sound", "equals": "playing"},

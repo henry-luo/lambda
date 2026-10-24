@@ -6,14 +6,22 @@ commands, ribbon, and dialogs are Lambda; Radiant supplies layout, painting,
 input, clipboard transport, and selection geometry. No Rust binary, WASM,
 JavaScript editor, or browser is required.
 
-Run from the repository root:
+Run from the main checkout root (see [worktree build guidance](../../../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas) for linked worktrees):
 
 ```sh
-make build
+make release
 ./lambda.exe demo word
 # Or open the entry script directly:
 ./lambda.exe view test/demo/word/word.ls
 ```
+
+Use the release build for interactive typing. `make build` creates a debug
+executable with detailed layout logging; it is useful for debugging, but its
+input latency does not represent normal interactive performance. To measure
+individual physical keystrokes and native repainting, run
+`python3 test/demo/word/benchmark_typing.py --paint` after the release build.
+The benchmark checks the resulting text and writes timings under
+`temp/word/performance/`.
 
 The studio handbook is editable. Start a blank document with **New**, or return
 to the example with **Studio example**. Select text to format it; formatting

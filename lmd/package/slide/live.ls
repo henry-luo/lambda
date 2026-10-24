@@ -20,6 +20,13 @@ fn event_owner(target, options) {
     if (owner != null and dom.get_attribute(owner, "id") == instance(options)) owner else null
 }
 
+// down arrow at the bar's bottom-right; once hidden, the .slide-toolbar-reveal hot corner brings it back
+fn hide_button() => <button class: "slide-toolbar-hide", type: "button", ["data-slide-tool"]: "toolbar",
+    ["aria-label"]: "Hide toolbar (H)", title: "Hide toolbar (H)",
+    <svg width: "14", height: "14", viewBox: "0 0 14 14", ["aria-hidden"]: "true",
+        <path d: "M3 5 L7 9 L11 5", fill: "none", stroke: "currentColor", ["stroke-width"]: "2",
+            ["stroke-linecap"]: "round", ["stroke-linejoin"]: "round">>>
+
 fn tree(plan, options) {
     let key = instance(options)
     let controls = has_controls(options);
@@ -34,7 +41,7 @@ fn tree(plan, options) {
                 <div class: "slide-blackout", ["data-slide-tool"]: "blackout", ["aria-hidden"]: "true">,
                 <div class: "slide-pointer", ["aria-hidden"]: "true">,
                 presenter.overview_tree(plan)]>, presenter.console_tree(key)]>,
-        *(if (controls) [<button class: "slide-toolbar-toggle", type: "button", ["data-slide-tool"]: "toolbar", ["aria-label"]: "Toggle toolbar (H)", "Toolbar">] else []),
+        *(if (controls) [<div class: "slide-toolbar-reveal", ["aria-hidden"]: "true">] else []),
         // without controls the bar stays mounted but hidden: status and speed writes still find it
         <div class: "slide-controls", *:(if (controls) {} else {style: "display:none;", inert: "", ["aria-hidden"]: "true"}),
             *[<button type: "button", ["data-slide-command"]: "previous", "Previous">,
@@ -50,7 +57,8 @@ fn tree(plan, options) {
                 <span class: "slide-speed-value", "1×">
             >,
             <span class: "slide-status", ["aria-live"]: "polite", "1 / " ++ string(len(plan.slides))>,
-            *presenter.toolbar(plan, key)]
+            *presenter.toolbar(plan, key),
+            *(if (controls) [hide_button()] else [])]
         >]
     >
 }
@@ -313,6 +321,11 @@ pn tool_event(owner, plan, ps, tools, command, now_ms, options, clock_token) {
 // one session value publishes playback and presenter state together after each action.
 pn action(owner, plan, session, command, value, now_ms, options) {
     if (command == "toolbar" and not has_controls(options)) { return session }
+    if (command == "fullscreen") {
+        // the viewer owns full screen; windowfullscreenchange relabels the button (sync_fullscreen)
+        if (has_controls(options)) { dom.set_window_fullscreen(owner, not dom.window_fullscreen(owner)) }
+        return session
+    }
     if (contains(["console", "overview", "toolbar", "blackout", "pointer", "escape", "timer-toggle", "timer-reset"], command)) {
         let changed = tool_event(owner, plan, session.ps, session.tools, command, now_ms, options, session.clock_token)^;
         return {*: session, tools: changed.tools, clock_token: changed.token}
@@ -335,11 +348,12 @@ pn action(owner, plan, session, command, value, now_ms, options) {
     }
     let next = commit_event(owner, plan, session.ps, event, options, session.token, session.painted, tools)
     if (command == "go") dom.focus_set(owner, false)
-    return {*: next, tools: tools, clock_token: clock_token}
+    // keep session fields commit_event does not own (the hot corner's arming)
+    return {*: session, *: next, tools: tools, clock_token: clock_token}
 }
 
 view <slide_player> state session: {ps: player.initial_state(~.plan, ~.options), token: 0, painted: null,
-    tools: {*: presenter.initial_state(), toolbar: has_controls(~.options)}, clock_token: 0} {
+    tools: {*: presenter.initial_state(), toolbar: has_controls(~.options)}, clock_token: 0, reveal_armed: true} {
     ~.rendered
 }
 on slide_fit(evt) {
@@ -400,6 +414,8 @@ on click(evt) {
     let value = if (tool != null and dom.has_attribute(tool, "data-slide-destination")) dom.get_attribute(tool, "data-slide-destination")
         else dom.get_state(dom.query_selector(owner, ".slide-picker"), "value")
     session = action(owner, ~.plan, session, command, value, evt.time_stamp, ~.options)^
+    // the hide arrow sits inside the hot corner: the corner arms once the pointer has left it
+    if (tool != null and dom.matches(tool, ".slide-toolbar-hide")) { session = {*: session, reveal_armed: false} }
     return 'handled'
 }
 on keydown(evt) {
@@ -411,14 +427,20 @@ on keydown(evt) {
     }
     let tool = if (lower(evt.key) == "p") "console" else if (lower(evt.key) == "o") "overview"
         else if (lower(evt.key) == "h") "toolbar" else if (lower(evt.key) == "b" or evt.key == ".") "blackout"
-        else if (lower(evt.key) == "l") "pointer" else if (evt.key == "Escape") "escape" else null
+        else if (lower(evt.key) == "l") "pointer" else if (lower(evt.key) == "f") "fullscreen"
+        else if (evt.key == "Escape") "escape" else null
     let editing = dom.closest(evt.target, "input, select, textarea, [contenteditable]") != null
+    // with nothing to clear, Escape belongs to the viewer: it leaves full screen or closes the window
+    if (tool == "escape" and not (session.tools.overview or session.tools.blackout or session.tools.pointer)) { return 'pass' }
     if (tool != null and (not editing or evt.key == "Escape")) {
         session = action(owner, ~.plan, session, tool, null, evt.time_stamp, ~.options)^
         return 'prevent-default'
     }
-    if (not dom.same_node(evt.target, owner)) { return 'pass' }
-    let cmd = if (evt.key == "ArrowRight" or evt.key == " " or evt.key == "PageDown") "next"
+    // a clicked control keeps focus, so its buttons navigate too; inputs and the speed slider
+    // keep their own arrows, and Space on a button stays that button's activation
+    let on_root = dom.same_node(evt.target, owner)
+    if (editing or not (on_root or dom.matches(evt.target, "button"))) { return 'pass' }
+    let cmd = if (evt.key == "ArrowRight" or (on_root and evt.key == " ") or evt.key == "PageDown") "next"
         else if (evt.key == "ArrowLeft" or evt.key == "PageUp") "previous"
         else if (evt.key == "Home") "home" else if (evt.key == "End") "end" else null
     if (cmd == null) { return 'pass' }
@@ -430,6 +452,19 @@ on mousemove(evt) {
     let owner = event_owner(evt.target, ~.options)
     if (owner == null) { return 'pass' }
     track_pointer(owner, evt)^
+    return 'handled'
+}
+// the bottom-right hot corner (shown only while the toolbar is hidden) brings the toolbar back
+on mouseover(evt) {
+    if (session.tools.toolbar) { return 'pass' }
+    if (not dom.matches(evt.target, ".slide-toolbar-reveal")) {
+        if (not session.reveal_armed) { session = {*: session, reveal_armed: true} }
+        return 'pass'
+    }
+    if (not session.reveal_armed) { return 'pass' }
+    let owner = event_owner(evt.target, ~.options)
+    if (owner == null) { return 'pass' }
+    session = action(owner, ~.plan, session, "toolbar", null, evt.time_stamp, ~.options)^
     return 'handled'
 }
 on mouseout(evt) {
@@ -456,6 +491,7 @@ view <slide_document> {
 }
 on load(evt) {
     fit_document(evt.target, ~.plan, ~.options)
+    sync_fullscreen(dom.get_element_by_id(evt.target, instance(~.options)))
     if (c.value(~.options.autostart, false)) {
         let owner = dom.get_element_by_id(evt.target, instance(~.options))
         if (owner != null) dom.request_frame(owner, "slide_activate")
@@ -465,6 +501,23 @@ on load(evt) {
 on resize(evt) {
     fit_document(evt.target, ~.plan, ~.options, true)
     return 'handled'
+}
+on windowfullscreenchange(evt) {
+    sync_fullscreen(dom.get_element_by_id(evt.target, instance(~.options)))
+    return 'pass'
+}
+
+// The full-screen button shows only when the player's window can go full screen (not in an
+// embed or a headless run), and names the action it will take.
+pn sync_fullscreen(owner) {
+    let button = if (owner == null) null else dom.query_selector(owner, "button[data-slide-tool=fullscreen]")
+    if (button == null) { return null }
+    let on = dom.window_fullscreen(owner)
+    dom.set_attribute(owner, "data-slide-fullscreen", string(on))
+    dom.set_attribute(button, "aria-pressed", string(on))
+    set_text(button, if (on) "Exit full screen" else "Full screen")
+    if (dom.window_fullscreen_enabled(owner)) { dom.remove_attribute(button, "hidden") }
+    else { dom.set_attribute(button, "hidden", "") }
 }
 
 pn fit_document(target, plan, options, after_layout = false) {

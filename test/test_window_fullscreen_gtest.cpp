@@ -202,9 +202,23 @@ TEST(WindowFullscreenKeys, ToggleRepeatAndEscapeUseOneHostGate) {
     EXPECT_FALSE(ui.fullscreen.requested);
     ui.fullscreen.actual = ui.fullscreen.requested = true;
     event.key.key = RDT_KEY_ESCAPE;
-    EXPECT_TRUE(radiant_window_fullscreen_key(&ui, &event));
+    // a fresh Escape press reaches the document first
+    EXPECT_FALSE(radiant_window_fullscreen_key(&ui, &event));
+    EXPECT_TRUE(ui.fullscreen.requested);
+    // a document that prevents it (a deck clearing its blackout) keeps fullscreen
+    radiant_window_escape_default(&ui, true);
+    EXPECT_TRUE(ui.fullscreen.requested);
+    EXPECT_TRUE(ui.fullscreen.escape_page_consumed);
+    event.type = RDT_EVENT_KEY_UP;
+    EXPECT_FALSE(radiant_window_fullscreen_key(&ui, &event));
+    event.type = RDT_EVENT_KEY_DOWN;
+    // the next, unprevented press leaves fullscreen
+    EXPECT_FALSE(radiant_window_fullscreen_key(&ui, &event));
+    EXPECT_FALSE(ui.fullscreen.escape_page_consumed);
+    radiant_window_escape_default(&ui, false);
     EXPECT_FALSE(ui.fullscreen.requested);
     ui.fullscreen.actual = false;
+    // auto-repeat and release of the press that left fullscreen stay with the host
     EXPECT_TRUE(radiant_window_fullscreen_key(&ui, &event));
     event.type = RDT_EVENT_KEY_UP;
     EXPECT_TRUE(radiant_window_fullscreen_key(&ui, &event));

@@ -50,6 +50,13 @@
       "count": 1
     },
     {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dashboard-gallery > .card"
+      },
+      "count": 44
+    },
+    {
       "type": "assert_script",
       "js": "document.querySelectorAll('.card').length>=10 && Array.from(document.querySelectorAll('.chart-frame')).every(e=>e.querySelector('svg'))"
     },

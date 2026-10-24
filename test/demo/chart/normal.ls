@@ -3,30 +3,6 @@ import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 import gallery: .mod_gallery
 import catalog: .mod_catalog
-import dom
-
-let gallery_page_size = 8;
-fn page_count(entries) => int(ceil(float(len(entries)) / gallery_page_size))
-
-// Bound the number of live views mounted at once; all dashboard examples remain browsable.
-view <dashboard_gallery> state page_index:0 {
-    let pages = page_count(~.entries);
-    <section class:"dashboard-gallery",
-        <nav class:"playback-controls",'aria-label':"Dashboard pages",
-            <button type:"button",'data-gallery-step':"-1",*:(if (page_index == 0) {disabled:""} else {}),"Previous examples">;
-            <output class:"gallery-page",'aria-live':"polite","Page " ++ string(page_index + 1) ++ " of " ++ string(pages)>;
-            <button type:"button",'data-gallery-step':"1",*:(if (page_index == pages - 1) {disabled:""} else {}),"Next examples">
-        >
-        <div class:"gallery",for (i,entry in ~.entries where i >= page_index * gallery_page_size and i < (page_index + 1) * gallery_page_size)
-            gallery.panel("example-" ++ string(i),entry.label,"",chart.interactive(catalog.live(catalog.spec(entry))))>
-    >
-}
-on click(evt) {
-    let step = dom.get_attribute(evt.target,"data-gallery-step");
-    if (step == null) { return 'pass' }
-    page_index = max(0,min(page_count(~.entries) - 1,page_index + int(step)))
-    'handled'
-}
 
 fn has_keyframes(entry) => entry.previous != null or entry.spec.timeline != null
 let motion = catalog.charts |: has_keyframes(~);
@@ -69,5 +45,6 @@ gallery.page("Normal charts","Play a transition, pick a mark, or brush a range. 
         >
         <h2 class:"section-heading",string(len(examples)) ++ " dashboard examples">
         <p class:"caption","Hover or focus marks to inspect them. Click to select; Shift-click to add marks; double-click to clear. Each chart keeps its own selection.">
-        apply(<dashboard_gallery entries:examples>)
+        <div class:"gallery dashboard-gallery",for (i,entry in examples)
+            gallery.panel("example-" ++ string(i),entry.label,"",chart.interactive(catalog.live(catalog.spec(entry))))>
     >)

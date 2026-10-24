@@ -670,12 +670,18 @@ void css_resolved_style_record_html_axis(LayoutContext* context, LayoutAxis axis
     style->preferred_percentages |= binding->dependencies;
 }
 
-bool css_resolved_style_matches_context(LayoutContext* context, DomElement* element) {
+bool css_resolved_style_matches_context(LayoutContext* context, DomElement* element,
+                                        bool computed_dependencies_only) {
     if (!css_resolved_style_input_revision(context, element)) return false;
     const CssResolvedStyle* style = element->layout_cache->resolved_style;
     if (style->role_flags != css_style_role_flags(element)) return false;
     const CssGeometryContext& previous = style->used_box ? style->used_box->context : style->context;
-    return css_geometry_context_equal(previous, css_geometry_context(context, element));
+    CssGeometryContext current = css_geometry_context(context, element);
+    // scalar probes only need the containing axes consumed by computed CSS.
+    // committed layout still validates its complete used-box constraint.
+    return computed_dependencies_only
+        ? css_resolved_geometry_context_equal(element, previous, current)
+        : css_geometry_context_equal(previous, current);
 }
 
 bool css_resolved_style_apply(LayoutContext* context, DomElement* element) {

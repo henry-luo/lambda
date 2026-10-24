@@ -1,0 +1,11 @@
+{
+  "name": "Slide text: a rounded inline span background stays behind its text while another object fades in",
+  "html": "test/ui/slide_inline_background.slides",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 120, "steps": 3},
+    {"type": "assert_pixel", "target": {"selector": "#inline-bg [data-slide-object=line] span", "offset_x": 4, "offset_y": 6}, "min_r": 195, "max_r": 215, "min_g": 55, "max_g": 78, "max_b": 55},
+    {"type": "advance_time", "ms": 1000, "steps": 20},
+    {"type": "assert_pixel", "target": {"selector": "#inline-bg [data-slide-object=line] span", "offset_x": 4, "offset_y": 6}, "min_r": 195, "max_r": 215, "min_g": 55, "max_g": 78, "max_b": 55}
+  ]
+}

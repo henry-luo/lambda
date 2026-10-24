@@ -99,14 +99,16 @@ pub fn project(model, normalized) {
     let point = transforms(normalized, model.transform);
     let swapped = contains(["theta", "radial"], model.type) and model.direct_polar != true;
     let u = point[if (swapped) 1 else 0]; let v = point[if (swapped) 0 else 1];
-    let angle = if (model.type == "helix") model.start_angle + util.TAU * util.lerp(model.turns[0], model.turns[1], u)
-        else util.lerp(model.start_angle, model.end_angle, u);
-    let radius = min(model.width, model.height) / 2.0 * (if (model.type == "helix") model.inner_radius +
-        (model.outer_radius - model.inner_radius - model.track_width) * u + model.track_width * v
-        else util.lerp(model.inner_radius, model.outer_radius, v));
     if (model is error) model else if (model.type=="custom") model.project(point)
     else if (model.type == "cartesian") [point[0] * model.width, (1.0 - point[1]) * model.height]
-    else [model.width / 2.0 + radius * math.cos(angle), model.height / 2.0 + radius * math.sin(angle)]
+    else {
+        let angle = if (model.type == "helix") model.start_angle + util.TAU * util.lerp(model.turns[0], model.turns[1], u)
+            else util.lerp(model.start_angle, model.end_angle, u);
+        let radius = min(model.width, model.height) / 2.0 * (if (model.type == "helix") model.inner_radius +
+            (model.outer_radius - model.inner_radius - model.track_width) * u + model.track_width * v
+            else util.lerp(model.inner_radius, model.outer_radius, v));
+        [model.width / 2.0 + radius * math.cos(angle), model.height / 2.0 + radius * math.sin(angle)]
+    }
 }
 
 pub fn invert(model, displayed) {
@@ -136,9 +138,10 @@ pub fn pixel(model, point) => project(model, [point[0] / model.width, 1.0 - poin
 
 fn intervals(model) => if (model.type == "helix") max(8, int(ceil((model.turns[1] - model.turns[0]) * 8.0))) else 8
 pub fn line(model, points, closed = false) {
+    let linear = model.type == "cartesian" and not any(model.transform |> ~.type == "fisheye");
     let segments = [for (i in 0 to (len(points) - (if (closed) 1 else 2)),
         let a = points[i], let b = points[(i + 1) % len(points)])
-        paths.sample_curve((t) => pixel(model, geometry.interpolate(a, b, t)), model.precision, intervals(model))];
+        paths.sample_curve((t) => pixel(model, geometry.interpolate(a, b, t)), model.precision, intervals(model), linear)];
     let invalid = util.first_error(segments);
     if (invalid is error) invalid else [for (i, segment in segments) for (j, point in segment where i == 0 or j > 0) point]
 }
@@ -184,15 +187,18 @@ pub fn warp(node, model, marker = false, inherited = affine.identity) {
             let d = projected_path(model, points |> affine.project(matrix, ~), tag == 'rect'),
             if (d is error) d else <path *:attrs,*:(if (tag=='line') {fill:"none"} else {}),d:d,*children>)
         else if (tag == 'path') (
-            let source = paths.sample(node.d, (point) array | error => affine.project(matrix, point)),
-            let points = [for (line in source) for (point in line.points) point],
-            let anchor = if (len(points) > 0) [(min(points |> ~[0]) + max(points |> ~[0])) / 2.0,
-                (min(points |> ~[1]) + max(points |> ~[1])) / 2.0] else [0.0, 0.0],
-            let displayed = pixel(model, anchor),
-            let lines = if (marker) [for (line in source) {*:line, points: [for (point in line.points)
-                [displayed[0] + point[0] - anchor[0], displayed[1] + point[1] - anchor[1]]]}]
-                else paths.sample(node.d, (point) => pixel(model, affine.project(matrix, point)), model.precision, intervals(model)),
-            if (source is error) source else if (lines is error) lines else <path *:attrs, d: paths.path(lines), *children>)
+            // parse once; only pixel-sized markers need a separate unwarped outline.
+            let segments = paths.parse(node.d),
+            let lines = if (segments is error) segments else if (marker) {
+                let source = paths.sample(segments, (point) array | error => affine.project(matrix, point));
+                let points = [for (line in source) for (point in line.points) point];
+                let anchor = if (len(points) > 0) [(min(points |> ~[0]) + max(points |> ~[0])) / 2.0,
+                    (min(points |> ~[1]) + max(points |> ~[1])) / 2.0] else [0.0, 0.0];
+                let displayed = pixel(model, anchor);
+                if (source is error) source else [for (line in source) {*:line, points: [for (point in line.points)
+                    [displayed[0] + point[0] - anchor[0], displayed[1] + point[1] - anchor[1]]]}]
+            } else paths.sample(segments, (point) => pixel(model, affine.project(matrix, point)), model.precision, intervals(model)),
+            if (lines is error) lines else <path *:attrs, d: paths.path(lines), *children>)
         else svg.rebuild(tag, attrs, children)
     }
 }

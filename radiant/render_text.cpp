@@ -1121,11 +1121,12 @@ static void render_text_inline_background(RasterRenderContext* rdcon, ViewText* 
             rdt_path_line_to(p, fx, fy + r_left);
             if (r_left > 0) rdt_path_cubic_to(p, fx, fy + r_left * 0.45f, fx + r_left * 0.45f, fy, fx + r_left, fy);
             rdt_path_close(p);
-            rc_fill_path(rdcon, p, *bg_color, RDT_FILL_WINDING, NULL);
+            // the path is in the same local space as the glyphs; under a CSS transform an
+            // identity fill drew the background away from its text (e.g. during fly-ins).
+            rc_fill_path(rdcon, p, *bg_color, RDT_FILL_WINDING, render_state_current_transform(rdcon));
             rdt_path_free(p);
         } else {
-            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bg_rect, bg_color->c,
-                &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+            render_painter_fill_context_rect(rdcon, &bg_rect, bg_color->c);
         }
     }
 

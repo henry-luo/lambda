@@ -36,7 +36,9 @@ pub fn toolbar(plan, key) => [
     button("console", "Presenter"), button("overview", "Overview"),
     <label class: "slide-picker-label", ["for"]: key ++ "-picker", "Slide">,
     <input id: key ++ "-picker", class: "slide-picker", type: "text", value: "1", ["aria-label"]: "Slide number or ID">,
-    button("go", "Go"), button("blackout", "Blackout"), button("pointer", "Pointer")]
+    button("go", "Go"), button("blackout", "Blackout"), button("pointer", "Pointer"),
+    // hidden until the player's document learns its window can go full screen (live.sync_fullscreen)
+    <button type: "button", ["data-slide-tool"]: "fullscreen", ["aria-label"]: "Toggle full screen (F)", hidden: "", "Full screen">]
 
 pub fn console_tree(key) => <aside class: "slide-console", ["aria-label"]: "Presenter console", ["aria-hidden"]: "true", inert: "",
     <h2 "Presenter console">

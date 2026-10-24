@@ -13910,6 +13910,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         return;
     }
     EventContext evcon;
+    // The document has first refusal on Escape (e.g. a deck clearing its blackout); on
+    // every return path the host's Escape then leaves fullscreen unless it was prevented.
+    struct EscapeDefaultScope {
+        UiContext* uicon; const bool* prevented; bool active;
+        ~EscapeDefaultScope() { if (active) radiant_window_escape_default(uicon, prevented && *prevented); }
+    } escape_scope = {uicon, nullptr, event->type == RDT_EVENT_KEY_DOWN && event->key.key == RDT_KEY_ESCAPE};
     log_debug("HANDLE_EVENT: type=%d", event->type);
     log_debug("Handling event %d", event->type);
     // PDF documents don't have html_root - they only have view_tree
@@ -13966,6 +13972,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     EventDocumentScope document_scope(uicon, doc);
     event_context_init(&evcon, uicon, event);
+    escape_scope.prevented = &evcon.default_prevented;  // the page's verdict exists from here on
     DocState* cascade_state = (DocState*)doc->state;
     EventStateLog* cascade_log = cascade_state && cascade_state->active_event_log
         ? cascade_state->active_event_log : evcon.ui_context->event_log;
@@ -15621,6 +15628,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             NativePointerCapture* capture = native_pointer_capture(doc, false);
             if (native_resize_end(capture)) {
                 evcon.need_repaint = true;
+                evcon.default_prevented = true;  // this press is spent: no host Escape
                 break;
             }
         }
@@ -15630,6 +15638,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (state->context_menu_target && key_event->key == RDT_KEY_ESCAPE) {
             radiant_dispatch_behavior_context_menu_dismiss(state->context_menu_target);
             evcon.need_repaint = true;
+            evcon.default_prevented = true;  // this press is spent: no host Escape
             break;
         }
 

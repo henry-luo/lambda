@@ -5,7 +5,7 @@
   "events": [
     {"type": "assert_attribute", "target": {"selector": "#film"}, "attribute": "data-slide-duration", "equals": "3200"},
     {"type": "assert_attribute", "target": {"selector": "#film"}, "attribute": "data-slide-toolbar", "equals": "false"},
-    {"type": "assert_script", "js": "document.querySelector('.slide-toolbar-toggle')===null && getComputedStyle(document.querySelector('.slide-controls')).display==='none'"},
+    {"type": "assert_script", "js": "document.querySelector('.slide-toolbar-hide')===null && document.querySelector('.slide-toolbar-reveal')===null && getComputedStyle(document.querySelector('.slide-controls')).display==='none'"},
     {"type": "click", "target": {"selector": "[data-host='play']"}},
     {"type": "assert_attribute", "target": {"selector": "#film"}, "attribute": "data-slide-autoplay", "equals": "true"},
     {"type": "assert_script", "js": "globalThis.t0=+document.getElementById('film').getAttribute('data-slide-position-at'); document.getElementById('film').getAttribute('data-slide-position')==='0'"},

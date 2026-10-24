@@ -1,0 +1,17 @@
+{
+  "name": "Root viewport stops claiming scrollbar-strip hits once its content shrinks to fit",
+  "html": "test/ui/root_scroller_shrink.html",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "assert_script", "js": "document.elementFromPoint(1275, 300).tagName === 'HTML'"},
+    {"type": "assert_script", "js": "document.elementFromPoint(600, 300).id === 'tall'"},
+    {"type": "assert_script", "js": "(document.getElementById('tall').style.height = '800px', true)"},
+    {"type": "advance_time", "ms": 32, "steps": 2},
+    {"type": "assert_script", "js": "document.documentElement.scrollHeight === 800"},
+    {"type": "assert_script", "js": "document.elementFromPoint(1275, 300).id === 'tall'"},
+    {"type": "assert_script", "js": "document.elementFromPoint(1279, 799).id === 'tall'"},
+    {"type": "assert_script", "js": "(document.getElementById('tall').style.height = '1200px', true)"},
+    {"type": "advance_time", "ms": 32, "steps": 2},
+    {"type": "assert_script", "js": "document.elementFromPoint(1275, 300).tagName === 'HTML'"}
+  ]
+}

@@ -4169,7 +4169,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s view page.html --event-file events.json --headless  # Headless testing (no window)\n", argv[0]);
             printf("  --state-dump  Emit per-cascade Mark state-store dump under ./temp/state/\n");
             printf("\nKeyboard Controls:\n");
-            fputs("  F11        Toggle fullscreen\n  ESC        Exit fullscreen, or close the window\n", stdout);
+            fputs("  F11        Toggle fullscreen\n  ESC        Exit fullscreen, or close the window (after the page declines it)\n", stdout);
             fputs("  Paged mode: wheel/arrows scroll; PageUp/PageDown, Home/End navigate\n", stdout);
             printf("  Q          Quit viewer\n");
             return lambda_main_finish(0);

@@ -25,6 +25,9 @@ struct RadiantFullscreenState {
     bool failed;
     bool toggle_key_down;
     bool escape_key_down;
+    // the document prevented the current Escape press: the host neither leaves
+    // fullscreen nor closes the viewer for it (radiant_window_escape_default)
+    bool escape_page_consumed;
 };
 
 float radiant_fullscreen_overlap(RadiantWindowBounds a, RadiantWindowBounds b);

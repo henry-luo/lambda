@@ -15,9 +15,9 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-text { width: 100%; height: 100%; white-space: pre-wrap; }
 .slide-text p { margin: 0 0 0.6em; }
 .slide-image { width: 100%; height: 100%; }
-.slide-controls { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+.slide-controls { position: relative; display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
     gap: 8px; padding: 14px 24px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
-.slide-controls button, .slide-console button, .slide-overview button, .slide-toolbar-toggle { appearance: none; box-sizing: border-box; font-family: inherit;
+.slide-controls button, .slide-console button, .slide-overview button { appearance: none; box-sizing: border-box; font-family: inherit;
     font-size: 13px; font-weight: 600; line-height: 20px; padding: 8px 16px;
     border: 1px solid var(--slide-ui-control-border, #365263); border-radius: var(--slide-ui-radius, 8px); background: var(--slide-ui-control, #1b3445); color: var(--slide-ui-text, #e5eef2);
     cursor: pointer; box-shadow: var(--slide-ui-shadow, 0 1px 2px #081724); }
@@ -30,6 +30,13 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-controls button[data-slide-command=next]:active { background: var(--slide-ui-accent-active, #69c8ab); }
 .slide-controls button[data-slide-command=restart] { margin-left: 8px; background: transparent; }
 .slide-controls button[data-slide-command=restart]:hover { background: var(--slide-ui-control-hover, #28495c); }
+/* the hide arrow sits out of flow at the bar's bottom-right, so wrapping and bar height are unchanged */
+.slide-controls button.slide-toolbar-hide { position: absolute; right: 12px; bottom: 12px; padding: 6px 10px; line-height: 0;
+    background: transparent; border-color: transparent; box-shadow: none; color: var(--slide-ui-muted, #afc5d0); }
+.slide-controls button.slide-toolbar-hide:hover { background: var(--slide-ui-control-hover, #28495c); color: var(--slide-ui-text, #e5eef2); }
+/* invisible hot corner over the stage's bottom-right, present only while the toolbar is hidden */
+.slide-toolbar-reveal { display: none; position: absolute; right: 0; bottom: 0; width: 64px; height: 64px; z-index: 16; }
+.slide-player[data-slide-toolbar=false] .slide-toolbar-reveal { display: block; }
 .slide-speed { display: flex; align-items: center; gap: 10px; margin-left: 8px;
     padding: 8px 12px; border: 1px solid var(--slide-ui-border, #2b4353); border-radius: var(--slide-ui-radius, 8px);
     font-size: 12px; font-weight: 600; line-height: 20px; color: var(--slide-ui-muted, #afc5d0); }
@@ -41,7 +48,6 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-player { position: relative; }
 .slide-workspace { display: flex; align-items: flex-start; }
 .slide-audience { position: relative; flex-shrink: 0; }
-.slide-toolbar-toggle { position: absolute; top: 6px; left: 6px; z-index: 20; opacity: 0.7; padding: 4px 8px; font-size: 11px; }
 .slide-picker { width: 70px; box-sizing: border-box; padding: 8px; border: 1px solid var(--slide-ui-control-border, #365263); border-radius: 6px;
     background: var(--slide-ui-control, #1b3445); color: var(--slide-ui-text, #e5eef2); font-size: 13px; }
 .slide-picker-label { font-size: 12px; color: var(--slide-ui-muted, #afc5d0); }
@@ -66,7 +72,6 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-blackout { display: none; position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000000; z-index: 15; }
 .slide-pointer { display: none; position: absolute; left: 0; top: 0; width: 14px; height: 14px; border-radius: 50%;
     background: #ff3344; border: 2px solid #ffffff; box-sizing: border-box; box-shadow: 0 0 10px #ff3344; pointer-events: none; z-index: 14; }
-.slide-player[data-slide-blackout=true] .slide-toolbar-toggle { visibility: hidden; }
 "
 
 // compare sampled channels before formatting; steady channels need no CSS patch.

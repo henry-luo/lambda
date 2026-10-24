@@ -1,0 +1,25 @@
+{
+  "name": "Escape clears the deck's blackout, pointer and overview first; the full-screen button stays hidden without a window",
+  "html": "test/demo/slides/presenter_tools.slides",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 200, "steps": 4},
+    {"type": "click", "target": {"selector": "#presenter-demo [data-slide-command=restart]"}},
+    {"type": "assert_script", "js": "document.querySelector('#presenter-demo [data-slide-tool=fullscreen]').hasAttribute('hidden')"},
+    {"type": "key_press", "key": "f"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-fullscreen", "equals": "false"},
+    {"type": "key_press", "key": "b"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-blackout", "equals": "true"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-blackout", "equals": "false"},
+    {"type": "key_press", "key": "l"},
+    {"type": "key_press", "key": "o"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-pointer", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-overview", "equals": "true"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-pointer", "equals": "false"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-overview", "equals": "false"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "0"}
+  ]
+}

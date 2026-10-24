@@ -1,0 +1,8 @@
+// Inline span background inside a transformed slide object, while another object animates.
+<presentation id: "inline-bg", width: 1280, height: 720, autostart: true,
+    <slide id: "s", background: "#f8f6f1",
+        <text id: "line", x: 72, y: 144, width: 1136, height: 60, font_size: 21, color: "#5f6b7a", style: "line-height:1.3;", "Rebuilt from scratch in " <span style: "padding:0 12px;border-radius:8px;background:#ce422b;color:#ffffff;font-size:40px;font-weight:700;", "Rust">>
+        <shape id: "box", x: 200, y: 300, width: 400, height: 200, kind: 'rect', fill: "#2f6fde">
+        <cue start: 'entry', <effect target: "box", kind: 'fade-in', duration: 800>>
+    >
+>

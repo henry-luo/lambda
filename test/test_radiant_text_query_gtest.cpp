@@ -1297,6 +1297,33 @@ TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
     EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
 }
 
+TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    dom_node_resolve_style(item, &flow.layout);
+    layout_flex_item_content(&flow.layout, lam::view_require_block(item));
+    ASSERT_TRUE(item->flex_item()->retained.has_content);
+    uint64_t geometry = retained_subtree_geometry(item);
+    {
+        // a read at the committed constraint does not replace any fragment or used style.
+        radiant::LayoutRunModeScope probe(&flow.layout, radiant::RunMode::ComputeSize);
+        dom_node_resolve_style(item, &flow.layout);
+    }
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+    ASSERT_TRUE(item->set_attribute("style", "font-size:24px"));
+    {
+        radiant::LayoutRunModeScope probe(&flow.layout, radiant::RunMode::ComputeSize);
+        dom_node_resolve_style(item, &flow.layout);
+    }
+    EXPECT_FALSE(item->flex_item()->retained.has_content);
+    EXPECT_FLOAT_EQ(item->font->font_size, 24.0f);
+}
+
 TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);

@@ -19,6 +19,7 @@ let transforms = [{type: "transpose"}, {type: "reflect_x"}, {type: "rotate", ang
 let transformed = coordinate.configure({type: "cartesian", transform: transforms}, 300, 200);
 let curve = paths.sample("M0 0 C0 100 100 100 100 0 Z");
 let arc = paths.sample("M10 0 A10 10 0 1 1 -10 0 A10 10 0 1 1 10 0 Z");
+let projected_line = paths.sample("M0 0 L1 0", (p) => [p[0], math.sin(util.TAU*p[0])], 0.01, 8)[0].points;
 let spec = {width: 300, height: 240, padding: 20, data: [{a: "A", value: 2}, {a: "B", value: 4}, {a: "C", value: 3}],
     mark: {kind: "bar"}, encoding: {x: {field: "a", dtype: "nominal", title: "category"}, y: {field: "value", dtype: "quantitative"}}};
 let image = chart.render_spec({*:spec, coordinate: {type: "polar"}});
@@ -49,6 +50,9 @@ let checks = {
     relative_path: paths.parse("m10 20 l5 -5 h10 v10 z")[4].end == [10.0, 20.0],
     smooth_path: len(paths.sample("M0 0 Q10 20 20 0 T40 0 C45 0 45 20 50 20 S60 0 70 0")) == 1,
     subpaths: len(paths.sample("M0 0 L5 5 M10 10 L20 20 Z")) == 2,
+    projected_line_curvature: max(projected_line |> ~[1]) > 0.99 and min(projected_line |> ~[1]) < -0.99,
+    projected_line_endpoints: projected_line[0][0] == 0.0 and projected_line[len(projected_line)-1][0] == 1.0,
+    sampling_invalid_line: paths.sample("M0 0 L10 0", null, 0) is error,
     projected_bar_boundaries: len((elements(image) |: name(~) == 'path' and ~.width != null)) == 3,
     coordinate_guides: len(classes(image, "coordinate-axis")) == 2 and len(classes(image, "coordinate-grid")) > 2,
     circular_category_title: all([for (circular in circular_titles)
@@ -79,6 +83,7 @@ let checks = {
     ambiguous_inverse: coordinate.invert(coordinate.configure({type: "helix"}, 200, 200), [20, 30]) is error,
     malformed_path: paths.parse("M0 0 C1 2") is error,
     invalid_arc_flag: paths.parse("M0 0 A1 1 0 2 0 1 1") is error,
-    sampling_error: paths.sample_curve((t) error => error("bad point")) is error
+    sampling_error: paths.sample_curve((t) error => error("bad point")) is error,
+    sampling_midpoint_error: paths.sample_curve((t) => if (t == 0.5) error("bad midpoint") else [t, t*t]) is error
 };
 [for (label, passed in checks where passed != true) string(label)]

@@ -2339,15 +2339,26 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
             bool measuring = layout_context_is_measuring(lycon);
-            // probes may reset used margins without running a content pass or snapshot scope.
-            if (measuring) flex_retained_forget_content(dom_elem);
+            DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())
+                ? dom_elem->parent->as_element() : nullptr;
+            ViewBlock* flex_parent = parent_elem
+                ? lam::view_as_block(parent_elem) : nullptr;
+            bool is_direct_flex_item = flex_parent &&
+                flex_parent->display.inner == CSS_VALUE_FLEX;
+            LayoutContainingBlock flex_item_cb = is_direct_flex_item
+                ? layout_containing_block_for_view(flex_parent) : LayoutContainingBlock{};
+            // validate reuse against the same flex containing block used by CSS application.
+            // outer measurement contexts can carry a different parent width.
+            LayoutContainingBlockScope flex_item_percentage_scope(
+                lycon, LAYOUT_AXIS_X, flex_item_cb.content_width,
+                is_direct_flex_item && flex_item_cb.content_width > 0.0f);
             // validated committed boxes keep algorithm-assigned constraints; changed
             // computed inputs or percentage bases restore clean values before flow (VR15).
-            if (styles_current && !measuring && !dom_elem->measure_restyled() &&
+            if (styles_current && !dom_elem->measure_restyled() &&
                 !layout_element_is_replaced(dom_elem) &&
                 !layout_boundary_consumed_by_flow(dom_elem) &&
-                (!radiant::css_resolved_style_cache_allowed(lycon, dom_elem) ||
-                 radiant::css_resolved_style_matches_context(lycon, dom_elem))) {
+                ((!measuring && !radiant::css_resolved_style_cache_allowed(lycon, dom_elem)) ||
+                 radiant::css_resolved_style_matches_context(lycon, dom_elem, measuring))) {
                 // these used dimensions belong to the validated committed constraint.
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
@@ -2367,6 +2378,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 return;  // early return - reuse existing styles
             }
 
+            // only probes that restore used CSS invalidate the recorded content;
+            // an unchanged-context read leaves its committed fragments intact.
+            if (measuring) flex_retained_forget_content(dom_elem);
+
             // committing provisional CSS does not invalidate keyed intrinsic results.
             // Mutations clear the flag; context/font/generation changes are checked
             // by the query itself, including after a speculative sizing pass.
@@ -2375,19 +2390,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 radiant::layout_cache_clear(dom_elem->layout_cache, lycon->pool);
             }
 
-            DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())
-                ? dom_elem->parent->as_element() : nullptr;
-            ViewBlock* flex_parent = parent_elem
-                ? lam::view_as_block(parent_elem) : nullptr;
-            bool is_direct_flex_item = flex_parent &&
-                flex_parent->display.inner == CSS_VALUE_FLEX;
-            LayoutContainingBlock flex_item_cb = is_direct_flex_item
-                ? layout_containing_block_for_view(flex_parent) : LayoutContainingBlock{};
-            // A later intrinsic query can retain an outer block context after flex
-            // sizing. Percentages on a direct flex item still use its flex container.
-            LayoutContainingBlockScope flex_item_percentage_scope(
-                lycon, LAYOUT_AXIS_X, flex_item_cb.content_width,
-                is_direct_flex_item && flex_item_cb.content_width > 0.0f);
             bool incremental = radiant::css_resolved_style_apply(lycon, dom_elem);
             if (!incremental) {
                 radiant::CssStyleRecordScope record(lycon, dom_elem);
@@ -5151,6 +5153,29 @@ static void layout_root_viewport_scroller(LayoutContext* lycon, ViewBlock* html,
         content_height, physical_height, v_max);
 }
 
+// A root that fits the viewport is no longer its vertical scroller. Views and
+// their scrollers persist across relayouts, so undo layout_root_viewport_scroller
+// here: a stale has_vt_scroll keeps a scrollbar-width strip at the viewport's
+// right edge claiming every hit (scrollpane_target) after the document shrinks.
+static void layout_root_viewport_fits(LayoutContext* lycon, ViewBlock* html) {
+    if (!html->scroller || !html->scroller->has_vt_scroll) return;
+    html->scroller->has_vt_scroll = false;
+    html->scroller->has_vt_overflow = false;
+    if (!html->scroll()->pane) return;
+    DocState* state = (DocState*)lycon->doc->state;
+    float x = 0.0f, y = 0.0f, h_max = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
+                                       &x, &y, &h_max, NULL);
+    // the range setter clamps the position; the viewport follows a clamped offset.
+    scroll_state_set_max_for_view(state, (View*)html, html->scroll()->pane, h_max, 0.0f);
+    float clamped_x = x, clamped_y = y;
+    scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
+                                       &clamped_x, &clamped_y, NULL, NULL);
+    if (clamped_x != x || clamped_y != y)
+        doc_state_sync_viewport_scroll(state, lycon->doc, clamped_x, clamped_y);
+    log_info("layout: viewport fits: vertical scroller cleared");
+}
+
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     uint64_t t_start = time_now_ns();
 
@@ -5749,26 +5774,36 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
 
+    // the viewport scroller is decided on every layout, so a document that
+    // stops overflowing also stops scrolling (layout_root_viewport_fits).
+    bool viewport_fits = false;
     if (!root_has_explicit_height && html->height > physical_height) {
         float content_height = html->height;
         html->content_height = content_height;
         html->height = physical_height;   // constrain root block to viewport height
         layout_root_viewport_scroller(lycon, html, content_height, physical_height);
-    } else if (root_has_explicit_height && html->height <= physical_height && html->scroller &&
-               html->scroll()->pane && html->scroll()->overflow_y == CSS_VALUE_VISIBLE) {
+    } else if (!root_has_explicit_height) {
+        viewport_fits = true;
+    } else if (html->height <= physical_height && html->scroller && html->scroll()->pane &&
+               (html->scroll()->overflow_y == CSS_VALUE_VISIBLE || html->scroll()->has_vt_scroll)) {
         // An explicit root height keeps its box, but content overflowing it
         // still scrolls the viewport: finalize_block_flow recorded that
         // overflow in the root's pane without making it a scroller, so wheel,
         // hit-testing and the scrollbar all ignored it. (A root taller than the
         // viewport would need its box constrained like the auto-height root.)
+        // A root promoted earlier carries overflow_y AUTO until it is restyled,
+        // so has_vt_scroll keeps it under this re-evaluation.
         DocState* state = (DocState*)lycon->doc->state;
         float v_max = 0.0f;
         scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
                                            NULL, NULL, NULL, &v_max);
         if (html->height + v_max > physical_height) {
             layout_root_viewport_scroller(lycon, html, html->height + v_max, physical_height);
+        } else {
+            viewport_fits = true;
         }
     }
+    if (viewport_fits) layout_root_viewport_fits(lycon, html);
 
     uint64_t t_finalize = time_now_ns();
     log_info("%s [TIMING] layout: finalize_block_flow: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_layout_block, t_finalize));

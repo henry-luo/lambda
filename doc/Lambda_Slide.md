@@ -132,8 +132,8 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
     detail: {command: "seek_time", position_ms: 12000.0}})
 ```
 
-- `controls: false` keeps the control bar mounted but hidden, removes the
-  floating **Toolbar** button and ignores the H key. A click on the stage
+- `controls: false` keeps the control bar mounted but hidden, omits its hide
+  arrow and the bottom-right reveal corner, and ignores the H key. A click on the stage
   belongs to the host and does not advance the deck.
 - A `slide_command` event's `detail` is a reducer event without `time_ms`; the
   event's own time stamp is used. Accepted commands are `play`, `pause`,
@@ -241,7 +241,7 @@ and `'ease-in-out-cubic'`; four-number cubic Bézier arrays are also accepted.
 | `fly-in`, `fly-out` | `from: 'left'/'right'/'top'/'bottom'`, `distance`. |
 | `zoom-in`, `zoom-out`, `pulse` | `scale`. |
 | `spin` | `angle`. |
-| `wipe-in`, `wipe-out` | `from`; rectangular CSS inset clipping. |
+| `wipe-in`, `wipe-out` | `from`; rectangular CSS inset clipping. The revealed area grows toward the `from` edge: `from: 'right'` draws left to right, `from: 'top'` rises from the bottom. |
 | `motion` | `path`, optional `orient: 'auto'`. |
 | `highlight` | `color`; preceding highlights supply the next starting color. |
 | `keyframes` | `channel`, `stops`, optional `from` for clip direction. |
@@ -296,8 +296,10 @@ positive finite rate.
 Next finishes a running build or starts the next build, then advances slides.
 Previous rewinds a build and crosses a slide boundary at its final state.
 Manual navigation, Restart, Home/End, jump and seek stop automatic playback.
-On a focused player root, arrows, Space, Page Up/Down and
-Home/End navigate. Modified keys and embedded controls retain normal behavior.
+When the player root or any of its buttons has focus (a clicked control keeps
+focus), arrows, Page Up/Down and Home/End navigate; Space navigates from the root
+and activates a focused button. Modified keys, the slide picker, the speed slider
+and other embedded inputs retain normal behavior.
 `reduced_motion: true` snaps each build to its final state and uses cut transitions.
 
 The **Presenter** button opens a docked console in the same viewer, containing
@@ -313,8 +315,13 @@ this is not a separate speaker window for a second display.
 closes the overview. **Slide / Go** accepts a one-based slide number or an exact
 slide ID; Enter submits. Invalid input reports an error without navigation.
 **Blackout** covers the audience canvas in black. **Pointer** enables a red laser
-that follows the mouse over the canvas. The floating **Toolbar** button restores
-hidden controls. Tool shortcuts work within the player; text inputs retain
+that follows the mouse over the canvas. **Full screen** (or F) toggles the
+viewer window's full screen and reads **Exit full screen** while active; it shows
+only when the player's window can go full screen, not in an embed or a headless
+run. The **⌄** arrow at the control bar's
+bottom-right hides the toolbar; moving the mouse into the player's bottom-right
+corner, or pressing H, brings it back. The arrow sits inside that corner, so after a
+click the pointer must leave the corner before re-entering reopens the toolbar. Tool shortcuts work within the player; text inputs retain
 ordinary typing.
 
 | Key | Tool |
@@ -324,7 +331,8 @@ ordinary typing.
 | H | Hide/show toolbar |
 | B or . | Toggle blackout |
 | L | Toggle laser pointer |
-| Escape | Close overview and clear blackout/pointer |
+| F | Toggle full screen |
+| Escape | Close overview and clear blackout/pointer; with none active, the viewer's Escape applies (leave full screen, or close the window) |
 
 Overview uses titles without rendering every slide. Next-slide previews are
 rendered lazily into a separate cache with instance-specific IDs; revisiting a

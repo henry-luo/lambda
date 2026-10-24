@@ -1,0 +1,27 @@
+{
+  "name": "Arrow keys keep flipping slides after a toolbar button takes focus; the slide number input keeps its arrows",
+  "html": "test/demo/slides/presenter_tools.slides",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 200, "steps": 4},
+    {"type": "click", "target": {"selector": "#presenter-demo [data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 600, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "key_press", "key": "ArrowLeft"},
+    {"type": "advance_time", "ms": 600, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "0"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "advance_time", "ms": 600, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "click", "target": {"selector": "#presenter-demo [data-slide-command=previous]"}},
+    {"type": "advance_time", "ms": 600, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "0"},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "advance_time", "ms": 600, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "focus", "target": {"selector": ".slide-picker"}},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "advance_time", "ms": 600, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#presenter-demo"}, "attribute": "data-slide-index", "equals": "1"}
+  ]
+}

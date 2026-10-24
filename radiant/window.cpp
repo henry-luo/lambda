@@ -698,14 +698,26 @@ bool radiant_window_fullscreen_key(UiContext* uicon, const RdtEvent* event) {
             return consumed;
         }
         if (state->escape_key_down) return true;
-        if (state->actual || state->requested) {
-            radiant_fullscreen_request(state, false);
-            window_release_relative_mouse(uicon);
-            state->escape_key_down = true;
-            return true;
-        }
+        // a fresh press reaches the document first; radiant_window_escape_default
+        // applies the host's Escape afterwards unless the document prevented it.
+        state->escape_page_consumed = false;
     }
     return false;
+}
+
+void radiant_window_escape_default(UiContext* uicon, bool prevented) {
+    if (!uicon) return;
+    RadiantFullscreenState* state = &uicon->fullscreen;
+    if (prevented) {
+        state->escape_page_consumed = true;
+        return;
+    }
+    if (state->actual || state->requested) {
+        radiant_fullscreen_request(state, false);
+        window_release_relative_mouse(uicon);
+        // the viewer close in key_callback skips the press that left fullscreen
+        state->escape_key_down = true;
+    }
 }
 
 struct RelativeMouseResource : DomDocumentResourceData { DomDocument* document; };
@@ -875,15 +887,6 @@ static void window_close_callback(GLFWwindow* window) {
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     window_flush_pointer_motion();
-    // The viewer closes on Escape; the edit application gives Escape to the
-    // active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS &&
-            ui_context.app_mode != UI_APP_MODE_EDIT && !radiant_relative_mouse_target(&ui_context) &&
-            !ui_context.fullscreen.actual && !ui_context.fullscreen.requested &&
-            !ui_context.fullscreen.escape_key_down) {
-        window_request_close(window);
-        return;
-    }
 
     // Alt+Left = browser back, Alt+Right = browser forward
     if (!ui_context.paged_options && action == GLFW_PRESS && (mods & GLFW_MOD_ALT)) {
@@ -939,7 +942,21 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
     // Handle key events
     window_submit_input(&event);
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) window_release_relative_mouse(&ui_context);
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+        // The viewer closes on an Escape the document declined (dispatch is synchronous)
+        // and that did not just leave fullscreen; the edit application gives Escape to
+        // the active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
+        bool close = ui_context.app_mode != UI_APP_MODE_EDIT &&
+            !radiant_relative_mouse_target(&ui_context) &&
+            !ui_context.fullscreen.escape_page_consumed &&
+            !ui_context.fullscreen.actual && !ui_context.fullscreen.requested &&
+            !ui_context.fullscreen.escape_key_down;
+        window_release_relative_mouse(&ui_context);
+        if (close) {
+            window_request_close(window);
+            return;
+        }
+    }
     // Always repaint after a key event so caret motion, character
     // insertion/deletion, selection changes, and context-menu open/close
     // become visible immediately.

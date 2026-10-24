@@ -356,6 +356,8 @@ bool radiant_window_set_fullscreen(DomNode* node, bool enabled);
 bool radiant_window_fullscreen(DomNode* node);
 bool radiant_window_fullscreen_enabled(DomNode* node);
 bool radiant_window_fullscreen_key(UiContext* uicon, const union RdtEvent* event);
+// the host's Escape after the document saw the press: leave fullscreen unless prevented
+void radiant_window_escape_default(UiContext* uicon, bool prevented);
 bool radiant_window_set_relative_mouse(DomElement* owner, bool enabled);
 DomElement* radiant_relative_mouse_target(UiContext* uicon);
 bool radiant_window_relative_mouse_active(DomElement* owner);

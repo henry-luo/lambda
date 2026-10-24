@@ -1,0 +1,23 @@
+{
+  "name": "Hidden toolbar: the hot corner ignores the cursor left there by the hide arrow and reopens from the extreme corner",
+  "html": "test/demo/slides/presenter_tools.slides",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 200, "steps": 4},
+    {"type": "assert_count", "target": {"selector": ".slide-toolbar-toggle"}, "equals": 0},
+    {"type": "click", "target": {"selector": ".slide-toolbar-hide"}},
+    {"type": "advance_time", "ms": 32, "steps": 2},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "none"},
+    {"type": "assert_style", "target": {"selector": ".slide-toolbar-reveal"}, "property": "display", "equals": "block"},
+    {"type": "mouse_move", "target": {"selector": ".slide-stage", "offset_x": 1250, "offset_y": 775}},
+    {"type": "advance_time", "ms": 32, "steps": 2},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "none"},
+    {"type": "mouse_move", "target": {"selector": ".slide-stage", "offset_x": 600, "offset_y": 400}},
+    {"type": "advance_time", "ms": 32, "steps": 2},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "none"},
+    {"type": "mouse_move", "target": {"selector": ".slide-stage", "offset_x": 1277, "offset_y": 796}},
+    {"type": "advance_time", "ms": 32, "steps": 2},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "flex"},
+    {"type": "assert_style", "target": {"selector": ".slide-toolbar-reveal"}, "property": "display", "equals": "none"}
+  ]
+}

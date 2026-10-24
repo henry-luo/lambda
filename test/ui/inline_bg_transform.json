@@ -1,0 +1,9 @@
+{
+  "name": "Inline backgrounds (rounded and square) follow their text under a CSS transform",
+  "html": "test/ui/inline_bg_transform.html",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "assert_pixel", "target": {"selector": "#pill", "offset_x": 4, "offset_y": 6}, "min_r": 195, "max_r": 215, "min_g": 55, "max_g": 78, "max_b": 55},
+    {"type": "assert_pixel", "target": {"selector": "#flat", "offset_x": 3, "offset_y": 6}, "max_r": 60, "min_g": 100, "max_g": 125, "min_b": 210}
+  ]
+}

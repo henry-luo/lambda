@@ -68,7 +68,8 @@ bool css_resolved_geometry_context_equal(DomElement* element,
 // selected-view computed state; size-query caches have a separate lifetime.
 bool css_resolved_style_apply(LayoutContext* context, DomElement* element);
 bool css_resolved_style_cache_allowed(LayoutContext* context, DomElement* element);
-bool css_resolved_style_matches_context(LayoutContext* context, DomElement* element);
+bool css_resolved_style_matches_context(LayoutContext* context, DomElement* element,
+    bool computed_dependencies_only = false);
 bool css_resolved_style_is_containing_block_independent(DomElement* element);
 bool css_resolved_style_is_block_size_independent(DomElement* element);
 void css_resolved_style_release(LayoutCache* cache, Pool* pool);

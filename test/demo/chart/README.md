@@ -19,9 +19,9 @@ The normal and graph galleries read `test/lambda/chart/dashboard_data.json`,
 the same source used by `test/lambda/chart/chart_dashboard.ls`. The release
 preparation script bundles that file. Shared page layout lives in
 `mod_gallery.ls` and `chart.css`; chart conversion and classification live in
-`mod_catalog.ls`. The normal gallery mounts eight interactive examples per page;
-Previous/Next controls expose the entire dashboard without mounting every live
-view at once. Packages use the shipped `lambda.*` hierarchy (D7.2.4v3).
+`mod_catalog.ls`. The normal gallery shows all dashboard examples together,
+without pagination. Galleries use three columns on wider screens and one column
+on narrow screens. Packages use the shipped `lambda.*` hierarchy (D7.2.4v3).
 Live state belongs to each applied view (S12.1.3). Animations play once on load
 and can be replayed. Mermaid, Graphviz, and TikZ examples are rendered diagrams;
 the chart marks provide the interactive examples.

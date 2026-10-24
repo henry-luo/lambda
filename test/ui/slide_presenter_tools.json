@@ -50,7 +50,7 @@
     {"type": "assert_pixel", "target": {"selector": ".slide-stage", "offset_x": 100, "offset_y": 100}, "min_r": 240, "max_g": 80, "max_b": 90},
     {"type": "key_press", "key": "Escape"},
     {"type": "assert_style", "target": {"selector": ".slide-pointer"}, "property": "display", "equals": "none"},
-    {"type": "click", "target": {"selector": ".slide-toolbar-toggle"}},
+    {"type": "mouse_move", "target": {"selector": ".slide-toolbar-reveal"}},
     {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "flex"},
     {"type": "resize", "width": 960, "height": 640},
     {"type": "key_press", "key": "p"},

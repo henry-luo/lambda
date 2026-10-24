@@ -144,6 +144,67 @@ Evidence is under `temp/word/performance/`: `fast-comparison.json`,
 `fast-source.patch`. The installed `lambda.exe` matches the measured release
 candidate's SHA-256 in `fast-binaries.json`.
 
+## Follow-up: measurement probes and launch configuration
+
+**D4.5.3v2 / D4.5.1v4**, with computation identity under **VR15**, govern
+reuse here. A measurement read can preserve committed fragments when its
+computed CSS inputs and the containing dimensions used by those inputs are
+unchanged. `dom_node_resolve_style` now establishes the direct flex item's
+containing block before validating reuse. Measurement reads check the existing
+computed dependency mask; committed layout still checks its complete geometry
+context. Only probes that actually restore used CSS discard retained content.
+Native-value controls keep their measurement adapter. The regression checks
+fragment preservation and invalidation after a font-size edit. No formal ruling
+changed.
+
+The executable initially installed in this checkout was a debug build, and the
+Word README instructed users to run `make build`. The launch instructions now
+use `make release` in the main checkout, and the installed executable is the
+measured release candidate. Debug performance was not benchmarked.
+
+The source comparison starts at `b25fa4174`. Both pinned release executables
+ran identical Word sources at 1440 × 900, without concurrent compilation or
+tests. Three interleaved 120-character pairs and one 600-character pair include
+a native raster repaint after every physical key. Startup and OS display
+presentation remain outside the measurement.
+
+| Document / workload | Keys per build | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Blank, short | 360 | 43.013 ms | 42.775 ms | 47.630 ms | 47.451 ms |
+| Studio, short | 360 | 51.002 ms | 50.569 ms | 55.899 ms | 55.398 ms |
+| Blank, sustained | 600 | 52.598 ms | 51.691 ms | 91.946 ms | 91.581 ms |
+| Studio, sustained | 600 | 61.862 ms | 61.076 ms | 104.563 ms | 120.054 ms |
+
+This is a small improvement: short-run medians change by less than 1%, and
+sustained medians by 1–2%. Slow-key latency is not consistently better: Studio's
+sustained p95 increased in this pair. The candidate's sustained maxima were
+151.686 ms (blank) and 169.024 ms (Studio), so long-paragraph responsiveness
+remains partial. All text and pixel assertions passed across 3,840 physical
+keystrokes. A separate profile reduces cached computed-style reapplications on the
+selected keystroke from 1,829 to 1,680; nested flex layout still dominates.
+
+All 216 focused native text/layout tests pass. A rendered Studio typing replay
+passes and was visually inspected for text, caret, ribbon and page layout.
+All **87 Word UI/export checks** pass, including physical typing, Undo/Redo,
+page breaks, ribbon fields, object gestures, rulers, lists and exports. Word model
+tiers were unchanged and were not rerun. Integer-cast lint and diff whitespace
+checks pass.
+
+The required Radiant baseline build completed, followed by its complete runner
+with native macOS graphics/audio access: **6,163 passed, 141 partials, two skips,
+and one failure**. The failure is the existing `jqueryui` CSS memory budget:
+both the original and candidate executables report **375,038 bytes** at initial
+cascade and recascade, exceeding the **373,940-byte** limit. The baseline and
+limit are unchanged. The earlier sandboxed run could not access graphics/audio;
+all 28 Scene3D and 669 UI automation checks pass with native services available.
+
+Evidence is under `temp/word/performance/`: `tune-final-comparison.json`,
+`tune-final-provenance.json`, `tune-final-source.patch`,
+`tune-final-{short,sustained}-*`, `tune-word-final.json`,
+`tune-radiant-native/test_summary.json`, `tune-css-memory-comparison.json`,
+`tune-word-studio.png`, and `tune-dependencies-profile.log`. The installed
+`lambda.exe` matches the measured candidate's SHA-256.
+
 ## Reproduction and verification
 
 `python3 test/demo/word/benchmark_typing.py --repeat 3 --characters 120`

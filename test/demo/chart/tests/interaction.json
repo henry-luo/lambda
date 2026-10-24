@@ -1,5 +1,5 @@
 {
-  "name": "Chart demo playback, independent selection, filtering and navigation",
+  "name": "Chart demo playback, independent selection, filtering and complete gallery",
   "viewport": {
     "width": 1180,
     "height": 1200
@@ -7,6 +7,24 @@
   "input_turn_ms": 0,
   "event_interval_ms": 0,
   "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dashboard-gallery > .card"
+      },
+      "count": 44
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-gallery-step], .gallery-page"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var b=[0,1,2,3].map(i=>document.getElementById('example-'+i).getBoundingClientRect());return Math.abs(b[0].top-b[1].top)<1&&Math.abs(b[0].top-b[2].top)<1&&b[0].left<b[1].left&&b[1].left<b[2].left&&b[3].top>b[0].top})()"
+    },
     {
       "type": "advance_time",
       "ms": 200,
@@ -296,20 +314,6 @@
       "file": "temp/chart-demo/interaction-desktop.png"
     },
     {
-      "type": "click",
-      "target": {
-        "selector": "[data-gallery-step='1']"
-      },
-      "scroll_into_view": true
-    },
-    {
-      "type": "assert_text",
-      "target": {
-        "selector": ".gallery-page"
-      },
-      "equals": "Page 2 of 6"
-    },
-    {
       "type": "assert_count",
       "target": {
         "selector": "#example-8 svg"
@@ -317,17 +321,11 @@
       "min": 1
     },
     {
-      "type": "click",
+      "type": "assert_count",
       "target": {
-        "selector": "[data-gallery-step='-1']"
-      }
-    },
-    {
-      "type": "assert_text",
-      "target": {
-        "selector": ".gallery-page"
+        "selector": "#example-43 svg"
       },
-      "equals": "Page 1 of 6"
+      "min": 1
     },
     {
       "type": "window_close"

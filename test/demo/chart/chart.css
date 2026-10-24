@@ -9,15 +9,16 @@ h1 { font-size: 38px; letter-spacing: -1px; margin: 0 0 12px; }
 .intro { max-width: 760px; color: #647287; font-size: 16px; line-height: 1.6; margin: 0 0 28px; }
 h2 { margin: 0 0 10px; font-size: 20px; }
 .section-heading { margin: 30px 0 18px; }
-.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
 .card { min-width: 0; padding: 20px; background: #fff; border: 1px solid #dfe5ee; border-radius: 14px; }
 .caption { color: #647287; font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
-.chart-frame { overflow: auto; }
-.chart-frame > svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.chart-frame { overflow: auto; text-align: center; }
+.chart-frame > * { margin: 0 auto; }
+.chart-frame > svg { display: block; max-width: 100%; height: auto; }
 .chart-frame > .lambda-sequence { max-width: 100%; min-height: 0 !important; }
 .lambda-sequence > svg { display: block; max-width: 100%; height: auto; }
-.lambda-chart { display: inline-block; max-width: 100%; outline: none; }
-.lambda-chart > svg { display: block; max-width: 100%; height: auto; }
+.lambda-chart { display: inline-block; max-width: 100%; outline: none; text-align: left; }
+.lambda-chart > svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
 .lambda-chart:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid #317e78; outline-offset: 3px; }
 .chart-controls { padding: 10px 0 0; }
 .chart-control { display: inline-block; margin-right: 12px; font-size: 13px; color: #647287; }
@@ -26,8 +27,6 @@ button:hover { background: #e7edf5; }
 .playback-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 .playback-phase { color: #317e78; font-size: 12px; }
 button:disabled { opacity: 0.4; cursor: default; }
-.dashboard-gallery > nav { margin: 0 0 18px; }
-.gallery-page { color: #647287; font-size: 13px; }
 .wide { grid-column: 1 / -1; }
 .collection-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin-top: 36px; }
 .demo-tile { display: block; min-width: 0; background: #fff; color: #24334b; border: 1px solid #dfe5ee; border-radius: 16px; overflow: hidden; }

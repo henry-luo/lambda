@@ -78,8 +78,11 @@ and per-slide themes:
 
 Press **P** for notes, the next-slide preview and an independent timer in a docked
 console. **O** opens the title overview; the slide picker accepts a number or ID.
-**H** hides/shows the toolbar, **B** blacks out the canvas, and **L** enables the
-laser pointer. **Escape** clears blackout, pointer and overview. These tools also
+**H**, or the **⌄** arrow at the toolbar's bottom-right, hides the toolbar; **H** or moving
+the mouse into the bottom-right corner brings it back. **B** blacks out the canvas, and **L** enables the
+laser pointer, and **F** (or the **Full screen** button) toggles full screen. **Escape**
+clears blackout, pointer and overview first; once none is active it leaves full screen,
+or closes the viewer. These tools also
 work on the other decks. The console shares the viewer with the audience canvas.
 
 The Northstar UI replay visits every slide, checks five staged reveals, pauses
