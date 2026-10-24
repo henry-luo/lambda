@@ -7,14 +7,19 @@ let kinds = ["click", "dblclick", "pointerdown", "pointermove", "pointerup", "po
     "pointerover", "pointerout", "pointerenter", "pointerleave", "mousedown", "mousemove", "mouseup",
     "mouseover", "mouseout", "mouseenter", "mouseleave", "wheel", "keydown", "keyup", "input", "change", "focusin", "focusout"]
 
-fn split_parts(text, separator = ",", index = 0, begin = 0, depth = 0, quote = null, parts = []) {
-    let ch = slice(text, index, index + 1);
-    if (index >= len(text)) [*parts, trim(slice(text, begin, len(text)))]
-    else if (quote != null) split_parts(text, separator, index + (if (ch == "\\") 2 else 1), begin, depth,
-        if (ch == quote) null else quote, parts)
-    else if (ch == "'" or ch == "\"") split_parts(text, separator, index + 1, begin, depth, ch, parts)
-    else if (ch == separator and depth == 0) split_parts(text, separator, index + 1, index + 1, 0, null, [*parts, trim(slice(text, begin, index))])
-    else split_parts(text, separator, index + 1, begin, depth + (if (ch == "[") 1 else if (ch == "]") -1 else 0), null, parts)
+// A quote runs to its unescaped match, or to the end when unterminated.
+type quoted = \("'" ("\\" (. | "\n") | !("'" | "\\"))* "'"? | "\"" ("\\" (. | "\n") | !("\"" | "\\"))* "\""?)
+type comma_mark = \(quoted | "[" | "]" | ",")
+type arrow_mark = \(quoted | "[" | "]" | ">")
+
+// Quoted runs match whole, so only brackets and separators outside quotes are scanned;
+// a per-character recursion here dominated chart interaction setup.
+fn split_parts(text, separator = ",") {
+    let marks = find(text, if (separator == ">") arrow_mark else comma_mark);
+    let depths = math.cumsum([for (m in marks) if (m.value == "[") 1 else if (m.value == "]") -1 else 0]);
+    let cuts = [for (i, m in marks where m.value == separator and depths[i] == 0) m.index];
+    let ends = [*cuts, len(text)];
+    [for (i, begin in [0, for (cut in cuts) cut + 1]) trim(slice(text, begin, ends[i]))]
 }
 
 pub fn lifecycle(stream) {

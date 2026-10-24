@@ -70,6 +70,6 @@ on keydown(evt) {
 }
 
 <html lang:"en",
-    <head <meta charset:"UTF-8"><title "Sentence Match — Lambda Playground"><style CSS>>
+    <head <meta charset:"UTF-8"><title "Build Sentence — Lambda Playground"><style CSS>>
     <body apply(<sentence_app>)>
 >

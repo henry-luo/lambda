@@ -164,17 +164,22 @@ pub fn sample(source, project = (point) => point, precision = 0.75, intervals = 
 
 pub fn path(polylines) => join([for (line in polylines) svg.line_path(line.points) ++ (if (line.closed) " Z" else "")], " ")
 
-fn segment_length(segment, end = 1.0) {
-    let points = sample_curve((t) => point(segment, t * end), 0.1);
-    if (points is error) points else sum([for (i in 1 to (len(points) - 1)) distance(points[i - 1], points[i])])
+// One adaptive sampling per segment; each sample carries its parameter t as a third coordinate.
+fn length_table(segment) {
+    let points = sample_curve((t) => (let p = point(segment, t), if (p is error) p else [*p, t]), 0.1);
+    if (points is error) points else (
+        let steps = [for (i in 1 to (len(points) - 1)) distance(points[i - 1], points[i])],
+        {points: points, steps: steps, lengths: math.cumsum(steps), total: sum(steps)})
 }
 
-fn length_parameter(segment, length, lo = 0.0, hi = 1.0, remaining = 20) {
-    let mid = (lo + hi) / 2.0;
-    let measured = segment_length(segment, mid);
-    if (measured is error) measured else if (remaining == 0) mid
-    else if (measured < length) length_parameter(segment, length, mid, hi, remaining - 1)
-    else length_parameter(segment, length, lo, mid, remaining - 1)
+// Inverts the sampled arc length inside the first step that reaches it; re-sampling
+// every prefix of a bisection made one arrow cost ~40 full curve samplings.
+fn length_parameter(table, length) {
+    let reached = [for (i, measured in table.lengths where measured >= length) i];
+    let i = if (len(reached) > 0) reached[0] else len(table.steps) - 1;
+    let before = if (i == 0) 0.0 else table.lengths[i - 1];
+    let t0 = table.points[i][2]; let t1 = table.points[i + 1][2];
+    if (table.steps[i] > 0) t0 + (t1 - t0) * min(1.0, max(0.0, (length - before) / table.steps[i])) else t1
 }
 
 // de Casteljau subdivision retains the original cubic rather than replacing it with a polyline.
@@ -204,12 +209,12 @@ fn end_direction(segment) {
     else [for (axis in [0, 1]) segment.end[axis] - segment.begin[axis]]
 }
 
-fn path_cut(entries, segments, remaining) {
+fn path_cut(entries, remaining) {
     let cuts = [for (i, entry in entries,
         let after = sum(slice(entries, i + 1, len(entries)) |> ~.length)
         where entry.length > 0 and after < remaining and after + entry.length >= remaining)
         {index: entry.index, t: if (entry.length + after == remaining) 0.0 else
-            length_parameter(segments[entry.index], entry.length + after - remaining)}];
+            length_parameter(entry.table, entry.length + after - remaining)}];
     cuts[0]
 }
 
@@ -222,16 +227,16 @@ pub fn arrow_geometry(source, length, width = 0.0) {
     else if (length == 0 or len(segments) == 0) {body: source, length: 0.0}
     else {
         let start = max([for (index, segment in segments where segment.kind == "M") index]);
-        let entries = [for (index, segment in segments where index > start)
-            {index: index, length: segment_length(segment)}];
+        let entries = [for (index, segment in segments where index > start, let table = length_table(segment))
+            {index: index, table: table, length: if (table is error) table else table.total}];
         let failure = util.first_error(entries |> ~.length);
         if (failure is error) failure else {
             let positive = entries |: ~.length > 0;
             let total = sum(entries |> ~.length);
             if (total == 0) {body: source, length: 0.0} else {
                 let actual = min(length, total);
-                let head_cut = path_cut(entries, segments, actual);
-                let cut = path_cut(entries, segments, actual * 0.85);
+                let head_cut = path_cut(entries, actual);
+                let cut = path_cut(entries, actual * 0.85);
                 let body = join([for (index, segment in segments where index < start or
                     (actual < total and index <= cut.index)) segment_path(segment, if (index == cut.index) cut.t else 1.0)], " ");
                 let terminal = segments[positive[len(positive) - 1].index];

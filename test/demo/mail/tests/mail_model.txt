@@ -4,43 +4,74 @@
     role: 'inbox',
     depth: 0,
     name: "Inbox",
-    unread: 2
+    unread: 2,
+    selectable: true,
+    parent: false,
+    collapsed: false
   }, {
     path: "[Gmail]/Sent Mail",
     role: 'sent',
     depth: 0,
     name: "Sent",
-    unread: null
+    unread: null,
+    selectable: true,
+    parent: false,
+    collapsed: false
   }, {
     path: "Archive",
     role: null,
     depth: 0,
     name: "Archive",
-    unread: null
+    unread: null,
+    selectable: true,
+    parent: false,
+    collapsed: false
   }, {
     path: "Work/2026",
     role: null,
     depth: 1,
     name: "2026",
-    unread: null
+    unread: null,
+    selectable: true,
+    parent: false,
+    collapsed: false
   }]
-"INBOXINBOX=== window ==="
+"INBOXINBOX=== sidebar tree ==="
+[["Inbox", 0, false, false], ["Sent", 0, false, false], ["Archive", 0, false, false], ["Work", 0, true, false], ["2026", 1, true, false], ["Q4", 2, false, false]]
+["INBOX", "[Gmail]/Sent Mail", "Archive", "Work"]
+["INBOX", "[Gmail]/Sent Mail", "Archive", "Work", "Work/2026"]
+[["a", "b"], ["b"]]
+{
+  path: "Work/Ideas"
+}
+{
+  error: "Type a name for the mailbox."
+}
+{
+  error: "A mailbox name cannot contain “/”."
+}
+{
+  error: "There is already a mailbox named “Archive”."
+}
+[["", "Top level"], ["Archive", "Archive"], ["Work", "Work"], ["Work/2026", "Work/2026"], ["Work/2026/Q4", "Work/2026/Q4"]]
+["2026", "Inbox", 'inbox', "[Gmail]/Sent Mail", null]
+"=== window ==="
 {
   first: 0,
-  stop: 22,
+  stop: 20,
   before: 0,
-  after: 3198592
+  after: 4298280
 }
 {
   first: 988,
-  stop: 1022,
-  before: 63232,
-  after: 3134592
+  stop: 1020,
+  before: 84968,
+  after: 4212280
 }
 {
   first: 49988,
   stop: 50000,
-  before: 3199232,
+  before: 4298968,
   after: 0
 }
 {
@@ -57,7 +88,25 @@
 "=== labels ===09:145 Oct1 Jan 202521 Oct"
 ["900 B", "47 KB", "23.8 MB"]
 ["Ada", "bob@x", "(no sender)"]
-"(no subject)=== reports ==="
+"(no subject)=== rows ==="
+["To: Ann, b@x", "(no recipients)", "Me"]
+[2, 2, null, null]
+"24 Oct 2026 at 02:53"
+["MC", "JÁ", "B", true]
+{
+  name: "Alex Rivera",
+  address: "alex@lambda.demo"
+}
+{
+  to: "Ann <a@x>",
+  cc: "",
+  subject: "",
+  text: "hi",
+  in_reply_to: null,
+  references: null,
+  attachments: []
+}
+"New Message=== reports ==="
 ["Syncing…", "Offline", 5, {
     unread: 3,
     total: 5
@@ -183,6 +232,7 @@
   }
 }
 [true, false, false]
+[true, true, false, true]
 "=== sign-in ==="
 ["oauth", "password", "password", "password", "google", {
     id: "id.apps.googleusercontent.com",

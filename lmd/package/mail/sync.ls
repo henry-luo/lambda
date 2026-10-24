@@ -33,6 +33,10 @@ pub fn header_entry(header) {
      message_id: if (header == null) null else header.message_id}
 }
 
+// What a list row shows of a whole message, once its body is on disk: a
+// preview line and the number of attachments.
+pub fn body_entry(message) => {snippet: mime.snippet(message, 200), attachments: len(mime.attachments(message))}
+
 // One list row from a FETCH of the header fields.
 fn entry_of(box_id, uidvalidity, item) {
     let header = if (item.header == null) null else (parse(item.header, 'eml') ^ { null });

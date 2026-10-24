@@ -1166,6 +1166,11 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
                                                 DisplayList* dl) {
     if (!group || !dl) return;
 
+    // the same region test as the group's begin, so both halves agree
+    IRect region = {};
+    if (!dl_effect_bounds_to_region(&group->bounds, &region)) {
+        return;
+    }
     if (group->filter) {
         Bound clip = group->has_clip ? group->bounds : Bound{};
         dl_apply_filter(dl,
@@ -1175,11 +1180,6 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
                         group->bounds.bottom - group->bounds.top,
                         group->filter,
                         paint_optional_clip(group->has_clip, &clip));
-    }
-
-    IRect region = {};
-    if (!dl_effect_bounds_to_region(&group->bounds, &region)) {
-        return;
     }
     if (group->backdrop) {
         // vector replay stores premultiplied foreground pixels in its isolated region.

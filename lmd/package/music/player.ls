@@ -126,11 +126,22 @@ pn follow_notes(owner,session_value,node,sounding) {
         dom.set_scroll_state(pane,scroll.x,max(0.0,scroll.y+y-port.top-margin))
     }
 }
+// The live audio session is recorded on its owner element. A player applied with
+// another score is another template instance with fresh state on the same
+// element (Reactive UI §5.1: state is keyed by the source item), so only the
+// element knows which session is current: the new instance closes the old one,
+// and the old instance stops once it no longer owns the element.
+let SESSION="data-music-session"
+let idle={token:null,frame:0,active:[],groups:{}}
+pn close_session(owner,token) {
+    dom.audio_close(owner,token)
+    if (dom.get_attribute(owner,SESSION)==string(token)) dom.remove_attribute(owner,SESSION)
+}
 pn synchronize(owner,session_value,node) {
     let info=dom.midi_info(owner,session_value.token)
     if (info==null or info.state=="error") {
         status(owner,"Playback unavailable or audio device stopped","error")
-        if (session_value.token!=null) dom.audio_close(owner,session_value.token)
+        if (session_value.token!=null) close_session(owner,session_value.token)
         return {*:session_value,token:null,frame:0}
     }
     let occurrences=if (info.state=="playing" or info.state=="paused") [for (o in node.performance.occurrences where
@@ -149,12 +160,17 @@ pn handle(node,session_value,evt) {
     let owner=dom.closest(evt.target,".lambda-music-player")
     if (owner==null) { return session_value }
     var current=session_value
+    // a stale instance: the element now presents another score, whose instance closed this session
+    if (current.token!=null and dom.get_attribute(owner,SESSION)!=string(current.token)) { return idle }
     if (evt.type=="render") {
         dom.watch_window(owner,"closerequest",true)
         dom.watch_window(owner,"resize",true)
-        if (current.token!=null and current.performance!=node.performance) {
-            dom.audio_close(owner,current.token)
-            return {token:null,frame:0,active:[],groups:{},performance:null}
+        let live=dom.get_attribute(owner,SESSION)
+        if (current.token==null and live!=null) {
+            // the score presented before this one is still playing on this element
+            close_session(owner,int(live))
+            dom.set_state(dom.query_selector(owner,".music-seek"),"value","0")
+            status(owner,state_labels.ready,"ready")
         }
         return current
     }
@@ -167,9 +183,9 @@ pn handle(node,session_value,evt) {
         return current
     }
     if (evt.type=="closerequest") {
-        if (current.token!=null) dom.audio_close(owner,current.token)
+        if (current.token!=null) close_session(owner,current.token)
         if (current.frame>0) dom.cancel_frame(owner,current.frame)
-        return {token:null,frame:0,active:[],groups:{},performance:null}
+        return idle
     }
     if (evt.type=="music_tick") {
         if (current.token==null) { return current }
@@ -194,13 +210,14 @@ pn handle(node,session_value,evt) {
             status(owner,if (problem!="") problem else "Cannot open SoundFont or audio device","error")
             return current
         }
-        current={token:token,frame:0,active:[],performance:node.performance,
+        dom.set_attribute(owner,SESSION,string(token))
+        current={token:token,frame:0,active:[],
             pages:dom.query_selector_all(owner,".lambda-music-page svg"),sounding:[],
             groups:map([for (g in dom.query_selector_all(owner,"[data-highlight-id]")) (dom.get_attribute(g,"data-highlight-id"),g)])}
         // controls edited before opening the device still define the first audible state.
         for (control_name in ["speed","volume","mute","solo","seek"]) {
             if (not dom.midi_command(owner,token,control_name,control_value(owner,control_name))) {
-                dom.audio_close(owner,token)
+                close_session(owner,token)
                 status(owner,"Invalid playback control: "++control_name,"error")
                 return {*:current,token:null}
             }
@@ -210,14 +227,14 @@ pn handle(node,session_value,evt) {
     let command=action or control
     let value=if (action!=null) 0.0 else control_value(owner,control)
     if (not dom.midi_command(owner,current.token,command,value)) {
-        dom.audio_close(owner,current.token)
+        close_session(owner,current.token)
         status(owner,"Playback command failed","error")
         return {*:current,token:null,frame:0}
     }
     return synchronize(owner,{*:current,frame:0},node)
 }
 
-view <music_player> state session:{token:null,frame:0,active:[],groups:{},performance:null} { ~.tree }
+view <music_player> state session:idle { ~.tree }
 on render(evt) { session=handle(~,session,evt); return 'pass' }
 on click(evt) { session=handle(~,session,evt); return 'handled' }
 on change(evt) { session=handle(~,session,evt); return 'handled' }

@@ -134,7 +134,21 @@ let strokes = {
     focus:"M3 9V3h6 M15 3h6v6 M21 15v6h-6 M9 21H3v-6",
     zoom_reset:"M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14 M15 15l6 6 M7 10h6",
     up:"M5 15l7-7 7 7", down:"M5 9l7 7 7-7",
-    check:"M4 12l5 5L20 6", trash:"M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"
+    check:"M4 12l5 5L20 6", trash:"M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7",
+    // mail
+    mail:"M3 6h18v12H3z M3 7l9 6 9-6",
+    inbox:"M3 13l3-8h12l3 8v6H3z M3 13h5l1 3h6l1-3h5",
+    send:"M21 3L3 10.5l7.5 3L13.5 21z M10.5 13.5L21 3",
+    archive:"M3 4h18v4H3z M5 8v12h14V8 M10 12h4",
+    junk:"M4 6h16l-1.5 14h-13z M3 6h18 M9.5 10.5l5 5 M14.5 10.5l-5 5",
+    compose:"M12 4H4v16h16v-8 M17.5 2.5l4 4L12 16H8v-4z",
+    reply:"M9 5L3 11l6 6 M3 11h11a7 7 0 0 1 7 7v1",
+    reply_all:"M8 5L2 11l6 6 M13 5l-6 6 6 6 M7 11h8a7 7 0 0 1 7 7v1",
+    forward:"M15 5l6 6-6 6 M21 11H10a7 7 0 0 0-7 7v1",
+    flag:"M5 21V4 M5 4h12l-2.5 4.5L17 13H5",
+    paperclip:"M20 11.5l-8.2 8.2a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8",
+    unread:"M3 6h12 M3 6v12h18v-6 M3 7l9 6 4-2.7 M19 3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5",
+    folder_add:"M3 7V4h7l3 3h8v13H3z M12 11v6 M9 14h6"
 }
 pub fn glyph(graphic,color="currentColor",weight=1.7) => <path d:strokes[graphic] or strokes.library,fill:"none",stroke:color,'stroke-width':weight,
     'stroke-linecap':"round",'stroke-linejoin':"round">

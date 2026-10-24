@@ -332,6 +332,15 @@ class DemoWindowTests(unittest.TestCase):
         self.assertIn(b"ada-fake-test", (TEMP / "demo" / "accounts.mark").read_bytes())
 
     @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
+    def test_demo_mailbox(self):
+        # the demo account never connects: its mail is seeded in the profile
+        state, messages = self.replay("mail_window_demo", "demo-mailbox")
+        self.assertEqual(state.lines, [])
+        # 330 seeded, the sent reply, one Get Mail arrival, the draft sent from Drafts (its draft erased)
+        self.assertEqual(len(messages), 333)
+        self.assertIn(b"protocol: \"demo\"", (TEMP / "demo-mailbox" / "accounts.mark").read_bytes())
+
+    @unittest.skipUnless(sys.platform == "darwin", "the demo keeps passwords in the Keychain (macOS only, MQ7)")
     def test_demo_window_pop3(self):
         state, messages = self.replay("mail_window_pop3", "demo-pop3")
         # the replay ends by removing the account: from the list and from the Keychain

@@ -1,0 +1,21 @@
+{
+  "name": "DOOM scales its 640x400 layout to fill the window and follows resizes",
+  "html": "test/demo/doom/doom.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 120, "steps": 3},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-zoom", "contains": "1.50"},
+    {"type": "click", "target": {"selector": "#auto-play"}},
+    {"type": "advance_time", "ms": 800, "steps": 20},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-mode", "equals": "playing"},
+    {"type": "resize", "width": 1600, "height": 1100},
+    {"type": "advance_time", "ms": 300, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-zoom", "contains": "2.07"},
+    {"type": "resize", "width": 700, "height": 500},
+    {"type": "advance_time", "ms": 300, "steps": 6},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-zoom", "contains": "0.94"},
+    {"type": "assert_attribute", "target": {"selector": "#doom"}, "attribute": "data-mode", "equals": "playing"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true}
+  ]
+}

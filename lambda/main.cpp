@@ -2476,7 +2476,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"readability", "test/demo/readability/readability.ls"},
     {"archive", "test/demo/archive/archive.ls"},
     {"mail", "test/demo/mail/mail.ls"},
-    {"wordcloud", "test/demo/wordcloud.ls"},
+    {"music", "test/demo/music/music.ls"},
 };
 
 static void print_demo_help(FILE* stream) {

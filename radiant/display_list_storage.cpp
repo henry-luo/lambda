@@ -1201,6 +1201,10 @@ Bound dl_effect_capture_bounds(const DisplayList* dl, int start, int end, Bound 
 
 bool dl_effect_bounds_to_region(const Bound* bounds, IRect* region) {
     if (!bounds || !region) return false;
+    // an empty or inverted group covers no pixels; snapping outward first would
+    // turn a sub-pixel inversion (an effect clipped away under a fractional
+    // scale) into a 1 px region while its filter kept a negative size.
+    if (!(bounds->right > bounds->left && bounds->bottom > bounds->top)) return false;
     float left = floorf(bounds->left), top = floorf(bounds->top);
     float right = ceilf(bounds->right), bottom = ceilf(bounds->bottom);
     if (!isfinite(left) || !isfinite(top) || !isfinite(right) || !isfinite(bottom) ||

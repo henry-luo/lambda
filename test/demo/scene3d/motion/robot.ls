@@ -17,11 +17,14 @@ let compiled = motion.scene(motion.load("test/demo/scene3d/assets/motion/robot/R
 
 fn stage(choice, cue) element^ => s.normalize(s.scene([
     s.camera({id: "camera", position: [0.0, 2.8, 8.4], target: [0.0, 2.0, 0.0], fov: 45.0}),
-    s.light('ambient', {intensity: 0.6}),
-    s.light('directional', {position: [2.0, 4.0, 3.0], intensity: 0.85}),
-    s.mesh(s.box([9.0, 0.1, 5.0]), s.material('lambert', {color: "#2b3a52"}), {position: [0.0, -0.05, 0.0]}),
+    // three-point rig: warm key, cool fill and a rim light so the robot reads against the backdrop
+    s.light('ambient', {intensity: 1.45}),
+    s.light('directional', {position: [3.0, 6.0, 6.0], color: "#fff4e6", intensity: 1.7}),
+    s.light('directional', {position: [-5.0, 3.0, 4.0], color: "#dbe7ff", intensity: 0.8}),
+    s.light('directional', {position: [0.0, 5.0, -6.0], color: "#ffffff", intensity: 0.6}),
+    s.mesh(s.box([9.0, 0.1, 5.0]), s.material('lambert', {color: "#34465f"}), {position: [0.0, -0.05, 0.0]}),
     motion.control(compiled, ui.states(choices, 'idle'), {state: choice, cue: cue, fade: 0.25})^
-], {id: "robot-view", camera: "camera", width: 960, height: 440, background: "#162436"}))^
+], {id: "robot-view", camera: "camera", width: 960, height: 440, background: "#31496b"}))^
 
 // `playing` records what the controller announces
 view <workshop> state choice: 'idle', cue: 0, playing: "idle" {

@@ -6502,13 +6502,18 @@ static void render_svg_image_resource(SvgInlineRenderContext* ctx, Element* elem
 static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
     const char* href = get_svg_href(ctx, elem);
     SvgLengthContext lengths = svg_length_context(ctx, elem);
-    float x = svg_resolve_length(get_svg_attr(elem, "x"), &lengths, SVG_LENGTH_X, 0.0f);
-    float y = svg_resolve_length(get_svg_attr(elem, "y"), &lengths, SVG_LENGTH_Y, 0.0f);
-    float width = svg_resolve_length(get_svg_attr(elem, "width"), &lengths, SVG_LENGTH_X, 0.0f);
-    float height = svg_resolve_length(get_svg_attr(elem, "height"), &lengths, SVG_LENGTH_Y, 0.0f);
+    // geometry may be a number item (Lambda-built SVG), not only attribute text;
+    // the string-only getter read those as absent, drawing at the intrinsic size.
+    float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
+    read_svg_number_attr(elem, "x", &x, &lengths, SVG_LENGTH_X);
+    read_svg_number_attr(elem, "y", &y, &lengths, SVG_LENGTH_Y);
+    bool has_width = read_svg_number_attr(elem, "width", &width, &lengths, SVG_LENGTH_X) ||
+        get_svg_attr(elem, "width");
+    bool has_height = read_svg_number_attr(elem, "height", &height, &lengths, SVG_LENGTH_Y) ||
+        get_svg_attr(elem, "height");
     RdtMatrix frame = compose_element_transform(ctx, elem);
     render_svg_image_resource(ctx, elem, href, {x, y, x + width, y + height}, &frame,
-        !get_svg_attr(elem, "width"), !get_svg_attr(elem, "height"));
+        !has_width, !has_height);
 }
 
 // ============================================================================

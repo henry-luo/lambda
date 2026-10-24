@@ -257,9 +257,9 @@ fn playback_plan(raw, duration) {
     if (spec.timeline != null) timeline.configure(spec) else
         {duration: duration, length: duration, repeat: 1, direction: "normal", fill: "forwards"}
 }
-fn playback_initial(model, st, previous = null) {
+fn playback_initial(model, st, previous = null) => playback_clock(model, st, previous, render_spec(model.spec, model.viewport, st))
+fn playback_clock(model, st, previous, target) {
     let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
-    let target = render_spec(model.spec, model.viewport, st);
     let duration = max(animation.duration(target),animation.duration(previous));
     let has_timeline = spec.timeline != null;
     let plan = if (has_timeline) timeline.configure(model.spec) else null;
@@ -268,21 +268,26 @@ fn playback_initial(model, st, previous = null) {
         phase: if (running and model.options.reduced_motion != true) "playing" else if (has_timeline) "paused" else "ended",
         position: if (has_timeline and not running) 0.0 else null, reversed: false, generation: 0, presentation: previous}
 }
+// The settled image is the same pure render the clock and change check need,
+// so it is computed once here instead of once per use (each chart rendered twice on load).
+fn settled_image(model, st, current) => if (current != null) current else render_spec(model.spec, model.viewport, st)
 fn playback_image(model, st, playback) {
-    let clock = if (playback != null) playback else playback_initial(model, st);
+    let current = if (playback == null or playback.spec == model.spec and playback.parameter_values != st.values)
+        render_spec(model.spec, model.viewport, st) else null;
+    let clock = if (playback != null) playback else playback_clock(model, st, null, current);
     let spec=if (model.spec is element) parse.parse_top(model.spec) else model.spec;
     let changed=clock.spec!=model.spec or clock.parameter_values!=st.values and
-        clock.target_signature!=animation.geometry_signature(render_spec(model.spec,model.viewport,st));
+        clock.target_signature!=animation.geometry_signature(current);
     let frame = {time_ms: if (clock.position != null) clock.position else clock.elapsed, exact: clock.position != null,
         previous: if (changed) clock.presentation else clock.previous, interrupted:changed or clock.previous!=null and spec.timeline!=null,
         previous_state: clock.timing_state, timing_state: clock.timing_state, reduced_motion: model.options.reduced_motion == true};
-    if (changed and spec.timeline==null and not has_animation(spec,"update")) render_spec(model.spec,model.viewport,st)
+    if (changed and spec.timeline==null and not has_animation(spec,"update")) settled_image(model, st, current)
     else if (changed) render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
     else if (spec.timeline != null) render_frame(model.spec,if (clock.phase=="idle") {*:frame,previous:null,interrupted:false,time_ms:0.0} else frame,model.viewport,st)
     else if (clock.position!=null) render_frame(model.spec,frame,model.viewport,st)
     else if (clock.phase == "idle") if (clock.previous != null) clock.previous else render_frame(model.spec, {*:frame, time_ms: 0.0}, model.viewport, st)
     else if (clock.phase == "ended") if (clock.reversed and clock.elapsed==0) render_frame(model.spec,frame,model.viewport,st)
-        else render_spec(model.spec,model.viewport,st)
+        else settled_image(model, st, current)
     else render_frame(model.spec, frame, model.viewport, st)
 }
 

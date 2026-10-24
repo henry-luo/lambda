@@ -161,7 +161,7 @@ pub fn frame(st,level,progress,body_content) => <div id:"sentence-game",class:"p
     'data-pattern':st.pattern,'data-object':st.object,'data-where':st.where,'data-when':st.when,'data-how':st.how,'data-why':st.why,
     'data-round':string(st.round),'data-joins':string(len(st.clauses or [])),
     <header class:"topbar",
-        <div class:"brand",<span class:"brand-mark",'aria-hidden':"true","Aa"><span "Sentence Match">>
+        <div class:"brand",<span class:"brand-mark",'aria-hidden':"true","Aa"><span "Build Sentence">>
         <div class:"top-actions",
             <span class:"progress-pill",id:"score",'aria-live':"polite",progress>
             if (level != 0) <button id:"reset",type:"button",class:"quiet-button",'data-action':"reset",'aria-label':"Start this level over","Start over">

@@ -1,6 +1,8 @@
 /* Translated CSS scene geometry from cssDOOM; GPL-2.0, see ATTRIBUTION.md. */
 * { box-sizing: border-box; }
 html, body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
+/* doom.ls zooms #doom to fill the window; centre it both ways */
+body { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; }
 #doom { width: 640px; margin: 16px auto; outline: none; }
 #stage { position: relative; width: 640px; height: 400px; background: #000; }
 #viewport { position: relative; width: 640px; height: 336px; overflow: hidden; perspective: 320px; background-color: #1a1a3a; background-repeat: repeat-x; background-size: auto 70%; image-rendering: pixelated; }
@@ -134,7 +136,7 @@ html, body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
 }
 #overlay { position: absolute; inset: 0; background: rgba(0,0,0,.7); text-align: center; padding-top: 80px; }
 #overlay h1 { font-size: 64px; margin: 0; color: #ba3924; text-shadow: 3px 3px #642; }
-button, select { font: inherit; padding: 6px 10px; background: #333; color: #ddd; border: 1px solid #666; }
+button, select { font: inherit; padding: 6px 10px; background: #333; color: #ddd; border: 1px solid #666; white-space: nowrap; }
 button:hover { background: #555; }
 #auto-play { margin-left: 8px; border-color: #ba3924; }
 nav { display: flex; gap: 6px; margin-top: 12px; }

@@ -69,10 +69,13 @@ pub fn imap_url(server) => scheme(server, "imaps", "imap") ++ "://" ++ server.ho
 pub fn pop3_url(server) => scheme(server, "pop3s", "pop3") ++ "://" ++ server.host ++ ":" ++ string(server.port)
 pub fn smtp_url(server) => scheme(server, "smtps", "smtp") ++ "://" ++ server.host ++ ":" ++ string(server.port)
 
+// `tls: false` for a plain-text server, else nothing; a fn, since in a pn
+// `else {}` reads as an empty block rather than an empty map
+pub fn tls_option(server) => if (server.security == 'plain') {tls: false} else {}
+
 // the options lambda.io.mail open and send take for a server
 pub fn session_options(server, user, password, pin) => {user: user, password: password,
-    *: (if (pin == null or pin == "") {} else {pin: pin}),
-    *: (if (server.security == 'plain') {tls: false} else {})}
+    *: (if (pin == null or pin == "") {} else {pin: pin}), *: tls_option(server)}
 
 // ---- ISPDB autoconfig (https://wiki.mozilla.org/Thunderbird:Autoconfiguration) ----
 

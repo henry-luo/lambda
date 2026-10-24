@@ -420,8 +420,11 @@ static void trim(const char** s, size_t* n) {
 static void decode_display_name(const char* s, size_t n, StrBuf* raw, StrBuf* out, StrBuf* comment) {
     strbuf_reset(raw);
     int depth = 0;
+    // a quoted string's "(" is text, not a comment (RFC 5322 §3.2.4): "Ann (Forge)"
+    bool quoted = false;
     for (size_t i = 0; i < n; i++) {
         char c = s[i];
+        if (!depth && c == '"') { quoted = !quoted; continue; }
         if (depth) {
             if (c == '\\' && i + 1 < n) {
                 i++;
@@ -433,8 +436,7 @@ static void decode_display_name(const char* s, size_t n, StrBuf* raw, StrBuf* ou
             else if (comment) strbuf_append_char(comment, c);
             continue;
         }
-        if (c == '(') { depth = 1; continue; }
-        if (c == '"') continue;
+        if (c == '(' && !quoted) { depth = 1; continue; }
         if (c == '\\' && i + 1 < n) c = s[++i];
         strbuf_append_char(raw, c);
     }

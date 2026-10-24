@@ -181,9 +181,12 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
         left = viewport.x; top = viewport.y;
         right = viewport.x + viewport.width; bottom = viewport.y + viewport.height;
     }
-    left = fmaxf(viewport.x, floorf(left)); top = fmaxf(viewport.y, floorf(top));
-    right = fminf(viewport.x + viewport.width, ceilf(right));
-    bottom = fminf(viewport.y + viewport.height, ceilf(bottom));
+    // clip to the viewport first, then snap outward to whole pixels: a scaled
+    // ancestor gives the viewport fractional edges, and snapping before the
+    // clip left a sub-pixel span that truncated to an empty buffer.
+    left = floorf(fmaxf(viewport.x, left)); top = floorf(fmaxf(viewport.y, top));
+    right = ceilf(fminf(viewport.x + viewport.width, right));
+    bottom = ceilf(fminf(viewport.y + viewport.height, bottom));
     if (right <= left || bottom <= top) return true;
     int out_w = (int)(right - left), out_h = (int)(bottom - top); // INT_CAST_OK: bounded raster buffer dimensions
     if ((size_t)out_w > SIZE_MAX / sizeof(uint32_t) / (size_t)out_h) return false;

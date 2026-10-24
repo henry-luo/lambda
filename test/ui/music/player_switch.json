@@ -1,0 +1,31 @@
+{
+  "name": "Music demo: switching scores while one plays closes its session, and Stop stops the new one",
+  "html": "test/demo/music/music.ls",
+  "viewport": {"width": 1280, "height": 860},
+  "events": [
+    {"type": "click", "target": {"selector": "[data-action=\"play\"]"}},
+    {"type": "wait", "ms": 1200},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-music-player"}, "attribute": "data-state", "equals": "playing"},
+    {"type": "assert_text", "target": {"selector": ".music-status"}, "contains": "/ 34.3 s"},
+
+    {"type": "click", "target": {"selector": ".sheet[data-sheet=\"twinkle\"]"}},
+    {"type": "wait", "ms": 600},
+    {"type": "assert_attribute", "target": {"selector": "#music"}, "attribute": "data-selected", "equals": "twinkle"},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-music-player"}, "attribute": "data-state", "equals": "ready"},
+    {"type": "assert_text", "target": {"selector": ".music-status"}, "equals": "Ready"},
+    {"type": "assert_count", "target": {"selector": ".lambda-music-player[data-music-session]"}, "count": 0},
+
+    {"type": "click", "target": {"selector": "[data-action=\"play\"]"}},
+    {"type": "wait", "ms": 1200},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-music-player"}, "attribute": "data-state", "equals": "playing"},
+    {"type": "assert_text", "target": {"selector": ".music-status"}, "contains": "/ 30.0 s"},
+    {"type": "assert_count", "target": {"selector": ".lambda-music-player[data-music-session]"}, "count": 1},
+
+    {"type": "click", "target": {"selector": "[data-action=\"stop\"]"}},
+    {"type": "wait", "ms": 500},
+    {"type": "assert_attribute", "target": {"selector": ".lambda-music-player"}, "attribute": "data-state", "equals": "ready"},
+    {"type": "assert_text", "target": {"selector": ".music-status"}, "contains": "Ready · 0.0 / 30.0 s"},
+    {"type": "wait", "ms": 800},
+    {"type": "assert_text", "target": {"selector": ".music-status"}, "contains": "Ready · 0.0 / 30.0 s"}
+  ]
+}

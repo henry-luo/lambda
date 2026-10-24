@@ -2,33 +2,33 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #e8ebff; background: #070a1c;
+  color: #fff; background: #5b8ef5;
 }
 
 /* The backdrop stays put while the page scrolls above it: every layer moves by
    transform or opacity only, so the viewer can blit it instead of repainting. */
 .backdrop {
   position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-  background: linear-gradient(160deg, #070a1c 0%, #0d1033 48%, #120a2a 100%);
+  background: linear-gradient(150deg, #7c6ef6 0%, #5b8ef5 38%, #8ccdfb 70%, #e0f2fe 100%);
 }
 .orb { position: absolute; border-radius: 50%; animation-timing-function: ease-in-out;
        animation-iteration-count: infinite; animation-direction: alternate; }
 .orb-a { width: 620px; height: 620px; left: -160px; top: -220px;
-         background: radial-gradient(circle, rgba(124, 58, 237, .45) 0%, rgba(124, 58, 237, 0) 68%);
+         background: radial-gradient(circle, rgba(255, 255, 255, .22) 0%, rgba(255, 255, 255, 0) 68%);
          animation-name: drift-a; animation-duration: 16s; }
 .orb-b { width: 540px; height: 540px; right: -140px; top: 120px;
-         background: radial-gradient(circle, rgba(14, 165, 233, .32) 0%, rgba(14, 165, 233, 0) 68%);
+         background: radial-gradient(circle, rgba(125, 211, 252, .5) 0%, rgba(125, 211, 252, 0) 68%);
          animation-name: drift-b; animation-duration: 20s; }
 .orb-c { width: 680px; height: 680px; left: 30%; bottom: -380px;
-         background: radial-gradient(circle, rgba(236, 72, 153, .26) 0%, rgba(236, 72, 153, 0) 68%);
+         background: radial-gradient(circle, rgba(165, 180, 252, .4) 0%, rgba(165, 180, 252, 0) 68%);
          animation-name: drift-c; animation-duration: 24s; }
 @keyframes drift-a { from { transform: translate(0, 0); } to { transform: translate(140px, 90px); } }
 @keyframes drift-b { from { transform: translate(0, 0); } to { transform: translate(-120px, 140px); } }
 @keyframes drift-c { from { transform: translate(0, 0); } to { transform: translate(-160px, -100px); } }
 .lattice { position: absolute; inset: 0; opacity: .55;
-           background-image: radial-gradient(circle, rgba(165, 180, 252, .22) 1px, rgba(165, 180, 252, 0) 1.6px);
+           background-image: radial-gradient(circle, rgba(255, 255, 255, .3) 1px, rgba(255, 255, 255, 0) 1.6px);
            background-size: 30px 30px; }
-.glyph { position: absolute; bottom: -60px; color: rgba(196, 181, 253, .5); font-weight: 300;
+.glyph { position: absolute; bottom: -60px; color: rgba(30, 64, 175, .22); font-weight: 300;
          animation-name: rise; animation-duration: 14s; animation-timing-function: linear;
          animation-iteration-count: infinite; }
 @keyframes rise {
@@ -44,54 +44,85 @@ body {
 /* hero */
 .hero { display: flex; align-items: center; gap: 48px; padding: 64px 0 44px; }
 .hero-copy { flex: 1; min-width: 0; }
-.eyebrow { margin: 0 0 18px; color: #a5b4fc; font-size: 13px; font-weight: 600; letter-spacing: .22em; }
+.eyebrow { margin: 0 0 18px; color: #e0f2fe; font-size: 13px; font-weight: 600; letter-spacing: .22em; }
 h1 { margin: 0; font-size: 60px; line-height: 1.06; font-weight: 800; letter-spacing: -.02em; color: #fff; }
 h1 span { display: block; }
-h1 .ink { color: #a78bfa; animation-name: ink; animation-duration: 9s;
+h1 .ink { color: #1e3a8a; animation-name: ink; animation-duration: 9s;
           animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
-@keyframes ink { from { color: #7dd3fc; } 50% { color: #c084fc; } to { color: #7dd3fc; } }
-.lead { max-width: 620px; margin: 22px 0 0; color: #b6bde0; font-size: 17px; line-height: 1.6; }
+@keyframes ink { from { color: #1e3a8a; } 50% { color: #312e81; } to { color: #1e3a8a; } }
+/* a brighter royal blue than the navy, still about 2.8:1 on the backdrop */
+h1 .lead-word { display: inline; color: #1b35c2; }
+/* each letter of "Living" rises and brightens in turn, a wave through the word */
+h1 .wave { display: inline-block; animation-name: wave; animation-duration: 2.6s;
+           animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+@keyframes wave {
+  from { transform: translateY(0); color: #1b35c2; }
+  18% { transform: translateY(-7px); color: #2e4fe6; }
+  36% { transform: translateY(0); color: #1b35c2; }
+  to { transform: translateY(0); color: #1b35c2; }
+}
+/* the full stop is a pixel: it hops, lands on the baseline and flashes */
+h1 .pixel { display: inline-block; width: .19em; height: .19em; margin-left: .05em; background: #1e3a8a;
+            animation-name: hop; animation-duration: 1.8s; animation-iteration-count: infinite;
+            animation-timing-function: ease-in-out; }
+@keyframes hop {
+  from { transform: translateY(0); background: #1e3a8a; }
+  30% { transform: translateY(-.55em); background: #1b35c2; }
+  52% { transform: translateY(0); background: #ffffff; }
+  62% { transform: translateY(0) scale(1.25, .8); background: #1b35c2; }
+  74% { transform: translateY(0); background: #1e3a8a; }
+  to { transform: translateY(0); background: #1e3a8a; }
+}
+.lead { max-width: 620px; margin: 22px 0 0; color: rgba(255, 255, 255, .92); font-size: 17px; line-height: 1.6; }
 .stats { display: flex; gap: 12px; margin-top: 26px; }
-.stat { padding: 7px 14px; border: 1px solid rgba(165, 180, 252, .25); border-radius: 999px;
-        background: rgba(30, 27, 75, .45); color: #b6bde0; font-size: 14px; white-space: nowrap; }
+.stat { padding: 7px 14px; border: 1px solid rgba(255, 255, 255, .4); border-radius: 999px;
+        background: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .92); font-size: 14px; white-space: nowrap; }
 .stat b { color: #fff; font-weight: 800; }
-.hint { margin: 22px 0 0; color: #7c84b0; font-size: 13px; }
-.emblem { flex: none; width: 270px; height: 270px; }
+.hint { margin: 22px 0 0; color: rgba(255, 255, 255, .8); font-size: 13px; }
+.emblem { flex: none; width: 320px; height: 320px; }
 
 /* tiles */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 22px; }
 .tile {
   display: flex; flex-direction: column; margin: 0; padding: 0; overflow: hidden;
-  border: 1px solid rgba(165, 180, 252, .14); border-radius: 18px;
-  background: rgba(14, 17, 42, .78); color: inherit; font: inherit; text-align: left; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .7); border-radius: 18px;
+  background: rgba(239, 246, 255, .94); box-shadow: 0 6px 18px rgba(30, 58, 138, .12); color: inherit; font: inherit; text-align: left; cursor: pointer;
   transition-property: border-color, background-color; transition-duration: .25s;
 }
-.tile:hover { border-color: var(--hue); background-color: rgba(26, 30, 68, .92); }
-.tile:focus-visible { outline: 2px solid var(--hue); outline-offset: 3px; }
-.tile-art { display: block; flex: none; overflow: hidden; border-bottom: 2px solid var(--hue); }
+.tile:hover { border-color: #fff; background-color: #fff; }
+.tile:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.tile-art { display: block; flex: none; overflow: hidden; border-bottom: 1px solid #e2e8f0; }
 .art { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
 .tile-copy { display: block; padding: 16px 18px 6px; }
-.tile-tag { display: block; color: var(--hue); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
-.tile-title { display: block; margin-top: 6px; color: #fff; font-size: 20px; font-weight: 700; }
-.tile-blurb { display: block; margin-top: 7px; color: #a7aed3; font-size: 13.5px; line-height: 1.5; }
+/* a quiet grey label: the tile art carries the demo, not the tag */
+.tile-tag { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #e9edf2;
+            color: #5b6474; font-size: 10.5px; font-weight: 700; letter-spacing: .12em; }
+.tile-title { display: block; margin-top: 8px; color: #0b1a40; font-size: 20px; font-weight: 700; }
+/* every blurb fits two lines; the clamp keeps a longer one from growing the tile */
+.tile-blurb { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+              margin-top: 7px; color: #475a80; font-size: 13.5px; line-height: 1.5; }
 .tile-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px;
              margin-top: auto; padding: 12px 18px 16px; }
-.tile-cmd { padding: 3px 8px; border-radius: 6px; background: rgba(255, 255, 255, .06);
-            color: #8b93bd; font-family: Menlo, monospace; font-size: 11.5px;
+.tile-cmd { padding: 3px 8px; border-radius: 6px; background: rgba(59, 130, 246, .1);
+            color: #3b5384; font-family: Menlo, monospace; font-size: 11.5px;
             min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tile-open { flex: none; color: var(--hue); font-size: 13px; font-weight: 700; white-space: nowrap; }
-.tile.running { border-color: var(--hue); }
+.tile-open { flex: none; color: #2563eb; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.tile.running { border-color: #3b82f6; }
 .tile.running .tile-open { animation-name: pulse; animation-duration: 1.6s;
                            animation-iteration-count: infinite; }
 @keyframes pulse { from { opacity: 1; } 50% { opacity: .35; } to { opacity: 1; } }
 
-.page-foot { margin-top: 44px; color: #7c84b0; font-size: 13px; text-align: center; }
-.page-foot code { color: #c4b5fd; font-family: Menlo, monospace; }
+.page-foot { margin-top: 44px; color: #1e3a8a; font-size: 13px; text-align: center; }
+.page-foot code { color: #0b1a40; font-weight: 700; font-family: Menlo, monospace; }
 
+/* the bar centres the message; the message itself wraps within 760px */
+.toast-bar { position: absolute; left: 16px; right: 16px; bottom: 24px;
+             display: flex; justify-content: center; pointer-events: none; }
 .toast {
-  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
-  padding: 10px 18px; border: 1px solid rgba(167, 139, 250, .5); border-radius: 999px;
-  background: rgba(17, 20, 48, .94); color: #e8ebff; font-size: 14px; white-space: nowrap;
+  max-width: 760px; pointer-events: auto;
+  padding: 10px 18px; border: 1px solid rgba(59, 130, 246, .35); border-radius: 18px;
+  background: rgba(255, 255, 255, .96); color: #0b1a40; font-size: 14px; line-height: 1.45;
+  cursor: pointer;
 }
 
 @media (max-width: 760px) {

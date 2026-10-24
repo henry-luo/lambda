@@ -1,0 +1,11 @@
+{
+  "name": "SVG image places number-item geometry from a Lambda-built document",
+  "html": "test/lambda/ui/_svg_image_numeric_attrs.ls",
+  "viewport": {"width": 240, "height": 120},
+  "events": [
+    {"type": "assert_pixel", "x": 40, "y": 40, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 140, "y": 40, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 5, "y": 5, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 175, "y": 40, "min_r": 245, "min_g": 245, "min_b": 245}
+  ]
+}

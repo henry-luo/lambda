@@ -9,6 +9,7 @@
 import dom
 import store: lambda.mail.store
 import prov: lambda.mail.providers
+import compose: lambda.mail.compose
 import san: lambda.mail.sanitize
 import secret: lambda.io.secret
 import oauth: lambda.oauth
@@ -17,6 +18,7 @@ import model: .mod_model
 import ui: .mod_ui
 import sync: .mod_sync
 import signin: .mod_signin
+import demo: .mod_demo
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = input(url_resolve(BASE, "mail.css"), 'text')^
@@ -158,6 +160,57 @@ pn open_message(e, file) {
     return if (message == null) null else model.message_view(message, e, file)
 }
 
+// Opens list row `uid`: from the store when its file is there, else asks the
+// account's task to download it. The next state and the open message.
+pn opened(st, tasks, uid) {
+    let e = model.entry(st, uid)
+    if (e == null) { return {st: {*: st, selected: null, fetching: null}, shown: null} }
+    let file = store.message_path(sync.account_dir(ROOT, st.account), e.file)
+    if (exists(file)) {
+        // a POP3 or demo account keeps read state only in the store (ML9)
+        if (model.reads_locally(model.current(st)) and model.is_unread(e)) {
+            send(tasks[st.account], {op: 'seen', path: st.box, uid: e.uid}) ^ { null }
+        }
+        return {st: {*: st, selected: e.uid, fetching: null}, shown: open_message(e, file)}
+    }
+    var next = {*: st, selected: e.uid, fetching: e.uid}
+    send(tasks[st.account], {op: 'fetch', path: st.box, entry: e}) ^ { next = {*: next, fetching: null, note: "The account is not running."} }
+    return {st: next, shown: null}
+}
+
+// Sends `request` about the open message (a move or an erase), takes it out
+// of the list at once, and opens the row below it, as Mail does.
+pn moved_away(st, tasks, request) {
+    let uid = st.selected
+    let after = model.neighbor(st.entries, uid)
+    send(tasks[st.account], {*: request, path: st.box, uid: uid}) ^ { null }
+    let rest = model.without_entry(st, uid)
+    return if (after == null) {st: {*: rest, selected: null}, shown: null} else opened(rest, tasks, after)
+}
+
+// The compose window's draft to the account's task: sent (and filed in
+// Sent), or saved to Drafts. The next state; the task reports the outcome.
+pn deliver_draft(st, tasks, sending) {
+    let c = st.compose
+    let a = model.account(st, c.account)
+    let problem = if (sending) compose.problem(c) else null
+    if (problem != null) { return {*: st, compose: {*: c, note: problem}} }
+    let now_ms = datetime().unix
+    let id = "<" ++ string(now_ms) ++ "." ++ a.id ++ "@" ++ prov.domain_of(a.email) ++ ">"
+    var text = null
+    var failure = null
+    compose.eml(c, model.sender_of(a), compose.rfc5322_date(now_ms), id) ^ { failure = ^ } ~ { text = ~ }
+    if (failure is error) { return {*: st, compose: {*: c, note: failure.message}} }
+    let recipients = [for (p in [*compose.recipients(c.to), *compose.recipients(c.cc)]) p.address]
+    let role = if (sending) 'sent' else 'drafts'
+    let request = {op: if (sending) 'send' else 'save_draft', text: text, recipients: recipients,
+        path: model.role_path(st, a.id, role) or model.ROLE_LABELS[role], replaces: c.replaces,
+        to_self: lower(a.email) in [for (r in recipients) lower(r)]}
+    var next = {*: st, compose: {*: c, sending: true, note: null}}
+    send(tasks[a.id], request) ^ { next = {*: st, compose: {*: c, note: "The account is not running."}} }
+    return next
+}
+
 fn safe_name(name) => replace(replace(if (name == null or trim(name) == "") "attachment" else trim(name), "/", "_"), ":", "_")
 
 // Quick Look: images and text in the sheet, PDF in a frame over a copy
@@ -191,6 +244,16 @@ pn save_attachment(a) {
     var saved = true
     output(if (a.content is string) binary(a.content) else a.content, path) ^ { saved = false }
     return if (saved) path else null
+}
+
+// a compose or new-mailbox field typed into; else null
+pn form_input(evt, st) {
+    let value = dom.get_state(evt.target, "value") or ""
+    let compose_key = dom.get_attribute(evt.target, "data-compose")
+    if (compose_key != null and st.compose != null) { return {*: st, compose: {*: st.compose, [compose_key]: value, note: null}} }
+    let box_key = dom.get_attribute(evt.target, "data-newbox")
+    if (box_key != null and st.new_box != null) { return {*: st, new_box: {*: st.new_box, [box_key]: value, note: null}} }
+    return null
 }
 
 // ---- the window ----
@@ -239,6 +302,15 @@ on mail(evt) {
         st = show_box(st, tasks, st.account, st.box)
         shown = null
     }
+    if (m.type == "sent" or m.type == "draft_saved") {
+        st = {*: st, compose: null, note: if (m.type == "sent") "Message sent." else "Draft saved."}
+    } else if (m.type == "send_failed" and st.compose != null) {
+        st = {*: st, compose: {*: st.compose, sending: false, note: m.text}}
+    }
+    if (m.type == "index" and shown != null and m.account == st.account and m.path == st.box) {
+        let e = model.entry(st, shown.uid)
+        if (e != null) { shown = {*: shown, flags: e.flags} }
+    }
     if (m.type == "message" and m.account == st.account and m.uid == st.fetching) {
         let e = model.entry(st, m.uid)
         shown = if (e == null) null else open_message(e, m.file)
@@ -252,25 +324,59 @@ on click(evt) {
     if (button == null) { return 'pass' }
     let name = dom.get_attribute(button, "data-action")
     let value = dom.get_attribute(button, "data-value")
+    // a note ("Message sent.") lasts until the next action
+    if (st.note != null) { st = {*: st, note: null} }
     if (name == "mailbox") {
         st = show_box(st, tasks, dom.get_attribute(button, "data-account"), value)
         shown = null
     } else if (name == "message") {
-        let e = model.entry(st, int(value))
-        if (e != null) {
-            let file = store.message_path(sync.account_dir(ROOT, st.account), e.file)
-            if (exists(file)) {
-                shown = open_message(e, file)
-                st = {*: st, selected: e.uid, fetching: null}
-                // a POP3 account keeps read state only in the store (ML9)
-                if (model.is_pop3(model.current(st)) and model.is_unread(e)) {
-                    send(tasks[st.account], {op: 'seen', uid: e.uid}) ^ { null }
-                }
-            } else {
-                shown = null
-                st = {*: st, selected: e.uid, fetching: e.uid}
-                send(tasks[st.account], {op: 'fetch', path: st.box, entry: e}) ^ { st = {*: st, fetching: null, note: "The account is not running."} }
-            }
+        let next = opened(st, tasks, int(value))
+        st = next.st
+        shown = next.shown
+    } else if (name == "toggle") {
+        st = {*: st, collapsed: model.toggled(st.collapsed, value)}
+    } else if (name == "new-box") {
+        st = {*: st, new_box: {account: value, parent: "", name: "", note: null}}
+    } else if (name == "new-box-cancel") {
+        st = {*: st, new_box: null}
+    } else if (name == "new-box-save") {
+        let nb = st.new_box
+        let made = model.new_mailbox_path(st, nb.account, nb.parent, nb.name)
+        if (made.error != null) { st = {*: st, new_box: {*: nb, note: made.error}} }
+        else {
+            send(tasks[nb.account], {op: 'create', path: made.path}) ^ { st = {*: st, note: "The account is not running."} }
+            // the new mailbox's parent opens to show it
+            st = {*: st, new_box: null, collapsed: [for (k in st.collapsed where k != nb.account and k != model.count_key(nb.account, nb.parent)) k]}
+        }
+    } else if (name == "compose") {
+        if (st.account != null) { st = {*: st, compose: model.compose_window(compose.blank(), "new", st.account, null)} }
+    } else if (name == "reply" or name == "reply-all" or name == "forward") {
+        if (shown != null) {
+            let me = model.sender_of(model.current(st))
+            let draft = if (name == "forward") compose.forward(model.for_reply(shown)) else compose.reply(model.for_reply(shown), me, name == "reply-all")
+            st = {*: st, compose: model.compose_window(draft, name, st.account, null)}
+        }
+    } else if (name == "edit-draft") {
+        if (shown != null) { st = {*: st, compose: model.compose_window(model.draft_of(shown), "draft", st.account, {path: st.box, uid: shown.uid})} }
+    } else if (name == "compose-discard") {
+        st = {*: st, compose: null}
+    } else if (name == "compose-send" or name == "compose-save") {
+        if (st.compose != null and not st.compose.sending) { st = deliver_draft(st, tasks, name == "compose-send") }
+    } else if (name == "archive" or name == "junk" or name == "delete") {
+        if (shown != null and st.selected != null) {
+            let trash = model.role_path(st, st.account, 'trash')
+            let request = if (name == "delete" and st.box == trash) {op: 'erase'}
+                else {op: 'move', to: model.role_path(st, st.account, if (name == "delete") 'trash' else name) or model.ROLE_LABELS[if (name == "delete") 'trash' else name]}
+            let next = moved_away(st, tasks, request)
+            st = next.st
+            shown = next.shown
+        }
+    } else if (name == "flag" or name == "mark-unread") {
+        if (shown != null) {
+            let flag = if (name == "flag") "\\Flagged" else "\\Seen"
+            let enabled = not (flag in (shown.flags or []))
+            send(tasks[st.account], {op: 'flag', path: st.box, uid: shown.uid, flag: flag, enabled: enabled}) ^ { null }
+            shown = {*: shown, flags: if (enabled) [*shown.flags, flag] else [for (f in shown.flags where f != flag) f]}
         }
     } else if (name == "remote") {
         if (shown != null) { st = {*: st, remote: [*st.remote, shown.file]} }
@@ -278,6 +384,11 @@ on click(evt) {
         if (st.account != null and tasks[st.account] != null) { send(tasks[st.account], {op: 'refresh'}) ^ { null } }
     } else if (name == "add-account") {
         st = {*: st, setup: model.setup_initial()}
+    } else if (name == "add-demo") {
+        // the demo mailbox (mod_demo.ls): made-up mail on this computer, no server
+        let next = finish_account(dom.root_node(evt.target), st, tasks, demo.account(), null)
+        st = next.st
+        tasks = next.tasks
     } else if (name == "setup-cancel") {
         // a sign-in still waiting for the browser ends with the sheet
         if (st.setup != null and st.setup.signer != null) { cancel(st.setup.signer) }
@@ -345,6 +456,11 @@ on click(evt) {
 
 // the account sheet's fields; the password stays in memory until Add
 on input(evt) {
+    let typed = form_input(evt, st)
+    if (typed != null) {
+        st = typed
+        return 'handled'
+    }
     let field = dom.get_attribute(evt.target, "data-field")
     if (field == null or st.setup == null) { return 'pass' }
     st = {*: st, setup: {*: st.setup, [field]: dom.get_state(evt.target, "value") or "", note: null}}
@@ -352,6 +468,11 @@ on input(evt) {
 }
 
 on change(evt) {
+    let typed = form_input(evt, st)
+    if (typed != null) {
+        st = typed
+        return 'handled'
+    }
     let field = dom.get_attribute(evt.target, "data-field")
     if (field == null or st.setup == null) { return 'pass' }
     st = {*: st, setup: {*: st.setup, [field]: dom.get_state(evt.target, "value") or "", note: null}}

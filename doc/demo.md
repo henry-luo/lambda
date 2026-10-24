@@ -21,7 +21,6 @@ its name:
 ./lambda demo chart
 ./lambda demo slides
 ./lambda demo archive
-./lambda demo wordcloud
 ./lambda demo --list
 ```
 
@@ -33,7 +32,7 @@ CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
 Crystal garden, Observatory, and Shared Animation, with breadcrumbs back to
 the collection.
 The `chart` collection opens normal charts with animation and interaction,
-scientific plots, and graphs including word clouds, timelines, Mermaid, and TikZ.
+scientific plots, and graphs including word clouds, Mermaid, Graphviz, and TikZ.
 
 ## Viewer features
 

@@ -37,6 +37,11 @@ Open `doom.ls` from the repository root with:
 ./lambda.exe demo doom
 ```
 
+The game fills the window and follows it when resized. Its 640×400 layout is
+scaled as one piece with CSS `zoom`, so the camera math, written for the
+336 px viewport, is unchanged; top-view dragging divides screen pixels by the
+same factor. A larger window draws more pixels per frame.
+
 Press Start, then W/S to move, A/D to strafe, arrows to turn, Shift to run,
 E/Space to use, Control or mouse button 1 to fire, and 1–6 to select a weapon.
 P/Escape pauses and R restarts in player mode. Player mode captures relative mouse movement;

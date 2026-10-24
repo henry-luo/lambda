@@ -68,7 +68,7 @@ pub pn sync_inbox(session, root, progress) map^ {
         let message = sync.file_message(root, file, reply.responses[0])^
         let uid = store.highest_uid({entries: entries}) + 1
         entries = [*entries, {uid: uid, uidl: m.uidl, file: file, flags: [], *: sync.header_entry(message),
-            internaldate: null, size: octets(reply.text), thread: null, has_file: true}]
+            *: sync.body_entry(message), internaldate: null, size: octets(reply.text), thread: null, has_file: true}]
         done = done + 1
         if (progress != null) { progress(done) }
         if (done % BATCH == 0) { index = saved(index_file, index, entries)^ }
@@ -82,7 +82,5 @@ pub pn mark_seen(root, uid, seen) map^ {
     let index_file = store.index_path(root, INBOX)
     let loaded = store.load_index(index_file)
     if (loaded == null) { return null }
-    let entries = [for (e in loaded.entries) if (e.uid != uid) e
-        else {*: e, flags: if (seen) unique([*e.flags, "\\Seen"]) else [for (f in e.flags where f != "\\Seen") f]}]
-    saved(index_file, loaded, entries)
+    saved(index_file, loaded, store.with_flag(loaded.entries, uid, "\\Seen", seen))
 }

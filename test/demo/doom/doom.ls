@@ -24,6 +24,24 @@ let SCENE = scene.prepare(WORLD, GAME)
 let PROFILE = sys.proc.self.env.DOOM_PROFILE# == "1"
 
 fn internal_focus(evt) => dom.closest(evt.relatedTarget, "#doom") != null
+
+// The game keeps its 640×400 design and scales as one piece to fill the
+// window: `zoom` scales layout, perspective and HUD together, so the camera
+// math, written for the 336 px viewport, stays valid. The factor is kept on
+// the owner for input that maps screen pixels back into the scene.
+let FIT_MARGIN = 32  // #doom's 16 px margins (doom.css), on both sides
+fn zoom_of(owner) => (let z = dom.get_attribute(owner, "data-zoom"), if (z == null) 1.0 else float(z))
+pn fit_window(owner) {
+    if (owner == null) { return null }
+    let viewport = dom.viewport_size(owner)
+    let box = dom.bounding_box(owner)
+    if (viewport == null or box == null) { return null }
+    let current = zoom_of(owner)
+    let zoom = max(0.5, min(viewport.width / (box.width / current + FIT_MARGIN),
+        viewport.height / (box.height / current + FIT_MARGIN)))
+    dom.set_attribute(owner, "data-zoom", string(zoom))
+    dom.style_set_property(owner, "zoom", string(zoom))
+}
 pn stop_frame(owner, token) { if (token > 0) dom.cancel_frame(owner, token) }
 pn publish(owner, previous, next, timestamp_ms, reset_clock = false) {
     stop_frame(owner, previous.token)
@@ -89,6 +107,7 @@ view <doom_session> state session: {game: ~.game, map_data: ~.map_data, clock: s
 }
 on doom_activate(evt) {
     if (evt.event_phase != 2 or session.handles != null) { return 'pass' }
+    fit_window(evt.target)
     session = publish(evt.target, session, session, evt.time_stamp, true)
     dom.focus_set(evt.target, false)
     return 'handled'
@@ -160,7 +179,9 @@ on pointerdown(evt) {
 on pointermove(evt) {
     if (session.drag == null) { return 'pass' }
     let owner = dom.get_element_by_id(dom.root_node(evt.target), "doom")
-    let game = camera.drag(session.game, evt.clientX - session.drag.x, evt.clientY - session.drag.y)
+    // drag distances are screen pixels; the camera works in unzoomed layout pixels
+    let zoom = zoom_of(owner)
+    let game = camera.drag(session.game, (evt.clientX - session.drag.x) / zoom, (evt.clientY - session.drag.y) / zoom)
     session = publish(owner, session, {*: session, game: game, drag: {x: evt.clientX, y: evt.clientY}}, evt.time_stamp)
     return 'prevent-default'
 }
@@ -223,6 +244,10 @@ on blur(evt) {
 on load(evt) {
     let owner = dom.get_element_by_id(evt.target, "doom")
     if (owner != null) dom.request_frame(owner, "doom_activate")
+    return 'handled'
+}
+on resize(evt) {
+    fit_window(dom.get_element_by_id(evt.target, "doom"))
     return 'handled'
 }
 

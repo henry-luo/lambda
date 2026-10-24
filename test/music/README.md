@@ -53,6 +53,11 @@ must use wall time rather than headless replay's virtual clock.
   with no page scroll or toolbar movement.
 - `player_lyrics.json`: audio-clock lyric highlighting, repeat-specific verses,
   melisma continuation, paused color changes, resizing and Stop/restart cleanup.
+- `player_switch.json`: the music demo (`test/demo/music/music.ls`) switching
+  scores while one plays. A player given another score is a new template
+  instance on the same element, so the session recorded on the element
+  (`data-music-session`) lets the new instance close the old one; the test then
+  plays the new score and checks that Stop stops it.
 
 Package goldens live in `test/lambda/music/` and are registered with
 `test_lambda_gtest`. The focused `music_gc_roots` score/font/SVG ownership

@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+* { box-sizing: border-box; }
+body { margin: 0; font: 12px Arial, sans-serif; }
+.ws { display: grid; grid-template-columns: 200px minmax(0,1fr) 200px; gap: 20px; }
+@media (max-width: 700px) { .ws { grid-template-columns: 200px minmax(0,1fr); } .side { grid-column: 1 / -1; } }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.card { padding: 10px; border: 1px solid #ccc; }
+.fill { display: block; width: 100%; }
+</style></head><body>
+<!-- a width:100% child resolves as auto in its grid item's min-content contribution -->
+<div class="ws"><aside>catalog</aside><section><div class="row" id="row-div">
+  <section class="card" id="div-a"><p>First card text.</p></section>
+  <section class="card" id="div-b"><p>Second.</p><div class="fill">x</div></section>
+</div><div class="row" id="row-select">
+  <section class="card" id="sel-a"><p>First card text.</p></section>
+  <section class="card" id="sel-b"><p>Second.</p><select class="fill"><option>White Blood Cell</option></select></section>
+</div></section><aside class="side">inspector</aside></div>
+</body></html>

@@ -3802,9 +3802,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->available_space.width.value <= 0.0f &&
         (width_is_percentage || max_width_is_percentage) &&
         !parent_has_auto_inline_width;
-    // an auto-sized flex item is a cyclic basis before its main size is assigned.
+    // an auto-sized flex or grid item is a cyclic basis before its track/main size
+    // is assigned; otherwise a child's stale resolved percentage width becomes the
+    // item's min-content contribution (CSS Sizing 3 §5.2.1).
     bool parent_measures_auto_width = intrinsic_parent && intrinsic_parent->measuring_intrinsic_width() &&
-        intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_FLEX &&
+        (intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_FLEX ||
+         intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_GRID) &&
         layout_block_has_automatic_size(intrinsic_parent, true);
     bool intrinsic_width_context = parent_measures_auto_width || lycon->available_space.width.is_intrinsic() ||
         intrinsic_percentage_width_is_indefinite(lycon) ||

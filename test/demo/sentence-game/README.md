@@ -1,4 +1,4 @@
-# Sentence Match
+# Build Sentence
 
 A native Lambda/Radiant game with three levels: sentence building, word-card
 puzzles, and picture description.

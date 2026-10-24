@@ -14,7 +14,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | Name | Entry point | Guide |
 | --- | --- | --- |
 | `tetris` | `tetris/tetris.ls` | [Tetris](tetris/TETRIS.md) |
-| `sentence-game` | `sentence-game/sentence-game.ls` | [Sentence Match](sentence-game/README.md) |
+| `sentence-game` | `sentence-game/sentence-game.ls` | [Build Sentence](sentence-game/README.md) |
 | `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
 | `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
 | `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |
@@ -31,7 +31,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | `readability` | `readability/readability.ls` | [Reader View](readability/README.md) |
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
 | `mail` | `mail/mail.ls` | [Mail](mail/README.md) |
-| `wordcloud` | `wordcloud.ls` | [Charts](CHARTS.md) |
+| `music` | `music/music.ls` | [Music](music/README.md) |
 
 Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 
@@ -68,6 +68,8 @@ Lambda and played through the music package's SoundFont. Generate the model with
 ## Mail
 
 `./lambda.exe demo mail` is a mail client in the spirit of macOS Mail. It reads IMAP accounts (Gmail, iCloud, Fastmail and Yahoo with app passwords, or Proton Mail Bridge) through [`lambda.io.mail`](../../doc/Lambda_Sys_Func.md#lambdaiomail) and keeps passwords in the Keychain. The window has a sidebar of mailboxes, a message list that mounts only the rows in view, and a viewer that shows HTML mail in a sandboxed, script-free frame with remote content blocked until you load it. See [Mail](mail/README.md).
+
+`./lambda.exe demo music` plays sheet music. A library of five scores sits on the left; the chosen one is engraved on A4 pages by [`lambda.music`](../../doc/Lambda_Packages.md) and played through its SoundFont player, with the sounding notes, chords and lyric syllables highlighted as they play. See [Music](music/README.md).
 
 ## Interactive Tetris
 
