@@ -1,0 +1,49 @@
+{
+  "name": "Paint-only hover: border colors keep em widths and per-side winners, inherited color reaches descendants, shadows repaint",
+  "html": "test/ui/hover_border_color_paint.html",
+  "viewport": {"width": 320, "height": 220},
+  "events": [
+    {"type": "log", "message": "idle: red 10px border (0.5em at 20px) around green"},
+    {"type": "assert_pixel", "x": 2, "y": 60, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+    {"type": "assert_pixel", "x": 8, "y": 60, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+    {"type": "assert_pixel", "x": 12, "y": 60, "min_r": 0, "max_r": 5, "min_g": 250, "max_g": 255, "min_b": 0, "max_b": 5},
+
+    {"type": "log", "message": "hover #box: border turns blue with its width unchanged"},
+    {"type": "mouse_move", "target": {"selector": "#box"}},
+    {"type": "assert_state", "target": {"selector": "#box"}, "state": ":hover", "value": true},
+    {"type": "assert_pixel", "x": 2, "y": 60, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255},
+    {"type": "assert_pixel", "x": 8, "y": 60, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255},
+    {"type": "assert_pixel", "x": 12, "y": 60, "min_r": 0, "max_r": 5, "min_g": 250, "max_g": 255, "min_b": 0, "max_b": 5},
+
+    {"type": "log", "message": "hover #pair: every side blue, #box back to red"},
+    {"type": "mouse_move", "target": {"selector": "#pair"}},
+    {"type": "assert_pixel", "x": 165, "y": 60, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255},
+    {"type": "assert_pixel", "x": 210, "y": 5, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255},
+    {"type": "assert_pixel", "x": 2, "y": 60, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+
+    {"type": "log", "message": "leave: #pair restores its green left side and red top"},
+    {"type": "mouse_move", "x": 300, "y": 190},
+    {"type": "assert_pixel", "x": 165, "y": 60, "min_r": 0, "max_r": 5, "min_g": 250, "max_g": 255, "min_b": 0, "max_b": 5},
+    {"type": "assert_pixel", "x": 210, "y": 5, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+
+    {"type": "log", "message": "#card idle: swatch border is currentColor red, no shadow"},
+    {"type": "assert_pixel", "x": 22, "y": 160, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+    {"type": "assert_pixel", "x": 100, "y": 136, "min_r": 250},
+
+    {"type": "log", "message": "hover #hit, a sibling of the swatch: the swatch border turns blue and the shadow appears"},
+    {"type": "mouse_move", "target": {"selector": "#hit"}},
+    {"type": "assert_pixel", "x": 22, "y": 160, "min_r": 0, "max_r": 5, "min_g": 0, "max_g": 5, "min_b": 250, "max_b": 255},
+    {"type": "assert_pixel", "x": 100, "y": 136, "min_r": 0, "max_r": 5, "min_g": 250, "max_g": 255, "min_b": 0, "max_b": 5},
+
+    {"type": "log", "message": "leave: red swatch border again and the shadow is gone"},
+    {"type": "mouse_move", "x": 300, "y": 210},
+    {"type": "assert_pixel", "x": 22, "y": 160, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+    {"type": "assert_pixel", "x": 100, "y": 136, "min_r": 250},
+
+    {"type": "log", "message": "a window losing the pointer sends it off the document, which clears hover"},
+    {"type": "mouse_move", "target": {"selector": "#box"}},
+    {"type": "mouse_move", "x": -1, "y": -1},
+    {"type": "assert_state", "target": {"selector": "#box"}, "state": ":hover", "value": false},
+    {"type": "assert_pixel", "x": 2, "y": 60, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5}
+  ]
+}
