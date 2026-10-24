@@ -43,6 +43,12 @@ names over a feature tag that admits unmeasured cases. Preserve the baseline,
 expected exceptions, crash policy and timing
 gates while measuring; the final mixed run must qualify independently.
 
+The MVP MIR compiler honors `--opt-level=0` for these cold jobs. The default
+outside the runner remains O2, with the existing O1 bound for hot-entry
+satellites and large functions. Reusable native images match the effective
+optimization level as well as the emitted MIR; changing the requested level
+compiles a fresh image.
+
 Compiled helpers can be shared with interpreted consumers through
 `compile_js_mir_preamble_len` and `instantiate_js_preamble` (**D8.5.1v7**).
 `JsFormalMir.CachedHarnessFunctionsServeAstAcrossFreshRealms` verifies native
@@ -52,9 +58,17 @@ validate the reusable machine-code image; it does not skip the frontend.
 This API is distinct from the current MVP batch path, which owns a standalone
 execution per MIR test and evaluates the saved harness text in that realm.
 
-Realm globals keep real own properties from creation. Constructor graphs and
-the Math, JSON, Intl, Reflect, Atomics, console, and CSS namespaces are built
-when their values are first observed, using the existing lazy-slot mechanism.
+Realm globals keep real own properties from creation. Builtin callable graphs,
+browser host families and the Math, JSON, Intl, Reflect, Atomics, console, and
+CSS namespaces are built when their values are first observed, using the
+existing lazy-slot mechanism on both AST and MIR. A host family publishes
+only markers still owned by the runtime, preserving replaced or deleted
+siblings and the installed descriptors.
+Bootstrap uses own-slot stores, and deferred host families build on a private
+null-prototype staging object so guest prototype setters cannot intercept
+initialization (**D6.2.2v2**).
+Internal HTTP and Blob factories initialize their intrinsic family through
+realm-owned caches, independently of reads or replacements of public bindings.
 Reads and property descriptors resolve the slot; presence, assignment, and
 deletion use ordinary property semantics. Calls still use real callable
 objects and executable entries (**D6.2.2v2**). `runtime_reset_heap` owns the
@@ -107,7 +121,7 @@ declaring an object-runtime change complete.
 The runner is a GTest binary that orchestrates a pool of worker processes; it never executes JS in-process.
 
 - **Orchestrator (parent).** `test_js_test262_gtest.cpp` discovers tests by walking fixed category tables — `language_cats` (`:655`), `builtin_cats`, and AnnexB cats (`:771`) — under `TEST262_ROOT` (`ref/test262`), skipping `_FIXTURE.js` helper modules (`:599`). Phase 1 parses each test's YAML frontmatter into a `Test262Prepared` record (`:956`) and `partition_batch_indices` (`:2659`) splits work into native-harness, JS-harness, module, and slow groups; JS groups are keyed by their special-preamble needs so each AST batch retains only the helper Scripts it needs.
-- **Worker pool.** Each worker is `./lambda.exe js-test-batch`, launched via **`posix_spawn`** (`run_t262_sub_batch`, `:2547`) rather than `fork`+`exec`: with the parent holding ~1.3 GB of test sources, `fork` would copy page tables thousands of times (the comment at `:2515` cites ~500 s of avoided system time). Worker count is `cpu_count - 1` by default (`t262_target_worker_count`, `:1321`), overridable with `--jobs`. stdin is dup2'd from a per-worker reusable manifest file and stdout/stderr from a pipe; each worker reuses one `temp/_t262_worker_N.manifest`.
+- **Worker pool.** Each worker is `./lambda.exe js-test-batch`, launched via **`posix_spawn`** (`run_t262_sub_batch`, `:2547`) rather than `fork`+`exec`: with the parent holding ~1.3 GB of test sources, `fork` would copy page tables thousands of times (the comment at `:2515` cites ~500 s of avoided system time). Worker count defaults to the hardware CPU count, or four if unavailable (`t262_target_worker_count`), overridable with `--jobs`. Recycled realms bound each worker's live state. stdin is dup2'd from a per-worker reusable manifest file and stdout/stderr from a pipe; each worker reuses one `temp/_t262_worker_N.manifest`.
 - **Persistent hot-reload process.** With hot-reload on (the default), the worker reuses its `EvalContext`. AST tests recycle the realm heap and release each test's Script generation while retaining the harness Scripts (§1.1). MVP MIR jobs create a standalone execution for each test.
 - **Wire protocol.** The manifest is a length-prefixed line protocol read on the worker's stdin (`main.cpp:3452`): `harness:<len>` (retain the shared harness for the batch), `source:<name>[:<path>]:<len>` (an ordinary test), and `module-source:<name>[:<path>]:<len>` (run through the ES-module entry). The worker emits results back on stdout framed by a **`\x01` control byte**: `BATCH_START <name>`, then captured stdout, then `BATCH_END <status> <elapsed_us> <rss…> <phase_us…>` (parsed by the parent at `:2599`); out-of-band diagnostics use `BATCH_EXIT`/`BATCH_DIAG`.
 - **Harness preparation.** The current worker follows §1.1: retained Scripts for AST jobs and saved harness text for standalone MVP jobs. The separate compiled-image APIs and fresh-realm instantiation are described from the compiler side in [JS_01 §3](JS_01_Compilation_Pipeline.md).

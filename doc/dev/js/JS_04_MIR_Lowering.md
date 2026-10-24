@@ -1,6 +1,6 @@
 # LambdaJS — MIR Lowering and Native Helpers
 
-> **Last verified against tree:** 2026-10-17 (source and release-link inspection; runtime qualification is recorded separately).
+> **Last verified against tree:** 2026-10-24 (constant-array lowering; other sections retain their original verification scope).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
 > **Authority:** S1.11, D8.1.3v25, D8.2.3, D8.4.1v2, D8.4.3v2 and D5.3/D5.4.
@@ -32,6 +32,20 @@ access; guards retain observable property behavior, coercion order and fallback
 for special storage. Shared shapes and JS policy follow **D2.6.6v3**, **D3.4.7**
 and **S1.11**. The working design records the admission and optimization details:
 [JS MVP design](../../../vibe/jube/JS_MVP_Lmd.md).
+
+Large, side-effect-free nested array literals use a compiler-owned
+`JsStaticLiteralRecipe` instead of emitting MIR for every element. The existing
+inline-allocation budget bounds this choice; small literals retain inline stores and
+wide flat arrays retain their bulk scalar copy. One native
+materializer creates fresh arrays, preserves holes and copies wide scalars
+into destination-owned storage. Parent arrays remain precisely rooted while
+children allocate (**D5.3/D5.4**). Expressions with evaluation effects retain
+ordinary ordered lowering.
+
+Array shrinking uses the shape's indexed-name summary (**D8.4.1v2**). Without
+indexed descriptors, physical elements are configurable and the runtime can
+resize directly. Descriptor-bearing arrays retain descending deletion and
+the protected-index rollback required by `ArraySetLength`.
 
 ## 3. Calls, closures and roots
 

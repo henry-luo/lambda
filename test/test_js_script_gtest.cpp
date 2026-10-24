@@ -2926,12 +2926,39 @@ TEST(JsInterpreter, LazyGlobalsPreserveOwnDescriptorsAndReplacements) {
         "globalThis.Float64Array = 17; delete globalThis.BigUint64Array; "
         "Object.defineProperty(globalThis, 'Int16Array', {value: 23}); "
         "var math = Object.getOwnPropertyDescriptor(globalThis, 'Math'); "
+        "var callable = Object.getOwnPropertyDescriptor(globalThis, 'isFinite'); "
+        "globalThis.parseFloat=17;delete globalThis.decodeURI;"
         "before && identity && descriptor.writable && descriptor.configurable && "
         "!descriptor.enumerable && Float64Array === 17 && Int16Array === 23 && "
         "!('BigUint64Array' in globalThis) && math.value === Math && "
+        "callable.value===isFinite&&callable.writable&&!callable.enumerable&&"
+        "callable.configurable&&isFinite(42)&&parseFloat===17&&!('decodeURI' in globalThis)&&"
         "Object.getPrototypeOf(Uint16Array.prototype) === Object.getPrototypeOf(Uint8Array.prototype);";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "lazy-globals.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, LazyHostFamiliesPreserveDescriptorsAndGuestChanges) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var present='TextEncoder' in globalThis;"
+        "var hits=0;Object.defineProperty(Object.prototype,'TextEncoder',{set(v){hits++},configurable:true});"
+        "Object.defineProperty(Object.prototype,'encode',{set(v){hits++},configurable:true});"
+        "Object.defineProperty(globalThis,'TextDecoder',{value:23,writable:false,configurable:false});"
+        "delete globalThis.sessionStorage;Object.preventExtensions(globalThis);"
+        "var descriptor=Object.getOwnPropertyDescriptor(globalThis,'TextEncoder');"
+        "var storage=Object.getOwnPropertyDescriptor(globalThis,'localStorage');"
+        "var blob=new Blob(['hello']);delete Object.prototype.TextEncoder;delete Object.prototype.encode;"
+        "present&&hits===0&&descriptor.value===TextEncoder&&descriptor.writable&&!descriptor.enumerable&&"
+        "descriptor.configurable&&TextDecoder===23&& !('sessionStorage' in globalThis)&&"
+        "typeof storage.get==='function'&&localStorage instanceof Storage&&"
+        "new TextEncoder().encode('ok').length===2&&blob.size===5&&Blob.prototype.constructor===Blob";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "lazy-host-families.js", NULL);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, ITEM_TRUE);
     runtime_cleanup(&runtime);

@@ -232,6 +232,9 @@ static Item header_create_with_list(Item constructor, Item list, bool immutable)
     Rooted<Item> ctor(roots, constructor), entries(roots, list);
     Rooted<Item> prototype(roots, ItemNull);
     Rooted<Item> state(roots, js_array_new(0));
+    if (ctor.get().item == ItemNull.item)
+        ctor.set(js_host_intrinsic_constructor(JS_REALM_SLOT_HEADERS_CONSTRUCTOR, "Headers"));
+    JS_RETURN_IF_ERROR(ctor.get());
     JS_RETURN_IF_ERROR(js_array_push(state.get(), entries.get()));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = b2it(immutable)}));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), ((JsFunction*)ctor.get().function)->env[1]));
@@ -273,17 +276,14 @@ Item js_headers_create_http(char* const* lines, int count) {
         list.set(header_update(list.get(), key.get(), value.get(), HEADER_APPEND));
         JS_RETURN_IF_ERROR(list.get());
     }
-    Item* ctor = js_realm_slot_existing(&js_runtime_state.realm_slots, JS_REALM_SLOT_HEADERS_CONSTRUCTOR);
-    return ctor ? header_create_with_list(*ctor, list.get(), true) : ItemError;
+    return header_create_with_list(ItemNull, list.get(), true);
 }
 
 Item js_headers_create(Item init, bool immutable) {
     RootFrame roots(1);
     Rooted<Item> list(roots, js_headers_list_from_init(init));
     JS_RETURN_IF_ERROR(list.get());
-    Item* ctor = js_realm_slot_existing(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_HEADERS_CONSTRUCTOR);
-    return ctor ? header_create_with_list(*ctor, list.get(), immutable) : ItemError;
+    return header_create_with_list(ItemNull, list.get(), immutable);
 }
 
 Item js_headers_clone(Item headers) {
@@ -292,10 +292,8 @@ Item js_headers_clone(Item headers) {
     JS_RETURN_IF_ERROR(state.get());
     bool immutable = js_is_truthy(js_elements_get_int(state.get(), HEADER_IMMUTABLE));
     Rooted<Item> list(roots, js_elements_get_int(state.get(), HEADER_LIST));
-    Item* ctor = js_realm_slot_existing(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_HEADERS_CONSTRUCTOR);
     // Updates replace the private list, so cloning can share its immutable snapshot.
-    return ctor ? header_create_with_list(*ctor, list.get(), immutable) : ItemError;
+    return header_create_with_list(ItemNull, list.get(), immutable);
 }
 
 static Item header_constructor(Item callee, Item receiver, Item* args, int argc, uint64_t* home) {

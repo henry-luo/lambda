@@ -182,6 +182,7 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"Atomics", 7, js_get_atomics_object_value, false},
     {"console", 7, js_get_console_object_value, false},
     {"CSS", 3, js_get_css_object_value, false},
+    {"$262", 4, js_get_262_object_value, false},
     {"require", 7, []() {
         MvpLmdLibraryState* library = js_runtime_state.formal_mir_owner ? mvp_lmd_program_library() : NULL;
         const char* reference = library ? mvp_lmd_program_reference(library->object.program) : NULL;
@@ -229,7 +230,7 @@ static bool js_visit_host_namespace(bool constructors, Visitor visit) {
         if (spec->requires_node_core && !jube_node_core_module_enabled()) continue;
         if (!visit(spec->name, spec->name_length, JS_HOST_SLOT_LAZY)) return false;
     }
-    if (constructors) for (const auto& spec : js_host_globals) {
+    for (const auto& spec : js_host_globals) {
         if (!visit(spec.name, strlen(spec.name), JS_HOST_SLOT_LAZY)) return false;
     }
     int module_count = jube_static_module_count();
@@ -278,6 +279,8 @@ static Item js_materialize_host_global_group(Item object, Item requested, JsHost
     if (!roots.valid()) return ItemError;
     Rooted<Item> global(roots, object), key(roots, requested), staging(roots, js_new_object());
     if (get_type_id(staging.get()) != LMD_TYPE_MAP) return ItemError;
+    // deferred bootstrap must not invoke setters added to Object.prototype by guest code.
+    js_set_prototype(staging.get(), ItemNull);
     // build the complete family before publication. Only still-owned markers
     // may change; a deleted or replaced sibling stays under guest control.
     JS_RETURN_IF_ERROR(js_install_host_global_group(staging.get(), group));
@@ -291,8 +294,11 @@ static Item js_materialize_host_global_group(Item object, Item requested, JsHost
                 map_shape_field_to_item(global.get().map->data, field).item != ITEM_JS_LAZY_GLOBAL_SENTINEL) continue;
         JsPropertyDescriptor descriptor = {};
         if (!js_get_own_property_descriptor_name_id(staging.get(), name_ref_id(name), &descriptor)) return ItemError;
-        Item status = mvp_lmd_import_host_property(mvp_lmd_program_library()->object.program,
-            global.get(), Item{.item = s2it(name)}, &descriptor);
+        Item status = js_runtime_state.formal_mir_owner
+            ? mvp_lmd_import_host_property(mvp_lmd_program_library()->object.program,
+                global.get(), Item{.item = s2it(name)}, &descriptor)
+            : js_define_own_property_from_descriptor_name_id(global.get(), name_ref_id(name),
+                &descriptor, false, false);
         if (item_is_error(status)) return status;
     }
     return read_requested ? js_get_key_default(global.get(), key.get()) : ItemNull;
@@ -300,10 +306,18 @@ static Item js_materialize_host_global_group(Item object, Item requested, JsHost
 
 Item js_ensure_host_global_family(const char* name) {
     // native factories may need an intrinsic before its lazy guest binding is read.
-    if (!js_runtime_state.formal_mir_owner) return ItemNull;
     for (const auto& spec : js_host_globals) if (strcmp(name, spec.name) == 0)
         return js_materialize_host_global_group(js_get_global_this(), ItemNull, spec.group, false);
     return ItemError;
+}
+
+Item js_host_intrinsic_constructor(JsRealmSlotId slot, const char* family) {
+    Item* value = js_realm_slot_existing(&js_runtime_state.realm_slots, slot);
+    if (value && get_type_id(*value) == LMD_TYPE_FUNC) return *value;
+    // internal factories may run before any public binding is read, deleted or replaced.
+    JS_RETURN_IF_ERROR(js_ensure_host_global_family(family));
+    value = js_realm_slot_existing(&js_runtime_state.realm_slots, slot);
+    return value && get_type_id(*value) == LMD_TYPE_FUNC ? *value : ItemError;
 }
 
 bool js_host_object_has_property(Item object, Item key, Item* out) {
@@ -311,7 +325,7 @@ bool js_host_object_has_property(Item object, Item key, Item* out) {
     return false;
 }
 
-extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
+static bool js_resolve_lazy_global_impl(Item object, Item key, Item* out_value, bool read_requested) {
     if (out_value) *out_value = ItemNull;
     if (!js_is_global_this_object_value(object) ||
             get_type_id(key) != LMD_TYPE_STRING) {
@@ -342,9 +356,9 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
         if (out_value) *out_value = value_root.get();
         return true;
     }
-    if (js_runtime_state.formal_mir_owner) for (const auto& spec : js_host_globals) {
+    for (const auto& spec : js_host_globals) {
         if (name->len != strlen(spec.name) || memcmp(name->chars, spec.name, name->len)) continue;
-        value_root.set(js_materialize_host_global_group(object_root.get(), key_root.get(), spec.group));
+        value_root.set(js_materialize_host_global_group(object_root.get(), key_root.get(), spec.group, read_requested));
         if (out_value) *out_value = value_root.get();
         return true;
     }
@@ -363,6 +377,9 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
     bool resolved = jube_resolve_global(name->chars, name->len, &value);
     if (resolved && out_value) *out_value = value;
     return resolved;
+}
+extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
+    return js_resolve_lazy_global_impl(object, key, out_value, true);
 }
 
 bool js_host_object_delete_property(Item object, Item key, Item* out) {
@@ -7605,8 +7622,21 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         // all).
         {
             JsPropertyDescriptor pd = {};
-                if (js_get_own_property_descriptor(obj, name_str->chars,
-                                                (int)name_str->len, &pd)) {
+            if (js_get_own_property_descriptor(obj, name_str->chars,
+                    (int)name_str->len, &pd)) {
+                if (js_pd_is_data(&pd) && pd.value.item == ITEM_JS_LAZY_GLOBAL_SENTINEL &&
+                        js_is_global_this_object_value(obj)) {
+                    Item resolved = ItemNull;
+                    if (js_resolve_lazy_global_impl(object_root.get(), name_root.get(), &resolved, false)) {
+                        value_root.set(resolved);
+                        if (item_is_error(value_root.get())) return value_root.get();
+                        // a host marker may become an accessor; inspect its published kind without invoking its getter.
+                        obj = object_root.get(); name = name_root.get(); name_str = it2s(name); m = obj.map;
+                        pd = {};
+                        if (!js_get_own_property_descriptor(obj, name_str->chars, (int)name_str->len, &pd))
+                            return make_js_undefined();
+                    }
+                }
                 if (js_pd_is_accessor(&pd)) {
                     return js_property_descriptor_from_pd(&pd);
                 }
@@ -14325,8 +14355,9 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             // (D5.4.3).
             Rooted<Item> encode_key(text_codec_roots, make_string_item("encode"));
             Rooted<Item> decode_key(text_codec_roots, make_string_item("decode"));
-            js_set_key_default(encoder_proto.get(), encode_key.get(), encode_method.get());
-            js_set_key_default(decoder_proto.get(), decode_key.get(), decode_method.get());
+            // deferred native definitions create own slots even when guest ancestors have setters.
+            js_define_own_key_storage(encoder_proto.get(), encode_key.get(), encode_method.get());
+            js_define_own_key_storage(decoder_proto.get(), decode_key.get(), decode_method.get());
             js_mark_non_enumerable(encoder_proto.get(), encode_key.get());
             js_mark_non_enumerable(decoder_proto.get(), decode_key.get());
             js_set_key_cstr(global.get(), "TextEncoder", encoder_ctor.get());
@@ -14565,9 +14596,10 @@ extern "C" Item js_get_global_this() {
         if (!js_global_bindings_ensure_roots()) return ItemNull;
         js_global_this_obj = js_new_object();
         // populate standard globals
-        js_set_key_cstr(js_global_this_obj, "undefined", make_js_undefined());
-        js_set_key_cstr(js_global_this_obj, "NaN", push_d(NAN));
-        js_set_key_cstr(js_global_this_obj, "Infinity", push_d(INFINITY));
+        // realm birth defines own slots; ordinary Set would traverse and materialize prototypes.
+        js_define_own_key_storage(js_global_this_obj, js_name_item("undefined"), make_js_undefined());
+        js_define_own_key_storage(js_global_this_obj, js_name_item("NaN"), push_d(NAN));
+        js_define_own_key_storage(js_global_this_obj, js_name_item("Infinity"), push_d(INFINITY));
 
         // ES spec: NaN, Infinity, undefined are non-writable, non-enumerable, non-configurable
         static const char* ro_globals[] = {"NaN", "Infinity", "undefined", NULL};
@@ -14579,15 +14611,16 @@ extern "C" Item js_get_global_this() {
             js_mark_non_configurable(js_global_this_obj, key);
         }
 
-        // The catalog owns constructor names shared by registration and MIR lookup.
+        // the catalog owns callable names shared by registration and MIR lookup.
         for (int i = 0; i < js_builtin_global_count(); i++) {
             const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
-            if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
+            if (!spec || (spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR &&
+                    spec->kind != JS_BUILTIN_GLOBAL_FUNCTION) ||
                 !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
             Item name_item = js_name_item(spec->name, spec->len);
             // the ordinary own slot preserves reflection/deletion semantics;
-            // its constructor graph is built only when the value is observed.
-            js_set_key_default(js_global_this_obj, name_item,
+            // its callable graph is built only when the value is observed.
+            js_define_own_key_storage(js_global_this_obj, name_item,
                 (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
             if (spec->flags & JS_BUILTIN_GLOBAL_NON_ENUMERABLE) {
                 js_mark_non_enumerable(js_global_this_obj, name_item);
@@ -14599,28 +14632,10 @@ extern "C" Item js_get_global_this() {
         // startup budget (D6.2.2v2).
         js_install_host_namespace_slots(js_global_this_obj, [](Item global, Item key, Item value) -> Item {
             JS_ROOTS(roots, object, global, name, key, held, value);
-            Item stored = js_set_key_default(object.get(), name.get(), held.get());
+            Item stored = js_define_own_key_storage(object.get(), name.get(), held.get());
             if (!item_is_error(stored)) js_mark_non_enumerable(object.get(), name.get());
             return stored;
         }, false);
-        // D6.2.2v2: the retired direct-global lowering used to fabricate this
-        // namespace; generic global Get now requires the real realm property.
-        js_set_key_cstr(js_global_this_obj, "$262", js_get_262_object_value());
-        // Global function names, arity, and installation policy come from the catalog.
-        for (int i = 0; i < js_builtin_global_count(); i++) {
-            const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
-            if (!spec || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION ||
-                !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
-            Item name_item = js_name_item(spec->name, spec->len);
-            Item fn = js_get_global_builtin_fn_by_id(
-                (Item){.item = i2it(spec->id)});
-            js_set_key_default(js_global_this_obj, name_item, fn);
-        }
-
-        for (int group = 0; group < JS_HOST_GROUP_COUNT; group++) {
-            js_install_host_global_group(js_global_this_obj, (JsHostGlobalGroup)group);
-        }
-
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
         js_window_event_value = make_js_undefined();

@@ -427,6 +427,25 @@ extern "C" Item mvp_lmd_array_new(int64_t length) {
     return Item{.array = result};
 }
 
+extern "C" Item mvp_lmd_array_from_recipe(const JsStaticLiteralRecipe* recipe) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Array*> output(roots, array());
+    Rooted<Item> value(roots, ItemNull);
+    if (!output.get() || !array_reserve_append_slots(output.get(), (int64_t)recipe->length * 2))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    for (int i = 0; i < recipe->length; i++) {
+        const JsStaticLiteralRecipe* child = &recipe->children[i];
+        value.set(child->kind == JS_STATIC_LITERAL_ARRAY ? mvp_lmd_array_from_recipe(child)
+            : Item{.item = child->immediate});
+        if (item_is_error(value.get())) return value.get();
+        // array_set gives wide scalars destination-owned homes; publish only initialized slots to GC.
+        array_set(output.get(), i, value.get());
+        output.get()->length = i + 1;
+    }
+    return Item{.array = output.get()};
+}
+
 extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(1);

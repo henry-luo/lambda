@@ -1352,7 +1352,7 @@ static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
 // worker manifest does not retain prior test heaps between result records.
 static const size_t T262_MAX_BATCH_CHUNK_SIZE = 600;
 static const size_t T262_DEFAULT_AST_BATCH_CHUNK_SIZE = 600;
-static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
+static size_t g_t262_jobs = 0;  // 0 means auto: CPU count
 static size_t g_t262_batch_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
 static size_t g_t262_ast_chunk_size = T262_DEFAULT_AST_BATCH_CHUNK_SIZE;
 static size_t g_t262_async_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
@@ -1419,8 +1419,8 @@ static size_t t262_target_worker_count() {
     size_t workers = g_t262_jobs;
     if (workers == 0) {
         unsigned int cpu_count = std::thread::hardware_concurrency();
-        if (cpu_count == 0) cpu_count = 5;  // preserve a conservative fallback when CPU count is unavailable
-        workers = cpu_count > 1 ? cpu_count - 1 : 1;
+        // fresh-realm batches stay small; use every CPU to keep cold jobs flowing.
+        workers = cpu_count ? cpu_count : 4;
     }
     if (workers < 1) workers = 1;
     return workers;
@@ -3447,7 +3447,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, MIR_chunk=%zu, AST_chunk=%zu, async_chunk=%zu, %s, %s)\n",
             num_workers, target_workers, batches.size(),
             g_t262_batch_chunk_size, g_t262_ast_chunk_size, g_t262_async_chunk_size,
-            g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs",
+            g_t262_jobs == 0 ? "auto: cpu" : "explicit --jobs",
             g_persistent_workers ? "persistent" : "spawn-per-batch");
     std::vector<std::thread> threads;
     std::vector<std::vector<size_t>> worker_batch_order;

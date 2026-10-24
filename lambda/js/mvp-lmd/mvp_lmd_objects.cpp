@@ -621,7 +621,8 @@ static Item mvp_lmd_array_define_length(Item owner, const JsPropertyDescriptor* 
     if ((descriptor->flags & (JS_PD_HAS_GET | JS_PD_HAS_SET | JS_PD_ENUMERABLE)) || js_pd_is_configurable(descriptor) ||
             (!writable && (next_writable || requested != object.get().array->length))) return Item{.item = ITEM_FALSE};
     int64_t length = (int64_t)requested, old_length = object.get().array->length, blocked = -1;
-    if (length < old_length) {
+    // physical elements are configurable; only indexed descriptors require ordered deletion.
+    if (length < old_length && mvp_lmd_shape_has_indexed_keys((TypeMap*)map->type)) {
         keys.set(mvp_lmd_object_project(object.get(), 5));
         if (item_is_error(keys.get())) return keys.get();
         // Ordinary ArraySetLength deletes descending and restores past the first protected index.
