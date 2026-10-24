@@ -64,6 +64,53 @@ pub fn thumbnail(doc,children,width=156,page_no=1) {
         <span class:"word-content page-thumbnail-content",style:"width:" ++ string(g.width) ++ "px;transform:scale(" ++ string(scale) ++ ")",
             <span class:"word-page",style:page.editor_style(doc,page_no),*column_body(doc,children,true)>>>
 }
+// A printed page shows one window of its section's flow, between measured page starts (see mod_print.breaks).
+// Scaled content flows at width/scale and is scaled back onto the page; the paper and measuring flows are both
+// flow-root so a leading margin offsets them identically.
+pub fn print_page(doc,entry,page_no,total,width,scale=1) {
+    let g = page.geometry(doc,page_no)
+    let area = g.height-g.top-g.bottom
+    let height = if (entry.bottom==null) area else min((entry.bottom-entry.top)*scale,area);
+    <div class:"print-page",["data-page"]:string(page_no),["aria-label"]:"Page " ++ string(page_no),
+        style:"width:" ++ string(width) ++ "px;height:" ++ string(g.height*width/g.width) ++ "px",
+        <div class:"print-paper",style:"width:" ++ string(g.width) ++ "px;height:" ++ string(g.height) ++ "px;transform:scale(" ++ string(width/g.width) ++ ")",
+            stories.story(doc,"header",page_no,total);
+            <div class:"print-window",style:"top:" ++ string(g.top) ++ "px;left:" ++ string(g.left) ++ "px;width:" ++
+                string(g.width-g.left-g.right) ++ "px;height:" ++ string(height) ++ "px",
+                <div class:"word-content print-flow",style:"top:" ++ string(-entry.top*scale) ++ "px;width:" ++
+                    string((g.width-g.left-g.right)/scale) ++ "px;transform:scale(" ++ string(scale) ++ ")",*column_body(doc,entry.children,true)>>
+            stories.story(doc,"footer",page_no,total)>>
+}
+pub fn print_measure(doc,scale=1) {
+    let g = page.geometry(doc);
+    <div class:"print-measure",["aria-hidden"]:"true",*[for (children in page.sheets(doc))
+        <div class:"word-content print-measure-sheet",style:"width:" ++ string((g.width-g.left-g.right)/scale) ++ "px",*column_body(doc,children,true)>]>
+}
+// one sheet of paper: its pages centered in a grid of cells (mod_print.layout); the preview and the PDF share it.
+pub fn print_sheet(doc,sheet,layout,total,width,scale=1) {
+    let k = width/layout.width
+    let g = page.geometry(doc)
+    let cell_w = layout.width/layout.cols*k
+    let cell_h = layout.height/layout.rows*k
+    let page_w = g.width*layout.fit*k
+    let page_h = g.height*layout.fit*k;
+    <div class:"print-sheet",style:"width:" ++ string(width) ++ "px;height:" ++ string(layout.height*k) ++ "px",
+        *[for (i,item in sheet) <div class:"print-cell",style:"left:" ++ string((i%layout.cols)*cell_w+(cell_w-page_w)/2) ++
+            "px;top:" ++ string(floor(i/layout.cols)*cell_h+(cell_h-page_h)/2) ++ "px",
+            print_page(doc,item.entry,item.number,total,page_w,scale)>]>
+}
+// print geometry shared by the in-app preview and the composed PDF.
+pub let print_css = "
+ .print-sheet { position:relative; overflow:hidden; background:#fff; }
+ .print-cell { position:absolute; }
+ .print-page { position:relative; overflow:hidden; background:#fff; }
+ .print-paper { position:absolute; top:0; left:0; transform-origin:top left; background:#fff; }
+ .print-window { position:absolute; overflow:hidden; }
+ .print-flow { position:absolute; left:0; transform-origin:top left; }
+ .print-flow,.print-measure-sheet { display:flow-root; }
+ .print-measure { position:absolute; left:-20000px; top:0; visibility:hidden; pointer-events:none; }
+ .print-plain .word-content * { background-color:transparent !important; background-image:none !important; }
+"
 fn render_pages(doc,web=false) => <div class:"word-pages",
     *[for (i,children in page.sheets(doc)) <div class:"word-page",["data-page"]:string(i+1),
         style:if (web) null else page.editor_style(doc,i+1),stories.story(doc,"header",i+1,len(page.sheets(doc)));

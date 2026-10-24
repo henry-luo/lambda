@@ -171,6 +171,10 @@ image requests, and unavailable required constructions must remain visible.
 Document previews may preserve source as a fallback; that is an integration
 decision, not a successful math layout result.
 
+### 3.3 Editing marks
+
+`\lambdamark{N}` is an editor-only command for caret geometry. It renders a zero-size box of type `skip`, so, like explicit glue, it changes neither layout nor atom spacing: a formula with marks has the same geometry as the same formula without them. Its SVG body is an invisible `<line class="math-edit-mark" data-mark="N">` at the mark's baseline position, spanning −0.8em to +0.25em of the current style's em, so an editor can read every caret slot's position and size from one render. A mark placed directly before `^` or `_` becomes the script's base; editors must not place one there. The Word demo's equation field (`test/demo/word/mod_math_field.ls`) is the first client.
+
 ## 4. Geometry and style model
 
 ### 4.1 One measured box

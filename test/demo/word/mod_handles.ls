@@ -60,15 +60,19 @@ view <word_object_handles> state drag:null {
     <div id:"paper-wrap",class:"paper-wrap",tabindex:"-1",style:if (~.layout=="web") null else
         "width:" ++ string(g.width*~.zoom) ++ "px; min-height:" ++ string(g.height*~.zoom) ++ "px;",
         if (~.layout=="web") <div id:"surface-frame",class:"surface-frame",~.rendered> else ~.rendered;
-        if (~.disabled or ~.read_only or selected==null or transform.settings(selected.node)==null or object_layout.settings(selected.node).hidden) null else
-        <div id:"object-handles",class:"object-handles",contenteditable:"false",tabindex:"-1",["aria-label"]:"Object move, size and rotation",
+        // equations have no resize frame; the frame appears only to host their in-place caret.
+        if (~.disabled or ~.read_only or selected==null or (transform.settings(selected.node)==null and ~.caret==null) or
+            object_layout.settings(selected.node).hidden) null else
+        <div id:"object-handles",class:"object-handles" ++ (if (~.caret!=null) " math-editing" else ""),contenteditable:"false",tabindex:"-1",["aria-label"]:"Object move, size and rotation",
             <div id:"object-move",class:"object-move",["data-object-handle"]:"move",title:"Drag to move the object.",
                 style:if (drag.handle=="move" and drag.active) "cursor:grabbing" else null>
             <div class:"object-rotation-stem">;
             *[for (handle in ["nw","ne","sw","se","rotate"]) <button id:"object-" ++ handle,type:"button",
                 class:"object-handle object-" ++ handle,["data-object-handle"]:handle,
                 title:if (handle=="rotate") "Drag to rotate. Hold Shift to snap to 15°." else "Drag to resize proportionally.",
-                ["aria-label"]:if (handle=="rotate") "Rotate object" else "Resize object " ++ handle>]>;
+                ["aria-label"]:if (handle=="rotate") "Rotate object" else "Resize object " ++ handle>];
+            if (~.caret==null) null else <div id:"math-caret",class:"math-caret",["aria-hidden"]:"true",
+                style:"left:" ++ string(~.caret.left) ++ "%;top:" ++ string(~.caret.top) ++ "%;height:" ++ string(~.caret.height) ++ "%">>;
         if (drag.handle=="move" and drag.active and drag.drop!=null)
             <div id:"object-drop-caret",class:"object-drop-caret",style:"left:" ++ string(drag.drop.caret.left) ++
                 "px;top:" ++ string(drag.drop.caret.top) ++ "px;height:" ++ string(drag.drop.caret.height) ++ "px"> else null>
@@ -123,7 +127,7 @@ on pointerdown(evt) {
     // the stable workspace owns capture even when the first press selects an unselected image.
     drag = {*:if (value==null) {} else value,handle:kind,path:path,x:evt.clientX,y:evt.clientY,cx:box.x+box.width/2,cy:box.y+box.height/2,
         layout:object_layout.settings(image.selected(selected).node),floating:object_layout.floating(image.selected(selected).node),
-        zoom:~.zoom,pointer:evt.pointerId,style:dom.get_attribute(target,"style"),src:dom.get_attribute(target,"src"),active:false,drop:null}
+        zoom:~.zoom,pointer:evt.pointerId,box:box,style:dom.get_attribute(target,"style"),src:dom.get_attribute(target,"src"),active:false,drop:null}
     let host = dom.get_element_by_id(dom.root_node(evt.target),"paper-wrap")
     dom.focus_set(host,true)
     host.set_pointer_capture(evt.pointerId)
@@ -205,7 +209,9 @@ on pointerup(evt) {
     else if (not move and (value.width!=gesture.width or value.height!=gesture.height or value.rotation!=gesture.rotation))
         emit("word_command",{id:"object.transform",params:{*:value,path:gesture.path,scale_text:gesture.handle!="rotate"},
             selection:node_selection(gesture.path),node:evt.target,event:evt})
-    else emit("word_object_select",{path:gesture.path,node:evt.target})
+    // a plain click reports where it landed so an equation can place its caret there.
+    else emit("word_object_select",{path:gesture.path,node:evt.target,point:if (gesture.box.width>0 and gesture.box.height>0)
+        {x:(evt.clientX-gesture.box.x)/gesture.box.width,y:(evt.clientY-gesture.box.y)/gesture.box.height} else null})
     return 'prevent-default'
 }
 on pointercancel(evt) {
@@ -235,5 +241,5 @@ on keydown(evt) {
     return 'prevent-default'
 }
 // the parent projects the document once; gesture redraws only reuse that rendered body.
-pub fn workspace(editor,zoom,read_only,disabled,rendered,layout="print") =>
-    apply(<word_object_handles editor:editor,zoom:zoom,read_only:read_only,disabled:disabled,rendered:rendered,layout:layout>)
+pub fn workspace(editor,zoom,read_only,disabled,rendered,layout="print",caret=null) =>
+    apply(<word_object_handles editor:editor,zoom:zoom,read_only:read_only,disabled:disabled,rendered:rendered,layout:layout,caret:caret>)

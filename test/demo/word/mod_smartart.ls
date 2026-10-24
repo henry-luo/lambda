@@ -51,5 +51,5 @@ pub fn graphic(p) {
 pub fn transaction(editor,params,selected=null) map^ {
     let p = {*:defaults,*:params}
     if (not valid(p)) raise error("Word: choose a layout, 2–8 lines of text (up to 60 characters each), a #RRGGBB color, and valid dimensions/rotation")
-    else objects.transaction(editor,"data-word-smartart",p,graphic(p),p.width,p.height,"SmartArt: " ++ join(labels(p)," → "),selected)^
+    else objects.transaction(editor,"data-word-smartart",p,graphic(p),p.width,p.height,"Diagram: " ++ join(labels(p)," → "),selected)^
 }

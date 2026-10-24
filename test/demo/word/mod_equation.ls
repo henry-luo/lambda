@@ -9,6 +9,7 @@ import image: lambda.editor.mod_image
 import css: lambda.editor.mod_inline_format
 import layout: .mod_object_layout
 import catalog: .mod_equation_catalog
+import field: .mod_math_field
 
 pub let examples = catalog.examples
 pub let defaults = {source:"a^2+b^2=c^2",size:22,color:"#24334b",display:true,justify:"center",linear:false,number:""}
@@ -23,7 +24,7 @@ pub fn render(p) map^ {
         let ast = parse(p.source,{type:"math",flavor:"latex"})^
         let unknown = mathdoc.unmapped_commands(ast)
         if (len(unknown)>0) raise error("Word: unsupported equation command: " ++ join(unknown,", ")) else {
-            let options = {display:p.display==true,font_size:p.size,color:p.color}
+            let options = field_options(p)
             let measured = mathdoc.render_box(if (p.linear) <math <text_group p.source>> else ast,options)^
             let label = if (p.number=="") null else mathdoc.render_box(<math <text_group p.number>>,options)^
             let body_width = measured.width*p.size
@@ -33,12 +34,20 @@ pub fn render(p) map^ {
             let width = max(1,ceil(body_width+(if (label==null) 0 else p.size+label_width)))
             let height = max(1,ceil(max(body_height,label_height)))
             if (width>650 or height>1000) raise error("Word: equation is too large; reduce its size or source")
-            else {width:width,height:height,element:if (label==null) measured.element else
+            else {width:width,height:height,body_top:if (label==null) 0 else (height-body_height)/2,element:if (label==null) measured.element else
                 <svg xmlns:"http://www.w3.org/2000/svg",width:width,height:height,viewBox:"0 0 " ++ string(width) ++ " " ++ string(height),
                     <g transform:"translate(0 " ++ string((height-body_height)/2) ++ ")",measured.element>
                     <g transform:"translate(" ++ string(body_width+p.size) ++ " " ++ string((height-label_height)/2) ++ ")",label.element>>}
         }
     }
+}
+pub fn field_options(p) => {display:p.display==true,font_size:p.size,color:p.color}
+// caret slots in the stored image's pixels; a numbered equation centres its body vertically.
+pub fn caret_geometry(p,root) map^ {
+    let measured = render(p)^
+    let slots = field.geometry(root,field_options(p))^;
+    {width:measured.width,height:measured.height,slots:[for (g in slots)
+        {*:g,top:g.top+measured.body_top,bottom:g.bottom+measured.body_top}]}
 }
 pub fn transaction(editor,params,selected=null) map^ {
     let p = {*:defaults,*:params}

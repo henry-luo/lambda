@@ -1,0 +1,367 @@
+{
+  "name": "Word print page",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('[id=\"edit.undo\"] .tool-label')).display==='none'&&getComputedStyle(document.querySelector('[id=\"edit.redo\"] .tool-label')).display==='none'"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const b=s=>document.querySelector('[id=\"'+s+'\"]').getBoundingClientRect(),u=b('edit.undo'),r=b('edit.redo'),s=b('home-save'),p=b('file.print');return s.top>=u.bottom&&Math.abs(s.left-u.left)<1&&Math.abs(p.left-r.left)<1&&Math.abs(p.top-s.top)<1})()"
+    },
+    {
+      "type": "key_combo",
+      "key": "p",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-print"
+      },
+      "count": 1
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".print-page"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".print-summary"
+      },
+      "contains": "1 sheet of paper"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#print-paper"
+      },
+      "value": "A4"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-paper"
+      },
+      "value": "A5"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-orientation"
+      },
+      "value": "landscape"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-margins"
+      },
+      "value": "wide"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/print-preview.png"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const p=document.querySelectorAll('.print-page'),r=p[0].getBoundingClientRect();return p.length===3&&r.width>r.height})()"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#paper-label"
+      },
+      "contains": "A4 · portrait"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#print-headers"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('print-headers').checked===false"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#print-path"
+      },
+      "clear": true,
+      "text": "temp/word/print.txt"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-print"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "contains": ".pdf file"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#print-path"
+      },
+      "clear": true,
+      "text": "temp/word/print.pdf"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-print"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-layer"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved temp/word/print.pdf for printing"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#paper-label"
+      },
+      "contains": "A4 · portrait"
+    },
+    {
+      "type": "key_combo",
+      "key": "p",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-paper"
+      },
+      "value": "A5"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-orientation"
+      },
+      "value": "landscape"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-margins"
+      },
+      "value": "wide"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-pages"
+      },
+      "value": "custom"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#print-range"
+      },
+      "clear": true,
+      "text": "9"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".print-hint"
+      },
+      "contains": "between 1 and 3"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".print-page"
+      },
+      "count": 3
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#print-range"
+      },
+      "clear": true,
+      "text": "2-3"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-per-sheet"
+      },
+      "value": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#print-backgrounds"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/print-nup.png"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".print-hint"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".print-sheet"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".print-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".print-preview.print-plain"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".print-summary"
+      },
+      "contains": "1 sheet of paper"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.querySelector('.print-sheet').getBoundingClientRect();return r.height>r.width})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#print-path"
+      },
+      "clear": true,
+      "text": "temp/word/print-nup.pdf"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-print"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-layer"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved temp/word/print-nup.pdf for printing"
+    },
+    {
+      "type": "key_combo",
+      "key": "p",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#print-scale-mode"
+      },
+      "value": "custom"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#print-scale"
+      },
+      "clear": true,
+      "text": "200"
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.print-page').length>1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement&&document.activeElement.id==='print-scale'"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-layer"
+      },
+      "count": 0
+    }
+  ]
+}

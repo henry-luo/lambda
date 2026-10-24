@@ -270,7 +270,7 @@ expand lazy collection entries before returning face metadata. The neutral
 share this mechanism through the appended catalog slot (**D7.4.4**).
 
 The selected milestone is installed-font listing in Word's ribbon, selection
-toolbar and WordArt dialog, including exact PostScript filtering, Unicode metadata, and retaining
+toolbar and Word Art dialog, including exact PostScript filtering, Unicode metadata, and retaining
 missing document fonts in the picker. Focused checks cover native snapshot
 ownership, Lambda access without a JS realm, JS Promise/conversion behavior in
 AST and MIR, and native picker editing; qualification uses the library, Lambda

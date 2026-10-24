@@ -840,7 +840,7 @@
       "target": {
         "selector": "#context-object"
       },
-      "equals": "Edit WordArt\u2026"
+      "equals": "Edit Word Art\u2026"
     },
     {
       "type": "assert_count",

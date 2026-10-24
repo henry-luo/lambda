@@ -30,6 +30,7 @@ import tables: .mod_table
 import table_design: .mod_table_design
 import table_layout: .mod_table_layout
 import references: .mod_references
+import home: .mod_home
 
 // The same IDs drive the ribbon, shortcuts, and headless model tests.
 pub let registry = [
@@ -50,6 +51,10 @@ pub let registry = [
     {id:"format.color",label:"Text color",property:"color",param:"color"},
     {id:"format.highlight",label:"Highlight",property:"background-color",param:"color"},
     {id:"format.clear",label:"Clear formatting"},
+    {id:"format.case",label:"Change case"},
+    {id:"format.painter",label:"Format painter"},
+    {id:"format.shading",label:"Character shading",property:"background-color",param:"color"},
+    {id:"format.border",label:"Character border",property:"border",param:"value"},
     {id:"para.style",label:"Paragraph style"},
     {id:"para.set",label:"Paragraph settings"},
     {id:"para.indents",label:"Paragraph indentation"},
@@ -66,10 +71,16 @@ pub let registry = [
     {id:"para.alignRight",label:"Align right",property:"text-align",value:"right"},
     {id:"para.justify",label:"Justify",property:"text-align",value:"justify"},
     {id:"para.lineSpacing",label:"Line spacing",property:"line-height",param:"value"},
+    {id:"para.spaceBefore",label:"Space before paragraph",property:"margin-top",param:"value"},
+    {id:"para.spaceAfter",label:"Space after paragraph",property:"margin-bottom",param:"value"},
+    {id:"para.shading",label:"Shading",property:"background-color",param:"color"},
+    {id:"para.borders",label:"Borders"},
+    {id:"para.listStyle",label:"List style"},
+    {id:"para.sort",label:"Sort"},
     {id:"para.bullets",label:"Bullets",input:"insertUnorderedList"},
     {id:"para.numbering",label:"Numbering",input:"insertOrderedList"},
-    {id:"para.indent",label:"Indent list",input:"formatIndent"},
-    {id:"para.outdent",label:"Outdent list",input:"formatOutdent"},
+    {id:"para.indent",label:"Increase indent",input:"formatIndent"},
+    {id:"para.outdent",label:"Decrease indent",input:"formatOutdent"},
     {id:"insert.table",label:"Insert table",input:"insertTable"},
     {id:"table.insertRowBelow",label:"Add row",input:"insertTableRow"},
     {id:"table.insertRowAbove",label:"Insert row above"},
@@ -121,6 +132,7 @@ pub let registry = [
     {id:"text.enter",label:"New paragraph",input:"insertParagraph"},
     {id:"text.backspace",label:"Backspace",input:"deleteContentBackward"},
     {id:"text.delete",label:"Delete",input:"deleteContentForward"},
+    {id:"edit.pasteText",label:"Paste text only"},
     {id:"edit.replace",label:"Replace"},{id:"edit.replaceAll",label:"Replace all"}
 ]
 pub fn spec(id) => [for (s in registry where s.id == id) s][0]
@@ -213,7 +225,14 @@ fn property_value(s,params) any^ {
         else string(value) ++ "pt"
     }
     else if (s.property == "line-height") {
-        if (not contains([1,1.15,1.5,2],value)) raise error("Word: choose a supported line spacing") else string(value)
+        if (not contains(home.line_spacings,value)) raise error("Word: choose a supported line spacing") else string(value)
+    }
+    else if (s.property == "margin-top" or s.property == "margin-bottom") {
+        if (not valid_measure(value,0,200)) raise error("Word: enter valid paragraph spacing") else string(value) ++ "pt"
+    }
+    else if (s.property == "border") {
+        if (not contains([home.border_line,"none"],value)) raise error("Word: choose a character border")
+        else if (value=="none") "" else value
     }
     else if (s.property == "font-family") {
         // native families and missing imported families are valid; keep this one CSS declaration.
@@ -222,8 +241,7 @@ fn property_value(s,params) any^ {
             raise error("Word: choose a font family") else value
     }
     else if (s.property == "color" or s.property == "background-color") {
-        if (not contains(["#24334b","#2864ad","#b43d47","#28745d","#f9e896","#dceafa","transparent"],value))
-            raise error("Word: choose a palette color") else value
+        if (home.color_value(value)==null) raise error("Word: choose a color") else home.color_value(value)
     }
     else string(value)
 }
@@ -286,7 +304,7 @@ fn indentation_transaction(editor,p) map^ {
     tx_set_selection(tx,if (sel.kind!='text') sel else text_selection(wrapped_position(sel.anchor,wrapped),wrapped_position(sel.head,wrapped)))
 }
 fn paragraph_transaction(editor,p) map^ {
-    if (not contains(["left","center","right","justify"],p.align) or not contains([1,1.15,1.5,2],p.lines) or
+    if (not contains(["left","center","right","justify"],p.align) or not contains(home.line_spacings,p.lines) or
         not valid_measure(p.before,0,200) or not valid_measure(p.after,0,200))
         raise error("Word: enter valid paragraph spacing and indentation")
     else {
@@ -407,6 +425,39 @@ fn comment_transaction(editor,id,p) map^ {
     }
 }
 
+// The shared wrap command selects the new list node. Word keeps the text
+// selection, so the next paragraph command still finds the wrapped paragraphs.
+fn wrapped_pos(doc,tx,p) {
+    let at = tx.sel_after.path[0]
+    let moved = if (len(p.path)>1 and p.path[0]>=at and not is_text(node_at(tx.doc_after,p.path)))
+        pos([at,p.path[0]-at,0,*slice(p.path,1)],p.offset) else p
+    let before = node_at(doc,p.path)
+    let after = node_at(tx.doc_after,moved.path);
+    if (is_text(before) and is_text(after) and after.text==before.text) moved else null
+}
+fn list_selection(editor,tx) {
+    let sel = editor.selection
+    let anchor = if (sel.kind=='text' and tx.sel_after.kind=='node') wrapped_pos(editor.doc,tx,sel.anchor) else null
+    let head = if (anchor==null) null else wrapped_pos(editor.doc,tx,sel.head);
+    if (head==null) tx else tx_set_selection(tx,text_selection(anchor,head))
+}
+// a style choice wraps unlisted text first, so the list and its marker style form one undo step.
+fn list_style_transaction(editor,p) map^ {
+    let tag = if (p.kind=="ordered") 'ol' else 'ul'
+    let style = [for (s in home.list_styles(p.kind) where s.id==p.style) s][0]
+    if (style==null) raise error("Word: choose a list style")
+    else {
+        let run = if (current_node(editor,tag)!=null) null
+            else edit_handle_request(editor,edit_request_from_toolbar(if (tag=='ol') "insertOrderedList" else "insertUnorderedList",
+                {kind:if (tag=='ol') 'ordered' else 'bullet',value:true}))^
+        let tx = if (run==null) tx_begin(editor.doc,editor.selection) else if (run.result.failure is null) list_selection(editor,run.transaction) else null
+        let list_path = if (tx==null) null else commands.ancestor_tag(tx.doc_after,selection_path(tx.sel_after),tag)
+        if (list_path==null) raise error("Word: lists are unavailable at this selection")
+        else tx_step(tx,step_set_attr(list_path,'style',css_set(attrs_get(node_at(tx.doc_after,list_path).attrs,'style'),"list-style-type",
+            if (style.id=="disc" or style.id=="decimal") "" else style.id)))
+    }
+}
+
 pub fn execute(editor,id,params={}) map^ {
     let s = spec(id)
     if (s == null) raise error("Word: unknown command " ++ id)
@@ -460,6 +511,23 @@ pub fn execute(editor,id,params={}) map^ {
         edit_apply(editor,changes.resolve(editor,if (ends_with(id,"All")) null else params.id,starts_with(id,"review.accept"))^)
     else if (starts_with(id,"review.")) edit_apply(editor,comment_transaction(editor,id,params)^)
     else if (id == "format.clear") edit_apply(editor,char_transaction(editor,review.clear_format))
+    else if (id == "format.case") edit_apply(editor,home.case_transaction(editor,params.mode)^)
+    else if (id == "format.painter") edit_apply(editor,char_transaction(editor,(marks)=>home.painted(marks,params.marks or [])))
+    else if (id == "para.borders") edit_apply(editor,reduce([tx_begin(editor.doc,editor.selection),
+        *home.border_properties(selected_blocks(editor),params.preset)^],(tx,e)=>properties_transaction(tx,[e],e.properties)))
+    else if (id == "para.sort") edit_apply(editor,home.sort_transaction(editor,selected_blocks(editor),params.descending==true)^)
+    else if (id == "para.listStyle") edit_apply(editor,list_style_transaction(editor,params)^)
+    else if (id == "edit.pasteText") {
+        let tx = if (not (params.text is string) or params.text=="") null
+            else commands.cmd_paste_text({doc:editor.doc,selection:editor.selection,schema:word_schema,stored_marks:editor.stored_marks},params.text)
+        if (tx == null) raise error("Word: the clipboard has no text to paste here") else edit_apply(editor,tx)
+    }
+    // outside a list, Word's indent buttons step the paragraph's left indent by half an inch.
+    else if ((id == "para.indent" or id == "para.outdent") and current_node(editor,'li') == null) {
+        let at = paragraph_indents(editor).indent
+        edit_apply(editor,indentation_transaction(editor,{indent:if (id == "para.indent") min(200,(floor(at/36)+1)*36)
+            else max(0,(ceil(at/36)-1)*36)})^)
+    }
     else if (id == "para.set") edit_apply(editor,paragraph_transaction(editor,params)^)
     else if (id == "para.indents") edit_apply(editor,indentation_transaction(editor,params)^)
     else if (id == "insert.picture" or id == "picture.size") edit_apply(editor,picture_transaction(editor,id,params)^)
@@ -489,6 +557,7 @@ pub fn execute(editor,id,params={}) map^ {
         if (not (run.result.failure is null)) raise error("Word: " ++ s.label ++ " is unavailable at this selection")
         else if (id == "insert.table" or starts_with(id,"table.")) edit_apply(editor,
             table_transaction({*:run.transaction,sel_before:editor.selection}))
+        else if (id == "para.bullets" or id == "para.numbering") edit_apply(editor,list_selection(editor,run.transaction))
         else run.editor
     }
 }

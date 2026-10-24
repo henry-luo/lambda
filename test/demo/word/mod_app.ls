@@ -11,6 +11,7 @@ import document: .mod_document
 import model: .mod_model
 import storage: .mod_io
 import page: .mod_page
+import print: .mod_print
 import columns: .mod_columns
 import insert: .mod_insert
 import stories: .mod_stories
@@ -33,12 +34,14 @@ import shape_format: .mod_shape_format
 import equation: .mod_equation
 import equation_edit: .mod_equation_edit
 import equation_catalog: .mod_equation_catalog
+import home: .mod_home
+import math_edit: .mod_math_edit
 
 pub let default_settings = {show_ribbon_group_labels:false}
 pub fn initial(settings=default_settings) => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
     show_ribbon_group_labels:settings.show_ribbon_group_labels==true,
     fonts:sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family)=>lower(family)),
-    tab:"Home",equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
+    tab:"Home",math:null,home:{*:home.defaults,painter:null,marks:false},equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
     zoom:1.0,nav:true,nav_tab:"headings",nav_target:null,ruler_focus:null,layout:"print",read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
@@ -139,6 +142,26 @@ pn model_command(st,id,params,node,retain_focus=false) {
 }
 pn dialog_model(st,id,values,params,node) {
     return model_command({*:st,dialog:{*:st.dialog,values:values}},id,params,node)
+}
+// an in-place equation edit commits the new source; the open LaTeX pane follows the same revision.
+pn math_commit(st,change,node) {
+    let next = model_command(st,"equation.format",{source:math_edit.source(change.row)},node)
+    if (next.editor.model_revision==st.editor.model_revision) { return {*:next,math:st.math} }
+    let pane = if (equation_edit.active(st)) {*:st.equation_edit,revision:next.editor.model_revision,
+        values:equation.settings(image.selected(next.editor).node)} else st.equation_edit
+    return {*:next,equation_edit:pane,math:math_edit.start(next.editor,null,change.caret),status:"Editing equation"}
+}
+pub pn math_key(st,evt,node) {
+    let k = math_edit.key(st,evt)
+    if (k==null) { return null }
+    if (k.kind=="move") { return {*:st,math:{*:st.math,caret:k.caret}} }
+    if (k.kind=="exit") { return {*:st,math:null,status:"Equation selected"} }
+    if (k.kind=="leave") {
+        focus_document(node)
+        return {*:st,math:null,editor:edit_set_selection(mounted(st.editor,node),math_edit.beside(st.editor,k.after))}
+    }
+    if (k.row==st.math.row) { return {*:st,math:{*:st.math,caret:k.caret}} }
+    return math_commit(st,k,node)
 }
 pn equation_apply(st,node,values,close=false,selection=null) {
     let draft = equation_edit.draft(st)
@@ -305,6 +328,23 @@ pn dialog_command(st,action,node) {
         return {*:st,editor:replaced_editor(st.editor,opened.editor),object_picks:[],file_state:opened.session,status:opened.status,dialog:null,query:"",match_index:-1}
     }
     if (kind == "save") { return saved(st,path,node,action == "overwrite") }
+    if (kind == "print") {
+        let target = if (action == "overwrite") st.dialog.path else trim(field(node,"print-path"))
+        let values = {*:st.dialog.values,path:target}
+        let failed = (message) => {*:st,dialog:{kind:"print",values:values,starts:st.dialog.starts,error:message}}
+        if (lower(split(target,".")[last]) != "pdf") { return failed("Word: save the printout as a .pdf file") }
+        let printed = print.document(st.editor.doc,values) ^ { return failed(^.message) }
+        // composed printouts are built from the measured preview pages, so they need a finished measurement.
+        let starts = st.dialog.starts
+        if (print.composed(values) and starts==null) { return failed("Word: the preview is still updating; try again") }
+        if (exists(target) and action != "overwrite") { return {*:st,dialog:{kind:"exists",path:target,action:"print",values:values,starts:starts}} }
+        if (starts_with(target,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
+        let exported: any | error = if (print.composed(values)) storage.export_sheets(printed,st.file_state.envelope.title,values,starts,target)
+            else storage.export_document(printed,st.file_state.envelope.title,target,not values.backgrounds)
+        if (exported is error) { return failed(exported.message) }
+        focus_document(node)
+        return {*:st,status:"Saved " ++ target ++ " for printing",dialog:null}
+    }
     if (kind == "export") {
         if (exists(path) and action != "overwrite") { return {*:st,dialog:{kind:"exists",path:path,action:"export"}} }
         if (starts_with(path,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
@@ -337,6 +377,11 @@ pub pn command(st,id,params,node,retain_focus=false) {
         if (id=="ui.equationInsert") {
             let entry = equation_edit.fragment(params)
             if (entry==null) { return {*:st,status:"Choose an equation symbol or structure."} }
+            // with the caret inside the equation, structures insert there instead of into the LaTeX pane.
+            if (math_edit.active(st)) {
+                let change = math_edit.insert(st,entry) ^ { return {*:st,status:^.message} }
+                return math_commit(st,change,node)
+            }
             let bounds = equation_edit.source_range(node,draft.values.source)
             let inserted = equation_catalog.insert(draft.values.source,bounds.start,bounds.end,entry)
             return equation_apply(st,node,{*:draft.values,source:inserted.source},false,{start:inserted.start,end:inserted.end})
@@ -553,6 +598,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
     if (id == "ui.clearFind") { return {*:st,query:"",match_index:-1} }
     if (id == "ui.escape") {
         if (st.dialog!=null) { return dialog_command(st,"cancel",node) }
+        if (st.home.painter!=null) { return {*:st,home:{*:st.home,painter:null},status:"Ready to write"} }
         return {*:st,focused:false}
     }
     if (id=="ui.editingMenu") {
@@ -574,6 +620,12 @@ pub pn command(st,id,params,node,retain_focus=false) {
         focus_document(node)
         return {*:st,editor:model.select_paragraph(mounted(st.editor,node)),status:"Paragraph selected"}
     }
+    // Format Painter keeps the caret's character formatting until the next drag selection.
+    if (id=="ui.formatPainter") {
+        if (st.home.painter!=null or st.read_only) { return {*:st,home:{*:st.home,painter:null},status:"Ready to write"} }
+        return {*:st,home:{*:st.home,painter:model.current_marks(st.editor)},status:"Select text to apply the copied formatting"}
+    }
+    if (id=="ui.showMarks") { return {*:st,home:{*:st.home,marks:not st.home.marks}} }
     if (id == "view.navigationPane") { return {*:st,nav:not st.nav} }
     if (id == "view.ribbonGroupLabels") { return {*:st,show_ribbon_group_labels:not st.show_ribbon_group_labels} }
     if (id=="ui.closeNavigation") { focus_document(node); return {*:st,nav:false} }
@@ -627,6 +679,12 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return saved(st,st.file_state.path,node)
     }
     if (id == "file.export") { return {*:st,dialog:{kind:"export",path:"temp/word/document.pdf"}} }
+    // print overrides live on the dialog; each change re-measures the preview's page breaks after layout.
+    if (id == "file.print" or (id == "ui.printSetting" and st.dialog.kind == "print")) {
+        dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_print_measure")
+        if (id == "file.print") { return {*:st,context:null,dialog:{kind:"print",values:print.defaults(st.editor.doc),starts:null}} }
+        return {*:st,dialog:{*:st.dialog,error:null,starts:null,values:{*:st.dialog.values,path:field(node,"print-path"),[params.key]:params.value}}}
+    }
     if (contains(["file.new","file.sample","file.open","file.close"],id)) {
         if (session.is_dirty(st.file_state,st.editor.doc)) { return {*:st,pending:id,dialog:{kind:"unsaved"}} }
         return continued(st,id,node)
@@ -656,5 +714,9 @@ pub pn command(st,id,params,node,retain_focus=false) {
         else if (id == "edit.replaceAll") {find:st.query,replace:st.replace_text,match_case:st.match_case}
         else if (contains(["table.distributeRows","table.distributeColumns"],id) or (id=="table.autoFit" and params.mode=="fixed"))
             {*:params,*:table_layout.measure(st.editor,node,st.zoom)} else params
-    return model_command(st,id,payload,node,retain_focus)
+    let next = model_command(st,id,payload,node,retain_focus)
+    // split color buttons repeat the last color applied from their menus.
+    let remembered = if (id=="format.color") "color" else if (id=="format.highlight") "highlight" else if (id=="para.shading") "shading" else null
+    return if (remembered==null or not (params.color is string) or params.color=="none" or next.status!=model.spec(id).label) next
+        else {*:next,home:{*:next.home,*:map([remembered,params.color])}}
 }

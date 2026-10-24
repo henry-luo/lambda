@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "test/demo/word"
 ARTIFACTS = ROOT / "temp/word/tests"
 UI_FIXTURES = ("typing", "smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
-                        "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "ribbon_appearance", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
-                        "stories", "advanced_objects", "equations", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry")
+                        "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "home_ribbon", "ribbon_appearance", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
+                        "stories", "advanced_objects", "equations", "equation_caret", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry", "print")
 
 
 def pdf_words(xml):
@@ -94,7 +94,7 @@ def main():
                          "object-layout-front.pdf", "object-layout-behind.pdf",
                          "shape-format.word.json", "shape-format.html", "shape-format.pdf",
                          "equations.word.json", "equations.html", "equations.pdf",
-                         "transforms.word.json", "transforms.html", "transforms.pdf", "lists.word.json", "lists.html")):
+                         "transforms.word.json", "transforms.html", "transforms.pdf", "lists.word.json", "lists.html", "print.pdf", "print-nup.pdf")):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
         fixtures = UI_FIXTURES
         if args.ui_start_at:
@@ -157,6 +157,18 @@ def main():
                all([float(n) for n in box.split()] == [0, 0, 792, 612] for box in boxes) and
                re.search(rb"/Count\s+2\b", pdf_data) is not None,
                "two landscape Letter pages with an explicit page break")
+        printed = ROOT / "temp/word/print.pdf"
+        print_data = printed.read_bytes() if printed.exists() else b""
+        print_boxes = re.findall(rb"/MediaBox\s*\[([^]]+)\]", print_data)
+        record("print-pdf", len(print_boxes) == 3 and
+               all([round(float(n)) for n in box.split()] == [0, 0, 595, 420] for box in print_boxes),
+               "print overrides: three landscape A5 pages, matching the measured preview")
+        nup = ROOT / "temp/word/print-nup.pdf"
+        nup_data = nup.read_bytes() if nup.exists() else b""
+        nup_boxes = re.findall(rb"/MediaBox\s*\[([^]]+)\]", nup_data)
+        record("print-nup-pdf", len(nup_boxes) == 1 and
+               [round(float(n)) for n in nup_boxes[0].split()] == [0, 0, 420, 595] and b"/Image" in nup_data,
+               "pages 2-3 two per sheet: one turned A5 sheet carrying the rendered sheet image")
         comments = ROOT / "temp/word/comments.html"
         record("comment-html", comments.exists() and
                all(value in comments.read_text() for value in

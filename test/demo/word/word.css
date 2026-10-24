@@ -12,21 +12,22 @@ body { font-family:var(--font); color:var(--ink); font-size:13px; background:var
 button,input,select { font-family:var(--font); font-size:12px; }
 button { cursor:pointer; }
 button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.titlebar { height:58px; flex-shrink:0; display:flex; align-items:center; padding:0 24px;
-  gap:20px; background:var(--panel); color:var(--ink); border-bottom:1px solid var(--line); }
-.brand { display:flex; align-items:center; gap:10px; font-family:var(--font); font-size:18px; font-weight:700; }
-.brand-mark { display:flex; align-items:center; justify-content:center; width:24px; height:28px; color:var(--accent); }
-.brand-divider { height:18px; width:1px; background:var(--line); margin:0 8px; }
-.brand-detail { font-family:var(--font); font-size:9px; letter-spacing:1.5px; color:var(--muted); }
-.document-title { flex:1; min-width:0; text-align:center; font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.save-indicator { color:var(--muted); font-size:10px; }
-.title-actions { display:flex; gap:8px; }
+/* compact two-line header: the icon spans the title line and the ribbon tab row (Google Docs style). */
+.titlebar { flex-shrink:0; display:flex; align-items:center; padding:6px 16px 0 14px;
+  gap:10px; background:var(--panel); color:var(--ink); border-bottom:1px solid var(--line); }
+.brand { display:flex; align-items:center; gap:8px; flex-shrink:0; margin-bottom:4px; padding-right:12px; border-right:1px solid var(--line); font-size:18px; font-weight:700; }
+.brand-mark { display:flex; align-items:center; justify-content:center; width:32px; height:40px; color:var(--accent); }
+.title-stack { flex:1; min-width:0; display:flex; flex-direction:column; }
+.title-line { height:24px; display:flex; align-items:center; gap:10px; min-width:0; padding-left:9px; }
+.document-title { min-width:0; font-size:16px; font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.save-indicator { flex-shrink:0; color:var(--muted); font-size:11px; }
+.title-actions { display:flex; gap:8px; flex-shrink:0; }
 .title-actions .tool { color:var(--ink); border-color:transparent; background:var(--hover); height:30px; padding:0 12px; }
 .title-actions #export { background:var(--accent); color:#fff; border-color:var(--accent); }
 .title-actions #export:hover { background:#0071e3; }
 .ribbon-shell { background:var(--panel); flex-shrink:0; border-bottom:1px solid var(--line); }
-.tabs { height:39px; display:flex; align-items:center; padding:0 23px; gap:5px; border-bottom:1px solid var(--line); overflow-x:auto; }
-.tabs>.tool { flex-shrink:0; }
+.tabs { height:30px; display:flex; align-items:flex-end; gap:2px; overflow-x:auto; }
+.tabs>.tool { flex-shrink:0; height:28px; font-size:13px; }
 .tool { border:1px solid transparent; border-radius:7px; background:transparent; color:var(--ink);
   height:28px; padding:3px 8px; display:inline-flex; gap:6px; align-items:center; justify-content:center; white-space:nowrap; font-size:11px; }
 .tool:hover { background:var(--hover); }
@@ -37,11 +38,11 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .icon-only .tool-label { display:none; }
 .icon-only { width:28px; padding:3px; }
 .tool-label { font-size:inherit; line-height:1.2; }
-.tab { height:30px; min-width:62px; border-radius:4px 4px 0 0; font-size:12px; }
+.tab { min-width:0; padding:3px 10px; border-radius:4px 4px 0 0; }
 .tab[aria-pressed=true] { border-color:transparent; border-bottom:2px solid var(--accent); color:#2564ae; background:#f0f6ff; font-weight:600; }
-.tab-divider { height:15px; border-left:1px solid var(--line); margin:0 10px; }
+.tab-divider { height:15px; border-left:1px solid var(--line); margin:0 6px 7px; }
 .tab-spacer { flex:1; }
-#sample { color:var(--muted); font-size:11px; }
+.tabs>#sample { color:var(--muted); font-size:11px; }
 .ribbon-groups { min-height:80px; display:flex; padding:5px 18px 3px; gap:15px; overflow-x:auto; }
 .ribbon-group { border-right:1px solid #e0e5ed; padding-right:15px; display:flex; flex-direction:column; min-width:0; flex-shrink:0; }
 .ribbon-group:last-child { border-right:0; padding-right:0; }
@@ -122,6 +123,10 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .equation-apply { background:var(--accent-soft); color:var(--accent); border-color:#b7d7ff; }
 .ribbon-large .tool-icon { height:30px; }
 .ribbon-large .tool-icon .app-icon { width:30px; height:30px; }
+/* glyph strokes are 1.0 viewBox units, a 1.25px line on a 30px icon but a faint 0.67px one at 16px;
+   thicken small ribbon icons to ~1px so dense groups (Home) read like the large-icon ribbons. */
+.ribbon-groups .color-icon path { stroke-width:1.5; }
+.ribbon-large .color-icon path,.table-large-tool .color-icon path { stroke-width:1; }
 .ribbon-large .tool-label { display:flex; flex-direction:column; align-items:center; min-width:52px; min-height:24px; line-height:12px; text-align:center; }
 .ribbon-label-line { display:block; white-space:nowrap; }
 .ribbon-secondary-row { display:flex; align-items:center; gap:5px; height:20px; }
@@ -186,30 +191,50 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .selection-toolbar .mini-color { width:61px; }
 .mini-divider { height:16px; border-left:1px solid var(--line); margin:0 2px; }
 #mini-highlight { color:#9c7400; background:#fff4d6; }
-.group-history .group-tools,.group-styles .group-tools { display:flex; flex-direction:column; }
-.group-history .group-tools { gap:7px; }
+.group-undo .group-tools,.group-styles .group-tools { display:flex; flex-direction:column; }
+.group-undo .group-tools { justify-content:center; align-items:flex-start; gap:4px; }
+.history-tools { display:flex; gap:2px; }
 .group-editing .group-tools { display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
 .group-editing .tool { height:23px; justify-content:flex-start; }
 .find-split { display:flex; align-items:center; }
 .find-split #ribbon-find { border-radius:7px 0 0 7px; }
 .find-split #ribbon-find-menu { width:20px; padding:3px; border-radius:0 7px 7px 0; }
 .menu-chevron { margin-left:auto; display:inline-flex; }
-.font-selects,.font-tools,.paragraph-tools,.alignment-tools { display:flex; gap:3px; }
-.font-selects { margin-bottom:3px; }
+.font-selects,.font-tools,.paragraph-tools,.alignment-tools { display:flex; align-items:center; gap:3px; }
+/* center the two Font/Paragraph rows like the stacked tools in other ribbons (cf. .view-ribbon .group-show). */
+.home-ribbon .group-font .group-tools,.home-ribbon .group-paragraph .group-tools { display:flex; flex-direction:column; justify-content:center; gap:5px; }
 .ribbon-select { height:25px; border:1px solid #d6dfeb; background:#fff; border-radius:5px; padding:2px 6px; color:var(--ink); }
 .font-family { width:143px; }.font-size { width:50px; }
-.font-tools .tool { min-width:26px; height:25px; padding:3px 5px; }
-#format\.highlight { background:#fff4d6; }
-.palette { display:flex; align-items:center; gap:2px; margin-top:3px; font-size:9px; color:var(--muted); }
-.palette>span { margin-right:8px; }
-.swatch { padding:0 3px; height:15px; }
-.swatch .app-icon { width:12px; height:12px; }.swatch path { fill:currentColor; }.swatch .tool-label { display:none; }
-.swatch-24334b { color:#24334b; }.swatch-2864ad { color:#2864ad; }.swatch-b43d47 { color:#b43d47; }.swatch-28745d { color:#28745d; }
+.home-ribbon .font-selects .tool,.font-tools .tool { min-width:25px; height:25px; padding:3px 4px; }
+.ribbon-divider { width:1px; height:18px; background:#e0e5ed; margin:0 2px; }
+.split-tool { display:flex; align-items:center; }
+.split-tool>.tool:first-child { border-radius:5px 0 0 5px; }
+.home-ribbon .split-tool .split-chevron,.home-ribbon .paste-split .split-chevron { min-width:13px; width:13px; padding:3px 1px; border-radius:0 5px 5px 0; }
+.home-ribbon .icon-only.ribbon-menu-trigger:not(.split-chevron) { gap:1px; padding:3px 2px 3px 4px; }
+.color-split-icon { display:inline-flex; flex-direction:column; align-items:center; gap:1px; }
+.color-split-icon .app-icon { width:15px; height:15px; }
+.color-bar { display:block; width:15px; height:3px; border-radius:1px; border:1px solid rgba(36,51,75,0.12); }
+.paste-split { display:flex; align-items:stretch; }
+.paste-split #home-paste { border-radius:5px 0 0 5px; min-width:46px; }
+/* line the chevron up with the icon, at the same offset as .ribbon-large .menu-chevron (top:21px). */
+.home-ribbon .paste-split .split-chevron { height:66px; align-items:flex-start; padding-top:21px; }
+.clipboard-tools { min-height:66px; justify-content:space-around; }
+.clipboard-tools .tool { width:25px; height:22px; padding:2px; justify-content:center; }
+.color-grid { display:grid; grid-template-columns:repeat(7,26px); gap:4px; padding:4px 8px 6px; }
+.context-menu .color-choice { width:26px; height:26px; padding:3px; justify-content:center; }
+.color-choice .tool-label,.list-style-choice .tool-label { display:none; }
+.menu-swatch { display:block; width:18px; height:18px; border-radius:3px; border:1px solid rgba(36,51,75,0.18); }
+.list-style-grid { display:grid; grid-template-columns:repeat(3,66px); gap:6px; padding:2px 8px 8px; }
+.context-menu .list-style-choice { height:52px; border:1px solid var(--line); justify-content:center; background:#fff; }
+.list-style-choice[aria-pressed=true] { border-color:#7fb0ef; background:#eaf3ff; }
+.list-glyph { font:18px Georgia, serif; color:var(--ink); }
+#word.format-painting #edit-surface { cursor:copy; }
+#word.show-marks #edit-surface p::after,#word.show-marks #edit-surface h1::after,#word.show-marks #edit-surface h2::after,
+#word.show-marks #edit-surface h3::after,#word.show-marks #edit-surface h4::after,#word.show-marks #edit-surface h5::after,
+#word.show-marks #edit-surface h6::after { content:"¶"; color:#8aa2c4; font-weight:400; font-style:normal; }
 .paragraph-tools .tool-label,.alignment-tools .tool-label { display:none; }
 .paragraph-tools .tool,.alignment-tools .tool { height:22px; min-width:30px; padding:2px 5px; }
-.spacing { width:125px; font-size:10px; margin-top:3px; }
-.paragraph-settings-row { display:flex; gap:3px; align-items:center; }
-.paragraph-dialog { width:24px; height:25px; padding:2px; margin-top:3px; }
+.paragraph-dialog { width:24px; height:25px; padding:2px; }
 .paragraph-dialog .tool-label { display:none; }
 .group-pictures .group-tools,.group-shapes .group-tools,.group-rows .group-tools,.group-columns .group-tools { display:flex; flex-direction:column; gap:3px; }
 .group-table-style .ribbon-select,.group-cell-alignment .ribbon-select { min-width:150px; margin-bottom:8px; }
@@ -234,7 +259,8 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .table-insert-tools,.table-sizing,.table-alignment-tools,.table-data-tools { display:flex; align-items:center; gap:5px; height:72px; }
 .table-layout-ribbon .table-large-tool { position:relative; height:66px; min-width:53px; width:auto; padding:4px 2px; flex-direction:column; justify-content:flex-start; gap:4px; }
 .table-layout-ribbon .table-large-tool .tool-label { display:flex; flex-direction:column; align-items:center; min-width:49px; line-height:12px; text-align:center; }
-.table-layout-ribbon .table-large-tool .app-icon { width:24px; height:24px; }
+/* scope to the tool icon: the menu chevron is an .app-icon too and must stay 10px. */
+.table-layout-ribbon .table-large-tool .tool-icon .app-icon { width:24px; height:24px; }
 .table-layout-ribbon .table-large-tool .menu-chevron { position:absolute; right:2px; top:20px; margin:0; height:8px; }
 .table-size-fields,.table-distribute { display:flex; flex-direction:column; gap:5px; }
 .table-size-field { display:flex; gap:4px; align-items:center; font-size:10px; height:25px; }
@@ -407,7 +433,31 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .edit-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .edit-dialog-btn { height:32px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); padding:0 13px; }
 .edit-dialog-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-@media (max-width:1050px) { .brand-detail,.brand-divider { display:none; }.navigation-slot { width:205px; }.navigation { padding:22px 13px; }.search-field input { width:139px; }.ribbon-groups { gap:12px; padding-left:15px; }.ribbon-group { padding-right:12px; }.canvas-chrome,.stage { padding-left:24px; padding-right:24px; } }
-@media (max-width:760px) { .navigation-slot { display:none; }.titlebar { padding:0 14px; }.document-title { font-size:10px; }.save-indicator { display:none; }.brand { font-size:20px; }.canvas-chrome,.stage { padding-left:14px; padding-right:14px; }.ribbon-groups { overflow-x:auto; }.statusbar { height:auto; min-height:33px; gap:3px 12px; padding:5px 12px; } }
+@media (max-width:1050px) { .navigation-slot { width:205px; }.navigation { padding:22px 13px; }.search-field input { width:139px; }.ribbon-groups { gap:12px; padding-left:15px; }.ribbon-group { padding-right:12px; }.canvas-chrome,.stage { padding-left:24px; padding-right:24px; } }
+@media (max-width:760px) { .navigation-slot { display:none; }.titlebar { padding:6px 12px 0 10px; }.document-title { font-size:14px; }.save-indicator { display:none; }.canvas-chrome,.stage { padding-left:14px; padding-right:14px; }.ribbon-groups { overflow-x:auto; }.statusbar { height:auto; min-height:33px; gap:3px 12px; padding:5px 12px; } }
 @media (max-width:600px) { .statusbar { flex-direction:column; align-items:stretch; }.status-right { justify-content:space-between; } }
 @media (max-width:760px) { .search-open .navigation-slot { display:block; } }
+/* in-place equation editing: Word's light equation box with a text caret and no resize handles */
+.object-handles.math-editing { background:rgba(36,99,180,0.05); border-color:#b9cde8; }
+.object-handles.math-editing .object-handle,.object-handles.math-editing .object-rotation-stem { display:none; }
+.object-handles.math-editing .object-move { cursor:text; }
+.math-caret { position:absolute; width:1.5px; margin-left:-0.75px; background:#1f2d42; pointer-events:none; }
+/* print page (Chrome / Google Docs print): the preview runs the full dialog height on a gray well; the settings
+   column carries the heading, the options, and Cancel / Save. Page geometry lives in surface.print_css. */
+.edit-dialog.edit-dialog-print { width:900px; max-width:calc(100vw - 32px); padding:0; overflow:hidden; }
+.edit-dialog-print .edit-dialog-title,.edit-dialog-print .edit-dialog-text,.edit-dialog-print .edit-dialog-actions { display:none; }
+.print-layout { display:flex; height:calc(100vh - 60px); min-height:320px; }
+.print-preview { flex:1; min-width:0; overflow:auto; display:flex; flex-direction:column; align-items:center; gap:18px; padding:24px; background:#9fa5ae; }
+.print-sheet { flex-shrink:0; box-shadow:0 3px 12px rgba(20,28,40,0.35); }
+.print-settings { position:relative; width:290px; flex-shrink:0; border-left:1px solid var(--line); }
+.print-heading { display:flex; align-items:baseline; justify-content:space-between; padding:20px 22px 12px; }
+.print-title { font-size:18px; font-weight:600; color:var(--ink); }
+.print-summary { font-size:12px; color:var(--muted); }
+.print-options { position:absolute; top:58px; bottom:68px; left:0; right:0; overflow:auto; padding:4px 22px 8px; }
+.print-options .edit-dialog-field { margin-bottom:12px; }
+.print-detail { margin-top:-4px; }
+.print-hint { margin:-6px 0 12px; font-size:11px; color:#a43a4b; }
+.print-group-label { font-size:11px; color:var(--muted); margin:2px 0 6px; }
+.print-settings .table-style-option { margin:0 0 8px; font-size:12px; }
+.print-options .dialog-field:last-child { margin-top:10px; }
+.print-actions { position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:flex-end; gap:8px; padding:16px 22px; border-top:1px solid var(--line); background:#fff; }

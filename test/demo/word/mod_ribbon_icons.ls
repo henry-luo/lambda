@@ -8,23 +8,28 @@ pub let palettes = {blue:{ink:"#1764c0",accent:"#0a84ff",wash:"#d6eaff"},
     amber:{ink:"#b76a00",accent:"#ffab00",wash:"#fff0bf"},
     rose:{ink:"#c63265",accent:"#ff477d",wash:"#ffe1eb"},
     slate:{ink:"#426b9e",accent:"#548ee6",wash:"#e1edff"},
-    ink:{ink:"currentColor",accent:"currentColor",wash:"none"}}
+    ink:{ink:"currentColor",accent:"currentColor",wash:"none"},
+    grid:{ink:"#a7b1bf",accent:"currentColor",wash:"none"}}
 let families = [
     {tone:"blue",names:["cover","blank_page","page_break","header","footer","page_number","document","folder","save","export",
-        "album","link","bookmark","portrait","landscape","margins","margins_normal","margins_narrow","sidebar","book","globe","columns","columns_1","columns_2","columns_3",
+        "print","album","link","bookmark","portrait","landscape","margins","margins_normal","margins_narrow","sidebar","book","globe","columns","columns_1","columns_2","columns_3",
         "object_position","wrap_inline","wrap_square","wrap_top_bottom","wrap_behind","wrap_front","bring_forward","send_backward","selection_pane","object_align","object_flip","object_group","object_ungroup","eye","eye_off",
         "table","select_table","select_cell","select_row","select_column","table_gridlines","table_properties",
         "insert_above","insert_below","insert_left","insert_right","merge_cells","split_cells","split_table","autofit",
         "distribute_rows","distribute_columns","cell_margins","undo","redo","bullets","numbering","search","replace"]},
     {tone:"violet",names:["shapes","edit_shape","shape_effects","shape_outline","format_shape","emoji","smartart","wordart","equation","symbol","formula","text_direction","tracking","citation","sources","bibliography","source_add"]},
+    {tone:"grid",names:["border_top","border_bottom","border_left","border_right","border_none","border_all","border_outside","border_inside"]},
     {tone:"teal",names:["chart","chart_bar","chart_line","chart_pie","chart_doughnut","check","sort","repeat_header"]},
-    {tone:"amber",names:["comment","comment_add","changes","highlight","shading","shape_fill","text_fill"]},
+    {tone:"amber",names:["comment","comment_add","changes","highlight","highlighter","shading","shape_fill","text_fill","format_painter"]},
     {tone:"rose",names:["trash","unlink","clear","reject"]},
     {tone:"ink",names:["bold","italic","underline","strike","subscript","superscript","circle",
-        "align_left","align_center","align_right","justify","indent","outdent","paragraph"]}]
+        "align_left","align_center","align_right","justify","indent","outdent","paragraph",
+        "grow_font","shrink_font","change_case","char_border","font_color","pilcrow","line_spacing"]}]
 let paper = "M6 3h12v18H6z"
 let folded = "M6 3h8l4 4v14H6z"
 let grid = "M3 4h18v16H3z"
+let letter_a = "M7 17l4.5-11h1L17 17 M8.7 13h6.6"
+let big_a = "M2 20L8 6h2l6 14 M4.5 15h9"
 let layout_contours = ["object_position","wrap_inline","wrap_square","wrap_top_bottom","wrap_behind","wrap_front",
     "bring_forward","send_backward","selection_pane","object_align","object_flip","object_group","object_ungroup"]
 let details = {
@@ -120,17 +125,41 @@ let details = {
     bullets:{accent:"M3 5h1 M3 12h1 M3 19h1"},
     numbering:{accent:"M3 3h1v6 M3 9h2 M2 15c0-3 4-3 4 0 0 2-4 3-4 5h4"},
     save:{fill:"M4 3h13l3 3v15H4z",accent:"M8 3v6h8V3 M8 21v-8h8v8"},
+    print:{fill:"M3 9h18v8H3z",outline:"M7 9V3h10v6 M7 17H3V9h18v8h-4 M7 14h10v7H7z",accent:"M17.5 12h0.5"},
     folder:{fill:"M3 7V4h7l3 3h8v13H3z",accent:"M3 8h18"},
     reject:{base:"close",accent:"M6 6l12 12 M18 6L6 18"},
-    trash:{fill:"M5 6h14l-1 15H6z",accent:"M3 6h18 M9 6V3h6v3"}}
+    trash:{fill:"M5 6h14l-1 15H6z",accent:"M3 6h18 M9 6V3h6v3"},
+    grow_font:{outline:big_a,accent:"M17 9l2.5-4 2.5 4"},
+    shrink_font:{outline:big_a,accent:"M17 5l2.5 4 2.5-4"},
+    change_case:{outline:"M1 19L6 6h2l5 13 M3 14h8",accent:"M21 15a2.5 3 0 1 1-5 0a2.5 3 0 1 1 5 0 M21 12v7"},
+    char_border:{outline:"M3 3h18v18H3z " ++ letter_a},
+    char_shading:{fill:"M3 3h18v18H3z",outline:letter_a},
+    font_color:{outline:"M5 17L11 3h2l6 14 M7.5 12h9"},
+    highlighter:{fill:"M7 12l8-9 5 5-8 9z",outline:"M7 12l8-9 5 5-8 9z M7 12l-3 5h5l3-3"},
+    format_painter:{fill:"M4 3h13v6H4z",outline:"M4 3h13v6H4z M17 6h3v6h-8v3 M11 15h2v6h-2z"},
+    pilcrow:{outline:"M11 4v16 M16 4v16 M19 4h-9a4 4 0 0 0 0 8h1"},
+    line_spacing:{outline:"M11 6h10 M11 12h10 M11 18h10",accent:"M5 4v16 M2.5 6.5L5 4l2.5 2.5 M2.5 17.5L5 20l2.5-2.5"}}
 
+// Word's border glyphs: a light dotted 2×2 grid with the applied edges drawn solid.
+// All Borders has no dotted edge; its outline falls back to the same grid under the solid lines.
+let border_edges = {top:"M3 3h18",middle:"M3 12h18",bottom:"M3 21h18",left:"M3 3v18",center:"M12 3v18",right:"M21 3v18"}
+let border_sets = {top:["top"],bottom:["bottom"],left:["left"],right:["right"],none:[],
+    all:["top","middle","bottom","left","center","right"],outside:["top","bottom","left","right"],inside:["middle","center"]}
+fn dotted_edge(edge) {
+    let fixed = if (edge=="top" or edge=="left") 3 else if (edge=="bottom" or edge=="right") 21 else 12;
+    join([for (t in [3,6,9,12,15,18,21]) if (edge=="top" or edge=="middle" or edge=="bottom")
+        "M" ++ string(t-0.4) ++ " " ++ string(fixed) ++ "h0.8" else "M" ++ string(fixed) ++ " " ++ string(t-0.4) ++ "v0.8"]," ")
+}
+fn border_detail(set) => {outline:join([for (edge,_ in border_edges where not contains(set,string(edge))) dotted_edge(string(edge))]," "),
+    accent:if (len(set)==0) null else join([for (edge,line in border_edges where contains(set,string(edge))) line]," ")}
 fn column_detail(count) => {fill:"M3 2h18v20H3z",outline:"M3 2h18v20H3z",
     accent:join([for (c in 0 to count-1) for (row in 0 to 3)
         "M" ++ string(6+c*14/count) ++ " " ++ string(6+row*4) ++ "h" ++ string(14/count-2)]," ")}
 pub fn icon(graphic,size=20) {
     let tone = [for (family in families where contains(family.names,graphic)) family.tone][0] or "slate"
     let p = palettes[tone]
-    let detail = if (graphic=="columns") column_detail(2) else if (starts_with(graphic,"columns_")) column_detail(int(slice(graphic,8))) else details[graphic]
+    let detail = if (graphic=="columns") column_detail(2) else if (starts_with(graphic,"columns_")) column_detail(int(slice(graphic,8))) else if (starts_with(graphic,"border_") and border_sets[slice(graphic,7)]!=null) border_detail(border_sets[slice(graphic,7)])
+        else details[graphic]
     let base = detail.base or graphic;
     let contour = detail.outline or (if (contains(layout_contours,graphic)) detail.fill else null);
     <svg class:"app-icon color-icon icon-tone-" ++ tone,focusable:"false",width:string(size),height:string(size),viewBox:"0 0 24 24",

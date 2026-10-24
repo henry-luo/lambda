@@ -29,7 +29,7 @@ pub fn transaction(editor,params) map^ {
     let item = describe(selected.node)
     let preset = [for (s in styles where s.id==params.preset) s][0]
     let values = if (params.preset!=null and preset!=null) {*:preset.values,dash:"solid",effect:"none",fill_style:"solid",opacity:100} else params.values
-    if (item==null) raise error("Word: select a shape or WordArt first")
+    if (item==null) raise error("Word: select a shape or Word Art first")
     else if (params.preset!=null and (preset==null or item.kind!="shape")) raise error("Word: choose a supported shape style")
     else if (not (values is map) or any([for (key,value in values) not contains([for (k,v in item.values) string(k)],string(key))]))
         raise error("Word: choose a supported formatting property")
