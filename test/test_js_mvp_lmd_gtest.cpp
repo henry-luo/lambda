@@ -1395,6 +1395,41 @@ TEST_F(JsFormalMir, CachedPreambleAndClassicsUseMvpAcrossFreshRealms) {
     }
 }
 
+TEST_F(JsFormalMir, CachedHarnessFunctionsServeAstAcrossFreshRealms) {
+    JsPreambleState image = {}, consumer = {};
+    const char* source = "var helperCalls=0;function checkHelper(value){"
+        "helperCalls++;if(value!==42)throw new Error('helper assertion');return helperCalls}";
+    ASSERT_FALSE(item_is_error(compile_js_mir_preamble_len(&runtime, source,
+        strlen(source), "<cached-harness>", &image)));
+    void* entry = NULL;
+    for (int pass = 0; pass < 3; pass++) {
+        ASSERT_FALSE(item_is_error(instantiate_js_preamble(&runtime, &image, &consumer)));
+        preamble_state_destroy(&consumer);
+        {
+            RootFrame roots(1);
+            Rooted<Item> helper(roots, js_get_key_default(js_get_global_this(), js_make_string("checkHelper")));
+            ASSERT_EQ(get_type_id(helper.get()), LMD_TYPE_FUNC);
+            ASSERT_TRUE(function_has_abi(helper.get().function, FN_ENTRY_ABI_MVP_LMD));
+            if (!pass) entry = (void*)helper.get().function->ptr;
+            else EXPECT_EQ((void*)helper.get().function->ptr, entry);
+            heap_gc_collect();
+            const char* check = "checkHelper.changed===undefined&&checkHelper(42)===1&&checkHelper(42)===2";
+            EXPECT_EQ(js_interp_execute_source(&runtime, check, strlen(check),
+                "<interpreted-consumer>", &result_home).item, ITEM_TRUE);
+            const char* throwing = "var helperThrew=false;try{checkHelper(41)}catch(error){"
+                "helperThrew=error instanceof Error&&error.message==='helper assertion'}helperThrew";
+            EXPECT_EQ(js_interp_execute_source(&runtime, throwing, strlen(throwing),
+                "<interpreted-assertion>", &result_home).item, ITEM_TRUE);
+            const char* mutate = "checkHelper.changed=true;checkHelper=function(){return -1}";
+            EXPECT_FALSE(item_is_error(js_interp_execute_source(&runtime, mutate,
+                strlen(mutate), "<mutate-harness>", &result_home)));
+        }
+        // the next realm must rebuild callable objects while retaining native code.
+        reset_runtime();
+    }
+    preamble_state_destroy(&image);
+}
+
 TEST_F(JsFormalMir, PublicHostPublishesNativeCallbackIntoActiveRealm) {
     ASSERT_FALSE(item_is_error(run("0")));
     RootFrame roots(2);
