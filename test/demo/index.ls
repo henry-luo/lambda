@@ -32,6 +32,8 @@ let DEMOS = [
      blurb: "Stack, blend and paint layers in a raster editor."},
     {name: "draw", title: "Draw", tag: "TOOLS · DIAGRAMS",
      blurb: "Shapes and connectors, inspired by draw.io."},
+    {name: "greetings", title: "Greetings", tag: "DESIGN · CARDS",
+     blurb: "Design a greeting card, preview it open, print and fold."},
     {name: "word", title: "Word", tag: "DOCUMENTS · EDITOR",
      blurb: "A word processor with ribbon, tables and equations."},
     {name: "note", title: "Notes", tag: "DOCUMENTS · NOTES",
@@ -75,9 +77,9 @@ fn hero() => <header class:"hero",
         <h1 <span "Pure functions.">; <span class:"ink", 'aria-label':"Living pixels.", (living()); " pixels";
             // the full stop is one live pixel that hops and lands
             <span class:"pixel", 'aria-hidden':"true">>>
-        <p class:"lead", "Nineteen apps, from games and editors to 3D worlds and documents, written in Lambda and painted by Radiant. No browser. No framework. One language, start to finish.">
+        <p class:"lead", "Twenty apps, from games and editors to 3D worlds and documents, written in Lambda and painted by Radiant. No browser. No framework. One language, start to finish.">
         <div class:"stats",
-            <span class:"stat", <b "19">; " apps">
+            <span class:"stat", <b "20">; " apps">
             <span class:"stat", <b "1">; " language">
             <span class:"stat", <b "0">; " browsers">>
         <p class:"hint", "Click a tile to open it in its own window.">>;

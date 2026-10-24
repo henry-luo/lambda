@@ -89,6 +89,11 @@
       "tags": ["note"]
     },
     {
+      "name": "greetings",
+      "globs": ["test/ui/greetings/*.json"],
+      "tags": ["greetings"]
+    },
+    {
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",
