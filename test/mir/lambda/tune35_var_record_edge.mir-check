@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "description": "D8.3.3, S9.1.3: completely proved boxed record calls forward the original var home without an adapter round trip; unknown calls retain admission.",
+  "checks": [
+    {"in_func": "_advance_#", "forbid": ["call\t_advance_b_"]}
+  ]
+}

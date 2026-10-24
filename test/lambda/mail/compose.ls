@@ -37,7 +37,10 @@ compose.recipients("  ");
 compose.rfc5322_date(1761272399000)
 let draft = {*: compose.reply(m, me, true), text: "Sounds good.\n\n" ++ compose.reply(m, me, true).text};
 let text = compose.eml(draft, me, "Sat, 24 Oct 2026 03:00:00 +0000", "<r1@lambda.demo>")^;
-text
+// verify wire CRLF before rendering an LF-normalized golden.
+let lf = replace(text, "\r\n", "\n");
+[contains(text, "\r\n\r\n"), not contains(lf, "\r"), len(split(lf, "\n")) == len(split(text, "\r\n"))]
+lf
 let sent = parse(binary(text), 'eml')^;
 [sent.subject, sent.addresses.to, sent.headers["in-reply-to"], replace(mime.text_body(sent), "\r\n", "\n") == draft.text, mime.html_body(sent) != null]
 

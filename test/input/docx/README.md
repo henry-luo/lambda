@@ -61,7 +61,10 @@ relationships; note diagnostics retain that part's path.
 The user-supplied `biz-plan1.docx` and `biz-plan2.docx` are covered by
 `docx_business_plans.ls`. Their `.body.txt` sidecars independently concatenate
 the main WordprocessingML part's `w:t` nodes in document order; the golden
-compares every non-layout character with extracted text. It also checks both
+compares every non-layout character with extracted text. The larger sidecar was
+restored directly from `word/document.xml`, by concatenating the text of all
+`{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t` nodes with
+Python's `zipfile` and `xml.etree.ElementTree`; it is not converter output. It also checks both
 embedded images per document, all one/six tables, the larger plan's cached TOC
 links and its 51 omitted trailing grid slots. The documents remain unchanged.
 

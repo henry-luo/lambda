@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "D5.3, S9.1.3: admitted array calls retain their raw witness and late effectful arguments remain in source order.",
+  "checks": [
+    {"in_func": "_defaulted_#", "expect": ["call\t_consume_"]},
+    {"in_func": "_main_#", "expect_seq": ["call\t_replace_values_", "call\t_consume_"]}
+  ]
+}

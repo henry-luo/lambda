@@ -3358,6 +3358,9 @@ static void lambda_call_root_value(void* owner, MIR_reg_t reg,
         // scratch slot over the stable module binding (D5.2).
         return;
     }
+    // call rooting consumes an existing semantic home when the register is
+    // already owned; publishing another alias only dirties the loop's roots.
+    if (mt && em_root_binding_slot_for_reg(&mt->em, reg) >= 0) return;
     if (mt && mt->em.frame.active && mt->em.frame.root_base && reg) {
         create_gc_root_slot(mt, reg, value_class);
     }
@@ -4332,7 +4335,9 @@ static bool mir_emit_bool_equality(MirTranspiler* mt, AstBinaryNode* comparison,
             comparison->op != OPERATOR_NE)) return false;
     bool native_lanes = mir_expr_native_bool_operand(mt, comparison->left) &&
         mir_expr_native_bool_operand(mt, comparison->right);
-    bool boxed_bool_or_null = mir_is_stable_boxed_bool_or_null(mt, comparison->left) &&
+    // native bool/null lanes already have identical equality encodings;
+    // prefer them over a second nullable boxing round trip (D2.4.1).
+    bool boxed_bool_or_null = !native_lanes && mir_is_stable_boxed_bool_or_null(mt, comparison->left) &&
         mir_is_stable_boxed_bool_or_null(mt, comparison->right);
     if (!native_lanes && !boxed_bool_or_null) return false;
     MIR_reg_t left = boxed_bool_or_null ? transpile_box_item(mt, comparison->left)
@@ -4513,6 +4518,14 @@ static bool mir_is_native_param_type(TypeId tid) {
 }
 
 static bool mir_param_uses_native_lane(AstFuncNode* fn_node, int index) {
+    AstNamedNode* param = mir_param_at(fn_node, index);
+    TypeParam* parameter = param ? lambda_type_param(param->type) : NULL;
+    // borrowed records keep their Item carrier and caller home even when
+    // sibling scalars use lanes; nullable pointers cannot transport COW roots.
+    if (parameter && parameter->is_var_param &&
+            lambda_type_nonnull_map_contract(mir_param_contract_at(fn_node, index))) {
+        return false;
+    }
     TypeId type_id = mir_param_type_at(fn_node, index);
     if (mir_is_native_param_type(type_id)) return true;
     TypeId lane_type = LMD_TYPE_ANY;
@@ -4574,9 +4587,10 @@ static bool mir_borrowed_param_requires_raw_abi(AstFuncNode* fn_node,
             // CW33 home -- `let before = b; set_left(b)` wrote into `before`
             // (S9.1.2, S9.1.3). Use the same predicate that selects that arm.
             TypeId contract_lane = LMD_TYPE_ANY;
-            if (mir_is_native_param_type(resolved) ||
+            if (mir_param_uses_native_lane(fn_node, index) &&
+                    (mir_is_native_param_type(resolved) ||
                     (mir_contract_native_scalar_type(mir_param_contract_at(fn_node, index),
-                        &contract_lane) && contract_lane == resolved)) {
+                        &contract_lane) && contract_lane == resolved))) {
                 return true;
             }
         }
@@ -5239,12 +5253,21 @@ static MIR_reg_t emit_uext8(MirTranspiler* mt, MIR_reg_t val_reg) {
     return ext;
 }
 
+static Type* mir_call_result_contract(AstNode* primary);
+static Type* mir_unwrap_decl_type(Type* type);
+
 static bool mir_boxed_predicate_result(AstNode* source, int depth = 0) {
     if (!source || depth > 16) return false;
     AstNode* node = ast_unwrap_primary_to_leaf(source);
     if (!node) return false;
     if (node->node_type == AST_NODE_PRIMARY || node->node_type == AST_NODE_LITERAL) {
         return node->type && node->type->type_id == LMD_TYPE_BOOL;
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        // a checked bool return can join an error Item; only ItemTrue admits
+        // the success, so the existing error edge needs no truthiness call.
+        Type* result = mir_call_result_contract(node);
+        return result && mir_unwrap_decl_type(result) == &TYPE_BOOL;
     }
     if (node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* binary = (AstBinaryNode*)node;
@@ -6709,6 +6732,9 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
     // is exact here.
     MIR_reg_t boxed = value_type == LMD_TYPE_FLOAT
         ? emit_box_float_lane(mt, value) : emit_box(mt, value, value_type);
+    // the non-error top cannot convert a value, and admission forwards an
+    // incoming error unchanged. The consumer retains its error guard (S11.4.3).
+    if (target == &TYPE_ANY_NO_ERROR) return boxed;
     // Tune27 §6: the static census counts these calls per loop but cannot name
     // them; this line attributes each emitted check to its site and target.
     log_debug("mir-boundary: fn=%s site='%s' target=%d value=%d",
@@ -6721,7 +6747,7 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
     // TypeId is admitted unchanged by every arm of that ladder (a compact int
     // is in band by construction; T28-5 for string), so test the tag inline
     // and keep the call for every other tag: null, poison, a widened numeric,
-    // a symbol, an error. Doubles carry no plain top-byte tag and stay out.
+    // a symbol, an error. Floats use the shared exact representation test.
     // A native lane of the contract's own scalar type boxes to that tag, or to
     // null (a nullable lane's sentinel, e.g. an out-of-range `int[]` read) or
     // a widened int64 -- both tag misses that keep the call. Gating on `any`
@@ -6730,7 +6756,8 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
     bool tag_admits = (value_type == LMD_TYPE_ANY ||
             (target && value_type == target->type_id)) && target &&
         target->kind == TYPE_KIND_SIMPLE && !target->is_literal &&
-        (target->type_id == LMD_TYPE_INT || target->type_id == LMD_TYPE_BOOL ||
+        (target == &TYPE_FLOAT ||
+         target->type_id == LMD_TYPE_INT || target->type_id == LMD_TYPE_BOOL ||
          target->type_id == LMD_TYPE_STRING) &&
         !lambda_type_accepts_null(expected) &&
         !(mt->binder_env_reg && mir_contract_uses_binder(expected));
@@ -6768,7 +6795,14 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         MIR_reg_t tag = new_reg(mt, "scalar_admit_tag", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH, MIR_new_reg_op(mt->ctx, tag),
             MIR_new_reg_op(mt->ctx, boxed), MIR_new_int_op(mt->ctx, 56)));
-        if (record_contract) {
+        if (target == &TYPE_FLOAT) {
+            // exact float membership includes inline doubles, signed zeros
+            // and number-home floats. Other numerics retain lossless admission.
+            MIR_reg_t matches = emit_exact_inferred_shape_test(mt, boxed,
+                LMD_TYPE_FLOAT);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, tag_miss), MIR_new_reg_op(mt->ctx, matches)));
+        } else if (record_contract) {
             MIR_label_t tag_hit = new_label(mt);
             if (lambda_type_accepts_null(expected)) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, tag_hit),
@@ -7902,6 +7936,48 @@ static bool mir_compact_bitwise_int_cast_success(MirTranspiler* mt,
     return mir_bitwise_kind_for_node(mt, value) == LAMBDA_NUM_U32;
 }
 
+static AstNode* mir_single_value_branch_node(AstNode* node);
+
+// broad containers need membership only; refined shapes and T[] still own
+// their reification boundary. The error arm is handled by the consumer.
+static bool mir_container_success_proves_contract(MirTranspiler* mt,
+        AstNode* source, Type* target, int depth = 0) {
+    Type* expected = mir_unwrap_decl_type(target);
+    if ((expected != &TYPE_ARRAY && expected != &TYPE_MAP) || depth > 12) return false;
+    AstNode* node = ast_unwrap_primary(source);
+    if (!node) return false;
+    if (mir_flow_find(mt, node, expected, MIR_FLOW_SEMANTIC) ||
+            mir_call_result_proves_contract(node, expected)) return true;
+    if (node->node_type == AST_NODE_ARRAY) return expected == &TYPE_ARRAY;
+    if (node->node_type == AST_NODE_MAP) return expected == &TYPE_MAP;
+    if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_LIST) {
+        AstNode* value = mir_single_value_branch_node(node);
+        return value && mir_container_success_proves_contract(mt, value, target, depth + 1);
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        return branch->otherwise &&
+            mir_container_success_proves_contract(mt, branch->then, target, depth + 1) &&
+            mir_container_success_proves_contract(mt, branch->otherwise, target, depth + 1);
+    }
+    if (node->node_type == AST_NODE_BINARY && expected == &TYPE_ARRAY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return binary->op == OPERATOR_JOIN &&
+            mir_container_success_proves_contract(mt, binary->left, expected, depth + 1) &&
+            mir_container_success_proves_contract(mt, binary->right, expected, depth + 1);
+    }
+    if (node->node_type != AST_NODE_IDENT) return false;
+    MirVarEntry* binding = mir_var_for_ident(mt, (AstIdentNode*)node);
+    // boxed parameters retain their admitted full contract even when their
+    // physical carrier deliberately stays Any (S11.4.10, D2.4.1).
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (binding && entry && entry->declared_type && !entry->type_widened && binding->full_type &&
+            mir_unwrap_decl_type(binding->full_type) == expected) return true;
+    if (!binding || mir_expr_may_be_null(mt, node)) return false;
+    return expected == &TYPE_MAP ? binding->type_id == LMD_TYPE_MAP
+        : binding->type_id == LMD_TYPE_ARRAY || binding->type_id == LMD_TYPE_ARRAY_NUM;
+}
+
 static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, Type* target) {
     // `return null` against `T?`: the check can only hand the null back
     if (source_node && target && mir_is_null_literal(source_node) &&
@@ -7921,6 +7997,7 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
 // instead of re-admitting the value (cube3d's `var n: float[] = calc_normal(...)`).
 static bool mir_boundary_join_success_redundant(MirTranspiler* mt, AstNode* source_node,
         Type* target) {
+    if (mir_container_success_proves_contract(mt, source_node, target)) return true;
     AstCallNode* call = mir_value_call(source_node);
     // int() itself is non-defecting, but its compact bitwise operand can
     // publish ItemError. Its successful result already satisfies plain int.
@@ -7944,7 +8021,8 @@ static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source
     Type* expected = mir_unwrap_decl_type(target);
     // A type predicate proves membership, not record/array reification. Union
     // admission preserves its member carrier, so the identical union is safe.
-    if (lambda_type_is_union(expected) && !lambda_type_nonnull_map_contract(expected) &&
+    if ((expected == &TYPE_ARRAY || expected == &TYPE_MAP ||
+            (lambda_type_is_union(expected) && !lambda_type_nonnull_map_contract(expected))) &&
             mir_flow_find(mt, source_node, expected, MIR_FLOW_SEMANTIC)) return true;
     TypeId expected_tid = expected ? expected->type_id : LMD_TYPE_ANY;
     // A literal contract (`x: 1`, `x: 2.5`) names one value on the int or
@@ -7972,6 +8050,8 @@ static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source
         return true;
     }
     AstNode* primary = ast_unwrap_primary(source_node);
+    if (primary && primary->node_type == AST_NODE_IDENT &&
+            mir_container_success_proves_contract(mt, primary, target)) return true;
     if (mir_call_result_proves_contract(primary, target)) return true;
     if (primary && primary->node_type == AST_NODE_IDENT &&
             mir_binding_definitions_prove_contract(mt,
@@ -8069,6 +8149,45 @@ static bool mir_boundary_statically_deferred(AstNode* source_node, Type* contrac
              contract == &TYPE_ANY_NO_ERROR)) return false;
     return lambda_static_boundary_relation(source_node->type, contract,
         parameter != NULL) != STATIC_BOUNDARY_PROVEN;
+}
+
+// a boxed body consumes the same var homes as its adapter. A complete proved
+// signature may enter it directly without repeating admission/preparation.
+static bool mir_boxed_body_arguments_proven(MirTranspiler* mt, AstFuncNode* fn,
+        AstNode** arguments) {
+    if (!fn || fn->node_type != AST_NODE_PROC || fn->captures) return false;
+    TypeFunc* signature = (TypeFunc*)fn->type;
+    if (!signature || signature->is_variadic || signature->binder_count) return false;
+    int index = 0;
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)param->next, index++) {
+        if (index >= LAMBDA_MAX_FUNCTION_ARGS || !arguments[index] ||
+                !param->declared_type ||
+                !mir_boundary_is_redundant(mt, arguments[index], mir_named_contract(param))) return false;
+        TypeParam* type = lambda_type_param(param->type);
+        if (type && type->is_var_param) {
+            MirVarEntry* root = mir_direct_root_binding(mt, arguments[index]);
+            if (!root || root->root_slot < 0) return false;
+        }
+    }
+    return true;
+}
+
+static MirVarEntry* mir_reusable_array_argument_root(MirTranspiler* mt,
+        AstFuncNode* fn, AstNode** arguments, int index, int count) {
+    MirVarEntry* root = mir_direct_root_binding(mt, arguments[index]);
+    if (!root || root->root_slot < 0 || root->from_env || root->in_scope_env ||
+            root->env_offset >= 0) return NULL;
+    // later argument evaluation must not rebind or detach the captured value.
+    // Keep a separate snapshot home for defaults, calls and borrowed arguments.
+    for (int i = index + 1; i < count; i++) {
+        AstNode* argument = ast_unwrap_primary_to_leaf(arguments[i]);
+        AstNamedNode* param = mir_param_at(fn, i);
+        TypeParam* type = param ? lambda_type_param(param->type) : NULL;
+        if (!argument || argument->node_type != AST_NODE_IDENT ||
+                !param || !type || type->is_var_param) return NULL;
+    }
+    return root;
 }
 
 // A native indexed load can be lane-proven while still carrying the reserved
@@ -35145,7 +35264,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             // scope-dependent defaults need the callee's earlier parameters and captures;
             // closed expressions keep the existing native call lane.
             if ((omitted_default && !routed_to_boxed_entry) ||
-                    (borrowed_var_call && fn_def && !native_call) ||
+                    (borrowed_var_call && fn_def && !native_call &&
+                     !mir_boxed_body_arguments_proven(mt, fn_def, resolved_args)) ||
                     (native_call && call_nfi->record_result &&
                      mt->record_call_target != call_node)) {
                 entry_name_buf = strbuf_new_cap(64);
@@ -35429,14 +35549,20 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         mir_prepare_cow_root(mt, witness_root);
                     }
                     MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
-                    int source_root = create_gc_root_slot(mt, val);
+                    bool proven_array_witness = mir_boundary_is_redundant(mt,
+                        resolved_args[i], parameter_contract) ||
+                        argument_contract.array_constructed();
+                    MirVarEntry* reusable_root = !witness_param && proven_array_witness
+                        ? mir_reusable_array_argument_root(mt, fn_def,
+                            resolved_args, i, expected_params) : NULL;
+                    // a complete admitted array already has a precise home.
+                    // Reuse it rather than spilling an alias on every call.
+                    int source_root = reusable_root ? reusable_root->root_slot
+                        : create_gc_root_slot(mt, val);
                     val = load_gc_root_slot(mt, source_root, "array_source");
                     // An admitted binding/return retains the FULL T[] proof
                     // across same-contract COW detaches. An inferred element
                     // tag alone still cannot authorize this edge (D3.3.3v3).
-                    bool proven_array_witness = mir_boundary_is_redundant(mt,
-                        resolved_args[i], parameter_contract) ||
-                        argument_contract.array_constructed();
                     // S7.7.3 / S11.4.3 (LR12-36): an error argument is the
                     // call's value, as on the other argument paths, not a
                     // return from this activation. With that arm guarded, a
@@ -35456,7 +35582,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                         emit_return_if_item_error(mt, admitted_array);
                         array_item = admitted_array;
                     }
-                    arg_root_slots[i] = create_gc_root_slot(mt, array_item);
+                    arg_root_slots[i] = reusable_root ? source_root
+                        : create_gc_root_slot(mt, array_item);
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, array_item);
                     arg_vars[i] = {MIR_T_I64, "array", 0};
                     typed_array_witness_args[i] = true;
@@ -35950,7 +36077,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 if (typed_array_witness_args[i]) {
                     MIR_reg_t boxed = load_gc_root_slot(mt, arg_root_slots[i],
                         "call_array_item");
-                    MIR_reg_t raw = emit_unbox_container(mt, boxed);
+                    // an admitted non-null container Item is its header pointer;
+                    // masking it creates a fresh alias with a redundant root.
+                    MIR_reg_t raw = boxed;
                     call_types[i] = MIR_T_I64;
                     call_ops[i] = MIR_new_reg_op(mt->ctx, raw);
                 } else if (raw_pointer_arg_items[i]) {
@@ -40105,6 +40234,28 @@ static void mir_emit_var_root_unshare(MirTranspiler* mt, AstNode* place) {
     emit_label(mt, unique);
 }
 
+static MIR_reg_t mir_emit_checked_map_store(MirTranspiler* mt, MIR_reg_t owner,
+        MIR_reg_t key, MIR_reg_t value, Type* contract, bool in_place,
+        const char* site) {
+    // plain map has no field/post-state obligation; use the runtime checker's
+    // own COW path directly, preserving owner replacement (S11.4.10).
+    if (mir_unwrap_decl_type(contract) == &TYPE_MAP) {
+        return emit_call_3(mt,
+            cow_profile_sites_enabled() ? "map_set_cow_profiled" : "map_set_cow", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+    }
+    return emit_call_5(mt, in_place
+        ? "lambda_map_set_checked_inplace" : "lambda_map_set_checked", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)contract),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_string_literal(mt, site)));
+}
+
+
 static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         AstNode* node) {
     if (!node) {
@@ -40150,15 +40301,9 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                 if (typed_path.count == 0) {
                     MIR_reg_t key = transpile_box_item(mt, ca->key);
                     MIR_reg_t owner = emit_box(mt, typed_root->reg, typed_root->type_id);
-                    const char* checked_set = typed_root->is_var_param
-                        ? "lambda_map_set_checked_inplace" : "lambda_map_set_checked";
-                    MIR_reg_t replacement = emit_call_5(mt, checked_set, MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)typed_root->full_type),
-                        MIR_T_P, MIR_new_reg_op(mt->ctx,
-                            emit_load_string_literal(mt, "typed map computed assignment")));
+                    MIR_reg_t replacement = mir_emit_checked_map_store(mt, owner,
+                        key, value, typed_root->full_type, typed_root->is_var_param,
+                        "typed map computed assignment");
                     emit_return_if_item_error(mt, replacement);
                     MIR_reg_t raw_map = emit_unbox(mt, replacement, LMD_TYPE_MAP);
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -41086,15 +41231,9 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                 key = transpile_box_item(mt, ca->key);
             }
             MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-            const char* checked_set = cow_root->is_var_param
-                ? "lambda_map_set_checked_inplace" : "lambda_map_set_checked";
-            MIR_reg_t replacement = emit_call_5(mt, checked_set, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)cow_root->full_type),
-                MIR_T_P, MIR_new_reg_op(mt->ctx,
-                    emit_load_string_literal(mt, "typed map member assignment")));
+            MIR_reg_t replacement = mir_emit_checked_map_store(mt, owner, key,
+                value, cow_root->full_type, cow_root->is_var_param,
+                "typed map member assignment");
             emit_return_if_item_error(mt, replacement);
             MIR_reg_t raw_map = emit_unbox(mt, replacement, LMD_TYPE_MAP);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,

@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "D3.4.6, S9.1.2: COW preserves scalar lanes and snapshots of native-pointer and dynamic container children.",
+  "checks": [{"in_func": "_main_#", "expect": ["lambda_map_set_checked"]}]
+}

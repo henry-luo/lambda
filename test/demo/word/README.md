@@ -623,7 +623,7 @@ an empty new page, and undo/redo. It also puts the native caret on the editor's
 unmapped wrapper to verify typing retains the document and logical caret.
 The columns replay covers text fragmented across columns, caret/typing, history,
 custom spacing and rules, validation, page breaks, table-cell edits, responsive
-views and file round trips. `_columns_export.ls` checks default HTML and explicit
+views and file round trips. `tests/proc/_columns_export.ls` checks default HTML and explicit
 XHTML export; the long PDF must contain five sheets and no leading blank. When
 `pdftotext` is available, the harness verifies all 100 paragraphs appear once and
 headers/page fields repeat correctly. Applied source nodes remain singular
@@ -651,3 +651,9 @@ blank page and a four-page PDF after prepending a cover. Its screenshot is
 WordCraft's original sample text and command vocabulary are used under its
 MIT license, included as [LICENSE-MIT](LICENSE-MIT). The workspace styling is
 original; no Microsoft assets or fonts are bundled.
+
+The export API procedures in `tests/proc/` run independently in the Lambda
+baseline. Equations, shape formatting, and grouping construct fresh models
+through `tests/fixtures/mod_export.ls` and round-trip their own saved files.
+The UI runner sets `LAMBDA_WORD_EXPORT_UI=1` to verify the UI-produced files
+instead; a missing UI artifact still fails that run.

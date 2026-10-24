@@ -1,12 +1,14 @@
-import files: ~~.mod_io
-import model: ~~.mod_model
-import shapes: ~~.mod_shapes
+import fixture: ~~.fixtures.mod_export
+import files: ~~.~~.mod_io
+import model: ~~.~~.mod_model
+import shapes: ~~.~~.mod_shapes
 import image: lambda.editor.mod_image
 import lambda.editor.mod_step
 
 pn main() {
-    let saved = files.read_document("temp/word/shape-format.word.json")^
-    let imported = files.import_html_document(input("temp/word/shape-format.html",'text')^)^
+    let data = fixture.load("shape-format","Shapes")^
+    let saved = data.saved
+    let imported = data.imported
     let n = image.images(imported)[0].node
     let p = shapes.settings(n)
     // HTML normalizes whitespace and attribute types; compare canonical imported models.

@@ -1,14 +1,16 @@
-import files: ~~.mod_io
-import model: ~~.mod_model
-import groups: ~~.mod_group_data
-import layout: ~~.mod_object_layout
+import fixture: ~~.fixtures.mod_export
+import files: ~~.~~.mod_io
+import model: ~~.~~.mod_model
+import groups: ~~.~~.mod_group_data
+import layout: ~~.~~.mod_object_layout
 import image: lambda.editor.mod_image
 import lambda.editor.mod_editor
 import lambda.editor.mod_source_pos
 
 pn main() {
-    let saved = files.read_document("temp/word/object-layout.word.json")^
-    let imported = files.import_html_document(input("temp/word/object-layout.html",'text')^)^
+    let data = fixture.load("object-layout","Layout")^
+    let saved = data.saved
+    let imported = data.imported
     let selected = edit_set_selection(saved.editor,node_selection(image.images(saved.editor.doc)[0].path))
     let recovered = model.execute(selected,"object.ungroup")^
     let original = files.read_document("test/demo/word/tests/object_layout.word.json")^

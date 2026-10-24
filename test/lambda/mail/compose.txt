@@ -49,7 +49,9 @@
   }]
 []
 ["“nobody” is not an email address.", "Add at least one recipient.", null]
-"=== eml ===Fri, 24 Oct 2025 02:19:59 +0000in-reply-to: <a@x>
+"=== eml ===Fri, 24 Oct 2025 02:19:59 +0000"
+[true, true, true]
+"in-reply-to: <a@x>
 references: <0@x> <a@x>
 from: "Alex Rivera" <alex@lambda.demo>
 to: "Maya Chen" <maya@x.example>, =?UTF-8?B?Sm9zw6kgw4FsdmFyZXo=?= <jose@y.example>
