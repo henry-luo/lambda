@@ -3199,7 +3199,8 @@ build-input-baseline: build-lambda-data
 # the aggregate build-test target that normally supplies these DSOs.
 # debug and release share lambda.exe; remove it before a release host rebuild
 # so make cannot mistake an ASan debug binary for an up-to-date release host.
-build-lambda-baseline: build-input-baseline build-node-core build-node-fs
+# CryptoKey lazily loads node-crypto; stale DSOs otherwise hide current host behavior.
+build-lambda-baseline: build-input-baseline build-node-core build-node-fs build-node-crypto
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \

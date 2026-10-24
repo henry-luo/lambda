@@ -209,7 +209,10 @@ void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdr
                 *pixel = render_pixel_source_over_premultiplied_pair(source,
                     coverage == 255 ? *pixel : render_pixel_scale_premultiplied(*pixel, coverage));
             } else if (mode == RENDER_COMPOSITE_REGION_PREMULTIPLIED_FULL) {
-                *pixel = render_pixel_source_over_premultiplied(*pixel, source);
+                // snapshots unpremultiply after replay; shadows must retain the destination's representation.
+                *pixel = surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED
+                    ? render_pixel_source_over_premultiplied_pair(*pixel, source)
+                    : render_pixel_source_over_premultiplied(*pixel, source);
             } else {
                 *pixel = render_pixel_source_over_straight(
                     source, *pixel, coverage);

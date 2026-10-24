@@ -2,7 +2,7 @@
 import unittest
 import zlib
 
-from pdf_output_check import compare_objects
+from pdf_output_check import compare_objects, phase6_shadow
 
 
 def stream_object(identifier, dictionary, pixels):
@@ -11,14 +11,21 @@ def stream_object(identifier, dictionary, pixels):
             + compressed + b"\nendstream\nendobj\n")
 
 
-def image_objects(color=173, alpha=28):
-    image = "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /Device"
-    return [stream_object(1, image + "Gray /BitsPerComponent 8", bytes([alpha])),
-            stream_object(2, image + "RGB /BitsPerComponent 8 /SMask 1 0 R", bytes([color]) * 3),
+def image_objects(color=173, alpha=28, width=1, height=1):
+    image = f"/Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /Device"
+    count = width * height
+    return [stream_object(1, image + "Gray /BitsPerComponent 8", bytes([alpha]) * count),
+            stream_object(2, image + "RGB /BitsPerComponent 8 /SMask 1 0 R", bytes([color]) * count * 3),
             stream_object(3, "", b"BT\n(Exact text) Tj\nET\n")]
 
 
 class PdfGoldenComparisonTest(unittest.TestCase):
+    def test_phase6_shadow_rejects_double_alpha_conversion(self):
+        phase6_shadow(image_objects(85, 128, 70, 50))
+        for color in (43, 169):
+            with self.subTest(color=color), self.assertRaisesRegex(AssertionError, "shadow color changed"):
+                phase6_shadow(image_objects(color, 128, 70, 50))
+
     def test_native_rounding_compares_premultiplied_color_and_alpha(self):
         # these straight colors both reconstruct the native premultiplied value 19.
         compare_objects(image_objects(167, 29), image_objects())

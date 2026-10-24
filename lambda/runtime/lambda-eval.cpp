@@ -12073,6 +12073,36 @@ Item cow_prepare_write(Item old) {
     return replacement;
 }
 
+// S9.1.2/D5.3: the compiler proves this snapshot cannot escape its activation.
+// Its GC-owned header is precisely rooted; compact int/bool payloads contain
+// no roots and can live in the caller's fixed scratch span. Other shapes keep
+// ordinary COW, including a share mark before the first write.
+Item lambda_array_scalar_snapshot(Item value, void* scratch, int64_t scratch_bytes) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY_NUM || !value.array_num || !scratch)
+        return cow_mark_shared(value);
+    ArrayNum* source = value.array_num;
+    ArrayNumElemType kind = source->get_elem_type();
+    if (source->is_view || source->is_ndim || source->type || source->Map::data ||
+            (kind != ELEM_INT && kind != ELEM_BOOL) || source->length < 0 ||
+            (source->length && !source->data) ||
+            source->length > scratch_bytes / ELEM_TYPE_SIZE[kind >> 4])
+        return cow_mark_shared(value);
+    RootFrame roots(1);
+    Rooted<ArrayNum*> rooted_source(roots, source);
+    ArrayNum* copy = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!copy) return ItemError;
+    source = rooted_source.get();
+    copy->type_id = LMD_TYPE_ARRAY_NUM;
+    copy->set_elem_type(kind);
+    copy->length = source->length;
+    copy->capacity = source->length;
+    copy->rep_cert = source->rep_cert;
+    copy->data = scratch;
+    if (source->length) memcpy(scratch, source->data,
+        (size_t)source->length * ELEM_TYPE_SIZE[kind >> 4]);
+    return {.array_num = copy};
+}
+
 Item cow_prepare_write_profiled(Item old) {
     uintptr_t caller = COW_PROFILE_CALLER();
     TypeId type_id = get_type_id(old);
@@ -13594,6 +13624,9 @@ Item member_set_cow(Item owner, Item key, Item value) {
     return replacement;
 }
 
+static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, Item key, Item value,
+    const TypeMap* expected_shape, ShapeEntry* resolved_field);
+
 Item map_set_cow(Item owner, Item key, Item value) {
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
@@ -13609,10 +13642,28 @@ Item map_set_cow(Item owner, Item key, Item value) {
     return replacement;
 }
 
+// D3.4.6/D4.4.4: retain canonical mutation and child capture while reusing a
+// resolved descriptor only when the prepared owner's exact shape still fits.
+Item map_set_cow_resolved(Item owner, NameId key_id, Item value,
+        const TypeMap* shape, ShapeEntry* field) {
+    Item key = lambda_name_id_to_item(key_id);
+    if (get_type_id(owner) != LMD_TYPE_MAP) return map_set_cow(owner, key, value);
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_key(roots, key);
+    rooted_owner.set(cow_prepare_write(rooted_owner.get()));
+    if (item_is_error(rooted_owner.get())) return rooted_owner.get();
+    Item status = map_set_impl(rooted_owner.get(), rooted_key.get(),
+        rooted_value.get(), shape, field);
+    return item_is_error(status) ? status : rooted_owner.get();
+}
+
 // Diagnostic entries carry the MIR call PC through a native setter without
 // putting stack inspection in the ordinary helper path.
+template<class Setter>
 static Item cow_profile_set_with_caller(Item owner, Item key, Item value,
-        uintptr_t caller, Item (*setter)(Item, Item, Item)) {
+        uintptr_t caller, Setter setter) {
     TypeId type_id = get_type_id(owner);
     CowProfileTypeCounters* counters = cow_profile_for(owner);
     uint64_t unique_before = counters ? counters->unique_mutations : 0;
@@ -13632,6 +13683,15 @@ static Item cow_profile_set_with_caller(Item owner, Item key, Item value,
 Item map_set_cow_profiled(Item owner, Item key, Item value) {
     return cow_profile_set_with_caller(owner, key, value,
         COW_PROFILE_CALLER(), map_set_cow);
+}
+
+Item map_set_cow_resolved_profiled(Item owner, NameId key_id, Item value,
+        const TypeMap* shape, ShapeEntry* field) {
+    return cow_profile_set_with_caller(owner, lambda_name_id_to_item(key_id), value,
+        COW_PROFILE_CALLER(), [key_id, shape, field](Item owner, Item key, Item value) {
+            (void)key;
+            return map_set_cow_resolved(owner, key_id, value, shape, field);
+        });
 }
 
 Item member_set_cow_profiled(Item owner, Item key, Item value) {
@@ -15296,7 +15356,11 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     return NULL;
 }
 
-Item fn_map_set(Item map_item, Item key, Item value) {
+// keep ordinary setters free of descriptor arguments and hint branches while
+// sharing the mutation body with resolved stores; an out-of-line adapter made
+// every existing fn_map_set pay for the five-argument general entry.
+static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, Item key, Item value,
+        const TypeMap* expected_shape, ShapeEntry* resolved_field) {
     if (item_is_list(value)) {
         // a field or attribute stores the list's array image (S2.5.6); the
         // copy is a safepoint, so the owner and key stay rooted across it
@@ -15402,8 +15466,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     // tree node, whose table holds every field by construction (D3.4.3v4); a
     // private type can gain entries its table never saw (elmt_put), so it
     // keeps the walk, as JS shapes and identity keys do.
-    bool table_answers = false;
-    if (!identity_key && !map_type->js_meta && key_len <= INT_MAX &&
+    bool table_answers = !identity_key && !map_type->js_meta &&
+        map_type == expected_shape && resolved_field &&
+        resolved_field->key_kind == NAME_KEY_STRING;
+    if (table_answers) entry = resolved_field;
+    if (!table_answers && !identity_key && !map_type->js_meta && key_len <= INT_MAX &&
             typemap_hash_is_usable(map_type)) {
         ShapeEntry* hit = typemap_hash_lookup(map_type, key_cstr, (int)key_len);
         if (hit ? hit->key_kind == NAME_KEY_STRING : map_type->is_transition_shared_shape) {
@@ -15636,6 +15703,10 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     if (map_extend_open_shape(map_item, key, value)) return ItemNull;
     log_error("fn_map_set: field '%s' not found", key_cstr);
     return ItemError;
+}
+
+Item fn_map_set(Item map_item, Item key, Item value) {
+    return map_set_impl(map_item, key, value, NULL, NULL);
 }
 
 Item map_literal_begin(void) {

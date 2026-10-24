@@ -5341,6 +5341,27 @@ TEST(PaintOwnership, GlyphBackgroundSnapshotOwnsCoverageAfterCacheAndStyleChange
     EXPECT_EQ(paint_capture_scratch_bytes(), 0u);
 }
 
+TEST(RasterPaintTest, ShadowCompositePreservesDestinationAlphaRepresentation) {
+    const struct { uint32_t destination, straight, premultiplied; } cases[] = {
+        {0x00000000u, 0x80804020u, 0x80402010u},
+        {0x80604020u, 0xc0754020u, 0xc0583018u},
+        {0xff604020u, 0xff704020u, 0xff704020u}
+    };
+    const uint32_t shadow = 0x80402010u;
+    for (const auto& sample : cases) for (ImageAlphaMode mode : {IMAGE_ALPHA_STRAIGHT, IMAGE_ALPHA_PREMULTIPLIED}) {
+        SCOPED_TRACE(sample.destination);
+        SCOPED_TRACE(mode);
+        uint32_t pixel = mode == IMAGE_ALPHA_STRAIGHT ? sample.destination :
+            render_pixel_premultiply_abgr(sample.destination);
+        ImageSurface surface = {};
+        surface.width = surface.height = 1; surface.pitch = 4;
+        surface.pixels = &pixel; surface.alpha_mode = mode;
+        render_composite_apply_region(&surface, &shadow, 0, 0, 1, 1,
+            RENDER_COMPOSITE_REGION_PREMULTIPLIED_FULL, CSS_VALUE_NORMAL, 255);
+        EXPECT_EQ(pixel, mode == IMAGE_ALPHA_STRAIGHT ? sample.straight : sample.premultiplied);
+    }
+}
+
 TEST(RasterPaintTest, GlyphCoverageAndImageSourceOverAgreeForEveryCoverageByte) {
     const uint32_t destinations[] = {0xffffffffu, 0xff204080u, 0xffcf7f21u};
     const uint32_t colors[] = {0xff000000u, 0xffff0000u, 0xff0000ffu, 0xff8e4a93u, 0x807c1fadu};
