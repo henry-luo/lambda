@@ -1604,15 +1604,26 @@ static void intrinsic_record_min_segment(TextIntrinsicWidths* widths, float* cur
     *current = 0.0f;
 }
 
-TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
-                                                   const char* text,
-                                                   size_t length,
-                                                   CssEnum text_transform,
-                                                   CssEnum font_variant,
-                                                   CssEnum white_space,
-                                                   CssEnum overflow_wrap,
-                                                   CssEnum word_break,
-                                                   CssEnum line_break) {
+// pre and nowrap leave no soft wrap opportunity: the run is one unbreakable segment.
+static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum white_space) {
+    if (white_space != CSS_VALUE_PRE && white_space != CSS_VALUE_NOWRAP) return;
+    widths->min_content = widths->max_content;
+    widths->first_segment_min = widths->max_content;
+    widths->remaining_min_content = 0.0f;
+    widths->last_segment_min = widths->max_content;
+    widths->has_min_content_break = false;
+    widths->interior_min_content = 0.0f;
+}
+
+static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
+                                                           const char* text,
+                                                           size_t length,
+                                                           CssEnum text_transform,
+                                                           CssEnum font_variant,
+                                                           CssEnum white_space,
+                                                           CssEnum overflow_wrap,
+                                                           CssEnum word_break,
+                                                           CssEnum line_break) {
     bool break_anywhere = overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE;
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
@@ -1962,6 +1973,24 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     return result;
 }
 
+// The no-wrap clamp lives here, not in callers: anonymous flex text and the flex
+// measurement passes trusted the white_space argument, so nowrap text measured as
+// breakable there and a flex item could shrink below its unbreakable line.
+TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
+                                                   const char* text,
+                                                   size_t length,
+                                                   CssEnum text_transform,
+                                                   CssEnum font_variant,
+                                                   CssEnum white_space,
+                                                   CssEnum overflow_wrap,
+                                                   CssEnum word_break,
+                                                   CssEnum line_break) {
+    TextIntrinsicWidths widths = measure_text_intrinsic_segments(lycon, text, length,
+        text_transform, font_variant, white_space, overflow_wrap, word_break, line_break);
+    intrinsic_text_apply_no_wrap(&widths, white_space);
+    return widths;
+}
+
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
         float* vertical_text_extent) {
@@ -1991,15 +2020,9 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
                 options.text_transform, options.font_variant, options.tab_size,
                 options.tab_size_length);
         }
-        // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines.
-        if (options.white_space == CSS_VALUE_PRE || options.white_space == CSS_VALUE_NOWRAP) {
-            widths.min_content = widths.max_content;
-            widths.first_segment_min = widths.max_content;
-            widths.remaining_min_content = 0.0f;
-            widths.last_segment_min = widths.max_content;
-            widths.has_min_content_break = false;
-            widths.interior_min_content = 0.0f;
-        }
+        // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines;
+        // the tab-adjusted max-content above needs the clamp again.
+        intrinsic_text_apply_no_wrap(&widths, options.white_space);
         IntrinsicSizes line_sizes = {widths.min_content, widths.max_content};
         line_sizes.first_segment_min = widths.first_segment_min;
         line_sizes.last_segment_min = widths.last_segment_min;

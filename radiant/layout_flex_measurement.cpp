@@ -1295,6 +1295,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // Get gap from the flex container properties
                 float gap = layout_flex_column_gap(item);
                 children.total_width += gap * (children.count - 1);
+                // CSS Flexbox §9.9.1: a single nowrap line keeps its gaps at min-content
+                // too; without them a flex:1 item shrank below its row and overflowed.
+                children.total_min_width += gap * (children.count - 1);
             }
 
         }

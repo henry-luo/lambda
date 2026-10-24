@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- a flex:1 item whose child is an inline-flex box with nowrap text must not shrink
+     below that unbreakable line; #ref is the same box outside any flex sizing -->
+<html><head><style>
+body { margin: 0; font: 13px sans-serif; }
+.bar { display: flex; width: 200px; }
+.title { flex: 1; min-width: 0; }
+.acts { flex: 1; display: flex; justify-content: flex-end; }
+.b { display: inline-flex; white-space: nowrap; padding: 0 12px; border: 1px solid #888; }
+</style></head><body>
+<div class="bar"><div class="title">T</div><div class="acts" id="span-acts"><span class="b" id="span-b">Print &amp; share now</span></div></div>
+<div class="bar"><div class="title">T</div><div class="acts" id="button-acts"><button class="b" id="button-b">Print &amp; share now</button></div></div>
+<div><span class="b" id="ref">Print &amp; share now</span></div>
+</body></html>
