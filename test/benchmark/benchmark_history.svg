@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1360" height="919" viewBox="0 0 1360 919" role="img" aria-labelledby="chart-title chart-desc">
   <title id="chart-title">Lambda Benchmark History: Geometric Mean versus Node.js</title>
-  <desc id="chart-desc">Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result50, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.</desc>
-  <metadata id="benchmark-history-data"><![CDATA[{"metric":"geometric mean of engine time divided by Node.js time","y_scale":"log10, 0.1x to 100x","session_labels":["Result1","Result2","Result3","Result4","Result9","Result10","Result11","Result12","Result13","Result14","Result15","Result16","Result17","Result18","Result19","Result20","Result21","Result22","Result23","Result24","Result25","Result26","Result27","Result28","Result29","Result30","Result31","Result32","Result33","Result34","Result35","Result36","Result37","Result38","Result41","Result42","Result43","Result44","Result45","Result46","Result47","Result48","Result49","Result50"],"omitted_sessions":["Result5","Result6","Result7","Result8","Result39","Result40"],"month_groups":[{"label":"Feb 26","start":"Result1","end":"Result1"},{"label":"Mar 26","start":"Result2","end":"Result4"},{"label":"Jun 26","start":"Result9","end":"Result9"},{"label":"Jul 26","start":"Result10","end":"Result18"},{"label":"Aug 26","start":"Result19","end":"Result35"},{"label":"Sep 26","start":"Result36","end":"Result50"}],"series":{"Lambda untyped":[null,null,null,null,null,null,null,null,null,null,null,6.16,2.65,2.55,4.49,4.26,3.17,2.75,2.7,2.65,2.32,2.25,2.14,1.97,1.84,1.96,1.95,1.81,1.41,1.35,1.26,1.37,0.97,1.08,1.39,1.56,1.36,1.32,1.34,1.2,1.26,1.07,1.13,1.05],"Lambda typed":[null,0.83,1.14,1.05,4.31,8.6,4.28,3.01,2.94,2.9,2.92,2.31,1.91,1.87,3.19,4.07,2.85,2.27,1.91,1.68,1.32,1.26,1.26,1.07,0.99,1.06,1.04,0.85,0.83,0.8,0.73,0.85,0.78,0.91,1.22,1.27,0.88,0.86,0.85,0.75,0.71,0.63,0.63,0.54],"LambdaJS":[null,0.5,8.78,7.93,13.1,20.1,21.1,15.1,15.4,14.9,13.8,13.2,13.5,13.6,22.2,24.2,15.5,15.3,15.4,15.5,16,16,16.1,16.7,45.8,30.2,30.4,31.5,30.8,30.6,30.8,30.9,30.9,31.5,20.4,16.4,19.9,21.0,18.7,10.0,9.73,8.65,7.8,7.43],"QuickJS":[null,5.92,7.98,7.98,7.58,7.74,7.1,7,7.45,7.28,7.39,7.38,7.37,7.44,6.92,7.28,7.26,7.23,7.2,7.22,7.3,7.25,7.23,7.38,6.9,7.37,7.44,7.37,7.38,7.32,7.37,6.84,6.84,7.24,7.22,7.24,7.04,7.22,7.24,6.83,null,7.2,null,7.24],"Python":[null,null,4.86,4.86,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,5.02],"Go":[null,null,null,null,null,null,null,null,null,null,null,null,null,0.2,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,0.31],"Node.js":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1.0],"C2MIR":[null,null,null,null,null,null,null,null,null,null,null,null,null,0.18,null,null,0.18,0.17,0.17,null,0.15,0.15,0.15,0.16,0.14,0.16,0.16,0.16,0.16,0.15,0.16,0.15,0.15,0.15,0.17,0.19,0.19,0.19,null,0.18,0.2,0.2,0.2,0.2]},"sources":{"Result1":"Overall_Result1.md (MIR Direct/C2MIR experiment report)","Result2":"Overall_Result2.md (Overall raw for Lambda typed/QuickJS; LambdaJS geo recomputed from displayed timing tables)","Result3":"Overall_Result3.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md","Result4":"Overall_Result4.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md","Result9_to_50":"Overall_Result9.md through Overall_Result50.md (first Part 1 Overall row: JIT-pinned self-reported execution time)"},"interpretation":"Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4 and Result50; Go is reported in Results18 and Result50. Node.js is the 1.0x reference line. Results39-40 are omitted because they were measured against Node.js v24.7.0 instead of v22.13.0 and are not comparable. Result41 onward covers 63 rows (four text rows added); Result45 omits C2MIR; Result47 omits QuickJS; Result48 restores QuickJS; Result49 omits QuickJS; Result50 includes QuickJS, Python, and Go across all 63 rows.","title":"Lambda Benchmark History","description":"Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result50, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.","session_dates":{"Result1":"2026-02-21","Result2":"2026-03-07","Result3":"2026-03-09","Result4":"2026-03-19","Result9":"2026-06-27","Result10":"2026-07-22","Result11":"2026-07-24","Result12":"2026-07-24","Result13":"2026-07-26","Result14":"2026-07-26","Result15":"2026-07-27","Result16":"2026-07-28","Result17":"2026-07-29","Result18":"2026-07-29","Result19":"2026-08-05","Result20":"2026-08-05","Result21":"2026-08-05","Result22":"2026-08-06","Result23":"2026-08-06","Result24":"2026-08-07","Result25":"2026-08-07","Result26":"2026-08-08","Result27":"2026-08-08","Result28":"2026-08-10","Result29":"2026-08-13","Result30":"2026-08-16","Result31":"2026-08-17","Result32":"2026-08-17","Result33":"2026-08-18","Result34":"2026-08-21","Result35":"2026-08-26","Result36":"2026-09-02","Result37":"2026-09-07","Result38":"2026-09-08","Result41":"2026-09-10","Result42":"2026-09-10","Result43":"2026-09-13","Result44":"2026-09-14","Result45":"2026-09-15","Result46":"2026-09-17","Result47":"2026-09-18","Result48":"2026-09-22","Result49":"2026-09-24","Result50":"2026-09-30"},"layout":{"width":1360,"height":919,"card_x":44,"card_y":22,"card_width":1250,"card_height":889,"plot_x_min":105,"plot_x_max":1520,"plot_y_min":150,"plot_y_max":735,"x_transform_anchor":84,"x_transform_scale":0.82,"x_tick_label_y":753,"x_tick_label_angle":58,"month_label_y":171,"x_axis_label_x":681.37,"x_axis_label_y":805,"y_axis_label_x":24,"y_axis_label_y":442.5,"y_ticks":[100,50,20,10,5,2,1,0.5,0.2,0.1]},"legend_items":[{"key":"Lambda untyped","x":84},{"key":"Lambda typed","x":278},{"key":"LambdaJS","x":465},{"key":"QuickJS","x":628},{"key":"Python","x":760},{"key":"Go","x":878},{"key":"Node.js","x":965},{"key":"C2MIR","x":1080}],"series_style":{"Lambda untyped":{"color":"#2563eb","stroke_width":3,"show_points":true},"Lambda typed":{"color":"#7c3aed","stroke_width":3,"show_points":true},"LambdaJS":{"color":"#dc2626","stroke_width":3,"show_points":true},"QuickJS":{"color":"#fbbd00","stroke_width":3,"connect_gaps":true,"show_points":true},"Python":{"color":"#c026d3","stroke_width":3,"connect_gaps":true,"dasharray":"1 6","show_points":true},"Go":{"color":"#0891b2","stroke_width":3,"connect_gaps":true,"dasharray":"1 6","show_points":true},"Node.js":{"color":"#64748b","stroke_width":2.2,"dasharray":"8 6","show_points":false},"C2MIR":{"color":"#16a34a","stroke_width":3,"show_points":true}},"inline_labels":{"Lambda untyped":{"x":1060.12,"y":477.75},"Lambda typed":{"x":352.62,"y":436.68},"LambdaJS":{"x":741.75,"y":298.43},"QuickJS":{"x":850,"y":347},"Python":{"x":205,"y":313},"Go":{"x":532.88,"y":680.3},"Node.js":{"x":494.12,"y":532.0},"C2MIR":{"x":1110,"y":690}},"dividers":[{"after":"Result15","before":"Result16","label":"typed split"},{"after":"Result17","before":"Result18","label":"native C2MIR transition"},{"after":"Result38","before":"Result41","label":"63-row suite"}],"c2mir_gap_bridges":[{"from":"Result18","to":"Result21","note":"missing Results19–20"},{"from":"Result23","to":"Result25","note":"missing Result24"},{"from":"Result44","to":"Result46","note":"missing Result45"}],"notes":["Results5–8 were partial tests and are omitted from the x-axis.","Results39–40 are omitted: they were measured against Node.js v24.7.0 (all other sessions use v22.13.0), thus not comparable.","Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. QuickJS joins measured points; dotted Python/Go lines bridge missing sessions.","C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.","R3–4 Python dots include ten Result50 workload fixes; other cells retain March timings. Go R18 used 56 rows."]}]]></metadata>
+  <desc id="chart-desc">Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result54, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.</desc>
+  <metadata id="benchmark-history-data"><![CDATA[{"metric":"geometric mean of engine time divided by Node.js time","y_scale":"log10, 0.1x to 100x","session_labels":["Result1","Result2","Result3","Result4","Result9","Result10","Result11","Result12","Result13","Result14","Result15","Result16","Result17","Result18","Result19","Result20","Result21","Result22","Result23","Result24","Result25","Result26","Result27","Result28","Result29","Result30","Result31","Result32","Result33","Result34","Result35","Result36","Result37","Result38","Result41","Result42","Result43","Result44","Result45","Result46","Result47","Result48","Result49","Result50","Result51","Result52","Result53","Result54"],"omitted_sessions":["Result5","Result6","Result7","Result8","Result39","Result40"],"month_groups":[{"label":"Feb 26","start":"Result1","end":"Result1"},{"label":"Mar 26","start":"Result2","end":"Result4"},{"label":"Jun 26","start":"Result9","end":"Result9"},{"label":"Jul 26","start":"Result10","end":"Result18"},{"label":"Aug 26","start":"Result19","end":"Result35"},{"label":"Sep 26","start":"Result36","end":"Result50"},{"label":"Oct 26","start":"Result51","end":"Result54"}],"series":{"Lambda untyped":[null,null,null,null,null,null,null,null,null,null,null,6.16,2.65,2.55,4.49,4.26,3.17,2.75,2.7,2.65,2.32,2.25,2.14,1.97,1.84,1.96,1.95,1.81,1.41,1.35,1.26,1.37,0.97,1.08,1.39,1.56,1.36,1.32,1.34,1.2,1.26,1.07,1.13,1.05,0.93,1.03,1.02,0.8],"Lambda typed":[null,0.83,1.14,1.05,4.31,8.6,4.28,3.01,2.94,2.9,2.92,2.31,1.91,1.87,3.19,4.07,2.85,2.27,1.91,1.68,1.32,1.26,1.26,1.07,0.99,1.06,1.04,0.85,0.83,0.8,0.73,0.85,0.78,0.91,1.22,1.27,0.88,0.86,0.85,0.75,0.71,0.63,0.63,0.54,0.58,0.6,0.58,0.53],"LambdaJS":[null,0.5,8.78,7.93,13.1,20.1,21.1,15.1,15.4,14.9,13.8,13.2,13.5,13.6,22.2,24.2,15.5,15.3,15.4,15.5,16,16,16.1,16.7,45.8,30.2,30.4,31.5,30.8,30.6,30.8,30.9,30.9,31.5,20.4,16.4,19.9,21.0,18.7,10.0,9.73,8.65,7.8,7.43,8.6,9.49,1.63,1.63],"QuickJS":[null,5.92,7.98,7.98,7.58,7.74,7.1,7,7.45,7.28,7.39,7.38,7.37,7.44,6.92,7.28,7.26,7.23,7.2,7.22,7.3,7.25,7.23,7.38,6.9,7.37,7.44,7.37,7.38,7.32,7.37,6.84,6.84,7.24,7.22,7.24,7.04,7.22,7.24,6.83,null,7.2,null,7.24,7.84,7.77,null,null],"Python":[null,null,4.86,4.86,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,5.02,5.46,null,null,null],"Go":[null,null,null,null,null,null,null,null,null,null,null,null,null,0.2,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,0.31,0.33,0.33,null,null],"Node.js":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1.0,1.0,1.0,1.0,1.0],"C2MIR":[null,null,null,null,null,null,null,null,null,null,null,null,null,0.18,null,null,0.18,0.17,0.17,null,0.15,0.15,0.15,0.16,0.14,0.16,0.16,0.16,0.16,0.15,0.16,0.15,0.15,0.15,0.17,0.19,0.19,0.19,null,0.18,0.2,0.2,0.2,0.2,0.21,0.22,null,0.22]},"sources":{"Result1":"Overall_Result1.md (MIR Direct/C2MIR experiment report)","Result2":"Overall_Result2.md (Overall raw for Lambda typed/QuickJS; LambdaJS geo recomputed from displayed timing tables)","Result3":"Overall_Result3.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md","Result4":"Overall_Result4.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md","Result9_to_50":"Overall_Result9.md through Overall_Result50.md (first Part 1 Overall row: JIT-pinned self-reported execution time)","Result51_to_54":"Overall_Result51.md through Overall_Result54.md, Part 1 Overall rows (JIT-pinned self-reported execution-time geomeans; engine availability varies by snapshot)"},"interpretation":"Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4 and Result50; Go is reported in Results18 and Result50. Node.js is the 1.0x reference line. Results39-40 are omitted because they were measured against Node.js v24.7.0 instead of v22.13.0 and are not comparable. Result41 onward covers 63 rows (four text rows added); Result45 omits C2MIR; Result47 omits QuickJS; Result48 restores QuickJS; Result49 omits QuickJS; Result50 includes QuickJS, Python, and Go across all 63 rows. Results51-54 include 71 rows after adding Julia microbenchmarks and jq workloads; engine availability varies by session, and absent common-engine measurements remain gaps.","title":"Lambda Benchmark History","description":"Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result54, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.","session_dates":{"Result1":"2026-02-21","Result2":"2026-03-07","Result3":"2026-03-09","Result4":"2026-03-19","Result9":"2026-06-27","Result10":"2026-07-22","Result11":"2026-07-24","Result12":"2026-07-24","Result13":"2026-07-26","Result14":"2026-07-26","Result15":"2026-07-27","Result16":"2026-07-28","Result17":"2026-07-29","Result18":"2026-07-29","Result19":"2026-08-05","Result20":"2026-08-05","Result21":"2026-08-05","Result22":"2026-08-06","Result23":"2026-08-06","Result24":"2026-08-07","Result25":"2026-08-07","Result26":"2026-08-08","Result27":"2026-08-08","Result28":"2026-08-10","Result29":"2026-08-13","Result30":"2026-08-16","Result31":"2026-08-17","Result32":"2026-08-17","Result33":"2026-08-18","Result34":"2026-08-21","Result35":"2026-08-26","Result36":"2026-09-02","Result37":"2026-09-07","Result38":"2026-09-08","Result41":"2026-09-10","Result42":"2026-09-10","Result43":"2026-09-13","Result44":"2026-09-14","Result45":"2026-09-15","Result46":"2026-09-17","Result47":"2026-09-18","Result48":"2026-09-22","Result49":"2026-09-24","Result50":"2026-09-30","Result51":"2026-10-06","Result52":"2026-10-20","Result53":"2026-10-23","Result54":"2026-10-24"},"layout":{"width":1360,"height":919,"card_x":44,"card_y":22,"card_width":1250,"card_height":889,"plot_x_min":105,"plot_x_max":1520,"plot_y_min":150,"plot_y_max":735,"x_transform_anchor":84,"x_transform_scale":0.82,"x_tick_label_y":753,"x_tick_label_angle":58,"month_label_y":171,"x_axis_label_x":681.37,"x_axis_label_y":805,"y_axis_label_x":24,"y_axis_label_y":442.5,"y_ticks":[100,50,20,10,5,2,1,0.5,0.2,0.1]},"legend_items":[{"key":"Lambda untyped","x":84},{"key":"Lambda typed","x":278},{"key":"LambdaJS","x":465},{"key":"QuickJS","x":628},{"key":"Python","x":760},{"key":"Go","x":878},{"key":"Node.js","x":965},{"key":"C2MIR","x":1080}],"series_style":{"Lambda untyped":{"color":"#2563eb","stroke_width":3,"show_points":true},"Lambda typed":{"color":"#7c3aed","stroke_width":3,"show_points":true},"LambdaJS":{"color":"#dc2626","stroke_width":3,"show_points":true},"QuickJS":{"color":"#fbbd00","stroke_width":3,"connect_gaps":true,"show_points":true},"Python":{"color":"#c026d3","stroke_width":3,"connect_gaps":true,"dasharray":"1 6","show_points":true},"Go":{"color":"#0891b2","stroke_width":3,"connect_gaps":true,"dasharray":"1 6","show_points":true},"Node.js":{"color":"#64748b","stroke_width":2.2,"dasharray":"8 6","show_points":false},"C2MIR":{"color":"#16a34a","stroke_width":3,"show_points":true}},"inline_labels":{"Lambda untyped":{"x":1060.12,"y":487.75},"Lambda typed":{"x":352.62,"y":436.68},"LambdaJS":{"x":741.75,"y":298.43},"QuickJS":{"x":850,"y":347},"Python":{"x":780,"y":400},"Go":{"x":953,"y":645},"Node.js":{"x":494.12,"y":532.0},"C2MIR":{"x":1085,"y":690}},"dividers":[{"after":"Result15","before":"Result16","label":"typed split"},{"after":"Result17","before":"Result18","label":"native C2MIR transition"},{"after":"Result38","before":"Result41","label":"63-row suite"},{"after":"Result50","before":"Result51","label":"71-row suite"}],"c2mir_gap_bridges":[{"from":"Result18","to":"Result21","note":"missing Results19–20"},{"from":"Result23","to":"Result25","note":"missing Result24"},{"from":"Result44","to":"Result46","note":"missing Result45"},{"from":"Result52","to":"Result54","note":"missing Result53"}],"notes":["Results5–8 were partial tests and are omitted from the x-axis.","Results39–40 are omitted: they were measured against Node.js v24.7.0 (all other sessions use v22.13.0), thus not comparable.","Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. QuickJS joins measured points; dotted Python/Go lines bridge missing sessions.","C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.","R3–4 Python dots include ten Result50 workload fixes; other cells retain March timings. Go R18 used 56 rows. Results51–54 include 71 rows; engine availability varies."]}]]></metadata>
   <defs>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
@@ -51,340 +51,372 @@
   <text x="91" y="739.00" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">0.1×</text>
   <line x1="105.00" y1="150.00" x2="105.00" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
   <line x1="105.00" y1="735.00" x2="105.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="137.91" y1="735.00" x2="137.91" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="170.81" y1="735.00" x2="170.81" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="203.72" y1="735.00" x2="203.72" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="236.63" y1="150.00" x2="236.63" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="236.63" y1="735.00" x2="236.63" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="269.53" y1="735.00" x2="269.53" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="302.44" y1="735.00" x2="302.44" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="335.35" y1="735.00" x2="335.35" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="368.26" y1="735.00" x2="368.26" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="401.16" y1="150.00" x2="401.16" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="401.16" y1="735.00" x2="401.16" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="434.07" y1="735.00" x2="434.07" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="466.98" y1="735.00" x2="466.98" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="499.88" y1="735.00" x2="499.88" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="532.79" y1="735.00" x2="532.79" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="565.70" y1="150.00" x2="565.70" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="565.70" y1="735.00" x2="565.70" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="598.60" y1="735.00" x2="598.60" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="631.51" y1="735.00" x2="631.51" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="664.42" y1="735.00" x2="664.42" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="697.33" y1="735.00" x2="697.33" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="730.23" y1="150.00" x2="730.23" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="730.23" y1="735.00" x2="730.23" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="763.14" y1="735.00" x2="763.14" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="796.05" y1="735.00" x2="796.05" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="828.95" y1="735.00" x2="828.95" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="861.86" y1="735.00" x2="861.86" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="894.77" y1="150.00" x2="894.77" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="894.77" y1="735.00" x2="894.77" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="927.67" y1="735.00" x2="927.67" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="960.58" y1="735.00" x2="960.58" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="993.49" y1="735.00" x2="993.49" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1026.40" y1="735.00" x2="1026.40" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1059.30" y1="150.00" x2="1059.30" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="1059.30" y1="735.00" x2="1059.30" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1092.21" y1="735.00" x2="1092.21" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1125.12" y1="735.00" x2="1125.12" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1158.02" y1="735.00" x2="1158.02" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1190.93" y1="735.00" x2="1190.93" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1223.84" y1="150.00" x2="1223.84" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="1223.84" y1="735.00" x2="1223.84" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1256.74" y1="735.00" x2="1256.74" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1289.65" y1="735.00" x2="1289.65" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1322.56" y1="735.00" x2="1322.56" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1355.47" y1="735.00" x2="1355.47" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1388.37" y1="150.00" x2="1388.37" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
-  <line x1="1388.37" y1="735.00" x2="1388.37" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1421.28" y1="735.00" x2="1421.28" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1454.19" y1="735.00" x2="1454.19" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
-  <line x1="1487.09" y1="735.00" x2="1487.09" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="135.11" y1="735.00" x2="135.11" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="165.21" y1="735.00" x2="165.21" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="195.32" y1="735.00" x2="195.32" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="225.43" y1="150.00" x2="225.43" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="225.43" y1="735.00" x2="225.43" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="255.53" y1="735.00" x2="255.53" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="285.64" y1="735.00" x2="285.64" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="315.74" y1="735.00" x2="315.74" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="345.85" y1="735.00" x2="345.85" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="375.96" y1="150.00" x2="375.96" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="375.96" y1="735.00" x2="375.96" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="406.06" y1="735.00" x2="406.06" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="436.17" y1="735.00" x2="436.17" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="466.28" y1="735.00" x2="466.28" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="496.38" y1="735.00" x2="496.38" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="526.49" y1="150.00" x2="526.49" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="526.49" y1="735.00" x2="526.49" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="556.60" y1="735.00" x2="556.60" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="586.70" y1="735.00" x2="586.70" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="616.81" y1="735.00" x2="616.81" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="646.91" y1="735.00" x2="646.91" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="677.02" y1="150.00" x2="677.02" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="677.02" y1="735.00" x2="677.02" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="707.13" y1="735.00" x2="707.13" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="737.23" y1="735.00" x2="737.23" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="767.34" y1="735.00" x2="767.34" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="797.45" y1="735.00" x2="797.45" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="827.55" y1="150.00" x2="827.55" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="827.55" y1="735.00" x2="827.55" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="857.66" y1="735.00" x2="857.66" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="887.77" y1="735.00" x2="887.77" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="917.87" y1="735.00" x2="917.87" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="947.98" y1="735.00" x2="947.98" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="978.09" y1="150.00" x2="978.09" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="978.09" y1="735.00" x2="978.09" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1008.19" y1="735.00" x2="1008.19" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1038.30" y1="735.00" x2="1038.30" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1068.40" y1="735.00" x2="1068.40" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1098.51" y1="735.00" x2="1098.51" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1128.62" y1="150.00" x2="1128.62" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1128.62" y1="735.00" x2="1128.62" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1158.72" y1="735.00" x2="1158.72" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1188.83" y1="735.00" x2="1188.83" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1218.94" y1="735.00" x2="1218.94" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1249.04" y1="735.00" x2="1249.04" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1279.15" y1="150.00" x2="1279.15" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1279.15" y1="735.00" x2="1279.15" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1309.26" y1="735.00" x2="1309.26" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1339.36" y1="735.00" x2="1339.36" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1369.47" y1="735.00" x2="1369.47" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1399.57" y1="735.00" x2="1399.57" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1429.68" y1="150.00" x2="1429.68" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1429.68" y1="735.00" x2="1429.68" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1459.79" y1="735.00" x2="1459.79" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1489.89" y1="735.00" x2="1489.89" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
   <line x1="1520.00" y1="150.00" x2="1520.00" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
   <line x1="1520.00" y1="735.00" x2="1520.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
   <line x1="105.00" y1="735.00" x2="1520.00" y2="735.00" stroke="#64748b" stroke-width="1.2"/>
   <line x1="105.00" y1="150.00" x2="105.00" y2="735.00" stroke="#64748b" stroke-width="1.2"/>
-  <line x1="450.52" y1="150.00" x2="450.52" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
-  <line x1="516.34" y1="150.00" x2="516.34" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
-  <line x1="1207.38" y1="150.00" x2="1207.38" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
+  <line x1="421.12" y1="150.00" x2="421.12" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
+  <line x1="481.33" y1="150.00" x2="481.33" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
+  <line x1="1113.56" y1="150.00" x2="1113.56" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
+  <line x1="1414.63" y1="150.00" x2="1414.63" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
   <text transform="translate(105.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result1</text>
-  <text transform="translate(137.91 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result2</text>
-  <text transform="translate(170.81 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result3</text>
-  <text transform="translate(203.72 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result4</text>
-  <text transform="translate(236.63 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result9</text>
-  <text transform="translate(269.53 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result10</text>
-  <text transform="translate(302.44 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result11</text>
-  <text transform="translate(335.35 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result12</text>
-  <text transform="translate(368.26 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result13</text>
-  <text transform="translate(401.16 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result14</text>
-  <text transform="translate(434.07 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result15</text>
-  <text transform="translate(466.98 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result16</text>
-  <text transform="translate(499.88 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result17</text>
-  <text transform="translate(532.79 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result18</text>
-  <text transform="translate(565.70 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result19</text>
-  <text transform="translate(598.60 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result20</text>
-  <text transform="translate(631.51 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result21</text>
-  <text transform="translate(664.42 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result22</text>
-  <text transform="translate(697.33 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result23</text>
-  <text transform="translate(730.23 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result24</text>
-  <text transform="translate(763.14 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result25</text>
-  <text transform="translate(796.05 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result26</text>
-  <text transform="translate(828.95 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result27</text>
-  <text transform="translate(861.86 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result28</text>
-  <text transform="translate(894.77 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result29</text>
-  <text transform="translate(927.67 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result30</text>
-  <text transform="translate(960.58 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result31</text>
-  <text transform="translate(993.49 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result32</text>
-  <text transform="translate(1026.40 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result33</text>
-  <text transform="translate(1059.30 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result34</text>
-  <text transform="translate(1092.21 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result35</text>
-  <text transform="translate(1125.12 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result36</text>
-  <text transform="translate(1158.02 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result37</text>
-  <text transform="translate(1190.93 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result38</text>
-  <text transform="translate(1223.84 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result41</text>
-  <text transform="translate(1256.74 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result42</text>
-  <text transform="translate(1289.65 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result43</text>
-  <text transform="translate(1322.56 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result44</text>
-  <text transform="translate(1355.47 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result45</text>
-  <text transform="translate(1388.37 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result46</text>
-  <text transform="translate(1421.28 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result47</text>
-  <text transform="translate(1454.19 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result48</text>
-  <text transform="translate(1487.09 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result49</text>
-  <text transform="translate(1520.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result50</text>
+  <text transform="translate(135.11 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result2</text>
+  <text transform="translate(165.21 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result3</text>
+  <text transform="translate(195.32 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result4</text>
+  <text transform="translate(225.43 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result9</text>
+  <text transform="translate(255.53 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result10</text>
+  <text transform="translate(285.64 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result11</text>
+  <text transform="translate(315.74 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result12</text>
+  <text transform="translate(345.85 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result13</text>
+  <text transform="translate(375.96 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result14</text>
+  <text transform="translate(406.06 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result15</text>
+  <text transform="translate(436.17 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result16</text>
+  <text transform="translate(466.28 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result17</text>
+  <text transform="translate(496.38 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result18</text>
+  <text transform="translate(526.49 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result19</text>
+  <text transform="translate(556.60 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result20</text>
+  <text transform="translate(586.70 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result21</text>
+  <text transform="translate(616.81 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result22</text>
+  <text transform="translate(646.91 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result23</text>
+  <text transform="translate(677.02 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result24</text>
+  <text transform="translate(707.13 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result25</text>
+  <text transform="translate(737.23 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result26</text>
+  <text transform="translate(767.34 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result27</text>
+  <text transform="translate(797.45 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result28</text>
+  <text transform="translate(827.55 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result29</text>
+  <text transform="translate(857.66 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result30</text>
+  <text transform="translate(887.77 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result31</text>
+  <text transform="translate(917.87 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result32</text>
+  <text transform="translate(947.98 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result33</text>
+  <text transform="translate(978.09 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result34</text>
+  <text transform="translate(1008.19 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result35</text>
+  <text transform="translate(1038.30 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result36</text>
+  <text transform="translate(1068.40 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result37</text>
+  <text transform="translate(1098.51 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result38</text>
+  <text transform="translate(1128.62 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result41</text>
+  <text transform="translate(1158.72 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result42</text>
+  <text transform="translate(1188.83 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result43</text>
+  <text transform="translate(1218.94 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result44</text>
+  <text transform="translate(1249.04 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result45</text>
+  <text transform="translate(1279.15 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result46</text>
+  <text transform="translate(1309.26 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result47</text>
+  <text transform="translate(1339.36 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result48</text>
+  <text transform="translate(1369.47 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result49</text>
+  <text transform="translate(1399.57 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result50</text>
+  <text transform="translate(1429.68 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result51</text>
+  <text transform="translate(1459.79 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result52</text>
+  <text transform="translate(1489.89 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result53</text>
+  <text transform="translate(1520.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result54</text>
   </g>
   <text x="681.37" y="805" text-anchor="middle" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="14" font-weight="600">Benchmark session</text>
   <text transform="translate(24 442.5) rotate(-90)" text-anchor="middle" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="14" font-weight="600">Geometric mean over Node.js (×)</text>
   <g transform="translate(84 0) scale(0.82 1) translate(-84 0)" aria-label="Packed benchmark data">
   <g aria-label="Session creation month">
     <line x1="105.00" y1="150.00" x2="105.00" y2="735.00" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 5"><title>Result1 · Feb 26</title></line>
-    <text x="1075.76" y="171" text-anchor="middle" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Session month</text>
+    <text x="993.14" y="171" text-anchor="middle" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Session month</text>
     <text x="105.00" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Feb 26</text>
-    <text x="170.81" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Mar 26</text>
-    <text x="236.63" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Jun 26</text>
-    <text x="401.16" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Jul 26</text>
-    <text x="828.95" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Aug 26</text>
-    <text x="1322.56" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Sep 26</text>
+    <text x="165.21" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Mar 26</text>
+    <text x="225.43" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Jun 26</text>
+    <text x="375.96" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Jul 26</text>
+    <text x="767.34" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Aug 26</text>
+    <text x="1218.94" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Sep 26</text>
+    <text x="1474.84" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Oct 26</text>
   </g>
-  <path d="M 466.98,386.03 L 499.88,457.47 L 532.79,460.72 L 565.70,412.81 L 598.60,417.27 L 631.51,442.29 L 664.42,454.33 L 697.33,455.88 L 730.23,457.47 L 763.14,468.73 L 796.05,471.32 L 828.95,475.57 L 861.86,482.58 L 894.77,488.36 L 927.67,483.01 L 960.58,483.44 L 993.49,489.75 L 1026.40,510.90 L 1059.30,514.58 L 1092.21,520.43 L 1125.12,513.34 L 1158.02,542.58 L 1190.93,533.48 L 1223.84,512.11 L 1256.74,502.34 L 1289.65,513.96 L 1322.56,516.49 L 1355.47,515.21 L 1388.37,524.56 L 1421.28,520.43 L 1454.19,534.27 L 1487.09,529.65 L 1520.00,535.87" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Lambda untyped</title></path>
-  <path d="M 137.91,555.78 L 170.81,528.90 L 203.72,535.87 L 236.63,416.28 L 269.53,357.77 L 302.44,416.87 L 335.35,446.68 L 368.26,448.67 L 401.16,449.83 L 434.07,449.25 L 466.98,469.10 L 499.88,485.20 L 532.79,486.99 L 565.70,441.76 L 598.60,421.13 L 631.51,451.31 L 664.42,470.57 L 697.33,485.20 L 730.23,496.06 L 763.14,516.49 L 796.05,520.43 L 828.95,520.43 L 861.86,534.27 L 894.77,540.85 L 927.67,535.07 L 960.58,536.68 L 993.49,553.76 L 1026.40,555.78 L 1059.30,558.90 L 1092.21,566.65 L 1125.12,553.76 L 1158.02,561.04 L 1190.93,547.99 L 1223.84,523.16 L 1256.74,519.76 L 1289.65,550.83 L 1322.56,552.77 L 1355.47,553.76 L 1388.37,564.36 L 1421.28,569.00 L 1454.19,579.13 L 1487.09,579.13 L 1520.00,592.18" fill="none" stroke="#7c3aed" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Lambda typed</title></path>
-  <path d="M 137.91,598.70 L 170.81,356.02 L 203.72,364.64 L 236.63,322.13 L 269.53,285.88 L 302.44,281.76 L 335.35,310.10 L 368.26,308.43 L 401.16,311.23 L 434.07,317.72 L 466.98,321.49 L 499.88,319.58 L 532.79,318.96 L 565.70,277.46 L 598.60,270.16 L 631.51,307.89 L 664.42,308.99 L 697.33,308.43 L 730.23,307.89 L 763.14,305.20 L 796.05,305.20 L 828.95,304.67 L 861.86,301.57 L 894.77,216.13 L 927.67,251.40 L 960.58,250.84 L 993.49,247.83 L 1026.40,249.73 L 1059.30,250.28 L 1092.21,249.73 L 1125.12,249.46 L 1158.02,249.46 L 1190.93,247.83 L 1223.84,284.62 L 1256.74,303.11 L 1289.65,286.72 L 1322.56,282.17 L 1355.47,291.99 L 1388.37,345.00 L 1421.28,347.32 L 1454.19,357.28 L 1487.09,366.04 L 1520.00,370.16" fill="none" stroke="#dc2626" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>LambdaJS</title></path>
-  <path d="M 137.91,389.40 L 170.81,364.11 L 203.72,364.11 L 236.63,368.46 L 269.53,366.70 L 302.44,374.00 L 335.35,375.21 L 368.26,369.93 L 401.16,371.88 L 434.07,370.61 L 466.98,370.73 L 499.88,370.84 L 532.79,370.04 L 565.70,376.18 L 598.60,371.88 L 631.51,372.12 L 664.42,372.47 L 697.33,372.82 L 730.23,372.59 L 763.14,371.65 L 796.05,372.23 L 828.95,372.47 L 861.86,370.73 L 894.77,376.42 L 927.67,370.84 L 960.58,370.04 L 993.49,370.84 L 1026.40,370.73 L 1059.30,371.42 L 1092.21,370.84 L 1125.12,377.16 L 1158.02,377.16 L 1190.93,372.35 L 1223.84,372.59 L 1256.74,372.35 L 1289.65,374.72 L 1322.56,372.59 L 1355.47,372.35 L 1388.37,377.29 L 1454.19,372.82 L 1520.00,372.35" fill="none" stroke="#fbbd00" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>QuickJS</title></path>
-  <path d="M 170.81,406.11 L 203.72,406.11 L 1520.00,403.36" fill="none" stroke="#c026d3" stroke-width="3" stroke-dasharray="1 6" stroke-linejoin="round" stroke-linecap="round"><title>Python</title></path>
-  <path d="M 532.79,676.30 L 1520.00,639.18" fill="none" stroke="#0891b2" stroke-width="3" stroke-dasharray="1 6" stroke-linejoin="round" stroke-linecap="round"><title>Go</title></path>
-  <path d="M 105.00,540.00 L 137.91,540.00 L 170.81,540.00 L 203.72,540.00 L 236.63,540.00 L 269.53,540.00 L 302.44,540.00 L 335.35,540.00 L 368.26,540.00 L 401.16,540.00 L 434.07,540.00 L 466.98,540.00 L 499.88,540.00 L 532.79,540.00 L 565.70,540.00 L 598.60,540.00 L 631.51,540.00 L 664.42,540.00 L 697.33,540.00 L 730.23,540.00 L 763.14,540.00 L 796.05,540.00 L 828.95,540.00 L 861.86,540.00 L 894.77,540.00 L 927.67,540.00 L 960.58,540.00 L 993.49,540.00 L 1026.40,540.00 L 1059.30,540.00 L 1092.21,540.00 L 1125.12,540.00 L 1158.02,540.00 L 1190.93,540.00 L 1223.84,540.00 L 1256.74,540.00 L 1289.65,540.00 L 1322.56,540.00 L 1355.47,540.00 L 1388.37,540.00 L 1421.28,540.00 L 1454.19,540.00 L 1487.09,540.00 L 1520.00,540.00" fill="none" stroke="#64748b" stroke-width="2.2" stroke-dasharray="8 6" stroke-linejoin="round" stroke-linecap="round"><title>Node.js</title></path>
-  <path d="M 631.51,685.22 L 664.42,690.06 L 697.33,690.06" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
-  <path d="M 763.14,700.66 L 796.05,700.66 L 828.95,700.66 L 861.86,695.20 L 894.77,706.51 L 927.67,695.20 L 960.58,695.20 L 993.49,695.20 L 1026.40,695.20 L 1059.30,700.66 L 1092.21,695.20 L 1125.12,700.66 L 1158.02,700.66 L 1190.93,700.66 L 1223.84,690.06 L 1256.74,680.64 L 1289.65,680.64 L 1322.56,680.64" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
-  <path d="M 1388.37,685.22 L 1421.28,676.30 L 1454.19,676.30 L 1487.09,676.30 L 1520.00,676.30" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
-  <path d="M 532.79,685.22 L 631.51,685.22" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Results19–20</title></path>
-  <path d="M 697.33,690.06 L 763.14,700.66" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Result24</title></path>
-  <path d="M 1322.56,680.64 L 1388.37,685.22" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Result45</title></path>
+  <path d="M 436.17,386.03 L 466.28,457.47 L 496.38,460.72 L 526.49,412.81 L 556.60,417.27 L 586.70,442.29 L 616.81,454.33 L 646.91,455.88 L 677.02,457.47 L 707.13,468.73 L 737.23,471.32 L 767.34,475.57 L 797.45,482.58 L 827.55,488.36 L 857.66,483.01 L 887.77,483.44 L 917.87,489.75 L 947.98,510.90 L 978.09,514.58 L 1008.19,520.43 L 1038.30,513.34 L 1068.40,542.58 L 1098.51,533.48 L 1128.62,512.11 L 1158.72,502.34 L 1188.83,513.96 L 1218.94,516.49 L 1249.04,515.21 L 1279.15,524.56 L 1309.26,520.43 L 1339.36,534.27 L 1369.47,529.65 L 1399.57,535.87 L 1429.68,546.15 L 1459.79,537.50 L 1489.89,538.32 L 1520.00,558.90" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Lambda untyped</title></path>
+  <path d="M 135.11,555.78 L 165.21,528.90 L 195.32,535.87 L 225.43,416.28 L 255.53,357.77 L 285.64,416.87 L 315.74,446.68 L 345.85,448.67 L 375.96,449.83 L 406.06,449.25 L 436.17,469.10 L 466.28,485.20 L 496.38,486.99 L 526.49,441.76 L 556.60,421.13 L 586.70,451.31 L 616.81,470.57 L 646.91,485.20 L 677.02,496.06 L 707.13,516.49 L 737.23,520.43 L 767.34,520.43 L 797.45,534.27 L 827.55,540.85 L 857.66,535.07 L 887.77,536.68 L 917.87,553.76 L 947.98,555.78 L 978.09,558.90 L 1008.19,566.65 L 1038.30,553.76 L 1068.40,561.04 L 1098.51,547.99 L 1128.62,523.16 L 1158.72,519.76 L 1188.83,550.83 L 1218.94,552.77 L 1249.04,553.76 L 1279.15,564.36 L 1309.26,569.00 L 1339.36,579.13 L 1369.47,579.13 L 1399.57,592.18 L 1429.68,586.13 L 1459.79,583.26 L 1489.89,586.13 L 1520.00,593.77" fill="none" stroke="#7c3aed" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Lambda typed</title></path>
+  <path d="M 135.11,598.70 L 165.21,356.02 L 195.32,364.64 L 225.43,322.13 L 255.53,285.88 L 285.64,281.76 L 315.74,310.10 L 345.85,308.43 L 375.96,311.23 L 406.06,317.72 L 436.17,321.49 L 466.28,319.58 L 496.38,318.96 L 526.49,277.46 L 556.60,270.16 L 586.70,307.89 L 616.81,308.99 L 646.91,308.43 L 677.02,307.89 L 707.13,305.20 L 737.23,305.20 L 767.34,304.67 L 797.45,301.57 L 827.55,216.13 L 857.66,251.40 L 887.77,250.84 L 917.87,247.83 L 947.98,249.73 L 978.09,250.28 L 1008.19,249.73 L 1038.30,249.46 L 1068.40,249.46 L 1098.51,247.83 L 1128.62,284.62 L 1158.72,303.11 L 1188.83,286.72 L 1218.94,282.17 L 1249.04,291.99 L 1279.15,345.00 L 1309.26,347.32 L 1339.36,357.28 L 1369.47,366.04 L 1399.57,370.16 L 1429.68,357.77 L 1459.79,349.43 L 1489.89,498.62 L 1520.00,498.62" fill="none" stroke="#dc2626" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>LambdaJS</title></path>
+  <path d="M 135.11,389.40 L 165.21,364.11 L 195.32,364.11 L 225.43,368.46 L 255.53,366.70 L 285.64,374.00 L 315.74,375.21 L 345.85,369.93 L 375.96,371.88 L 406.06,370.61 L 436.17,370.73 L 466.28,370.84 L 496.38,370.04 L 526.49,376.18 L 556.60,371.88 L 586.70,372.12 L 616.81,372.47 L 646.91,372.82 L 677.02,372.59 L 707.13,371.65 L 737.23,372.23 L 767.34,372.47 L 797.45,370.73 L 827.55,376.42 L 857.66,370.84 L 887.77,370.04 L 917.87,370.84 L 947.98,370.73 L 978.09,371.42 L 1008.19,370.84 L 1038.30,377.16 L 1068.40,377.16 L 1098.51,372.35 L 1128.62,372.59 L 1158.72,372.35 L 1188.83,374.72 L 1218.94,372.59 L 1249.04,372.35 L 1279.15,377.29 L 1339.36,372.82 L 1399.57,372.35 L 1429.68,365.61 L 1459.79,366.37" fill="none" stroke="#fbbd00" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>QuickJS</title></path>
+  <path d="M 165.21,406.11 L 195.32,406.11 L 1399.57,403.36 L 1429.68,396.25" fill="none" stroke="#c026d3" stroke-width="3" stroke-dasharray="1 6" stroke-linejoin="round" stroke-linecap="round"><title>Python</title></path>
+  <path d="M 496.38,676.30 L 1399.57,639.18 L 1429.68,633.89 L 1459.79,633.89" fill="none" stroke="#0891b2" stroke-width="3" stroke-dasharray="1 6" stroke-linejoin="round" stroke-linecap="round"><title>Go</title></path>
+  <path d="M 105.00,540.00 L 135.11,540.00 L 165.21,540.00 L 195.32,540.00 L 225.43,540.00 L 255.53,540.00 L 285.64,540.00 L 315.74,540.00 L 345.85,540.00 L 375.96,540.00 L 406.06,540.00 L 436.17,540.00 L 466.28,540.00 L 496.38,540.00 L 526.49,540.00 L 556.60,540.00 L 586.70,540.00 L 616.81,540.00 L 646.91,540.00 L 677.02,540.00 L 707.13,540.00 L 737.23,540.00 L 767.34,540.00 L 797.45,540.00 L 827.55,540.00 L 857.66,540.00 L 887.77,540.00 L 917.87,540.00 L 947.98,540.00 L 978.09,540.00 L 1008.19,540.00 L 1038.30,540.00 L 1068.40,540.00 L 1098.51,540.00 L 1128.62,540.00 L 1158.72,540.00 L 1188.83,540.00 L 1218.94,540.00 L 1249.04,540.00 L 1279.15,540.00 L 1309.26,540.00 L 1339.36,540.00 L 1369.47,540.00 L 1399.57,540.00 L 1429.68,540.00 L 1459.79,540.00 L 1489.89,540.00 L 1520.00,540.00" fill="none" stroke="#64748b" stroke-width="2.2" stroke-dasharray="8 6" stroke-linejoin="round" stroke-linecap="round"><title>Node.js</title></path>
+  <path d="M 586.70,685.22 L 616.81,690.06 L 646.91,690.06" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
+  <path d="M 707.13,700.66 L 737.23,700.66 L 767.34,700.66 L 797.45,695.20 L 827.55,706.51 L 857.66,695.20 L 887.77,695.20 L 917.87,695.20 L 947.98,695.20 L 978.09,700.66 L 1008.19,695.20 L 1038.30,700.66 L 1068.40,700.66 L 1098.51,700.66 L 1128.62,690.06 L 1158.72,680.64 L 1188.83,680.64 L 1218.94,680.64" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
+  <path d="M 1279.15,685.22 L 1309.26,676.30 L 1339.36,676.30 L 1369.47,676.30 L 1399.57,676.30 L 1429.68,672.17 L 1459.79,668.23" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
+  <path d="M 496.38,685.22 L 586.70,685.22" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Results19–20</title></path>
+  <path d="M 646.91,690.06 L 707.13,700.66" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Result24</title></path>
+  <path d="M 1218.94,680.64 L 1279.15,685.22" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Result45</title></path>
+  <path d="M 1459.79,668.23 L 1520.00,668.23" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Result53</title></path>
   <g aria-label="Inline series labels" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600" paint-order="stroke" stroke="#ffffff" stroke-width="4" stroke-linejoin="round">
-    <text x="1060.12" y="477.75" fill="#2563eb">Lambda untyped</text>
+    <text x="1060.12" y="487.75" fill="#2563eb">Lambda untyped</text>
     <text x="352.62" y="436.68" fill="#7c3aed">Lambda typed</text>
     <text x="741.75" y="298.43" fill="#dc2626">LambdaJS</text>
     <text x="850" y="347" fill="#fbbd00">QuickJS</text>
-    <text x="205" y="313" fill="#c026d3">Python</text>
-    <text x="532.88" y="680.3" fill="#0891b2">Go</text>
+    <text x="780" y="400" fill="#c026d3">Python</text>
+    <text x="953" y="645" fill="#0891b2">Go</text>
     <text x="494.12" y="532.0" fill="#64748b">Node.js</text>
-    <text x="1110" y="690" fill="#16a34a">C2MIR</text>
+    <text x="1085" y="690" fill="#16a34a">C2MIR</text>
   </g>
-  <circle cx="466.98" cy="386.03" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result16: 6.16×</title></circle>
-  <circle cx="499.88" cy="457.47" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result17: 2.65×</title></circle>
-  <circle cx="532.79" cy="460.72" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result18: 2.55×</title></circle>
-  <circle cx="565.70" cy="412.81" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result19: 4.49×</title></circle>
-  <circle cx="598.60" cy="417.27" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result20: 4.26×</title></circle>
-  <circle cx="631.51" cy="442.29" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result21: 3.17×</title></circle>
-  <circle cx="664.42" cy="454.33" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result22: 2.75×</title></circle>
-  <circle cx="697.33" cy="455.88" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result23: 2.70×</title></circle>
-  <circle cx="730.23" cy="457.47" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result24: 2.65×</title></circle>
-  <circle cx="763.14" cy="468.73" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result25: 2.32×</title></circle>
-  <circle cx="796.05" cy="471.32" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result26: 2.25×</title></circle>
-  <circle cx="828.95" cy="475.57" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result27: 2.14×</title></circle>
-  <circle cx="861.86" cy="482.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result28: 1.97×</title></circle>
-  <circle cx="894.77" cy="488.36" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result29: 1.84×</title></circle>
-  <circle cx="927.67" cy="483.01" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result30: 1.96×</title></circle>
-  <circle cx="960.58" cy="483.44" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result31: 1.95×</title></circle>
-  <circle cx="993.49" cy="489.75" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result32: 1.81×</title></circle>
-  <circle cx="1026.40" cy="510.90" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result33: 1.41×</title></circle>
-  <circle cx="1059.30" cy="514.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result34: 1.35×</title></circle>
-  <circle cx="1092.21" cy="520.43" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result35: 1.26×</title></circle>
-  <circle cx="1125.12" cy="513.34" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result36: 1.37×</title></circle>
-  <circle cx="1158.02" cy="542.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result37: 0.97×</title></circle>
-  <circle cx="1190.93" cy="533.48" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result38: 1.08×</title></circle>
-  <circle cx="1223.84" cy="512.11" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result41: 1.39×</title></circle>
-  <circle cx="1256.74" cy="502.34" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result42: 1.56×</title></circle>
-  <circle cx="1289.65" cy="513.96" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result43: 1.36×</title></circle>
-  <circle cx="1322.56" cy="516.49" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result44: 1.32×</title></circle>
-  <circle cx="1355.47" cy="515.21" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result45: 1.34×</title></circle>
-  <circle cx="1388.37" cy="524.56" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result46: 1.20×</title></circle>
-  <circle cx="1421.28" cy="520.43" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result47: 1.26×</title></circle>
-  <circle cx="1454.19" cy="534.27" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result48: 1.07×</title></circle>
-  <circle cx="1487.09" cy="529.65" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result49: 1.13×</title></circle>
-  <circle cx="1520.00" cy="535.87" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result50: 1.05×</title></circle>
-  <circle cx="137.91" cy="555.78" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result2: 0.83×</title></circle>
-  <circle cx="170.81" cy="528.90" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result3: 1.14×</title></circle>
-  <circle cx="203.72" cy="535.87" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result4: 1.05×</title></circle>
-  <circle cx="236.63" cy="416.28" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result9: 4.31×</title></circle>
-  <circle cx="269.53" cy="357.77" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result10: 8.60×</title></circle>
-  <circle cx="302.44" cy="416.87" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result11: 4.28×</title></circle>
-  <circle cx="335.35" cy="446.68" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result12: 3.01×</title></circle>
-  <circle cx="368.26" cy="448.67" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result13: 2.94×</title></circle>
-  <circle cx="401.16" cy="449.83" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result14: 2.90×</title></circle>
-  <circle cx="434.07" cy="449.25" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result15: 2.92×</title></circle>
-  <circle cx="466.98" cy="469.10" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result16: 2.31×</title></circle>
-  <circle cx="499.88" cy="485.20" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result17: 1.91×</title></circle>
-  <circle cx="532.79" cy="486.99" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result18: 1.87×</title></circle>
-  <circle cx="565.70" cy="441.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result19: 3.19×</title></circle>
-  <circle cx="598.60" cy="421.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result20: 4.07×</title></circle>
-  <circle cx="631.51" cy="451.31" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result21: 2.85×</title></circle>
-  <circle cx="664.42" cy="470.57" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result22: 2.27×</title></circle>
-  <circle cx="697.33" cy="485.20" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result23: 1.91×</title></circle>
-  <circle cx="730.23" cy="496.06" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result24: 1.68×</title></circle>
-  <circle cx="763.14" cy="516.49" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result25: 1.32×</title></circle>
-  <circle cx="796.05" cy="520.43" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result26: 1.26×</title></circle>
-  <circle cx="828.95" cy="520.43" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result27: 1.26×</title></circle>
-  <circle cx="861.86" cy="534.27" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result28: 1.07×</title></circle>
-  <circle cx="894.77" cy="540.85" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result29: 0.99×</title></circle>
-  <circle cx="927.67" cy="535.07" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result30: 1.06×</title></circle>
-  <circle cx="960.58" cy="536.68" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result31: 1.04×</title></circle>
-  <circle cx="993.49" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result32: 0.85×</title></circle>
-  <circle cx="1026.40" cy="555.78" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result33: 0.83×</title></circle>
-  <circle cx="1059.30" cy="558.90" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result34: 0.80×</title></circle>
-  <circle cx="1092.21" cy="566.65" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result35: 0.73×</title></circle>
-  <circle cx="1125.12" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result36: 0.85×</title></circle>
-  <circle cx="1158.02" cy="561.04" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result37: 0.78×</title></circle>
-  <circle cx="1190.93" cy="547.99" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result38: 0.91×</title></circle>
-  <circle cx="1223.84" cy="523.16" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result41: 1.22×</title></circle>
-  <circle cx="1256.74" cy="519.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result42: 1.27×</title></circle>
-  <circle cx="1289.65" cy="550.83" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result43: 0.88×</title></circle>
-  <circle cx="1322.56" cy="552.77" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result44: 0.86×</title></circle>
-  <circle cx="1355.47" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result45: 0.85×</title></circle>
-  <circle cx="1388.37" cy="564.36" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result46: 0.75×</title></circle>
-  <circle cx="1421.28" cy="569.00" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result47: 0.71×</title></circle>
-  <circle cx="1454.19" cy="579.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result48: 0.63×</title></circle>
-  <circle cx="1487.09" cy="579.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result49: 0.63×</title></circle>
-  <circle cx="1520.00" cy="592.18" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result50: 0.54×</title></circle>
-  <circle cx="137.91" cy="598.70" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result2: 0.50×</title></circle>
-  <circle cx="170.81" cy="356.02" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result3: 8.78×</title></circle>
-  <circle cx="203.72" cy="364.64" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result4: 7.93×</title></circle>
-  <circle cx="236.63" cy="322.13" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result9: 13.10×</title></circle>
-  <circle cx="269.53" cy="285.88" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result10: 20.10×</title></circle>
-  <circle cx="302.44" cy="281.76" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result11: 21.10×</title></circle>
-  <circle cx="335.35" cy="310.10" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result12: 15.10×</title></circle>
-  <circle cx="368.26" cy="308.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result13: 15.40×</title></circle>
-  <circle cx="401.16" cy="311.23" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result14: 14.90×</title></circle>
-  <circle cx="434.07" cy="317.72" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result15: 13.80×</title></circle>
-  <circle cx="466.98" cy="321.49" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result16: 13.20×</title></circle>
-  <circle cx="499.88" cy="319.58" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result17: 13.50×</title></circle>
-  <circle cx="532.79" cy="318.96" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result18: 13.60×</title></circle>
-  <circle cx="565.70" cy="277.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result19: 22.20×</title></circle>
-  <circle cx="598.60" cy="270.16" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result20: 24.20×</title></circle>
-  <circle cx="631.51" cy="307.89" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result21: 15.50×</title></circle>
-  <circle cx="664.42" cy="308.99" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result22: 15.30×</title></circle>
-  <circle cx="697.33" cy="308.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result23: 15.40×</title></circle>
-  <circle cx="730.23" cy="307.89" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result24: 15.50×</title></circle>
-  <circle cx="763.14" cy="305.20" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result25: 16.00×</title></circle>
-  <circle cx="796.05" cy="305.20" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result26: 16.00×</title></circle>
-  <circle cx="828.95" cy="304.67" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result27: 16.10×</title></circle>
-  <circle cx="861.86" cy="301.57" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result28: 16.70×</title></circle>
-  <circle cx="894.77" cy="216.13" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result29: 45.80×</title></circle>
-  <circle cx="927.67" cy="251.40" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result30: 30.20×</title></circle>
-  <circle cx="960.58" cy="250.84" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result31: 30.40×</title></circle>
-  <circle cx="993.49" cy="247.83" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result32: 31.50×</title></circle>
-  <circle cx="1026.40" cy="249.73" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result33: 30.80×</title></circle>
-  <circle cx="1059.30" cy="250.28" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result34: 30.60×</title></circle>
-  <circle cx="1092.21" cy="249.73" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result35: 30.80×</title></circle>
-  <circle cx="1125.12" cy="249.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result36: 30.90×</title></circle>
-  <circle cx="1158.02" cy="249.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result37: 30.90×</title></circle>
-  <circle cx="1190.93" cy="247.83" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result38: 31.50×</title></circle>
-  <circle cx="1223.84" cy="284.62" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result41: 20.40×</title></circle>
-  <circle cx="1256.74" cy="303.11" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result42: 16.40×</title></circle>
-  <circle cx="1289.65" cy="286.72" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result43: 19.90×</title></circle>
-  <circle cx="1322.56" cy="282.17" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result44: 21.00×</title></circle>
-  <circle cx="1355.47" cy="291.99" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result45: 18.70×</title></circle>
-  <circle cx="1388.37" cy="345.00" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result46: 10.00×</title></circle>
-  <circle cx="1421.28" cy="347.32" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result47: 9.73×</title></circle>
-  <circle cx="1454.19" cy="357.28" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result48: 8.65×</title></circle>
-  <circle cx="1487.09" cy="366.04" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result49: 7.80×</title></circle>
-  <circle cx="1520.00" cy="370.16" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result50: 7.43×</title></circle>
-  <circle cx="137.91" cy="389.40" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result2: 5.92×</title></circle>
-  <circle cx="170.81" cy="364.11" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result3: 7.98×</title></circle>
-  <circle cx="203.72" cy="364.11" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result4: 7.98×</title></circle>
-  <circle cx="236.63" cy="368.46" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result9: 7.58×</title></circle>
-  <circle cx="269.53" cy="366.70" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result10: 7.74×</title></circle>
-  <circle cx="302.44" cy="374.00" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result11: 7.10×</title></circle>
-  <circle cx="335.35" cy="375.21" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result12: 7.00×</title></circle>
-  <circle cx="368.26" cy="369.93" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result13: 7.45×</title></circle>
-  <circle cx="401.16" cy="371.88" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result14: 7.28×</title></circle>
-  <circle cx="434.07" cy="370.61" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result15: 7.39×</title></circle>
-  <circle cx="466.98" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result16: 7.38×</title></circle>
-  <circle cx="499.88" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result17: 7.37×</title></circle>
-  <circle cx="532.79" cy="370.04" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result18: 7.44×</title></circle>
-  <circle cx="565.70" cy="376.18" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result19: 6.92×</title></circle>
-  <circle cx="598.60" cy="371.88" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result20: 7.28×</title></circle>
-  <circle cx="631.51" cy="372.12" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result21: 7.26×</title></circle>
-  <circle cx="664.42" cy="372.47" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result22: 7.23×</title></circle>
-  <circle cx="697.33" cy="372.82" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result23: 7.20×</title></circle>
-  <circle cx="730.23" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result24: 7.22×</title></circle>
-  <circle cx="763.14" cy="371.65" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result25: 7.30×</title></circle>
-  <circle cx="796.05" cy="372.23" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result26: 7.25×</title></circle>
-  <circle cx="828.95" cy="372.47" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result27: 7.23×</title></circle>
-  <circle cx="861.86" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result28: 7.38×</title></circle>
-  <circle cx="894.77" cy="376.42" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result29: 6.90×</title></circle>
-  <circle cx="927.67" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result30: 7.37×</title></circle>
-  <circle cx="960.58" cy="370.04" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result31: 7.44×</title></circle>
-  <circle cx="993.49" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result32: 7.37×</title></circle>
-  <circle cx="1026.40" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result33: 7.38×</title></circle>
-  <circle cx="1059.30" cy="371.42" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result34: 7.32×</title></circle>
-  <circle cx="1092.21" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result35: 7.37×</title></circle>
-  <circle cx="1125.12" cy="377.16" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result36: 6.84×</title></circle>
-  <circle cx="1158.02" cy="377.16" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result37: 6.84×</title></circle>
-  <circle cx="1190.93" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result38: 7.24×</title></circle>
-  <circle cx="1223.84" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result41: 7.22×</title></circle>
-  <circle cx="1256.74" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result42: 7.24×</title></circle>
-  <circle cx="1289.65" cy="374.72" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result43: 7.04×</title></circle>
-  <circle cx="1322.56" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result44: 7.22×</title></circle>
-  <circle cx="1355.47" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result45: 7.24×</title></circle>
-  <circle cx="1388.37" cy="377.29" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result46: 6.83×</title></circle>
-  <circle cx="1454.19" cy="372.82" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result48: 7.20×</title></circle>
-  <circle cx="1520.00" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result50: 7.24×</title></circle>
-  <circle cx="170.81" cy="406.11" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result3: 4.86×</title></circle>
-  <circle cx="203.72" cy="406.11" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result4: 4.86×</title></circle>
-  <circle cx="1520.00" cy="403.36" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result50: 5.02×</title></circle>
-  <circle cx="532.79" cy="676.30" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result18: 0.20×</title></circle>
-  <circle cx="1520.00" cy="639.18" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result50: 0.31×</title></circle>
-  <circle cx="532.79" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result18: 0.18×</title></circle>
-  <circle cx="631.51" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result21: 0.18×</title></circle>
-  <circle cx="664.42" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result22: 0.17×</title></circle>
-  <circle cx="697.33" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result23: 0.17×</title></circle>
-  <circle cx="763.14" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result25: 0.15×</title></circle>
-  <circle cx="796.05" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result26: 0.15×</title></circle>
-  <circle cx="828.95" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result27: 0.15×</title></circle>
-  <circle cx="861.86" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result28: 0.16×</title></circle>
-  <circle cx="894.77" cy="706.51" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result29: 0.14×</title></circle>
-  <circle cx="927.67" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result30: 0.16×</title></circle>
-  <circle cx="960.58" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result31: 0.16×</title></circle>
-  <circle cx="993.49" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result32: 0.16×</title></circle>
-  <circle cx="1026.40" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result33: 0.16×</title></circle>
-  <circle cx="1059.30" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result34: 0.15×</title></circle>
-  <circle cx="1092.21" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result35: 0.16×</title></circle>
-  <circle cx="1125.12" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result36: 0.15×</title></circle>
-  <circle cx="1158.02" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result37: 0.15×</title></circle>
-  <circle cx="1190.93" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result38: 0.15×</title></circle>
-  <circle cx="1223.84" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result41: 0.17×</title></circle>
-  <circle cx="1256.74" cy="680.64" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result42: 0.19×</title></circle>
-  <circle cx="1289.65" cy="680.64" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result43: 0.19×</title></circle>
-  <circle cx="1322.56" cy="680.64" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result44: 0.19×</title></circle>
-  <circle cx="1388.37" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result46: 0.18×</title></circle>
-  <circle cx="1421.28" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result47: 0.20×</title></circle>
-  <circle cx="1454.19" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result48: 0.20×</title></circle>
-  <circle cx="1487.09" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result49: 0.20×</title></circle>
-  <circle cx="1520.00" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result50: 0.20×</title></circle>
+  <circle cx="436.17" cy="386.03" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result16: 6.16×</title></circle>
+  <circle cx="466.28" cy="457.47" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result17: 2.65×</title></circle>
+  <circle cx="496.38" cy="460.72" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result18: 2.55×</title></circle>
+  <circle cx="526.49" cy="412.81" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result19: 4.49×</title></circle>
+  <circle cx="556.60" cy="417.27" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result20: 4.26×</title></circle>
+  <circle cx="586.70" cy="442.29" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result21: 3.17×</title></circle>
+  <circle cx="616.81" cy="454.33" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result22: 2.75×</title></circle>
+  <circle cx="646.91" cy="455.88" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result23: 2.70×</title></circle>
+  <circle cx="677.02" cy="457.47" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result24: 2.65×</title></circle>
+  <circle cx="707.13" cy="468.73" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result25: 2.32×</title></circle>
+  <circle cx="737.23" cy="471.32" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result26: 2.25×</title></circle>
+  <circle cx="767.34" cy="475.57" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result27: 2.14×</title></circle>
+  <circle cx="797.45" cy="482.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result28: 1.97×</title></circle>
+  <circle cx="827.55" cy="488.36" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result29: 1.84×</title></circle>
+  <circle cx="857.66" cy="483.01" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result30: 1.96×</title></circle>
+  <circle cx="887.77" cy="483.44" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result31: 1.95×</title></circle>
+  <circle cx="917.87" cy="489.75" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result32: 1.81×</title></circle>
+  <circle cx="947.98" cy="510.90" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result33: 1.41×</title></circle>
+  <circle cx="978.09" cy="514.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result34: 1.35×</title></circle>
+  <circle cx="1008.19" cy="520.43" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result35: 1.26×</title></circle>
+  <circle cx="1038.30" cy="513.34" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result36: 1.37×</title></circle>
+  <circle cx="1068.40" cy="542.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result37: 0.97×</title></circle>
+  <circle cx="1098.51" cy="533.48" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result38: 1.08×</title></circle>
+  <circle cx="1128.62" cy="512.11" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result41: 1.39×</title></circle>
+  <circle cx="1158.72" cy="502.34" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result42: 1.56×</title></circle>
+  <circle cx="1188.83" cy="513.96" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result43: 1.36×</title></circle>
+  <circle cx="1218.94" cy="516.49" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result44: 1.32×</title></circle>
+  <circle cx="1249.04" cy="515.21" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result45: 1.34×</title></circle>
+  <circle cx="1279.15" cy="524.56" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result46: 1.20×</title></circle>
+  <circle cx="1309.26" cy="520.43" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result47: 1.26×</title></circle>
+  <circle cx="1339.36" cy="534.27" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result48: 1.07×</title></circle>
+  <circle cx="1369.47" cy="529.65" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result49: 1.13×</title></circle>
+  <circle cx="1399.57" cy="535.87" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result50: 1.05×</title></circle>
+  <circle cx="1429.68" cy="546.15" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result51: 0.93×</title></circle>
+  <circle cx="1459.79" cy="537.50" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result52: 1.03×</title></circle>
+  <circle cx="1489.89" cy="538.32" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result53: 1.02×</title></circle>
+  <circle cx="1520.00" cy="558.90" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result54: 0.80×</title></circle>
+  <circle cx="135.11" cy="555.78" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result2: 0.83×</title></circle>
+  <circle cx="165.21" cy="528.90" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result3: 1.14×</title></circle>
+  <circle cx="195.32" cy="535.87" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result4: 1.05×</title></circle>
+  <circle cx="225.43" cy="416.28" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result9: 4.31×</title></circle>
+  <circle cx="255.53" cy="357.77" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result10: 8.60×</title></circle>
+  <circle cx="285.64" cy="416.87" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result11: 4.28×</title></circle>
+  <circle cx="315.74" cy="446.68" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result12: 3.01×</title></circle>
+  <circle cx="345.85" cy="448.67" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result13: 2.94×</title></circle>
+  <circle cx="375.96" cy="449.83" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result14: 2.90×</title></circle>
+  <circle cx="406.06" cy="449.25" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result15: 2.92×</title></circle>
+  <circle cx="436.17" cy="469.10" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result16: 2.31×</title></circle>
+  <circle cx="466.28" cy="485.20" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result17: 1.91×</title></circle>
+  <circle cx="496.38" cy="486.99" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result18: 1.87×</title></circle>
+  <circle cx="526.49" cy="441.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result19: 3.19×</title></circle>
+  <circle cx="556.60" cy="421.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result20: 4.07×</title></circle>
+  <circle cx="586.70" cy="451.31" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result21: 2.85×</title></circle>
+  <circle cx="616.81" cy="470.57" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result22: 2.27×</title></circle>
+  <circle cx="646.91" cy="485.20" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result23: 1.91×</title></circle>
+  <circle cx="677.02" cy="496.06" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result24: 1.68×</title></circle>
+  <circle cx="707.13" cy="516.49" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result25: 1.32×</title></circle>
+  <circle cx="737.23" cy="520.43" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result26: 1.26×</title></circle>
+  <circle cx="767.34" cy="520.43" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result27: 1.26×</title></circle>
+  <circle cx="797.45" cy="534.27" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result28: 1.07×</title></circle>
+  <circle cx="827.55" cy="540.85" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result29: 0.99×</title></circle>
+  <circle cx="857.66" cy="535.07" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result30: 1.06×</title></circle>
+  <circle cx="887.77" cy="536.68" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result31: 1.04×</title></circle>
+  <circle cx="917.87" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result32: 0.85×</title></circle>
+  <circle cx="947.98" cy="555.78" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result33: 0.83×</title></circle>
+  <circle cx="978.09" cy="558.90" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result34: 0.80×</title></circle>
+  <circle cx="1008.19" cy="566.65" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result35: 0.73×</title></circle>
+  <circle cx="1038.30" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result36: 0.85×</title></circle>
+  <circle cx="1068.40" cy="561.04" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result37: 0.78×</title></circle>
+  <circle cx="1098.51" cy="547.99" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result38: 0.91×</title></circle>
+  <circle cx="1128.62" cy="523.16" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result41: 1.22×</title></circle>
+  <circle cx="1158.72" cy="519.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result42: 1.27×</title></circle>
+  <circle cx="1188.83" cy="550.83" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result43: 0.88×</title></circle>
+  <circle cx="1218.94" cy="552.77" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result44: 0.86×</title></circle>
+  <circle cx="1249.04" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result45: 0.85×</title></circle>
+  <circle cx="1279.15" cy="564.36" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result46: 0.75×</title></circle>
+  <circle cx="1309.26" cy="569.00" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result47: 0.71×</title></circle>
+  <circle cx="1339.36" cy="579.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result48: 0.63×</title></circle>
+  <circle cx="1369.47" cy="579.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result49: 0.63×</title></circle>
+  <circle cx="1399.57" cy="592.18" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result50: 0.54×</title></circle>
+  <circle cx="1429.68" cy="586.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result51: 0.58×</title></circle>
+  <circle cx="1459.79" cy="583.26" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result52: 0.60×</title></circle>
+  <circle cx="1489.89" cy="586.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result53: 0.58×</title></circle>
+  <circle cx="1520.00" cy="593.77" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result54: 0.53×</title></circle>
+  <circle cx="135.11" cy="598.70" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result2: 0.50×</title></circle>
+  <circle cx="165.21" cy="356.02" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result3: 8.78×</title></circle>
+  <circle cx="195.32" cy="364.64" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result4: 7.93×</title></circle>
+  <circle cx="225.43" cy="322.13" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result9: 13.10×</title></circle>
+  <circle cx="255.53" cy="285.88" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result10: 20.10×</title></circle>
+  <circle cx="285.64" cy="281.76" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result11: 21.10×</title></circle>
+  <circle cx="315.74" cy="310.10" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result12: 15.10×</title></circle>
+  <circle cx="345.85" cy="308.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result13: 15.40×</title></circle>
+  <circle cx="375.96" cy="311.23" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result14: 14.90×</title></circle>
+  <circle cx="406.06" cy="317.72" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result15: 13.80×</title></circle>
+  <circle cx="436.17" cy="321.49" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result16: 13.20×</title></circle>
+  <circle cx="466.28" cy="319.58" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result17: 13.50×</title></circle>
+  <circle cx="496.38" cy="318.96" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result18: 13.60×</title></circle>
+  <circle cx="526.49" cy="277.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result19: 22.20×</title></circle>
+  <circle cx="556.60" cy="270.16" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result20: 24.20×</title></circle>
+  <circle cx="586.70" cy="307.89" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result21: 15.50×</title></circle>
+  <circle cx="616.81" cy="308.99" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result22: 15.30×</title></circle>
+  <circle cx="646.91" cy="308.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result23: 15.40×</title></circle>
+  <circle cx="677.02" cy="307.89" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result24: 15.50×</title></circle>
+  <circle cx="707.13" cy="305.20" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result25: 16.00×</title></circle>
+  <circle cx="737.23" cy="305.20" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result26: 16.00×</title></circle>
+  <circle cx="767.34" cy="304.67" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result27: 16.10×</title></circle>
+  <circle cx="797.45" cy="301.57" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result28: 16.70×</title></circle>
+  <circle cx="827.55" cy="216.13" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result29: 45.80×</title></circle>
+  <circle cx="857.66" cy="251.40" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result30: 30.20×</title></circle>
+  <circle cx="887.77" cy="250.84" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result31: 30.40×</title></circle>
+  <circle cx="917.87" cy="247.83" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result32: 31.50×</title></circle>
+  <circle cx="947.98" cy="249.73" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result33: 30.80×</title></circle>
+  <circle cx="978.09" cy="250.28" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result34: 30.60×</title></circle>
+  <circle cx="1008.19" cy="249.73" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result35: 30.80×</title></circle>
+  <circle cx="1038.30" cy="249.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result36: 30.90×</title></circle>
+  <circle cx="1068.40" cy="249.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result37: 30.90×</title></circle>
+  <circle cx="1098.51" cy="247.83" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result38: 31.50×</title></circle>
+  <circle cx="1128.62" cy="284.62" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result41: 20.40×</title></circle>
+  <circle cx="1158.72" cy="303.11" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result42: 16.40×</title></circle>
+  <circle cx="1188.83" cy="286.72" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result43: 19.90×</title></circle>
+  <circle cx="1218.94" cy="282.17" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result44: 21.00×</title></circle>
+  <circle cx="1249.04" cy="291.99" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result45: 18.70×</title></circle>
+  <circle cx="1279.15" cy="345.00" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result46: 10.00×</title></circle>
+  <circle cx="1309.26" cy="347.32" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result47: 9.73×</title></circle>
+  <circle cx="1339.36" cy="357.28" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result48: 8.65×</title></circle>
+  <circle cx="1369.47" cy="366.04" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result49: 7.80×</title></circle>
+  <circle cx="1399.57" cy="370.16" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result50: 7.43×</title></circle>
+  <circle cx="1429.68" cy="357.77" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result51: 8.60×</title></circle>
+  <circle cx="1459.79" cy="349.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result52: 9.49×</title></circle>
+  <circle cx="1489.89" cy="498.62" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result53: 1.63×</title></circle>
+  <circle cx="1520.00" cy="498.62" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result54: 1.63×</title></circle>
+  <circle cx="135.11" cy="389.40" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result2: 5.92×</title></circle>
+  <circle cx="165.21" cy="364.11" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result3: 7.98×</title></circle>
+  <circle cx="195.32" cy="364.11" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result4: 7.98×</title></circle>
+  <circle cx="225.43" cy="368.46" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result9: 7.58×</title></circle>
+  <circle cx="255.53" cy="366.70" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result10: 7.74×</title></circle>
+  <circle cx="285.64" cy="374.00" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result11: 7.10×</title></circle>
+  <circle cx="315.74" cy="375.21" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result12: 7.00×</title></circle>
+  <circle cx="345.85" cy="369.93" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result13: 7.45×</title></circle>
+  <circle cx="375.96" cy="371.88" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result14: 7.28×</title></circle>
+  <circle cx="406.06" cy="370.61" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result15: 7.39×</title></circle>
+  <circle cx="436.17" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result16: 7.38×</title></circle>
+  <circle cx="466.28" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result17: 7.37×</title></circle>
+  <circle cx="496.38" cy="370.04" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result18: 7.44×</title></circle>
+  <circle cx="526.49" cy="376.18" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result19: 6.92×</title></circle>
+  <circle cx="556.60" cy="371.88" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result20: 7.28×</title></circle>
+  <circle cx="586.70" cy="372.12" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result21: 7.26×</title></circle>
+  <circle cx="616.81" cy="372.47" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result22: 7.23×</title></circle>
+  <circle cx="646.91" cy="372.82" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result23: 7.20×</title></circle>
+  <circle cx="677.02" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result24: 7.22×</title></circle>
+  <circle cx="707.13" cy="371.65" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result25: 7.30×</title></circle>
+  <circle cx="737.23" cy="372.23" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result26: 7.25×</title></circle>
+  <circle cx="767.34" cy="372.47" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result27: 7.23×</title></circle>
+  <circle cx="797.45" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result28: 7.38×</title></circle>
+  <circle cx="827.55" cy="376.42" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result29: 6.90×</title></circle>
+  <circle cx="857.66" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result30: 7.37×</title></circle>
+  <circle cx="887.77" cy="370.04" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result31: 7.44×</title></circle>
+  <circle cx="917.87" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result32: 7.37×</title></circle>
+  <circle cx="947.98" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result33: 7.38×</title></circle>
+  <circle cx="978.09" cy="371.42" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result34: 7.32×</title></circle>
+  <circle cx="1008.19" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result35: 7.37×</title></circle>
+  <circle cx="1038.30" cy="377.16" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result36: 6.84×</title></circle>
+  <circle cx="1068.40" cy="377.16" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result37: 6.84×</title></circle>
+  <circle cx="1098.51" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result38: 7.24×</title></circle>
+  <circle cx="1128.62" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result41: 7.22×</title></circle>
+  <circle cx="1158.72" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result42: 7.24×</title></circle>
+  <circle cx="1188.83" cy="374.72" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result43: 7.04×</title></circle>
+  <circle cx="1218.94" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result44: 7.22×</title></circle>
+  <circle cx="1249.04" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result45: 7.24×</title></circle>
+  <circle cx="1279.15" cy="377.29" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result46: 6.83×</title></circle>
+  <circle cx="1339.36" cy="372.82" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result48: 7.20×</title></circle>
+  <circle cx="1399.57" cy="372.35" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result50: 7.24×</title></circle>
+  <circle cx="1429.68" cy="365.61" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result51: 7.84×</title></circle>
+  <circle cx="1459.79" cy="366.37" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result52: 7.77×</title></circle>
+  <circle cx="165.21" cy="406.11" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result3: 4.86×</title></circle>
+  <circle cx="195.32" cy="406.11" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result4: 4.86×</title></circle>
+  <circle cx="1399.57" cy="403.36" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result50: 5.02×</title></circle>
+  <circle cx="1429.68" cy="396.25" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result51: 5.46×</title></circle>
+  <circle cx="496.38" cy="676.30" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result18: 0.20×</title></circle>
+  <circle cx="1399.57" cy="639.18" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result50: 0.31×</title></circle>
+  <circle cx="1429.68" cy="633.89" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result51: 0.33×</title></circle>
+  <circle cx="1459.79" cy="633.89" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result52: 0.33×</title></circle>
+  <circle cx="496.38" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result18: 0.18×</title></circle>
+  <circle cx="586.70" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result21: 0.18×</title></circle>
+  <circle cx="616.81" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result22: 0.17×</title></circle>
+  <circle cx="646.91" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result23: 0.17×</title></circle>
+  <circle cx="707.13" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result25: 0.15×</title></circle>
+  <circle cx="737.23" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result26: 0.15×</title></circle>
+  <circle cx="767.34" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result27: 0.15×</title></circle>
+  <circle cx="797.45" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result28: 0.16×</title></circle>
+  <circle cx="827.55" cy="706.51" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result29: 0.14×</title></circle>
+  <circle cx="857.66" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result30: 0.16×</title></circle>
+  <circle cx="887.77" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result31: 0.16×</title></circle>
+  <circle cx="917.87" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result32: 0.16×</title></circle>
+  <circle cx="947.98" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result33: 0.16×</title></circle>
+  <circle cx="978.09" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result34: 0.15×</title></circle>
+  <circle cx="1008.19" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result35: 0.16×</title></circle>
+  <circle cx="1038.30" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result36: 0.15×</title></circle>
+  <circle cx="1068.40" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result37: 0.15×</title></circle>
+  <circle cx="1098.51" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result38: 0.15×</title></circle>
+  <circle cx="1128.62" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result41: 0.17×</title></circle>
+  <circle cx="1158.72" cy="680.64" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result42: 0.19×</title></circle>
+  <circle cx="1188.83" cy="680.64" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result43: 0.19×</title></circle>
+  <circle cx="1218.94" cy="680.64" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result44: 0.19×</title></circle>
+  <circle cx="1279.15" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result46: 0.18×</title></circle>
+  <circle cx="1309.26" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result47: 0.20×</title></circle>
+  <circle cx="1339.36" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result48: 0.20×</title></circle>
+  <circle cx="1369.47" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result49: 0.20×</title></circle>
+  <circle cx="1399.57" cy="676.30" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result50: 0.20×</title></circle>
+  <circle cx="1429.68" cy="672.17" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result51: 0.21×</title></circle>
+  <circle cx="1459.79" cy="668.23" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result52: 0.22×</title></circle>
+  <circle cx="1520.00" cy="668.23" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result54: 0.22×</title></circle>
   </g>
   <text x="84" y="825" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">Results5–8 were partial tests and are omitted from the x-axis.</text>
   <text x="84" y="844" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">Results39–40 are omitted: they were measured against Node.js v24.7.0 (all other sessions use v22.13.0), thus not comparable.</text>
   <text x="84" y="863" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. QuickJS joins measured points; dotted Python/Go lines bridge missing sessions.</text>
   <text x="84" y="882" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.</text>
-  <text x="84" y="901" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">R3–4 Python dots include ten Result50 workload fixes; other cells retain March timings. Go R18 used 56 rows.</text>
+  <text x="84" y="901" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">R3–4 Python dots include ten Result50 workload fixes; other cells retain March timings. Go R18 used 56 rows. Results51–54 include 71 rows; engine availability varies.</text>
 </svg>
