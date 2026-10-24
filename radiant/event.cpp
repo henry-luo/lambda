@@ -10325,6 +10325,21 @@ static bool css_declaration_is_color_background_only(CssDeclaration* declaration
         case CSS_PROPERTY_BACKGROUND:
             // Complex backgrounds can need used box dimensions for their paint.
             return declaration->value->type == CSS_VALUE_TYPE_COLOR;
+        // border colors repaint in place; border widths and styles stay with layout.
+        case CSS_PROPERTY_BORDER_COLOR:
+        case CSS_PROPERTY_BORDER_TOP_COLOR:
+        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
+        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+        case CSS_PROPERTY_BORDER_LEFT_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_START_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_END_COLOR:
+        // shadows are ink overflow: layout never reads them.
+        case CSS_PROPERTY_BOX_SHADOW:
+            return true;
         default:
             return false;
     }
@@ -10564,20 +10579,126 @@ static bool document_has_matched_hover_rule_on_path(DomDocument* doc, DocState* 
     return false;
 }
 
-static void refresh_hover_color_background_element(DocState* state,
-                                                   DomDocument* doc,
-                                                   LayoutContext* lycon,
-                                                   View* view) {
-    if (!state || !state->hover_matcher || !doc || !lycon || !view || !view->is_element()) return;
-    DomElement* element = lam::dom_require_element(view);
-    if (!element->specified_style) return;
+static const CssPropertyCode HOVER_BORDER_COLOR_SIDES[4] = {
+    CSS_PROPERTY_BORDER_TOP_COLOR, CSS_PROPERTY_BORDER_RIGHT_COLOR,
+    CSS_PROPERTY_BORDER_BOTTOM_COLOR, CSS_PROPERTY_BORDER_LEFT_COLOR};
 
-    // Direct self-hover rules can only change this element's cascade.
-    radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
+// Re-resolves each side's border color from its cascade winner. A shorthand
+// winner (`border: 1px solid c`) also rewrites width and style, so those keep
+// their laid-out values. False asks for the full restyle: a side color with no
+// winner left came from layout defaults, which only layout can rebuild.
+static bool refresh_hover_border_colors(LayoutContext* lycon, DomElement* element,
+                                        const bool had_winner[4]) {
+    CssDeclaration* winners[4];
+    bool any_winner = false;
+    for (int side = 0; side < 4; side++) {
+        winners[side] = layout_cascaded_physical_declaration(element, HOVER_BORDER_COLOR_SIDES[side]);
+        if (!winners[side]) {
+            if (had_winner[side]) return false;
+            continue;
+        }
+        if (winners[side]->property_code == CSS_PROPERTY_ALL ||
+            winners[side]->pending_shorthand_code > 0) return false;
+        any_winner = true;
+    }
+    if (!any_winner) return true;
 
+    BorderProp* border = layout_ensure_border(lycon, lam::view_require_element(element));
+    Spacing width = border->width;
+    CssEnum styles[4];
+    int64_t style_specificities[4];
+    memcpy(styles, border->styles, sizeof(styles));
+    memcpy(style_specificities, border->style_specificities, sizeof(style_specificities));
+    for (int side = 0; side < 4; side++) {
+        if (!winners[side]) continue;
+        border->colors[side] = {};
+        border->color_specificities[side] = 0;
+    }
+    // cascade priorities order the lanes, so each distinct winner resolves once in any order.
+    for (int side = 0; side < 4; side++) {
+        bool resolved = false;
+        for (int prior = 0; prior < side; prior++) resolved |= winners[prior] == winners[side];
+        if (winners[side] && !resolved)
+            resolve_css_property(winners[side]->property_code, winners[side], lycon);
+    }
+    border->width = width;
+    memcpy(border->styles, styles, sizeof(styles));
+    memcpy(border->style_specificities, style_specificities, sizeof(style_specificities));
+    return true;
+}
+
+// Font-relative shadow and background lengths resolve against the element's
+// own font, which layout would have installed on the context.
+static void refresh_hover_use_element_font(LayoutContext* lycon, View* view) {
+    for (DomNode* node = view; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        ViewSpan* span = lam::view_require_element(static_cast<View*>(node));
+        if (span->font && span->fontp()->font_size > 0.0f) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->fontp()->font_size;
+            return;
+        }
+    }
+}
+
+// The shadow paints outside the box, so both the old and the new shadow extents
+// are marked for repaint. Inline boxes have no ink-overflow helper and restyle in full.
+static bool refresh_hover_box_shadow(DocState* state, LayoutContext* lycon,
+                                     DomElement* element, View* view) {
+    ViewSpan* span = lam::view_require_element(view);
+    CssDeclaration* declaration = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BOX_SHADOW);
+    bool had_shadow = span->bound && span->boundary()->box_shadow;
+    if (!declaration && !had_shadow) return true;
+    ViewBlock* block = lam::view_as_block(view);
+    if (!block) return false;
+
+    float overflow = render_geometry_block_visual_overflow(block);
+    if (declaration) resolve_css_property(CSS_PROPERTY_BOX_SHADOW, declaration, lycon);
+    else span->boundary_mut()->box_shadow = nullptr;
+    float new_overflow = render_geometry_block_visual_overflow(block);
+    if (new_overflow > overflow) overflow = new_overflow;
+
+    RdtLogicalPoint origin = view_geometry_node_document_origin(view);
+    dirty_mark_rect(&state->dirty_tracker, origin.x - overflow, origin.y - overflow,
+                    view->width + 2.0f * overflow, view->height + 2.0f * overflow);
+    return true;
+}
+
+static void hover_border_color_winners(DomElement* element, bool has_winner[4]) {
+    for (int side = 0; side < 4; side++) {
+        has_winner[side] = layout_cascaded_physical_declaration(
+            element, HOVER_BORDER_COLOR_SIDES[side]) != nullptr;
+    }
+}
+
+// Layout copies an inherited color into each element without its own `color`
+// (resolve_css_inherited_properties); refresh that copy from the same declaration.
+static void refresh_hover_inherited_color(LayoutContext* lycon, DomElement* element) {
+    if (style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR)) return;
+    for (DomElement* ancestor = dom_parent_element(element); ancestor;
+         ancestor = dom_parent_element(ancestor)) {
+        CssDeclaration* declaration = ancestor->specified_style
+            ? style_tree_get_declaration(ancestor->specified_style, CSS_PROPERTY_COLOR) : nullptr;
+        if (!declaration || !declaration->value) continue;
+        if (declaration->property_code != CSS_PROPERTY_ALL) {
+            resolve_css_property(CSS_PROPERTY_COLOR, declaration, lycon);
+            return;
+        }
+        // an ancestor's `all: initial` ends inheritance; other `all` values defer further up.
+        if (declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            declaration->value->data.keyword == CSS_VALUE_INITIAL) return;
+    }
+}
+
+// Re-resolves the paint-only properties layout would have set on one element.
+static bool refresh_hover_paint_style(DocState* state, LayoutContext* lycon,
+                                      DomElement* element, const bool had_border_color[4]) {
+    View* view = static_cast<View*>(element);
     LayoutViewScope view_scope(lycon);
     lycon->view = lam::up(view);
     lycon->elmt = lam::up(static_cast<DomNode*>(element));
+    refresh_hover_use_element_font(lycon, view);
     layout_reset_color_background_style_cache(lycon, lam::view_require_element(view));
     static const CssPropertyCode properties[] = {
         CSS_PROPERTY_COLOR,
@@ -10599,31 +10720,88 @@ static void refresh_hover_color_background_element(DocState* state,
             element->specified_style, properties[i]);
         if (declaration) resolve_css_property(properties[i], declaration, lycon);
     }
+    refresh_hover_inherited_color(lycon, element);
+    if (!refresh_hover_border_colors(lycon, element, had_border_color)) return false;
+    if (!refresh_hover_box_shadow(state, lycon, element, view)) return false;
     // paint-only hover skips layout, where transitions normally compare used colors.
     css_transition_resolve(element, lycon);
+    return true;
 }
 
-static void refresh_hover_color_background_path(DocState* state,
+// A color of its own (not inherit/unset/currentColor) shields the subtree from an ancestor's change.
+static bool hover_color_declaration_is_own(const CssDeclaration* declaration) {
+    if (!declaration || !declaration->value || declaration->property_code == CSS_PROPERTY_ALL) return false;
+    const CssValue* value = declaration->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        return keyword != CSS_VALUE_INHERIT && keyword != CSS_VALUE_UNSET &&
+            keyword != CSS_VALUE_CURRENTCOLOR;
+    }
+    return value->type == CSS_VALUE_TYPE_COLOR && value->data.color.type != CSS_COLOR_CURRENTCOLOR;
+}
+
+// A color change reaches every descendant that inherits it: their copied color
+// and the currentColor-derived borders and shadows layout resolved from it.
+static bool refresh_hover_inheriting_descendants(DocState* state, LayoutContext* lycon,
+                                                 DomElement* parent) {
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* element = lam::dom_require_element(child);
+        if (element->specified_style) {
+            if (hover_color_declaration_is_own(
+                    style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR))) continue;
+            bool has_border_color[4];
+            hover_border_color_winners(element, has_border_color);
+            if (!refresh_hover_paint_style(state, lycon, element, has_border_color)) return false;
+        }
+        if (!refresh_hover_inheriting_descendants(state, lycon, element)) return false;
+    }
+    return true;
+}
+
+static bool refresh_hover_color_background_element(DocState* state,
+                                                   DomDocument* doc,
+                                                   LayoutContext* lycon,
+                                                   View* view) {
+    if (!state || !state->hover_matcher || !doc || !lycon || !view || !view->is_element()) return true;
+    DomElement* element = lam::dom_require_element(view);
+    if (!element->specified_style) return true;
+
+    bool had_border_color[4];
+    hover_border_color_winners(element, had_border_color);
+    CssDeclaration* color = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR);
+    // Direct self-hover rules can only change this element's cascade.
+    radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
+    if (!refresh_hover_paint_style(state, lycon, element, had_border_color)) return false;
+    // compare declarations: a color transition still paints the old used value here.
+    return style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR) == color ||
+        refresh_hover_inheriting_descendants(state, lycon, element);
+}
+
+static bool refresh_hover_color_background_path(DocState* state,
                                                 DomDocument* doc,
                                                 LayoutContext* lycon,
                                                 View* target) {
-    if (!target) return;
+    if (!target) return true;
     ArrayList* path = build_view_stack(nullptr, target);
-    if (!path) return;
-    for (int i = 0; i < path->length; i++) {
-        refresh_hover_color_background_element(
+    if (!path) return false;
+    bool refreshed = true;
+    for (int i = 0; refreshed && i < path->length; i++) {
+        refreshed = refresh_hover_color_background_element(
             state, doc, lycon, static_cast<View*>(path->data[i]));
     }
     arraylist_free(path);
+    return refreshed;
 }
 
-static void refresh_hover_color_background_paths(DocState* state,
+// False when the paint-only refresh could not finish; the caller restyles in full.
+static bool refresh_hover_color_background_paths(DocState* state,
                                                  DomDocument* doc,
                                                  View* prev_hover,
                                                  View* new_target) {
     UiContext* uicon = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
     if (!state || !state->hover_matcher || !doc || !uicon || !doc->view_tree ||
-        !doc->view_tree->prop_pool) return;
+        !doc->view_tree->prop_pool) return false;
 
     LayoutContext lycon = {};
     lycon.doc = lam::up(doc);
@@ -10635,8 +10813,8 @@ static void refresh_hover_color_background_paths(DocState* state,
     lycon.sizing_mode = radiant::SizingMode::InherentSize;
     setup_font(uicon, &lycon.font, &uicon->default_font);
 
-    refresh_hover_color_background_path(state, doc, &lycon, prev_hover);
-    refresh_hover_color_background_path(state, doc, &lycon, new_target);
+    return refresh_hover_color_background_path(state, doc, &lycon, prev_hover) &&
+        refresh_hover_color_background_path(state, doc, &lycon, new_target);
 }
 
 static void apply_document_condition_restyle(DomDocument* doc, DocState* state, uint32_t reason) {
@@ -10753,9 +10931,8 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
         paint_only_hover = false;
     }
     if (hover_styles_active || state->hover_styles_active) {
-        if (paint_only_hover) {
-            refresh_hover_color_background_paths(state, doc, prev_hover, new_target);
-        } else {
+        if (!paint_only_hover ||
+            !refresh_hover_color_background_paths(state, doc, prev_hover, new_target)) {
             radiant_recascade_document(doc);
             if (doc->root) {
                 reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
