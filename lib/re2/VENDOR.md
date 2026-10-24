@@ -5,7 +5,7 @@ expression engine behind Lambda string patterns (`lambda/runtime/re2_wrapper.cpp
 the LambdaJS RegExp fast path, the hosted Python and Ruby `re` modules, and the
 grep library (`lib/grep`). It moved in-tree from a setup-script clone in
 `build_temp/re2-noabsl` so that local patches have an auditable home (GRP15 in
-`vibe/Lambda_Lib_Grep.md`).
+`vibe/lib/Lib_Grep.md`).
 
 | | |
 |---|---|
@@ -86,7 +86,7 @@ stopped at every occurrence of it. The patch adds the same test 16 bytes at a
 time with SSE2 (always available on x86-64, so no runtime detection) and NEON
 (ARM64; a narrowing shift stands in for the missing movemask). AVX2 stays first
 for any build that enables it. Touches only `re2/prog.cc` (GRP9v2,
-`vibe/Lambda_Lib_Grep.md` §6.1).
+`vibe/lib/Lib_Grep.md` §6.1).
 
 Reach: every RE2 search whose pattern starts with a case-sensitive literal of
 two or more bytes — Lambda string patterns in `find`/`replace`/`split`, the

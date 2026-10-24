@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><style>
+body { margin:0; height:1200px; font:13px Arial; }
+select { position:absolute; top:30px; height:24px; width:180px; padding:0; border:1px solid #bcc5d4; background:white; font:13px Arial; }
+#fonts { left:40px; } #short { left:260px; width:120px; }
+</style></head><body>
+<select id="fonts">
+    <option value="0">Font family 00 with a long label</option>
+    <option value="1">Font family 01 with a long label</option>
+    <option value="2">Font family 02 with a long label</option>
+    <option value="3">Font family 03 with a long label</option>
+    <option value="4">Font family 04 with a long label</option>
+    <option value="5">Font family 05 with a long label</option>
+    <option value="6">Font family 06 with a long label</option>
+    <option value="7">Font family 07 with a long label</option>
+    <option value="8">Font family 08 with a long label</option>
+    <option value="9">Font family 09 with a long label</option>
+    <option value="10">Font family 10 with a long label</option>
+    <option value="11">Font family 11 with a long label</option>
+    <option value="12">Font family 12 with a long label</option>
+    <option value="13">Font family 13 with a long label</option>
+    <option value="14">Font family 14 with a long label</option>
+    <option value="15">Font family 15 with a long label</option>
+    <option value="16">Font family 16 with a long label</option>
+    <option value="17">Font family 17 with a long label</option>
+    <option value="18">Font family 18 with a long label</option>
+    <option value="19">Font family 19 with a long label</option>
+    <option value="20">Font family 20 with a long label</option>
+    <option value="21">Font family 21 with a long label</option>
+    <option value="22">Font family 22 with a long label</option>
+    <option value="23">Font family 23 with a long label</option>
+    <option value="24">Font family 24 with a long label</option>
+    <option value="25">Font family 25 with a long label</option>
+    <option value="26">Font family 26 with a long label</option>
+    <option value="27">Font family 27 with a long label</option>
+    <option value="28">Font family 28 with a long label</option>
+    <option value="29">Font family 29 with a long label</option>
+    <option value="30">Font family 30 with a long label</option>
+    <option value="31">Font family 31 with a long label</option>
+    <option value="32">Font family 32 with a long label</option>
+    <option value="33">Font family 33 with a long label</option>
+    <option value="34">Font family 34 with a long label</option>
+    <option value="35">Font family 35 with a long label</option>
+    <option value="36">Font family 36 with a long label</option>
+    <option value="37">Font family 37 with a long label</option>
+    <option value="38">Font family 38 with a long label</option>
+    <option value="39">Font family 39 with a long label</option>
+</select>
+<select id="short"><option>One</option><option>Two</option><option>Three</option></select>
+<script>
+window.fontChanges=0;
+document.getElementById('fonts').addEventListener('change',function(){fontChanges++;});
+</script>
+</body></html>

@@ -2,6 +2,8 @@
 // `mousemove` and `wheel` (with its deltas) on a pad, `scroll` from a
 // scrollable box. A sibling template declares none of them and never runs.
 
+import dom
+
 view <motion_pad> state moves: 0, last_x: 0.0, wheel_y: 0.0, wheels: 0 {
   <div id:"pad", class:"pad",
     <output id:"moves", string(moves)>
@@ -28,6 +30,15 @@ on scroll(evt) {
   scrolls = scrolls + 1
 }
 
+// keep the drag target mounted while recording native scroll notifications.
+view <drag_box> {
+  <div id:"drag", class:"drag", ["data-scrolls"]:"0",
+    <div class:"wide-tall", "drag content">>
+}
+on scroll(evt) {
+  dom.set_attribute(evt.target,"data-scrolls",string(int(dom.get_attribute(evt.target,"data-scrolls"))+1))
+}
+
 view <quiet_box> state clicks: 0 {
   <div id:"quiet", class:"quiet", <output id:"clicks", string(clicks)>>
 }
@@ -42,12 +53,15 @@ on click(evt) {
       .pad { position: absolute; left: 0; top: 0; width: 400px; height: 200px; background: #eef; }
       .box { position: absolute; left: 0; top: 220px; width: 400px; height: 150px; overflow: auto; background: #efe; }
       .tall { height: 1000px; }
+      .drag { position: absolute; left: 450px; top: 220px; width: 300px; height: 150px; overflow: auto; }
+      .wide-tall { width: 1000px; height: 1000px; }
       .quiet { position: absolute; left: 450px; top: 0; width: 200px; height: 200px; background: #fee; }
     ">
   >
   <body
     apply(<motion_pad>)
     apply(<scroll_box>)
+    apply(<drag_box>)
     apply(<quiet_box>)
   >
 >

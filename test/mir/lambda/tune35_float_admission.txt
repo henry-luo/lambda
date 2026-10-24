@@ -1,0 +1,10 @@
+[float, 0]
+[float, 0]
+[float, 1.5]
+[int, inf]
+[int, nan]
+[float, 3]
+error
+error
+error
+[true, inf, -inf]

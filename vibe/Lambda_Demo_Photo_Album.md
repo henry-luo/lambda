@@ -320,20 +320,26 @@ The collage editor composes 2 to 30 photos.
 | Grid | Equal cells in N×M, with a configurable gutter. |
 | Mosaic | Recursive split of the canvas that follows the photos' aspect ratios, so little is cropped. |
 | Magazine | A large hero cell plus smaller cells, with a title band. |
-| Polaroid scrapbook | Free-form prints with a white border, caption strip, slight random rotation and drop shadow on a textured background. |
-| Heart, circle and letter masks | Cells arranged inside a shape, using `clip-path`. |
+| Frame | A hero ringed by small cells, with the title in a band below. |
+| Spotlight | A grid with the title on a rounded plate over the centre. |
+| Diamonds, honeycomb | Shaped cells (`clip-path`) on a lattice, the sites nearest the centre. Diamonds tile edge to edge around a hero diamond four sites big. |
+| Scrapbook, pile, polaroids, keepsake | Free-form prints with a white border, caption strip and drop shadow, in four styles: a jittered, tilted scatter; an overlapping pile under a large hero print; a neat grid with square windows; tilted prints in a zigzag. |
+| Heart, circle, star and balloon masks | Cells arranged inside a shape, using `clip-path`. The balloon hangs a basket on ropes below its envelope. |
+
+The templates are one table in `mod_collage.ls`. Each row names a layout family (grid, mosaic, magazine, frame, lattice, prints or mask) and its parameters, where the text sits (top band, bottom band or centred plate) and a *look*. A look is a background, title font, spacing, corners and border. Choosing a template applies its look, and the user can then change any of it. The editor shows the templates as a gallery of live miniatures: each one is the template's own layout and look, drawn by the collage canvas over colour swatches.
 
 **Editing.**
 
 - Drag photos from a side tray into cells. Drag a cell onto another to swap.
 - Pan and zoom within a cell; the crop is stored as normalized offsets.
 - In scrapbook mode, move, rotate and resize prints with handles.
-- Set gutter, corner radius, border, background colour or texture, and caption
-  text.
+- Set gutter, corner radius, border, background colour, gradient or texture,
+  caption text, title font (sans, serif, script or handwritten) and a note line
+  under the caption.
 - Undo and redo work over the collage model's history.
 
 **Model.** A collage is plain data: canvas aspect, template, slots with photo id,
-focal point and zoom (and a scrapbook print box once moved), styling, caption,
+focal point and zoom (and a print box once moved), styling, title font, caption, note,
 credits flag and a seed. Layout is a pure function from the model to rectangles
 in export pixels. The model is saved as `<corpus>/collages/<name>.mark` and
 reopened from the editor.

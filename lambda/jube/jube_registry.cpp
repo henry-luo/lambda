@@ -521,7 +521,6 @@ extern "C" const char* dom_to_attribute_cstr(Item value);
 extern "C" void dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
 extern "C" void dom_after_remove_attribute(void* elem, const char* attr_name);
 extern "C" void dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
-extern "C" void dom_after_disabled_attribute_set(void* elem);
 extern "C" void dom_after_default_checked_set(void* elem, bool checked);
 extern "C" void dom_after_default_selected_set(void* elem, bool selected);
 extern "C" void dom_after_select_multiple_removed(void* elem);

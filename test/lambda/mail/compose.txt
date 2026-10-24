@@ -1,0 +1,99 @@
+"=== subjects ==="
+["Re: Offsite", "RE: Offsite", "Re: ", "Fwd: Offsite", "Fw: Offsite"]
+"=== quoting ===> one
+>> two"
+[{
+    depth: 0,
+    text: "Thanks!"
+  }, {
+    depth: 1,
+    text: "first"
+  }, {
+    depth: 2,
+    text: "deeper"
+  }, {
+    depth: 0,
+    text: "end"
+  }]
+"<!DOCTYPE html><html><body><div style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1d1d1f">Hi<blockquote type="cite" style="margin:4px 0 4px 2px;padding-left:10px;border-left:2px solid #8fb3e8;color:#3a5378">earlier<blockquote type="cite" style="margin:4px 0 4px 2px;padding-left:10px;border-left:2px solid #8fb3e8;color:#3a5378">older</blockquote></blockquote>Bye</div></body></html><!DOCTYPE html><html><body><div style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1d1d1f">a &lt; b &amp; c</div></body></html>=== replies ==="
+{
+  to: "Maya Chen <maya@x.example>",
+  cc: "",
+  subject: "Re: Offsite",
+  text: "\n\nOn Sat, 24 Oct 2026 02:19:59 +0000, Maya Chen <maya@x.example> wrote:\n> Hi\n>> earlier\n>> > older\n> Bye",
+  in_reply_to: "<a@x>",
+  references: "<0@x> <a@x>",
+  attachments: []
+}
+{
+  to: "Maya Chen <maya@x.example>, José Álvarez <jose@y.example>",
+  cc: "Priya <priya@z.example>",
+  subject: "Re: Offsite",
+  text: "\n\nOn Sat, 24 Oct 2026 02:19:59 +0000, Maya Chen <maya@x.example> wrote:\n> Hi\n>> earlier\n>> > older\n> Bye",
+  in_reply_to: "<a@x>",
+  references: "<0@x> <a@x>",
+  attachments: []
+}
+["José Álvarez <jose@y.example>", "List <list@x>"]
+["Fwd: Re: Offsite", 1, "\n\n---------- Forwarded message ----------\nFrom: Maya Chen <maya@x.example>\nDate: Sat, 24 Oct 2026 02:19:59 +0000\nSubject: Re: Offsite\nTo: Alex Rivera <alex@lambda.demo>, José Álvarez <jose@y.example>\n\nHi\n> earlier\n> > older\nBye"]
+"=== recipients ==="
+[{
+    name: "Ann Lee",
+    address: "ann@x.org"
+  }, {
+    name: null,
+    address: "bo@y.org"
+  }, {
+    name: "José",
+    address: "j@z.org"
+  }]
+[]
+["“nobody” is not an email address.", "Add at least one recipient.", null]
+"=== eml ===Fri, 24 Oct 2025 02:19:59 +0000"
+[true, true, true]
+"in-reply-to: <a@x>
+references: <0@x> <a@x>
+from: "Alex Rivera" <alex@lambda.demo>
+to: "Maya Chen" <maya@x.example>, =?UTF-8?B?Sm9zw6kgw4FsdmFyZXo=?= <jose@y.example>
+cc: "Priya" <priya@z.example>
+subject: Re: Offsite
+date: Sat, 24 Oct 2026 03:00:00 +0000
+message-id: <r1@lambda.demo>
+mime-version: 1.0
+content-type: multipart/alternative; boundary="=_Lambda_MIME_0"
+
+--=_Lambda_MIME_0
+content-type: text/plain; charset=UTF-8
+content-transfer-encoding: 8bit
+
+Sounds good.
+
+
+
+On Sat, 24 Oct 2026 02:19:59 +0000, Maya Chen <maya@x.example> wrote:
+> Hi
+>> earlier
+>> > older
+> Bye
+--=_Lambda_MIME_0
+content-type: text/html; charset=UTF-8
+content-transfer-encoding: 8bit
+
+<!DOCTYPE html><html><body><div style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1d1d1f">Sounds good.<br>
+<br>
+<br>
+<br>
+On Sat, 24 Oct 2026 02:19:59 +0000, Maya Chen &lt;maya@x.example&gt; wrote:<blockquote type="cite" style="margin:4px 0 4px 2px;padding-left:10px;border-left:2px solid #8fb3e8;color:#3a5378">Hi<blockquote type="cite" style="margin:4px 0 4px 2px;padding-left:10px;border-left:2px solid #8fb3e8;color:#3a5378">earlier<blockquote type="cite" style="margin:4px 0 4px 2px;padding-left:10px;border-left:2px solid #8fb3e8;color:#3a5378">older</blockquote></blockquote>Bye</blockquote></div></body></html>
+--=_Lambda_MIME_0--
+"
+["Re: Offsite", [{
+      name: "Maya Chen",
+      address: "maya@x.example"
+    }, {
+      name: "José Álvarez",
+      address: "jose@y.example"
+    }], "<a@x>", true, true]
+"=== html text ===Hi there
+One & two
+a
+b"

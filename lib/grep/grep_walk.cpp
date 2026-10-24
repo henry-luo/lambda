@@ -1,4 +1,4 @@
-// grep_walk.cpp — searching files and directory trees (vibe/Lambda_Lib_Grep.md §9).
+// grep_walk.cpp — searching files and directory trees (vibe/lib/Lib_Grep.md §9).
 //
 // Traversal and search share one thread pool (GRP13): a directory job lists
 // its entries and submits a job per subdirectory and per file. The walk itself

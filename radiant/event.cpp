@@ -880,15 +880,7 @@ static void target_stacking_list_reverse(EventContext* evcon, ArrayList* views) 
     }
 }
 
-static void target_positive_z_descendants(EventContext* evcon, View* first_child) {
-    ArrayList* views = radiant_stack_collect_positive_z_descendants(
-        first_child, "[RAD_CAP_POSITIONED_HIT]");
-    if (!views) return;
 
-    radiant_stack_sort_in_paint_order(views);
-    target_stacking_list_reverse(evcon, views);
-    arraylist_free(views);
-}
 
 static void target_positioned_children(EventContext* evcon, ViewBlock* block) {
     ArrayList* views = radiant_stack_collect_positioned_children(
@@ -900,17 +892,22 @@ static void target_positioned_children(EventContext* evcon, ViewBlock* block) {
     arraylist_free(views);
 }
 
-static bool target_negative_layer(void* context, View* owner, View* layer) {
+static bool target_stacking_layer(void* context, View* owner, View* layer) {
     EventContext* evcon = (EventContext*)context;
-    View* saved = evcon->negative_path;
-    evcon->negative_path = lam::up(layer);
+    View* saved = evcon->stacking_path;
+    evcon->stacking_path = lam::up(layer);
     target_stacking_view(evcon, radiant_stack_path_child(owner, layer));
-    evcon->negative_path = lam::up(saved);
+    evcon->stacking_path = lam::up(saved);
     return !evcon->target;
 }
 
+static void target_positive_z_descendants(EventContext* evcon, View* first_child) {
+    if (first_child && !evcon->target) radiant_stack_visit_positive_z_descendants(
+        first_child->parent, true, evcon, target_stacking_layer);
+}
+
 static void target_negative_z_descendants(EventContext* evcon, ViewBlock* block) {
-    if (!evcon->target) radiant_stack_visit_negative_z_descendants(block, true, evcon, target_negative_layer);
+    if (!evcon->target) radiant_stack_visit_negative_z_descendants(block, true, evcon, target_stacking_layer);
 }
 
 static void target_custom_layout_children(EventContext* evcon, ViewBlock* block) {
@@ -1157,13 +1154,14 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     if (dom_node_is_inert(view_span)) return;
     log_enter();
     FontBox pa_font = evcon->font;
+    if (evcon->stacking_path == static_cast<View*>(view_span)) evcon->stacking_path = nullptr;
     View* view = view_span->first_child;
     if (view) {
         if (view_span->font) {
             setup_font(evcon->ui_context, &evcon->font, view_span->font);
         }
-        if (evcon->negative_path) target_stacking_view(evcon,
-            radiant_stack_path_child(view_span, evcon->negative_path));
+        if (evcon->stacking_path) target_stacking_view(evcon,
+            radiant_stack_path_child(view_span, evcon->stacking_path));
         else target_children(evcon, view);
     }
     evcon->font = pa_font;
@@ -1216,8 +1214,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         return;
     }
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
-    bool path_only = evcon->negative_path && evcon->negative_path != static_cast<View*>(block);
-    if (evcon->negative_path == static_cast<View*>(block)) evcon->negative_path = nullptr;
+    RdtLogicalPoint layer_parent_offset = {};
+    bool path_only = evcon->stacking_path && evcon->stacking_path != static_cast<View*>(block);
+    if (evcon->stacking_path == static_cast<View*>(block)) {
+        layer_parent_offset = layout_positioned_parent_offset(block);
+        evcon->stacking_path = nullptr;
+    }
     float pointer_x = evcon->event.mouse_position.x, pointer_y = evcon->event.mouse_position.y;
     RdtMatrix matrix, inverse;
     if (view_get_transform_matrix(static_cast<View*>(block), &matrix)) {
@@ -1230,8 +1232,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
     RdtLogicalPoint fixed = view_geometry_fixed_scroll_adjustment(block);
-    evcon->block.x = pa_block.x + block->x + fixed.x;
-    evcon->block.y = pa_block.y + block->y + fixed.y;
+    evcon->block.x = pa_block.x + block->x + fixed.x - layer_parent_offset.x;
+    evcon->block.y = pa_block.y + block->y + fixed.y - layer_parent_offset.y;
     MousePositionEvent* event = &evcon->event.mouse_position;
     // an invisible box cannot claim the hit; traversal still reaches visible descendants.
     bool self_unhittable = view_visibility_is_hidden(block) || event_view_pointer_events_none(
@@ -1313,7 +1315,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (clipped_out || view_contents_are_skipped(block)) goto RETURN;
 
     if (path_only) {
-        target_stacking_view(evcon, radiant_stack_path_child(block, evcon->negative_path));
+        target_stacking_view(evcon, radiant_stack_path_child(block, evcon->stacking_path));
         goto RETURN;
     }
 
@@ -1469,7 +1471,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
-        float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
+        float x = pa_block.x + block->x + fixed.x - layer_parent_offset.x;
+        float y = pa_block.y + block->y + fixed.y - layer_parent_offset.y;
         BorderProp* border = block->bound ? block->boundary_mut()->border.get() : nullptr;
         Corner radius = {};
         if (border) {
@@ -1484,6 +1487,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             // pointer-events:none makes the underlying control the hit target.
             log_debug("hit on block: %s", block->node_name());
             evcon->target = static_cast<View*>(block);
+            evcon->block.x = x - block->x;
+            evcon->block.y = y - block->y;
             evcon->offset_x = event->x - x;
             evcon->offset_y = event->y - y;
         }
@@ -1590,22 +1595,6 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     log_debug("fired at view %s", span->node_name());
 }
 
-void fire_block_event(EventContext* evcon, ViewBlock* block) {
-    log_debug("fire block event");
-    // fire as inline view first
-    fire_inline_event(evcon, lam::view_require_element(block));
-    if (block->scroller && block->scroll_mut()->pane) {
-        if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
-            scrollpane_mouse_up(evcon, block);
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
-            scroll_state_is_dragging_for_view(event_view_owner_state(static_cast<View*>(block)),
-                                              static_cast<View*>(block))) {
-            scrollpane_drag(evcon, block);
-        }
-    }
-}
-
 static void radiant_notify_scrolled_view(EventContext* evcon, ViewBlock* block,
                                          float old_x, float old_y) {
     DomDocument* doc = event_context_target_document(evcon);
@@ -1625,6 +1614,34 @@ static void radiant_notify_scrolled_view(EventContext* evcon, ViewBlock* block,
     } else {
         radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
                                       "scroll", false, false);
+    }
+}
+
+void fire_block_event(EventContext* evcon, ViewBlock* block) {
+    log_debug("fire block event");
+    // fire as inline view first
+    fire_inline_event(evcon, lam::view_require_element(block));
+    if (block->scroller && block->scroll_mut()->pane) {
+        if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
+            scrollpane_mouse_up(evcon, block);
+        }
+        else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
+            scroll_state_is_dragging_for_view(event_view_owner_state(static_cast<View*>(block)),
+                                              static_cast<View*>(block))) {
+            DocState* state = event_view_owner_state(static_cast<View*>(block));
+            float old_x = 0.0f, old_y = 0.0f;
+            scroll_state_get_position_for_view(state, static_cast<View*>(block),
+                block->scroll()->pane, &old_x, &old_y, nullptr, nullptr);
+            scrollpane_drag(evcon, block);
+            float x = 0.0f, y = 0.0f;
+            scroll_state_get_position_for_view(state, static_cast<View*>(block),
+                block->scroll()->pane, &x, &y, nullptr, nullptr);
+            // thumb motion must publish the same scroll event/geometry update as wheel input.
+            if (x != old_x || y != old_y) {
+                radiant_notify_scrolled_view(evcon, block, old_x, old_y);
+                dom_observers_post_layout();
+            }
+        }
     }
 }
 
@@ -2482,8 +2499,12 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     if (evcon && strcmp(event_name, "scrollbarpress") == 0 && target &&
         target->is_block()) {
         ViewBlock* block = lam::view_require_block(target);
+        DocState* state = event_context_target_state(evcon);
+        ScrollbarPressPart popup_part = state && state->open_dropdown == target
+            ? select_dropdown_scrollbar_part(state, block->form,
+                evcon->event.mouse_button.x, evcon->event.mouse_button.y) : SCROLLBAR_PRESS_NONE;
         mb.put("scrollbarPart", scrollpane_press_part_name(
-            scrollpane_press_part(evcon, block)));
+            popup_part != SCROLLBAR_PRESS_NONE ? popup_part : scrollpane_press_part(evcon, block)));
     }
 
     // InputIntent owns an input event's data. The native RdtEvent union can
@@ -3285,11 +3306,14 @@ static bool settle_template_retransform(EventContext* evcon,
     if (!render_map_has_dirty()) return false;
     RetransformResult results[16];
     int count = 0;
+    uint64_t transform_start = time_now_ns();
     {
         // only published render results follow the runtime's canonical result Input.
         TemplateUiAllocationScope render_scope(context, true);
         count = render_map_retransform_with_results(results, 16);
     }
+    if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice("[TEMPLATE_PROFILE] transform_ms=%.3f",
+        time_elapsed_ms_f(transform_start, time_now_ns()));
     int available = count <= 16 ? count : 16;
     int reported = 0;
     DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
@@ -7141,6 +7165,39 @@ static bool dom_js_rule_is_scope(CssRule* rule, void*) {
     return rule && rule->type == CSS_RULE_SCOPE;
 }
 
+static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data) {
+    return dom_js_selector_mentions_mutation_attribute(selector, (const char*)data);
+}
+
+static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data) {
+    // scope/container/keyframe state has dependencies beyond a style rule's selector list.
+    if (rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_KEYFRAMES)
+        return true;
+    if (dom_js_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
+    if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
+        return false;
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* declaration = rule->data.style_rule.declarations[i];
+        if (declaration && css_value_contains_attr_reference(declaration->value)) return true;
+    }
+    return false;
+}
+
+static bool dom_js_style_has_attribute_value(StyleNode* node, void* data) {
+    bool* found = (bool*)data;
+    if (node->winning_decl && css_value_contains_attr_reference(node->winning_decl->value)) *found = true;
+    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next)
+        if (weak->declaration && css_value_contains_attr_reference(weak->declaration->value)) *found = true;
+    return true;
+}
+
+bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
+    if (!doc || !element || !name) return true;
+    bool found = false;
+    if (element->specified_style) style_tree_foreach(element->specified_style, dom_js_style_has_attribute_value, &found);
+    return found || dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, (void*)name);
+}
+
 static bool dom_js_selector_has_attribute_dependency(CssSelector* selector, void* context) {
     return dom_js_selector_has_relational_mutation_attribute_dependency(
         selector, *(const char**)context);
@@ -8174,6 +8231,13 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
     int mutations = doc->js.mutation_count;
 
     if (mutations == 0) {
+        // scrollIntoView queues geometry work without publishing a DOM mutation.
+        if (doc->pending_scroll_into_view_target.address &&
+                layout_update_document(evcon->ui_context, doc)) {
+            // scrolling may expose skipped content and request a subsequent flow update.
+            doc_state_request_repaint((DocState*)doc->state);
+            evcon->need_repaint = true;
+        }
         log_info("[TIMING] html event handler: %.2fms (no DOM changes)",
                  time_elapsed_ms_f(t_start, t_handler));
         return;
@@ -10261,6 +10325,21 @@ static bool css_declaration_is_color_background_only(CssDeclaration* declaration
         case CSS_PROPERTY_BACKGROUND:
             // Complex backgrounds can need used box dimensions for their paint.
             return declaration->value->type == CSS_VALUE_TYPE_COLOR;
+        // border colors repaint in place; border widths and styles stay with layout.
+        case CSS_PROPERTY_BORDER_COLOR:
+        case CSS_PROPERTY_BORDER_TOP_COLOR:
+        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
+        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+        case CSS_PROPERTY_BORDER_LEFT_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_START_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_END_COLOR:
+        // shadows are ink overflow: layout never reads them.
+        case CSS_PROPERTY_BOX_SHADOW:
+            return true;
         default:
             return false;
     }
@@ -10500,20 +10579,126 @@ static bool document_has_matched_hover_rule_on_path(DomDocument* doc, DocState* 
     return false;
 }
 
-static void refresh_hover_color_background_element(DocState* state,
-                                                   DomDocument* doc,
-                                                   LayoutContext* lycon,
-                                                   View* view) {
-    if (!state || !state->hover_matcher || !doc || !lycon || !view || !view->is_element()) return;
-    DomElement* element = lam::dom_require_element(view);
-    if (!element->specified_style) return;
+static const CssPropertyCode HOVER_BORDER_COLOR_SIDES[4] = {
+    CSS_PROPERTY_BORDER_TOP_COLOR, CSS_PROPERTY_BORDER_RIGHT_COLOR,
+    CSS_PROPERTY_BORDER_BOTTOM_COLOR, CSS_PROPERTY_BORDER_LEFT_COLOR};
 
-    // Direct self-hover rules can only change this element's cascade.
-    radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
+// Re-resolves each side's border color from its cascade winner. A shorthand
+// winner (`border: 1px solid c`) also rewrites width and style, so those keep
+// their laid-out values. False asks for the full restyle: a side color with no
+// winner left came from layout defaults, which only layout can rebuild.
+static bool refresh_hover_border_colors(LayoutContext* lycon, DomElement* element,
+                                        const bool had_winner[4]) {
+    CssDeclaration* winners[4];
+    bool any_winner = false;
+    for (int side = 0; side < 4; side++) {
+        winners[side] = layout_cascaded_physical_declaration(element, HOVER_BORDER_COLOR_SIDES[side]);
+        if (!winners[side]) {
+            if (had_winner[side]) return false;
+            continue;
+        }
+        if (winners[side]->property_code == CSS_PROPERTY_ALL ||
+            winners[side]->pending_shorthand_code > 0) return false;
+        any_winner = true;
+    }
+    if (!any_winner) return true;
 
+    BorderProp* border = layout_ensure_border(lycon, lam::view_require_element(element));
+    Spacing width = border->width;
+    CssEnum styles[4];
+    int64_t style_specificities[4];
+    memcpy(styles, border->styles, sizeof(styles));
+    memcpy(style_specificities, border->style_specificities, sizeof(style_specificities));
+    for (int side = 0; side < 4; side++) {
+        if (!winners[side]) continue;
+        border->colors[side] = {};
+        border->color_specificities[side] = 0;
+    }
+    // cascade priorities order the lanes, so each distinct winner resolves once in any order.
+    for (int side = 0; side < 4; side++) {
+        bool resolved = false;
+        for (int prior = 0; prior < side; prior++) resolved |= winners[prior] == winners[side];
+        if (winners[side] && !resolved)
+            resolve_css_property(winners[side]->property_code, winners[side], lycon);
+    }
+    border->width = width;
+    memcpy(border->styles, styles, sizeof(styles));
+    memcpy(border->style_specificities, style_specificities, sizeof(style_specificities));
+    return true;
+}
+
+// Font-relative shadow and background lengths resolve against the element's
+// own font, which layout would have installed on the context.
+static void refresh_hover_use_element_font(LayoutContext* lycon, View* view) {
+    for (DomNode* node = view; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        ViewSpan* span = lam::view_require_element(static_cast<View*>(node));
+        if (span->font && span->fontp()->font_size > 0.0f) {
+            lycon->font.style = lam::up(span->font);
+            lycon->font.current_font_size = span->fontp()->font_size;
+            return;
+        }
+    }
+}
+
+// The shadow paints outside the box, so both the old and the new shadow extents
+// are marked for repaint. Inline boxes have no ink-overflow helper and restyle in full.
+static bool refresh_hover_box_shadow(DocState* state, LayoutContext* lycon,
+                                     DomElement* element, View* view) {
+    ViewSpan* span = lam::view_require_element(view);
+    CssDeclaration* declaration = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BOX_SHADOW);
+    bool had_shadow = span->bound && span->boundary()->box_shadow;
+    if (!declaration && !had_shadow) return true;
+    ViewBlock* block = lam::view_as_block(view);
+    if (!block) return false;
+
+    float overflow = render_geometry_block_visual_overflow(block);
+    if (declaration) resolve_css_property(CSS_PROPERTY_BOX_SHADOW, declaration, lycon);
+    else span->boundary_mut()->box_shadow = nullptr;
+    float new_overflow = render_geometry_block_visual_overflow(block);
+    if (new_overflow > overflow) overflow = new_overflow;
+
+    RdtLogicalPoint origin = view_geometry_node_document_origin(view);
+    dirty_mark_rect(&state->dirty_tracker, origin.x - overflow, origin.y - overflow,
+                    view->width + 2.0f * overflow, view->height + 2.0f * overflow);
+    return true;
+}
+
+static void hover_border_color_winners(DomElement* element, bool has_winner[4]) {
+    for (int side = 0; side < 4; side++) {
+        has_winner[side] = layout_cascaded_physical_declaration(
+            element, HOVER_BORDER_COLOR_SIDES[side]) != nullptr;
+    }
+}
+
+// Layout copies an inherited color into each element without its own `color`
+// (resolve_css_inherited_properties); refresh that copy from the same declaration.
+static void refresh_hover_inherited_color(LayoutContext* lycon, DomElement* element) {
+    if (style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR)) return;
+    for (DomElement* ancestor = dom_parent_element(element); ancestor;
+         ancestor = dom_parent_element(ancestor)) {
+        CssDeclaration* declaration = ancestor->specified_style
+            ? style_tree_get_declaration(ancestor->specified_style, CSS_PROPERTY_COLOR) : nullptr;
+        if (!declaration || !declaration->value) continue;
+        if (declaration->property_code != CSS_PROPERTY_ALL) {
+            resolve_css_property(CSS_PROPERTY_COLOR, declaration, lycon);
+            return;
+        }
+        // an ancestor's `all: initial` ends inheritance; other `all` values defer further up.
+        if (declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            declaration->value->data.keyword == CSS_VALUE_INITIAL) return;
+    }
+}
+
+// Re-resolves the paint-only properties layout would have set on one element.
+static bool refresh_hover_paint_style(DocState* state, LayoutContext* lycon,
+                                      DomElement* element, const bool had_border_color[4]) {
+    View* view = static_cast<View*>(element);
     LayoutViewScope view_scope(lycon);
     lycon->view = lam::up(view);
     lycon->elmt = lam::up(static_cast<DomNode*>(element));
+    refresh_hover_use_element_font(lycon, view);
     layout_reset_color_background_style_cache(lycon, lam::view_require_element(view));
     static const CssPropertyCode properties[] = {
         CSS_PROPERTY_COLOR,
@@ -10535,31 +10720,88 @@ static void refresh_hover_color_background_element(DocState* state,
             element->specified_style, properties[i]);
         if (declaration) resolve_css_property(properties[i], declaration, lycon);
     }
+    refresh_hover_inherited_color(lycon, element);
+    if (!refresh_hover_border_colors(lycon, element, had_border_color)) return false;
+    if (!refresh_hover_box_shadow(state, lycon, element, view)) return false;
     // paint-only hover skips layout, where transitions normally compare used colors.
     css_transition_resolve(element, lycon);
+    return true;
 }
 
-static void refresh_hover_color_background_path(DocState* state,
+// A color of its own (not inherit/unset/currentColor) shields the subtree from an ancestor's change.
+static bool hover_color_declaration_is_own(const CssDeclaration* declaration) {
+    if (!declaration || !declaration->value || declaration->property_code == CSS_PROPERTY_ALL) return false;
+    const CssValue* value = declaration->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        return keyword != CSS_VALUE_INHERIT && keyword != CSS_VALUE_UNSET &&
+            keyword != CSS_VALUE_CURRENTCOLOR;
+    }
+    return value->type == CSS_VALUE_TYPE_COLOR && value->data.color.type != CSS_COLOR_CURRENTCOLOR;
+}
+
+// A color change reaches every descendant that inherits it: their copied color
+// and the currentColor-derived borders and shadows layout resolved from it.
+static bool refresh_hover_inheriting_descendants(DocState* state, LayoutContext* lycon,
+                                                 DomElement* parent) {
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* element = lam::dom_require_element(child);
+        if (element->specified_style) {
+            if (hover_color_declaration_is_own(
+                    style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR))) continue;
+            bool has_border_color[4];
+            hover_border_color_winners(element, has_border_color);
+            if (!refresh_hover_paint_style(state, lycon, element, has_border_color)) return false;
+        }
+        if (!refresh_hover_inheriting_descendants(state, lycon, element)) return false;
+    }
+    return true;
+}
+
+static bool refresh_hover_color_background_element(DocState* state,
+                                                   DomDocument* doc,
+                                                   LayoutContext* lycon,
+                                                   View* view) {
+    if (!state || !state->hover_matcher || !doc || !lycon || !view || !view->is_element()) return true;
+    DomElement* element = lam::dom_require_element(view);
+    if (!element->specified_style) return true;
+
+    bool had_border_color[4];
+    hover_border_color_winners(element, had_border_color);
+    CssDeclaration* color = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR);
+    // Direct self-hover rules can only change this element's cascade.
+    radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
+    if (!refresh_hover_paint_style(state, lycon, element, had_border_color)) return false;
+    // compare declarations: a color transition still paints the old used value here.
+    return style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR) == color ||
+        refresh_hover_inheriting_descendants(state, lycon, element);
+}
+
+static bool refresh_hover_color_background_path(DocState* state,
                                                 DomDocument* doc,
                                                 LayoutContext* lycon,
                                                 View* target) {
-    if (!target) return;
+    if (!target) return true;
     ArrayList* path = build_view_stack(nullptr, target);
-    if (!path) return;
-    for (int i = 0; i < path->length; i++) {
-        refresh_hover_color_background_element(
+    if (!path) return false;
+    bool refreshed = true;
+    for (int i = 0; refreshed && i < path->length; i++) {
+        refreshed = refresh_hover_color_background_element(
             state, doc, lycon, static_cast<View*>(path->data[i]));
     }
     arraylist_free(path);
+    return refreshed;
 }
 
-static void refresh_hover_color_background_paths(DocState* state,
+// False when the paint-only refresh could not finish; the caller restyles in full.
+static bool refresh_hover_color_background_paths(DocState* state,
                                                  DomDocument* doc,
                                                  View* prev_hover,
                                                  View* new_target) {
     UiContext* uicon = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
     if (!state || !state->hover_matcher || !doc || !uicon || !doc->view_tree ||
-        !doc->view_tree->prop_pool) return;
+        !doc->view_tree->prop_pool) return false;
 
     LayoutContext lycon = {};
     lycon.doc = lam::up(doc);
@@ -10571,8 +10813,8 @@ static void refresh_hover_color_background_paths(DocState* state,
     lycon.sizing_mode = radiant::SizingMode::InherentSize;
     setup_font(uicon, &lycon.font, &uicon->default_font);
 
-    refresh_hover_color_background_path(state, doc, &lycon, prev_hover);
-    refresh_hover_color_background_path(state, doc, &lycon, new_target);
+    return refresh_hover_color_background_path(state, doc, &lycon, prev_hover) &&
+        refresh_hover_color_background_path(state, doc, &lycon, new_target);
 }
 
 static void apply_document_condition_restyle(DomDocument* doc, DocState* state, uint32_t reason) {
@@ -10669,7 +10911,8 @@ static DomDocument* hover_resolve_document(View* view) {
 static void sync_hover_pseudo_state_after_transition(DocState* state,
                                                      View* prev_hover,
                                                      View* new_target) {
-    if (!state) return;
+    // retained template redraws can re-hit the same node without a hover transition.
+    if (!state || prev_hover == new_target) return;
 
     DomDocument* doc = hover_resolve_document(new_target);
     if (!doc) doc = hover_resolve_document(prev_hover);
@@ -10688,9 +10931,8 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
         paint_only_hover = false;
     }
     if (hover_styles_active || state->hover_styles_active) {
-        if (paint_only_hover) {
-            refresh_hover_color_background_paths(state, doc, prev_hover, new_target);
-        } else {
+        if (!paint_only_hover ||
+            !refresh_hover_color_background_paths(state, doc, prev_hover, new_target)) {
             radiant_recascade_document(doc);
             if (doc->root) {
                 reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
@@ -11660,7 +11902,7 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
     if (option_count <= 0) option_count = 1;
 
     // Maximum visible options
-    int max_visible = 10;
+    int max_visible = FormDefaults::SELECT_MAX_VISIBLE_OPTIONS;
     int visible_count = (option_count < max_visible) ? option_count : max_visible;
 
     // the popup uses the native option row, not an author-sized closed control
@@ -11705,6 +11947,7 @@ static void select_open_dropdown(UiContext* uicon, DocState* state,
     // Popup state stays in the top-level logical viewport; rendering performs
     // the sole logical-to-surface conversion.
     select_refresh_dropdown_geometry(uicon, state);
+    doc_state_reveal_dropdown_option(state, form_control_get_hover_index(state, select_view));
 }
 
 
@@ -11746,8 +11989,11 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     }
 
     // Calculate which option was clicked
-    float option_height = form_select_dropdown_row_height(select->form);
-    int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height); // INT_CAST_OK: option array index
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form);
+    if (select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y) != SCROLLBAR_PRESS_NONE)
+        return true;
+    float option_height = geometry.row_height;
+    int clicked_index = (int)((mouse_y - state->dropdown_y + geometry.scroll_y) / option_height); // INT_CAST_OK: option array index
 
     log_debug("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
              option_height, clicked_index, select->form->option_count);
@@ -11776,7 +12022,8 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     if (!select) return;
 
     // Check if mouse is within dropdown popup
-    if (!dropdown_point_inside(state, mouse_x, mouse_y)) {
+    if (!dropdown_point_inside(state, mouse_x, mouse_y) ||
+        select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y) != SCROLLBAR_PRESS_NONE) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != -1) {
             form_control_set_hover_index(state, static_cast<View*>(select), -1);
         }
@@ -11784,12 +12031,12 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 
     // Calculate which option is hovered
-    float option_height = form_select_dropdown_row_height(select->form);
-    int hover_index = (int)((mouse_y - state->dropdown_y) / option_height); // INT_CAST_OK: option array index
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form);
+    int hover_index = (int)((mouse_y - state->dropdown_y + geometry.scroll_y) / geometry.row_height); // INT_CAST_OK: option array index
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != hover_index) {
-            form_control_set_hover_index(state, static_cast<View*>(select), hover_index);
+            form_control_set_hover_index(state, static_cast<View*>(select), hover_index, false);
         }
     }
 }
@@ -13744,6 +13991,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         evcon.event.mouse_position = *motion;
         log_debug("Mouse event at (%.1f, %.1f)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
+        DocState* popup_state = event_context_target_state(&evcon);
+        if (popup_state && popup_state->open_dropdown && popup_state->dropdown_dragging) {
+            ViewBlock* select = lam::view_require_block(popup_state->open_dropdown);
+            SelectDropdownGeometry geometry = select_dropdown_geometry(popup_state, select->form);
+            float travel = popup_state->dropdown_height - 2.0f - geometry.thumb_height;
+            if (travel > 0.0f) doc_state_set_dropdown_scroll(popup_state,
+                popup_state->dropdown_drag_start_scroll +
+                (mouse_y - popup_state->dropdown_drag_start_y) * geometry.scroll_max / travel);
+            break;
+        }
         // The select popup is a native overlay, so a row hover must not send
         // mousemove to the editor or controls underneath it.
         if (dropdown_point_inside(event_context_target_state(&evcon), mouse_x, mouse_y)) {
@@ -14250,9 +14507,40 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
         }
 
+        // scrollbar release is captured even outside the popup and cannot commit a row.
+        if (state && state->dropdown_scrollbar_pressed && event->type == RDT_EVENT_MOUSE_UP &&
+            btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+            doc_state_set_dropdown_scrollbar_press(state, false, false, mouse_y);
+            break;
+        }
+
         // Popup rows receive the press and release before the underlying DOM.
         // The select behavior template still owns the option commit.
         if (dropdown_point_inside(state, mouse_x, mouse_y)) {
+            ViewBlock* select = lam::view_require_block(state->open_dropdown);
+            ScrollbarPressPart part = select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y);
+            if (part != SCROLLBAR_PRESS_NONE) {
+                evcon.target = state->open_dropdown;
+                if (event->type == RDT_EVENT_MOUSE_DOWN && btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                    bool prevented = radiant_dispatch_button_pointer_event(&evcon, evcon.target,
+                        "pointerdown", mouse_x, mouse_y, btn_event, 1);
+                    prevented |= radiant_dispatch_button_mouse_event(&evcon, evcon.target,
+                        "mousedown", mouse_x, mouse_y, btn_event, 1, 1);
+                    if (!prevented) {
+                        uint64_t epoch = s_scroll_op_epoch;
+                        radiant_dispatch_behavior_scrollbar_press(&evcon, evcon.target);
+                        if (s_scroll_op_epoch != epoch) {
+                            bool drag = strcmp(s_scroll_op_name, "drag") == 0;
+                            doc_state_set_dropdown_scrollbar_press(state, true, drag, mouse_y);
+                            if (strcmp(s_scroll_op_name, "pageBackward") == 0)
+                                doc_state_set_dropdown_scroll(state, state->dropdown_scroll_y - state->dropdown_height * 0.85f);
+                            else if (strcmp(s_scroll_op_name, "pageForward") == 0)
+                                doc_state_set_dropdown_scroll(state, state->dropdown_scroll_y + state->dropdown_height * 0.85f);
+                        }
+                    }
+                }
+                break;
+            }
             if (event->type == RDT_EVENT_MOUSE_UP &&
                 btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
                 handle_dropdown_option_click(&evcon, mouse_x, mouse_y);
@@ -15274,6 +15562,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
+        DocState* popup_state = event_context_target_state(&evcon);
+        bool popup_scroll = dropdown_point_inside(popup_state, mouse_x, mouse_y);
+        if (popup_scroll) evcon.target = popup_state->open_dropdown;
+
         // Forward scroll to layer-mode webview
         if (evcon.target && evcon.target->is_element() && evcon.target->is_block()) {
             // SVG paint hits target leaf geometry without a CSS block box;
@@ -15308,7 +15600,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             radiant_dispatch_behavior_scroll_wheel(&evcon, evcon.target);
             if (s_scroll_op_epoch != scroll_epoch &&
                 strcmp(s_scroll_op_name, "wheel") == 0) {
-                apply_wheel_scroll_operation(&evcon, evcon.target);
+                if (popup_scroll) doc_state_set_dropdown_scroll(popup_state,
+                    popup_state->dropdown_scroll_y - scroll->yoffset * RDT_WHEEL_PIXEL_STEP);
+                else apply_wheel_scroll_operation(&evcon, evcon.target);
             }
         } else {
             log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);

@@ -474,7 +474,8 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
 void layout_advance_text_balance_paragraph(LayoutContext* lycon);
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
-                                                 bool content_only = false);
+                                                 bool content_only = false,
+                                                 bool preserve_layout = false);
 IntrinsicSizes flex_measure_intrinsic_item_widths(
     LayoutContext* lycon, ViewBlock* container,
     bool row_flex, bool wrapping, int* item_count);
@@ -721,9 +722,8 @@ extern int64_t g_layout_flex_retained_count;
 // formatting_root also admits relative boxes and absolute boxes positioned
 // inside the subtree, which an independent formatting context (a flex item) contains.
 bool layout_retained_subtree_is_stable(DomNode* root, bool formatting_root);
-// Only the committed pass of an incremental layout without running animations
-// may keep retained geometry.
-bool layout_can_retain_geometry(LayoutContext* lycon);
+// scalar queries may also reuse inputs during measurement; live geometry requires a committed pass.
+bool layout_can_retain_geometry(LayoutContext* lycon, bool scalar_query = false);
 // Normal-flow collapse consumed this element's used boundary, so its next
 // committed style pass resolves it afresh (dom_node_resolve_style).
 bool layout_boundary_consumed_by_flow(DomElement* element);
@@ -776,19 +776,21 @@ struct CssFontKey {
 CssFontKey css_font_key(const FontProp* font);
 bool css_font_keys_equal(const CssFontKey& a, const CssFontKey& b);
 
-// tier-3: layout-transient, valid within one measurement generation
+// tier-2: scalar queries retained while subtree, inherited and environment inputs match.
 struct IntrinsicWidthCacheEntry {
     IntrinsicSizes sizes;
     CacheEntry context;
     SizeF block_size;
     SizeF parent_size;
     uint32_t generation;
+    uint32_t layout_generation, input_revision, parent_revision;
     CssFontKey input_font;
     uint64_t style_epoch;
     uint64_t font_generation;
     uint32_t style_version;
     float root_font_size, raster_scale;
     bool context_independent;
+    bool retain_across_passes;
 };
 struct CssResolvedStyle;
 struct IntrinsicHeightCache;
@@ -838,16 +840,23 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
 
 void intrinsic_width_history_release(LayoutCache* cache, Pool* pool);
 
-inline void layout_cache_clear(LayoutCache* cache, Pool* pool) {
+inline void layout_cache_clear(LayoutCache* cache, Pool* pool, bool retain_widths = false) {
     // intrinsic heights and computed CSS carry their own complete input keys.
     CssResolvedStyle* resolved = cache->resolved_style;
     IntrinsicHeightCache* heights = cache->intrinsic_heights;
     FlexMeasuredFlow* flow = cache->measured_flex_flow;
-    intrinsic_width_history_release(cache, pool);
+    IntrinsicWidthHistory* history = cache->intrinsic_width_history;
+    IntrinsicWidthCacheEntry widths[4];
+    if (retain_widths) memcpy(widths, cache->intrinsic_widths, sizeof(widths));
+    else intrinsic_width_history_release(cache, pool);
     layout_cache_init(cache, cache ? cache->generation : 0);
     cache->resolved_style = lam::own(resolved);
     cache->intrinsic_heights = lam::own(heights);
     cache->measured_flex_flow = lam::own(flow);
+    if (retain_widths) {
+        memcpy(cache->intrinsic_widths, widths, sizeof(widths));
+        cache->intrinsic_width_history = lam::own(history);
+    }
 }
 
 void intrinsic_height_cache_release(LayoutCache* cache, Pool* pool);
@@ -4829,12 +4838,12 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 void layout_parent_to_containing_block_offset(ViewBlock* block,
                                               ViewBlock* containing_block,
                                               float* out_x, float* out_y);
+RdtLogicalPoint layout_positioned_parent_offset(View* layer);
 void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
 void re_resolve_abs_children_vertical(LayoutContext* lycon,
-                                      ViewBlock* containing_block,
-                                      bool resolve_inset_stretch = true);
+                                      ViewBlock* containing_block);
 void re_resolve_abs_descendant_widths(View* root);
 void layout_finalize_static_positioned_abs_descendants(ViewBlock* root);
 void layout_shift_static_positioned_abs_descendants(ViewElement* root, float delta_x, float delta_y);

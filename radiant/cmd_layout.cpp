@@ -7,6 +7,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/mem_context.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/arraylist.hpp"
 #include "../lib/time_util.h"
 #include "../lib/uv_loop.h"
 #include "../lib/escape.h"
@@ -52,6 +53,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/dom/dom.h"      // dom_find_element_by_id for focus restore
 #include "../lambda/dom/dom_cssom.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -2336,7 +2338,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
     DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config,
-    CookieJar* top_level_cookie_jar, bool print_media) {
+    CookieJar* top_level_cookie_jar, bool print_media, bool xhtml_source = false) {
     auto t_start = time_now_ns();
 
     log_mem_stage("load_html: enter");
@@ -2347,7 +2349,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     char* html_filepath = url_to_local_path(html_url);
-    bool xhtml = !html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars);
+    bool xhtml = xhtml_source || (!html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars));
 
     // Step 1: Parse HTML with Lambda parser
     // If html_source is provided, use it directly; otherwise read from file or download
@@ -2725,7 +2727,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 }
 
 DomDocument* load_html_source_doc(const char* html_source, int viewport_width, int viewport_height,
-        const DocumentJsHostConfig* host_config, bool print_media, Url* base_url) {
+        const DocumentJsHostConfig* host_config, bool print_media, Url* base_url, bool xhtml) {
     if (!html_source || !html_source[0]) return nullptr;
     Url* source_url = base_url ? url_parse(url_get_href(base_url)) : get_current_dir();
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "radiant.render.document");
@@ -2734,8 +2736,9 @@ DomDocument* load_html_source_doc(const char* html_source, int viewport_width, i
         if (pool) pool_destroy(pool);
         return nullptr;
     }
-    DomDocument* doc = load_lambda_html_doc(source_url, nullptr, viewport_width, viewport_height,
-        pool, html_source, false, false, host_config, print_media);
+    // explicit XML input preserves native page controls and foreign namespaces through the shared loader.
+    DomDocument* doc = load_lambda_html_doc_profiled(source_url, nullptr, false, viewport_width, viewport_height,
+        pool, html_source, false, false, nullptr, nullptr, host_config, nullptr, print_media, xhtml);
     if (!doc) {
         url_destroy(source_url);
         pool_destroy(pool);
@@ -4875,7 +4878,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
     layout_preserve_rebuilt_owners(doc, old_root, new_root);
     if (old_root && old_root != new_root) {
         // Rebase canonical ranges and the retained #document links before old nodes retire.
-        if (state) dom_mutation_pre_remove(state, static_cast<DomNode*>(old_root));
         DomNode* parent = old_root->parent;
         if (parent && parent->is_element()) {
             if (!dom_node_replace_in_parent(parent->as_element(), old_root, new_root)) {
@@ -4887,6 +4889,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
         }
     }
     doc->root = lam::up(new_root);
+    if (state && old_root && old_root != new_root)
+        dom_reconcile_post_replace(state, old_root, new_root);
 
     bool stylesheet_changed = false;
     if (old_root != new_root) {
@@ -4930,7 +4934,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     if (state) {
         state->dirty_tracker.full_repaint = true;
-        doc_state_mark_dirty(state);
+        doc_state_request_repaint(state);
         doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
@@ -4941,6 +4945,136 @@ void rebuild_lambda_doc(UiContext* uicon) {
         time_elapsed_ms_f(t_dom, t_css),
         time_elapsed_ms_f(t_css, t_layout),
         time_elapsed_ms_f(t_start, t_end));
+}
+
+// retain equal branches while advancing source identities for nested handlers and ranges.
+static bool render_metadata_attribute(const char* key, ItemReader value) {
+    return key && (strncmp(key, "data-", 5) == 0 || strncmp(key, "aria-", 5) == 0) &&
+        value.isString();
+}
+
+static bool render_metadata_only(ElementReader before, ElementReader after) {
+    auto check = [](ElementReader from, ElementReader to) {
+        auto attrs = from.attrs();
+        const char* key; ItemReader value;
+        while (attrs.next(&key, &value)) {
+            ItemReader other = to.get_attr(key);
+            if (to.has_attr(key) && fn_eq_strict(value.item(), other.item()) == BOOL_TRUE) continue;
+            if (!render_metadata_attribute(key, value) ||
+                (to.has_attr(key) && !render_metadata_attribute(key, other))) return false;
+        }
+        return true;
+    };
+    return check(before, after) && check(after, before);
+}
+
+struct RenderRetainedBranch { Item previous; Item current; bool equal; };
+
+static bool render_source_is_current(DomDocument* doc, Item source,
+        DomElement* parent = nullptr, unsigned depth = 0) {
+    TypeId kind = get_type_id(source);
+    if (kind != LMD_TYPE_ELEMENT && kind != LMD_TYPE_ARRAY) return true;
+    if (depth >= 128) return false;
+    if (kind == LMD_TYPE_ELEMENT) {
+        DomElement* native = element_dom_map_lookup(doc->element_dom_map, source.element);
+        if (!native || dom_element_render_source(native) != source.element ||
+                (parent && native->parent != parent)) {
+            if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice(
+                "[TEMPLATE_PROFILE] source_mismatch tag=%s native=%p expected_parent=%p actual_parent=%p",
+                ((TypeElmt*)source.element->type)->name.str, native, parent, native ? native->parent.get() : nullptr);
+            return false;
+        }
+        if (layout_is_svg_viewport(native->tag())) return true;
+        parent = native;
+    }
+    List* children = (List*)source.array;
+    for (int64_t i = 0; i < children->length; i++)
+        if (!render_source_is_current(doc, children->items[i], parent, depth + 1)) return false;
+    return true;
+}
+
+static bool collect_render_frontier(DomDocument* doc, const RetransformResult& change,
+        lam::ArrayList<RetransformResult>& frontier,
+        lam::ArrayList<RenderRetainedBranch>& retained, unsigned depth = 0) {
+    Item previous = change.old_result, current = change.new_result;
+    if (fn_eq_strict(previous, current) == BOOL_TRUE) {
+        // nested updates and layout fixups can change the correspondence below an equal source root.
+        if (!render_source_is_current(doc, previous)) return frontier.push_back(change);
+        return retained.push_back({previous, current, true});
+    }
+    bool descend = depth < 128 && get_type_id(previous) == LMD_TYPE_ELEMENT &&
+        get_type_id(current) == LMD_TYPE_ELEMENT && previous.element->type && current.element->type;
+    ElementReader before(previous), after(current);
+    if (descend) {
+        auto* a = (TypeElmt*)previous.element->type;
+        auto* b = (TypeElmt*)current.element->type;
+        DomElement* native = element_dom_map_lookup(doc->element_dom_map, previous.element);
+        // native viewports consume complete source trees.
+        descend = a->ns == b->ns && strview_equal(&a->name, b->name.str) &&
+            before.childCount() == after.childCount() &&
+            native && !layout_is_svg_viewport(native->tag()) &&
+            render_metadata_only(before, after);
+    }
+    if (descend) {
+        // text or fragment changes keep their enclosing element as the replacement unit.
+        for (int64_t i = 0; i < before.childCount(); i++) {
+            Item a = before.childAt(i).item(), b = after.childAt(i).item();
+            DomElement* child = get_type_id(a) == LMD_TYPE_ELEMENT
+                ? element_dom_map_lookup(doc->element_dom_map, a.element) : nullptr;
+            DomElement* native = element_dom_map_lookup(doc->element_dom_map, previous.element);
+            if (get_type_id(a) == LMD_TYPE_ELEMENT && (!child || child->parent != native)) {
+                descend = false;
+                break;
+            }
+            if (fn_eq_strict(a, b) != BOOL_TRUE &&
+                (get_type_id(a) != LMD_TYPE_ELEMENT || get_type_id(b) != LMD_TYPE_ELEMENT)) {
+                descend = false;
+                break;
+            }
+        }
+    }
+    if (!descend) return frontier.push_back(change);
+    if (!retained.push_back({previous, current, false})) return false;
+    for (int64_t i = 0; i < before.childCount(); i++) {
+        RetransformResult child = change;
+        child.old_result = before.childAt(i).item();
+        child.new_result = after.childAt(i).item();
+        if (!collect_render_frontier(doc, child, frontier, retained, depth + 1)) return false;
+    }
+    return true;
+}
+
+static void retain_render_branch(DomDocument* doc, const RenderRetainedBranch& branch) {
+    if (branch.equal) {
+        dom_rebind_equal_render_result(doc, branch.previous, branch.current);
+        return;
+    }
+    DomElement* node = element_dom_map_lookup(doc->element_dom_map, branch.previous.element);
+    if (!node) return;
+    ElementReader before(branch.previous), after(branch.current);
+    auto attrs = before.attrs();
+    const char* key; ItemReader value;
+    while (attrs.next(&key, &value)) {
+        if (after.has_attr(key)) continue;
+        const char* old = node->get_attribute(key);
+        node->remove_attribute(key);
+        dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+    }
+    attrs = after.attrs();
+    while (attrs.next(&key, &value)) {
+        if (before.has_attr(key) && fn_eq_strict(before.get_attr(key).item(), value.item()) == BOOL_TRUE) continue;
+        const char* old = node->get_attribute(key);
+        if (!radiant_attribute_has_css_dependency(doc, node, key) &&
+            dom_element_set_non_style_metadata(node, key, value.cstring())) {
+            // non-style metadata remains observable without invalidating ancestor layout.
+            doc->mutation_epoch++;
+            dom_observers_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+        } else {
+            node->set_attribute(key, value.cstring());
+            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+        }
+    }
+    dom_rebind_render_element(doc, branch.previous.element, branch.current.element);
 }
 
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count) {
@@ -4955,6 +5089,29 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     if (!html_elem) {
         log_error("rebuild_lambda_doc_incremental: no html_root in document");
         return;
+    }
+
+    lam::ArrayList<RetransformResult> frontier(MEM_CAT_TEMP);
+    lam::ArrayList<RenderRetainedBranch> retained(MEM_CAT_TEMP);
+    bool can_retain = doc->element_dom_map && doc->root;
+    for (int i = 0; can_retain && i < result_count; i++)
+        can_retain = collect_render_frontier(doc, results[i], frontier, retained);
+    // allocation failure falls back before any identity handoff or native mutation.
+    if (can_retain) {
+        for (size_t i = 0; i < retained.size(); i++) retain_render_branch(doc, retained[i]);
+        // equal branches can have new template inputs and still need their render callbacks.
+        for (int i = 0; i < result_count; i++) {
+            if (get_type_id(results[i].new_result) == LMD_TYPE_ELEMENT) {
+                DomElement* node = element_dom_map_lookup(doc->element_dom_map, results[i].new_result.element);
+                if (node) radiant_queue_template_render_events(doc, node);
+            }
+        }
+        results = frontier.data();
+        result_count = (int)frontier.size(); // INT_CAST_OK: bounded collection length, not layout geometry.
+        if (!result_count) {
+            if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(uicon, doc);
+            return;
+        }
     }
 
     // Imperative DOM writes made earlier in this handler turn (e.g. set_inner_html
@@ -5074,9 +5231,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                 parent_dom->last_child = lam::up(static_cast<DomNode*>(new_dom));
             }
         } else {
-            // Rebase live Range endpoints before the old subtree is detached;
-            // the splice helper does not publish a DOM removal mutation.
-            if (state) dom_mutation_pre_remove(state, static_cast<DomNode*>(old_dom));
             if (!dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom),
                                             static_cast<DomNode*>(new_dom))) {
                 log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
@@ -5088,6 +5242,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             doc->root = lam::up(new_dom);
             doc->input->root = {.element = html_elem};
         }
+        if (state && old_dom != new_dom) dom_reconcile_post_replace(state, old_dom, new_dom);
 
         // template splices bypass DOM mutation records; retire detached sheets and publish replacements.
         if (old_dom != new_dom) {
@@ -5141,10 +5296,15 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     if (state) state_store_prune_after_reflow(state);
     auto t_layout = time_now_ns();
 
+    if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice("[TEMPLATE_PROFILE] patch_ms=%.3f layout_ms=%.3f",
+        time_elapsed_ms_f(t_start, t_dom_css), time_elapsed_ms_f(t_dom_css, t_layout));
+
     if (state) {
         dirty_clear(&state->dirty_tracker);
 
         state->dirty_tracker.full_repaint = true;
+        // retained hover/focus can remain unchanged, so the rebuild owns its paint request.
+        doc_state_request_repaint(state);
     }
 
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
@@ -5154,7 +5314,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
 
     if (state) {
-        doc_state_mark_dirty(state);
         doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }

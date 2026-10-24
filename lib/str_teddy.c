@@ -1,5 +1,5 @@
 /**
- * str_teddy.c — Teddy multi-literal search (GRP29, vibe/Lambda_Lib_Grep.md §5.3).
+ * str_teddy.c — Teddy multi-literal search (GRP29, vibe/lib/Lib_Grep.md §5.3).
  *
  * Teddy (from Intel's Hyperscan) finds the leftmost occurrence of any of a
  * small set of literals in one pass. Each literal goes into one of 8 buckets

@@ -61,7 +61,10 @@ relationships; note diagnostics retain that part's path.
 The user-supplied `biz-plan1.docx` and `biz-plan2.docx` are covered by
 `docx_business_plans.ls`. Their `.body.txt` sidecars independently concatenate
 the main WordprocessingML part's `w:t` nodes in document order; the golden
-compares every non-layout character with extracted text. It also checks both
+compares every non-layout character with extracted text. The larger sidecar was
+restored directly from `word/document.xml`, by concatenating the text of all
+`{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t` nodes with
+Python's `zipfile` and `xml.etree.ElementTree`; it is not converter output. It also checks both
 embedded images per document, all one/six tables, the larger plan's cached TOC
 links and its 51 omitted trailing grid slots. The documents remain unchanged.
 
@@ -85,3 +88,60 @@ source order, signed offsets, paragraph indentation, inset image cropping and
 literal/theme rectangle fills. `drawing-unsupported.docx` retains diagnostics
 for rotated/gradient shapes, invalid crops and page-relative placement, while
 an unsupported modern shape keeps its compatibility fallback.
+
+`legacy-graphics.docx` checks SmartArt's saved node text, paragraph/line breaks,
+escaped markup, and OLE raster previews selected by `ShapeID`. Presentation
+points, document points and VML shape/formula metadata are not visible text.
+The absent OLE binary deliberately proves that static previews do not read the
+embedded object (S1.8). The external/missing/root variants check bounded
+diagnostics and placeholders without loading external relationships.
+
+The unchanged `large-doc-15-MB-docx-file.docx` was checked directly; its
+`saved-graphics.docx` reproduction is covered by `docx_legacy_graphics.ls` and
+`doc_viewer_docx_legacy_graphics.json`. Its six
+raster drawings and cached chart remain visible. The SmartArt layout now renders
+from its composite/linear/text instructions, constraints and theme styles; the
+embedded video's saved EMF icon and `Wildlife.wmv` label render as SVG with a
+BMP alpha image. This file imports in strict unsupported mode with zero
+diagnostics (D7.2.4v4, S1.8). Unimplemented SmartArt algorithms and EMF records
+still produce diagnostics and retain the established text/object fallback.
+
+`drawing-edge-fallback.docx` covers a 2px column offset with 6px wrapping
+clearance, a complete saved raster compatibility representation, and empty
+header/footer metadata including an uncached PAGE field (S1.8). The 7px
+offset in `drawing-interior.docx` remains unsupported because text could fit on
+both sides of the interior drawing. `drawing-fallback-partial.docx` retains
+diagnostics for a fallback containing two images; `visible-stories.docx`
+retains warnings for cached footer text, a visible border and shading.
+`invalid-header-root.docx` verifies structural validation of inspected stories.
+
+The unchanged `large-doc-cbbac18c-49b5-4751-943a-3b033aa654be.docx` was checked
+directly; its `saved-anchors.docx` reproduction is covered by
+`docx_edge_fallbacks.ls` and `doc_viewer_docx_edge_fallbacks.json`. All nine
+saved images remain, including five compatibility fallbacks, and its portrait
+now wraps with its source offset/clearance. Empty footer metadata no longer
+warns. Its eight page-relative drawings still use flow presentation and retain
+placement diagnostics: the flowing converter does not implement Word page
+assignment or page-relative coordinates. These are actual remaining limits,
+separate from the eight avoidable warnings fixed here (D7.2.4v4).
+
+`diagram-composite.docx` independently varies template names, proportions,
+right-to-left child placement, connection ordering and shade colors.
+`diagram-cycle.docx` and `diagram-unsupported.docx` keep text with diagnostics
+for cyclic data or an unsupported algorithm. `metafile-preview.docx` carries a
+generated 2×2 premultiplied alpha bitmap plus a UTF-16 label containing a
+surrogate pair and escaped markup. `metafile-truncated.docx` and the standalone
+EMF fixtures exercise malformed input. `docx_graphics_render.ls` also checks
+unknown record rejection and shared UTF-16 validation. The UTF-16 decoder is
+shared with IMAP mailbox-name parsing rather than copied (S2.5.8).
+
+The two `saved-*.docx` archives retain the original XML, relationships and EMF
+preview while replacing raster payloads with the generated blue test pixel and
+omitting embedded object/font payloads. The original large files are ignored
+local inputs; default regressions use these small checked-in reproductions.
+Regenerate them from the original inputs with:
+
+```bash
+python3 test/input/docx/minimize.py test/input/docx/large-doc-15-MB-docx-file.docx test/input/docx/saved-graphics.docx
+python3 test/input/docx/minimize.py test/input/docx/large-doc-cbbac18c-49b5-4751-943a-3b033aa654be.docx test/input/docx/saved-anchors.docx
+```

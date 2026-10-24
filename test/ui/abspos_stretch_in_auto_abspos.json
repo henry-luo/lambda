@@ -1,0 +1,12 @@
+{
+  "name": "A top+bottom stretched abspos child fills its auto-height abspos parent, and a later bottom-anchored sibling is placed",
+  "html": "test/ui/abspos_stretch_in_auto_abspos.html",
+  "viewport": {"width": 420, "height": 320},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#item"}, "x": 40, "y": 40, "width": 200, "height": 90},
+    {"type": "assert_rect", "target": {"selector": "#ring"}, "x": 36, "y": 36, "width": 208, "height": 98},
+    {"type": "assert_rect", "target": {"selector": "#dot"}, "x": 230, "y": 120, "width": 10, "height": 10},
+    {"type": "assert_pixel", "x": 37, "y": 128, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 235, "y": 125, "max_r": 20, "max_g": 20, "min_b": 240}
+  ]
+}

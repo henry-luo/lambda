@@ -1,0 +1,12 @@
+{
+  "name": "A nested inline-flex box's nowrap text counts as unbreakable in its flex item's automatic minimum",
+  "html": "test/ui/flex_nested_nowrap_min_content.html",
+  "viewport": {"width": 320, "height": 120},
+  "events": [
+    {"type": "assert_script", "js": "document.getElementById('ref').getBoundingClientRect().width > 110"},
+    {"type": "assert_script", "js": "Math.abs(document.getElementById('span-b').getBoundingClientRect().width - document.getElementById('ref').getBoundingClientRect().width) < 0.5"},
+    {"type": "assert_script", "js": "Math.abs(document.getElementById('span-acts').getBoundingClientRect().width - document.getElementById('span-b').getBoundingClientRect().width) < 0.5"},
+    {"type": "assert_script", "js": "Math.abs(document.getElementById('button-acts').getBoundingClientRect().width - document.getElementById('button-b').getBoundingClientRect().width) < 0.5"},
+    {"type": "assert_script", "js": "document.getElementById('button-acts').getBoundingClientRect().width > 110"}
+  ]
+}

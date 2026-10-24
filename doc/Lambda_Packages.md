@@ -73,7 +73,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, a deck clock with host control, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
-| `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
+| `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda view` on `doc_viewer.html` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor.draw` | `lambda.editor.draw`, `lambda.editor.draw.view` | Library, initial native profile | Programmable vertices/edges, ports, custom paths, topology, shared transactions, archives, SVG and retained canvases | `lambda demo draw`; see [drawing API](../lmd/package/editor/draw/README.md) |
 | `editor.raster` | `lambda.editor.raster`, `lambda.editor.raster.view` | Library, initial layered profile | Raster layer/group commands, masks, translation, shared history and retained canvas presentation | `lambda demo photos`; see [raster API](../lmd/package/editor/raster/README.md) |
@@ -1325,9 +1325,10 @@ for a query helper, a focus helper and an E224 example.
 
 ### 10.4 `doc` — the bundled document viewer
 
-Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home;
-`lambda demo` with no name opens the adjacent `doc_viewer.html` startup splash.
-Named demos use `lambda demo <name>`; see the [demo catalog](../test/demo/README.md).
+Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home; the
+adjacent `doc_viewer.html` is its startup splash. `lambda demo` with no name opens
+the demo index, and named demos use `lambda demo <name>`; see the
+[demo catalog](../test/demo/README.md).
 The viewer browses the current working directory and loads documents on selection. Its
 Seti icon font and license ship in `package/doc/icons/`, and its bundled math fonts
 come from `package/doc/math/fonts/`. These application resources belong to the shipped
@@ -2109,12 +2110,13 @@ pn main() {
 | Module | Contents |
 |---|---|
 | `lambda.mail.imap` | `mailbox_name` (modified UTF-7), `list_entry`, `select_state`, `fetch_items`, `uid_set`, and the `is_list`/`is_fetch` tests over response tokens |
-| `lambda.mail.mime` | `text_body` (format=flowed unwrapped), `html_body`, `attachments`, `cid_parts`, `snippet`, `search_text` over a message read with `input(…, 'eml')` |
-| `lambda.mail.store` | store paths, `safe_name` (distinct file names, case-insensitive file systems included), `server_id`, `load_index`, `save_index` (atomic), and the index updates `merge_entries`, `refresh_entries`, `with_files` |
-| `lambda.mail.sync` | `capabilities`, `mailboxes`, `sync_mailbox` (headers of new messages, flags of known ones, expunges, UIDVALIDITY resets), `fetch_message` (the body and its search sidecar), and the shared `file_message` and `header_entry` |
+| `lambda.mail.mime` | `text_body` (format=flowed unwrapped), `html_body`, `html_text` (an HTML body as plain text), `readable_text`, `attachments`, `cid_parts`, `snippet`, `search_text` over a message read with `input(…, 'eml')` |
+| `lambda.mail.store` | store paths, `safe_name` (distinct file names, case-insensitive file systems included), `server_id`, `load_index`, `save_index` (atomic), and the index updates `merge_entries`, `refresh_entries`, `with_files`, `with_flag` |
+| `lambda.mail.sync` | `capabilities`, `mailboxes`, `sync_mailbox` (headers of new messages, flags of known ones, expunges, UIDVALIDITY resets), `fetch_message` (the body and its search sidecar), and the shared `file_message`, `header_entry` and `body_entry` (a row's preview and attachment count) |
 | `lambda.mail.pop3` | A POP3 account as a download source (ML9): `sync_inbox(session, root, progress)` downloads each message the server lists by UIDL that the local Inbox lacks, once, and leaves mail on the server; `mark_seen` keeps read state in the store; `listing`, `missing`, `message_id`, `octets` |
+| `lambda.mail.compose` | New messages, replies and forwards (§4.6): `reply(message, me, all)` and `forward(message)` give a draft with the quote, `Re:`/`Fwd:` subject, recipients (Reply All without your address or duplicates), `In-Reply-To` and `References`; `quote`, `quote_runs`, `html_of_text` (nested `<blockquote type="cite">`), `recipients` (typed address lists), `problem`, `rfc5322_date`, and `eml(draft, from, date, id)`, the `multipart/alternative` RFC 5322 text through `lambda.doc.misc` |
 | `lambda.mail.sanitize` | `clean(html, {remote, cids})` → `{html, blocked}`: a standalone document for a message frame, with scripts, `on*` attributes, embedded documents, forms and frame navigation removed, remote loads dropped unless `remote` (`blocked` counts them), `cid:` URLs inlined, and `<noscript>` content parsed and cleaned; `cid_urls`, `data_url`, `clean_css` |
-| `lambda.mail.providers` | `PRESETS` (Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com, Yahoo, with POP3 servers where the host offers them), `preset_for(address)`, `imap_url`, `pop3_url`, `smtp_url`, `session_options` for `lambda.io.mail`, and `autoconfig(address)` / `from_autoconfig(doc, address)` for Mozilla's ISPDB |
+| `lambda.mail.providers` | `PRESETS` (Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com, Yahoo, with POP3 servers where the host offers them), `preset_for(address)`, `imap_url`, `pop3_url`, `smtp_url`, `session_options` and `tls_option` for `lambda.io.mail`, and `autoconfig(address)` / `from_autoconfig(doc, address)` for Mozilla's ISPDB |
 
 An index entry is `{uid, file, flags, date, internaldate, from, to, subject, message_id, size, thread, has_file}`. List rows come from each message's header block, fetched with `BODY.PEEK[HEADER.FIELDS (…)]` and decoded by the `eml` reader, so subjects and names arrive decoded.
 

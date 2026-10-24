@@ -1220,7 +1220,7 @@ correct under forced collection. This satisfies **D2.5.2v3**, **D2.6.1v3**,
 
 The audit found two JavaScript-native carrier defects after the Lambda-core
 paths were closed: Error standard own fields and JS collection entry storage.
-They are tracked separately as [JS03-L1](JS_Issue_Ledger.md#js03-l1); they do
+They are tracked separately as [JS03-L1](jube/JS_Issue_Ledger.md#js03-l1); they do
 not leave a remaining Lambda-core runtime path under this record.
 
 <a id="lr08-r12"></a>**LR08-R12 · Generator/async suspension states capped at 64 · RESOLVED (2026-09-08)**

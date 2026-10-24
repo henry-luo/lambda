@@ -1,0 +1,11 @@
+fonts:api:true
+fonts:promise:true
+fonts:metadata:true
+fonts:ordered:true
+fonts:filter:true
+fonts:empty:true
+fonts:missing:true
+fonts:iterable:true
+fonts:invalid:true
+fonts:getter:true
+fonts:fresh:true

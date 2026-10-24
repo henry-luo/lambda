@@ -12400,6 +12400,24 @@ TEST(RenderOutputParity, NegativeLayersRespectContextFlowAndAncestorClips) {
     mem_free(actual);
 }
 
+TEST(RenderOutputParity, PositiveLayersRespectContextAndAncestorClips) {
+    char* actual = nullptr;
+    ASSERT_TRUE(file_read_all("test/ui/positive_stacking.html", MEM_CAT_TEMP, &actual, nullptr));
+    // flat rectangles independently specify the visible order and inherited anchor offsets.
+    const char* reference = "<!doctype html><style>html,body{margin:0;width:320px;height:300px;overflow:hidden;background:white}"
+        "div{position:absolute}</style>"
+        "<div style='left:20px;top:20px;width:100px;height:60px;background:blue'></div>"
+        "<div style='left:200px;top:20px;width:40px;height:40px;background:orange'></div>"
+        "<div style='left:20px;top:150px;width:100px;height:80px;background:yellow'></div>"
+        "<div style='left:30px;top:160px;width:70px;height:50px;background:magenta'></div>"
+        "<div style='left:40px;top:170px;width:40px;height:20px;background:lime'></div>"
+        "<div style='left:160px;top:110px;width:40px;height:25px;background:teal'></div>"
+        "<div style='left:220px;top:110px;width:40px;height:25px;background:teal'></div>"
+        "<div style='left:280px;top:260px;width:30px;height:30px;background:lime'></div>";
+    expect_html_pair_output_parity("positive_stacking", actual, reference, true);
+    mem_free(actual);
+}
+
 
 
 static void expect_decoration_reference(const char* prefix, size_t variant, int density,

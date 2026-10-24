@@ -1,0 +1,588 @@
+{
+  "name": "Word ruler margins, paragraph indents, previews, history and zoom",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "window.rulerPx=function(s){return parseFloat(s)*(s.endsWith(\"pt\")?4/3:1)};window.rulerAligned=function(selector){var p=document.querySelector(selector||\"#edit-surface p\"),b=p.getBoundingClientRect(),c=getComputedStyle(p),page=p.closest(\".word-page\"),z=page.getBoundingClientRect().width/parseFloat(getComputedStyle(page).width),l=b.left+(window.rulerPx(c.paddingLeft)+window.rulerPx(c.borderLeftWidth))*z,r=b.right-(window.rulerPx(c.paddingRight)+window.rulerPx(c.borderRightWidth))*z;var ids=[\"first\",\"hanging\",\"indent\",\"right\"],xs=[l+window.rulerPx(c.textIndent)*z,l,l,r];for(var i=0;i<ids.length;i++){var h=document.getElementById(\"ruler-indent-\"+ids[i]).getBoundingClientRect();if(Math.abs(h.left+h.width/2-xs[i])>1)return false}return true};true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface td"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "script",
+      "js": "window.rulerCellText=document.querySelector(\"#edit-surface td\").textContent"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned(\"#edit-surface td\")"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-indent"
+      },
+      "pointerType": "touch",
+      "dx": 16,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface td p\").style.marginLeft===\"12pt\" && document.querySelector(\"#edit-surface td\").textContent===window.rulerCellText"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned(\"#edit-surface td p\")"
+    },
+    {
+      "type": "type_physical",
+      "text": "!"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface td\").textContent===window.rulerCellText+\"!\""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface td p\")==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "F",
+      "target": {
+        "selector": "#edit-surface p"
+      }
+    },
+    {
+      "type": "paste_text",
+      "text": "irst paragraph, with enough text to see the indentation change across its first and following lines. More words make a useful wrapped line for the ruler preview."
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "type_physical",
+      "text": "S"
+    },
+    {
+      "type": "paste_text",
+      "text": "econd paragraph keeps independent formatting."
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p:first-child"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned() && !document.getElementById(\"ruler-indent-first\").disabled"
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.getElementById(\"ruler-indent-first\")).cursor===\"ew-resize\" && getComputedStyle(document.getElementById(\"ruler-margin-top-1\")).cursor===\"ns-resize\""
+    },
+    {
+      "type": "script",
+      "js": "window.rulerRevision=Number(document.getElementById(\"word\").getAttribute(\"data-revision\"));window.rulerScroll=document.getElementById(\"stage\").scrollTop"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#ruler-indent-first"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#horizontal-ruler",
+        "offset_x": 120,
+        "offset_y": 4
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface p\").style.textIndent===\"36pt\" && Number(document.getElementById(\"word\").getAttribute(\"data-revision\"))===window.rulerRevision"
+    },
+    {
+      "type": "assert_script",
+      "js": "var g=document.getElementById(\"ruler-guide\").getBoundingClientRect(),h=document.getElementById(\"ruler-indent-first\").getBoundingClientRect(),s=document.getElementById(\"stage\").getBoundingClientRect();Math.abs(g.left-h.left-h.width/2)<1&&g.top>=s.top&&g.bottom<=s.bottom+1"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/ruler-edit-first-line-preview.png"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#horizontal-ruler",
+        "offset_x": 120,
+        "offset_y": 4
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface p\").style.textIndent===\"36pt\" && Number(document.getElementById(\"word\").getAttribute(\"data-revision\"))===window.rulerRevision+1"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned() && document.querySelectorAll(\"#edit-surface p\")[1].style.textIndent===\"\""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface p\").style.textIndent===\"\""
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-indent"
+      },
+      "pointerType": "touch",
+      "dx": 40,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface p\").style.marginLeft===\"30pt\" && document.querySelector(\"#edit-surface p\").style.textIndent===\"36pt\" && window.rulerAligned()"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-hanging"
+      },
+      "pointerType": "touch",
+      "dx": 16,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface p\").style.marginLeft===\"42pt\" && document.querySelector(\"#edit-surface p\").style.textIndent===\"24pt\" && window.rulerAligned()"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-right"
+      },
+      "pointerType": "touch",
+      "dx": -32,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface p\").style.marginRight===\"24pt\" && window.rulerAligned()"
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#edit-surface p:first-child",
+        "offset_x": 100,
+        "offset_y": 10
+      },
+      "to_target": {
+        "selector": "#edit-surface p:nth-child(2)",
+        "offset_x": 70,
+        "offset_y": 10
+      },
+      "steps": 5
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned(\"#edit-surface p:nth-child(2)\")"
+    },
+    {
+      "type": "script",
+      "js": "window.rulerSelected=window.getSelection().toString();true"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-indent"
+      },
+      "pointerType": "touch",
+      "dx": 8,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "var p=document.querySelectorAll(\"#edit-surface p\");p[0].style.marginLeft===\"6pt\"&&p[1].style.marginLeft===\"6pt\"&&p[0].style.textIndent===\"24pt\"&&p[1].style.textIndent===\"\""
+    },
+    {
+      "type": "assert_script",
+      "js": "window.getSelection().toString()===window.rulerSelected"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned(\"#edit-surface p:nth-child(2)\") && document.getElementById(\"ruler-indent-right\").style.visibility===\"visible\""
+    },
+    {
+      "type": "script",
+      "js": "window.rulerStyles=JSON.stringify(Array.from(document.querySelectorAll(\"#edit-surface p\"),function(p){return p.getAttribute(\"style\")}));window.rulerRevision=Number(document.getElementById(\"word\").getAttribute(\"data-revision\"))"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#ruler-indent-right"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#horizontal-ruler",
+        "offset_x": 650,
+        "offset_y": 14
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#ruler-workspace"
+      },
+      "attribute": "data-ruler-control",
+      "equals": "ruler-indent-right"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(Array.from(document.querySelectorAll(\"#edit-surface p\"),function(p){return p.getAttribute(\"style\")}))!==window.rulerStyles"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(Array.from(document.querySelectorAll(\"#edit-surface p\"),function(p){return p.getAttribute(\"style\")}))===window.rulerStyles&&Number(document.getElementById(\"word\").getAttribute(\"data-revision\"))===window.rulerRevision"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerAligned(\"#edit-surface p:nth-child(2)\")"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-margin-left",
+        "offset_x": 2,
+        "offset_y": 12
+      },
+      "pointerType": "touch",
+      "dx": 40,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector(\"#edit-surface .word-page\")).paddingLeft===\"112px\""
+    },
+    {
+      "type": "assert_script",
+      "js": "var p=document.querySelector(\"#edit-surface .word-page\").getBoundingClientRect(),r=document.querySelector(\"#horizontal-ruler [data-ruler-cm=\\\"0\\\"]\").getBoundingClientRect();Math.abs(r.left+r.width/2-p.left-112)<1"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector(\"#edit-surface .word-page\")).paddingLeft===\"72px\""
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-margin-right",
+        "offset_x": 18,
+        "offset_y": 12
+      },
+      "pointerType": "touch",
+      "dx": -24,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector(\"#edit-surface .word-page\")).paddingRight===\"96px\""
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-margin-top-1"
+      },
+      "pointerType": "touch",
+      "dx": 0,
+      "dy": 32
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector(\"#edit-surface .word-page\")).paddingTop===\"96px\""
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"stage\").scrollTop=document.getElementById(\"stage\").scrollHeight"
+    },
+    {
+      "type": "script",
+      "js": "window.rulerScroll=document.getElementById(\"stage\").scrollTop"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-margin-bottom-1"
+      },
+      "pointerType": "touch",
+      "dx": 0,
+      "dy": -24
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector(\"#edit-surface .word-page\")).paddingBottom===\"96px\""
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById(\"stage\").scrollTop-window.rulerScroll)<1"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"stage\").scrollTop=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p:first-child"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "script",
+      "js": "window.rulerFirst=parseFloat(document.querySelector(\"#edit-surface p\").style.textIndent)"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-first"
+      },
+      "pointerType": "touch",
+      "dx": 24,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "parseFloat(document.querySelector(\"#edit-surface p\").style.textIndent)===window.rulerFirst+15&&window.rulerAligned()"
+    },
+    {
+      "type": "resize",
+      "width": 1000,
+      "height": 1000
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"stage\").scrollLeft=80"
+    },
+    {
+      "type": "script",
+      "js": "window.rulerLeft=parseFloat(document.querySelector(\"#edit-surface p\").style.marginLeft);window.rulerScrollX=document.getElementById(\"stage\").scrollLeft"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-indent"
+      },
+      "pointerType": "touch",
+      "dx": 24,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "parseFloat(document.querySelector(\"#edit-surface p\").style.marginLeft)===window.rulerLeft+15&&window.rulerAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollLeft>0&&Math.abs(document.getElementById(\"stage\").scrollLeft-window.rulerScrollX)<1"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/ruler-edit-zoom-and-horizontal-scroll.png"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"ruler-indent-first\").focus();window.rulerFirst=parseFloat(document.querySelector(\"#edit-surface p\").style.textIndent)"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#ruler-indent-first"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#ruler-indent-first"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "parseFloat(document.querySelector(\"#edit-surface p\").style.textIndent)===window.rulerFirst+2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#ruler-indent-first"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll(\".ruler-control\")).every(function(n){return n.disabled})"
+    },
+    {
+      "type": "script",
+      "js": "window.rulerRevision=Number(document.getElementById(\"word\").getAttribute(\"data-revision\"))"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#ruler-indent-first"
+      },
+      "pointerType": "touch",
+      "dx": 24,
+      "dy": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById(\"word\").getAttribute(\"data-revision\"))===window.rulerRevision"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById(\"ruler-indent-first\").disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paragraph-settings"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#paragraph-right"
+      },
+      "equals": "24"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/ruler-edit-final.png"
+    }
+  ]
+}

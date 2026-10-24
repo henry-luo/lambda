@@ -327,7 +327,10 @@ bool render_effect_group_finish(RenderEffectGroup* group,
         bounds = view_geometry_intersect_bound_rect(bounds,
             {clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top});
         IRect region = {};
-        if (dl_effect_bounds_to_region(&bounds, &region) &&
+        if (!(bounds.right > bounds.left && bounds.bottom > bounds.top)) {
+            // the clip removed all ink: filter an empty rect, never an inverted one
+            group->filter_rect = {};
+        } else if (dl_effect_bounds_to_region(&bounds, &region) &&
                 dl_resize_saved_backdrops(rdcon->dl, group->recording_start, group->source_start, &bounds)) {
             // saved sources and final compositing must cover the same completed ink extent.
             RenderEffectBackdrop* levels[] = {&group->filter_backdrop, &group->opacity_backdrop, &group->mix_blend_backdrop};

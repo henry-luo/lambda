@@ -72,10 +72,10 @@ layer sequence in [CSS Appendix E](https://www.w3.org/TR/CSS22/zindex.html#paint
    `isolation:isolate` is a validated computed property and a stacking boundary;
    it keeps negative layers above that container's background even with auto z-index.
 2. `render_walk_children` walks in-flow children, **skipping** negative positioned blocks, out-of-flow positioned children (`absolute`/`fixed`) and positive-z positioned children. In-flow positioned children (`relative`/`sticky`) with `z-index` auto or 0 (`radiant_stack_is_in_flow_positioned_step8`) paint in a second loop after their non-positioned siblings, in tree order — CSS 2.1 Appendix E step 8.
-3. `render_walk_positioned_children` collects the block's `first_abs_child` chain, excluding negative layers already owned by a stacking context, and paints in stable ascending z-index order.
-4. `render_walk_positive_z_descendants` collects positive-z positioned descendants (recursing through inline elements) and paints them last in stable ascending order.
+3. `render_walk_positioned_children` collects the block's `first_abs_child` chain, excluding signed layers already owned by a stacking context, and paints the remaining entries in stable ascending z-index order. Custom layouts retain their local signed sequence.
+4. `render_walk_positive_z_descendants` collects positive-z positioned descendants at their nearest real stacking context and paints them last in stable ascending order. Positive and negative collection share ancestry traversal and clip replay. `layout_positioned_parent_offset` translates absolute/fixed layer coordinates from the replayed DOM-parent frame to their containing-block frame.
 
-Positive/zero stacking is still resolved among siblings: a positioned box nested in a non-positioned block is lifted above that block's other children, not above the block's later siblings. Absolute/fixed children follow in-flow step-8 boxes rather than interleaving with them by tree order. Negative positioned inline spans and complete isolation/flex/grid context rules remain outside the new block-layer path. The shared helper preserves source order for equal z-index entries. `event.cpp` consumes its lists in reverse, testing negative layers after flow children and before the context's own background. `test/ui/negative_stacking.{html,json}` and `RenderOutputParity.NegativeLayersRespectContextFlowAndAncestorClips` cover flow text layers, zero/auto contexts, clipping, hit order and PNG/SVG/PDF parity.
+Zero-level descendant lifting remains partial. Absolute/fixed children follow in-flow step-8 boxes rather than interleaving with them by tree order. Negative positioned inline spans and complete isolation/flex/grid context rules remain outside the signed block-layer path. The shared helper preserves source order for equal z-index entries. `event.cpp` consumes its lists in reverse, testing negative layers after flow children and before the context's own background. `test/ui/{negative,positive}_stacking.{html,json}` and the corresponding `RenderOutputParity` cases cover paragraph anchors, nested zero contexts, ancestor clips, containing-block offsets, hit order and PNG/SVG/PDF parity.
 
 When ordinary blocks or floating descendants require separate layers, `render_walk_children`
 uses `RadiantPaintPhase` in the shared `RenderContext`: ordinary block
@@ -260,6 +260,11 @@ module operation (D7.5.3/S12.1.1v2). Its required `format` selects `png`, `jpeg`
 `device_scale`, JPEG `quality`, `pagination`, `base_url`, and `local_resources`
 configure the same export sessions as the CLI. It returns `true` or a diagnostic
 string; package facades convert diagnostics to raised errors (S7.4.2).
+`source_format:"xhtml"` explicitly selects the XML HTML loader for in-memory
+source, preserving foreign and native page-control namespaces (**D2.10**).
+The default `"html"` uses HTML parsing. XHTML must be well formed, including
+escaped CSS/text and closed void elements; both syntaxes use the same export
+session, ownership and resource policy.
 Continuous PNG also accepts `transparent:true` to preserve canvas alpha for image
 compositions; authored backgrounds still paint normally. The default canvas
 remains opaque. Other output formats and paged output reject transparency.
@@ -293,7 +298,7 @@ cross-fragment clipping regressions pass (verified 2026-10-11).
 
 ## 10. Known Issues & Future Improvements
 
-1. **CSS stacking contexts are still partial.** Negative positioned blocks now belong to their nearest context, including `isolation:isolate`, with shared paint/hit order. Positive/zero descendant lifting, floats, negative inline spans, blend-group isolation and complete flex/grid context rules still need the full CSS stacking-context algorithm.
+1. **CSS stacking contexts are still partial.** Signed positioned block layers belong to their nearest context, including `isolation:isolate`, with shared paint/hit order. Zero-level descendant lifting, floats, negative inline spans, blend-group isolation and complete flex/grid context rules still need the full CSS stacking-context algorithm.
 2. **PDF success paths emit `log_error` noise.** Multiple non-error PDF outcomes log at error level — e.g. "fallback effect group rendered as passthrough content" (`render_pdf.cpp:1033`) and the raster-fallback effect-group notice (`:598`) fire on the *success* path where a fallback is the intended behavior. This makes real PDF errors hard to spot. *Improvement:* demote intended fallbacks to `log_debug`.
 3. **Duplicated body-background propagation.** `render_output_canvas_background` (`render_output.cpp:205`) and the iframe branch of `render_embed_doc` (`render.cpp:122-156`) reimplement the same `<html>`-then-`<body>` background walk. *Improvement:* extract one shared helper.
 4. **File sprawl (~50 `render_*` files, ~26.8k LOC).** Painter logic, low-level pixel ops, and IO decode are interleaved; the largest are `render_svg_inline.cpp` (5633), `render_pdf.cpp` (2384), `render_background.cpp` (2107), `render_svg.cpp` (1978). No TODO/FIXME/HACK markers exist — the debt is structural (sprawl + duplication), not annotated.

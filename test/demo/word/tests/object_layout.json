@@ -1,0 +1,674 @@
+{
+  "name": "Word object arrangement, wrapping and selection pane",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "test/demo/word/tests/object_layout.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-shape]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-object-format"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#word').getAttribute('data-tab')==='Object Format'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-square"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).float==='left'"
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-shape]');var t=a.parentNode.querySelector('.word-text-run').firstChild;var r=document.createRange();r.setStart(t,0);r.setEnd(t,5);return r.getBoundingClientRect().left>=a.getBoundingClientRect().right+6;})()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/object-layout-wrap.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-right"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).float==='right'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-topBottom"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).display==='block'"
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-shape]');var t=a.parentNode.querySelector('.word-text-run').firstChild;var r=document.createRange();r.setStart(t,0);r.setEnd(t,5);return r.getBoundingClientRect().top>=a.getBoundingClientRect().bottom+6;})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-position-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-position-top-right"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).position==='absolute'"
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-shape]');var p=a.closest('.word-page');var b=p.getBoundingClientRect();var c=getComputedStyle(p);return Math.abs(a.getBoundingClientRect().right-(b.right-parseFloat(c.paddingRight)))<2 && Math.abs(a.getBoundingClientRect().top-b.top-parseFloat(c.paddingTop))<2;})()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/object-layout-position.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-selection-pane"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#selection-pane .object-list-row').length===3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).visibility==='hidden'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).visibility==='visible'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-rotate-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-flip-x"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface img[data-word-shape]').style.transform.replace(/\\s/g,'').indexOf('scale(-1,1)')>=0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/object-layout-pane.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-position-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-position-top-right"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-shape]');var b=a.getBoundingClientRect();return document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);})().getAttribute('alt')==='Studio picture'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-forward-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-layer-forward"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-shape]');var b=a.getBoundingClientRect();return document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);})().hasAttribute('data-word-shape')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-backward-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-layer-back"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-shape]');var b=a.getBoundingClientRect();return document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);})().getAttribute('alt')==='Studio picture'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-inline"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-behind"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "parseInt(getComputedStyle(document.querySelector('#edit-surface img[data-word-shape]')).zIndex)<0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-wrap-front"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-layout-options"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#object-distance"
+      },
+      "text": "-1",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-object_layout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#dialog-error').textContent.indexOf('0\u2013100')>=0"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#object-distance"
+      },
+      "text": "12",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-object_layout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.edit-dialog')===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-align-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-align-left"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('#edit-surface img[data-word-shape]').getBoundingClientRect().left-document.querySelector('#edit-surface p').getBoundingClientRect().left)<2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick-object-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.object-pick[aria-pressed=true]').length===2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-group-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-group-objects"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#edit-surface img[data-word-group]').length===1 && document.querySelectorAll('#edit-surface img').length===2"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface').textContent.indexOf('The final paragraph stays intact.')>=0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/object-layout-group.png"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-move"
+      },
+      "dx": 80,
+      "dy": 40,
+      "pointerType": "touch"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(JSON.parse(document.querySelector('#edit-surface img[data-word-group]').getAttribute('data-word-layout')).x-80)<2"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(JSON.parse(document.querySelector('#edit-surface img[data-word-group]').getAttribute('data-word-layout')).x)<2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-rotate-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object-rotate-right"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface img[data-word-group]').getAttribute('data-word-rotation')==='90'"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "dx": -25,
+      "dy": 10,
+      "pointerType": "touch"
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var a=document.querySelector('#edit-surface img[data-word-group]');var p=JSON.parse(a.getAttribute('data-word-group'));return parseFloat(a.getAttribute('width'))>p.width && Math.abs(parseFloat(a.getAttribute('width'))/p.width-parseFloat(a.getAttribute('height'))/p.height)<0.02;})()"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-group-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-ungroup-objects"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#edit-surface img[data-word-group]').length===0 && document.querySelectorAll('#edit-surface img').length===3"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface img[data-word-shape]').getAttribute('data-word-rotation')==='90'"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#edit-surface img[data-word-group]').length===1"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/object-layout-group-rotated.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick-object-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:last-of-type"
+      },
+      "start": 33,
+      "end": 33
+    },
+    {
+      "type": "type_physical",
+      "text": " Layout works."
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.object-pick[aria-pressed=true]').length===0 && document.querySelectorAll('#edit-surface img[data-word-group]').length===1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface .word-page > p:last-of-type').textContent.indexOf('Layout works.')>=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select-object-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/object-layout.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/object-layout.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/object-layout.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#status').textContent==='Exported temp/word/object-layout.pdf'"
+    }
+  ]
+}

@@ -90,6 +90,19 @@ All six remain differences in the historical-suite report; none is converted int
 
 ## Reproduction
 
+The Word References integration exposed empty generated `year-suffix` values
+suppressing APA's literal no-date term. The text evaluator now leaves the
+empty-attempt count unchanged for that generated suffix; ordinary empty source
+variables still suppress their groups. This matches the separate generated
+suffix path in [citeproc-js](https://github.com/Juris-M/citeproc-js/blob/master/src/node_text.js)
+and preserves the unmodified bundled style resources. The core fixture
+`empty-generated-suffix-keeps-no-date` and Word's undated corporate-source case
+cover it. The change stays in the pure processing layer (**D7.2.3**, **S1.8**).
+Word also passes `{plain_text: true}` to `data.json`: a source form's literal
+`<making>` or `&amp;` is text, while the existing default continues to normalize
+rich CSL JSON markup. Both use the same structural validation, and the data
+golden checks literal preservation, output escaping, and invalid names.
+
 ```sh
 ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*latex_test_latex_citeproc*'
 ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*latex*'

@@ -417,11 +417,11 @@
       "equals": "Table"
     },
     {
-      "type": "select_option",
+      "type": "click",
       "target": {
-        "selector": "#cell-alignment"
+        "selector": "#cell-align-center"
       },
-      "value": "center"
+      "scroll_into_view": true
     },
     {
       "type": "assert_script",
@@ -840,7 +840,7 @@
       "target": {
         "selector": "#context-object"
       },
-      "equals": "Edit WordArt\u2026"
+      "equals": "Edit Word Art\u2026"
     },
     {
       "type": "assert_count",

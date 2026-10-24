@@ -6,7 +6,7 @@ Lambda target fell back to memchr on the first byte, stopping at every
 occurrence of it. This adds the same test 16 bytes at a time with SSE2
 (always available on x86-64) and NEON (ARM64), keeping AVX2 first for builds
 that enable it. Reach: every RE2 search whose pattern starts with a
-case-sensitive literal of two or more bytes (vibe/Lambda_Lib_Grep.md 6.1,
+case-sensitive literal of two or more bytes (vibe/lib/Lib_Grep.md 6.1,
 GRP9v2). Covered by Re2PrefixAccel.MatchesNaiveSearchAtEveryAlignment in
 test/lib/test_grep_gtest.cpp.
 

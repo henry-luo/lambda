@@ -1,0 +1,15 @@
+{
+  "name": "Large DOCX renders SmartArt and the saved embedded-object preview without diagnostics",
+  "html": "test/input/docx/saved-graphics.docx",
+  "viewport": {"width": 1100, "height": 1000},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#docx-preview .docx-document"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".docx-import-notes"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".docx-diagram svg rect"}, "count": 5},
+    {"type": "assert_count", "target": {"selector": ".docx-diagram svg text"}, "count": 4},
+    {"type": "assert_text", "target": {"selector": ".docx-object"}, "equals": "Wildlife.wmv"},
+    {"type": "assert_count", "target": {"selector": ".docx-object svg image"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".docx-document img"}, "count": 6},
+    {"type": "assert_count", "target": {"selector": ".docx-chart svg"}, "count": 1}
+  ]
+}

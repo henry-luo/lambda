@@ -9,11 +9,14 @@ into a local store. Passwords stay in the Keychain through
 
 | Area | What it does |
 | --- | --- |
+| Demo mailbox | **Try the demo mailbox** in the account sheet adds an account that needs no server. See [the demo mailbox](#the-demo-mailbox) |
 | Account sheet | Email, password, provider and protocol. Presets cover Gmail, iCloud, Fastmail, Proton Mail Bridge, Outlook.com and Yahoo. An unknown domain is looked up in Mozilla's ISPDB. **Other (manual)** takes the incoming server, port, security, user name and a certificate pin. Use an app password; Proton Mail Bridge needs the password and pin it shows |
 | POP3 accounts | Choose **POP3** in the sheet. Each message is downloaded once into a local Inbox and stays on the server. Read state lives only on this computer: opening a message marks it read there |
-| Sidebar | Each account's status and its mailboxes. Special-use mailboxes (Inbox, Drafts, Sent, Junk, Trash, Archive) come first, then the rest by name, with unread counts for mailboxes that have been synced. **Get Mail** checks the shown mailbox now |
-| List | Newest first: unread dot, sender, date, subject, flag and size. Only the rows near the viewport are mounted, so a mailbox of any size scrolls through a few dozen rows |
-| Viewer | Header block and the body. Plain text shows quote levels and unwraps `format=flowed`. HTML loads in a sandboxed frame that runs no script; remote images and styles stay blocked until **Load Remote Content**, and `cid:` images come from the message. Links show their target but do not navigate yet |
+| Sidebar | Each account's status and its mailbox tree. Special-use mailboxes (Inbox, Drafts, Sent, Junk, Trash, Archive) come first with their own icons, then the folders by name, with unread counts for mailboxes that have been synced. An account and any folder with children collapse and expand. The folder button beside the account name opens **New Mailbox** (a name and a parent). **Get Mail** checks the shown mailbox now, and the pencil opens a new message |
+| List | Newest first. Each row has an unread dot and flag, then the sender (the recipients in Sent and Drafts), date, an attachment clip, the subject and two lines of preview. Only the rows near the viewport are mounted, so a mailbox of any size scrolls through a few dozen rows |
+| Viewer | A toolbar, then a header with the sender's initials, name, address, date, subject and recipients, then the body. Plain text shows quote levels and unwraps `format=flowed`. HTML loads in a sandboxed frame that runs no script; remote images and styles stay blocked until **Load Remote Content**, and `cid:` images come from the message. Links show their target but do not navigate yet. A draft shows **Edit Draft** |
+| Toolbar | **Reply**, **Reply All** and **Forward** for every account. The demo mailbox also offers **Archive**, **Move to Junk**, **Delete** (to Trash, or for good in Trash), **Flag** and **Mark as Unread**. After a move, the row below opens, as in Mail |
+| Compose | A window with To, Cc, Subject, From and a plain-text body. Replies quote the original under an "On … wrote:" line, with `In-Reply-To` and `References`. Reply All leaves out your own address and duplicates. A forward carries the original's attachments. **Send** builds `multipart/alternative` (the text and its HTML) with [`lambda.mail.compose`](../../../lmd/package/mail/compose.ls) over `lambda.doc.misc`'s eml writer. **Save Draft** files the message in Drafts |
 | Attachments | The strip below a message. A click opens a preview (images, text, PDF), where **Save to Downloads** writes the file without replacing an existing one |
 
 The profile lives in `~/Library/Application Support/Lambda Mail/`. Set
@@ -26,6 +29,20 @@ task then brings it up to date. It checks again every two minutes.
 
 macOS asks once per build of `lambda.exe` before it lets that build read a
 saved password: the Keychain grants access per program.
+
+## The demo mailbox
+
+**Try the demo mailbox**, at the bottom left of the account sheet, adds the account **Demo Mailbox** (`alex@lambda.demo`). Use it to show the window without a real account. Its task never connects to a server. The first time it runs, it writes about 330 made-up messages into the profile's `demo/` folder. They are dated back from that moment and spread over ten mailboxes: Inbox, Drafts, Sent, Junk, Trash, Archive, Projects with two nested mailboxes, and Receipts.
+
+The mail is chosen to exercise the window:
+
+- HTML mail of many kinds: personal notes with lists and tables, newsletters with a `cid:` logo and a blocked remote image, CI builds, code reviews, calendar invitations, invoices, shipping updates, security alerts and a garish piece of junk;
+- plain-text mailing-list traffic, with replies quoted two levels deep;
+- a sender name in an RFC 2047 encoded-word;
+- PNG, CSV, text and PDF attachments;
+- flagged and unread messages, enough of them to scroll the virtualized list.
+
+Everything is written by `lambda.doc.misc`'s eml writer, like the mail the window sends. Opening a message marks it read in the local index, as for POP3. Flags, moves, new mailboxes, drafts and sent mail all stay in that store too. Sending files the message in Sent, and in the Inbox as well when it is addressed to `alex@lambda.demo`. **Get Mail** delivers one more message to the Inbox per press, from a pool of five. Every person, address and company in it is invented (`.example` and `lambda.demo`). To start the mailbox over, remove the account, delete the profile's `demo/` folder, and add it again.
 
 ## Signing in with Google or Microsoft
 
@@ -110,9 +127,10 @@ document while the rest of the window changes.
 | File | Role |
 | --- | --- |
 | `mail.ls` | the document: view, handlers, account tasks, the profile, attachments |
-| `mod_model.ls` | state, the sidebar, the list window, labels, reports, quoting, the account sheet (pure) |
-| `mod_ui.ls` | layout, and the list and viewer templates |
-| `mod_sync.ls` | the account task |
+| `mod_model.ls` | state, the sidebar tree, the list window and rows, labels, reports, compose state, the account sheet (pure) |
+| `mod_ui.ls` | layout: the sidebar, the list and viewer templates, the compose window and the sheets |
+| `mod_sync.ls` | the account task: IMAP, POP3 or the demo store, and SMTP sending |
+| `mod_demo.ls` | the demo mailbox: its account, its made-up mail and its local store |
 | `mail.css` | style |
 | `tests/` | the model golden and the window replay |
 
@@ -123,6 +141,8 @@ The model golden runs in `test_lambda_gtest` (`tests_mail_model`):
 ```sh
 ./test/test_lambda_gtest.exe --gtest_filter='*mail_model*'
 ```
+
+The package's own goldens are in `test/lambda/mail/`; `compose.ls` covers replies, forwards, quoting, the HTML of a plain-text body and the RFC 5322 text of a draft.
 
 The window replays, `tests/mail_window.json` (IMAP) and
 `tests/mail_window_pop3.json` (POP3), run in `make test-mail` against the fake
@@ -139,13 +159,28 @@ again. The IMAP replay:
 python3 test/mail/test_mail.py DemoWindowTests
 ```
 
+`tests/mail_window_demo.json` adds the demo mailbox. It then checks:
+
+- the mailboxes, unread counts, previews and attachment clips;
+- an HTML message in its frame, a plain-text one with quote levels, and an attachment preview;
+- flagging, then a reply: its recipients, subject and quote, the text typed above the quote, and the copy in Sent;
+- **Get Mail**, then archiving and deleting, each followed by the row below opening;
+- collapsing and expanding a folder, and **New Mailbox** under a folder;
+- saving a new message as a draft, editing that draft, and sending it.
+
+It checks too that the fake servers saw no command.
+
 The POP3 replay adds a POP3 account, checks that the Inbox holds both messages and that opening one marks it read locally, and checks that **Get Mail** downloads nothing twice. The test then checks the fake server: two `RETR`s and no `DELE`.
 
 ## Not yet
 
 These are later milestones of the design: marking IMAP messages read, flags,
-moves and deletes, IDLE push, compose and send, search and conversations.
-Also not yet done:
+moves and deletes (the demo mailbox does these locally), IDLE push, search and
+conversations. Sending from an IMAP or POP3 account goes through its SMTP
+server, and **New Mailbox** on an IMAP account sends `CREATE`; neither has run
+yet, since this checkout's libcurl lacks the mail protocols. Compose is plain
+text: rich text, attachments added by hand, signatures, saving drafts and
+Sent copies to the server, and an outbox are P2. Also not yet done:
 
 - signing in again from the window when a refresh token stops working (remove the account's folder and `accounts.mark` entry, then add it again);
 - opening links in the system browser;

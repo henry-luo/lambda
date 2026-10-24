@@ -10,7 +10,6 @@ h1 { font-size: 38px; letter-spacing: -1px; margin: 0 0 12px; }
 h2 { margin: 0 0 10px; font-size: 20px; }
 .section-heading { margin: 30px 0 18px; }
 .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
-.graph-gallery { margin-top: 22px; }
 .card { min-width: 0; padding: 20px; background: #fff; border: 1px solid #dfe5ee; border-radius: 14px; }
 .caption { color: #647287; font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
 .chart-frame { overflow: auto; }
@@ -41,6 +40,5 @@ button:disabled { opacity: 0.4; cursor: default; }
 .demo-copy p { min-height: 84px; color: #647287; font-size: 14px; line-height: 1.6; }
 .demo-open { color: #315c90; font-size: 13px; font-weight: 700; }
 footer { margin-top: 32px; color: #647287; font-size: 12px; line-height: 1.6; }
-.lambda-timeline { font-size: 13px; }
 @media (max-width: 850px) { .collection-grid { grid-template-columns: minmax(0, 1fr); } .demo-copy p { min-height: 0; } }
 @media (max-width: 700px) { main { padding: 20px 16px; } h1 { font-size: 30px; } .gallery { grid-template-columns: minmax(0, 1fr); } .card { padding: 16px; } }

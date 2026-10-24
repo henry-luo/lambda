@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 52.0.0 (2026-10-24)
+**Spec version:** 52.0.1 (2026-10-24)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -256,12 +256,13 @@ language-visible counterparts are the semantics spec's SI ledger.
   entry** per the dual-func plan (§D8.3); untyped functions are boxed-only.
   Closures keep captures as `Item` and unbox on access; union-typed
   parameters never unbox (a representation decision, not a soundness one).
-  [Box_Unbox, DF §1.3]
+  [Box_Unbox (retired); DF1, DF15, DF §1.3]
 - **D2.3.2*** **Blind `(void*)` casts of Items to container pointers are a
   defect.** Container-typed parameters unbox through type-checking helpers
   (`it2map`, `it2list`, …) returning NULL on mismatch (the `it2s`
   contract); container returns box through `p2it()` so NULL becomes
-  `ItemNull`, never the zero word. [Box_Unbox2]
+  `ItemNull`, never the zero word. [Box_Unbox2 (retired); DF2, DF4,
+  Nullable §7.2]
 - **D2.3.3** Boxing is representation only (semantics S1.6); every
   box/unbox pair round-trips exactly, including poison and the nullable
   sentinels.
@@ -2716,7 +2717,7 @@ slice; no formal semantic ruling or document semver changes.
 | D3.5.1v2–D3.5.2v2 | **Native P2 profile implemented 2026-10-15.** One manifest generates compiler-checked bindings and Lambda declarations with matching complete revisions. Native record/scalar spans validate counts, capacity and stride, share invalidation controls and precisely trace record Item edges during publication and collection. Structural reads, enumeration, validation and formatting reject stale views. Buffer counted arrays, offset references and general cyclic schemas remain separate extensions. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.2.5 | **Implemented 2026-10-07 (USER).** MVP-Lmd preserves finite INT Items through storage and boxed calls, classifies INT/FLOAT as JS Number, and uses range-proven native integer regions plus checked boxed add/subtract/remainder. Widening retains JS binary64 rounding and signed zero. Shared finite boxing/unboxing/band emitters also serve Lambda; no runtime helper was added. Focused tests pass normally and under forced GC; the shared-emitter baseline passes 6284/6284 and the unchanged Test262 baseline 40261/40261. Archived release evidence and conservative proof limits: [JS_MVP_Lmd §9.6](../vibe/jube/JS_MVP_Lmd.md#96-archived-integer-evidence--2026-10-07). |
-| D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
+| D2.3.2 | **Met by admission, not as written; ruling text awaits the user (re-checked 2026-10-23).** The blind-cast crash is closed in MIR Direct: a declared container parameter is admitted at the `_b` boundary (DF2) before any pointer cast; a static mismatch is E207 at compile time and a dynamic null or wrong kind raises E201 (DF4). `p2it` landed as specified. `it2map`/`it2list`/`it2elmt`/`it2obj`/`it2arr`/`it2range`/`it2path`/`it2p` exist only as unchecked casts (`lambda/lambda.h`, `lambda/lambda.hpp`). The ruling's "NULL on mismatch (the `it2s` contract)" is therefore not implemented and conflicts with DF4's raise; the earlier note that the MIR path keeps container params as ANY predates the pointer lanes of D2.5.1. Record: `vibe/impl/Lambda_Box_Unbox2 (retired).md`. |
 | D2.6.5v4 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. **Landed with [List Fixes](<../vibe/impl/Lambda_List_Fixes (done).md>) P1–P4 (2026-09-22/23, both tiers); that plan closed at P6.** One kind bit (`is_spreadable`; the old `is_content` survives only as LambdaJS's `is_js_arguments`); a value-decided sequence append (`array_push` splices a list by its bit; array literals, pipe items included, never choose spreading syntactically); the verbatim append `array_push_verbatim` at every positional site — argument and rest lists, group/join/order keys and rows, path keys, query and `find` matches, directory listings, clones, element-copying transforms, `zip` pairs; single-value slots store a list's array image (`slot_image`, S2.5.6); and the content append now applies all of S2.6.2–S2.6.4 unconditionally — a lone `""` is dropped, adjacent binaries merge, and the `input_context` gate on string merging (the retired flag in disguise) is gone. Content writes stay normalized (S2.6.5): `e[i] = v` rebuilds the children through the content append and `push` on an element appends content. `input-ics.cpp` builds its component sequence with the pool-owned verbatim `array_append`; `input-mark.cpp`'s `list_push` is element content, the content append's own case. P4 removes the last syntactic spreading: `*x` no longer marks its operand (the retired `item_spread`) but builds the list of x's items, which the sequence and content appends then splice by its kind bit like any other list, so the ruling's "decided by the value, never by the syntax" now holds for the spread operator too. The LaTeX deviation closed on 2026-10-02: element appends normalize strings, command argument runs are array children, and the LaTeX package and formatter consume their entries positionally. The unused LaTeX AST-normalization module and reconstruction helper are retired. MarkEditor child writes normalize in both edit modes (54/54 editor tests); explicit web DOM node APIs retain node identity (112/112 node/range tests). Verified: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. [Input_Latex](../vibe/input/Input_Latex.md). |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
@@ -3069,7 +3070,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.1 | Item_Boxing §0–§8 (R7–R10, W1–W3) | `Lambda_Design_Item_Boxing.md` |
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.2.5 | MVP-Lmd integer subtype (USER, 2026-10-07) | [JS_MVP_Lmd §9](../vibe/jube/JS_MVP_Lmd.md#9-integer-tuning-phase) |
-| D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
+| D2.3 | Box_Unbox, Box_Unbox2 (both retired, C-transpiler era); DF1, DF2, DF4, DF15; Nullable §7.2 | `vibe/impl/Lambda_Box_Unbox (retired).md`, `vibe/impl/Lambda_Box_Unbox2 (retired).md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Compiling_Nullable.md` |
 | D2.6.12v2 | PDF virtual-list and dictionary MVP | `Lambda_Design_PDF_Output.md` §5.4–§5.6 |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |

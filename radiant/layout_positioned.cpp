@@ -1958,6 +1958,17 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     block->height = content_height + block_box.pad_border_v;
 
 }
+RdtLogicalPoint layout_positioned_parent_offset(View* layer) {
+    RdtLogicalPoint offset = {};
+    ViewBlock* block = lam::view_as_block(layer);
+    if (block && layout_view_is_out_of_flow_positioned(layer)) {
+        // abs/fixed coordinates belong to their containing block, while clip replay follows DOM ancestry.
+        ViewBlock* containing = find_containing_block(block, block->positionp()->position);
+        if (containing) layout_parent_to_containing_block_offset(block, containing, &offset.x, &offset.y);
+    }
+    return offset;
+}
+
 static void layout_abs_block_internal(LayoutContext* lycon, DomNode* elmt,
                                       ViewBlock* block, BlockContext* pa_block,
                                       Linebox* pa_line,
@@ -1991,7 +2002,12 @@ static void layout_reflow_abs_child_content_after_height_change(
     lycon->block.given_height = -1.0f;
     lycon->block.saved_clear_y = -1.0f;
     lycon->font.current_font_size = -1.0f;
+    // re-resolving style resets the whole position record, and with it the link
+    // that keeps this box in its containing block's abs list; restore it so the
+    // caller's walk continues to the later siblings.
+    ViewBlock* next_abs_sibling = child->position ? child->positionp()->next_abs_sibling.get() : nullptr;
     dom_node_resolve_style(static_cast<DomNode*>(child), lycon);
+    if (child->position) child->position->next_abs_sibling = lam::up(next_abs_sibling);
 
     // The child style retains the authored percentage, while these are its
     // already-resolved used sizes from the completed containing block.
@@ -2020,8 +2036,7 @@ static void layout_reflow_abs_child_content_after_height_change(
 
 // CSS 2.1 §10.5: For absolutely positioned elements, percentage heights resolve
 void re_resolve_abs_children_vertical(LayoutContext* lycon,
-                                      ViewBlock* containing_block,
-                                      bool resolve_inset_stretch) {
+                                      ViewBlock* containing_block) {
     if (!containing_block->position || !containing_block->positionp()->first_abs_child) return;
     // Compute containing block's padding box height (CSS 2.1 §10.1)
     LayoutContainingBlock cb = layout_containing_block_for_view(containing_block);
@@ -2075,7 +2090,7 @@ void re_resolve_abs_children_vertical(LayoutContext* lycon,
         }
 
         bool is_form_control = child->form_control();
-        if (resolve_inset_stretch && child->position &&
+        if (child->position &&
             child->positionp()->has_top && child->positionp()->has_bottom &&
             positioned_axis_is_auto(child, false) &&
             (!positioned_element_is_replaced(child) || is_form_control)) {
@@ -2110,7 +2125,7 @@ void re_resolve_abs_children_vertical(LayoutContext* lycon,
         }
 
         if (child->position && child->positionp()->first_abs_child) {
-            re_resolve_abs_children_vertical(lycon, child, resolve_inset_stretch);
+            re_resolve_abs_children_vertical(lycon, child);
         }
 
         child = child->position ? child->positionp()->next_abs_sibling : nullptr;
@@ -2779,9 +2794,10 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         }
     }
     if (block->position && block->positionp()->first_abs_child) {
-        // CSS 2.1 §10.5: resolve descendant percentages after this auto-sized
-        // absolute containing block has its used height from in-flow content.
-        re_resolve_abs_children_vertical(lycon, block, false);
+        // CSS 2.1 §10.5/§10.6.4: resolve descendant percentages and top+bottom
+        // stretched heights once this auto-sized absolute containing block has
+        // its used height from in-flow content; both used the provisional zero.
+        re_resolve_abs_children_vertical(lycon, block);
     }
     LayoutContainingBlock final_cb = layout_absolute_containing_block(lycon, cb);
     float final_offset_x = 0.0f;

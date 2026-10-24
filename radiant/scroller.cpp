@@ -46,26 +46,20 @@ static ScrollHandleGeometry scrollpane_handle_geometry(
     if (content_height > 0.0f) {
         float bar_height = max(view_height - sc.SCROLLBAR_SIZE -
             sc.SCROLL_BORDER_MAIN * 2.0f, 0.0f);
-        float ratio = min(view_height / content_height, 1.0f);
-        geometry.v_height = min(max(sc.MIN_HANDLE_SIZE, ratio * bar_height),
-                                bar_height);
         float range = v_max - sp->v_min_scroll;
-        float scroll_ratio = range > 0.0f
-            ? (v_scroll - sp->v_min_scroll) / range : 0.0f;
-        geometry.v_y = sc.SCROLL_BORDER_MAIN + scroll_ratio *
-            (bar_height - geometry.v_height);
+        ScrollThumbGeometry thumb = scroll_thumb_geometry(view_height, content_height,
+            bar_height, v_scroll - sp->v_min_scroll, range, sc.MIN_HANDLE_SIZE);
+        geometry.v_height = thumb.length;
+        geometry.v_y = sc.SCROLL_BORDER_MAIN + thumb.offset;
     }
     if (content_width > 0.0f) {
         float bar_width = max(view_width - sc.SCROLLBAR_SIZE -
             sc.SCROLL_BORDER_MAIN * 2.0f, 0.0f);
-        float ratio = min(view_width / content_width, 1.0f);
-        geometry.h_width = min(max(sc.MIN_HANDLE_SIZE, ratio * bar_width),
-                               bar_width);
         float range = h_max - sp->h_min_scroll;
-        float scroll_ratio = range > 0.0f
-            ? (h_scroll - sp->h_min_scroll) / range : 0.0f;
-        geometry.h_x = sc.SCROLL_BORDER_MAIN + scroll_ratio *
-            (bar_width - geometry.h_width);
+        ScrollThumbGeometry thumb = scroll_thumb_geometry(view_width, content_width,
+            bar_width, h_scroll - sp->h_min_scroll, range, sc.MIN_HANDLE_SIZE);
+        geometry.h_width = thumb.length;
+        geometry.h_x = sc.SCROLL_BORDER_MAIN + thumb.offset;
     }
     return geometry;
 }

@@ -115,6 +115,14 @@ TEST(MailMimeAddresses, Forms) {
     EXPECT_EQ(list[3], "Carol \"CJ\" Jones <carol@example.com>");
 }
 
+TEST(MailMimeAddresses, ParenthesesInQuotedName) {
+    // inside quotes "(" is text; outside it opens a comment that is dropped
+    auto list = addresses("\"Ann Lee (Forge)\" <n@forge.example>, Bo (work) <bo@example.com>");
+    ASSERT_EQ(list.size(), 2u);
+    EXPECT_EQ(list[0], "Ann Lee (Forge) <n@forge.example>");
+    EXPECT_EQ(list[1], "Bo <bo@example.com>");
+}
+
 TEST(MailMimeAddresses, EncodedNamesGroupsAndRoutes) {
     auto list = addresses("=?ISO-8859-1?Q?J=F6rg?= <joerg@example.de>, undisclosed-recipients:;, <@relay:x@y.org>");
     ASSERT_EQ(list.size(), 2u);

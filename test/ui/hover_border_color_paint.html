@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; }
+  /* em border widths catch a hover repaint that re-resolves width without the element font */
+  #box { font-size: 20px; width: 100px; height: 100px; border: .5em solid rgb(255, 0, 0);
+         background-color: rgb(0, 255, 0); }
+  #box:hover { border-color: rgb(0, 0, 255); }
+  /* per-side winners: the left longhand must return after the hover shorthand leaves */
+  #pair { position: absolute; left: 160px; top: 0; width: 100px; height: 100px;
+          border: 10px solid rgb(255, 0, 0); border-left-color: rgb(0, 255, 0); }
+  #pair:hover { border-color: rgb(0, 0, 255); }
+  /* the hovered card's color reaches a descendant off the pointer path: its
+     currentColor border must follow, and a spread shadow paints outside the box */
+  #card { position: absolute; left: 20px; top: 140px; width: 200px; height: 40px;
+          color: rgb(255, 0, 0); }
+  #card:hover { color: rgb(0, 0, 255); box-shadow: 0 0 0 6px rgb(0, 255, 0); }
+  #swatch { position: absolute; left: 0; top: 0; width: 20px; height: 40px; border: 5px solid; }
+  #hit { position: absolute; left: 120px; top: 0; width: 80px; height: 40px; }
+</style>
+</head>
+<body>
+  <div id="box"></div>
+  <div id="pair"></div>
+  <div id="card"><div id="swatch"></div><div id="hit"></div></div>
+</body>
+</html>

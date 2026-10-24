@@ -91,21 +91,7 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": "#timeline .lambda-timeline-chart"
-      },
-      "count": 1
-    },
-    {
-      "type": "assert_count",
-      "target": {
         "selector": "#tikz svg"
-      },
-      "min": 1
-    },
-    {
-      "type": "assert_count",
-      "target": {
-        "selector": "#mermaid-flow .lambda-graph"
       },
       "min": 1
     },
@@ -129,21 +115,6 @@
         "selector": ".wordcloud"
       },
       "min": 1
-    },
-    {
-      "type": "click",
-      "target": {
-        "selector": "[data-timeline-id='charts']"
-      },
-      "scroll_into_view": true
-    },
-    {
-      "type": "assert_attribute",
-      "target": {
-        "selector": ".lambda-timeline-chart"
-      },
-      "attribute": "data-timeline-active",
-      "equals": "charts"
     },
     {
       "type": "capture_surface",

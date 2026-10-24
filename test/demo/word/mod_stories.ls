@@ -11,7 +11,12 @@ pub fn settings(doc) {
     if (valid(p)) p else defaults
 }
 pub fn field_text(value,page_no,total) => replace(replace(value,"{PAGE}",string(page_no)),"{NUMPAGES}",string(total))
-fn fits(value,margin,p) => value=="" or p.distance*96/25.4+len(split(value,"\n"))*p.size*96/72*1.2+4<=margin
+fn required_margin(value,p) => if (value=="") 0 else p.distance*96/25.4+len(split(value,"\n"))*p.size*96/72*1.2+4
+fn fits(value,margin,p) => required_margin(value,p)<=margin
+pub fn minimum_margin(doc,side) {
+    let p = settings(doc);
+    required_margin(if (side=="top") p.header else if (side=="bottom") p.footer else "",p)*25.4/96
+}
 fn valid(p) => p.header is string and p.footer is string and len(p.header)<=1000 and len(p.footer)<=1000 and
     contains(["left","center","right"],p.header_align) and contains(["left","center","right"],p.footer_align) and
     p.size is number and p.size>=8 and p.size<=24 and p.distance is number and p.distance>=3 and p.distance<=30 and p.different_first is bool
@@ -29,7 +34,7 @@ pub fn transaction(editor,p) map^ {
 pub fn story(doc,kind,page_no,total) {
     let p = settings(doc)
     let value = p[kind]
-    let g = page.geometry(doc)
+    let g = page.geometry(doc,page_no)
     if (value=="" or (page_no==1 and p.different_first)) null else
         <div class:"word-story word-" ++ kind,contenteditable:"false",role:"note",["aria-label"]:if (kind=="header") "Page header" else "Page footer",
             style:(if (kind=="header") "top:" else "bottom:") ++ string(p.distance*96/25.4) ++ "px;left:" ++ string(g.left) ++

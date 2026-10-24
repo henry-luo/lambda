@@ -1,0 +1,4 @@
+[[1, "two", null], [1, "two", null, true], ["fallback"]]
+[{ value: 1}, { value: 1, extra: [2], fixed: 7}]
+[2, 9, error]
+

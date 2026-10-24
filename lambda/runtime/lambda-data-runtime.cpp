@@ -3560,6 +3560,17 @@ static bool string_char_span(String* str, int64_t index, const char** chars,
     return true;
 }
 
+// S7.1.1v3: preserve exact UTF-8 bytes and absence in a pointer-free scalar.
+// The length distinguishes an embedded NUL character from a missing index.
+extern "C" uint64_t fn_string_char_word(Item text, int64_t index) {
+    const char* chars = NULL;
+    size_t length = 0;
+    if (!string_char_span(text.get_safe_string(), index, &chars, &length)) return 0;
+    uint64_t word = (uint64_t)length << 32;
+    for (size_t i = 0; i < length; i++) word |= (uint64_t)(uint8_t)chars[i] << (8 * i);
+    return word;
+}
+
 // Decode the indexed character directly: materializing its String first made
 // ord(s[i]) cross two helpers and a possible allocation per character.
 extern "C" Item fn_string_ord_at(Item str_item, int64_t index) {

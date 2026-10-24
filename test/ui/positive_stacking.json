@@ -1,0 +1,21 @@
+{
+  "name":"Positive layers belong to their nearest stacking context across anchors",
+  "html":"test/ui/positive_stacking.html",
+  "viewport":{"width":320,"height":300},
+  "events":[
+    {"type":"assert_pixel","x":50,"y":50,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"assert_hit_test","x":50,"y":50,"expected_selector":"#high"},
+    {"type":"assert_pixel","x":210,"y":30,"min_r":255,"max_r":255,"min_g":165,"max_g":165,"min_b":0,"max_b":0},
+    {"type":"assert_hit_test","x":210,"y":30,"expected_selector":"#clipped"},
+    {"type":"assert_pixel","x":260,"y":30,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_hit_test","x":260,"y":30,"expected_selector":".anchor"},
+    {"type":"assert_pixel","x":35,"y":165,"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"assert_hit_test","x":35,"y":165,"expected_selector":"#local"},
+    {"type":"assert_pixel","x":60,"y":180,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_hit_test","x":60,"y":180,"expected_selector":"#outside"},
+    {"type":"assert_hit_test","x":170,"y":120,"expected_selector":"#relative-deep"},
+    {"type":"assert_hit_test","x":230,"y":120,"expected_selector":"#absolute-deep"},
+    {"type":"assert_pixel","x":290,"y":270,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_hit_test","x":290,"y":270,"expected_selector":"#root-layer"}
+  ]
+}

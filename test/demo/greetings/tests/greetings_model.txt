@@ -1,0 +1,136 @@
+"catalog:"
+{
+  templates: 20,
+  occasions: 10,
+  art: 32,
+  fonts: 16,
+  papers: 17,
+  patterns: 9,
+  borders: 7
+}
+"every template names a known occasion, format, paper and art:"
+[]
+"every occasion has four verses and a known motif:"
+[{
+    o: "birthday",
+    verses: 4,
+    motif: true
+  }, {
+    o: "thanks",
+    verses: 4,
+    motif: true
+  }, {
+    o: "holidays",
+    verses: 4,
+    motif: true
+  }, {
+    o: "love",
+    verses: 4,
+    motif: true
+  }, {
+    o: "wedding",
+    verses: 4,
+    motif: true
+  }, {
+    o: "baby",
+    verses: 4,
+    motif: true
+  }, {
+    o: "congrats",
+    verses: 4,
+    motif: true
+  }, {
+    o: "getwell",
+    verses: 4,
+    motif: true
+  }, {
+    o: "sympathy",
+    verses: 4,
+    motif: true
+  }, {
+    o: "hello",
+    verses: 4,
+    motif: true
+  }]
+"an assembled card:"
+{
+  title: "Evergreen",
+  format: "portrait",
+  front: ["f1", "f2", "f3", "f4", "f5"],
+  left: ["l1"],
+  right: ["r1", "r2"],
+  back: ["b1", "b2", "b3"],
+  verse: "Wishing you warm lights,\nquiet snow, and the company\nof everyone you love."
+}
+"photos resolve against the sample map:"
+[{
+    src: "file:///coast.jpg",
+    frame: "polaroid"
+  }]
+"edits:"
+{
+  x: 10,
+  color: "#ffffff",
+  untouched: true
+}
+{
+  back: ["b1", "b2", "b3", "n1"],
+  removed: ["b2", "b3", "n1"],
+  next: "n8"
+}
+{
+  front: ["f1", "f2", "f3", "f4", "f5", "n2"],
+  offset: 18
+}
+{
+  front: ["f2", "f3", "f4", "f5", "f1"],
+  back: ["f5", "f1", "f2", "f3", "f4"],
+  forward: ["f1", "f3", "f2", "f4", "f5"],
+  backward: ["f2", "f1", "f3", "f4", "f5"]
+}
+"backdrop on every page:"
+["kraft", "kraft", "kraft", "kraft"]
+"reshaping keeps centres and proportions:"
+{
+  format: "landscape",
+  centre_x: 350,
+  page_centre: 350,
+  w: 121,
+  ratio: true
+}
+"placing a new item centres it:"
+{
+  x: 150,
+  y: 258,
+  w: 200
+}
+"history:"
+{
+  undo_is_card: true,
+  redo_is_moved: true,
+  empty_undo: null
+}
+"colours:"
+{
+  tint: "#f08ea4",
+  shade: "#710f24",
+  dark_navy: true,
+  dark_cream: false
+}
+"files:"
+{
+  slug: "mr-mrs-golden-rings",
+  empty: "card",
+  valid: true,
+  invalid: false
+}
+"geometry the editor writes during a drag:"
+{
+  left: "40px",
+  top: "680px",
+  width: "920px",
+  height: "auto",
+  transform: "rotate(0deg)",
+  font-size: "132px",
+  letter-spacing: "0px"
+}

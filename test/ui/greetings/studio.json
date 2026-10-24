@@ -1,0 +1,645 @@
+{
+ "name": "Greetings demo: designs, inside verse, text edits with undo, art drag, backdrop, preview, save and open",
+ "html": "test/demo/greetings/greetings.ls",
+ "viewport": {
+  "width": 1440,
+  "height": 900
+ },
+ "events": [
+  {
+   "type": "log",
+   "message": "the studio opens on the first design with the full gallery"
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".doc-name"
+   },
+   "equals": "Balloon party"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".designs .design"
+   },
+   "count": 20
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas .card-page"
+   },
+   "count": 1
+  },
+  {
+   "type": "log",
+   "message": "an occasion narrows the gallery; a design replaces the card"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"occasion\"][data-arg=\"love\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".designs .design"
+   },
+   "count": 2
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"template\"][data-arg=\"sweetheart\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".doc-name"
+   },
+   "equals": "Sweetheart"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#studio"
+   },
+   "attribute": "data-view",
+   "equals": "front"
+  },
+  {
+   "type": "log",
+   "message": "the inside spread shows both pages, and a verse lands on the right page"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"view\"][data-arg=\"inside\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#studio"
+   },
+   "attribute": "data-view",
+   "equals": "inside"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#studio"
+   },
+   "attribute": "data-page",
+   "equals": "right"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas .card-page"
+   },
+   "count": 2
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"panel\"][data-arg=\"text\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"verse\"][data-arg=\"love/2\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas [data-page=\"right\"] .item.text"
+   },
+   "count": 3
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#studio"
+   },
+   "attribute": "data-selected",
+   "equals": "n1"
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "contains": "Of all the places"
+  },
+  {
+   "type": "log",
+   "message": "the inspector edits the selected text; a font applies to it"
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#text-content"
+   },
+   "text": "Hello there",
+   "clear": true
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "equals": "Hello there"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"font\"][data-arg=\"didot\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_style",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "property": "font-family",
+   "contains": "Didot"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"size\"][data-arg=\"2\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "log",
+   "message": "undo steps back through the font and the typing; delete removes the verse"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"undo\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"undo\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_style",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "property": "font-family",
+   "contains": "Georgia"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"undo\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "contains": "Of all the places"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"redo\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "equals": "Hello there"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"delete\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas [data-page=\"right\"] .item.text"
+   },
+   "count": 2
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#studio"
+   },
+   "attribute": "data-selected",
+   "equals": ""
+  },
+  {
+   "type": "log",
+   "message": "art goes on the chosen page; a drag moves it as one undo step"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"view\"][data-arg=\"front\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"panel\"][data-arg=\"art\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"add-art\"][data-arg=\"butterfly\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas [data-page=\"front\"] .item.art"
+   },
+   "count": 2
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#studio"
+   },
+   "attribute": "data-selected",
+   "equals": "n1"
+  },
+  {
+   "type": "mouse_down",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   }
+  },
+  {
+   "type": "mouse_move",
+   "target": {
+    "selector": "#canvas [data-page=\"front\"]",
+    "offset_x": 120,
+    "offset_y": 120
+   }
+  },
+  {
+   "type": "mouse_move",
+   "target": {
+    "selector": "#canvas [data-page=\"front\"]",
+    "offset_x": 110,
+    "offset_y": 110
+   }
+  },
+  {
+   "type": "mouse_up",
+   "target": {
+    "selector": "#canvas [data-page=\"front\"]",
+    "offset_x": 110,
+    "offset_y": 110
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".statusbar .status"
+   },
+   "equals": "Moved."
+  },
+  {
+   "type": "assert_style",
+   "target": {
+    "selector": "#canvas [data-id=\"n1\"]"
+   },
+   "property": "transform",
+   "contains": "matrix(1, 0, 0, 1, 0, 0)"
+  },
+  {
+   "type": "log",
+   "message": "the backdrop panel changes the current page's paper"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"panel\"][data-arg=\"backdrop\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"paper\"][data-arg=\"mint\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "[data-act=\"paper\"][data-arg=\"mint\"]"
+   },
+   "attribute": "class",
+   "contains": "on"
+  },
+  {
+   "type": "log",
+   "message": "the preview opens the folded card and closes again"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".preview"
+   },
+   "count": 1
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".book"
+   },
+   "attribute": "class",
+   "equals": "book closed"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".book"
+   },
+   "attribute": "class",
+   "equals": "book open"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"preview-done\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".preview"
+   },
+   "count": 0
+  },
+  {
+   "type": "log",
+   "message": "a saved card opens again after switching designs"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog\"][data-arg=\"export\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".dialog"
+   },
+   "count": 1
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#file-path"
+   },
+   "text": "temp/greetings_ui",
+   "clear": true
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"export\"][data-arg=\"mark\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 400
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".dialog-note"
+   },
+   "equals": "Saved temp/greetings_ui/sweetheart.mark"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog-close\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".dialog"
+   },
+   "count": 0
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"panel\"][data-arg=\"designs\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"template\"][data-arg=\"sweetheart\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog\"][data-arg=\"open\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#file-path"
+   },
+   "text": "temp/greetings_ui/sweetheart.mark",
+   "clear": true
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".dialog [data-act=\"open\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 300
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".dialog"
+   },
+   "count": 0
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas [data-page=\"front\"] .item.art"
+   },
+   "count": 2
+  },
+  {
+   "type": "key_combo",
+   "key": "z",
+   "mods_str": "super"
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#canvas [data-page=\"front\"] .item.art"
+   },
+   "count": 1
+  }
+ ]
+}

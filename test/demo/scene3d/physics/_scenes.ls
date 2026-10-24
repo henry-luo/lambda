@@ -36,8 +36,10 @@ fn viewport(kind, objects, config) element => <scene3d id:"world",camera:"main",
       <light type:'directional',position:[7.0,4.0,-6.0],intensity:0.25,color:"#82aaff">,
       <resources geometry.sphere("ball-unit",12,20)>, *objects]>
 
+// gravity x pace^2 with impulses x pace replays the same cascade, pace times faster.
+pub let domino_pace = 2.0
 pub fn domino_position(i) array => [-7.2+0.46*i,0.9,1.15*sin(i*0.19)]
-pub fn domino_commands() array => [{type:"impulse",body:"tile-0",value:[0.34,0.0,0.16],point:[-7.2,1.58,0.0]}]
+pub fn domino_commands() array => [{type:"impulse",body:"tile-0",value:[0.34*domino_pace,0.0,0.16*domino_pace],point:[-7.2,1.58,0.0]}]
 pub fn domino() element => viewport("domino",[
     body("table",[box([17.0,0.3,6.5],"#34445b")],{type:'fixed',position:[0.0,-0.15,0.0]}),
     for (i in 0 to 31)
@@ -46,7 +48,7 @@ pub fn domino() element => viewport("domino",[
     for (i in 0 to 31) visual(box([0.23,0.012,0.85],"#526781",[domino_position(i)[0],0.006,domino_position(i)[2]])),
     visual(box([16.0,0.014,0.025],"#65e8cf",[0.0,0.009,-2.6])),
     visual(box([16.0,0.014,0.025],"#65e8cf",[0.0,0.009,2.6]))
-],{state:'paused'})
+],{state:'paused',gravity:[0.0,-9.81*domino_pace*domino_pace,0.0]})
 
 fn assembly_parts(i) array =>
     if (i%3 == 0) [

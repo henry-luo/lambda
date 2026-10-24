@@ -44,6 +44,36 @@
           covered: 1,
           overlaps: 0,
           slots: true
+        }]], ["frame", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]], ["spotlight", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
         }]], ["heart", [{
           cells: 2,
           covered: 1,
@@ -74,7 +104,46 @@
           covered: 1,
           overlaps: 0,
           slots: true
+        }]], ["star", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }]], ["balloon", [{
+          cells: 2,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 7,
+          covered: 1,
+          overlaps: 0,
+          slots: true
+        }, {
+          cells: 30,
+          covered: 1,
+          overlaps: 0,
+          slots: true
         }]]],
+  lattices: [["diamonds", [[2, true, true, true], [7, true, true, true], [30, true, true, true]]], ["honeycomb", [[2, true, true, true], [7, true, true, true], [30, true, true, true]]]],
+  frame: true,
+  pile: [0, true, true],
+  polaroids: [true, true],
+  keepsake: [false, true, true, false],
+  balloon: ["rope", "rope", "basket"],
+  texts: [["mosaic", [0, 220, false]], ["frame", [1680, 1900, false]], ["spotlight", [840, 1060, true]]],
+  look: ["polaroids", "blush", "serif", 24, null, true],
+  fonts: ["script", "sans", "sans", "Hi"],
   grid_cols: [[0, 0, 666.67], [666.67, 0, 666.67], [1333.33, 0, 666.67], [0, 666.67, 666.67], [666.67, 666.67, 666.67], [1333.33, 666.67, 666.67], [0, 1333.33, 2000]],
   masks: ["circle(50% at 50% 50%)", "polygon(50% 29%, 50.1% 2"],
   scrapbook: [7, true],

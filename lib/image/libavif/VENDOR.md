@@ -9,7 +9,7 @@ Archive SHA-256: `0a545e953cc049bf5bcf4ee467306a2f113a75110edf59e61248873101cd26
 Official source imported for the common image library (2026-10-15).
 Local adaptations are made directly in this directory and reviewed through Git.
 No separate patch files are required, per the user-approved source policy in
-`vibe/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
+`vibe/lib/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
 and application directories are omitted; only library targets are built.
 
 Lambda uses only the libaom AV1 backend and the bundled minimal libyuv scaling fallback; optional applications and backends are not built.

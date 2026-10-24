@@ -504,6 +504,8 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_EQ(strstr(output, "asset-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "three-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "cellscope"), nullptr) << output;
+        // word clouds live in the chart demo; the standalone gallery is not a named demo.
+        EXPECT_EQ(strstr(output, "wordcloud"), nullptr) << output;
         if (strcmp(name, "unknown-demo") == 0) EXPECT_NE(strstr(output, "unknown demo 'unknown-demo'"), nullptr) << output;
         shell_result_free(&result);
     }
@@ -511,28 +513,20 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
 
 TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     test_radiant_view_ensure_temp_dir();
-    char custom_home[1024], custom_viewer[1024];
-    snprintf(custom_home, sizeof(custom_home), "%s/temp/test_demo_home_%s",
-        g_radiant_view_root, g_radiant_view_run_id);
-    snprintf(custom_viewer, sizeof(custom_viewer), "%s/package/doc/doc_viewer.html", custom_home);
-    char custom_doc[1024];
-    snprintf(custom_doc, sizeof(custom_doc), "%s/package/doc", custom_home);
-    ASSERT_TRUE(create_dir(custom_doc));
-    write_text_file(custom_viewer, "<main id='demo-home-splash'>Custom viewer</main>");
     struct DemoCase {
         const char* name; const char* selector;
-        bool graphics = false; const char* home = "./lmd";
+        bool graphics = false;
     };
     const DemoCase cases[] = {
-        {nullptr, "#splash"},
+        // with no name, `lambda demo` opens the demo index (test/demo/index.ls).
+        {nullptr, "#demo-index .tile[data-demo=doom]"},
         {"tetris", "#tetris[data-mode=ready]"},
         {"superlambda", "#superlambda[data-mode=ready]"},
         {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},
         {"slides", ".slide-player"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
-        {"wordcloud", ".gallery .card"},
-        {nullptr, "#demo-home-splash", false, custom_home},
+        {"chart", ".demo-tile"},
     };
     constexpr size_t count = sizeof(cases) / sizeof(cases[0]);
     RadiantViewLaunch launches[count] = {};
@@ -553,8 +547,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
             "{\"type\":\"window_close\"},{\"type\":\"assert_window_closed\",\"closed\":true}]}", demo.selector);
         ASSERT_EQ(write_binary_file(events[i], replay->str, replay->length), 0); strbuf_free(replay);
         launch.event_path = events[i];
-        snprintf(homes[i], sizeof(homes[i]), "%s", demo.home == custom_home ? custom_home : "");
-        if (demo.home != custom_home) snprintf(homes[i], sizeof(homes[i]), "%s/lmd", g_radiant_view_root);
+        snprintf(homes[i], sizeof(homes[i]), "%s/lmd", g_radiant_view_root);
         environments[i][0] = {"LAMBDA_HOME", homes[i]};
         // only the GPU demos need GLFW; CPU text measurement is windowless.
         environments[i][1] = {"LAMBDA_HEADLESS_GLFW_WINDOW", demo.graphics ? "1" : nullptr};
@@ -562,14 +555,13 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     }
     test_radiant_view_launch_all(launches, count);
     for (size_t i = 0; i < count; i++) {
-        SCOPED_TRACE(cases[i].name ? cases[i].name : cases[i].home);
+        SCOPED_TRACE(cases[i].name ? cases[i].name : "(index)");
         ShellResult& result = launches[i].result;
         EXPECT_FALSE(result.timed_out);
         EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
         EXPECT_TRUE(test_radiant_view_file_contains(launches[i].event_result, "\"result\":\"PASS\""));
         shell_result_free(&result);
     }
-    ASSERT_TRUE(file_delete_recursive(custom_home) == 0);
 }
 
 static const struct {
@@ -3487,7 +3479,8 @@ TEST(RadiantViewTest, PhotoToolButtonsPreserveContainerAlignment) {
 }
 
 TEST(RadiantViewTest, DoomNativeGameplayAndEpisodeLifecycle) {
-    const char* replays[] = {"e1m1_walkthrough", "e1m1_exit", "e1m1_death", "episode", "camera", "lifecycle"};
+    const char* replays[] = {"e1m1_walkthrough", "e1m1_exit", "e1m1_death", "episode", "camera", "lifecycle",
+        "window_fit"};
     for (const char* replay : replays) {
         SCOPED_TRACE(replay);
         StrBuf* events = strbuf_new();

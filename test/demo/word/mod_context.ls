@@ -9,10 +9,9 @@ import model: .mod_model
 import insert: .mod_insert
 import review: .mod_review
 import changes: .mod_changes
-import shapes: .mod_shapes
-import equation: .mod_equation
-import wordart: .mod_wordart
+import graphics: .mod_graphics
 import transform: .mod_transform
+import references: .mod_references
 
 pub fn story(node) => if (dom.closest(node,".word-header")!=null) "header"
     else if (dom.closest(node,".word-footer")!=null) "footer" else null
@@ -36,15 +35,13 @@ fn action(id,command,label,icon,params={},disabled=false) =>
 
 pub fn describe(editor,region=null) {
     let image = model.current_node(editor,'img')
-    let graphic = [for (entry in [
-        {kind:"shape",label:"Shape",command:"ui.shapeSettings",text:"Format Shape…",icon:"shapes",matches:shapes.settings(image.node)!=null},
-        {kind:"equation",label:"Equation",command:"ui.equationSettings",text:"Edit Equation…",icon:"equation",matches:equation.settings(image.node)!=null},
-        {kind:"wordart",label:"WordArt",command:"ui.wordArtSettings",text:"Edit WordArt…",icon:"wordart",matches:wordart.settings(image.node)!=null},
-        {kind:"picture",label:"Picture",command:"ui.pictureSettings",text:"Picture Settings…",icon:"album",matches:image!=null}]
-        where entry.matches) entry][0]
+    let entry = graphics.descriptor(image.node)
+    let graphic = if (entry!=null) {*:entry,command:entry.edit,text:if (entry.kind=="shape") "Format Shape…" else "Edit " ++ entry.label ++ "…"}
+        else if (image!=null) {kind:"picture",label:"Picture",command:"ui.pictureSettings",text:"Picture Settings…",icon:"album"} else null
     let table = model.table_context(editor)
     let item = model.current_node(editor,'li')
     let link = model.current_node(editor,'a')
+    let citation = references.current(editor)
     let block = model.current_block(editor)
     let bookmark = insert.bookmark_name(block.node)
     let marks = model.current_marks(editor)
@@ -55,14 +52,21 @@ pub fn describe(editor,region=null) {
         else if (item!=null) "list" else if (link!=null) "link" else if (model.current_node(editor,'hr')!=null) "rule" else "text"
     let label = if (region=="header") "Header" else if (region=="footer") "Footer" else if (graphic!=null) graphic.label
         else if (kind=="table") "Table cell" else if (kind=="list") "List item" else if (kind=="link") "Link"
-        else if (kind=="rule") "Horizontal line" else if (revision!=null) "Tracked change"
+        else if (citation!=null) "Citation" else if (kind=="rule") "Horizontal line" else if (revision!=null) "Tracked change"
         else if (len(comments)>0) "Comment" else if (bookmark!=null) "Bookmark" else "Text"
     let actions = if (region!=null) [
         action("story-edit","ui.headerFooter","Edit " ++ label ++ "…",region),
         action("page-number","ui.pageNumber","Page Numbers…","page_number"),
         action("page-setup","ui.pageSetup","Page Setup…","margins")]
     else [
+        *if (graphic.kind=="equation") [
+            action("equation-tools","ui.tab","Equation Tools…","equation",{tab:"Equation"}),
+            action("equation-source","ui.equationEdit","Edit LaTeX Source…","code"),
+            action("equation-display","ui.equationFormat","Display Equation","wrap_top_bottom",{display:true}),
+            action("equation-inline","ui.equationFormat","Inline Equation","wrap_inline",{display:false})] else [],
         *if (graphic!=null) [action("object",graphic.command,graphic.text,graphic.icon),
+            action("object-layout","ui.objectLayout","Layout Options…","object_position"),
+            action("object-arrange","ui.tab","Arrange Object…","bring_forward",{tab:"Object Format"}),
             *if (dimensions!=null and dimensions.width>0 and dimensions.height>0)
                 [for (choice in [{id:"left",label:"Rotate Left 90°",delta: -90},{id:"right",label:"Rotate Right 90°",delta:90}])
                     action("rotate-" ++ choice.id,"object.transform",choice.label,"rotate_" ++ choice.id,
@@ -82,10 +86,15 @@ pub fn describe(editor,region=null) {
                 {id:"delete-column",command:"table.deleteColumn",label:"Delete Column",icon:"trash"},
                 {id:"delete",command:"table.deleteTable",label:"Delete Table",icon:"trash"}])
                 action("table-" ++ entry.id,entry.command,entry.label,entry.icon)],
-            action("table-options","ui.tab","Table Style & Cell Alignment…","table",{tab:"Table"})] else [],
+            action("table-design","ui.tab","Table Design…","table",{tab:"Table Design"}),
+            action("table-options","ui.tab","Table Layout & Cell Alignment…","table",{tab:"Table"})] else [],
         *if (item!=null and graphic==null) [action("indent","para.indent","Increase Indent","indent"),
             action("outdent","para.outdent","Decrease Indent","outdent")] else [],
-        *if (link!=null) [action("edit-link","ui.link","Edit Link…","link"),
+        *if (citation!=null) [action("edit-citation","ui.editCitation","Edit Citation…","citation"),
+            action("edit-source","ui.source","Edit Source…","sources",{id:citation.value.source.id}),
+            action("remove-citation","references.removeCitation","Remove Citation","trash"),
+            action("update-citations","references.refresh","Update Citations & Bibliography","refresh")] else [],
+        *if (link!=null and citation==null) [action("edit-link","ui.link","Edit Link…","link"),
             action("remove-link","insert.removeLink","Remove Link","unlink"),
             *if (insert.link_bookmark(attrs_get(link.node.attrs,'href'))!=null)
                 [action("follow-link","ui.followLink","Go to Bookmark","bookmark")] else []] else [],

@@ -1139,6 +1139,53 @@ extern "C" void dom_install_image_constructor(void) {
 // Window-level publications
 // ---------------------------------------------------------------------------
 
+static Item js_window_query_local_fonts(Item options) {
+    // WebIDL conversion and Promise shape stay in the realm; native discovery is shared with Lambda.
+    JS_ROOTS(roots, opts, options, names, ItemNull, converted, ItemNull,
+        snapshot, ItemNull, result, ItemNull, face, ItemNull, value, ItemNull, query, ItemNull);
+    query.set(js_new_object());
+    if (opts.get().item != ItemNull.item && opts.get().item != ITEM_JS_UNDEFINED) {
+        if (!js_is_object_value(opts.get())) return js_promise_from_completion(
+            js_throw_type_error("queryLocalFonts: options must be a dictionary"));
+        names.set(js_get_key_cstr(opts.get(), "postscriptNames"));
+        if (item_is_error(names.get())) return js_promise_from_completion(names.get());
+        if (names.get().item != ITEM_JS_UNDEFINED) {
+            if (!js_is_object_value(names.get())) return js_promise_from_completion(
+                js_throw_type_error("queryLocalFonts: postscriptNames must be a sequence"));
+            names.set(js_iterable_to_array(names.get()));
+            if (item_is_error(names.get())) return js_promise_from_completion(names.get());
+            converted.set(js_array_new(0));
+            for (int64_t i = 0; i < js_array_length(names.get()); i++) {
+                value.set(js_to_string(js_elements_get_int(names.get(), i)));
+                if (item_is_error(value.get())) return js_promise_from_completion(value.get());
+                js_array_push(converted.get(), value.get());
+            }
+            js_set_key_cstr(query.get(), "postscriptNames", converted.get());
+        }
+    }
+    snapshot.set(jube_internal_host_api()->dom_catalog->query_local_fonts(query.get()));
+    if (item_is_error(snapshot.get())) return js_promise_from_completion(
+        js_throw_type_error("queryLocalFonts: native font enumeration failed"));
+    result.set(js_array_new(0));
+    for (int64_t i = 0; i < js_array_length(snapshot.get()); i++) {
+        converted.set(js_elements_get_int(snapshot.get(), i));
+        face.set(js_new_object());
+        const char* keys[] = {"postscriptName", "fullName", "family", "style"};
+        for (const char* key : keys) {
+            value.set(js_get_key_cstr(converted.get(), key));
+            js_set_key_cstr(face.get(), key, value.get());
+        }
+        js_array_push(result.get(), face.get());
+    }
+    return js_promise_resolve(result.get());
+}
+
+extern "C" void dom_install_window_font_global(void) {
+    JS_ROOTS(roots, global, js_get_global_this(), method, js_new_native_function(js_window_query_local_fonts));
+    js_set_function_name(method.get(), js_name_item("queryLocalFonts"));
+    js_set_key_cstr(global.get(), "queryLocalFonts", method.get());
+}
+
 static Item js_window_get_computed_style(Item elem_item, Item pseudo_item) {
     // WebIDL requires a native Element before entering the realm-neutral core.
     if (!_element_receiver(elem_item)) {

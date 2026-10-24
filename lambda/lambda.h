@@ -2809,6 +2809,7 @@ extern "C" {
     Item fn_string_ascii_at(Item str, int64_t index);
     String* get_ascii_char_string(unsigned char ch);
     Item fn_string_ord_at(Item str, int64_t index);
+    uint64_t fn_string_char_word(Item str, int64_t index);
     uint8_t fn_string_char_eq_ascii(Item str, int64_t index, uint8_t expected);
     uint8_t fn_string_char_eq(Item left, int64_t left_index,
                               Item right, int64_t right_index);
@@ -3667,6 +3668,11 @@ extern "C" {
     Item member_set_cow_profiled(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);
     Item map_set_cow_profiled(Item owner, Item key, Item value);
+    Item map_set_cow_resolved(Item owner, NameId key, Item value,
+        const struct TypeMap* shape, struct ShapeEntry* field);
+    Item map_set_cow_resolved_profiled(Item owner, NameId key, Item value,
+        const struct TypeMap* shape, struct ShapeEntry* field);
+    Item lambda_array_scalar_snapshot(Item value, void* scratch, int64_t scratch_bytes);
     bool cow_profile_sites_enabled(void);
     Item cow_path_set_raw(Item owner, Item key, Item value);
     int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,

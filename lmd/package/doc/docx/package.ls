@@ -99,9 +99,37 @@ fn stories(pkg) map^ => map([for (kind in ["footnote","endnote","comment"],
                     {key:c.attr(node,"id"),value:node}])}
         }
     })])
-fn story_diagnostics(pkg) array^ => [for (rel in pkg.relationships
-    where contains([c.R ++ "/header",c.R ++ "/footer"],rel.type))
-    c.issue("unsupported-story",pkg.main,"Separate document story is outside the v1 profile")]
+// saved field instructions and empty paragraph marks do not make a header/footer visible (S1.8).
+fn visible_story_content(node) {
+    if (node is string) trim(node) != ""
+    else if (node.uri != c.W) true
+    else if (contains(["t","delText"],node.tag)) c.text(node) != ""
+    else if (contains(["rPr","instrText","fldChar","bookmarkStart","bookmarkEnd","proofErr",
+        "lastRenderedPageBreak","permStart","permEnd","commentRangeStart","commentRangeEnd"],node.tag)) false
+    else if (node.tag == "pPr") {
+        let shading = c.child(node,"shd");
+        any([for (border in c.children(c.child(node,"pBdr"),null,null))
+            not contains(["none","nil"],c.attr(border,"val"))]) or
+        (shading != null and (c.attr(shading,"themeFill") != null or
+            (c.attr(shading,"fill") != null and c.attr(shading,"fill") != "auto") or
+            (c.attr(shading,"val") != null and not contains(["nil","clear"],c.attr(shading,"val")))))
+    } else if (contains(["hdr","ftr","p","r","fldSimple"],node.tag))
+        any([for (child in node.children) visible_story_content(child)])
+    else true
+}
+fn story_diagnostics(pkg) array^ {
+    let visible = [for (rel in pkg.relationships,
+        let kind = if (rel.type == c.R ++ "/header") "hdr" else if (rel.type == c.R ++ "/footer") "ftr" else null
+        where kind != null)
+        if (rel.external) true else {
+            let root = xml(pkg.parts,rel.target,true)^;
+            if (root.uri != c.W or root.tag != kind)
+                raise c.fail("invalid-package","Invalid header/footer root",rel.target)
+            else visible_story_content(root)
+        }];
+    [for (present in visible where present)
+        c.issue("unsupported-story",pkg.main,"Separate document story is outside the v1 profile")]
+}
 pub fn open_package(source) map^ {
     let archive = if (source is string) {
         if (contains(source,":") or starts_with(source,"//")) raise c.fail("invalid-source","A local DOCX path is required")

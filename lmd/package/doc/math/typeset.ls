@@ -234,7 +234,7 @@ let SPACE_COMMANDS = [",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace
 pub fn maps_command(key) =>
     sym.lookup_symbol(key) != null or sym.get_operator_name(key) != null or
     contains(NAMED_COMMANDS, key) or contains(SPACE_COMMANDS, key) or
-    key == "rule" or key == "genfrac" or font.alphabet_alias(key) != null
+    key == "rule" or key == "genfrac" or key == "lambdamark" or font.alphabet_alias(key) != null
 
 // the symbols a \boldsymbol in this formula leaves at regular weight because no
 // bundled face draws them in bold (Lambda_Pkg_Math §10.1)
@@ -326,7 +326,8 @@ fn text_command(n, c) {
 fn command_node(n, c) {
     let key = command_name(string(n.name or n.cmd or ""))
     let items = util.content_items(n)
-    if (key == "rule") {
+    if (key == "lambdamark") edit_mark(util.text_of(items[0], true), c)
+    else if (key == "rule") {
         // LaTeX's optional raise precedes the two mandatory dimensions; it is not the width.
         let start = if (name(items[0]) == 'brack_group') 1 else 0;
         rule(<rule_command width:util.text_of(items[start],true),height:util.text_of(items[start + 1],true),
@@ -1079,6 +1080,14 @@ fn colored(n, c) {
                 height:base.height + base.depth + 2.0 * pad, fill:color,
                 stroke:n.border_color or "none", 'stroke-width':metric(c,"fraction_rule_thickness")> result.body>}
     } else ({*:base, body: <g fill: color, style: "color:" ++ color, base.body>})
+}
+
+// An editor's caret slot: a zero-size "skip" box, so atom spacing and layout ignore it,
+// whose invisible line records the slot's position and current em (Lambda_Pkg_Math §3.3).
+fn edit_mark(id, c) {
+    let em = font.UNITS * scale(c);
+    {*:bx.make(<line class:"math-edit-mark", ["data-mark"]:id, x1:0, x2:0, y1:-0.8 * em, y2:0.25 * em, stroke:"none">,
+        0.0, 0.0, 0.0), type: "skip"}
 }
 
 fn space(n, c) {

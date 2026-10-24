@@ -1,0 +1,75 @@
+{
+  "html": "test/lambda/ui/template_state_lazy_init.ls",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#first"
+      },
+      "equals": "40:null"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#second"
+      },
+      "equals": "40:null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#first"
+      },
+      "equals": "41:null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#first"
+      },
+      "equals": "42:null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#second"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#second"
+      },
+      "equals": "41:null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#first"
+      },
+      "equals": "43:null"
+    }
+  ]
+}

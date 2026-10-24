@@ -1,11 +1,13 @@
 # Tune34 — Remaining large LambdaJS gaps after Tune33
 
-**Status:** shared compiler/runtime batch implemented; paired release performance
-qualification complete. Correctness retains inherited baseline and aggregate
-concurrency failures (§5.4). Remaining proposal mechanisms are listed in §5.7.
+**Status:** the initial batch (§5) and remaining initial-tranche mechanisms
+(§6) are implemented and release-qualified. Inherited baseline, release-ratchet
+and aggregate concurrency failures remain explicit; semantic residual costs
+and excluded higher-risk transformations are listed in §6.4.
 
-**Date:** 2026-10-23. **Inspected HEAD:**
-`46bdd322c03f85f306c912e3237cc0a0ae914927`.
+**Date:** 2026-10-23. **Initial inspected HEAD:**
+`46bdd322c03f85f306c912e3237cc0a0ae914927`. **Continuation control HEAD:**
+`8d6d8de8138b6b890f805a48933e10c819d5ac43`.
 
 **Scope:** general compiler/runtime improvements for unchanged untyped Lambda,
 with typed Lambda and LambdaJS regression controls. Eight workloads enter this
@@ -839,6 +841,9 @@ not selected as final acceptance samples.
 
 ### 5.7 Remaining proposal scope
 
+This records the initial §5 build. The continuation in §6 implements the
+remaining initial-tranche mechanisms listed here.
+
 This shared batch is implemented and performance-qualified. The proposal remains partial:
 
 - General finite array-content ranges and power-of-two remainder masking
@@ -859,3 +864,301 @@ sample. Current Navier ports run 15 timed frames/check77, while setup and
 solver structure still differ. JSON floor/truncation and the historical FFT
 zero-input oracle are covered by the separate audits (§5.3). The old Splay
 4.77× and one-frame Navier claims are not used as equal-work speedups.
+
+## 6. Continuation — remaining mechanisms
+
+**Status:** remaining initial-tranche mechanisms are implemented and qualified
+against merged HEAD `8d6d8de8138b6b890f805a48933e10c819d5ac43`.
+The previous §5 evidence remains a separate frozen snapshot.
+
+- **Finite-success array ranges and remainder masking:** a bounded induction
+  checks a private `fill` producer and every store, rejecting aliases, rebinding,
+  borrowing and escape. Only the div/mod consumer uses these content ranges,
+  after its existing absence/poison/divisor checks (S4.1, S6.1.2, D8.3.3).
+- **Invariant string reads:** pair comparisons reuse a pointer-free scalar
+  containing the exact selected UTF-8 bytes and their length. Zero denotes an
+  absent character, separately from an embedded NUL. Both receiver and all key
+  dependencies must remain stable over condition and body; Unicode/OOB paths
+  retain exact character equality (S7.1.1v3, D5.3).
+- **Record consumers and stores:** ordered comparisons can consume a guarded
+  float TypedItem directly. Guards cover the exact shape and live descriptor,
+  accessor/constructor state and actual tag. Marked-root member writes carry a
+  linked NameId and descriptor hint into the canonical COW setter; the prepared
+  owner's shape must match before it reuses that descriptor. Error propagation,
+  type changes and child capture retain the canonical implementation
+  (D3.4.6, D4.4.4v4, S7.9.3, S9.3.1).
+- **Recursive scalar snapshots:** proven nonescaping native formals use a
+  GC-owned, precisely rooted ArrayNum header with compact int/bool data copied
+  into a bounded activation span. Only scalar index/length observations and
+  same-formal recursive transfers qualify. Public boxed entries, views, wider
+  lanes, aliases, escapes and oversized payloads retain ordinary COW. A
+  recursive-transfer profitability gate preserves the existing lazy first-write
+  policy for nonrecursive activations (S9.1.2–S9.1.3, D4.4.1, D5.3).
+- **Mixed numeric recurrences:** complete int|float tuples retain native
+  arithmetic while choosing the logical result member at runtime: int+int keeps
+  saturation and poison; a float member selects double arithmetic. This uses
+  the shared physical decoder and preserves reflection and odd/fractional
+  halving (S4.1–S4.2, D2.4.1–D2.4.3).
+
+Canonical sources are unchanged. General proof budgets remain bounded; no
+benchmark name or workload constant selects an optimization. Final paired
+results, costs, limitations and aggregate gates follow below. Raw evidence is
+under `temp/tune34-next/` and compact durable evidence is linked in §6.2.
+
+### 6.1 Ownership fallback correction
+
+A dynamic recursive call with a range key exposed an existing boxed slow-entry
+bug: a failed native argument guard entered a body without the plain-parameter
+snapshot setup, and its unchecked setter mutated the caller. The frozen control
+reproduces the defect; the interpreter preserves the caller. The shared entry
+setup now gives boxed fallbacks their source-declared contract and ordinary COW
+metadata/prologue (S9.1.2, D8.3.3). The new scalar-snapshot fixture asserts both
+the returned slice and unchanged caller; its emission check requires the COW
+setter in the boxed fallback. It is not changed to accept the control defect.
+
+Each admitted native formal has a fixed 512-byte scalar scratch span per
+activation. Its runtime guard accepts only compact rank-one int/bool payloads
+that fit. The proof requires scalar integer indexing/length uses and recursive
+transfer at the same formal, with no rebind, capture, alias or other escape.
+The header remains a GC-owned precise root, and the scratch contains no roots
+(D5.3). Nonrecursive parameters retain lazy first-write COW. Wide, float, view,
+attributed and oversized values keep the canonical fallback. Logical copies
+remain necessary; removing ordinary COW payload allocations is not zero copying.
+
+The first continuation release was rejected after untyped Towers confirmed a
+21-pair ratio of 1.0474 (two-sided 95% lower bound 1.0409). Its emitted MIR,
+helper counts and COW counts were unchanged. A private relink matched all
+frozen binary text sections and showed `fn_map_set` had become a 12-byte
+adapter setting two null descriptor arguments and branching to the shared
+five-argument body. Towers executes 8,191 ordinary map stores. The shared
+setter body is now required to inline into both entry points, allowing the
+ordinary entry to eliminate descriptor arguments/branches without duplicating
+source. Rejected captures are retained separately; fresh qualification uses
+the revised release, with no budget/golden relaxation (D8.3.3, D3.4.6).
+
+### 6.2 Fresh release qualification
+
+**Qualified:** 2026-10-24.
+
+Continuation evidence is in
+[`benchmark_results_tune34_continuation.json`](../../test/benchmark/benchmark_results_tune34_continuation.json).
+The clean merged-HEAD control was rebuilt at the start of this continuation;
+it is a fresh A/B control, separate from the previous §5 release. The binary
+hashes are:
+
+- Control: `e7b73c0a0b33c71ea859029cbf5d2e52bfd40501a731fd96ef1039b05516e3af`.
+- Candidate: `bd9d4ccc9fc2a6b31105966c2846ca834229ffb1cc9d1e38cb82353f86c6dde9`.
+
+The archived candidate is
+`test/benchmark/exe/lambda-tune34-continuation-8d6d8de813`,
+with its production-source patch and build manifest. Canonical benchmark
+sources, old Result53 and previous Tune34 snapshots are preserved.
+
+| Gate | Final-source result |
+|---|---|
+| Lambda baseline | 6,036/6,038 |
+| Input baseline | 2,112/2,112 |
+| New/extended fixtures across interpreter, auto and JIT | 39/39 |
+| MIR emission | 269/269 |
+| GC unit | 90/90 |
+| Focused concurrency/activation | 32/32, including 2 new scalar-snapshot cases |
+| Full forced-GC sweep | 340/340 |
+| Debug size ratchet | 20/20 |
+| Release size ratchet | 19/20; control also has `cow_nested_store` 166→169 |
+| Test262 baseline | 40,261/40,261; zero retries |
+
+The Lambda baseline retains the same `crypto_key` and PDF offsets/image-stream
+failures. The additional concurrency aggregate remains red in the existing
+Jube ordinal, callable-realm and script-cache cases, followed by a crash.
+The historical unit-control reproduction is linked in the artifact; that
+aggregate was not rebuilt separately against the fresh merged control.
+These failures are reported separately from the passing focused cases.
+No golden or existing instruction budget was relaxed.
+
+#### Follow-up: inherited baseline failures (2026-10-24)
+
+The two inherited failures are repaired in the current source. The release
+qualification above remains attached to its archived binary and timings.
+
+- `crypto_key`: the baseline build omitted the separately built `node-crypto`
+  DSO and loaded an older image without `CryptoKey`. Add that module to
+  `build-lambda-baseline` prerequisites, preserving module isolation
+  (**D7.3.4**). The fixture passes under both AST and MIR after rebuilding it.
+- PDF offsets/image streams: the phase 6 reference contained shadow colors
+  unpremultiplied twice. The direct shadow compositor still had the same
+  representation bug; it now preserves the destination's alpha representation.
+  A native regression fails before this fix and passes after it. An independent
+  shadow-color check rejects both extra alpha conversions; 16 Poppler pixel
+  samples validate the corrected PDF. Regenerating the reference changes only
+  object 9's RGB stream, with its alpha mask and every other object unchanged.
+
+Fresh validation: Lambda baseline **6,041/6,041**, input **2,112/2,112**,
+PDF builder/output **7/7** (including interpreter and JIT), Python PDF checker
+**9/9**, full vector suite **234/234**, and Radiant integer-cast lint clean.
+The completed Radiant run with macOS graphics access records **6,136 passed,
+141 partial, 2 skipped, 1 failed**. The remaining failure is
+`CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`: `jqueryui` uses
+375,038 CSS-role live bytes against a 373,940-byte limit. The archived pre-fix
+Tune34 binary reproduces those same initial and recascade byte counts.
+The earlier sandbox run was interrupted after macOS services blocked two
+Scene3D cases; both pass with graphics access, and the fresh complete run
+passes the full Scene3D unit suite **28/28**.
+The fresh release also passes `crypto_key` under AST and MIR, the PDF checks
+under interpreter and JIT, and Test262 **40,261/40,261 with zero retries**.
+Release executable SHA-256:
+`74e26314b74dbeb82cd01ff39abab0fed48502926af53b34574d7866d23da49b`.
+
+### 6.3 Execution and cost results
+
+Pilots and selected controls use 21 alternating release pairs plus one warmup
+per side. All 142 Lambda rows receive a three-pair screen, with separate
+21-pair confirmation of screened slowdowns. All 67 short LambdaJS rows receive
+at least three pairs; the four long JQ rows have one pair with a 600-second
+per-process timeout. The long census cannot exclude small regressions.
+Binaries and inputs stay frozen, output/oracles must match, and no build,
+regression test, profiler or memory capture runs during accepted timing.
+
+Ratios below are candidate/control; lower is faster. They measure this
+continuation only and are not multiplied into the previous §5 aggregate.
+
+| Pilot | Untyped control ms | Untyped candidate ms | U ratio | Typed ratio |
+|---|---:|---:|---:|---:|
+| jetstream/crypto_sha1 | 27.246 | 26.888 | 0.9869 | 0.9938 |
+| jetstream/navier_stokes | 74.876 | 75.137 | 1.0035 | 0.9990 |
+| jetstream/splay | 221.399 | 183.924 | 0.8307 | 0.8794 |
+| kostya/brainfuck | 91.037 | 91.116 | 1.0009 | 0.9998 |
+| kostya/json_gen | 7.103 | 7.229 | 1.0177 | 1.0034 |
+| kostya/levenshtein | 2.381 | 2.190 | 0.9198 | 0.9076 |
+| larceny/puzzle | 12.498 | 5.053 | 0.4043 | 0.3791 |
+| r7rs/fft | 0.201 | 0.190 | 0.9453 | 0.9868 |
+
+| Population | Rows | Geometric candidate/control |
+|---|---:|---:|
+| eight_untyped_pilots | 8 | 0.8583 |
+| eight_typed_pilots | 8 | 0.8593 |
+| untyped | 71 | 0.9783 |
+| typed | 71 | 0.9815 |
+| js | 71 | 0.9951 |
+
+Mixed-sample aggregates are descriptive. No confirmed row has a two-sided
+95% lower confidence bound above 1.03. Point slowdowns remain visible below;
+an interval overlapping 1.03 does not prove the regression is smaller.
+
+| Workload | Variant | Ratio | 95% interval |
+|---|---|---:|---:|
+| awfy/towers | js | 1.0321 | 1.0069–1.0442 |
+| r7rs/ack | js | 1.0438 | 0.9095–1.1408 |
+
+Separate whole-process instrumentation verifies the intended mechanisms.
+These are helper/COW counts or emitted MIR/native operations, not CPU percentages:
+
+| Workload | Counter | Control | Candidate |
+|---|---|---:|---:|
+| brainfuck | signed_mod_mir | 2 | 0 |
+| brainfuck | signed_divide_native | 2 | 0 |
+| brainfuck | fn_chr | 130,000 | 130,000 |
+| levenshtein | fn_string_char_word | 0 | 914 |
+| levenshtein | boxed_min3 | 0 | 0 |
+| levenshtein | numeric_array_copies | 0 | 0 |
+| crypto_sha1 | fn_index | 1,000 | 1,000 |
+| crypto_sha1 | bitwise_helpers | 0 | 0 |
+| json_gen | fn_join | 4 | 4 |
+| json_gen | it2s | 320,000 | 320,000 |
+| json_gen | string_copied_bytes | 2,354,068 | 2,354,068 |
+| fft | fn_add | 1,984 | 0 |
+| fft | fn_sub | 0 | 0 |
+| fft | fn_ge | 0 | 0 |
+| fft | index_assign_cow | 1,984 | 1,984 |
+| splay | map_shape_field_to_item | 3,079,202 | 2,328,900 |
+| splay | map_set_cow_resolved_profiled | 0 | 672,115 |
+| splay | map_copies | 951,168 | 951,168 |
+| puzzle | lambda_array_scalar_snapshot | 0 | 106,617 |
+| puzzle | numeric_array_copies | 174,909 | 0 |
+| prettier_ast | it2s | 257 | 257 |
+
+The new Puzzle helper performs one logical scratch copy per admitted call.
+Its ordinary COW-copy count reaching zero does not mean zero copying.
+Splay map copies remain required; the native consumer and resolved setter
+remove projection/lookup work around those copies.
+
+Five alternating compiler-pipeline captures and native-code snapshots per
+untyped pilot are diagnostic; accepted process-wall timings are also retained.
+MIR Direct generation is included under `transpile`, so standalone `mir_gen`
+zero does not omit generation or isolate native generation as a separate cost.
+
+| Pilot | Native bytes control → candidate | Ratio | Compiler pipeline ms control → candidate | Ratio |
+|---|---:|---:|---:|---:|
+| brainfuck | 7,600 → 7,584 | 0.9979 | 7.099 → 7.076 | 0.9968 |
+| crypto_sha1 | 29,712 → 29,712 | 1.0000 | 24.858 → 25.077 | 1.0088 |
+| fft | 18,416 → 19,584 | 1.0634 | 19.639 → 21.454 | 1.0924 |
+| json_gen | 12,912 → 12,912 | 1.0000 | 10.663 → 10.714 | 1.0048 |
+| levenshtein | 12,768 → 12,640 | 0.9900 | 10.778 → 10.816 | 1.0035 |
+| navier_stokes | 73,376 → 73,376 | 1.0000 | 86.417 → 86.414 | 1.0000 |
+| puzzle | 8,464 → 8,384 | 0.9905 | 8.593 → 8.477 | 0.9865 |
+| splay | 54,736 → 55,600 | 1.0158 | 35.998 → 36.552 | 1.0154 |
+
+The range, recurrence and escape analyses have fixed proof budgets. Native
+code growth includes complete guarded fallback bodies. Cost increases are
+retained explicitly and limit any claim about cold-start performance.
+
+The shared inline setter body removes the measured ordinary-entry delegation.
+Its canonical/resolved runtime entries total 7,788 native bytes versus 5,000
+in the rejected adapter build, a reviewed 2,788-byte runtime-code increase.
+
+### 6.4 Memory and remaining limits
+
+Separate three-pair canonical RSS captures and repeated-main resource
+captures review memory, apart from accepted timing:
+
+| Repeated workload | Repeats | Control peak footprint MB | Candidate peak footprint MB |
+|---|---:|---:|---:|
+| puzzle | 300 | 47.6 | 81.8 |
+| splay | 20 | 1807.9 | 1572.6 |
+| brainfuck | 40 | 40.3 | 40.5 |
+
+| Canonical workload | Variant | Median RSS candidate/control |
+|---|---|---:|
+| r7rs/fft | untyped | 1.0364 |
+| kostya/brainfuck | untyped | 1.0044 |
+| kostya/levenshtein | untyped | 1.0057 |
+| kostya/json_gen | untyped | 1.0047 |
+| larceny/puzzle | untyped | 0.7168 |
+| jetstream/navier_stokes | untyped | 1.0091 |
+| jetstream/splay | untyped | 0.8397 |
+| jetstream/crypto_sha1 | untyped | 1.0036 |
+| awfy/havlak | typed | 1.2780 |
+| text/prettier_ast | untyped | 1.0019 |
+
+The 300-repeat Puzzle capture has a higher candidate peak, **47.6 → 81.8 MB**.
+Separate 60- and 900-repeat captures both keep the candidate around 47.6 MB,
+with matching output. These captures do not show sustained growth with repeat
+count; the original higher peak remains in the table and artifact. They do
+not establish a uniformly lower peak. Typed Havlak has a **1.2780 RSS ratio**:
+candidate samples are approximately 284, 284 and 223 MB versus control
+213, 222 and 223 MB. This observed memory tradeoff is retained; no memory
+reduction is claimed for Havlak.
+
+
+The precise-header tests and full forced-GC sweep exercise scratch lifetime
+and ordinary fallback. Stack use increases by the bounded 512-byte span per
+admitted formal/activation, in addition to ordinary MIR frame storage;
+recursive depth is not made unboundedly safe by this optimization.
+
+All four mechanisms left open in §5.7 are now implemented, and the FFT mixed
+arithmetic residue is removed. This completes the initial implementation
+tranche with the semantic stop conditions in Phase 4. Remaining runtime work
+is not claimed to be redundant:
+
+- Logical recursive snapshots, Splay map copies and FFT checked mixed-key
+  COW setters remain. Wider, attributed, aliased, escaping, view and oversized
+  snapshots use ordinary COW.
+- Brainfuck retains its ordinary int tape. ASCII `chr` already uses shared
+  immutable storage; a new character-append API remains unjustified.
+- Whole-solver swaps/fusion and recursive restore-on-return remain outside
+  the initial tranche; their alias, exit and floating-order proofs are not
+  supplied by these changes.
+- Splay canonical timed setup, algorithm and payload differ from JS. JSON
+  floor/truncation differs. Current Navier ports use 15 frames/check77 but
+  still differ in setup boundaries and solver structure. The nonzero returned
+  FFT and matched-source diagnostic audits remain separate from canonical
+  cross-language timing.

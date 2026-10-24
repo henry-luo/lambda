@@ -1142,6 +1142,43 @@ TEST_F(LambdaConcurrencyRuntime, LargeRuntimeContainersKeepZeroedFallback) {
     EXPECT_TRUE(gc_is_managed(concurrency_test_gc, items));
 }
 
+TEST_F(LambdaConcurrencyRuntime, ScalarSnapshotKeepsPreciseHeaderAndPrivatePayload) {
+    RootFrame roots(2);
+    Rooted<ArrayNum*> source(roots, array_num_new(ELEM_INT, 4));
+    ASSERT_NE(source.get(), nullptr);
+    for (int i = 0; i < 4; i++) source.get()->items[i] = i + 1;
+    int64_t scratch[4] = {};
+    Rooted<Item> copy(roots, lambda_array_scalar_snapshot(
+        (Item){.array_num = source.get()}, scratch, sizeof(scratch)));
+    ASSERT_EQ(get_type_id(copy.get()), LMD_TYPE_ARRAY_NUM);
+    EXPECT_NE(copy.get().array_num, source.get());
+    EXPECT_EQ(copy.get().array_num->data, scratch);
+    EXPECT_EQ(source.get()->cow_state & COW_STATE_SHARED, 0);
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, copy.get().array_num));
+    // D5.3: tracing finds the header; the scalar span needs no stack scan.
+    gc_collect(concurrency_test_gc, eval.side_root_base,
+        eval.side_root_top - eval.side_root_base);
+    EXPECT_EQ(copy.get().array_num->data, scratch);
+    for (int i = 0; i < 4; i++) EXPECT_EQ(scratch[i], i + 1);
+    copy.get().array_num->items[0] = 99;
+    EXPECT_EQ(source.get()->items[0], 1);
+}
+
+TEST_F(LambdaConcurrencyRuntime, ScalarSnapshotRetainsOrdinaryCowForOtherLayouts) {
+    RootFrame roots(2);
+    Rooted<ArrayNum*> large(roots, array_num_new(ELEM_INT, 8));
+    Rooted<ArrayNum*> wide(roots, array_num_new(ELEM_FLOAT64, 4));
+    ASSERT_NE(large.get(), nullptr);
+    ASSERT_NE(wide.get(), nullptr);
+    int64_t scratch[4] = {};
+    EXPECT_EQ(lambda_array_scalar_snapshot((Item){.array_num = large.get()},
+        scratch, sizeof(scratch)).array_num, large.get());
+    EXPECT_EQ(lambda_array_scalar_snapshot((Item){.array_num = wide.get()},
+        scratch, sizeof(scratch)).array_num, wide.get());
+    EXPECT_NE(large.get()->cow_state & COW_STATE_SHARED, 0);
+    EXPECT_NE(wide.get()->cow_state & COW_STATE_SHARED, 0);
+}
+
 TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     int order[3] = {};
     int count = 0;

@@ -1,4 +1,4 @@
-// grep_searcher.cpp — the line-oriented search engine (vibe/Lambda_Lib_Grep.md
+// grep_searcher.cpp — the line-oriented search engine (vibe/lib/Lib_Grep.md
 // §5.1 tiers, §5.5 terminators, §7.1 streaming, GRP20–GRP25).
 //
 // A block is a run of complete lines (plus, at the end of an input, one

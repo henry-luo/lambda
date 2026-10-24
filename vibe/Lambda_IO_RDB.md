@@ -2263,7 +2263,7 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
     (`make rdb-test-servers-up`) runs both servers with TLS under Apple's
     `container` tool, reloads the fixtures, and prints the URIs;
     `make test-rdb-drivers-local` does both steps. Setup and day-to-day use:
-    `vibe/Lambda_Devop_DB_Containers.md`.
+    `vibe/Devop_DB_Containers.md`.
   - **Scripts:** `test/rdb/*.ls` use a `{{RDB_URI}}` placeholder and must
     produce the **same `.txt` golden** on every backend. A backend-specific
     `<name>.<backend>.txt` exists only for real differences (today: declared

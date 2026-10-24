@@ -22,6 +22,8 @@ pub let STYLESHEET = "
   .docx-document img { max-width: 100%; }
   .docx-document .docx-chart { display: inline-block; max-width: 100%; white-space: normal; }
   .docx-chart svg { max-width: 100%; height: auto; }
+  .docx-diagram, .docx-object { display: inline-block; max-width: 100%; white-space: normal; }
+  .docx-diagram svg, .docx-object svg { max-width: 100%; height: auto; }
   .docx-document:after { content: ''; display: block; clear: both; }
   .docx-document a { color: #1769c2; }
   .docx-document blockquote { margin: 1em 0; padding-left: 1em;

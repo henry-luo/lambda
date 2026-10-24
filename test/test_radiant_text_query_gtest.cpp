@@ -33,6 +33,31 @@ void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
 
 
+TEST(FontLocalMetadata, LocalFontMetadataIsOwnedSortedAndUnique) {
+    ArrayList* faces = font_query_local_fonts(nullptr);
+    ASSERT_NE(faces, nullptr);
+    ASSERT_GT(faces->length, 0);
+    for (int i = 0; i < faces->length; i++) {
+        auto* face = (FontLocalFace*)faces->data[i];
+        ASSERT_NE(face, nullptr);
+        ASSERT_NE(face->postscript_name, nullptr);
+        ASSERT_NE(face->family, nullptr);
+        ASSERT_NE(face->full_name, nullptr);
+        ASSERT_NE(face->style, nullptr);
+        EXPECT_GT(strlen(face->postscript_name), 0u);
+        EXPECT_GT(strlen(face->family), 0u);
+        EXPECT_GT(strlen(face->full_name), 0u);
+        if (i) EXPECT_LT(strcmp(((FontLocalFace*)faces->data[i - 1])->postscript_name, face->postscript_name), 0);
+    }
+    ArrayList* again = font_query_local_fonts(nullptr);
+    ASSERT_NE(again, nullptr);
+    ASSERT_EQ(again->length, faces->length);
+    EXPECT_NE(again->data[0], faces->data[0]);
+    font_local_fonts_free(faces);
+    EXPECT_GT(strlen(((FontLocalFace*)again->data[0])->family), 0u);
+    font_local_fonts_free(again);
+}
+
 TEST(FontTextMeasurement, TextMeasurementsOwnKeysAndInvalidateWhenFontResourcesChange) {
     FontContextConfig config = {};
     config.pixel_ratio = 1.0f;
@@ -750,6 +775,67 @@ TEST_F(RadiantTextQuery, SharedPublicationCommitsForeignFrameWritesWithoutParent
     EXPECT_EQ(embedded->view_tree->document_layout_count, child_passes);
 }
 
+TEST_F(RadiantTextQuery, RebuiltSourceRangesIgnoreAnonymousTableGroups) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        #table{display:table}#row{display:table-row}#cell{display:table-cell}
+        </style><div id="result"><div id="table"><div id="row"><div id="cell">text</div></div></div></div>)HTML"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* table = dom_find_element_by_id(document->root->as_element(), "table");
+    DomElement* cell = dom_find_element_by_id(document->root->as_element(), "cell");
+    ASSERT_NE(table, nullptr);
+    ASSERT_NE(cell, nullptr);
+    ASSERT_NE(cell->parent.get(), nullptr);
+    ASSERT_NE(cell->parent->parent.get(), table);
+
+    DomElement* next_table = dom_element_create(document, "div", nullptr);
+    DomElement* next_row = dom_element_create(document, "div", nullptr);
+    DomElement* next_cell = dom_element_create(document, "div", nullptr);
+    ASSERT_NE(next_table, nullptr);
+    ASSERT_NE(next_row, nullptr);
+    ASSERT_NE(next_cell, nullptr);
+    ASSERT_TRUE(next_table->set_attribute("id", "table"));
+    ASSERT_TRUE(next_row->set_attribute("id", "row"));
+    ASSERT_TRUE(next_cell->set_attribute("id", "cell"));
+    ASSERT_TRUE(next_table->append_child(next_row));
+    ASSERT_TRUE(next_row->append_child(next_cell));
+    EXPECT_EQ(view_state_corresponding_node(cell, table, next_table, true), next_cell);
+}
+
+TEST_F(RadiantTextQuery, ScrollRequestsReuseValidatedFlowAndHonorViewportChanges) {
+    DomElement* result = load_script_source(R"HTML(<style>
+        body{margin:0}#scrollport{width:160px;height:64px;overflow:auto}
+        #start{height:16px}#spacer{height:384px}#result{height:16px}
+        </style><div id="scrollport"><div id="start"></div><div id="spacer"></div><div id="result">end</div></div>)HTML");
+    ASSERT_NE(result, nullptr);
+    layout_html_doc(&ui, document, false);
+    // script-only documents can start without an interactive scroll-state owner.
+    dom_scroll_into_view_if_needed_bridge(result);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    expect_box("result", 0, 48, 160, 16);
+
+    radiant_document_ensure_state(document, "scroll-publication-test");
+    ASSERT_NE(document->state, nullptr);
+    layout_html_doc(&ui, document, true);
+    uint64_t layouts = document->view_tree->document_layout_count;
+    DomElement* start = dom_find_element_by_id(document->root->as_element(), "start");
+    ASSERT_NE(start, nullptr);
+    DomElement* targets[] = {start, result};
+    for (DomElement* target : targets) {
+        dom_scroll_into_view_if_needed_bridge(target);
+        ASSERT_TRUE(layout_update_document(&ui, document));
+        EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+        expect_box(target == start ? "start" : "result", 0, target == start ? 0 : 48, 160, 16);
+    }
+
+    // a queued scroll cannot bypass a changed viewport's normal flow validation.
+    ui.viewport_width = 640.0f;
+    dom_scroll_into_view_if_needed_bridge(result);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    EXPECT_EQ(document->view_tree->document_layout_count, layouts + 1);
+    EXPECT_FLOAT_EQ(document->view_tree->root->width, 640.0f);
+    expect_box("result", 0, 48, 160, 16);
+}
+
 TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesInputs) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
@@ -1181,6 +1267,99 @@ TEST_F(RadiantTextQuery, CompletedFlexReplayRetainsContentInNextCleanPass) {
     document->incremental_layout = false;
 }
 
+TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    IntrinsicSizes expected = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    layout_flex_item_content(&flow.layout, lam::view_require_block(item));
+    ASSERT_TRUE(item->flex_item()->retained.has_content);
+    uint64_t geometry = retained_subtree_geometry(item);
+    uint64_t hits = flow.layout.profiler.intrinsic_cache_hits;
+
+    // a scalar cache hit must not open a destructive measurement scope.
+    IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
+    EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+    EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+    EXPECT_TRUE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(retained_subtree_geometry(item), geometry);
+    EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
+
+    item->invalidate_intrinsic_inputs();
+    uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
+    layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
+    EXPECT_FALSE(item->flex_item()->retained.has_content);
+    EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
+}
+
+TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses) {
+    ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* item = dom_find_element_by_id(document->root->as_element(), "wrapped");
+    ASSERT_NE(item, nullptr);
+    FlexFlowTestContext flow(&ui, document, item);
+    IntrinsicSizes expected = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    flow.layout.width += 40.0f;
+    layout_measure_intrinsic_widths(&flow.layout, item, true);
+    flow.layout.width -= 40.0f;
+    document->incremental_layout = true;
+    advance_measurement_cache_generation(document->view_tree);
+    radiant::layout_pass_ensure_cache(&flow.layout, item);
+    uint64_t hits = flow.layout.profiler.intrinsic_cache_hits;
+    IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+    EXPECT_EQ(flow.layout.profiler.intrinsic_cache_hits, hits + 1);
+    EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+    EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+
+    auto expect_miss = [&]() {
+        uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
+        layout_measure_intrinsic_widths(&flow.layout, item, true);
+        EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
+    };
+    item->invalidate_intrinsic_inputs();
+    expect_miss();
+    flow.layout.width += 40.0f;
+    expect_miss();
+    flow.layout.root_font_size += 2.0f;
+    expect_miss();
+    setup_font(&ui, &flow.layout.font, item->font);
+    expect_miss();
+    document->style_query_epoch++;
+    expect_miss();
+    document->view_tree->layout_generation++;
+    expect_miss();
+    document->incremental_layout = false;
+    advance_measurement_cache_generation(document->view_tree);
+    expect_miss();
+}
+
+TEST_F(RadiantTextQuery, IntrinsicWidthKeepsResourceAndOrderedEffectsPassLocal) {
+    ASSERT_NE(load("test/html/layout_flex_retained_effects.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    for (const char* id : {"resource", "generated", "list"}) {
+        SCOPED_TRACE(id);
+        DomElement* item = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(item, nullptr);
+        FlexFlowTestContext flow(&ui, document, item);
+        IntrinsicSizes expected = layout_measure_intrinsic_widths(&flow.layout, item, true);
+        document->incremental_layout = true;
+        advance_measurement_cache_generation(document->view_tree);
+        uint64_t misses = flow.layout.profiler.intrinsic_cache_misses;
+        IntrinsicSizes actual = layout_measure_intrinsic_widths(&flow.layout, item, true);
+        EXPECT_GT(flow.layout.profiler.intrinsic_cache_misses, misses);
+        EXPECT_FLOAT_EQ(actual.min_content, expected.min_content);
+        EXPECT_FLOAT_EQ(actual.max_content, expected.max_content);
+        document->incremental_layout = false;
+    }
+}
+
 TEST_F(RadiantTextQuery, AncestorReplayExpiresDescendantLiveAssociation) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
@@ -1373,6 +1552,31 @@ TEST_F(RadiantTextQuery, CompletedFlexContentEnlargesProvisionalAncestorHeight) 
     EXPECT_FLOAT_EQ(find("auto-sidebar")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-dependent")->height, 100.0f);
     EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 80.0f);
+}
+
+TEST_F(RadiantTextQuery, FlexShellReservesDescendantHeightConstraintsForItsFooter) {
+    ASSERT_NE(load("test/html/flex_shell_descendant_constraints.html"), nullptr);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
+    auto child = [&](const char* shell, const char* suffix) {
+        char id[64];
+        snprintf(id, sizeof(id), "%s-%s", shell, suffix);
+        return find(id);
+    };
+    struct Case { const char* id; float header; };
+    const Case cases[] = {{"min",100.0f},{"explicit",120.0f},{"content",108.0f}};
+    for (unsigned pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const Case& entry : cases) {
+            EXPECT_FLOAT_EQ(child(entry.id,"header")->height, entry.header) << entry.id << " pass " << pass;
+            EXPECT_FLOAT_EQ(child(entry.id,"main")->height, 180.0f-entry.header) << entry.id << " pass " << pass;
+            EXPECT_FLOAT_EQ(child(entry.id,"footer")->y, 180.0f) << entry.id << " pass " << pass;
+        }
+    }
+    ASSERT_TRUE(find("min-tools")->set_attribute("style", "min-height:110px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(find("min-header")->height, 130.0f);
+    EXPECT_FLOAT_EQ(find("min-main")->height, 50.0f);
+    EXPECT_FLOAT_EQ(find("min-footer")->y, 180.0f);
 }
 
 TEST_F(RadiantTextQuery, ScalarSizeCacheExpiresWithoutDiscardingComputedStyle) {
@@ -1919,6 +2123,70 @@ TEST_F(RadiantTextQuery, TableBackgroundsUseSourcePositioningAndCellCoverage) {
                 EXPECT_FLOAT_EQ(row->height, 0.0f);
             }
         }
+    }
+}
+
+TEST_F(RadiantTextQuery, TextareaRevealsEditingCaretAndClipsScrolledContents) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white}textarea{position:absolute;left:20px;top:20px;
+        box-sizing:border-box;width:180px;height:60px;border:2px solid #999;padding:4px;
+        font:10px Arial;caret-color:#ff00ff;background:white;color:#ff0000}
+        </style><div id="result"></div><textarea id="area">one&#10;two&#10;three&#10;four&#10;five&#10;six&#10;seven&#10;eight</textarea>)HTML"), nullptr);
+    DocState* state = radiant_document_ensure_state(document, "textarea-caret-test");
+    ASSERT_NE(state, nullptr);
+    for (float scale : {1.0f, 2.0f}) {
+        SCOPED_TRACE(scale);
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 320; ui.viewport_height = 200;
+        ui.window_width = 320 * scale; ui.window_height = 200 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        layout_html_doc(&ui, document, false);
+        DomElement* area = dom_find_element_by_id(document->root->as_element(), "area");
+        ASSERT_NE(area, nullptr); ASSERT_NE(area->form, nullptr);
+        focus_set_programmatic(state, area);
+        tc_ensure_init(area);
+        uint32_t end = area->form->current_value_u16_len;
+        auto expect_caret_pixels = [&](bool visible) {
+            render_html_doc(&ui, document->view_tree, nullptr);
+            ASSERT_FALSE(ui.render_failed);
+            unsigned inside = 0, outside = 0, text_outside = 0;
+            for (int y = 0; y < ui.surface->height; y++) {
+                for (int x = 0; x < ui.surface->width; x++) {
+                    const uint8_t* pixel = (const uint8_t*)ui.surface->pixels + y * ui.surface->pitch + x * 4;
+                    bool in_content = x >= 26 * scale && x < 194 * scale && y >= 26 * scale && y < 74 * scale;
+                    if (pixel[0] > 180 && pixel[1] < 40 && pixel[2] > 180) {
+                        if (in_content) inside++;
+                        else outside++;
+                    }
+                    if (pixel[0] > 180 && pixel[1] < 40 && pixel[2] < 40 && !in_content) text_outside++;
+                }
+            }
+            EXPECT_EQ(outside, 0u);
+            EXPECT_EQ(text_outside, 0u);
+            if (visible) EXPECT_GT(inside, 0u);
+            else EXPECT_EQ(inside, 0u);
+        };
+        tc_set_selection_range(area, end, end, 0);
+        expect_caret_pixels(true);
+        EXPECT_GT(area->form->scroll_y, 0.0f);
+        tc_set_selection_range(area, 0, 0, 0);
+        expect_caret_pixels(true);
+        EXPECT_FLOAT_EQ(area->form->scroll_y, 0.0f);
+        // dragging beyond the viewport clips its caret until the drag autoscroll tick.
+        state_store_selection_start_pointer(state, area, end);
+        ASSERT_TRUE(state->editing.pointer_selecting);
+        ASSERT_TRUE(caret_is_visible(state));
+        expect_caret_pixels(false);
+        EXPECT_FLOAT_EQ(area->form->scroll_y, 0.0f);
+        selection_finish_active_gesture(state);
+        // inserting new lines must reveal the new blank line as well as populated lines.
+        StrBuf* appended = strbuf_new();
+        strbuf_append_str(appended, area->form->current_value);
+        strbuf_append_str(appended, "\nnine\n");
+        tc_set_value(area, appended->str, appended->length);
+        strbuf_free(appended);
+        expect_caret_pixels(true);
+        EXPECT_GT(area->form->scroll_y, 0.0f);
     }
 }
 
@@ -5648,6 +5916,50 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
 }
 
 class RadiantFormControls : public RadiantTextQuery {};
+
+TEST_F(RadiantFormControls, DefaultTextBackgroundPreservesRoundedBorders) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:#ddd}.box{position:absolute;box-sizing:border-box;
+        width:100px;height:40px;border:3px solid blue;border-radius:12px;padding:0}
+        .reference{left:140px;background:white}.control{left:20px}
+        .ellipse{border-width:2px 4px 5px 3px;border-radius:30% 20% / 45% 30%}
+        </style><div id="result"></div>
+        <input class="box control" style="top:20px"><div class="box reference" style="top:20px"></div>
+        <textarea class="box control" style="top:80px"></textarea><div class="box reference" style="top:80px"></div>
+        <input class="box control ellipse" style="top:140px"><div class="box reference ellipse" style="top:140px"></div>
+        <textarea class="box control ellipse" style="top:200px"></textarea><div class="box reference ellipse" style="top:200px"></div>)HTML"), nullptr);
+    for (float scale : {1.0f, 2.0f}) {
+        SCOPED_TRACE(scale);
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.viewport_width = 280; ui.viewport_height = 260;
+        ui.window_width = 280 * scale; ui.window_height = 260 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        layout_html_doc(&ui, document, false);
+        render_html_doc(&ui, document->view_tree, nullptr);
+        ASSERT_FALSE(ui.render_failed);
+        for (unsigned top : {20u, 80u, 140u, 200u}) {
+            SCOPED_TRACE(top);
+            unsigned missing_border = 0, overwritten_exterior = 0, border_pixels = 0;
+            for (unsigned y = 0; y < 40 * scale; y++) {
+                for (unsigned x = 0; x < 100 * scale; x++) {
+                    const uint8_t* actual = (const uint8_t*)ui.surface->pixels +
+                        (unsigned)(top * scale + y) * ui.surface->pitch + (unsigned)(20 * scale + x) * 4;
+                    const uint8_t* reference = actual + (unsigned)(120 * scale) * 4;
+                    if (reference[0] < 20 && reference[1] < 20 && reference[2] > 235) {
+                        border_pixels++;
+                        if (actual[0] > 40 || actual[1] > 40 || actual[2] < 215) missing_border++;
+                    }
+                    if (reference[0] == 221 && reference[1] == 221 && reference[2] == 221 &&
+                        (actual[0] != 221 || actual[1] != 221 || actual[2] != 221)) overwritten_exterior++;
+                }
+            }
+            EXPECT_GT(border_pixels, 0u);
+            EXPECT_EQ(missing_border, 0u);
+            EXPECT_EQ(overwritten_exterior, 0u);
+            test_radiant_expect_surface_pixel(ui.surface, 70 * scale, (top + 20) * scale, 255, 255, 255);
+        }
+    }
+}
 
 TEST_F(RadiantFormControls, ScriptCreatedFormSurvivesRetainedStyleReset) {
     DomElement* owner = load("test/html/select_retained_refresh.html");

@@ -45,6 +45,8 @@ bool radiant_stack_is_context(View* view) {
     if (!view || !view->parent) return true;
     ViewElement* element = lam::view_as_element(view);
     if (!element) return false;
+    // a selected view root can retain its DOM parent; it still owns the initial stacking context.
+    if (element->doc && element->doc->view_tree && element->doc->view_tree->root == view) return true;
     if (dom_element_is_svg(element)) {
         // SVG 2 §3.4.1 isolates foreignObject and each outermost SVG fragment from its parent stack.
         if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) return true;
@@ -132,39 +134,61 @@ View* radiant_stack_path_child(View* ancestor, View* descendant) {
     return nullptr;
 }
 
-static void radiant_stack_collect_negative_into(View* view, ArrayList* out) {
+
+
+static void radiant_stack_collect_z_into(View* view, ArrayList* out, bool negative) {
     for (View* child = view; child; child = child->next()) {
-        if (radiant_stack_is_negative_z_block(child)) {
+        if (negative ? radiant_stack_is_negative_z_block(child) : radiant_stack_is_positive_z_positioned(child)) {
             if (!arraylist_append(out, child)) {
-                log_warn("[RAD_STACK_NEGATIVE] failed to grow negative paint list");
+                log_warn("[RAD_STACK_LAYERS] failed to grow context paint list");
                 return;
             }
-        } else if (!view_contents_are_skipped(child) && !radiant_stack_is_context(child)) {
+        } else {
             ViewElement* element = lam::view_as_element(child);
-            if (element) radiant_stack_collect_negative_into(element->first_child, out);
+            if (element && element->first_child && !view_contents_are_skipped(child) && !radiant_stack_is_context(child))
+                radiant_stack_collect_z_into(element->first_child, out, negative);
         }
     }
 }
 
-static ArrayList* radiant_stack_collect_negative_z_descendants(View* owner) {
-    ViewElement* element = lam::view_as_element(owner);
-    if (!element || !radiant_stack_is_context(owner)) return nullptr;
+static ArrayList* radiant_stack_collect_z_list(View* first_child, bool negative) {
     ArrayList* views = arraylist_new(8);
     if (!views) return nullptr;
-    radiant_stack_collect_negative_into(element->first_child, views);
+    radiant_stack_collect_z_into(first_child, views, negative);
     radiant_stack_sort_in_paint_order(views);
     return views;
 }
 
-void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
+ArrayList* radiant_stack_collect_positive_z_descendants(View* first_child, const char*) {
+    return first_child ? radiant_stack_collect_z_list(first_child, false) : nullptr;
+}
+
+static ArrayList* radiant_stack_collect_z_descendants(View* owner, bool negative) {
+    ViewElement* element = lam::view_as_element(owner);
+    return element && radiant_stack_is_context(owner) ?
+        radiant_stack_collect_z_list(element->first_child, negative) : nullptr;
+}
+
+static void radiant_stack_visit_z_descendants(View* owner, bool negative, bool reverse, void* context,
         bool (*visit)(void* context, View* owner, View* layer)) {
-    ArrayList* views = radiant_stack_collect_negative_z_descendants(owner);
+    ArrayList* views = radiant_stack_collect_z_descendants(owner, negative);
     if (!views) return;
     for (int i = 0; i < views->length; i++) {
         int index = reverse ? views->length - 1 - i : i;
         if (!visit(context, owner, (View*)views->data[index])) break;
     }
     arraylist_free(views);
+}
+
+void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
+        bool (*visit)(void* context, View* owner, View* layer)) {
+    radiant_stack_visit_z_descendants(owner, true, reverse, context, visit);
+}
+
+void radiant_stack_visit_positive_z_descendants(View* owner, bool reverse, void* context,
+        bool (*visit)(void* context, View* owner, View* layer)) {
+    // positive layers belong to the stacking context, across ordinary paragraph ancestors.
+    radiant_stack_visit_z_descendants(owner, false, reverse, context, visit);
 }
 
 // CSS 2.1 Appendix E step 8: in-flow positioned boxes (relative, sticky) with
@@ -188,36 +212,6 @@ bool radiant_stack_is_in_flow_positioned_step8(View* view) {
         position->z_index == 0;
 }
 
-static void radiant_stack_collect_positive_z_descendants_into(View* view, ArrayList* out_views,
-                                                              const char* log_prefix) {
-    while (view) {
-        if (radiant_stack_is_positive_z_positioned(view)) {
-            if (!arraylist_append(out_views, view)) {
-                log_warn("%s failed to grow positive z-order list", log_prefix);
-                return;
-            }
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewElement* element = lam::view_require_element(view);
-            radiant_stack_collect_positive_z_descendants_into(element->first_child, out_views,
-                                                              log_prefix);
-        }
-        view = view->next();
-    }
-}
-
-ArrayList* radiant_stack_collect_positive_z_descendants(View* first_child, const char* log_prefix) {
-    if (!first_child) return NULL;
-    if (!log_prefix) log_prefix = "[RAD_STACK]";
-
-    ArrayList* views = arraylist_new(16);
-    if (!views) {
-        log_warn("%s failed to allocate positive z-order list", log_prefix);
-        return NULL;
-    }
-    radiant_stack_collect_positive_z_descendants_into(first_child, views, log_prefix);
-    return views;
-}
-
 ArrayList* radiant_stack_collect_positioned_children(ViewBlock* block, const char* log_prefix) {
     if (!block || !block->position || !block->positionp()->first_abs_child) return NULL;
     if (!log_prefix) log_prefix = "[RAD_STACK]";
@@ -230,7 +224,9 @@ ArrayList* radiant_stack_collect_positioned_children(ViewBlock* block, const cha
 
     ViewBlock* child = block->positionp()->first_abs_child;
     while (child) {
-        if (!radiant_stack_is_negative_z_block(child) && !arraylist_append(views, child)) {
+        if (!radiant_stack_is_negative_z_block(child) &&
+            (!radiant_stack_is_positive_z_positioned(child) || block->custom_layout_paint_prop()) &&
+            !arraylist_append(views, child)) {
             log_warn("%s failed to grow positioned list", log_prefix);
             break;
         }

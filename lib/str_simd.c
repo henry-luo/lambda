@@ -1,5 +1,5 @@
 /**
- * str_simd.c — the SIMD tier of the str_find kernel (GRP8, vibe/Lambda_Lib_Grep.md §5.3).
+ * str_simd.c — the SIMD tier of the str_find kernel (GRP8, vibe/lib/Lib_Grep.md §5.3).
  *
  * Packed pair: a needle's two rarest positions are tested together, 16
  * candidate starts at a time, and the needle is verified only where both

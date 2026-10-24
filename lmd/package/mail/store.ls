@@ -83,3 +83,8 @@ pub pn with_files(entries, uids) {
     for (uid in uids) { stored = {*: stored, [string(uid)]: true} };
     [for (e in entries) if (stored[string(e.uid)] != null) {*: e, has_file: true} else e]
 }
+
+// The entries with one message's flag ("\\Seen", "\\Flagged") set or cleared:
+// flags a local mailbox (POP3, the mail demo's demo account) keeps only in its index.
+pub fn with_flag(entries, uid, flag, on) => [for (e in entries) if (e.uid != uid) e
+    else {*: e, flags: if (on) unique([*e.flags, flag]) else [for (f in e.flags where f != flag) f]}]

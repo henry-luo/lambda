@@ -36,8 +36,8 @@
 //
 // Execution model:
 //   - Phase 1:  Parse metadata, partition tests into backend groups:
-//       (a) AST      — synchronous tests not listed in mir_list.txt (600/process)
-//       (b) MIR      — mir_list.txt entries plus async/module/raw tests
+//       (a) AST      — test bodies not listed in mir_list.txt (600/process)
+//       (b) MIR      — measured performance exceptions in mir_list.txt
 //     --ast-only / --mir-only collapse this to one backend for parity runs.
 //       (c) PREVIOUS PARTIAL — tests listed in t262_partial.txt from the
 //                       previous run. They are included in CLEAN every run so
@@ -985,7 +985,7 @@ struct Test262Prepared {
     bool is_module = false;      // execute through the ES module transpiler path
     bool is_raw = false;         // raw parser-mode test; do not prepend harness or host flags
     bool is_slow_test = false;   // intentionally exhaustive test; isolate batch and use 5s slow gate
-    bool ast_backend = false;    // synchronous non-MIR-list test uses the AST interpreter
+    bool ast_backend = false;    // test bodies use AST unless the MIR allowlist selects them
     Test262Result skip_result;   // T262_SKIP if test should be skipped
     std::string skip_message;
     bool is_negative;
@@ -1351,11 +1351,19 @@ static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
 // AST batch cleanup replaces the test realm after every source, so a larger
 // worker manifest does not retain prior test heaps between result records.
 static const size_t T262_MAX_BATCH_CHUNK_SIZE = 600;
-static const size_t T262_AST_BATCH_CHUNK_SIZE = 600;
-static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
+static const size_t T262_DEFAULT_AST_BATCH_CHUNK_SIZE = 600;
+static size_t g_t262_jobs = 0;  // 0 means auto: CPU count
 static size_t g_t262_batch_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
+static size_t g_t262_ast_chunk_size = T262_DEFAULT_AST_BATCH_CHUNK_SIZE;
 static size_t g_t262_async_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
 static bool g_t262_async_chunk_size_explicit = false;
+
+static size_t test262_parse_chunk_size(const char* text) {
+    long requested = strtol(text, nullptr, 10);
+    if (requested < 1) return 1;
+    return (unsigned long)requested > T262_MAX_BATCH_CHUNK_SIZE
+        ? T262_MAX_BATCH_CHUNK_SIZE : (size_t)requested;
+}
 
 struct SubBatch {
     size_t start;
@@ -1411,8 +1419,8 @@ static size_t t262_target_worker_count() {
     size_t workers = g_t262_jobs;
     if (workers == 0) {
         unsigned int cpu_count = std::thread::hardware_concurrency();
-        if (cpu_count == 0) cpu_count = 5;  // preserve a conservative fallback when CPU count is unavailable
-        workers = cpu_count > 1 ? cpu_count - 1 : 1;
+        // fresh-realm batches stay small; use every CPU to keep cold jobs flowing.
+        workers = cpu_count ? cpu_count : 4;
     }
     if (workers < 1) workers = 1;
     return workers;
@@ -1595,9 +1603,8 @@ static long slow_threshold_for_test(const std::string& test_name) {
 static bool test262_should_use_ast_backend(const Test262Prepared& prepared) {
     if (g_mir_only || g_mvp_lmd) return false;
     if (g_ast_only) return true;
-    // Raw, async, and module jobs retain the established MIR path; exact test
-    // names and metadata feature tags can also force a synchronous test to MIR.
-    if (prepared.is_async || prepared.is_module || prepared.is_raw) return false;
+    // async/module bodies now share the activation-backed interpreter (D5.1.1v3);
+    // their wrappers do not require a separate whole-unit MIR compilation.
     if (g_mir_allowlist.find(prepared.test_name) != g_mir_allowlist.end()) return false;
     for (const auto& feature : prepared.features) {
         if (g_mir_allowlist.find(feature) != g_mir_allowlist.end()) return false;
@@ -1652,14 +1659,14 @@ static void write_phase_timing_log(const std::unordered_map<std::string, BatchRe
     FILE* phase_log = fopen(phase_path, "w");
     if (!phase_log) return;
     fprintf(phase_log,
-            "test_name\texit_code\telapsed_us\tparse_us\tast_us\tearly_us\timports_us\tmir_us\tlink_us\texecute_us\tcleanup_us\tphase_total_us\trealm_us\tharness_us\treset_us\tlifecycle_us\n");
+            "test_name\texit_code\telapsed_us\tparse_us\tast_us\tearly_us\timports_us\tmir_us\tlink_us\texecute_us\tcleanup_us\tphase_total_us\trealm_us\tharness_us\treset_us\tlifecycle_us\tcpu_us\n");
     for (const auto& kv : batch_results) {
         const BatchResult& br = kv.second;
-        fprintf(phase_log, "%s\t%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
+        fprintf(phase_log, "%s\t%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
                 kv.first.c_str(), br.exit_code, br.elapsed_us,
                 br.parse_us, br.ast_us, br.early_us, br.imports_us, br.mir_us,
                 br.link_us, br.execute_us, br.cleanup_us, br.phase_total_us,
-                br.realm_us, br.harness_us, br.reset_us, br.lifecycle_us);
+                br.realm_us, br.harness_us, br.reset_us, br.lifecycle_us, br.cpu_us);
     }
     fclose(phase_log);
     fprintf(stderr, "[test262] Phase timing data: %zu entries → %s\n",
@@ -3360,7 +3367,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     for (size_t group_index = 0; group_index < js_groups.size(); group_index++) {
         const auto& group_indices = js_groups[group_index].indices;
         size_t group_chunk_size = js_groups[group_index].is_slow_test ? 1 :
-            js_groups[group_index].ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
+            js_groups[group_index].ast_backend ? g_t262_ast_chunk_size :
             (js_groups[group_index].is_async ? g_t262_async_chunk_size : chunk_size);
         for (size_t s = 0; s < group_indices.size(); s += group_chunk_size) {
             size_t e = std::min(s + group_chunk_size, group_indices.size());
@@ -3439,8 +3446,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
 #endif
     fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, MIR_chunk=%zu, AST_chunk=%zu, async_chunk=%zu, %s, %s)\n",
             num_workers, target_workers, batches.size(),
-            g_t262_batch_chunk_size, T262_AST_BATCH_CHUNK_SIZE, g_t262_async_chunk_size,
-            g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs",
+            g_t262_batch_chunk_size, g_t262_ast_chunk_size, g_t262_async_chunk_size,
+            g_t262_jobs == 0 ? "auto: cpu" : "explicit --jobs",
             g_persistent_workers ? "persistent" : "spawn-per-batch");
     std::vector<std::thread> threads;
     std::vector<std::vector<size_t>> worker_batch_order;
@@ -3719,7 +3726,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         size_t js_batches = 0;
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
-                group.ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
+                group.ast_backend ? g_t262_ast_chunk_size :
                 (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             js_batches += (group.indices.size() + group_chunk_size - 1) / group_chunk_size;
         }
@@ -3734,7 +3741,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         size_t js_batch_base = native_batches;
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
-                group.ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
+                group.ast_backend ? g_t262_ast_chunk_size :
                 (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             for (size_t i = 0; i < group.indices.size(); i++) {
                 size_t bi = js_batch_base + (i / group_chunk_size);
@@ -3808,7 +3815,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         analyze_group(native_clean, "native", g_t262_batch_chunk_size);
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
-                group.ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
+                group.ast_backend ? g_t262_ast_chunk_size :
                 (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             std::string label = group.is_slow_test
                 ? "js-slow"
@@ -4712,8 +4719,10 @@ static void print_test262_help(const char* program) {
     printf("  --batch-chunk-size=<n>    Tests per js-test-batch process, clamped to\n");
     printf("                            1..%zu (default: %zu).\n",
            T262_MAX_BATCH_CHUNK_SIZE, T262_DEFAULT_BATCH_CHUNK_SIZE);
-    printf("                            Hybrid runs use %zu tests/process for AST tests\n",
-           T262_AST_BATCH_CHUNK_SIZE);
+    printf("  --ast-chunk-size=<n>      AST tests per process, clamped to 1..%zu\n",
+           T262_MAX_BATCH_CHUNK_SIZE);
+    printf("                            (default: %zu). Smaller chunks balance expensive groups.\n",
+           T262_DEFAULT_AST_BATCH_CHUNK_SIZE);
     printf("  --async-chunk-size=<n>    Async tests per js-test-batch process, clamped to\n");
     printf("                            1..%zu (default: %zu, same as sync batches).\n",
            T262_MAX_BATCH_CHUNK_SIZE, T262_DEFAULT_BATCH_CHUNK_SIZE);
@@ -4862,24 +4871,13 @@ int main(int argc, char** argv) {
             g_async_list_file = argv[i] + 13;
         }
         if (strncmp(argv[i], "--batch-chunk-size=", 19) == 0) {
-            int requested_chunk = atoi(argv[i] + 19);
-            if (requested_chunk < 1) {
-                requested_chunk = 1;
-            }
-            if ((size_t)requested_chunk > T262_MAX_BATCH_CHUNK_SIZE) {
-                requested_chunk = (int)T262_MAX_BATCH_CHUNK_SIZE;
-            }
-            g_t262_batch_chunk_size = (size_t)requested_chunk;
+            g_t262_batch_chunk_size = test262_parse_chunk_size(argv[i] + 19);
+        }
+        if (strncmp(argv[i], "--ast-chunk-size=", 17) == 0) {
+            g_t262_ast_chunk_size = test262_parse_chunk_size(argv[i] + 17);
         }
         if (strncmp(argv[i], "--async-chunk-size=", 19) == 0) {
-            int requested_chunk = atoi(argv[i] + 19);
-            if (requested_chunk < 1) {
-                requested_chunk = 1;
-            }
-            if ((size_t)requested_chunk > T262_MAX_BATCH_CHUNK_SIZE) {
-                requested_chunk = (int)T262_MAX_BATCH_CHUNK_SIZE;
-            }
-            g_t262_async_chunk_size = (size_t)requested_chunk;
+            g_t262_async_chunk_size = test262_parse_chunk_size(argv[i] + 19);
             g_t262_async_chunk_size_explicit = true;
         }
         if (strncmp(argv[i], "--write-failures=", 17) == 0) {
@@ -4992,12 +4990,12 @@ int main(int argc, char** argv) {
         fputs("[test262] MVP mode: canonical sources and JS harness, pinned MIR, no LJS fallback\n", stderr);
     } else if (g_ast_only) {
         fprintf(stderr, "[test262] AST-only mode: all selected jobs use AST batches of %zu\n",
-                T262_AST_BATCH_CHUNK_SIZE);
+                g_t262_ast_chunk_size);
     } else if (g_mir_only) {
         fprintf(stderr, "[test262] MIR-only mode: all selected jobs use pinned MIR batches\n");
     } else {
-        fprintf(stderr, "[test262] Loaded MIR allowlist: %zu tests from %s; sync remainder uses AST batches of %zu\n",
-                g_mir_allowlist.size(), MIR_LIST_FILE, T262_AST_BATCH_CHUNK_SIZE);
+        fprintf(stderr, "[test262] Loaded MIR allowlist: %zu entries from %s; remaining test bodies use AST batches of %zu\n",
+                g_mir_allowlist.size(), MIR_LIST_FILE, g_t262_ast_chunk_size);
     }
 
     if (load_special_preamble_list(SPECIAL_PREAMBLE_FILE)) {

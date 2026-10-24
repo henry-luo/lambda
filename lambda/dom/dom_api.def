@@ -556,9 +556,9 @@ DOM_RAW(activate_popover_native, forms, bool, (void* popover, int action), dom_a
 DOM_RAW(invoke_raw, node, Item, (Item node, JubeDomElementOperation op, Item* args, int argc), dom_element_operation_impl, DOM_F_NATIVE)
 DOM_RAW(after_default_checked_set, notify, void, (void* elem, bool checked), dom_after_default_checked_set, DOM_F_NATIVE)
 DOM_RAW(after_default_selected_set, notify, void, (void* elem, bool selected), dom_after_default_selected_set, DOM_F_NATIVE)
-DOM_RAW(after_disabled_attribute_set, notify, void, (void* elem), dom_after_disabled_attribute_set, DOM_F_NATIVE)
 DOM_RAW(after_select_multiple_removed, notify, void, (void* elem), dom_after_select_multiple_removed, DOM_F_NATIVE)
 DOM_RAW(after_set_attribute, notify, void, (void* elem, const char* attr_name, const char* attr_value), dom_after_set_attribute, DOM_F_NATIVE)
+DOM_RAW(after_remove_attribute, notify, void, (void* elem, const char* attr_name), dom_after_remove_attribute, DOM_F_NATIVE)
 DOM_RAW(append_child_bridge, tree, Item, (void* parent, Item child), dom_append_child_bridge, DOM_F_NATIVE)
 DOM_RAW(check_validity_bridge, forms, Item, (Item elem_item), dom_check_validity_bridge, DOM_F_NATIVE)
 DOM_RAW(computed_style_get_property, style, Item, (Item style_item, Item prop_name), dom_computed_style_get_property, DOM_F_NATIVE)
@@ -810,6 +810,9 @@ DOM_OP(CORE, broadcast_set_handler, messaging, 3, "pn(n: any, error: bool, value
 DOM_OP(CORE, broadcast_post, messaging, 2, "pn(n: any, value: any) -> null", dom_broadcast_channel_post, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, broadcast_close, messaging, 1, "pn(n: any) -> null", dom_broadcast_channel_close, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
 DOM_RAW(broadcast_destroy, messaging, void, (void* channel), dom_broadcast_channel_destroy, DOM_F_NATIVE)
+
+// native font metadata appends without moving existing host catalog slots (D7.4.4).
+DOM_OP(CORE, query_local_fonts, window, 1, "fn(options: any) -> [map]^", dom_engine_query_local_fonts, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_SNAPSHOT, "", none, "", "")
 
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP

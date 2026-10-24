@@ -9,7 +9,7 @@ Archive SHA-256: `560f6338b547544c4f9721b18d8b87685d433ec78b3c644c70d77adad22c55
 Official source imported for the common image library (2026-10-15).
 Local adaptations are made directly in this directory and reviewed through Git.
 No separate patch files are required, per the user-approved source policy in
-`vibe/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
+`vibe/lib/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
 and application directories are omitted; only library targets are built.
 
 The Lambda BMP writer in `lib/image/image_bitmap.cpp` adapts the uncompressed Windows header and BGR row layout from `src/wrbmp.c`; its IJG attribution and `README.ijg` notices are retained.

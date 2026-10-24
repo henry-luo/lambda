@@ -1,11 +1,43 @@
 {
-  "name": "Word ruler stays visible across pages, zoom and horizontal scrolling",
+  "name": "Word horizontal and vertical rulers, consolidated status, scrolling and zoom",
   "html": "test/demo/word/word.ls",
   "viewport": {
     "width": 1440,
     "height": 720
   },
   "events": [
+    {
+      "type": "script",
+      "js": "window.wordRulersAligned=function(){var pages=document.querySelectorAll(\"#edit-surface .word-page\"),rulers=document.querySelectorAll(\"#vertical-ruler .ruler-page\"),v=document.getElementById(\"vertical-ruler\").getBoundingClientRect(),s=document.getElementById(\"stage\").getBoundingClientRect();var f=document.querySelector(\".statusbar\").getBoundingClientRect();if(f.bottom>window.innerHeight+1||f.top<s.bottom-1)return false;if(pages.length!=rulers.length||Math.abs(v.top-s.top)>1||Math.abs(v.bottom-s.bottom)>1)return false;for(var i=0;i<pages.length;i++){var p=pages[i].getBoundingClientRect(),r=rulers[i].getBoundingClientRect();if(Math.abs(p.top-r.top)>1||Math.abs(p.height-r.height)>1)return false}return true};window.wordRulerScale=function(){var p=document.querySelector(\"#edit-surface .word-page\"),b=p.getBoundingClientRect(),c=getComputedStyle(p),z=b.width/parseFloat(c.width),h=document.getElementById(\"horizontal-ruler\"),v=document.querySelector(\"#vertical-ruler .ruler-page\"),hz=h.querySelector('[data-ruler-cm=\"0\"]').getBoundingClientRect(),vz=v.querySelector('[data-ruler-cm=\"0\"]').getBoundingClientRect(),hn=h.querySelector('[data-ruler-cm=\"1\"]').getBoundingClientRect(),vn=v.querySelector('[data-ruler-cm=\"1\"]').getBoundingClientRect();return Math.abs(hz.left+hz.width/2-b.left-parseFloat(c.paddingLeft)*z)<1&&Math.abs(vz.top+vz.height/2-b.top-parseFloat(c.paddingTop)*z)<1&&Math.abs((hn.left+hn.width/2)-(hz.left+hz.width/2)-96/2.54*z)<1&&Math.abs((vn.top+vn.height/2)-(vz.top+vz.height/2)-96/2.54*z)<1};true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".canvas-heading"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".statusbar #document-mode"
+      },
+      "equals": "Draft \u00b7 Writing"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".statusbar #paper-label"
+      },
+      "equals": "A4 \u00b7 portrait"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".statusbar #page-count-label"
+      },
+      "equals": "1 page"
+    },
     {
       "type": "click",
       "target": {
@@ -36,6 +68,13 @@
       "count": 2
     },
     {
+      "type": "assert_text",
+      "target": {
+        "selector": ".statusbar #page-count-label"
+      },
+      "equals": "2 pages"
+    },
+    {
       "type": "scroll",
       "target": {
         "selector": "#stage",
@@ -58,6 +97,14 @@
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),p=document.getElementById(\"paper-wrap\").getBoundingClientRect();Math.abs(r.left-p.left)<1 && Math.abs(r.width-p.width)<1"
     },
     {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
+    },
+    {
       "type": "capture_surface",
       "source": "page",
       "file": "temp/word-ruler-second-page.png"
@@ -77,6 +124,14 @@
     {
       "type": "assert_script",
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),p=document.getElementById(\"paper-wrap\").getBoundingClientRect();Math.abs(r.left-p.left)<1 && Math.abs(r.width-p.width)<1"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
     },
     {
       "type": "assert_script",
@@ -107,6 +162,14 @@
     },
     {
       "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
+    },
+    {
+      "type": "assert_script",
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),s=document.getElementById(\"stage\").getBoundingClientRect();Math.abs(r.bottom-s.top)<1 && r.top>=document.querySelector(\".canvas-panel\").getBoundingClientRect().top"
     },
     {
@@ -126,6 +189,14 @@
     },
     {
       "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
+    },
+    {
+      "type": "assert_script",
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),s=document.getElementById(\"stage\").getBoundingClientRect();Math.abs(r.bottom-s.top)<1 && r.top>=document.querySelector(\".canvas-panel\").getBoundingClientRect().top"
     },
     {
@@ -137,6 +208,14 @@
     {
       "type": "assert_script",
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),p=document.getElementById(\"paper-wrap\").getBoundingClientRect();Math.abs(r.left-p.left)<1 && Math.abs(r.width-p.width)<1"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
     },
     {
       "type": "assert_script",
@@ -162,6 +241,14 @@
     {
       "type": "assert_script",
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),p=document.getElementById(\"paper-wrap\").getBoundingClientRect();Math.abs(r.left-p.left)<1 && Math.abs(r.width-p.width)<1"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
     },
     {
       "type": "assert_script",
@@ -216,6 +303,14 @@
     },
     {
       "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
+    },
+    {
+      "type": "assert_script",
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),s=document.getElementById(\"stage\").getBoundingClientRect();Math.abs(r.bottom-s.top)<1 && r.top>=document.querySelector(\".canvas-panel\").getBoundingClientRect().top"
     },
     {
@@ -231,9 +326,322 @@
       "js": "var r=document.querySelector(\".ruler\").getBoundingClientRect(),p=document.getElementById(\"paper-wrap\").getBoundingClientRect();Math.abs(r.left-p.left)<1 && Math.abs(r.width-p.width)<1"
     },
     {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulerScale()"
+    },
+    {
       "type": "capture_surface",
       "source": "page",
       "file": "temp/word-ruler-first-page.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".statusbar #document-mode"
+      },
+      "equals": "Draft \u00b7 Reading"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned() && window.wordRulerScale()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-rulers-reading.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#paper-size"
+      },
+      "value": "Letter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#orientation-landscape"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#margins-menu"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#margins-narrow"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".statusbar #paper-label"
+      },
+      "equals": "Letter \u00b7 landscape"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned() && window.wordRulerScale()"
+    },
+    {
+      "type": "assert_script",
+      "js": "var h=document.getElementById(\"horizontal-ruler\").getBoundingClientRect(),v=document.querySelector(\"#vertical-ruler .ruler-page\").getBoundingClientRect();Math.abs(h.width-1056)<1 && Math.abs(v.height-816)<1 && Math.abs(document.querySelector(\"#horizontal-ruler .ruler-leading\").getBoundingClientRect().width-48)<1 && Math.abs(document.querySelector(\"#vertical-ruler .ruler-leading\").getBoundingClientRect().height-48)<1"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-rulers-landscape.png"
+    },
+    {
+      "type": "resize",
+      "width": 640,
+      "height": 720
+    },
+    {
+      "type": "assert_script",
+      "js": "var f=document.querySelector(\".statusbar\").getBoundingClientRect(),nodes=document.querySelectorAll(\"#document-mode,#paper-label,#page-count-label,#zoom-label\");var ok=true;for(var i=0;i<nodes.length;i++){var b=nodes[i].getBoundingClientRect();ok=ok&&b.width>0&&b.left>=f.left&&b.right<=f.right&&b.top>=f.top&&b.bottom<=f.bottom}ok"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned() && window.wordRulerScale()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-rulers-narrow.png"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");s.scrollTop=0;s.scrollLeft=0;window.rulerDragEvents=[];s.addEventListener(\"scroll\",function(){window.rulerDragEvents.push([s.scrollLeft,s.scrollTop])});true"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");window.rulerDragPosition=[s.scrollLeft,s.scrollTop];window.rulerDragCount=window.rulerDragEvents.length;true"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 405,
+        "offset_y": 20
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "scrollbar_v_dragging": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.rulerDragEvents.length===window.rulerDragCount"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 405,
+        "offset_y": 90
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollTop>0 && window.rulerDragEvents.length>window.rulerDragCount && window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");window.rulerDragPosition=[s.scrollLeft,s.scrollTop];window.rulerDragCount=window.rulerDragEvents.length;true"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 405,
+        "offset_y": 50
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollTop<window.rulerDragPosition[1] && window.rulerDragEvents.length>window.rulerDragCount && window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 405,
+        "offset_y": 900
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var s=document.getElementById(\"stage\");s.scrollTop>1000 && window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");window.rulerDragPosition=[s.scrollLeft,s.scrollTop];window.rulerDragCount=window.rulerDragEvents.length;true"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 405,
+        "offset_y": 1000
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollTop===window.rulerDragPosition[1] && window.rulerDragEvents.length===window.rulerDragCount"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 405,
+        "offset_y": 1000
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "scrollbar_v_dragging": false
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/ruler-drag-vertical.png"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".statusbar",
+        "offset_x": 300,
+        "offset_y": -6
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "scrollbar_h_dragging": true
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");window.rulerDragPosition=[s.scrollLeft,s.scrollTop];window.rulerDragCount=window.rulerDragEvents.length;true"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".statusbar",
+        "offset_x": 400,
+        "offset_y": -6
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollLeft>0 && window.rulerDragEvents.length>window.rulerDragCount && window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");window.rulerDragPosition=[s.scrollLeft,s.scrollTop];window.rulerDragCount=window.rulerDragEvents.length;true"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".statusbar",
+        "offset_x": 340,
+        "offset_y": -6
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollLeft<window.rulerDragPosition[0] && window.rulerDragEvents.length>window.rulerDragCount && window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".statusbar",
+        "offset_x": 1000,
+        "offset_y": -6
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollLeft>500 && window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById(\"stage\");window.rulerDragPosition=[s.scrollLeft,s.scrollTop];window.rulerDragCount=window.rulerDragEvents.length;true"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".statusbar",
+        "offset_x": 1100,
+        "offset_y": -6
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"stage\").scrollLeft===window.rulerDragPosition[0] && window.rulerDragEvents.length===window.rulerDragCount"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": ".statusbar",
+        "offset_x": 1100,
+        "offset_y": -6
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "scrollbar_h_dragging": false
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordRulersAligned() && Math.abs(document.getElementById(\"horizontal-ruler\").getBoundingClientRect().left-document.getElementById(\"paper-wrap\").getBoundingClientRect().left)<1"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/ruler-drag-horizontal.png"
     }
   ]
 }

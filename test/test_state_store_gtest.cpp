@@ -349,9 +349,11 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     ASSERT_TRUE(root->remove_child(control));
     ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     EXPECT_EQ(dom_node_ref_validate(&doc, detached_ref), nullptr);
-    EXPECT_GT(state_store_prune_after_reflow(doc.state), 0u);
     ViewStateEntry query = {.view_id = detached_ref.expected_id, .kind = VIEW_STATE_FORM_CONTROL};
+    // retirement must release durable state even without a layout tree or another reflow.
     EXPECT_EQ(hashmap_get(doc.state->view_state_map, &query), nullptr);
+    EXPECT_TRUE(radiant_state_validate_interaction(doc.state, nullptr));
+    EXPECT_EQ(state_store_prune_after_reflow(doc.state), 0u);
     state_store_destroy(&doc);
     doc.destroy();
 }
@@ -522,6 +524,56 @@ TEST_F(StateStoreDomMutationTest, RegeneratedTextControlKeepsNativeValueOnlyForS
     EXPECT_EQ(view_state_get(state(), orphan), before);
     EXPECT_EQ(view_state_get(state(), live), nullptr);
     live->form = orphan->form = nullptr;
+}
+
+TEST_F(StateStoreDomMutationTest, DropdownScrollClampsRevealsAndReleasesCapture) {
+    FormControlProp form{};
+    form.control_type = FORM_CONTROL_SELECT;
+    form.option_count = 40;
+    form.intrinsic_height = 20.0f;
+    live->form = lam::view_prop(&form);
+    doc_state_open_dropdown(state(), live);
+    doc_state_set_dropdown_geometry(state(), 10.0f, 30.0f, 160.0f, 200.0f);
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state(), &form);
+    EXPECT_FLOAT_EQ(geometry.scrollbar_width, 12.0f);
+    EXPECT_FLOAT_EQ(geometry.scroll_max, 600.0f);
+    EXPECT_FLOAT_EQ(geometry.thumb_height, 49.5f);
+    EXPECT_EQ(select_dropdown_scrollbar_part(state(), &form, 165.0f, 35.0f),
+              SCROLLBAR_PRESS_VERTICAL_THUMB);
+    EXPECT_EQ(select_dropdown_scrollbar_part(state(), &form, 165.0f, 200.0f),
+              SCROLLBAR_PRESS_VERTICAL_AFTER);
+    EXPECT_EQ(select_dropdown_scrollbar_part(state(), &form, 140.0f, 35.0f),
+              SCROLLBAR_PRESS_NONE);
+
+    doc_state_set_dropdown_scroll(state(), 9999.0f);
+    EXPECT_FLOAT_EQ(state()->dropdown_scroll_y, 600.0f);
+    geometry = select_dropdown_geometry(state(), &form);
+    EXPECT_FLOAT_EQ(geometry.thumb_y + geometry.thumb_height, 199.0f);
+    form_control_set_hover_index(state(), live, 12);
+    EXPECT_FLOAT_EQ(state()->dropdown_scroll_y, 240.0f);
+    form_control_set_hover_index(state(), live, 30);
+    EXPECT_FLOAT_EQ(state()->dropdown_scroll_y, 420.0f);
+    // pointer hover over a clipped row must not snap the content while dragging.
+    form_control_set_hover_index(state(), live, 20, false);
+    EXPECT_FLOAT_EQ(state()->dropdown_scroll_y, 420.0f);
+    doc_state_set_dropdown_scroll(state(), -100.0f);
+    EXPECT_FLOAT_EQ(state()->dropdown_scroll_y, 0.0f);
+    doc_state_set_dropdown_scrollbar_press(state(), true, true, 35.0f);
+    EXPECT_TRUE(state()->dropdown_dragging);
+    doc_state_close_dropdown(state(), live);
+    EXPECT_FALSE(state()->dropdown_dragging);
+    EXPECT_FALSE(state()->dropdown_scrollbar_pressed);
+    EXPECT_FLOAT_EQ(state()->dropdown_scroll_y, 0.0f);
+
+    // short menus have no scrollbar or residual offset after changing owners.
+    form.option_count = 3;
+    doc_state_open_dropdown(state(), live);
+    doc_state_set_dropdown_geometry(state(), 10.0f, 30.0f, 160.0f, 60.0f);
+    geometry = select_dropdown_geometry(state(), &form);
+    EXPECT_FLOAT_EQ(geometry.scrollbar_width, 0.0f);
+    EXPECT_FLOAT_EQ(geometry.scroll_max, 0.0f);
+    doc_state_close_dropdown(state(), live);
+    live->form = nullptr;
 }
 
 TEST_F(StateStoreDomMutationTest, HiddenSelectUpdatesRetainedSelectionWithoutLayoutBox) {

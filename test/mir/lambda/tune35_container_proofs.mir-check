@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "description": "S11.4.10: broad joins and branch results retain successful array membership; open-map stores reuse the canonical COW setter.",
+  "checks": [
+    {"in_func": "_concatenate_#", "forbid": ["call\tlambda_type_check_p, lambda_type_check"]},
+    {"in_func": "_choose_#", "forbid": ["call\tlambda_type_check_p, lambda_type_check"]},
+    {"in_func": "_extend_#", "forbid": ["call\tlambda_map_set_checked"]}
+  ]
+}

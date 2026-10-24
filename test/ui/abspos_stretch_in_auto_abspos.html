@@ -1,0 +1,13 @@
+<!doctype html>
+<!-- the stretched ring comes before the bottom-anchored dot, so the dot is placed after the ring's reflow -->
+<html><head><style>
+body { margin: 0; background: #fff; }
+.page { position: relative; width: 400px; height: 300px; }
+/* an auto-height absolute box: its height comes from the three lines of text */
+.item { position: absolute; left: 40px; top: 40px; width: 200px; font: 20px/30px sans-serif; color: #111; }
+/* stretched by top and bottom, so its height follows the parent's used height */
+.ring { position: absolute; left: -4px; top: -4px; right: -4px; bottom: -4px; box-sizing: border-box; border: 2px solid rgb(255, 0, 0); }
+.dot { position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; background: rgb(0, 0, 255); }
+</style></head><body><div class="page">
+<div class="item" id="item">one<br>two<br>three<span class="ring" id="ring"></span><span class="dot" id="dot"></span></div>
+</div></body></html>

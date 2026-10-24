@@ -8,8 +8,9 @@ From the root of a Lambda checkout or of an unzipped release:
 ./lambda demo
 ```
 
-With no name, this opens the bundled `lambda.doc` viewer and its startup splash
-(D7.2.4). To launch another demo, append its name:
+With no name, this opens the demo index: one animated tile per demo. Click a
+tile to open that demo in a window of its own. To launch a demo directly, append
+its name:
 
 ```bash
 ./lambda demo tetris
@@ -20,7 +21,7 @@ With no name, this opens the bundled `lambda.doc` viewer and its startup splash
 ./lambda demo chart
 ./lambda demo slides
 ./lambda demo archive
-./lambda demo wordcloud
+./lambda demo greetings
 ./lambda demo --list
 ```
 
@@ -32,7 +33,7 @@ CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
 Crystal garden, Observatory, and Shared Animation, with breadcrumbs back to
 the collection.
 The `chart` collection opens normal charts with animation and interaction,
-scientific plots, and graphs including word clouds, timelines, Mermaid, and TikZ.
+scientific plots, and graphs including word clouds, Mermaid, Graphviz, and TikZ.
 
 ## Viewer features
 
@@ -73,7 +74,7 @@ open it at full size.
 
 <table>
 <tr>
-<td width="33%" align="center"><a href="img/demo/splash.png"><img src="img/demo/splash.png" alt="Startup splash"></a><br><sub><b>Startup splash</b> — <code>lambda demo</code></sub></td>
+<td width="33%" align="center"><a href="img/demo/splash.png"><img src="img/demo/splash.png" alt="Startup splash"></a><br><sub><b>Startup splash</b> — <code>doc_viewer.html</code></sub></td>
 <td width="33%" align="center"><a href="img/demo/markdown.png"><img src="img/demo/markdown.png" alt="Markdown"></a><br><sub><b>Markdown</b> — README.md with badges and an SVG figure</sub></td>
 <td width="33%" align="center"><a href="img/demo/markdown_math.png"><img src="img/demo/markdown_math.png" alt="Markdown math"></a><br><sub><b>Markdown + math</b> — inline LaTeX math</sub></td>
 </tr>

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "Tune34 continuation: guarded lowering retains its original semantic miss paths.",
+  "checks": [
+    {
+      "in_func": "_compare_#",
+      "expect": [
+        "dlt",
+        "dgt",
+        "fn_lt",
+        "fn_gt"
+      ]
+    },
+    {
+      "in_func": "_ordered_store_#",
+      "expect": [
+        "map_set_cow_resolved"
+      ]
+    }
+  ]
+}

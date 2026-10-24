@@ -13,9 +13,11 @@ import document: .mod_document
 import model: .mod_model
 import surface: .mod_surface
 import page: .mod_page
+import columns: .mod_columns
 import review: .mod_review
 import stories: .mod_stories
 import changes: .mod_changes
+import print: .mod_print
 
 let tags = ['doc','p','h1','h2','h3','h4','h5','h6','blockquote','ul','ol','li',
     'table','thead','tbody','tfoot','tr','td','th','pre','code','span','strong','em','u','b','i','del','s','sub','sup','a','img','br','hr','div',
@@ -105,7 +107,7 @@ pub fn read_document(path) map^ {
             status:"Imported " ++ session.basename(path) ++ "; save an editable copy."}
     }
 }
-let metadata_names = ['data-word-page','data-word-comments','data-word-comment-seq','data-word-stories','data-word-tracking','data-word-change-seq']
+let metadata_names = ['data-word-page','data-word-columns','data-word-comments','data-word-comment-seq','data-word-stories','data-word-tracking','data-word-change-seq','data-word-references']
 pub fn import_html_document(source) map^ {
     let loaded = html.import_text(source)^
     import_metadata(restored(loaded.doc)^,loaded.envelope.head)^
@@ -119,25 +121,83 @@ fn import_metadata(doc,head) map^ {
         else {*:doc,attrs:unpack_attrs(attrs)}
     }
 }
-pub fn html_document(doc,title) string^ => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++
+fn document_body(doc,paged) {
+    let body = html.export_text(doc,{document:false,head:<head>})
+    if (paged) columns.pdf_flow(doc,body) else body
+}
+// plain drops background colors and images, as a browser's print option does.
+pub fn html_document(doc,title,paged=false,plain=false) string^ => "<!doctype html><html" ++
+    (if (paged) " xmlns=\"http://www.w3.org/1999/xhtml\"" else "") ++ (if (plain) " class=\"print-plain\"" else "") ++ "><head><meta charset=\"utf-8\"><title>" ++
     helpers.escape_text(title) ++ "</title><meta name=\"lambda-word-metadata\" content=\"" ++
     helpers.escape_attr(format(pack_attrs([for (a in doc.attrs where contains(metadata_names,a.name)) a]),'json')^) ++
-    "\"><style>" ++ surface.document_css ++ page.export_css(doc) ++ stories.export_css(doc) ++ review.css(doc) ++ changes.css ++
-    "</style></head><body class=\"word-content\">" ++ html.export_text(doc,{document:false,head:<head>}) ++ "</body></html>"
-pub pn export_document(doc,title,path) any^ {
+    "\"><style>" ++ surface.document_css ++ surface.print_css ++ page.export_css(doc) ++ columns.export_css(doc) ++ stories.export_css(doc) ++ review.css(doc) ++ changes.css ++
+    "</style></head><body class=\"word-content\">" ++
+    document_body(doc,paged) ++ "</body></html>"
+pub fn pdf_document(doc,title,plain=false) string^ {
+    let source = html_document(doc,title,true,plain)^
+    if (columns.settings(doc).count==1) source else {
+        // serialize parsed HTML as XML so void elements, text and native namespaces remain well formed.
+        let parsed = parse(source,'html')^
+        let root = [for (child in content(parsed) where type(child)==element and name(child)=='html') child][0]
+        let head = [for (child in content(root) where type(child)==element and name(child)=='head') child][0]
+        // the XML formatter retains HTML raw-text tags; escape this generated head for XML parsing.
+        let xml_head = <head *[for (child in content(head))
+            if (type(child)==element and name(child)=='title') <title helpers.escape_text(join(content(child),""))>
+            else if (type(child)==element and name(child)=='style') <style helpers.escape_text(join(content(child),""))>
+            else child]>
+        format(<html *:map(root),xml_head; *[for (child in content(root) where child!=head) child]>,'xml')^
+    }
+}
+// render to a pending file, then rename, so a failed export never replaces an existing PDF.
+pn write_pdf(source,width,height,source_format,path) any^ {
+    let pending = path ++ ".word-" ++ string(int(clock()*1000000)) ++ ".pdf"
+    let result = radiant.export_document(source,pending,{format:"pdf",width:width,height:height,pagination:true,source_format:source_format})
+    if (result != true) {
+        io.delete(pending) ^ { null }
+        raise error("Word: " ++ string(result))
+    }
+    io.rename(pending,path) ^ { io.delete(pending) ^ { null }; raise ^ }
+    return true
+}
+pub pn export_document(doc,title,path,plain=false) any^ {
     let extension = lower(split(path,".")[last])
     if (extension == "html") { output(html_document(doc,title)^,path,{format:'text',atomic:true})^ }
     else if (extension == "txt") { output(model.plain_text(doc) ++ "\n",path,{format:'text',atomic:true})^ }
     else if (extension == "pdf") {
-        let pending = path ++ ".word-" ++ string(int(clock()*1000000)) ++ ".pdf"
         let geometry = page.geometry(doc)
-        let result = radiant.export_document(html_document(doc,title)^,pending,{format:"pdf",width:geometry.width,height:geometry.height,pagination:true})
-        if (result != true) {
-            io.delete(pending) ^ { null }
-            raise error("Word: " ++ string(result))
-        }
-        io.rename(pending,path) ^ { io.delete(pending) ^ { null }; raise ^ }
+        write_pdf(pdf_document(doc,title,plain)^,geometry.width,geometry.height,
+            if (columns.settings(doc).count>1) "xhtml" else "html",path)^
     }
     else { raise error("Word: export as .html, .txt, or .pdf") }
     return true
+}
+// print the measured preview sheets as fixed pages: scaled, n-up, and page-range printouts (see mod_print.composed).
+// Radiant's PDF writer does not yet apply CSS transforms or overflow clipping, so each sheet is rasterized at
+// print resolution (where both work, as in the preview) and the PDF carries one full-page image per sheet.
+fn print_head(title,lay) => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++ helpers.escape_text(title) ++
+    "</title><style>" ++ surface.document_css ++ surface.print_css ++ "@page { size:" ++ string(lay.width_mm) ++ "mm " ++
+    string(lay.height_mm) ++ "mm; margin:0; } body { margin:0; } .print-sheet + .print-sheet { break-before:page; } " ++
+    ".print-image { display:block; }</style></head>"
+pn sheet_image(source,lay,path) any^ {
+    let result = radiant.export_document(source,path,{format:"png",width:lay.width,height:lay.height,scale:3})
+    if (result != true) raise error("Word: " ++ string(result))
+    let uri = media.data_uri(input(path,'binary')^,"image/png")^
+    io.delete(path) ^ { null }
+    return uri
+}
+pub pn export_sheets(doc,title,values,starts,path) any^ {
+    let lay = print.layout(doc,values)
+    let sheets = print.sheets(doc,values,starts)^
+    if (len(sheets)==0) raise error("Word: the chosen pages are empty")
+    let total = len(print.pages(doc,starts))
+    let head = print_head(title,lay)
+    let images = [for (i,sheet in sheets) sheet_image(head ++ "<body" ++ (if (values.backgrounds) "" else " class=\"print-plain\"") ++ ">" ++
+        format(surface.print_sheet(doc,sheet,lay,total,lay.width,print.scale(values)),'html')^ ++ "</body></html>",lay,
+        path ++ ".sheet-" ++ string(i+1) ++ ".png")^]
+    // exact millimetre sheets: a rounded-up pixel height would spill a sliver onto an extra PDF page.
+    let width = lay.width_mm*96/25.4
+    let height = lay.height_mm*96/25.4
+    let body = join([for (uri in images) "<div class=\"print-sheet\" style=\"width:" ++ string(width) ++ "px;height:" ++ string(height) ++
+        "px\"><img class=\"print-image\" alt=\"\" src=\"" ++ uri ++ "\" style=\"width:" ++ string(width) ++ "px;height:" ++ string(height) ++ "px\"></div>"],"")
+    return write_pdf(print_head(title,lay) ++ "<body>" ++ body ++ "</body></html>",lay.width,lay.height,"html",path)^
 }

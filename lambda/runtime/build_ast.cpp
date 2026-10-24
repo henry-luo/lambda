@@ -2851,6 +2851,20 @@ static Type* array_item_element_type(AstNode* item) {
     return ((TypeArray*)container)->nested;
 }
 
+// Whether two items' types can share one element type. Array rows agree only
+// when their own elements do: `[[1, 2], [3, 4.5]]` once took the first row's
+// int elements for every row, so `r[1]` read 4.5 through an int lane.
+static bool array_item_types_agree(Type* left, Type* right, int depth) {
+    if (left == right) return true;
+    if (!left || !right || left->type_id != right->type_id) return false;
+    if (left->type_id == LMD_TYPE_NUM_SIZED) return type_num_sized_kind(left) == type_num_sized_kind(right);
+    if (left->type_id != LMD_TYPE_ARRAY && left->type_id != LMD_TYPE_ARRAY_NUM) return true;
+    // a global simple array type is a bare Type with no `nested`
+    bool left_bare = is_global_simple_type(left), right_bare = is_global_simple_type(right);
+    if (left_bare || right_bare) return left_bare && right_bare;
+    return depth < 16 && array_item_types_agree(((TypeArray*)left)->nested, ((TypeArray*)right)->nested, depth + 1);
+}
+
 // An array node holds its item list from the syntax phase.
 static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
     AstNode* items = ast_node->item;
@@ -2871,12 +2885,7 @@ static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
             nested_type = item_type;
             has_value_item = true;
         }
-        else if (nested_type && (!item_type ||
-                item_type->type_id != nested_type->type_id)) {
-            nested_type = NULL;
-        }
-        else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED &&
-                type_num_sized_kind(nested_type) != type_num_sized_kind(item_type)) {
+        else if (nested_type && !array_item_types_agree(nested_type, item_type, 0)) {
             nested_type = NULL;
         }
         // D6.1.3/S7.8.1: a possible defect keeps the array generic

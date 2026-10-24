@@ -974,6 +974,41 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     window_submit_input(&event);
 }
 
+// A move to a point outside the document hit-tests no target, which clears
+// hover and dispatches the mouseout/mouseleave boundary events.
+static void window_submit_pointer_leave(GLFWwindow* window) {
+    cursor_position_callback(window, -1.0, -1.0);
+}
+
+static void cursor_enter_callback(GLFWwindow* window, int entered) {
+    if (!entered) window_submit_pointer_leave(window);
+}
+
+// macOS sends motion and enter/leave only to the key window, so a window that
+// lost focus (e.g. to an app it launched) would keep its last hover forever.
+// While unfocused, poll the pointer; GLFW_HOVERED excludes windows on top.
+static bool window_poll_unfocused_pointer(GLFWwindow* window) {
+    static bool pointer_over = false;
+    if (glfwGetWindowAttrib(window, GLFW_FOCUSED)) {
+        pointer_over = false;
+        return false;
+    }
+    if (!glfwGetWindowAttrib(window, GLFW_HOVERED)) {
+        if (pointer_over) window_submit_pointer_leave(window);
+        pointer_over = false;
+        return true;
+    }
+    double x, y;
+    glfwGetCursorPos(window, &x, &y);
+    const MouseState* mouse = &ui_context.mouse_state;
+    if (!pointer_over || !mouse->has_position ||
+        mouse->last_x != (float)x || mouse->last_y != (float)y) {
+        cursor_position_callback(window, x, y);
+    }
+    pointer_over = true;
+    return true;
+}
+
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     // flush before button bookkeeping changes the state observed by the last motion.
     window_flush_pointer_motion();
@@ -1067,6 +1102,7 @@ static void window_register_input_callbacks(GLFWwindow* window) {
     glfwSetKeyCallback(window, key_callback);
     glfwSetCharCallback(window, character_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
+    glfwSetCursorEnterCallback(window, cursor_enter_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     log_info("Mouse button callback registered: %p", mouse_button_callback);
     glfwSetScrollCallback(window, scroll_callback);
@@ -1311,6 +1347,9 @@ void render(GLFWwindow* window) {
         }
         doc_state_clear_reflow(state);
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
+    } else if (ui_context.document && ui_context.document->pending_scroll_into_view_target.address) {
+        // scroll-only requests still reach the checkpoint when no flow invalidation is pending.
+        layout_update_document(&ui_context, ui_context.document);
     }
 
     if (ui_context.document && (ui_context.document->view_tree || ui_context.paged_view)) {
@@ -2093,6 +2132,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
         // poll for new events
         glfwPollEvents();
+        // simulated input owns the pointer; the real cursor must not leak into a replay.
+        bool polling_pointer = !sim_ctx && window_poll_unfocused_pointer(window);
         // one latest motion per input batch lets layout and paint run while the mouse keeps moving.
         window_flush_pointer_motion();
         uv_loop_t* uv_loop = lambda_uv_loop();
@@ -2221,6 +2262,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
         if (idle_layer_frame) wait_timeout = 0.0;
         else if (idle_layer_time > 0.0) wait_timeout = fmin(wait_timeout, fmax(0.0, idle_layer_time - currentTime));
+        // an unfocused window receives no motion events to wake it, so it samples the pointer.
+        if (polling_pointer) wait_timeout = fmin(wait_timeout, 1.0 / 30.0);
         if (wait_timeout > 0.0) {
             glfwWaitEventsTimeout(wait_timeout);
         }

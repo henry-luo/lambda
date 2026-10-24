@@ -332,13 +332,14 @@ lambda demo [name] [view options]
 lambda demo --list
 ```
 
-With no name, opens the bundled `lambda.doc` viewer with its startup splash from
-`<LAMBDA_HOME>/package/doc/doc_viewer.html` (D7.2.4). Named demos launch through
-`view`: `lambda demo tetris` is equivalent to
+With no name, opens the demo index, `test/demo/index.ls`: one animated tile per
+demo. Clicking a tile starts that demo as its own `lambda demo <name>` process,
+in a window of its own; closing the index closes the demos it started. Named
+demos launch through `view`: `lambda demo tetris` is equivalent to
 `lambda view test/demo/tetris/tetris.ls`.
 
 Names include `tetris`, `superlambda`, `doom`, `photo`, `photos`, `draw`, `word`, `finder`,
-`note`, `scene3d`, `cityscape`, `photo-album`, `slides`, `readability`, `archive`, and `wordcloud`. `scene3d` opens one tile index for
+`note`, `scene3d`, `cityscape`, `photo-album`, `slides`, `readability`, and `archive`. `scene3d` opens one tile index for
 CellScope, Domino circuit, Salvage bay, Marble sorter, Bounce lab, Ringworld,
 Crystal garden, Observatory, and Shared Animation. Run named demos from the checkout or unpacked release root; their
 relative paths and local assets are under `test/demo/`.
@@ -385,8 +386,9 @@ it; `--autoplay` lifts that rule for the session.
 
 **Default file:** `<LAMBDA_HOME>/package/doc/doc_viewer.ls`, the bundled
 `lambda.doc` document viewer (D7.2.4). It browses the current working directory.
-`lambda demo` opens its `doc_viewer.html` startup splash. Both commands use
-`./lmd` as the default Lambda home and honor `LAMBDA_HOME`.
+Its startup splash is `<LAMBDA_HOME>/package/doc/doc_viewer.html`, opened with
+`lambda view` on that path. The viewer uses `./lmd` as the default Lambda home
+and honors `LAMBDA_HOME`.
 
 **Directory and archive browsing:** `lambda view directory/` and
 `lambda view archive.zip` open the bundled file tree rooted at that source.

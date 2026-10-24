@@ -1,0 +1,759 @@
+{
+  "name": "Word Table Design styles, options, shading and border pen",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1736,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tab-table-design"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tab-table-design"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#tab-table"
+      },
+      "equals": "Table Layout"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-tab",
+      "equals": "Table Design"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".table-style-card"
+      },
+      "count": 10
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".table-style-options input"
+      },
+      "count": 6
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/table-design-initial.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-style-blue"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-table-style",
+      "equals": "blue"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th:first-child"
+      },
+      "property": "background-color",
+      "equals": "rgb(37, 99, 235)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th:first-child"
+      },
+      "property": "color",
+      "equals": "rgb(255, 255, 255)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-option-header"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-header-row",
+      "equals": "false"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th:first-child"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 255, 255)"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-header-row",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th:first-child"
+      },
+      "property": "background-color",
+      "equals": "rgb(37, 99, 235)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-option-bandedRows"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-banded-rows",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(239, 246, 255)"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 255, 255)"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-option-total"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-total-row",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:last-child td:nth-child(2)"
+      },
+      "property": "font-weight",
+      "equals": "600"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-option-first"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-first-column",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(3) td:first-child"
+      },
+      "property": "font-weight",
+      "equals": "600"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-option-last"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-last-column",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-option-bandedColumns"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-banded-columns",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(3) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(239, 246, 255)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-row"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\").length === 3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-shading"
+      },
+      "value": "#fef9c3"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\").length === 3"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(254, 249, 195)"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(239, 246, 255)"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-pen-style"
+      },
+      "value": "dashed"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-pen-width"
+      },
+      "value": "2"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-pen-color"
+      },
+      "value": "#2563eb"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-borders-menu"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "aria-label",
+      "equals": "Borders"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-border-outside"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\").length === 3"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:first-child"
+      },
+      "property": "border-left-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:first-child"
+      },
+      "attribute": "style",
+      "contains": "2pt dashed #2563eb"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:first-child"
+      },
+      "property": "border-left-style",
+      "equals": "solid"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-shading-more"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-shading-color"
+      },
+      "text": "#ddccee",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-table_shading .primary"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(221, 204, 238)"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\").length === 3"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-shading"
+      },
+      "value": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(239, 246, 255)"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(221, 204, 238)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-style-purple"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th:first-child"
+      },
+      "property": "background-color",
+      "equals": "rgb(124, 58, 237)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(221, 204, 238)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:first-child"
+      },
+      "property": "border-left-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/table-design-final.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-design.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-design.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-design.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-design.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table td"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-table-style",
+      "equals": "purple"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-banded-columns",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.insertRowBelow\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table tr"
+      },
+      "count": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".table-style-card"
+      },
+      "count": 10
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tab-table-design"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#tab-table"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-tab",
+      "equals": "Home"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table td"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table-style-blue"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table-option-header"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table-shading"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table-borders-menu"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    }
+  ]
+}

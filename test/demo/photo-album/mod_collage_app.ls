@@ -34,7 +34,7 @@ pn render(owner, ctx, cs) {
     updates.attr(node(owner, "collage"), "data-template", m.template)
     if (len(cs.history.past) == 0) dom.set_attribute(node(owner, "cl-undo"), "disabled", "") else dom.remove_attribute(node(owner, "cl-undo"), "disabled")
     if (len(cs.history.future) == 0) dom.set_attribute(node(owner, "cl-redo"), "disabled", "") else dom.remove_attribute(node(owner, "cl-redo"), "disabled")
-    updates.show(owner, "cl-shuffle", m.template == "scrapbook")
+    updates.show(owner, "cl-shuffle", C.template(m).layout == "prints")
     return {*:cs, scale:scale}
 }
 
@@ -42,11 +42,13 @@ pn render(owner, ctx, cs) {
 pn sync_controls(owner, m) {
     // select values are set by index: set_state("value") is defined on text controls only
     dom.set_selected_index(node(owner, "cl-aspect"), index_of([for (a in C.ASPECTS) a.key], m.aspect) or 0)
-    // ranges take their value as a property; set_state("value") is defined on text controls only
-    dom.set_property(node(owner, "cl-gutter"), "value", string(m.gutter))
-    dom.set_property(node(owner, "cl-radius"), "value", string(m.radius))
-    dom.set_property(node(owner, "cl-border"), "value", string(m.border))
+    dom.set_selected_index(node(owner, "cl-font"), index_of([for (f in C.FONTS) f.key], C.font(m).key) or 0)
+    // set_state("value") commits a range's live value and moves its thumb
+    dom.set_state(node(owner, "cl-gutter"), "value", string(m.gutter))
+    dom.set_state(node(owner, "cl-radius"), "value", string(m.radius))
+    dom.set_state(node(owner, "cl-border"), "value", string(m.border))
     dom.set_state(node(owner, "cl-caption"), "value", m.caption or "")
+    dom.set_state(node(owner, "cl-note"), "value", m.note or "")
     dom.set_state(node(owner, "cl-credits"), "checked", m.credits)
 }
 
@@ -73,6 +75,13 @@ pub pn start(owner, ctx, ids, title) {
 pub pn change(owner, ctx, cs, model) {
     if (model == cs.model) { return cs }
     return render(owner, ctx, {*:cs, model:model, history:C.record(cs.history, cs.model)})
+}
+
+// a template brings its look, so the controls follow it
+pub pn retemplate(owner, ctx, cs, key) {
+    let model = C.apply_template(cs.model, key)
+    sync_controls(owner, model)
+    return change(owner, ctx, cs, model)
 }
 
 // draws a model without recording it, for edits still in progress

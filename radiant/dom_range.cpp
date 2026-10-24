@@ -65,6 +65,12 @@ __attribute__((weak)) bool tc_is_text_control(DomElement* /*elem*/) {
     return false;
 }
 
+// DOM-only range targets have no rendered-owner correspondence service.
+__attribute__((weak)) DomNode* view_state_corresponding_node(
+        DomNode* /*owner*/, DomNode* /*old_root*/, DomNode* /*new_root*/, bool /*source_tree*/) {
+    return nullptr;
+}
+
 __attribute__((weak)) void tc_ensure_init(DomElement* /*elem*/) {
     // weak fallback for DOM-only test targets without text_control.cpp.
 }
@@ -1005,19 +1011,31 @@ static inline void resync_selection_after_visible_mutation(DocState* state) {
 //   - Endpoint inside the removed subtree (inclusive descendant of child):
 //     collapse to (parent, index).
 //   - Endpoint at (parent, off) with off > index: decrement off by 1.
-static void adjust_one_endpoint_for_remove(DomBoundary* b,
+static bool adjust_one_endpoint_for_remove(DomBoundary* b,
                                            const DomNode* parent,
                                            const DomNode* child,
-                                           uint32_t index) {
-    if (!b || !b->node) return;
+                                           uint32_t index, DomNode* replacement,
+                                           bool* relocated = nullptr) {
+    if (!b || !b->node) return false;
     if (view_geometry_dom_is_descendant(b->node, child, true)) {
+        DomNode* next = replacement ? view_state_corresponding_node(b->node,
+            const_cast<DomNode*>(child), replacement, true) : nullptr;
+        if (next) {
+            uint32_t offset = b->offset;
+            b->node = next;
+            b->offset = min(offset, dom_node_boundary_length(next));
+            if (relocated) *relocated = true;
+            return b->offset != offset;
+        }
         b->node = const_cast<DomNode*>(parent);
         b->offset = index;
-        return;
+        return true;
     }
-    if (b->node == parent && b->offset > index) {
+    if (!replacement && b->node == parent && b->offset > index) {
         b->offset--;
+        return true;
     }
+    return false;
 }
 
 static bool removed_node_is_atomic_selection_boundary(const DomNode* child) {
@@ -1089,22 +1107,47 @@ static void normalize_selection_after_atomic_remove(DocState* state,
     r->layout_valid = false;
 }
 
-void dom_mutation_pre_remove(DocState* state, DomNode* child) {
-    if (!state || !child || !child->parent) return;
-    DomNode* parent = child->parent;
-    uint32_t index = dom_node_child_index(child);
+static void dom_mutation_prepare_remove(DocState* state, DomNode* child, DomNode* replacement) {
+    if (!state || !child || (!replacement && !child->parent)) return;
+    DomNode* parent = replacement ? replacement->parent.get() : child->parent.get();
+    uint32_t index = parent ? dom_node_child_index(replacement ? replacement : child) : 0;
+    if (!parent) parent = replacement;
     if (index == UINT32_MAX) return;
 
+    DomSelection* selection = dom_range_state_selection(state);
+    DomRange* primary = selection && selection->range_count ? selection->ranges[0] : nullptr;
+    bool selection_changed = false;
+    bool selection_relocated = false;
     DomRange** head = dom_range_state_live_ranges_slot(state);
     if (head) {
         for (DomRange* r = *head; r; r = r->next) {
-            adjust_one_endpoint_for_remove(&r->start, parent, child, index);
-            adjust_one_endpoint_for_remove(&r->end,   parent, child, index);
+            bool relocated = false;
+            bool collapsed = dom_range_collapsed(r);
+            bool changed = adjust_one_endpoint_for_remove(&r->start, parent, child, index, replacement, &relocated);
+            changed = adjust_one_endpoint_for_remove(&r->end, parent, child, index, replacement, &relocated) || changed;
+            if (replacement) enforce_range_invariant(r, true);
+            if (r == primary) {
+                selection_changed = changed || collapsed != dom_range_collapsed(r);
+                selection_relocated = relocated;
+            }
             r->layout_valid = false;
         }
     }
-    normalize_selection_after_atomic_remove(state, parent, child, index);
+    if (!replacement) normalize_selection_after_atomic_remove(state, parent, child, index);
+    // transferring presentation nodes preserves the logical selection and its native revision.
+    if (selection_relocated && !selection_changed) {
+        selection_notification_snapshot_store(selection, selection->direction);
+        state_store_refresh_editing_selection_shadow(state);
+    }
     resync_selection_after_visible_mutation(state);
+}
+
+void dom_mutation_pre_remove(DocState* state, DomNode* child) {
+    dom_mutation_prepare_remove(state, child, nullptr);
+}
+
+void dom_reconcile_post_replace(DocState* state, DomNode* child, DomNode* replacement) {
+    dom_mutation_prepare_remove(state, child, replacement);
 }
 
 static void dom_range_pre_remove(DocState* state, DomNode* child) {

@@ -2453,6 +2453,9 @@ struct LambdaDemo {
     const char* path;
 };
 
+// the unnamed `lambda demo`; its tiles mirror LAMBDA_DEMOS below.
+static const char* LAMBDA_DEMO_INDEX = "test/demo/index.ls";
+
 // one catalog drives both command lookup and the list of launchable demos.
 static const LambdaDemo LAMBDA_DEMOS[] = {
     {"tetris", "test/demo/tetris/tetris.ls"},
@@ -2473,12 +2476,14 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"readability", "test/demo/readability/readability.ls"},
     {"archive", "test/demo/archive/archive.ls"},
     {"mail", "test/demo/mail/mail.ls"},
-    {"wordcloud", "test/demo/wordcloud.ls"},
+    {"music", "test/demo/music/music.ls"},
+    {"greetings", "test/demo/greetings/greetings.ls"},
 };
 
 static void print_demo_help(FILE* stream) {
     fputs("Usage: lambda demo [name] [view options]\n"
-          "\nWith no name, opens the bundled document viewer with its startup splash.\n"
+          "\nWith no name, opens the demo index (test/demo/index.ls): one animated tile\n"
+          "per demo; a click opens that demo in its own window.\n"
           "Named demos (run from the checkout or release root):\n", stream);
     for (const LambdaDemo& demo : LAMBDA_DEMOS) {
         fprintf(stream, "  %-18s %s\n", demo.name, demo.path); // PRINTF_OK: user-facing CLI help.
@@ -2599,7 +2604,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
     memtrack_init(mode);
     atexit(lambda_main_memtrack_atexit);  // fallback for exit() paths
 
-    // demos share view's launch options; the unnamed splash follows Lambda home (D7.2.4).
+    // demos share view's launch options; with no name the demo index opens.
     // allocate after tracker initialization so teardown uses the same headers.
     if (argc >= 2 && strcmp(argv[1], "demo") == 0) {
         const char* path = nullptr;
@@ -2621,13 +2626,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 first_option = 3;
             }
         }
-        if (!path) {
-            g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.html");
-            path = g_lambda_main_viewer_path;
-        }
+        if (!path) path = LAMBDA_DEMO_INDEX;
         char** demo_argv = (char**)mem_alloc(sizeof(char*) * (argc + 2), MEM_CAT_SYSTEM);
         g_lambda_main_demo_argv = demo_argv;
-        if (!path || !demo_argv) {
+        if (!demo_argv) {
             fputs("Error: could not allocate demo launch arguments.\n", stderr);
             return lambda_main_finish(1);
         }

@@ -13,19 +13,31 @@ import inline_format: lambda.editor.mod_inline_format
 import image: lambda.editor.mod_image
 import document: .mod_document
 import page: .mod_page
+import columns: .mod_columns
 import review: .mod_review
 import insert: .mod_insert
-import shapes: .mod_shapes
 import stories: .mod_stories
-import equation: .mod_equation
-import wordart: .mod_wordart
+import graphics: .mod_graphics
 import changes: .mod_changes
 import objects: .mod_objects
 import transform: .mod_transform
+import object_layout: .mod_object_layout
+import groups: .mod_group
+import group_data: .mod_group_data
+import shape_format: .mod_shape_format
+import equation: .mod_equation
 import tables: .mod_table
+import table_design: .mod_table_design
+import table_layout: .mod_table_layout
+import references: .mod_references
+import home: .mod_home
 
 // The same IDs drive the ribbon, shortcuts, and headless model tests.
 pub let registry = [
+    *[for (entry in [{id:"saveSource",label:"Save source"},{id:"deleteSource",label:"Delete source"},
+        {id:"insertCitation",label:"Insert citation"},{id:"editCitation",label:"Edit citation"},{id:"removeCitation",label:"Remove citation"},
+        {id:"style",label:"Citation style"},{id:"bibliography",label:"Bibliography"},{id:"refresh",label:"Update citations and bibliography"}])
+        {id:"references." ++ entry.id,label:entry.label}],
     {id:"edit.undo",label:"Undo",input:"historyUndo",key:"z"},
     {id:"edit.redo",label:"Redo",input:"historyRedo",key:"y"},
     {id:"format.bold",label:"Bold",input:"formatBold",key:"b",mark:'strong'},
@@ -39,9 +51,15 @@ pub let registry = [
     {id:"format.color",label:"Text color",property:"color",param:"color"},
     {id:"format.highlight",label:"Highlight",property:"background-color",param:"color"},
     {id:"format.clear",label:"Clear formatting"},
+    {id:"format.case",label:"Change case"},
+    {id:"format.painter",label:"Format painter"},
+    {id:"format.shading",label:"Character shading",property:"background-color",param:"color"},
+    {id:"format.border",label:"Character border",property:"border",param:"value"},
     {id:"para.style",label:"Paragraph style"},
     {id:"para.set",label:"Paragraph settings"},
+    {id:"para.indents",label:"Paragraph indentation"},
     {id:"layout.pageSetup",label:"Page setup"},
+    {id:"layout.columns",label:"Columns"},
     {id:"insert.pageBreak",label:"Page break"},
     {id:"insert.blankPage",label:"Blank page"},
     {id:"insert.coverPage",label:"Cover page"},
@@ -53,10 +71,16 @@ pub let registry = [
     {id:"para.alignRight",label:"Align right",property:"text-align",value:"right"},
     {id:"para.justify",label:"Justify",property:"text-align",value:"justify"},
     {id:"para.lineSpacing",label:"Line spacing",property:"line-height",param:"value"},
+    {id:"para.spaceBefore",label:"Space before paragraph",property:"margin-top",param:"value"},
+    {id:"para.spaceAfter",label:"Space after paragraph",property:"margin-bottom",param:"value"},
+    {id:"para.shading",label:"Shading",property:"background-color",param:"color"},
+    {id:"para.borders",label:"Borders"},
+    {id:"para.listStyle",label:"List style"},
+    {id:"para.sort",label:"Sort"},
     {id:"para.bullets",label:"Bullets",input:"insertUnorderedList"},
     {id:"para.numbering",label:"Numbering",input:"insertOrderedList"},
-    {id:"para.indent",label:"Indent list",input:"formatIndent"},
-    {id:"para.outdent",label:"Outdent list",input:"formatOutdent"},
+    {id:"para.indent",label:"Increase indent",input:"formatIndent"},
+    {id:"para.outdent",label:"Decrease indent",input:"formatOutdent"},
     {id:"insert.table",label:"Insert table",input:"insertTable"},
     {id:"table.insertRowBelow",label:"Add row",input:"insertTableRow"},
     {id:"table.insertRowAbove",label:"Insert row above"},
@@ -65,7 +89,14 @@ pub let registry = [
     {id:"table.deleteRow",label:"Delete row",input:"deleteTableRow"},
     {id:"table.deleteColumn",label:"Delete column",input:"deleteTableColumn"},
     {id:"table.deleteTable",label:"Delete table"},
+    *[for (entry in [{id:"mergeCells",label:"Merge cells"},{id:"splitCells",label:"Split cells"},{id:"splitTable",label:"Split table"},
+        {id:"autoFit",label:"AutoFit"},{id:"cellSize",label:"Cell size"},{id:"distributeRows",label:"Distribute rows"},
+        {id:"distributeColumns",label:"Distribute columns"},{id:"cellMargins",label:"Cell margins"},{id:"textDirection",label:"Text direction"},
+        {id:"properties",label:"Table properties"},{id:"sort",label:"Sort table"},{id:"repeatHeader",label:"Repeat header rows"},
+        {id:"convertText",label:"Convert table to text"},{id:"formula",label:"Formula"}]) {id:"table." ++ entry.id,label:entry.label}],
     {id:"table.style",label:"Table style"},
+    {id:"table.designOption",label:"Table style option"},
+    {id:"table.shading",label:"Cell shading"},
     {id:"table.cellAlign",label:"Cell alignment"},
     {id:"table.selectCell",label:"Select cell"},
     {id:"table.selectRow",label:"Select row"},
@@ -80,14 +111,16 @@ pub let registry = [
     {id:"insert.picture",label:"Insert picture"},
     {id:"picture.size",label:"Picture settings"},
     {id:"object.transform",label:"Resize / rotate object"},
+    {id:"shape.format",label:"Shape formatting"},
+    {id:"equation.format",label:"Equation formatting"},
     {id:"object.move",label:"Move object"},
-    {id:"insert.shape",label:"Insert shape"},
-    {id:"shape.set",label:"Shape settings"},
+    {id:"object.group",label:"Group objects"},{id:"object.ungroup",label:"Ungroup objects"},
+    *[for (entry in [{id:"layout",label:"Object layout"},{id:"position",label:"Object position"},
+        {id:"align",label:"Align object"},{id:"layer",label:"Arrange object"},{id:"flip",label:"Flip object"}])
+        {id:"object." ++ entry.id,label:entry.label}],
     {id:"layout.headerFooter",label:"Header and footer"},
-    {id:"insert.equation",label:"Insert equation"},
-    {id:"equation.set",label:"Equation settings"},
-    {id:"insert.wordArt",label:"Insert WordArt"},
-    {id:"wordArt.set",label:"WordArt settings"},
+    *[for (entry in graphics.catalog) for (item in [{id:entry.insert,label:"Insert " ++ entry.label},{id:entry.update,label:entry.label ++ " settings"}]) item],
+    {id:"insert.emoji",label:"Insert emoji"},
     {id:"review.trackChanges",label:"Track text changes"},
     {id:"review.accept",label:"Accept change"},{id:"review.reject",label:"Reject change"},
     {id:"review.acceptAll",label:"Accept all changes"},{id:"review.rejectAll",label:"Reject all changes"},
@@ -99,7 +132,8 @@ pub let registry = [
     {id:"text.enter",label:"New paragraph",input:"insertParagraph"},
     {id:"text.backspace",label:"Backspace",input:"deleteContentBackward"},
     {id:"text.delete",label:"Delete",input:"deleteContentForward"},
-    {id:"edit.replaceAll",label:"Replace all"}
+    {id:"edit.pasteText",label:"Paste text only"},
+    {id:"edit.replace",label:"Replace"},{id:"edit.replaceAll",label:"Replace all"}
 ]
 pub fn spec(id) => [for (s in registry where s.id == id) s][0]
 pub fn shortcut(key,shift=false) =>
@@ -110,8 +144,11 @@ pub fn first_pos(doc) => {path:leaves(doc)[0].path or blocks(doc)[0].path,offset
 // page roles do not repeat on Enter; declared object attributes survive rich paste.
 let word_schema = {*:html.schema,p:{*:html.schema.p,attrs:[*html.schema.p.attrs,
     *[for (name in ['data-word-page-break','data-word-blank-page','data-word-cover']) {name:name,keep_on_split:false}]]},
+    table:{*:html.schema.table,attrs:[*html.schema.table.attrs,*[for (name in [*table_design.attributes,'data-word-repeat-header']) {name:name}]]},
+    a:{*:html.schema.a,attrs:[*html.schema.a.attrs,{name:'data-word-citation'}]},
+    div:{*:html.schema.div,attrs:[*html.schema.div.attrs,{name:'data-word-bibliography',keep_on_split:false}]},
     img:{*:html.schema.img,attrs:[*html.schema.img.attrs,
-        *[for (name in ['style','data-word-shape','data-word-equation','data-word-wordart','data-word-rotation']) {name:name}]]}}
+        *[for (name in ['style','data-word-rotation',object_layout.key,group_data.key,*[for (entry in graphics.catalog) entry.key]]) {name:name}]]}}
 pub fn open_editor(doc) => {*:edit_open(doc,word_schema,text_selection(first_pos(doc),first_pos(doc))),transaction_filter:changes.filter}
 pub fn initial() => open_editor(document.sample())
 
@@ -122,10 +159,13 @@ pub fn plain_text(n) => if (is_text(n)) (if (changes.deleted(n.marks)) "" else n
 pub fn word_count(doc) => len([for (s in split(replace(replace(replace(plain_text(doc),"\n"," "),"\t"," "),"\r"," ")," ") where s != "") s])
 
 let text_blocks = rendering.surface_block_tags
-pub fn blocks(n,path=[]) => if (not is_node(n)) []
-    else if (contains(text_blocks,n.tag)) [{path:path,node:n}]
-    else [for (i,child in n.content) for (entry in blocks(child,[*path,i])) entry]
-pub fn headings(doc) => [for (entry in blocks(doc) where contains(['h1','h2','h3','h4','h5','h6'],entry.node.tag))
+pub let block_selector = join([for (tag in text_blocks) string(tag)],",")
+pub fn blocks(n,path=[]) {
+    let children = if (not is_node(n)) [] else [for (i,child in n.content) for (entry in blocks(child,[*path,i])) entry];
+    // a cell with real paragraphs formats those paragraphs; a bare-text cell is its own block.
+    if (is_node(n) and contains(text_blocks,n.tag) and len(children)==0) [{path:path,node:n}] else children
+}
+pub fn headings(doc) => [for (entry in descendants(doc) where contains(['h1','h2','h3','h4','h5','h6'],entry.node.tag))
     {path:entry.path,label:doc_text(entry.node),level:string(entry.node.tag)}]
 
 pub let selection_path = inline_format.selection_path
@@ -136,6 +176,16 @@ pub fn current_node(editor,tag) {
 pub let table_context = tables.context
 pub fn current_block(editor) => [for (entry in blocks(editor.doc)
     where path_is_prefix(entry.path,selection_path(editor.selection))) entry][last]
+pub fn select_paragraph(editor) {
+    // span formatting runs while leaving neighboring paragraphs outside the range.
+    let block = current_block(editor)
+    let entries = if (block==null) [] else leaves(block.node,block.path)
+    let first = entries[0]
+    let tail = entries[last];
+    if (block==null) editor else edit_set_selection(editor,text_selection(
+        pos(if (first==null) block.path else first.path,0),
+        pos(if (tail==null) block.path else tail.path,if (tail==null) 0 else len(tail.leaf.text))))
+}
 pub let current_marks = inline_format.current_marks
 pub let css_get = inline_format.css_get
 pub let css_set = inline_format.css_set
@@ -145,7 +195,7 @@ let styled_marks = inline_format.styled_marks
 let leaf_segment = inline_format.leaf_segment
 let char_transaction = inline_format.transaction
 
-fn selected_blocks(editor) {
+pub fn selected_blocks(editor) {
     let sel = editor.selection
     let entries = blocks(editor.doc)
     if (sel.kind == 'all') entries
@@ -167,6 +217,7 @@ fn block_transaction(tx,entries,key,value,style,i=0) {
         block_transaction(next,entries,key,value,style,i+1)
     }
 }
+pub fn paragraph_block(editor) => current_block(editor) or selected_blocks(editor)[0]
 fn property_value(s,params) any^ {
     let value = if (s.value != null) s.value else params[s.param]
     if (s.property == "font-size") {
@@ -174,14 +225,23 @@ fn property_value(s,params) any^ {
         else string(value) ++ "pt"
     }
     else if (s.property == "line-height") {
-        if (not contains([1,1.15,1.5,2],value)) raise error("Word: choose a supported line spacing") else string(value)
+        if (not contains(home.line_spacings,value)) raise error("Word: choose a supported line spacing") else string(value)
+    }
+    else if (s.property == "margin-top" or s.property == "margin-bottom") {
+        if (not valid_measure(value,0,200)) raise error("Word: enter valid paragraph spacing") else string(value) ++ "pt"
+    }
+    else if (s.property == "border") {
+        if (not contains([home.border_line,"none"],value)) raise error("Word: choose a character border")
+        else if (value=="none") "" else value
     }
     else if (s.property == "font-family") {
-        if (not contains(["Arial","Georgia","Times New Roman","Courier New"],value)) raise error("Word: choose a supported font") else value
+        // native families and missing imported families are valid; keep this one CSS declaration.
+        if (not (value is string) or trim(value)=="" or
+            any([for (separator in [";","{","}","\n","\r"]) contains(value,separator)]))
+            raise error("Word: choose a font family") else value
     }
     else if (s.property == "color" or s.property == "background-color") {
-        if (not contains(["#24334b","#2864ad","#b43d47","#28745d","#f9e896","#dceafa","transparent"],value))
-            raise error("Word: choose a palette color") else value
+        if (home.color_value(value)==null) raise error("Word: choose a color") else home.color_value(value)
     }
     else string(value)
 }
@@ -202,23 +262,58 @@ fn valid_measure(value,lo,hi) => value is number and value >= lo and value <= hi
 fn properties_transaction(tx,entries,properties,i=0) => if (i >= len(properties)) tx else
     properties_transaction(block_transaction(tx,entries,properties[i].key,properties[i].value,null),entries,properties,i+1)
 
+// CSS lengths in imported documents may use pixels; dialog and ruler values use points.
+pub fn points(value,fallback=0) {
+    let s = trim(value or "")
+    let units = [{unit:"pt",scale:1},{unit:"px",scale:0.75},{unit:"mm",scale:72/25.4},{unit:"cm",scale:72/2.54},{unit:"in",scale:72}]
+    let unit = [for (u in units where ends_with(s,u.unit)) u][0]
+    let magnitude = float(if (unit==null) s else slice(s,0,len(s)-len(unit.unit))) ^ { fallback };
+    magnitude*(unit.scale or 1)
+}
+pub fn paragraph_indents(editor) {
+    let css = attrs_get(paragraph_block(editor).node.attrs,'style');
+    {indent:points(css_get(css,"margin-left")),first:points(css_get(css,"text-indent")),right:points(css_get(css,"margin-right"))}
+}
 pub fn paragraph_settings(editor) {
-    let css = attrs_get(current_block(editor).node.attrs,'style')
-    {align:css_get(css,"text-align") or "left",lines:float(css_get(css,"line-height") or "1.5"),
-        before:float(replace(css_get(css,"margin-top") or "0pt","pt","")),
-        after:float(replace(css_get(css,"margin-bottom") or "11pt","pt","")),
-        indent:float(replace(css_get(css,"margin-left") or "0pt","pt","")),
-        first:float(replace(css_get(css,"text-indent") or "0pt","pt",""))}
+    let css = attrs_get(paragraph_block(editor).node.attrs,'style')
+    {*:paragraph_indents(editor),align:css_get(css,"text-align") or "left",lines:float(css_get(css,"line-height") or "1.5"),
+        before:points(css_get(css,"margin-top")),after:points(css_get(css,"margin-bottom"),11)}
+}
+let indent_properties = [{id:"indent",css:"margin-left",min:0},{id:"first",css:"text-indent",min: -72},{id:"right",css:"margin-right",min:0}]
+fn indentation_properties(p) array^ {
+    if (any([for (s in indent_properties where p[s.id]!=null) not valid_measure(p[s.id],s.min,200)]))
+        raise error("Word: enter valid paragraph indentation")
+    else [for (s in indent_properties where p[s.id]!=null) {key:s.css,value:string(p[s.id]) ++ "pt"}]
+}
+fn wrapped_position(point,paths) {
+    let cell = [for (path in paths where path_is_prefix(path,point.path)) path][0];
+    if (cell==null) point else {*:point,path:[*cell,0,*slice(point.path,len(cell))]}
+}
+fn indentation_transaction(editor,p) map^ {
+    let properties = indentation_properties(p)^
+    let entries = selected_blocks(editor)
+    let wrapped = [for (e in entries where contains(['td','th'],e.node.tag)) e.path]
+    let tx = reduce([tx_begin(editor.doc,editor.selection),*entries],(tx,e)=>{
+        // CSS margins do not indent a table cell. Give its inline text a paragraph without changing the grid.
+        let cell = contains(['td','th'],e.node.tag)
+        let path = if (cell) [*e.path,0] else e.path
+        let prepared = if (not cell) tx else tx_step(tx,step_replace(e.path,0,len(e.node.content),[node('p',e.node.content)]));
+        properties_transaction(prepared,[{path:path}],properties)
+    })
+    let sel = editor.selection;
+    tx_set_selection(tx,if (sel.kind!='text') sel else text_selection(wrapped_position(sel.anchor,wrapped),wrapped_position(sel.head,wrapped)))
 }
 fn paragraph_transaction(editor,p) map^ {
-    if (not contains(["left","center","right","justify"],p.align) or not contains([1,1.15,1.5,2],p.lines) or
-        not valid_measure(p.before,0,200) or not valid_measure(p.after,0,200) or
-        not valid_measure(p.indent,0,200) or not valid_measure(p.first,-72,200))
+    if (not contains(["left","center","right","justify"],p.align) or not contains(home.line_spacings,p.lines) or
+        not valid_measure(p.before,0,200) or not valid_measure(p.after,0,200))
         raise error("Word: enter valid paragraph spacing and indentation")
-    else properties_transaction(tx_begin(editor.doc,editor.selection),selected_blocks(editor),[
-        {key:"text-align",value:p.align},{key:"line-height",value:string(p.lines)},
-        {key:"margin-top",value:string(p.before) ++ "pt"},{key:"margin-bottom",value:string(p.after) ++ "pt"},
-        {key:"margin-left",value:string(p.indent) ++ "pt"},{key:"text-indent",value:string(p.first) ++ "pt"}])
+    else {
+        let tx = indentation_transaction(editor,p)^
+        let target = {*:editor,doc:tx.doc_after,selection:tx.sel_after};
+        properties_transaction(tx,selected_blocks(target),[
+            {key:"text-align",value:p.align},{key:"line-height",value:string(p.lines)},
+            {key:"margin-top",value:string(p.before) ++ "pt"},{key:"margin-bottom",value:string(p.after) ++ "pt"}])
+    }
 }
 
 fn picture_transaction(editor,id,p) map^ {
@@ -229,6 +324,7 @@ fn picture_transaction(editor,id,p) map^ {
     else if (id == "picture.size" and image == null) raise error("Word: select a picture first")
     else if (id == "insert.picture" and (not (p.src is string) or trim(p.src)=="")) raise error("Word: choose a picture")
     else if (not (rotation is number) or rotation< -180 or rotation>180) raise error("Word: picture rotation must be −180–180°")
+    else if (id=="picture.size" and not group_data.proportional(image.node,p.width,p.height)) raise error("Word: resize groups proportionally")
     else {
         let tx = if (id == "picture.size") tx_begin(editor.doc,editor.selection)
             else commands.cmd_insert_image(editor,p.src,p.alt or "")
@@ -260,17 +356,10 @@ fn link_transaction(editor,id,p) map^ {
     }
 }
 
-fn table_edit(editor,id,p) map^ {
+fn cell_alignment_transaction(editor,p) map^ {
     let ctx = table_context(editor)
     if (ctx == null) raise error("Word: place the caret inside a table first")
-    else if (id == "table.insertRowAbove") table_transaction(commands.cmd_add_table_row(editor,true))
-    else if (id == "table.insertColumnLeft") table_transaction(commands.cmd_add_table_column(editor,true))
-    else if (id == "table.deleteTable") replace_entry(editor,{path:ctx.table_path},[document.paragraph("")])
-    else if (id == "table.style") {
-        if (not contains([for (s in document.table_styles) s.id],p.style)) raise error("Word: choose a table style")
-        else tx_step(tx_begin(editor.doc,editor.selection),step_set_attr(ctx.table_path,'data-word-table-style',p.style))
-    }
-    else if (not contains(["topLeft","topCenter","topRight","centerLeft","center","centerRight","bottomLeft","bottomCenter","bottomRight"],p.value))
+    else if (not contains(table_layout.alignments,p.value))
         raise error("Word: choose a cell alignment")
     else {
         let cells = tables.selected(editor)
@@ -285,7 +374,7 @@ fn table_navigate(editor,forward) map^ {
     if (ctx == null) raise error("Word: place the caret inside a table first") else {
         let cells = blocks(ctx.table,ctx.table_path)
         let index = [for (i,entry in cells where path_equal(entry.path,ctx.cell_path)) i][0]
-        if (forward and index == len(cells)-1) edit_apply(editor,table_transaction(commands.cmd_add_table_row(editor)))
+        if (forward and index == len(cells)-1) edit_apply(editor,table_layout.transaction(editor,"table.insertRowBelow")^)
         else if (not forward and index == 0) editor
         else {
             let cell = cells[index + if (forward) 1 else -1]
@@ -336,58 +425,116 @@ fn comment_transaction(editor,id,p) map^ {
     }
 }
 
+// The shared wrap command selects the new list node. Word keeps the text
+// selection, so the next paragraph command still finds the wrapped paragraphs.
+fn wrapped_pos(doc,tx,p) {
+    let at = tx.sel_after.path[0]
+    let moved = if (len(p.path)>1 and p.path[0]>=at and not is_text(node_at(tx.doc_after,p.path)))
+        pos([at,p.path[0]-at,0,*slice(p.path,1)],p.offset) else p
+    let before = node_at(doc,p.path)
+    let after = node_at(tx.doc_after,moved.path);
+    if (is_text(before) and is_text(after) and after.text==before.text) moved else null
+}
+fn list_selection(editor,tx) {
+    let sel = editor.selection
+    let anchor = if (sel.kind=='text' and tx.sel_after.kind=='node') wrapped_pos(editor.doc,tx,sel.anchor) else null
+    let head = if (anchor==null) null else wrapped_pos(editor.doc,tx,sel.head);
+    if (head==null) tx else tx_set_selection(tx,text_selection(anchor,head))
+}
+// a style choice wraps unlisted text first, so the list and its marker style form one undo step.
+fn list_style_transaction(editor,p) map^ {
+    let tag = if (p.kind=="ordered") 'ol' else 'ul'
+    let style = [for (s in home.list_styles(p.kind) where s.id==p.style) s][0]
+    if (style==null) raise error("Word: choose a list style")
+    else {
+        let run = if (current_node(editor,tag)!=null) null
+            else edit_handle_request(editor,edit_request_from_toolbar(if (tag=='ol') "insertOrderedList" else "insertUnorderedList",
+                {kind:if (tag=='ol') 'ordered' else 'bullet',value:true}))^
+        let tx = if (run==null) tx_begin(editor.doc,editor.selection) else if (run.result.failure is null) list_selection(editor,run.transaction) else null
+        let list_path = if (tx==null) null else commands.ancestor_tag(tx.doc_after,selection_path(tx.sel_after),tag)
+        if (list_path==null) raise error("Word: lists are unavailable at this selection")
+        else tx_step(tx,step_set_attr(list_path,'style',css_set(attrs_get(node_at(tx.doc_after,list_path).attrs,'style'),"list-style-type",
+            if (style.id=="disc" or style.id=="decimal") "" else style.id)))
+    }
+}
+
 pub fn execute(editor,id,params={}) map^ {
     let s = spec(id)
     if (s == null) raise error("Word: unknown command " ++ id)
+    else if (starts_with(id,"references.")) edit_apply(editor,references.transaction(editor,id,params)^)
     else if (starts_with(id,"table.select")) edit_set_selection(editor,
         tables.selection(editor,lower(slice(id,12)),params.path))
     else if (id=="table.borders") edit_apply(editor,tables.borders(editor,params)^)
+    else if (contains([for (name in table_layout.command_ids) "table." ++ name],id)) edit_apply(editor,table_layout.transaction(editor,id,params)^)
+    else if (contains(["table.style","table.designOption"],id)) edit_apply(editor,table_design.transaction(editor,params)^)
+    else if (id=="table.shading") edit_apply(editor,table_design.shade_transaction(editor,tables.selected(editor),params)^)
     else if (id=="table.clear") edit_apply(editor,tables.clear_transaction(editor))
     else if (id == "object.transform") edit_apply(editor,transform.transaction(editor,params)^)
+    else if (id=="shape.format") edit_apply(editor,shape_format.transaction(editor,params)^)
+    else if (id=="equation.format") edit_apply(editor,equation.format_transaction(editor,params)^)
+    else if (id=="object.group") edit_apply(editor,groups.transaction(editor,params)^)
+    else if (id=="object.ungroup") edit_apply(editor,groups.ungroup(editor,params)^)
+    else if (contains(["object.layout","object.position","object.align","object.layer","object.flip"],id))
+        edit_apply(editor,object_layout.transaction(editor,id,params)^)
     else if (id == "object.move") image.move_image(editor,params.path,params.target)
     else if (id == "insert.coverPage") edit_apply(editor,insert.cover_transaction(editor,params)^)
     else if (id == "insert.blankPage") edit_apply(editor,insert.blank_page_transaction(editor)^)
     else if (id == "insert.symbol") edit_apply(editor,insert.symbol_transaction(editor,params)^)
     else if (id == "insert.bookmark" or id == "insert.deleteBookmark")
         edit_apply(editor,insert.bookmark_transaction(editor,id,params,current_block(editor))^)
-    else if (id == "edit.replaceAll") {
-        let hits = search(editor.doc,params.find or "",params.match_case != false)
+    else if (id == "edit.replace" or id == "edit.replaceAll") {
+        // explicit replacements are transactions of their own, outside typing compression.
+        let hits = if (id=="edit.replace") [editor.selection] else search(editor.doc,params.find or "",params.match_case != false)
         if (len(hits)==0) editor else edit_apply(editor,
             replace_hits(tx_begin(editor.doc,editor.selection),hits,params.replace or "",len(hits)-1))
     }
     else if (id == "layout.pageSetup") {
         let tx = page.transaction(editor.doc,editor.selection,{*:page.settings(editor.doc),*:params})^
         let checked = stories.validate(tx.doc_after,stories.settings(tx.doc_after))^
+        let columns_fit = columns.validate(tx.doc_after,columns.settings(tx.doc_after))^
         edit_apply(editor,tx)
     }
+    else if (id == "layout.columns") edit_apply(editor,columns.transaction(editor,params)^)
     else if (id == "layout.headerFooter") edit_apply(editor,stories.transaction(editor,params)^)
-    else if (contains(["insert.equation","equation.set","insert.wordArt","wordArt.set"],id)) {
+    else if (graphics.command(id)!=null) {
+        let entry = graphics.command(id)
         let selected = if (starts_with(id,"insert.")) null else current_node(editor,'img')
-        let math_object = contains(["insert.equation","equation.set"],id)
-        if (not starts_with(id,"insert.") and (selected==null or
-            (if (math_object) equation.settings(selected.node)==null else wordart.settings(selected.node)==null)))
+        if (not starts_with(id,"insert.") and (selected==null or entry.settings(selected.node)==null))
             raise error("Word: select the matching object first")
-        else edit_apply(editor,if (math_object) equation.transaction(editor,params,selected)^ else wordart.transaction(editor,params,selected)^)
+        // property dialogs expose a subset; the source atom owns the remaining formatting.
+        else edit_apply(editor,entry.transaction(editor,if (selected==null) params else {*:entry.settings(selected.node),*:params},selected)^)
     }
+    else if (id=="insert.emoji") edit_apply(editor,insert.symbol_transaction(editor,params)^)
     else if (id == "insert.pageBreak") edit_apply(editor,insert.page_break_transaction(editor)^)
     else if (id=="review.trackChanges") edit_apply(editor,changes.configure(editor,{*:changes.settings(editor.doc),*:params})^)
     else if (contains(["review.accept","review.reject","review.acceptAll","review.rejectAll"],id))
         edit_apply(editor,changes.resolve(editor,if (ends_with(id,"All")) null else params.id,starts_with(id,"review.accept"))^)
     else if (starts_with(id,"review.")) edit_apply(editor,comment_transaction(editor,id,params)^)
     else if (id == "format.clear") edit_apply(editor,char_transaction(editor,review.clear_format))
-    else if (id == "para.set") edit_apply(editor,paragraph_transaction(editor,params)^)
-    else if (id == "insert.shape") edit_apply(editor,shapes.transaction(editor,params)^)
-    else if (id == "shape.set") {
-        let selected = current_node(editor,'img')
-        if (selected==null) raise error("Word: select a shape first")
-        else edit_apply(editor,shapes.transaction(editor,params,selected)^)
+    else if (id == "format.case") edit_apply(editor,home.case_transaction(editor,params.mode)^)
+    else if (id == "format.painter") edit_apply(editor,char_transaction(editor,(marks)=>home.painted(marks,params.marks or [])))
+    else if (id == "para.borders") edit_apply(editor,reduce([tx_begin(editor.doc,editor.selection),
+        *home.border_properties(selected_blocks(editor),params.preset)^],(tx,e)=>properties_transaction(tx,[e],e.properties)))
+    else if (id == "para.sort") edit_apply(editor,home.sort_transaction(editor,selected_blocks(editor),params.descending==true)^)
+    else if (id == "para.listStyle") edit_apply(editor,list_style_transaction(editor,params)^)
+    else if (id == "edit.pasteText") {
+        let tx = if (not (params.text is string) or params.text=="") null
+            else commands.cmd_paste_text({doc:editor.doc,selection:editor.selection,schema:word_schema,stored_marks:editor.stored_marks},params.text)
+        if (tx == null) raise error("Word: the clipboard has no text to paste here") else edit_apply(editor,tx)
     }
+    // outside a list, Word's indent buttons step the paragraph's left indent by half an inch.
+    else if ((id == "para.indent" or id == "para.outdent") and current_node(editor,'li') == null) {
+        let at = paragraph_indents(editor).indent
+        edit_apply(editor,indentation_transaction(editor,{indent:if (id == "para.indent") min(200,(floor(at/36)+1)*36)
+            else max(0,(ceil(at/36)-1)*36)})^)
+    }
+    else if (id == "para.set") edit_apply(editor,paragraph_transaction(editor,params)^)
+    else if (id == "para.indents") edit_apply(editor,indentation_transaction(editor,params)^)
     else if (id == "insert.picture" or id == "picture.size") edit_apply(editor,picture_transaction(editor,id,params)^)
     else if (id == "insert.removeLink" or (id == "insert.link" and current_node(editor,'a') != null))
         edit_apply(editor,link_transaction(editor,id,params)^)
     else if (id == "table.nextCell" or id == "table.previousCell") table_navigate(editor,id == "table.nextCell")^
-    else if (contains(["table.insertRowAbove","table.insertColumnLeft","table.deleteTable","table.style","table.cellAlign"],id))
-        edit_apply(editor,table_edit(editor,id,params)^)
+    else if (id=="table.cellAlign") edit_apply(editor,cell_alignment_transaction(editor,params)^)
     else if (id == "para.style") {
         let style = [for (style in document.styles where style.id == params.style) style][0]
         if (style == null) raise error("Word: unknown paragraph style") else
@@ -410,6 +557,7 @@ pub fn execute(editor,id,params={}) map^ {
         if (not (run.result.failure is null)) raise error("Word: " ++ s.label ++ " is unavailable at this selection")
         else if (id == "insert.table" or starts_with(id,"table.")) edit_apply(editor,
             table_transaction({*:run.transaction,sel_before:editor.selection}))
+        else if (id == "para.bullets" or id == "para.numbering") edit_apply(editor,list_selection(editor,run.transaction))
         else run.editor
     }
 }
@@ -454,6 +602,8 @@ fn replace_hits(tx,hits,replacement,i) {
 }
 pub fn select_heading(editor,path) {
     let first = leaves(node_at(editor.doc,path),path)[0]
-    edit_set_selection(editor,text_selection(pos(first.path,0),pos(first.path,0)))
+    // an empty heading owns its placeholder caret, just like an empty paragraph or list item.
+    let point = pos(first.path or path,0)
+    edit_set_selection(editor,text_selection(point,point))
 }
 pub fn clean(editor) => {*:editor,events:[]}

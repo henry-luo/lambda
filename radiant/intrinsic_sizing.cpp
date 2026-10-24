@@ -1604,15 +1604,26 @@ static void intrinsic_record_min_segment(TextIntrinsicWidths* widths, float* cur
     *current = 0.0f;
 }
 
-TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
-                                                   const char* text,
-                                                   size_t length,
-                                                   CssEnum text_transform,
-                                                   CssEnum font_variant,
-                                                   CssEnum white_space,
-                                                   CssEnum overflow_wrap,
-                                                   CssEnum word_break,
-                                                   CssEnum line_break) {
+// pre and nowrap leave no soft wrap opportunity: the run is one unbreakable segment.
+static void intrinsic_text_apply_no_wrap(TextIntrinsicWidths* widths, CssEnum white_space) {
+    if (white_space != CSS_VALUE_PRE && white_space != CSS_VALUE_NOWRAP) return;
+    widths->min_content = widths->max_content;
+    widths->first_segment_min = widths->max_content;
+    widths->remaining_min_content = 0.0f;
+    widths->last_segment_min = widths->max_content;
+    widths->has_min_content_break = false;
+    widths->interior_min_content = 0.0f;
+}
+
+static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
+                                                           const char* text,
+                                                           size_t length,
+                                                           CssEnum text_transform,
+                                                           CssEnum font_variant,
+                                                           CssEnum white_space,
+                                                           CssEnum overflow_wrap,
+                                                           CssEnum word_break,
+                                                           CssEnum line_break) {
     bool break_anywhere = overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE;
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
@@ -1962,6 +1973,24 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     return result;
 }
 
+// The no-wrap clamp lives here, not in callers: anonymous flex text and the flex
+// measurement passes trusted the white_space argument, so nowrap text measured as
+// breakable there and a flex item could shrink below its unbreakable line.
+TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
+                                                   const char* text,
+                                                   size_t length,
+                                                   CssEnum text_transform,
+                                                   CssEnum font_variant,
+                                                   CssEnum white_space,
+                                                   CssEnum overflow_wrap,
+                                                   CssEnum word_break,
+                                                   CssEnum line_break) {
+    TextIntrinsicWidths widths = measure_text_intrinsic_segments(lycon, text, length,
+        text_transform, font_variant, white_space, overflow_wrap, word_break, line_break);
+    intrinsic_text_apply_no_wrap(&widths, white_space);
+    return widths;
+}
+
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
         const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
         float* vertical_text_extent) {
@@ -1991,15 +2020,9 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
                 options.text_transform, options.font_variant, options.tab_size,
                 options.tab_size_length);
         }
-        // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines.
-        if (options.white_space == CSS_VALUE_PRE || options.white_space == CSS_VALUE_NOWRAP) {
-            widths.min_content = widths.max_content;
-            widths.first_segment_min = widths.max_content;
-            widths.remaining_min_content = 0.0f;
-            widths.last_segment_min = widths.max_content;
-            widths.has_min_content_break = false;
-            widths.interior_min_content = 0.0f;
-        }
+        // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines;
+        // the tab-adjusted max-content above needs the clamp again.
+        intrinsic_text_apply_no_wrap(&widths, options.white_space);
         IntrinsicSizes line_sizes = {widths.min_content, widths.max_content};
         line_sizes.first_segment_min = widths.first_segment_min;
         line_sizes.last_segment_min = widths.last_segment_min;
@@ -3299,9 +3322,28 @@ void intrinsic_width_history_release(LayoutCache* cache, Pool* pool) {
     }
 }
 
+static IntrinsicWidthHistory* intrinsic_width_history_slot(LayoutCache* cache, Pool* pool) {
+    IntrinsicWidthHistory* oldest = cache->intrinsic_width_history;
+    IntrinsicWidthHistory* previous = nullptr;
+    unsigned count = oldest ? 1 : 0;
+    while (oldest && oldest->next) {
+        previous = oldest;
+        oldest = oldest->next;
+        count++;
+    }
+    if (count < LAYOUT_CACHE_SIZE)
+        return (IntrinsicWidthHistory*)pool_calloc(pool, sizeof(IntrinsicWidthHistory));
+    // keep alternating constraint queries across passes without unbounded retained history.
+    if (previous) previous->next = nullptr;
+    else cache->intrinsic_width_history = nullptr;
+    return oldest;
+}
+
 static bool intrinsic_width_version_equal(const IntrinsicWidthCacheEntry& a,
                                          const IntrinsicWidthCacheEntry& b) {
-    return a.generation == b.generation && a.style_epoch == b.style_epoch &&
+    return (a.generation == b.generation || (a.retain_across_passes && b.retain_across_passes)) &&
+        a.layout_generation == b.layout_generation && a.input_revision == b.input_revision &&
+        a.parent_revision == b.parent_revision && a.style_epoch == b.style_epoch &&
         a.style_version == b.style_version && a.font_generation == b.font_generation;
 }
 
@@ -3337,21 +3379,33 @@ struct IntrinsicWidthCacheScope {
     radiant::IntrinsicWidthCacheEntry entry;
     bool cacheable = true;
     bool children_independent = true;
+    bool children_retained = true;
     IntrinsicWidthCacheScope* parent = active;
     static thread_local IntrinsicWidthCacheScope* active;
 
     void enter() { active = this; }
 
-    static void note_dependency(bool independent) {
-        if (active && !independent) active->children_independent = false;
+    static void note_dependency(bool independent, bool retained) {
+        if (!active) return;
+        if (!independent) active->children_independent = false;
+        if (!retained) active->children_retained = false;
     }
 
     ~IntrinsicWidthCacheScope() {
         entry.context_independent = cacheable && children_independent &&
             layout_flow_is_context_independent(element);
+        // resource sizes, native values and ordered effects can change outside this subtree's DOM versions.
+        ViewBlock* block = lam::unsafe_view_block_element_storage(element);
+        entry.retain_across_passes = cacheable && children_retained && !lycon->paged &&
+            !element->shadow_root_element() && !element->pseudo && !element->display.list_item &&
+            !(element->form_control() && element->tag() != MARKUP_NAME_BUTTON) &&
+            (!layout_element_is_replaced(element) || layout_is_svg_viewport(element->tag())) &&
+            !(block->blk && (block->block()->counter_reset || block->block()->counter_increment ||
+                            block->block()->counter_set)) &&
+            !custom_layout_name_for_element(element);
         active = parent;
         // a dependent descendant makes its ancestors dependent too, including on hits.
-        note_dependency(entry.context_independent);
+        note_dependency(entry.context_independent, entry.retain_across_passes);
         if (!cacheable) return;
         radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(lycon, element);
         if (!cache) return;
@@ -3364,8 +3418,7 @@ struct IntrinsicWidthCacheScope {
         if (previous.context.valid && radiant::intrinsic_width_version_equal(previous, entry) &&
             !radiant::intrinsic_width_query_matches(previous, entry) && lycon->pool) {
             // alternating flex constraints must not evict a completed subtree query.
-            auto* history = (radiant::IntrinsicWidthHistory*)pool_calloc(
-                lycon->pool, sizeof(radiant::IntrinsicWidthHistory));
+            auto* history = radiant::intrinsic_width_history_slot(cache, lycon->pool);
             if (history) {
                 *history = {cache->intrinsic_width_history, previous, basis};
                 cache->intrinsic_width_history = lam::own(history);
@@ -3379,7 +3432,7 @@ struct IntrinsicWidthCacheScope {
 thread_local IntrinsicWidthCacheScope* IntrinsicWidthCacheScope::active = nullptr;
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
-                                                bool content_only) {
+                                                bool content_only, bool preserve_layout) {
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
@@ -3393,6 +3446,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // dimensions and available space, even when both queries have a definite basis.
     radiant::IntrinsicWidthCacheEntry query = {};
     query.generation = measurement_generation;
+    query.layout_generation = lycon->doc && lycon->doc->view_tree
+        ? lycon->doc->view_tree->layout_generation : 0;
+    query.input_revision = element->intrinsic_input_revision;
+    query.parent_revision = radiant::css_resolved_style_inherited_revision(element->parent_element());
+    query.retain_across_passes = layout_can_retain_geometry(lycon, true) && !lycon->paged &&
+        !lycon->css_query_probe && !lycon->selected_style && !lycon->doc->view_tree->model;
     query.context.known_dimensions = {lycon->width, lycon->height, true, true};
     query.context.available_space = lycon->available_space;
     query.block_size = {lycon->block.content_width, lycon->block.content_height};
@@ -3432,14 +3491,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
     if (hit) {
-        IntrinsicWidthCacheScope::note_dependency(hit->context_independent);
+        IntrinsicWidthCacheScope::note_dependency(hit->context_independent, hit->retain_across_passes);
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, true, false);
         assert(element->layout_cache);
         return hit->sizes;
     }
 
     if (element->measuring_intrinsic_width()) {
-        IntrinsicWidthCacheScope::note_dependency(false);
+        IntrinsicWidthCacheScope::note_dependency(false, false);
         radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, true);
         return {0, 0};
     }
@@ -3454,6 +3513,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->profiler.intrinsic_miss_reasons[reason]++;
     }
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
+    // cached scalar queries do not touch fragments or invalidate containing flex content.
+    radiant::LayoutMeasureScope layout_scope(preserve_layout ? lycon : nullptr, element);
     LayoutMeasurementRootScope root_scope(lycon, element);
     radiant::LayoutProfileScope query_profile(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
     IntrinsicMeasureScope measure_scope(lycon, element);
@@ -3802,9 +3863,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->available_space.width.value <= 0.0f &&
         (width_is_percentage || max_width_is_percentage) &&
         !parent_has_auto_inline_width;
-    // an auto-sized flex item is a cyclic basis before its main size is assigned.
+    // an auto-sized flex or grid item is a cyclic basis before its track/main size
+    // is assigned; otherwise a child's stale resolved percentage width becomes the
+    // item's min-content contribution (CSS Sizing 3 §5.2.1).
     bool parent_measures_auto_width = intrinsic_parent && intrinsic_parent->measuring_intrinsic_width() &&
-        intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_FLEX &&
+        (intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_FLEX ||
+         intrinsic_parent->parent_item_kind() == DomElement::PARENT_ITEM_GRID) &&
         layout_block_has_automatic_size(intrinsic_parent, true);
     bool intrinsic_width_context = parent_measures_auto_width || lycon->available_space.width.is_intrinsic() ||
         intrinsic_percentage_width_is_indefinite(lycon) ||
@@ -7261,6 +7325,21 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                     child_height = layout_apply_min_max_axis(
                         child_block, child_content_w / child_ratio, false,
                         layout_uses_border_box(child_block));
+                }
+            }
+            // descendant minimums contribute to the parent's height even before the
+            // child's used box exists; its own intrinsic content query omits that floor.
+            if (child->is_element()) {
+                DomElement* child_element = child->as_element();
+                ViewBlock* child_view = lam::view_as_block(child_element);
+                float minimum = intrinsic_resolved_height_limit_or(
+                    lycon, child_element, child_view, true);
+                if (minimum >= 0.0f) {
+                    if (!intrinsic_view_uses_border_box(child_view, child_element)) {
+                        minimum += layout_intrinsic_padding_border_axis(
+                            lycon, child_element, false, content_w);
+                    }
+                    child_height = fmaxf(child_height, minimum);
                 }
             }
 

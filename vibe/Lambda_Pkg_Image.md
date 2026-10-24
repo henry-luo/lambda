@@ -28,7 +28,7 @@ S17.8.1** (errors and options). See [Formal Design](../doc/Lambda_Formal_Design.
 
 This document proposes image-domain contracts within those rulings. It does
 not revise a formal ruling or ratify unspecified language behavior. The
-existing [Common Image I/O Library](Lib_Image.md) remains the codec foundation;
+existing [Common Image I/O Library](lib/Lib_Image.md) remains the codec foundation;
 this proposal adds the editing model that its initial scope deferred.
 
 ## 1. Selected model
@@ -167,7 +167,7 @@ Pages and alternative resolutions remain distinct from animation. The
 package can select a TIFF page or ICO representation as an image, or return
 a collection of image values carrying source indices. It must not turn
 pages or icon sizes into timed frames merely because they share a file.
-This extends the distinctions already recorded in [Lib_Image §3.2](Lib_Image.md#32-image-and-option-contracts).
+This extends the distinctions already recorded in [Lib_Image §3.2](lib/Lib_Image.md#32-image-and-option-contracts).
 
 ### 1.4 Assets and fonts
 

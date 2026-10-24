@@ -1,6 +1,7 @@
 // lambda.mail.imap — what IMAP responses from lambda.io.mail mean
 // (vibe/Lambda_Demo_Mail.md ML2): mailbox names, LIST, SELECT and FETCH.
 // Pure: the protocol itself stays in lambda.io.mail.
+import utf16: lambda.io.utf16
 
 // Modified base64 of RFC 3501 §5.1.3 uses "," where base64 uses "/".
 fn sextets(chunk) {
@@ -21,16 +22,6 @@ fn sextet_bytes(values) {
     }]
 }
 
-// UTF-16BE code units to text; a high surrogate takes its low partner.
-fn utf16_text(bytes) {
-    let units = [for (i in range(0, int(floor(len(bytes) / 2)), 1)) bytes[2 * i] * 256 + bytes[2 * i + 1]];
-    join([for (i, unit in units)
-        if (unit >= 56320 and unit < 57344) ""
-        else if (unit >= 55296 and unit < 56320 and i + 1 < len(units))
-            chr(65536 + (unit - 55296) * 1024 + (units[i + 1] - 56320))
-        else chr(unit)], "")
-}
-
 // A mailbox name as the server spells it (modified UTF-7) to text.
 pub fn mailbox_name(path) {
     if (not contains(path, "&")) path
@@ -41,7 +32,7 @@ pub fn mailbox_name(path) {
             if (i == 0) piece
             else if (dash == null) "&" ++ piece
             else if (dash == 0) "&" ++ slice(piece, 1)
-            else utf16_text(sextet_bytes(sextets(slice(piece, 0, dash)))) ++ slice(piece, dash + 1)
+            else utf16.decode(sextet_bytes(sextets(slice(piece, 0, dash))))^ ++ slice(piece, dash + 1)
         }], "")
     }
 }

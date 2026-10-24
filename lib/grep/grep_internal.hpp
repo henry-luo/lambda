@@ -8,7 +8,7 @@
 
 namespace re2 { class RE2; }
 
-// Literal acceleration tiers (vibe/Lambda_Lib_Grep.md §5.1).
+// Literal acceleration tiers (vibe/lib/Lib_Grep.md §5.1).
 enum GrepTier {
     GREP_TIER_LITERAL = 0,   // the pattern is one case-sensitive literal: no RE2 at all
     GREP_TIER_REQUIRED = 1,  // every match contains one of a few literals: scan, then confirm the line

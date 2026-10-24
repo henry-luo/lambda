@@ -13,6 +13,7 @@
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
+#include "../lib/time_util.h"
 #include "../lib/file.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_factory.h"
@@ -935,20 +936,8 @@ static bool resolve_click_target(SimEvent* ev, UiContext* uicon,
             }
             if (clipped || ev->scroll_into_view) {
                 DocState* state = (DocState*)doc->state;
-                // the selector lookup above flushed pending layout; when nothing
-                // else is pending, bringing the target into view only moves
-                // scrollports, as a user's wheel would, without a full relayout.
-                bool layout_clean = state && !state->needs_reflow &&
-                    !state->reflow_scheduler.pending && !state->dirty_tracker.full_reflow &&
-                    doc->js.mutation_count == 0;
                 dom_scroll_into_view_if_needed_bridge((void*)elem->as_element());
-                if (layout_clean && doc->pending_scroll_into_view_target.address) {
-                    // clear the bridge's reflow request before scrolling, so a
-                    // reflow the scroll itself requests (content-visibility) stays.
-                    doc_state_clear_reflow(state);
-                    if (!layout_scroll_into_view_without_relayout(uicon, doc))
-                        doc_state_request_reflow(state);
-                }
+                layout_update_document(uicon, doc);
                 sim_reflow_if_pending(doc, state);
                 return resolve_target(ev, doc, out_x, out_y);
             }
@@ -1146,6 +1135,7 @@ static void parse_state_store_expectations(MapReader& reader, SimEvent* ev) {
         {"drag_drop_source", &SimEvent::has_expected_drag_drop_source, &SimEvent::expected_drag_drop_source},
         {"drag_drop_target", &SimEvent::has_expected_drag_drop_target, &SimEvent::expected_drag_drop_target},
         {"open_dropdown", &SimEvent::has_expected_open_dropdown, &SimEvent::expected_open_dropdown},
+        {"dropdown_dragging", &SimEvent::has_expected_dropdown_dragging, &SimEvent::expected_dropdown_dragging},
         {"context_menu_open", &SimEvent::has_expected_context_menu_open, &SimEvent::expected_context_menu_open},
         {"scrollbar_h_hovered", &SimEvent::has_expected_scrollbar_h_hovered, &SimEvent::expected_scrollbar_h_hovered},
         {"scrollbar_v_hovered", &SimEvent::has_expected_scrollbar_v_hovered, &SimEvent::expected_scrollbar_v_hovered},
@@ -1161,6 +1151,7 @@ static void parse_state_store_expectations(MapReader& reader, SimEvent* ev) {
         {"dropdown_y", &SimEvent::has_expected_dropdown_y, &SimEvent::expected_dropdown_y},
         {"dropdown_width", &SimEvent::has_expected_dropdown_width, &SimEvent::expected_dropdown_width},
         {"dropdown_height", &SimEvent::has_expected_dropdown_height, &SimEvent::expected_dropdown_height},
+        {"dropdown_scroll_y", &SimEvent::has_expected_dropdown_scroll_y, &SimEvent::expected_dropdown_scroll_y},
         {"context_menu_x", &SimEvent::has_expected_context_menu_x, &SimEvent::expected_context_menu_x},
         {"context_menu_y", &SimEvent::has_expected_context_menu_y, &SimEvent::expected_context_menu_y},
         {"context_menu_width", &SimEvent::has_expected_context_menu_width, &SimEvent::expected_context_menu_width},
@@ -2195,6 +2186,22 @@ EventSimContext* event_sim_load(const char* json_file) {
             return nullptr;
         }
         ctx->initial_render = root_map.get("initial_render").asBool();
+    }
+
+    if (root_map.has("profile_events")) {
+        if (!root_map.get("profile_events").isBool()) {
+            log_error("event_sim: profile_events must be boolean");
+            event_sim_free(ctx);
+            return nullptr;
+        }
+        ctx->profile_events = root_map.get("profile_events").asBool();
+#ifndef NDEBUG
+        if (ctx->profile_events) {
+            log_error("event_sim: event measurements require a release build");
+            event_sim_free(ctx);
+            return nullptr;
+        }
+#endif
     }
 
     // Parse each event
@@ -5353,6 +5360,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     ev->expected_drag_drop_target, drag_drop && drag_drop->drop_target == elem},
                 {"open dropdown", state && elem && ev->has_expected_open_dropdown,
                     ev->expected_open_dropdown, state && state->open_dropdown == elem},
+                {"dropdown dragging", state && ev->has_expected_dropdown_dragging,
+                    ev->expected_dropdown_dragging, state && state->dropdown_dragging},
                 {"context menu", state && elem && ev->has_expected_context_menu_open,
                     ev->expected_context_menu_open, state && state->context_menu_target == elem},
             };
@@ -5375,6 +5384,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     ev->expected_dropdown_width, state ? state->dropdown_width : 0.0f},
                 {"dropdown_height", state && ev->has_expected_dropdown_height,
                     ev->expected_dropdown_height, state ? state->dropdown_height : 0.0f},
+                {"dropdown_scroll_y", state && ev->has_expected_dropdown_scroll_y,
+                    ev->expected_dropdown_scroll_y, state ? state->dropdown_scroll_y : 0.0f},
                 {"context_menu_x", state && ev->has_expected_context_menu_x,
                     ev->expected_context_menu_x, state ? state->context_menu_x : 0.0f},
                 {"context_menu_y", state && ev->has_expected_context_menu_y,
@@ -6043,8 +6054,15 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
 
     // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
+    uint64_t profile_start = ctx->profile_events ? time_now_ns() : 0;
     if (!process_sim_event_with_retry(ctx, ev, uicon, window)) {
         return true;
+    }
+    if (ctx->profile_events) {
+        if (!ctx->event_durations_ms) ctx->event_durations_ms = (double*)arena_calloc(
+            ctx->event_arena, ctx->events->length * sizeof(double));
+        if (ctx->event_durations_ms) ctx->event_durations_ms[ctx->current_index] =
+            time_elapsed_ms_f(profile_start, time_now_ns());
     }
     if (ctx->replay_assert_state && ev->type == SIM_EVENT_REPLAY_INPUT) {
         event_sim_assert_schema(ctx, uicon, "replay_input");
@@ -6097,16 +6115,24 @@ void event_sim_print_results(EventSimContext* ctx) {
     // runner consumes this stable protocol instead of scraping presentation
     // text. Keep the schema intentionally small so new assertions are additive.
     if (ctx->result_path && ctx->result_path[0]) {
-        FILE* result = fopen(ctx->result_path, "wb");
+        StrBuf* result = strbuf_new();
         if (result) {
-            fprintf(result,
-                    "{\"version\":1,\"events\":%d,\"assertions\":{\"passed\":%d,\"failed\":%d},\"result\":\"%s\"}\n",
+            strbuf_append_format(result,
+                    "{\"version\":1,\"events\":%d,\"assertions\":{\"passed\":%d,\"failed\":%d},\"result\":\"%s\"",
                     ctx->current_index, ctx->pass_count, ctx->fail_count,
                     ctx->fail_count == 0 ? "PASS" : "FAIL");
-            fclose(result);
-        } else {
+            if (ctx->profile_events && ctx->event_durations_ms) {
+                strbuf_append_str(result, ",\"timings_ms\":[");
+                for (int i = 0; i < ctx->current_index; i++)
+                    strbuf_append_format(result, "%s%.6f", i ? "," : "", ctx->event_durations_ms[i]);
+                strbuf_append_char(result, ']');
+            }
+            strbuf_append_str(result, "}\n");
+        }
+        if (!result || write_text_file_atomic(ctx->result_path, result->str) != 0) {
             log_error("event_sim: failed to write machine result '%s'", ctx->result_path);
         }
+        strbuf_free(result);
     }
 
     // Log file as well

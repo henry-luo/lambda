@@ -1,0 +1,709 @@
+{
+  "name": "Word columns, fragmented editing, history, page breaks, views, tables and persistence",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "text": "test/demo/word/tests/columns.word.json",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "start": 900,
+      "end": 900,
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 3,
+      "target": {
+        "selector": ".columns-preset"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-pressed",
+      "equals": "true",
+      "target": {
+        "selector": "#context-columns-1"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "aria-label",
+      "equals": "Columns",
+      "target": {
+        "selector": "#word-context-menu"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.getElementById(\"columns-menu\").getBoundingClientRect(),c=document.querySelector(\"#columns-menu .menu-chevron\").getBoundingClientRect();c.top>=b.top && c.bottom<=b.bottom && c.right<=b.right"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/columns-menu.png"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-columns-2"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface .word-columns\").getAttribute(\"style\").indexOf(\"column-count:2;\")>=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-pages"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#navigation-pages .word-columns"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "var t=document.querySelector(\".page-thumbnail .word-columns\");t.getBoundingClientRect().width>0 && t.textContent.indexOf(\"Opening words.\")>=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-headings"
+      }
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": true,
+      "check_dom": true
+    },
+    {
+      "type": "type_physical",
+      "text": "X"
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keXeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var r=document.createRange();r.selectNodeContents(document.querySelector(\"#edit-surface p\"));var a=Array.from(r.getClientRects());a.length>2 && Math.max.apply(null,a.map(function(b){return b.x}))-Math.min.apply(null,a.map(function(b){return b.x}))>200"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/columns-two.png"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-columns-3"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface .word-columns\").getAttribute(\"style\").indexOf(\"column-count:3;\")>=0"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-columns-1"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-more-columns"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "3",
+      "target": {
+        "selector": "#columns-count"
+      }
+    },
+    {
+      "type": "type",
+      "text": "6",
+      "clear": true,
+      "target": {
+        "selector": "#columns-count"
+      }
+    },
+    {
+      "type": "type",
+      "text": "80",
+      "clear": true,
+      "target": {
+        "selector": "#columns-gap"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-columns"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#dialog-error"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "20 mm",
+      "target": {
+        "selector": "#dialog-error"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "6",
+      "target": {
+        "selector": "#columns-count"
+      }
+    },
+    {
+      "type": "type",
+      "text": "3",
+      "clear": true,
+      "target": {
+        "selector": "#columns-count"
+      }
+    },
+    {
+      "type": "type",
+      "text": "8.5",
+      "clear": true,
+      "target": {
+        "selector": "#columns-gap"
+      }
+    },
+    {
+      "type": "select_option",
+      "value": "true",
+      "target": {
+        "selector": "#columns-line"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/columns-dialog.png"
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-columns"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var s=document.querySelector(\"#edit-surface .word-columns\").getAttribute(\"style\");s.indexOf(\"column-count:3;\")>=0 && s.indexOf(\"column-gap:8.5mm;\")>=0 && s.indexOf(\"column-rule:0.5pt solid\")>=0"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/columns-three.png"
+    },
+    {
+      "type": "set_editing_selection",
+      "start": 400,
+      "end": 400,
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "[id=\"insert.pageBreak\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 2,
+      "target": {
+        "selector": "#edit-surface .word-page"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 2,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "NEW "
+    },
+    {
+      "type": "assert_text",
+      "equals": "NEW y while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface [data-word-page-break=true]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identit",
+      "target": {
+        "selector": "#edit-surface .word-page:first-child p"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edit-surface .word-page"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#status-view-read"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-view",
+      "equals": "read",
+      "target": {
+        "selector": "#word"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"columns-menu\").hasAttribute(\"disabled\")"
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#status-view-web"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-view",
+      "equals": "web",
+      "target": {
+        "selector": "#word"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 1000,
+      "height": 800
+    },
+    {
+      "type": "assert_script",
+      "js": "var w=document.querySelector(\"#edit-surface .word-columns\").getBoundingClientRect(),p=document.querySelector(\"#edit-surface .word-page\").getBoundingClientRect();w.width<=p.width+1 && w.width>300"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#status-view-print"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-columns-2"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "start": 0,
+      "end": 0,
+      "target": {
+        "selector": "#edit-surface td:first-child"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "Every "
+    },
+    {
+      "type": "assert_text",
+      "equals": "Every Thursday",
+      "target": {
+        "selector": "#edit-surface td:first-child"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "type",
+      "text": "temp/word/columns.word.json",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/word/columns.html",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/word/columns.pdf",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "text": "temp/word/columns.html",
+      "clear": true,
+      "target": {
+        "selector": "#word-file-path"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "count": 1,
+      "target": {
+        "selector": "#edit-surface .word-columns"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+      "target": {
+        "selector": "#edit-surface p:first-of-type"
+      }
+    },
+    {
+      "type": "assert_text",
+      "equals": "Every Thursday",
+      "target": {
+        "selector": "#edit-surface td:first-child"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#columns-menu"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "#context-more-columns"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "2",
+      "target": {
+        "selector": "#columns-count"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "8.5",
+      "target": {
+        "selector": "#columns-gap"
+      }
+    },
+    {
+      "type": "assert_value",
+      "equals": "true",
+      "target": {
+        "selector": "#columns-line"
+      }
+    },
+    {
+      "type": "click",
+      "scroll_into_view": true,
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/columns-document.png"
+    }
+  ]
+}

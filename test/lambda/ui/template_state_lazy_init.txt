@@ -1,0 +1,9 @@
+<html
+  <head
+    <title
+      "Lazy template state">>
+  <body
+    <button id: "first",
+      "40:null">
+    <button id: "second",
+      "40:null">>>

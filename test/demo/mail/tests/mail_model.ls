@@ -1,5 +1,6 @@
-// The mail demo's pure model (test/demo/mail/mod_model.ls): ids, the sidebar,
-// the list window, labels, sync reports, quoting and the account sheet.
+// The mail demo's pure model (test/demo/mail/mod_model.ls): ids, the sidebar
+// and its folder tree, the list window and rows, labels, sync reports,
+// quoting, compose helpers and the account sheet.
 import model: ~~.mod_model
 
 "=== ids ==="
@@ -22,10 +23,26 @@ model.sidebar(st, "ada")
 model.inbox_path(boxes)
 model.inbox_path([])
 
+"=== sidebar tree ==="
+let tree = [*boxes, {path: "Work", name: "Work", delimiter: "/", role: null, selectable: true},
+    {path: "Work/2026/Q4", name: "Work/2026/Q4", delimiter: "/", role: null, selectable: true}]
+let tst = {*: st, mailboxes: {ada: tree}};
+[for (r in model.sidebar(tst, "ada")) [r.name, r.depth, r.parent, r.collapsed]];
+[for (r in model.sidebar({*: tst, collapsed: ["ada/Work"]}, "ada")) r.path];
+[for (r in model.sidebar({*: tst, collapsed: ["ada/Work/2026"]}, "ada")) r.path];
+[model.toggled(["a"], "b"), model.toggled(["a", "b"], "a")]
+model.new_mailbox_path(tst, "ada", "Work", " Ideas ")
+model.new_mailbox_path(tst, "ada", "", " ")
+model.new_mailbox_path(tst, "ada", "", "a/b")
+model.new_mailbox_path(tst, "ada", "", "Archive")
+model.mailbox_parents(tst, "ada");
+[model.box_title({*: tst, box: "Work/2026"}), model.box_title(tst), model.box_role(tst), model.role_path(tst, "ada", 'sent'),
+ model.role_path(tst, "ada", 'junk')]
+
 "=== window ==="
 model.window(50000, 0.0, 640.0)
-model.window(50000, 64000.0, 640.0)
-model.window(50000, 3200000.0, 640.0)
+model.window(50000, 86000.0, 640.0)
+model.window(50000, 4300000.0, 640.0)
 model.window(3, 0.0, 640.0)
 let entries = [for (u in 1 to 5) {uid: u, flags: if (u % 2 == 0) ["\\Seen"] else []}];
 [for (e in model.rows_in(entries, model.window(5, 0.0, 128.0))) e.uid]
@@ -43,6 +60,19 @@ model.date_label({date: "garbage"}, now);
 [model.sender_label({from: {name: "Ada", address: "ada@x"}}), model.sender_label({from: {name: null, address: "bob@x"}}),
  model.sender_label({from: null})]
 model.subject_label("  ")
+
+"=== rows ==="
+let me = {name: "Me", address: "m@x"};
+[model.who_label({to: [{name: "Ann", address: "a@x"}, {name: null, address: "b@x"}], from: me}, 'sent'),
+ model.who_label({to: [], from: me}, 'drafts'), model.who_label({to: [], from: me}, 'inbox')]
+let five = [for (u in 1 to 5) {uid: u, flags: []}];
+[model.neighbor(five, 3), model.neighbor(five, 1), model.neighbor([{uid: 9}], 9), model.neighbor(five, 42)]
+model.long_date("Sat, 24 Oct 2026 02:53:07 +0000");
+[model.initials({name: "Maya Chen", address: "m@x"}), model.initials({name: "José Álvarez (Forge)", address: "j@x"}),
+ model.initials({name: null, address: "bob@x"}), model.avatar_hue({address: "bob@x"}) == model.avatar_hue({address: "BOB@x"})]
+model.sender_of({name: "Demo Mailbox", full_name: "Alex Rivera", email: "alex@lambda.demo"})
+model.draft_of({to: [{name: "Ann", address: "a@x"}], cc: [], subject: "(no subject)", text: null, readable: "hi", attachments: []})
+model.compose_title({subject: "  "})
 
 "=== reports ==="
 let s1 = model.apply_report(st, {type: "status", account: "ada", state: "syncing", text: null})
@@ -65,7 +95,9 @@ model.account_from_setup({*: form, protocol: "pop3"}, [], null)
 model.account_from_setup({*: form, email: "ada@icloud.com", protocol: "pop3"}, [], null)
 model.account_from_setup({*: form, email: "ada@nowhere.test", provider: "manual", protocol: "pop3", host: "127.0.0.1",
     security: "plain", user: "ada"}, [], null);
-[model.is_pop3({protocol: "pop3"}), model.is_pop3({protocol: "imap"}), model.is_pop3(null)]
+[model.is_pop3({protocol: "pop3"}), model.is_pop3({protocol: "imap"}), model.is_pop3(null)];
+[model.reads_locally({protocol: "demo"}), model.reads_locally({protocol: "pop3"}), model.organizes_locally({protocol: "pop3"}),
+ model.organizes_locally({protocol: "demo"})]
 
 "=== sign-in ===";
 let clients = {google: {client_id: "id.apps.googleusercontent.com", client_secret: "s"}}

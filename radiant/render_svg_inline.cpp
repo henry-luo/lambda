@@ -2176,10 +2176,10 @@ static const char* svg_template_attribute(SvgInlineRenderContext* ctx, const lam
     return value ? value : fallback;
 }
 
-static float svg_gradient_length(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
+static float svg_template_length(SvgInlineRenderContext* ctx, const lam::ArrayList<SvgResourceReference>* chain,
     const char* name, const char* fallback, const SvgLengthContext* lengths,
     SvgLengthAxis axis) {
-    // Lambda SVG builders carry numeric Items; resource inheritance must preserve them.
+    // Lambda SVG builders carry numeric Items; gradient and pattern inheritance must preserve them.
     float initial = svg_resolve_length(fallback, lengths, axis, 0.0f);
     Element* source = svg_template_attribute_source(ctx, chain, name, true);
     return source ? get_svg_number_attr(source, name, initial, lengths, axis) : initial;
@@ -2196,19 +2196,19 @@ static bool svg_resolve_gradient(SvgInlineRenderContext* ctx, Element* element,
     SvgInlineRenderContext resource_style = svg_resource_style_context(ctx, element);
     SvgLengthContext lengths = svg_length_context(&resource_style);
     if (!def->user_space) { lengths.viewport_width = lengths.viewport_height = 1.0f; }
-    def->x1 = svg_gradient_length(ctx, &chain, "x1", "0%", &lengths, SVG_LENGTH_X);
-    def->y1 = svg_gradient_length(ctx, &chain, "y1", "0%", &lengths, SVG_LENGTH_Y);
-    def->x2 = svg_gradient_length(ctx, &chain, "x2", "100%", &lengths, SVG_LENGTH_X);
-    def->y2 = svg_gradient_length(ctx, &chain, "y2", "0%", &lengths, SVG_LENGTH_Y);
-    def->cx = svg_gradient_length(ctx, &chain, "cx", "50%", &lengths, SVG_LENGTH_X);
-    def->cy = svg_gradient_length(ctx, &chain, "cy", "50%", &lengths, SVG_LENGTH_Y);
-    def->r = svg_gradient_length(ctx, &chain, "r", "50%", &lengths, SVG_LENGTH_DIAGONAL);
+    def->x1 = svg_template_length(ctx, &chain, "x1", "0%", &lengths, SVG_LENGTH_X);
+    def->y1 = svg_template_length(ctx, &chain, "y1", "0%", &lengths, SVG_LENGTH_Y);
+    def->x2 = svg_template_length(ctx, &chain, "x2", "100%", &lengths, SVG_LENGTH_X);
+    def->y2 = svg_template_length(ctx, &chain, "y2", "0%", &lengths, SVG_LENGTH_Y);
+    def->cx = svg_template_length(ctx, &chain, "cx", "50%", &lengths, SVG_LENGTH_X);
+    def->cy = svg_template_length(ctx, &chain, "cy", "50%", &lengths, SVG_LENGTH_Y);
+    def->r = svg_template_length(ctx, &chain, "r", "50%", &lengths, SVG_LENGTH_DIAGONAL);
     Element* fx = svg_template_attribute_source(ctx, &chain, "fx", true);
     Element* fy = svg_template_attribute_source(ctx, &chain, "fy", true);
     def->options.has_focal = def->is_radial;
     def->options.fx = fx ? get_svg_number_attr(fx, "fx", def->cx, &lengths, SVG_LENGTH_X) : def->cx;
     def->options.fy = fy ? get_svg_number_attr(fy, "fy", def->cy, &lengths, SVG_LENGTH_Y) : def->cy;
-    def->options.fr = svg_gradient_length(ctx, &chain, "fr", "0%", &lengths, SVG_LENGTH_DIAGONAL);
+    def->options.fr = svg_template_length(ctx, &chain, "fr", "0%", &lengths, SVG_LENGTH_DIAGONAL);
     const char* spread = svg_template_attribute(ctx, &chain, "spreadMethod", "pad");
     def->options.spread = strcmp(spread, "repeat") == 0 ? RDT_GRADIENT_REPEAT
         : strcmp(spread, "reflect") == 0 ? RDT_GRADIENT_REFLECT : RDT_GRADIENT_PAD;
@@ -2768,10 +2768,11 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
     resource.paint_resource_scope = lam::up(&scope);
     SvgLengthContext lengths = svg_length_context(&resource);
     if (!user_space) lengths.viewport_width = lengths.viewport_height = 1.0f;
-    float x = svg_resolve_length(svg_template_attribute(ctx, &chain, "x", "0"), &lengths, SVG_LENGTH_X, 0.0f);
-    float y = svg_resolve_length(svg_template_attribute(ctx, &chain, "y", "0"), &lengths, SVG_LENGTH_Y, 0.0f);
-    float width = svg_resolve_length(svg_template_attribute(ctx, &chain, "width", "0"), &lengths, SVG_LENGTH_X, 0.0f);
-    float height = svg_resolve_length(svg_template_attribute(ctx, &chain, "height", "0"), &lengths, SVG_LENGTH_Y, 0.0f);
+    // the tile frame reads numeric attributes too: a string-only read dropped Lambda-built patterns.
+    float x = svg_template_length(ctx, &chain, "x", "0", &lengths, SVG_LENGTH_X);
+    float y = svg_template_length(ctx, &chain, "y", "0", &lengths, SVG_LENGTH_Y);
+    float width = svg_template_length(ctx, &chain, "width", "0", &lengths, SVG_LENGTH_X);
+    float height = svg_template_length(ctx, &chain, "height", "0", &lengths, SVG_LENGTH_Y);
     if (width <= 0.0f || height <= 0.0f) return true;
     RdtMatrix authored = rdt_matrix_identity();
     for (size_t i = 0; i < chain.size(); i++) {
@@ -6502,13 +6503,18 @@ static void render_svg_image_resource(SvgInlineRenderContext* ctx, Element* elem
 static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
     const char* href = get_svg_href(ctx, elem);
     SvgLengthContext lengths = svg_length_context(ctx, elem);
-    float x = svg_resolve_length(get_svg_attr(elem, "x"), &lengths, SVG_LENGTH_X, 0.0f);
-    float y = svg_resolve_length(get_svg_attr(elem, "y"), &lengths, SVG_LENGTH_Y, 0.0f);
-    float width = svg_resolve_length(get_svg_attr(elem, "width"), &lengths, SVG_LENGTH_X, 0.0f);
-    float height = svg_resolve_length(get_svg_attr(elem, "height"), &lengths, SVG_LENGTH_Y, 0.0f);
+    // geometry may be a number item (Lambda-built SVG), not only attribute text;
+    // the string-only getter read those as absent, drawing at the intrinsic size.
+    float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
+    read_svg_number_attr(elem, "x", &x, &lengths, SVG_LENGTH_X);
+    read_svg_number_attr(elem, "y", &y, &lengths, SVG_LENGTH_Y);
+    bool has_width = read_svg_number_attr(elem, "width", &width, &lengths, SVG_LENGTH_X) ||
+        get_svg_attr(elem, "width");
+    bool has_height = read_svg_number_attr(elem, "height", &height, &lengths, SVG_LENGTH_Y) ||
+        get_svg_attr(elem, "height");
     RdtMatrix frame = compose_element_transform(ctx, elem);
     render_svg_image_resource(ctx, elem, href, {x, y, x + width, y + height}, &frame,
-        !get_svg_attr(elem, "width"), !get_svg_attr(elem, "height"));
+        !has_width, !has_height);
 }
 
 // ============================================================================

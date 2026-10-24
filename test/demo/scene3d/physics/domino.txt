@@ -40,9 +40,9 @@
       <p class: "intro",
         "A winding line of 32 tiles turns a small impulse into a travelling chain reaction. Start at one end, then counter-nudge the middle to make two fronts meet.">
       <div class: "toolbar", role: "group", aria-label: "Simulation controls",
-        <button id: "launch", type: "button", class: "primary", data-request: "{\n  \"operation\": \"apply\",\n  \"commands\": [\n    {\n      \"type\": \"impulse\",\n      \"body\": \"tile-0\",\n      \"value\": [\n        0.34,\n        0,\n        0.16\n      ],\n      \"point\": [\n        -7.2,\n        1.58,\n        0\n      ]\n    }\n  ]\n}", data-restart: "true", data-play-after: "true",
+        <button id: "launch", type: "button", class: "primary", data-request: "{\n  \"operation\": \"apply\",\n  \"commands\": [\n    {\n      \"type\": \"impulse\",\n      \"body\": \"tile-0\",\n      \"value\": [\n        0.68,\n        0,\n        0.32\n      ],\n      \"point\": [\n        -7.2,\n        1.58,\n        0\n      ]\n    }\n  ]\n}", data-restart: "true", data-play-after: "true",
           "Start cascade">
-        <button id: "nudge", type: "button", class: "", data-request: "{\n  \"operation\": \"apply\",\n  \"commands\": [\n    {\n      \"type\": \"impulse\",\n      \"body\": \"tile-16\",\n      \"value\": [\n        -0.3,\n        0,\n        0.14\n      ],\n      \"point\": [\n        0.16000000000000014,\n        1.58,\n        0.11663068426409215\n      ]\n    }\n  ]\n}", data-restart: "false", data-play-after: "true",
+        <button id: "nudge", type: "button", class: "", data-request: "{\n  \"operation\": \"apply\",\n  \"commands\": [\n    {\n      \"type\": \"impulse\",\n      \"body\": \"tile-16\",\n      \"value\": [\n        -0.6,\n        0,\n        0.28\n      ],\n      \"point\": [\n        0.16000000000000014,\n        1.58,\n        0.11663068426409215\n      ]\n    }\n  ]\n}", data-restart: "false", data-play-after: "true",
           "Counter-nudge middle">
         <span class: "toolbar-divider">
         <button id: "play-toggle", type: "button",
@@ -58,7 +58,7 @@
           "Top view">>
       <div class: "stage",
         <scene3d id: "world", camera: "main", width: 1040, height: 500, background: "#101b2b", tabindex: "0", role: "img", aria-label: "domino physics scene", data-demo: "domino", data-camera: "{\n  \"position\": [\n    11,\n    10,\n    14\n  ],\n  \"target\": [\n    0,\n    0.5,\n    0\n  ],\n  \"fov\": 42\n}", data-playing: "false",
-          <physics timestep: 0.008333333333333333, solver-iterations: 18, state: 'paused'>
+          <physics timestep: 0.008333333333333333, solver-iterations: 18, state: 'paused', gravity: [0, -39.24, 0]>
           <camera id: "main", type: 'perspective', position: [11, 10, 14], target: [0, 0.5, 0], fov: 42>
           <light type: 'ambient', intensity: 0.48, color: "#c5d6ff">
           <light type: 'directional', position: [-6, 10, 8], intensity: 0.85, color: "#fff1dd">

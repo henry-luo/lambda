@@ -1,0 +1,487 @@
+{
+  "name": "Word corporate website and journal sources, undated citations, validation and numeric bibliography",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Sources: ",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-references"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#source-kind"
+      },
+      "value": "webpage"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#source-corporate"
+      },
+      "value": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-author"
+      },
+      "text": "Open Studio",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-title"
+      },
+      "text": "Making together",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-container"
+      },
+      "text": "Open Studio",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-url"
+      },
+      "text": "javascript:alert(1)",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-url"
+      },
+      "text": "https://example.org/studio",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-accessed"
+      },
+      "text": "2026-02-30",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-accessed"
+      },
+      "text": "2024-02-29",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Sources: "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-citation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#citation-locator"
+      },
+      "text": "4",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".source-card[data-source-type=\"webpage\"] .source-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "contains": "(Open Studio, n.d., p. 4)"
+    },
+    {
+      "type": "type_physical",
+      "text": "; "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#source-kind"
+      },
+      "value": "article-journal"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-author"
+      },
+      "text": "Turing, Alan; Church, Alonzo",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-title"
+      },
+      "text": "Computing & <making>",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-year"
+      },
+      "text": "1936",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-container"
+      },
+      "text": "Journal of Making",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-volume"
+      },
+      "text": "4",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-issue"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-pages"
+      },
+      "text": "10-25",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-doi"
+      },
+      "text": "10.1000/test",
+      "clear": true
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/citation-journal-source.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-citation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".source-card[data-source-type=\"article-journal\"] .source-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-bibliography"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "<making>"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "https://doi.org/10.1000/test"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#citation-style"
+      },
+      "value": "ieee"
+    },
+    {
+      "type": "assert_script",
+      "js": "var c=document.querySelectorAll(\"#edit-surface [data-word-citation]\");c[0].textContent.indexOf(\"[1, p. 4]\")>=0 && c[1].textContent==\"[2]\""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "[1]"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface [data-word-bibliography]"
+      },
+      "contains": "[2]"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#source-title"
+      },
+      "text": "Unused source",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-source"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#manage-sources"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".source-card"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".source-card[data-source-type=\"book\"] .source-delete"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".source-card"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-cancel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-citation]"
+      },
+      "count": 2
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/citations-ieee.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/citations-ieee.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/citations-ieee.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[role=\"dialog\"]"
+      },
+      "count": 0
+    }
+  ]
+}

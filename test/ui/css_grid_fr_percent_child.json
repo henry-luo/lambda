@@ -1,0 +1,128 @@
+{
+  "name": "Grid fr tracks ignore percentage-width children in item min-content contributions",
+  "html": "test/ui/css_grid_fr_percent_child.html",
+  "viewport": {
+    "width": 1000,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#div-a"
+      },
+      "x": 220,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#div-b"
+      },
+      "x": 510,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#sel-a"
+      },
+      "x": 220,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#sel-b"
+      },
+      "x": 510,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "resize",
+      "width": 600,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#div-a"
+      },
+      "x": 220,
+      "width": 180,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#div-b"
+      },
+      "x": 420,
+      "width": 180,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#sel-a"
+      },
+      "x": 220,
+      "width": 180,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#sel-b"
+      },
+      "x": 420,
+      "width": 180,
+      "tolerance": 1
+    },
+    {
+      "type": "resize",
+      "width": 1000,
+      "height": 600
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#div-a"
+      },
+      "x": 220,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#div-b"
+      },
+      "x": 510,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#sel-a"
+      },
+      "x": 220,
+      "width": 270,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#sel-b"
+      },
+      "x": 510,
+      "width": 270,
+      "tolerance": 1
+    }
+  ]
+}

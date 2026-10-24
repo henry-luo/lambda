@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "description": "S11.4.5: exact float admission uses the shared representation guard and retains the numeric conversion/rejection fallback.",
+  "checks": [
+    {"in_func": "_admit_#", "expect": ["and\t{{r}}, {{r}}, 6917529027641081856", "call\tlambda_type_check_p, lambda_type_check"]}
+  ]
+}

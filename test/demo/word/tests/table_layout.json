@@ -1,0 +1,754 @@
+{
+  "name": "Word Table Layout ribbon and structural edits",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1736,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-tab",
+      "equals": "Table"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".cell-alignment-grid button"
+      },
+      "count": 9
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/table-layout-initial.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-gridlines"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-table-gridlines",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-gridlines"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-table-gridlines",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-row"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.mergeCells\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td"
+      },
+      "attribute": "colspan",
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td"
+      },
+      "contains": "Etching press"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td"
+      },
+      "contains": "Back room"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.splitCells\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#split-columns"
+      },
+      "attribute": "value",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-table_split"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td"
+      },
+      "count": 3
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "contains": "Back room"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-cell-height"
+      },
+      "text": "42",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement.id === \"table-cell-height\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-cell-width"
+      },
+      "text": "95",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement.id === \"table-cell-width\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table tr:nth-child(2)\").getAttribute(\"style\").includes(\"height: 42pt\")"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table tr:nth-child(2) td:nth-child(2)\").getAttribute(\"style\").includes(\"width: 95pt\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-align-bottomRight"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "text-align",
+      "equals": "right"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-cell-margins"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-margin-top"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-margin-right"
+      },
+      "text": "4",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-margin-bottom"
+      },
+      "text": "6",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-margin-left"
+      },
+      "text": "8",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-table_margins"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:nth-child(2)"
+      },
+      "property": "padding-left",
+      "equals": "8pt"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.textDirection\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table tr:nth-child(2) td:nth-child(2)\").getAttribute(\"style\").includes(\"vertical-rl\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.textDirection\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.textDirection\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-properties"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-preferred-width"
+      },
+      "text": "85",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-position"
+      },
+      "value": "center"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-table_properties"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table\").getAttribute(\"style\").includes(\"width: 85%\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-table"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\").length===12"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.distributeRows\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#edit-surface [data-word-cell-selected=true]\").length===12"
+    },
+    {
+      "type": "assert_script",
+      "js": "var rr=document.querySelectorAll(\"#edit-surface table tr\");rr.length===4 && rr[0].style.height && rr[0].style.height===rr[3].style.height"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.distributeColumns\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface td\").getAttribute(\"style\").includes(\"width:\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-autofit-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordFixedTableWidth=document.querySelector(\"#edit-surface table\").getBoundingClientRect().width;window.wordFixedTableWidth>0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-autofit-fixed"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table\").getAttribute(\"style\").includes(\"table-layout: fixed\")"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector(\"#edit-surface table\").getBoundingClientRect().width-window.wordFixedTableWidth)<2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-autofit-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-autofit-contents"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table\").getAttribute(\"style\").includes(\"width: auto\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-autofit-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-autofit-window"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#edit-surface table\").getAttribute(\"style\").includes(\"width: 100%\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.repeatHeader\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table thead th"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-repeat-header",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:last-child td:nth-child(2)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-cell"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "text": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:last-child td:nth-child(3)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-formula"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-formula-expression"
+      },
+      "text": "=SUM(LEFT)",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-table_formula"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table tr:last-child td:nth-child(3)"
+      },
+      "contains": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table tr:last-child td:nth-child(3)"
+      },
+      "attribute": "data-word-formula",
+      "equals": "=SUM(LEFT)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-sort"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-sort-order"
+      },
+      "value": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-table_sort"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table tr:first-child th:first-child"
+      },
+      "contains": "Equipment"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(2) td:first-child"
+      },
+      "contains": "Light table"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/table-layout-final.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-layout.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-layout.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/table-layout.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table tr:nth-child(3) td:first-child"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.splitTable\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h1"
+      },
+      "contains": "The Open Studio Handbook"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface table td"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-convert-text"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-text-separator"
+      },
+      "value": "commas"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "button.edit-dialog-table_text"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Equipment, Location, Steward"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h1"
+      },
+      "contains": "The Open Studio Handbook"
+    }
+  ]
+}

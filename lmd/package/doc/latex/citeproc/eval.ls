@@ -109,7 +109,9 @@ fn variable_text(node, context) {
         else if (key == "DOI" and c.nonempty(value))
             <a href: (if (out.safe_url(value)) value else "https://doi.org/" ++ value), body>
         else body
-    out.result(linked, 1, if (c.nonempty(value)) 1 else 0, if (c.nonempty(value)) [key] else [])
+    // a generated suffix has no empty-field attempt; otherwise it suppresses APA's no-date term.
+    let attempted = if (key == "year-suffix" and not c.nonempty(value)) 0 else 1
+    out.result(linked, attempted, if (c.nonempty(value)) 1 else 0, if (c.nonempty(value)) [key] else [])
 }
 
 fn text_node(node, context) {

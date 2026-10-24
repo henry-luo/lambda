@@ -1,0 +1,11 @@
+<!doctype html>
+<!-- a flex:1 item that is itself a nowrap row with gaps must not shrink below
+     its buttons plus gaps (its automatic minimum), or they overflow the start edge -->
+<html><head><style>
+body { margin: 0; }
+.bar { display: flex; width: 500px; background: #eee; }
+.title { flex: 1; min-width: 0; background: #fcd; }
+.acts { flex: 1; display: flex; justify-content: flex-end; gap: 6px; background: #cdf; }
+.acts button { width: 120px; flex: none; }
+</style></head><body><div class="bar"><div class="title">Title</div>
+<div class="acts" id="acts"><button id="a">A</button><button>B</button><button>C</button></div></div></body></html>

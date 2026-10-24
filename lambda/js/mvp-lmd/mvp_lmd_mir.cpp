@@ -10,6 +10,7 @@
 #include "../js_well_known_names.h"
 #include "../js_props.h"
 #include "../js_runtime_state.hpp"
+#include "../js_execution_internal.hpp"
 #include "../js_event_loop.h"
 #include "../js_interp.hpp"
 #include "../js_interp_env.h"
@@ -215,6 +216,7 @@ struct MvpLmdCode {
     StrBuf* image;
     ArrayList* addresses;
     size_t relocation_count;
+    unsigned int optimize_level;
     char* source;
     size_t source_length;
     char* reference;
@@ -558,7 +560,7 @@ struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     bool dense_storage = false; bool uncoerced_name = false; MIR_reg_t with_object = 0;
     bool invalid_target = false; bool private_element = false;
     MIR_reg_t eval_reference = 0; MIR_reg_t global_presence = 0; };
-enum { MVP_LMD_COMPACT_REGISTER_BUDGET = 4096 };
+enum { MVP_LMD_COMPACT_REGISTER_BUDGET = 4096, MVP_LMD_INLINE_ALLOCATION_NODE_BUDGET = 48 };
 struct LmdPrivateNameInit { NameRef spelling; uint32_t slot; };
 
 static LmdBinding* binding(MvpLmdProgram* p, NameEntry* entry) {
@@ -2929,6 +2931,52 @@ static MIR_op_t relocated(LmdCompiler* c, uint64_t value) {
 static bool finite_integer(double value) {
     return isfinite(value) && value >= INT53_MIN && value <= INT53_MAX &&
         value == trunc(value) && !(value == 0 && signbit(value));
+}
+static bool passive_array_literal(AstNode* node, uint64_t* nodes, bool* composite) {
+    (*nodes)++;
+    if (node->node_type == AST_NODE_ARRAY) {
+        for (AstNode* child = ((AstArrayNode*)node)->item; child; child = child->next) {
+            if (child->node_type == AST_NODE_ARRAY) *composite = true;
+            if (!passive_array_literal(child, nodes, composite)) return false;
+        }
+        return true;
+    }
+    if (node->node_type == AST_NODE_NULL) return true;
+    if (node->node_type != AST_NODE_LITERAL) return false;
+    auto* literal = (AstLiteralNode*)node;
+    return !literal->is_bigint && literal->literal_type >= AST_LITERAL_NUMBER &&
+        literal->literal_type <= AST_LITERAL_UNDEFINED;
+}
+static uint64_t passive_literal_item(AstNode* node) {
+    if (node->node_type == AST_NODE_NULL) return ITEM_JS_DELETED_SENTINEL;
+    auto* literal = (AstLiteralNode*)node;
+    switch (literal->literal_type) {
+    case AST_LITERAL_NUMBER:
+        return finite_integer(literal->value.number_value)
+            ? i2it((int64_t)literal->value.number_value)
+            : lambda_float_ptr_to_item(&literal->value.number_value).item;
+    case AST_LITERAL_STRING: return s2it(literal->value.string_value);
+    case AST_LITERAL_BOOLEAN: return b2it(literal->value.boolean_value);
+    case AST_LITERAL_NULL: return ITEM_NULL;
+    default: return ITEM_JS_UNDEFINED;
+    }
+}
+static bool build_array_recipe(MvpLmdProgram* program, AstNode* node, JsStaticLiteralRecipe* recipe) {
+    if (node->node_type == AST_NODE_ARRAY) {
+        auto* array = (AstArrayNode*)node;
+        recipe->kind = JS_STATIC_LITERAL_ARRAY;
+        recipe->length = array->length;
+        auto* children = array->length ? (JsStaticLiteralRecipe*)pool_calloc(program->frontend->pool,
+            (size_t)array->length * sizeof(JsStaticLiteralRecipe)) : NULL;
+        if (array->length && !children) return false;
+        recipe->children = children;
+        int index = 0;
+        for (AstNode* child = array->item; child; child = child->next, index++)
+            if (!build_array_recipe(program, child, &children[index])) return false;
+        return true;
+    }
+    recipe->immediate = passive_literal_item(node);
+    return true;
 }
 static LmdValue number(LmdCompiler* c, double value) {
     bool integral = finite_integer(value);
@@ -6723,7 +6771,7 @@ static bool inline_body(LmdCompiler* c, LmdFunction* f, LmdInlineBody* body,
     // prototype functions keep a small leaf expansion; wide call graphs retain ordinary activations.
     if (prototype_method &&
             (!repeated_execution(c) || budget.calls || budget.nodes > 24)) return false;
-    return budget.allowed && (!constructor || budget.nodes <= 48);
+    return budget.allowed && (!constructor || budget.nodes <= MVP_LMD_INLINE_ALLOCATION_NODE_BUDGET);
 }
 // both direct calls and guarded methods use the same parameter, local and ownership rules.
 static LmdValue inline_call_body(LmdCompiler* c, LmdInlineFrame& frame, const LmdInlineBody& body,
@@ -8604,40 +8652,33 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
     }
     case AST_NODE_ARRAY: {
         AstArrayNode* a = (AstArrayNode*)n;
+        uint64_t literal_nodes = 0;
+        bool composite = false;
+        bool passive = a->length && passive_array_literal(n, &literal_nodes, &composite);
+        // nested allocations share the constructor expansion budget; tiny graphs keep inline stores.
+        if (passive && composite && literal_nodes > MVP_LMD_INLINE_ALLOCATION_NODE_BUDGET) {
+            // cold nested literal graphs need one materializer call, not MIR for every scalar and child array.
+            auto* recipe = (JsStaticLiteralRecipe*)pool_calloc(c->program->frontend->pool, sizeof(JsStaticLiteralRecipe));
+            if (!recipe || !build_array_recipe(c->program, n, recipe)) {
+                diagnostic(c->program, n, "literal recipe allocation failed");
+                return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+            }
+            MIR_reg_t result = em_call_1(&c->em, "mvp_lmd_array_from_recipe", MIR_T_I64,
+                MIR_T_P, relocated(c, (uint64_t)recipe), true);
+            check_error(c, result);
+            return boxed(c, result, K_ARRAY);
+        }
         MIR_reg_t result = em_call_0(&c->em, "array", MIR_T_P, false);
         root_value(c, result, JIT_VALUE_RAW_GC_POINTER);
         MIR_reg_t reserved = em_call_2(&c->em, "array_reserve_append_slots", MIR_T_I64,
             MIR_T_P, reg(c, result), MIR_T_I64, integer(c, (uint64_t)a->length * 2), true);
         MIR_label_t ok = label(c); branch_truth(c, ok, reserved); fail(c, LMD_MVP_MEMORY, n); put_label(c, ok);
-        bool passive = a->length >= MVP_LMD_COMPACT_REGISTER_BUDGET;
-        for (AstNode* e = a->item; passive && e; e = e->next) {
-            if (e->node_type == AST_NODE_NULL) continue;
-            if (e->node_type != AST_NODE_LITERAL) { passive = false; break; }
-            AstLiteralNode* literal = (AstLiteralNode*)e;
-            passive = !literal->is_bigint && literal->literal_type >= AST_LITERAL_NUMBER &&
-                literal->literal_type <= AST_LITERAL_UNDEFINED;
-        }
-        if (passive) {
-            // immutable frontend values have no evaluation effects; Lambda copies wide scalars into the fresh owner.
+        if (passive && !composite && a->length >= MVP_LMD_COMPACT_REGISTER_BUDGET) {
             Item* items = (Item*)pool_alloc(c->program->frontend->pool, (size_t)a->length * sizeof(Item));
             if (!items) { diagnostic(c->program, n, "literal table allocation failed"); return boxed(c, result, K_ARRAY); }
             uint32_t index = 0;
-            for (AstNode* e = a->item; e; e = e->next, index++) {
-                if (e->node_type == AST_NODE_NULL) { items[index].item = ITEM_JS_DELETED_SENTINEL; continue; }
-                AstLiteralNode* literal = (AstLiteralNode*)e;
-                switch (literal->literal_type) {
-                case AST_LITERAL_NUMBER:
-                    // retain the same finite-int encoding as ordinary boxed literal initialization.
-                    items[index] = finite_integer(literal->value.number_value)
-                        ? Item{.item = i2it((int64_t)literal->value.number_value)}
-                        : lambda_float_ptr_to_item(&literal->value.number_value);
-                    break;
-                case AST_LITERAL_STRING: items[index].item = s2it(literal->value.string_value); break;
-                case AST_LITERAL_BOOLEAN: items[index].item = b2it(literal->value.boolean_value); break;
-                case AST_LITERAL_NULL: items[index].item = ITEM_NULL; break;
-                default: items[index].item = ITEM_JS_UNDEFINED; break;
-                }
-            }
+            for (AstNode* child = a->item; child; child = child->next, index++)
+                items[index].item = passive_literal_item(child);
             em_call_void_4(&c->em, "array_copy_owned_items", MIR_T_P, reg(c, result),
                 MIR_T_I64, integer(c, 0), MIR_T_P, relocated(c, (uint64_t)items),
                 MIR_T_I64, integer(c, a->length), true);
@@ -9866,6 +9907,7 @@ static const LmdImport imports[] = {
     {"mvp_lmd_array_sort", (void*)mvp_lmd_array_sort, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_array_spread", (void*)mvp_lmd_array_spread, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"mvp_lmd_array_new", (void*)mvp_lmd_array_new, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR))},
+    {"mvp_lmd_array_from_recipe", (void*)mvp_lmd_array_from_recipe, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR))},
     {"mvp_lmd_array_own_item", (void*)mvp_lmd_array_own_item, AUDIT(JIT_EFFECT_NO_GC, ITEM, ARG(0,GC_PTR)|ARG(1,SCALAR))},
     {"mvp_lmd_is_callable", (void*)mvp_lmd_is_callable, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM))},
     {"mvp_lmd_array_index_property", (void*)mvp_lmd_array_index_property, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,ITEM)|ARG(3,SCALAR))},
@@ -13751,8 +13793,13 @@ static int lower_pass(void* opaque) {
     if (!ok) return false;
     StrBuf* image = p->relocatable ? mvp_lmd_code_image(p->mir) : NULL;
     if (p->relocatable && !image) return false;
+    // honor the caller's cold-compilation level, including Test262's explicit O0.
+    unsigned int requested_level = g_js_mir_optimize_level;
+    if (p->satellite_script && requested_level > 1) requested_level = 1;
+    unsigned int optimize_level = mir_native_optimize_level(largest_function_insns, requested_level);
     const MvpLmdCode* cached = p->cached_code;
-    if (cached && image && cached->relocation_count == (size_t)p->relocations->length &&
+    if (cached && image && cached->optimize_level == optimize_level &&
+            cached->relocation_count == (size_t)p->relocations->length &&
             cached->addresses->length == p->functions->length &&
             cached->image->length == image->length &&
             !memcmp(cached->image->str, image->str, image->length)) {
@@ -13768,11 +13815,8 @@ static int lower_pass(void* opaque) {
         log_debug("js-mvp-code-cache: reused %d functions", p->functions->length);
         return true;
     }
-    if (cached) log_debug("js-mvp-code-cache: realm metadata changed emitted MIR; compile fresh code");
+    if (cached) log_debug("js-mvp-code-cache: emitted MIR or optimization level changed; compile fresh code");
     MIR_load_module(p->mir, p->module); MIR_gen_init(p->mir); p->linked = true;
-    // D8.1.3v29: first hot-entry satellites favor compile latency; large units share Lambda's bound.
-    unsigned int optimize_level = mir_native_optimize_level(largest_function_insns,
-        p->satellite_script ? 1 : 2);
     MIR_gen_set_optimize_level(p->mir, optimize_level);
     if (timing) log_notice("js-mvp-link: optimize_level=%u largest_function_insns=%llu",
         optimize_level, (unsigned long long)largest_function_insns);
@@ -13800,7 +13844,7 @@ static int lower_pass(void* opaque) {
                 mem_free(code); arraylist_free(addresses); strbuf_free(image); return false;
             }
         }
-        *code = {{1}, p->mir, image, addresses, (size_t)p->relocations->length};
+        *code = {{1}, p->mir, image, addresses, (size_t)p->relocations->length, optimize_level};
         p->code = code;
     }
     return true;

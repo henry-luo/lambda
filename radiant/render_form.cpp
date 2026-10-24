@@ -73,6 +73,14 @@ static Color form_accent_color(ViewBlock* block, bool disabled) {
     return make_color(0, 0, 0);
 }
 
+static float form_scroll_to_reveal(float scroll, float caret_start, float caret_extent,
+                                  float viewport_extent, float margin) {
+    if (caret_start - scroll < margin) scroll = caret_start - margin;
+    else if (caret_start + caret_extent - scroll > viewport_extent - margin)
+        scroll = caret_start + caret_extent - viewport_extent + margin;
+    return scroll > 0.0f ? scroll : 0.0f;
+}
+
 static float form_text_align_offset(ViewBlock* block, float content_w,
                                     float text_w) {
     if (!block || !block->blk || text_w <= 0.0f || text_w >= content_w) {
@@ -235,11 +243,13 @@ static void paint_default_text_control_box(RasterRenderContext* rdcon, ViewBlock
     if (!rdcon || !block || !box) return;
     if (block->form && block->form->appearance_none) return;
 
-    // Author backgrounds and borders are painted by render_block_view; the
-    // fallback chrome only fills the content area so it does not cover them.
+    // author borders are already painted; the fallback must follow their inner curve.
     if (!box->has_css_background) {
         Color bg = make_color(255, 255, 255);
         float bx = box->x, by = box->y, bw = box->w, bh = box->h;
+        Corner radius = box->css_border
+            ? radiant_corner_scaled(&box->css_border->radius, box->s) : Corner{};
+        constrain_corner_radii(&radius, bw, bh);
         if (box->has_css_border && block->bound && block->boundary_mut()->border) {
             float bl = block->boundary()->border->width.left * box->s;
             float br = block->boundary()->border->width.right * box->s;
@@ -247,8 +257,17 @@ static void paint_default_text_control_box(RasterRenderContext* rdcon, ViewBlock
             float bb = block->boundary()->border->width.bottom * box->s;
             bx += bl; by += bt;
             bw -= bl + br; bh -= bt + bb;
+            radius = radiant_corner_inset_edges(&radius, bt, br, bb, bl);
         }
-        fill_rect(rdcon, bx, by, bw, bh, bg);
+        if (bw > 0.0f && bh > 0.0f) {
+            if (radiant_corner_has_radius(&radius)) {
+                RdtPath* path = render_path_create_rounded_rect({bx, by, bw, bh}, &radius);
+                rc_fill_path(rdcon, path, bg, RDT_FILL_WINDING, render_state_current_transform(rdcon));
+                rdt_path_free(path);
+            } else {
+                fill_rect(rdcon, bx, by, bw, bh, bg);
+            }
+        }
     }
     if (box->use_default_border) {
         draw_3d_border(rdcon, box->x, box->y, box->w, box->h, true, 1 * box->s);
@@ -679,14 +698,8 @@ static void render_text_input(RasterRenderContext* rdcon, ViewBlock* block, Form
     // F4: keep caret_x_logical within [margin, content_w - margin]. A small
     // margin (3 px) avoids the caret kissing the right border.
     if (focused_here && form && content_w > 0) {
-        const float margin = 3.0f * s;
-        float visible_caret = caret_x_logical - form->scroll_x * s;
-        if (visible_caret < margin) {
-            form->scroll_x = (caret_x_logical - margin) / s;
-        } else if (visible_caret > content_w - margin) {
-            form->scroll_x = (caret_x_logical - (content_w - margin)) / s;
-        }
-        if (form->scroll_x < 0) form->scroll_x = 0;
+        form->scroll_x = form_scroll_to_reveal(form->scroll_x,
+            caret_x_logical / s, 0.0f, content_w / s, 3.0f);
     }
     float scroll_px = (form ? form->scroll_x : 0.0f) * s;
 
@@ -1278,10 +1291,8 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
 
     // native option rows keep their intrinsic metric when the closed control
     // has an author-specified height
-    float option_height = form_select_dropdown_row_height(form) * s;
-    int max_visible = 10;
-    int visible_count = (form->option_count < max_visible) ? form->option_count : max_visible;
-    if (visible_count <= 0) visible_count = 1;
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, form);
+    float option_height = geometry.row_height * s;
     float h = popup.height;
 
     // Override clip to full viewport for overlay rendering (dropdown should not be clipped by parent containers)
@@ -1310,15 +1321,21 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
     fill_rect(rdcon, x, y, bw, h, border_color);
     fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
 
-    // Render each visible option
+    // clip partial rows and long labels before the scrollbar gutter.
+    float options_right = x + w - max(bw, geometry.scrollbar_width * s);
+    Bound options_clip = {x + bw, y + bw, options_right, y + h - bw};
+    RenderClipScope options_scope = render_clip_push_rect_scope(rdcon, &options_clip, nullptr);
+    rdcon->block.clip = options_clip;
     DomElement* option = dom_select_next_option(select->as_element(), nullptr);
-    for (int i = 0; i < visible_count && option; i++,
+    for (int i = 0; i < form->option_count && option; i++,
          option = dom_select_next_option(select->as_element(), option)) {
-        float opt_y = y + i * option_height;
+        float opt_y = y + i * option_height - geometry.scroll_y * s;
+        if (opt_y + option_height <= y) continue;
+        if (opt_y >= y + h) break;
         SelectOptionPaint paint = select_option_paint(select, option, i == selected_index,
             i == hover_index, form_control_is_disabled(state, option), false);
         if (paint.background.a) fill_rect(rdcon, x + bw, opt_y + bw,
-            w - 2 * bw, option_height - bw, paint.background);
+            options_right - x - bw, option_height - bw, paint.background);
 
         // Get option text
         const char* opt_text = dom_option_text(option);
@@ -1337,6 +1354,18 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
             // Render the option text (y is top of text area, not baseline)
             render_simple_string(rdcon, opt_text, text_x, text_top, paint.font, paint.text);
         }
+    }
+
+    render_clip_pop_scope(rdcon, &options_scope);
+    rdcon->block.clip = {0, 0, (float)rdcon->ui_context->surface->width,
+        (float)rdcon->ui_context->surface->height};
+    if (geometry.scrollbar_width > 0.0f) {
+        float bar_x = x + w - geometry.scrollbar_width * s;
+        fill_rect(rdcon, bar_x, y + bw, geometry.scrollbar_width * s - bw,
+            h - 2 * bw, make_color(246, 246, 246));
+        Color thumb = state->dropdown_dragging ? make_color(142, 142, 142) : make_color(192, 192, 192);
+        rc_fill_rounded_rect(rdcon, bar_x + 2 * s, y + geometry.thumb_y * s,
+            (geometry.scrollbar_width - 4) * s, geometry.thumb_height * s, 4 * s, 4 * s, thumb);
     }
 
     // Restore original clip
@@ -1421,8 +1450,39 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
     float content_x = x + border_w_px + padding;
     float content_y = y + border_w_px + padding;
     float content_w = w - 2 * (border_w_px + padding);
+    float content_h = h - 2 * (border_w_px + padding);
     float font_size_scaled = render_font ? render_font->font_size * s : 13.333f * s;
     float line_height = font_size_scaled * 1.4f;
+    if (content_w <= 0.0f || content_h <= 0.0f) return;
+
+    // text, selection, IME and caret share the control's own transformed content clip.
+    Bound content_clip = {content_x, content_y, content_x + content_w, content_y + content_h};
+    Bound saved_clip = rdcon->block.clip;
+    const RdtMatrix* content_transform = render_state_current_transform(rdcon);
+    RenderClipScope clip_scope = render_clip_push_rect_scope(rdcon, &content_clip,
+        content_transform);
+    Bound glyph_clip = content_clip;
+    // bitmap glyphs consume projected bounds rather than the vector clip stack.
+    if (!content_transform || rdt_matrix_project_rect_bounds(content_transform,
+            content_clip.left, content_clip.top, content_clip.right, content_clip.bottom,
+            &glyph_clip.left, &glyph_clip.top, &glyph_clip.right, &glyph_clip.bottom)) {
+        rdcon->block.clip = view_geometry_intersect_bound_rect(saved_clip,
+            {glyph_clip.left, glyph_clip.top, glyph_clip.right - glyph_clip.left,
+                glyph_clip.bottom - glyph_clip.top});
+    }
+    if (form->caret_scroll_pending && form_control_has_focus(&fc, block) &&
+        !state->editing.pointer_selecting) {
+        int caret_offset = 0;
+        EditingCaretRect caret_rect;
+        if (!has_preedit && caret_get_offset(state, &caret_offset) &&
+            editing_geometry_text_control_caret_rect(rdcon->ui_context, block,
+                caret_offset > 0 ? (uint32_t)caret_offset : 0, &caret_rect)) { // INT_CAST_OK: non-negative caret byte offset.
+            float caret_top = caret_rect.y - block->y - (border_w_px + padding) / s;
+            form->scroll_y = form_scroll_to_reveal(form->scroll_y,
+                caret_top, caret_rect.height, content_h / s, 0.0f);
+            form->caret_scroll_pending = 0;
+        }
+    }
 
     bool has_active_selection = false;
     int active_sel_start = 0, active_sel_end = 0;
@@ -1636,8 +1696,8 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }
-
-
+    render_clip_pop_scope(rdcon, &clip_scope);
+    rdcon->block.clip = saved_clip;
 
 }
 

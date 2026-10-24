@@ -70,3 +70,24 @@ doc_text(node_at(pasted.doc,[1,1,0]))=="D" and pasted.selection==column.selectio
 let pretty = edit_apply(column,tables.replace_transaction(column,"insertFromPaste","",
     "<table>\n <tr>\n <th>X</th>\n </tr>\n <tr>\n <td>Y</td>\n </tr>\n <tr>\n <td>Z</td>\n </tr>\n</table>"));
 doc_text(node_at(pretty.doc,[1,0,1]))=="X" and doc_text(node_at(pretty.doc,[1,1,1]))=="Y" and doc_text(node_at(pretty.doc,[1,2,1]))=="Z"
+
+fn range_editor(a,b) => edit_set_selection(base,text_selection(pos(a,1),pos(b,0)))
+let within = range_editor([1,1,1,0],[1,1,1,0])
+let across = tables.promote(range_editor([1,1,1,0],[1,2,2,0]))
+let reverse = tables.promote(range_editor([1,2,2,0],[1,1,1,0]));
+tables.promote(within).selection==within.selection
+across.selection==multi_node_selection([[1,1,1],[1,1,2],[1,2,1],[1,2,2]])
+reverse.selection==across.selection and reverse.table_range.anchor==[1,2,2]
+tables.promote(range_editor([1,1,0,0],[1,1,2,0])).selection==node_selection([1,1])
+tables.promote(range_editor([1,0,1,0],[1,2,1,0])).selection==column.selection
+tables.promote(range_editor([1,0,0,0],[1,2,2,0])).selection==node_selection([1])
+tables.promote(range_editor([0,0],[1,1,1,0])).selection==range_editor([0,0],[1,1,1,0]).selection
+let two = node('doc',[*doc.content,node_at(doc,[1])])
+let other = edit_set_selection(model.open_editor(two),text_selection(pos([1,1,1,0],1),pos([3,1,1,0],1)));
+tables.promote(other).selection==other.selection
+len(tables.selected(tables.extend(reverse,"ArrowRight")))==2
+tables.extend(tables.extend(reverse,"ArrowRight"),"ArrowLeft").selection==reverse.selection
+len(tables.selected(tables.extend(reverse,"ArrowUp")))==6
+tables.extend(reverse,"ArrowDown").selection==multi_node_selection([[1,2,1],[1,2,2]])
+tables.extend(tables.promote(range_editor([1,0,1,0],[1,2,1,0])),"ArrowDown").selection==column.selection
+across.doc==doc and len(across.history.undo)==0

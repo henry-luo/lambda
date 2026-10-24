@@ -74,6 +74,7 @@ void form_control_prop_init(FormControlProp* f) {
     f->hover_index = -1;
     f->placeholder_opacity = 1.0f;
     f->caret_on = 1;
+    f->caret_scroll_pending = 1;
 }
 
 void form_control_prop_release(DomElement* elem, FormControlProp* f) {

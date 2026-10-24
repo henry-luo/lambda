@@ -465,7 +465,7 @@ TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
     std::string find_kernel = lib_source.substr(find_kernel_start,
         find_kernel_end - find_kernel_start);
     EXPECT_NE(find_kernel.find("if (needle_len == 1) return str_find_byte("), std::string::npos);
-    // GRP8 (vibe/Lambda_Lib_Grep.md): the candidate scan anchors on the
+    // GRP8 (vibe/lib/Lib_Grep.md): the candidate scan anchors on the
     // needle's rarest byte, or on its two rarest at a fixed distance (the
     // packed pair in lib/str_simd.c), and compares the needle only at a
     // candidate -- still never a comparison at every byte.

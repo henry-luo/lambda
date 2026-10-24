@@ -201,7 +201,7 @@ io.chmod("./config.json", 644)
 
 ### io.grep(source, pattern, options?)
 
-Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the line-oriented search library on RE2 designed in `vibe/Lambda_Lib_Grep.md` (§9B); implementation record `vibe/impl/Lambda_Impl_Lib_Grep.md`.
+Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the line-oriented search library on RE2 designed in `vibe/lib/Lib_Grep.md` (§9B); implementation record `vibe/impl/Lambda_Impl_Lib_Grep.md`.
 
 **Ruling (GRP26, USER, 2026-10-04; not yet ratified into `doc/Lambda_Formal_Semantics.md`).** **`io.grep(source, pattern, options?)` searches files line by line and is a procedure.** A match never spans a line terminator (GRP1); a line ends at `"\n"` or `"\r\n"`, whose `"\r"` is never matched (GRP18). Results are match maps `{value, index}` in a stable order — sources as given, files in path order, matches in position order (GRP25) — where `index` counts code points from the start of the file as in-memory `find` does (S17.4.1, GRP4); options add `file`, `line` (1-based), `byte_offset`, `text`, `line_ending`, `before`/`after` (GRP4, GRP20, GRP24, GRP31), or make the result one `{file, count}` per file, as `grep -c` (GRP30). A directory honours ignore files and skips hidden entries and dependency directories (GRP14); a source named explicitly is always searched (GRP22). An option name it does not define is a compile-time error in a literal and a warning in a value (S17.8.1, GRP28). *Why: its result depends on the file system, which `fn` may not (S12.1.1v2); a line-oriented search is what makes it fast and is what grep means.* [S12.1.1v2, S17.4.1, S17.8.1; GRP1, GRP4, GRP14, GRP18, GRP20–GRP28, GRP30, GRP31]
 
