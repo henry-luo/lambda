@@ -196,8 +196,6 @@ def run_navier_stokes():
     frames_till_add = 0
     frames_between = 5
     started = time.perf_counter_ns()
-    first_frame_ms = None
-
     for frame in range(15):
         for k in range(GRID_SIZE):
             u_prev[k] = 0.0
@@ -213,24 +211,21 @@ def run_navier_stokes():
 
         vel_step(u, v, u_prev, v_prev, dt, iterations)
         dens_step(dens, dens_prev, u, v, dt, iterations)
-        if frame == 0:
-            # Node times one update; later frames only verify its checksum.
-            first_frame_ms = (time.perf_counter_ns() - started) / 1_000_000
-
     result = 0
     for ci in range(7000, 7100):
         result += int(dens[ci] * 10.0)
-    return result, first_frame_ms
+    elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
+    return result, elapsed_ms
 
 
 def main():
-    result, first_frame_ms = run_navier_stokes()
+    result, elapsed_ms = run_navier_stokes()
 
     if result == 77:
         print(f"navier-stokes: PASS (checksum={result})")
     else:
         print(f"navier-stokes: FAIL (checksum={result}, expected 77)")
-    print(f"__TIMING__:{first_frame_ms:.3f}")
+    print(f"__TIMING__:{elapsed_ms:.3f}")
     if result != 77:
         raise SystemExit(1)
 

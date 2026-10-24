@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <errno.h>
 #include "../lib/log.h"
+#include "../lib/ownership.hpp"
 
 #include "../radiant/script_timeout.hpp"
 #include "test_radiant_view_helpers.hpp"
@@ -133,6 +134,11 @@ static void test_radiant_view_ensure_temp_dir() {
 struct RadiantViewImageServer {
     pid_t pid;
     int port;
+};
+
+struct RadiantViewServerScope {
+    pid_t pid;
+    ~RadiantViewServerScope() { if (pid > 0) { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); } }
 };
 
 static bool test_radiant_view_send_all(int client, const char* data, size_t size) {
@@ -623,10 +629,7 @@ static void test_radiant_view_check_http_language(size_t selected, bool gc_stres
     }
     RadiantViewImageServer server = {};
     ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources, count));
-    struct ServerScope {
-        pid_t pid;
-        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
-    } server_scope = {server.pid};
+    RadiantViewServerScope server_scope = {server.pid};
     // control and sanitizer processes need independent event fixtures.
     char events[128];
     ASSERT_GT(snprintf(events, sizeof(events), "temp/test_document_http_language_%ld_events.json",
@@ -941,10 +944,7 @@ TEST(RadiantViewTest, ResourceTimingBuffersTrackFetchAndXhrAcrossGc) {
     RadiantViewImageServer server = {};
     ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
         sizeof(resources) / sizeof(resources[0])));
-    struct ServerScope {
-        pid_t pid;
-        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
-    } server_scope = {server.pid};
+    RadiantViewServerScope server_scope = {server.pid};
     char url[128];
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
     for (const char* backend : {"ast", "mir"}) {
@@ -998,10 +998,7 @@ TEST(RadiantViewTest, SelectsXhtmlFromHttpMimeAndRedirects) {
     RadiantViewImageServer server = {};
     ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
         sizeof(resources) / sizeof(resources[0])));
-    struct ServerScope {
-        pid_t pid;
-        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
-    } server_scope = {server.pid};
+    RadiantViewServerScope server_scope = {server.pid};
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", "temp/xhtml-http-view.log"}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
         {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {NULL, NULL},
@@ -1277,6 +1274,86 @@ TEST(RadiantViewTest, RadialGradientPixelStopsReleasePaintResources) {
         "[MEMTRACK_LIVE] bytes=0 count=0") : nullptr, nullptr);
     shell_result_free(&result);
     remove(page);
+}
+
+TEST(RadiantViewTest, ModuleFetchFailuresDispatchElementErrorsBeforeLaterModules) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    lam::Temp<char> page(read_text_file("test/html/js_module_fetch_failure.html"));
+    ASSERT_NE(page.get(), nullptr);
+    const char bad_script[] = "window.moduleBodyRan++;";
+    const char good_script[] = "window.goodModuleRan++;";
+    const char html[] = "<!doctype html><script>window.moduleBodyRan++;</script>";
+    const char entry[] = "import './redirect.js'; window.moduleBodyRan++;";
+    const char again[] = "import './entry.js'; window.moduleBodyRan++;";
+    const char control[] = "<!doctype html><script type='module' src='/throw.js'></script>"
+        "<script type='module' src='/syntax.js'></script>";
+    const char throwing[] = "throw Error('module-body-control');";
+    const char invalid[] = "export const = ;";
+    RadiantViewHttpResource resources[] = {
+        {"GET /page ", "text/html", page.get(), strlen(page.get())},
+        {"GET /wrong.js ", "text/plain", bad_script, sizeof(bad_script) - 1},
+        {"GET /entry.js ", "text/javascript", entry, sizeof(entry) - 1},
+        {"GET /again.js ", "text/javascript", again, sizeof(again) - 1},
+        {"GET /redirect.js ", "text/javascript", "", 0, "Location: /html.js\r\n", 302},
+        {"GET /html.js ", "text/html", html, sizeof(html) - 1},
+        {"GET /missing.js ", "text/plain", "missing", 7, "", 404},
+        {"GET /good.js ", "Text/JavaScript; charset=utf-8", good_script, sizeof(good_script) - 1},
+        {"GET /legacy.js ", "text/javascript1.5", good_script, sizeof(good_script) - 1},
+        {"GET /control ", "text/html", control, sizeof(control) - 1},
+        {"GET /throw.js ", "text/javascript", throwing, sizeof(throwing) - 1},
+        {"GET /syntax.js ", "text/javascript", invalid, sizeof(invalid) - 1},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    RadiantViewServerScope server_scope = {server.pid};
+    char url[128];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
+    for (const char* backend : {"ast", "mir", "auto"}) {
+        SCOPED_TRACE(backend);
+        const ShellEnvEntry env[] = {
+            {"JS_EXEC_BACKEND", backend}, {"MEMTRACK_MODE", "STATS"},
+            {"LAMBDA_LOG_LEVEL", "NOTICE"},
+            {"VIEW_MEM_STAGES", "1"}, {"VIEW_MEM_STATS", "1"},
+            {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
+        };
+        RadiantViewLaunch launch = {};
+        launch.label = "module_fetch_failure";
+        launch.page = url;
+        launch.event_path = "test/html/js_module_fetch_failure_events.json";
+        launch.env = env;
+        launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+        test_radiant_view_launch_all(&launch, 1);
+        const char* output = launch.result.stdout_buf ? launch.result.stdout_buf : "";
+        EXPECT_EQ(launch.result.exit_code, 0) << output;
+        EXPECT_FALSE(launch.result.timed_out) << output;
+        EXPECT_NE(strstr(output, "Assertions: 1 passed, 0 failed"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        EXPECT_EQ(strstr(output, "execute_document_scripts: post-dom exception"), nullptr) << output;
+        shell_result_free(&launch.result);
+        // actual parse/body errors retain executed-script diagnostics.
+        char control_url[128];
+        snprintf(control_url, sizeof(control_url), "http://127.0.0.1:%d/control", server.port);
+        RadiantViewLaunch negative = {};
+        negative.label = "module_execution_failure";
+        negative.page = control_url;
+        negative.env = env;
+        negative.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+        ASSERT_TRUE(test_radiant_view_prepare_launch(&negative));
+        test_radiant_view_launch_all(&negative, 1);
+        const char* diagnostics = negative.result.stdout_buf ? negative.result.stdout_buf : "";
+        EXPECT_EQ(negative.result.exit_code, 0) << diagnostics;
+        EXPECT_FALSE(negative.result.timed_out) << diagnostics;
+        EXPECT_NE(strstr(diagnostics, "execute_document_scripts: defer exception in"), nullptr) << diagnostics;
+        EXPECT_EQ(strstr(diagnostics, "script_runner: script source load failed:"), nullptr) << diagnostics;
+        EXPECT_NE(strstr(diagnostics, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << diagnostics;
+        shell_result_free(&negative.result);
+    }
+#endif
 }
 
 TEST(RadiantViewTest, RestoresDocumentRealmAfterScriptException) {
@@ -1951,6 +2028,7 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     ASSERT_NE(nullptr, page_file);
     const char* document =
         "<!doctype html><body>first-render-ready<script>"
+        "if(performance.now()===0&&Date.now()===performance.timeOrigin)console.log('HEADLESS_EPOCH_ALIGNED');"
         "var announced=false;(function tick(){var token=setTimeout(tick,0);"
         "if(token>0&&!announced){console.log('RECURSIVE_TIMER_QUEUED');announced=true;}})();"
         "</script></body>";
@@ -1973,6 +2051,7 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     // prove recursive work was queued, then require a clean close within the watchdog.
     EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "RECURSIVE_TIMER_QUEUED"), nullptr);
+    EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "HEADLESS_EPOCH_ALIGNED"), nullptr);
     shell_result_free(&shell_result);
 
     remove(page);
@@ -2432,10 +2511,7 @@ TEST(RadiantViewTest, PreservesScriptAndDocumentTailAfterNullBytesInFileAndHttpH
     };
     RadiantViewImageServer server = {};
     ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources, 1));
-    struct ServerScope {
-        pid_t pid;
-        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
-    } server_scope = {server.pid};
+    RadiantViewServerScope server_scope = {server.pid};
     char remote[128];
     ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/page.html", server.port), 0);
     sources[source_count++] = remote;
@@ -2457,6 +2533,55 @@ TEST(RadiantViewTest, PreservesScriptAndDocumentTailAfterNullBytesInFileAndHttpH
     }
     remove(page);
     remove(view_log);
+}
+
+TEST(RadiantViewTest, HttpErrorNavigationRendersOriginBodyAndExecutesScripts) {
+#ifndef _WIN32
+    test_radiant_view_ensure_temp_dir();
+    const char page[] = "<!doctype html><p id='origin'>origin error body</p>"
+        "<script src='relative.js'></script><script>"
+        "if(document.getElementById('origin').textContent!=='origin error body'||"
+        "window.relativeErrorScript!==17)throw Error('error body');"
+        "console.log('ORIGIN_ERROR_DOCUMENT_EXECUTED');</script>";
+    const char script[] = "window.relativeErrorScript=17;";
+    const char rejected[] = "throw Error('ERROR_RESOURCE_MUST_NOT_EXECUTE');";
+    const char resource_page[] = "<script src='/rejected.js'></script>";
+    const RadiantViewHttpResource resources[] = {
+        {"GET /redirect ", "text/html", "", 0, "Location: /final/error.html\r\n", 302},
+        {"GET /final/error.html ", "text/html", page, sizeof(page) - 1, "Content-Language: fr\r\n", 404},
+        {"GET /unavailable ", "text/html", page, sizeof(page) - 1, "", 503},
+        {"GET /final/relative.js ", "text/javascript", script, sizeof(script) - 1},
+        {"GET /relative.js ", "text/javascript", script, sizeof(script) - 1},
+        {"GET /resource ", "text/html", resource_page, sizeof(resource_page) - 1},
+        {"GET /rejected.js ", "text/javascript", rejected, sizeof(rejected) - 1, "", 404},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    RadiantViewServerScope server_scope = {server.pid};
+    const char* view_log = "./temp/test_radiant_view_http_error.log";
+    for (const char* path : {"redirect", "unavailable", "resource"}) {
+        SCOPED_TRACE(path);
+        char url[128];
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d/%s", server.port, path);
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
+            {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+        };
+        ShellResult result = test_radiant_view_run_logged_headless(url, nullptr, env);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_FALSE(result.timed_out);
+        if (strcmp(path, "resource")) {
+            EXPECT_NE(strstr(output, "ORIGIN_ERROR_DOCUMENT_EXECUTED"), nullptr) << output;
+            EXPECT_TRUE(test_radiant_view_file_contains(view_log, "HTTP: Server returned error"));
+        }
+        EXPECT_EQ(strstr(output, "ERROR_RESOURCE_MUST_NOT_EXECUTE"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+    remove(view_log);
+#endif
 }
 
 TEST(RadiantViewTest, InitializesScriptScreenFromHostViewport) {
@@ -2672,10 +2797,7 @@ TEST(RadiantViewTest, RegistersDownloadedFontsDuringStylesheetDiscovery) {
     bool started = test_radiant_view_unsupported_image_server_start(&server, resources, 2);
     mem_free(font);
     ASSERT_TRUE(started);
-    struct ServerScope {
-        pid_t pid;
-        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
-    } server_scope = {server.pid};
+    RadiantViewServerScope server_scope = {server.pid};
     char remote[128];
     ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/page.html", server.port), 0);
     const char* view_log = "./temp/test_radiant_view_early_font.log";

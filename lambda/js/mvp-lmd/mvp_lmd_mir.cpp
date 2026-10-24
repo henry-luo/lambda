@@ -98,6 +98,7 @@ struct LmdNumericRegion {
 };
 struct LmdBinding {
     NameEntry* entry;
+    NameEntry* satellite_entry;
     LmdFunction* owner;
     LmdFunction* target;
     AstNode* initializer;
@@ -698,12 +699,16 @@ static MvpLmdClass* class_plan(MvpLmdProgram* p, AstClassNode* ast, LmdBinding* 
     return cls;
 }
 static void collect_scope(MvpLmdProgram* p, LmdFunction* owner, NameScope* scope) {
+    // a module satellite retains private bindings, including shadowed globals.
+    bool script_globals = !p->source_module &&
+        !(p->satellite_script && p->satellite_script->is_module) && !owner->id &&
+        scope == ((AstScript*)p->frontend->ast_root)->global_vars;
     for (NameEntry* e = scope ? scope->first : NULL; e; e = e->next) {
         if (binding(p, e)) continue;
         LmdBinding* b = (LmdBinding*)mem_calloc(1, sizeof(LmdBinding), MEM_CAT_TEMP);
         b->entry = e;
         b->owner = owner;
-        if (!p->source_module && !owner->id && scope == ((AstScript*)p->frontend->ast_root)->global_vars) {
+        if (script_globals) {
             for (int i = 0; i < 3; i++) if (named(e->name, intrinsic_names[i])) {
                 if (e->is_lexical || (e->node && e->node->node_type == AST_NODE_FUNC))
                     diagnostic(p, e->node, "SyntaxError: restricted global declaration");
@@ -711,7 +716,7 @@ static void collect_scope(MvpLmdProgram* p, LmdFunction* owner, NameScope* scope
                 b->kinds = i ? K_NUMBER : K_UNDEFINED;
             }
         }
-        if (!p->source_module && !owner->id && !e->is_lexical && scope == ((AstScript*)p->frontend->ast_root)->global_vars)
+        if (script_globals && !e->is_lexical)
             for (int i = I_MAP - 1; i < I_COUNT - 1; i++) if (named(e->name, intrinsic_names[i]))
                 p->global_receiver = p->global_reflection = p->receiver_abi = true;
         b->module_cell = p->source_module && !owner->id && scope == ((AstScript*)p->frontend->ast_root)->global_vars;
@@ -725,6 +730,7 @@ static void collect_scope(MvpLmdProgram* p, LmdFunction* owner, NameScope* scope
                 if (original->name->len != e->name->len || memcmp(original->name->chars, e->name->chars, e->name->len)) continue;
                 // the AST caller's module slab remains the live binding owner after promotion.
                 b->module_cell = true; b->slot = original->slot;
+                b->satellite_entry = original;
                 b->external = b->assigned = b->observed = b->array_observed = true;
                 b->kinds = K_ANY; e->is_const = original->is_const;
                 b->target = NULL;
@@ -4141,8 +4147,10 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
     } else {
         v = box(c, v);
         if (b->module_cell) {
-            if (c->program->satellite_script && !b->entry->is_lexical) {
+            if (c->program->satellite_script &&
+                    !c->program->satellite_script->is_module && !b->entry->is_lexical) {
                 // the shared setter also synchronizes the caller's registered var/slab mirror.
+                // ES-module declarations stay private even when non-lexical.
                 MIR_reg_t stored = em_call_3(&c->em, "js_set_global_property_after_with_lookup", MIR_T_I64,
                     MIR_T_I64, relocated(c, s2it(b->entry->name)), MIR_T_I64, reg(c, v.reg),
                     MIR_T_I64, integer(c, c->strict), true);
@@ -4151,6 +4159,13 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
             MIR_reg_t state = em_load_at(&c->em, c->unit, offsetof(MvpLmdProgram, module_state), MIR_T_I64, "module_state");
             em_call_void_3(&c->em, "lambda_module_var_store", MIR_T_P, reg(c, state),
                 MIR_T_I64, integer(c, b->slot), MIR_T_I64, reg(c, v.reg), false);
+            if (c->program->satellite_script && c->program->satellite_script->interp_exports) {
+                // the legacy AST namespace mirrors exported aliases outside the slab.
+                em_call_void_3(&c->em, "js_interp_publish_export_bindings",
+                    MIR_T_P, relocated(c, (uint64_t)c->program->satellite_script),
+                    MIR_T_P, relocated(c, (uint64_t)b->satellite_entry),
+                    MIR_T_I64, reg(c, v.reg), true);
+            }
         } else if (b->captured) {
             MIR_reg_t cell = binding_cell(c, b);
             MIR_reg_t stored = em_call_3(&c->em, "mvp_lmd_array_store", MIR_T_I64, MIR_T_I64,
@@ -9880,6 +9895,8 @@ static const LmdImport imports[] = {
     {"array_copy_owned_items", (void*)array_copy_owned_items, AUDIT(JIT_EFFECT_NO_GC, SCALAR,
         ARG(0,GC_PTR)|ARG(1,SCALAR)|ARG(2,RAW_PTR)|ARG(3,SCALAR))},
     {"js_module_binding_get", (void*)js_module_binding_get, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR))},
+    {"js_interp_publish_export_bindings", (void*)js_interp_publish_export_bindings,
+        AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,RAW_PTR)|ARG(2,ITEM))},
     {"js_set_global_property_after_with_lookup", (void*)js_set_global_property_after_with_lookup,
         REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
     {"js_module_import_meta", (void*)js_module_import_meta, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR))},
@@ -14621,15 +14638,35 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     StrBuf* source = strbuf_new();
     if (!source) return ItemError;
     if (script->strict_mode) strbuf_append_str(source, "'use strict';\n");
+    // D8.2.4: clone only the checked body's resolved dependencies. Copying a
+    // wide module scope made planning and the unused synthetic main quadratic.
+    // Loop continuations have a separate parsed scope and keep their name map.
+    AstIndex* index = &script->ast_index;
+    bool* referenced = NULL;
+    if (binding_owner == script && index->binding_count) {
+        if (!index->function_reference_offsets) { strbuf_free(source); return ItemError; }
+        referenced = (bool*)mem_calloc(index->binding_count, sizeof(bool), MEM_CAT_TEMP);
+        if (!referenced) { strbuf_free(source); return ItemError; }
+        uint32_t count = 0;
+        const AstFunctionReference* references = ast_index_function_references(index, function_id, &count);
+        for (uint32_t i = 0; i < count; i++) referenced[references[i].binding_id] = true;
+    }
     for (NameEntry* entry = binding_owner->global_scope->first; entry; entry = entry->next) {
         if (definition->node_type == AST_NODE_FUNC && entry == definition->entry) continue;
+        if (referenced) {
+            AstBindingId binding_id = ast_index_find_binding_entry(index, entry);
+            if (binding_id >= index->binding_count || !referenced[binding_id]) continue;
+        }
         strbuf_append_str(source, entry->is_lexical ? "let " : "var ");
         strbuf_append_str_n(source, entry->name->chars, entry->name->len);
         strbuf_append_str(source, ";\n");
     }
-    if (definition->node_type == AST_NODE_FUNC_EXPR) strbuf_append_char(source, '(');
+    mem_free(referenced);
+    // anonymous default declarations need expression syntax in an isolated unit.
+    bool as_expression = definition->node_type == AST_NODE_FUNC_EXPR || !definition->name;
+    if (as_expression) strbuf_append_char(source, '(');
     strbuf_append_str_n(source, text, length);
-    if (definition->node_type == AST_NODE_FUNC_EXPR) strbuf_append_char(source, ')');
+    if (as_expression) strbuf_append_char(source, ')');
     strbuf_append_char(source, ';');
     MvpLmdExecution* execution = js_runtime_state.auto_mir_owner;
     bool existing = execution != NULL;
@@ -14646,6 +14683,8 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (!program) { strbuf_free(source); return ItemError; }
     program->execution_owner = execution; program->satellite_script = binding_owner;
     program->module_realm = true;
+    // satellite parameters arrive from other units; local literals cannot exclude types.
+    program->bigints = program->symbols = true;
     program->receiver_abi = program->global_receiver = program->global_reflection = program->property_callbacks = true;
     program->host_enabled = true;
     bool faulted = false;

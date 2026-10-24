@@ -955,7 +955,7 @@
     {
       "id": "jetstream/navier_stokes",
       "source": "test/benchmark/jetstream/navier-stokes.js",
-      "sha256": "24ff01d4efb18f994786659b04bdf79d74821461c99e9d8c29c2ea0081ff161c",
+      "sha256": "d30c56c76cd700d0a0b3b018c47452eb800a2e9468fc11d6c1a7ad94feb85809",
       "inputs": [],
       "arguments": [],
       "working_directory": ".",
@@ -963,9 +963,9 @@
         "kind": "jetstream_run_iteration",
         "strict_mode": "source_preserved",
         "run_expression": "runNavierStokes()",
-        "repeat_count": 1,
+        "repeat_count": 15,
         "timed_region": "source-defined runIteration payload",
-        "canonical_sha256": "4941f0a8acfc4c4aa5214f33d6cd42667050632254924f521f400a0e11fc968b"
+        "canonical_sha256": "2712a8dfb6ac967b1b117f0e8f423c0d442c415f9b254e0522877ce8f7be2faa"
       },
       "correctness_oracle": "source PASS/FAIL marker and zero exit status"
     },

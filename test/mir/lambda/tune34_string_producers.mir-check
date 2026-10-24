@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "D8.3.3: a bounded concat producer admits every string argument together and keeps the boxed miss body.",
+  "checks": [
+    {"in_func": "_assemble_#", "expect": ["fn_strcat_many"], "forbid": ["call\tfn_join_p, fn_join"]},
+    {"in_func": "_assemble_b_#", "expect": ["fn_join"]}
+  ]
+}

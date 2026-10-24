@@ -37,108 +37,9 @@ namespace {
 static const char* kOptDir = "./temp/js_opt_contract";
 
 static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
-    "scope_lookup_cache_hit",
-    "scope_lookup_cache_miss",
-    "regex_compile_cache_hit",
-    "regex_compile_cache_miss",
-    "regex_permanent_cache_hit",
-    "regex_fresh_wrapper",
-    "regex_keyless_reject",
-    "regex_cache_invalidate",
-    "regex_bulk_match_hit",
-    "regex_bulk_match_fallback",
-    "regex_bulk_replace_hit",
-    "regex_bulk_replace_fallback",
-    "array_set_fast_hit",
-    "array_set_guard_fail",
-    "array_own_element_get_hit",
-    "array_own_element_get_fallback",
-    "array_reduce_dense_element",
-    "array_reduce_prerooted_args",
-    "array_runtime_items_install",
-    "array_runtime_items_release",
-    "array_gc_items_alloc",
-    "mir_direct_destination",
-    "mir_discard_elision",
-    "mir_branch_direct",
-    "mir_generic_fallback",
-    "mir_box_value",
-    "mir_unbox_value",
-    "mir_root_store",
-    "module_cache_hit",
-    "module_cache_miss",
-    "tla_deferred_body",
-    "tla_drain",
-    "uri_error_cache_hit",
-    "uri_error_cache_miss",
-    "named_fast_probe",
-    "named_fast_hit",
-    "named_fast_miss",
-    "named_fast_no_entry_own",
-    "named_fast_no_entry_absent",
-    "named_fast_array_length",
-    "named_fast_string_length",
-    "named_fast_data_descriptor",
-    "named_fast_no_receiver_string",
-    "named_fast_no_receiver_function",
-    "named_fast_no_receiver_other",
-    "named_fast_function_data",
-    "runtime_number_head_hit",
-    "runtime_number_head_fallback",
-    "runtime_number_compare_head",
-    "runtime_string_concat_head",
-    "mir_number_admitted",
-    "mir_number_fallback",
-    "mir_boxed_loop_pair",
-    "mir_native_index_admitted",
-    "mir_native_index_fallback",
-    "mir_dense_index_admitted",
-    "mir_array_length_admitted",
-    "mir_packed_strict_equal",
-    "mir_loop_stable_name_id",
-    "mir_light_call",
-    "mir_light_direct_activation",
-    "mir_this_call",
-    "mir_this_direct_activation",
-    "bound_call_forward_args",
-    "mir_deferred_function_finalize",
-    "mir_lazy_function_metadata",
-    "ordinary_number_store",
-    "typed_number_store",
-    "typed_number_read",
-    "own_enumerability_inspect",
-    "mir_literal_field_admitted",
-    "reserved_constructor_store",
-    "reserved_constructor_direct_store",
-    "ordinary_data_store",
-    "dynamic_item_store",
-    "static_numeric_array_initializer",
-    "static_object_initializer",
-    "string_search_ascii",
-    "string_search_unicode",
-    "string_split_ascii",
-    "string_split_unicode",
-    "string_slice_ascii",
-    "string_slice_unicode",
-    "string_char_access_ascii",
-    "string_char_access_unicode",
-    "string_concat_ascii",
-    "string_concat_unicode",
-    "ascii_substring_cache_hit",
-    "ascii_substring_cache_miss",
-    "runtime_to_numeric_call",
-    "runtime_increment_call",
-    "runtime_decrement_call",
-    "runtime_boxed_compare_call",
-    "runtime_number_index_get_call",
-    "runtime_number_index_numeric_array",
-    "runtime_number_index_tagged_array",
-    "runtime_number_index_tagged_packed_plain",
-    "runtime_number_index_tagged_holey_plain",
-    "runtime_number_index_tagged_with_props",
-    "runtime_number_index_tagged_other",
-    "runtime_number_index_typed_array",
-    "runtime_number_index_other"
+#define JS_OPT_EVENT(id, name) name,
+#include "../lambda/js/js_exec_profile_events.def"
+#undef JS_OPT_EVENT
 };
 
 static const char* kReasonNames[JS_OPT_REASON_COUNT] = {
@@ -2799,6 +2700,80 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
                             output, sizeof(output)));
     expect_ok_output(output);
     expect_trace_off_same("named_fast_path", source, output);
+}
+
+TEST(JsOpt, AstOwnNamedReadsReachTheSharedDataKernel) {
+    const char* source =
+        "function read(object) {\n"
+        "  let sum = 0;\n"
+        "  for (let i = 0; i < 1024; i++) sum += object.value;\n"
+        "  return sum;\n"
+        "}\n"
+        "let object = {value: -1.25};\n"
+        "Object.freeze(object);\n"
+        "if (read(object) !== -1280) throw new Error('own read changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("ast_own_named_data", source, true,
+        "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GE(trace.events[JS_OPT_NAMED_FAST_HIT][1], 1024u);
+    expect_trace_off_same("ast_own_named_data", source, output, "ast");
+}
+
+TEST(JsOpt, AstNumericParametersUseThePrimitiveComparisonKernel) {
+    const char* source =
+        "function below(value, limit) { return value < limit; }\n"
+        "let count = 0;\n"
+        "for (let i = 0; i < 1024; i++) if (below(i & 15, 16)) count++;\n"
+        "if (count !== 1024) throw new Error('primitive comparison changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("ast_primitive_comparison", source, true,
+        "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GE(trace.events[JS_OPT_AST_PRIMITIVE_COMPARE][1], 1024u);
+    expect_trace_off_same("ast_primitive_comparison", source, output, "ast");
+}
+
+TEST(JsOpt, ModuleNumericPromotionRetainsItsLightCallProof) {
+    const char* source =
+        "export {};\n"
+        "function below(value) { return value < 128; }\n"
+        "let count = 0;\n"
+        "for (let i = 0; i < 1024; i++) if (below(i & 127)) count++;\n"
+        "let coercions = 0;\n"
+        "if (count !== 1024 || !below(64n) ||\n"
+        "    !below({valueOf() { coercions++; return 64; }}) || coercions !== 1)\n"
+        "  throw new Error('numeric promotion changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("module_numeric_promotion", source, true,
+        "auto", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LIGHT_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LIGHT_DIRECT_ACTIVATION][1], 0u);
+    expect_trace_off_same("module_numeric_promotion", source, output, "auto");
+}
+
+TEST(JsOpt, AstExistingNamedStoresReuseTheResolvedSlot) {
+    const char* source =
+        "function write(object) {\n"
+        "  for (let i = 0; i < 1024; i++) object.value = i;\n"
+        "  return object.value;\n"
+        "}\n"
+        "if (write({value: 0}) !== 1023) throw new Error('own store changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("ast_existing_named_store", source, true,
+        "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GE(trace.events[JS_OPT_NAMED_FAST_HIT][1], 1024u);
+    expect_trace_off_same("ast_existing_named_store", source, output, "ast");
 }
 
 TEST(JsOpt, NamedFastNoEntryProfileAttributesPropertyName) {

@@ -24,6 +24,12 @@ The value representation these optimizations operate on (the tagged `Item`, the 
 
 Grouped by tier. Each entry gives the mechanism (with a code anchor), the doc that owns it, and the measured effect where a log recorded one.
 
+Large-bundle AST publication uses an index-owned pointer/identity table for
+bindings, scopes, and classes (`ast-core.cpp`). Repeated identifier uses no
+longer scan every prior declaration. Clones retain their own lookup table,
+appends preserve existing dense IDs, and rebinding clears the old identities
+(**D8.2.4v2**).
+
 ### 2.1 Call & dispatch tier
 
 <img alt="Optimization catalog" src="diagram/d15_opt_catalog.svg" width="720">
@@ -161,16 +167,67 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   module, parameter, hosted, and observable eval-completion assignments retain
   their general operation. String values remain immutable to readers
   (**S1.4**, **S1.6**, **D5.3.3**, **D8.1.3v29**).
-- **AST numeric expression calls.** A definition-owned proof admits a single
-  return expression over numeric parameters, numeric/boolean literals,
-  comparisons, logical operators, and conditionals. Calls with primitive Number
-  arguments borrow the call activation's rooted arguments and use the ordinary
-  AST evaluator without allocating a lexical environment. Coercion, captures,
-  mutation, non-simple parameters, object environments, and hosted calls keep
-  their general path. Literal-cache allocation retains the same callee and
-  argument owners (**S1.6**, **D5.3.3**).
+- **AST parameter expression calls.** A definition-owned proof admits numeric
+  predicates over primitive Number parameters without a lexical environment.
+  Strict single-return expressions also borrow the call activation's rooted
+  parameters when their AST contains no binding writes, nested closures, eval,
+  or activation observations beyond `this`. The existing call activation owns
+  the strict receiver and method home. Captured bindings and property/call expressions
+  still use the ordinary evaluator and its getter, coercion, receiver and error
+  behavior. Non-simple parameters, missing arguments, object environments and
+  hosted calls retain their general path. The callee and argument span own values
+  across allocating getters and callbacks (**S1.6**, **D5.3.3**, **D8.4.1v2**).
+  `parameter_expression_calls.js` checks both admitted expressions and fallbacks.
+  Comparisons whose leaves are borrowed Number parameters or primitive literals
+  use the same binary kernels with local scalar homes and an asserted no-GC
+  boundary. Logical operators discard their unused left operand before evaluating
+  the right operand, so no root window retains it across callbacks or collection
+  (**D5.3.3**, **D8.4.1v2**).
+
+- **Module hot-entry promotion.** AUTO admits synchronous top-level ES-module
+  function declarations and expressions under the classic admission checks,
+  including local loops, property operations and live module-slot reads/writes.
+  Calls load live values and use ordinary invocation. The shared classifier runs
+  before the hot entry, so a threshold of one is honored without executing
+  the body first. Imports, captures outside the module slab, method definitions,
+  nested definitions, eval and suspended definitions retain their existing
+  implementation boundaries. The existing boxed satellite preserves namespace/
+  callable identity and the source module's binding slab; forced AST stays
+  interpreted (**D8.1.3v34**). Its approved class-method extension, including
+  one-wrapper sites with only module-slab free bindings, remains unimplemented:
+  both release experiments were neutral and removed. Object methods carry method
+  syntax on function-expression AST nodes and are rejected before satellite
+  parsing. `module_numeric_predicates.js` checks values, coercion errors, source
+  identity, live imports and scalar lifetime across GC.
+  Satellite parameters keep BigInt and Symbol possibilities even when the
+  cloned source has no such literals. Published strict P2 definitions retain
+  the admission scan's activation observations as callable analysis flags.
+  The existing light or receiver call entry consumes that proof while retaining
+  callee/argument roots and its realm, module and `with` guards
+  (**D5.3.3**, **D8.4.1v2**).
+  Hot-entry clones use the selected function's indexed binding references
+  (**D8.2.4**) to declare only its dependencies, retaining the original live
+  slots. This bounds satellite planning by the function rather than every
+  unrelated declaration in its source bundle.
+
 
 ### 2.4 Runtime builtin tier
+
+- **Shared own named-data reads.** `js_get_key_core` reuses
+  `js_named_fast_lookup` for canonical String keys in plain shape storage
+  without exotic callbacks or native payloads. This also admits plain data
+  on branded intrinsic prototypes during primitive Get; a data value is
+  independent of Receiver. Accessors, deleted/reserved slots, global/nominal
+  owners, exotic carriers and id-less keys retain the full operation.
+  Packed numeric fields publish a number home before leaving the read
+  (**D5.3.3**, **D5.3.5**, **D6.2.2v2**).
+- **Existing ordinary field stores.** After the shared Set kernel proves a
+  default writable own slot, `js_ordinary_add_own_data_property` reuses
+  `js_shape_write_same_size_slot` for an unchanged concrete storage type.
+  Intrinsic invalidation and event-handler publication still run. Reserved
+  constructor slots, global/nominal/static owners, nonextensible objects,
+  descriptors, list images and storage transitions retain their owner paths
+  (**D3.4.3v5**, **D5.3.3**, **D6.2.2v2**).
 
 - **Guarded packed-array splice.** After length/index coercion and species
   construction, `js_array_try_fast_splice` revalidates the captured length and
@@ -199,6 +256,16 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   from 4,300 ms to 350 ms with the same result. This is an isolated workload
   measurement, not a whole-page speedup. Unicode position and split fixtures
   cover captures, backward seeks and surrogate boundaries.
+- **RegExp split failure scanning.** After species construction and limit
+  coercion, a native splitter with builtin `exec`, writable own `lastIndex`,
+  no captures and a direct byte matcher searches for the next matching
+  position instead of repeating the full protocol at every failed position.
+  Successful matches still use the ordinary protocol; UTF-16 conversion,
+  surrogate-half replay, terminal boundaries and final `lastIndex` remain
+  unchanged. Custom exec/species results that fail the guard, captures,
+  backtracking and Unicode-mode matchers retain the existing loop
+  (**S1.11**, **D5.3.3**, **D8.4.1v2**). This removes repeated failed probes
+  from CSS source-fragment line splitting without changing tier admission.
 - **Tune12 admitted bulk RegExp match/replace.**
   `js_regexp_symbol_match` and `js_regexp_symbol_replace` (`js_runtime.cpp`)
   select a bulk RE2 loop only for primitive ASCII input, an ordinary global
@@ -392,3 +459,9 @@ Still-open performance work, distilled from the logs:
 - [JS_11 — RegExp](JS_11_RegExp.md) — property-walk cursor.
 - [JS_12 — TypedArrays, Binary Data & Atomics](JS_12_TypedArrays.md) — raw bulk paths.
 - [JS_16 — Testing](JS_16_Testing.md) — the test262 harness and benchmark drivers behind these numbers.
+
+Calls with an explicit caller result home retire their temporary number
+homes at the call boundary after scalar adoption (**D5.3.3**). Calls without
+a caller home retain the existing enclosing lifetime; proxy application
+keeps its ordinary return path. This applies to the generic, AST-direct,
+compiled light/receiver and compact MVP call entries.

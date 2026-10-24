@@ -19,6 +19,7 @@
 #include "../../lib/path_str.h"
 #include "../../lib/str.h"
 #include "../../lib/url.h"
+#include "../../lib/mime-detect.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -486,6 +487,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         log_error("js-mir: cannot initialize compile recovery state");
         return ItemError;
     }
+    // host clocks are configured before source entry; capture this realm's
+    // origin before user Date timestamps can precede its first performance read.
+    (void)js_performance_time_origin_ms();
     js_mir_reset_last_phase_timing();
     long phase_total_start = js_mir_phase_now_us();
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
@@ -848,9 +852,22 @@ char* js_load_script_source_from_cache(const char* path,
     if (is_http || is_data) {
         // embedded scripts share URL snapshot ownership instead of treating their payload as a filename.
         size_t source_length = 0;
+        char data_type[256] = {};
+        char* response_type = NULL;
         char* downloaded = is_data
-            ? (char*)parse_data_uri(path, NULL, 0, &source_length)
+            ? (char*)parse_data_uri(path, data_type, sizeof(data_type), &source_length)
+            : module_mode ? download_http_content_cached_typed(path, &source_length,
+                "./temp/cache", &response_type)
             : download_http_content_cached(path, &source_length, "./temp/cache");
+        if (downloaded && module_mode &&
+                !mime_type_is_javascript(is_data ? data_type : response_type)) {
+            // module fetch failure precedes parsing, including redirected HTML responses.
+            log_error("js-module-fetch: rejected non-JavaScript MIME type '%s' for %s",
+                is_data ? data_type : response_type ? response_type : "", path);
+            mem_free(downloaded);
+            downloaded = NULL;
+        }
+        mem_free(response_type);
         if (downloaded) {
             source = input_script_cache_copy_source(
                 input_manager_global_script_cache(), &request, downloaded,

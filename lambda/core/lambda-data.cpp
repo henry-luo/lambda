@@ -1241,6 +1241,23 @@ Item typeditem_to_item(TypedItem *titem) {
     }
 }
 
+static Item map_item_slot_to_item(void* field_ptr, Item empty) {
+    uint64_t word = 0;
+    memcpy(&word, field_ptr, sizeof(word));
+    return word ? (Item){.item = word} : empty;
+}
+
+static Item map_container_slot_to_item(void* field_ptr, TypeId type_id) {
+    Container* value = NULL;
+    memcpy(&value, field_ptr, sizeof(value));
+    if (!value) return ItemNull;
+    // raw foreign containers acquire their physical tag on the ordinary read;
+    // virtual carriers already own theirs (D2.6.4v3, D3.4.3v5).
+    if (!is_virtual_container_type_id(type_id) && value->type_id == LMD_TYPE_RAW_POINTER)
+        value->type_id = type_id;
+    return {.container = value};
+}
+
 Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
     if (!field) return ItemNull;
     // S12.1.1v2: passive Lambda storage reads cannot execute a guest accessor.
@@ -1255,7 +1272,17 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
     }
     // one immutable descriptor serves nullable admission and the ordinary storage projection (D3.4.6).
     const LaneStorageDesc& lane = *shape_entry_storage(field);
-    if (field->type && lane_desc_is_nullable_native(&lane)) {
+    bool nullable_native = field->type && lane_desc_is_nullable_native(&lane);
+    // linked records commonly retag null slots to container pointers. Decode
+    // that live descriptor without a second general scalar dispatch.
+    if (!nullable_native && lane.kind == LANE_STORAGE_POINTER &&
+            is_container_type_id(lane.value_domain))
+        return map_container_slot_to_item(field_ptr, lane.value_domain);
+    if (!nullable_native && lane.kind == LANE_STORAGE_ITEM &&
+            (lane.value_domain == LMD_TYPE_NULL || lane.value_domain == LMD_TYPE_ERROR))
+        return map_item_slot_to_item(field_ptr,
+            lane.value_domain == LMD_TYPE_NULL ? ItemNull : ItemError);
+    if (nullable_native) {
         if (lane.kind == LANE_STORAGE_INT) {
             return {.item = lambda_int_box_lane(*(int64_t*)field_ptr)};
         }
@@ -1370,12 +1397,7 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_NULL: {
         // For dynamically-typed fields, a non-null value may have been stored as a raw
         // tagged Item by set_fields(). Read it back; return ItemNull if field is empty.
-        uint64_t raw = 0;
-        memcpy(&raw, field_ptr, sizeof(uint64_t));
-        if (raw == 0) return ItemNull;
-        Item item_val;
-        memcpy(&item_val, field_ptr, sizeof(Item));
-        return item_val;
+        return map_item_slot_to_item(field_ptr, ItemNull);
     }
     case LMD_TYPE_BOOL:
         result.bool_val = *(bool*)field_ptr;
@@ -1428,25 +1450,8 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        // A null written into a container slot of a SHARED shape keeps the
-        // slot's container tag (shape_entry_retag_is_safe), so a zero word is
-        // that null. Return the canonical ItemNull: the raw 0 word typed as
-        // null but failed the JIT's `== null` bit compare, once runtime-grown
-        // maps and spreads came to share tree types (D3.4.3v4/v5).
-        if (!ptr_val) return ItemNull;
-        result.container = (Container*)ptr_val;
-        if (result.container->type_id == LMD_TYPE_RAW_POINTER) {
-            result.container->type_id = type_id;
-        }
-        break;
     case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
-        // Virtual carriers are direct pointers with their physical tag in the
-        // common Container prefix; a zero word is null, as above.
-        memcpy(&ptr_val, field_ptr, sizeof(void*));
-        if (!ptr_val) return ItemNull;
-        result.vmap = (VMap*)ptr_val;
-        break;
+        return map_container_slot_to_item(field_ptr, type_id);
     case LMD_TYPE_ANY: {
         result = typeditem_to_item((TypedItem*)field_ptr);
         break;
@@ -1456,9 +1461,7 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         // so the error keeps its payload; a never-written slot reads the
         // sentinel. Returning ItemNull here erased an error propagated through
         // an `any` map/tuple field.
-        uint64_t word = 0;
-        memcpy(&word, field_ptr, sizeof(word));
-        return word ? (Item){.item = word} : ItemError;
+        return map_item_slot_to_item(field_ptr, ItemError);
     }
     case LMD_TYPE_UNDEFINED:
         // JS shapes may infer a sentinel-only field. Returning ItemError here

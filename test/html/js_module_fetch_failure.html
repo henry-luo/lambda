@@ -1,0 +1,27 @@
+<!doctype html>
+<body>
+<script>
+window.moduleBodyRan = 0;
+window.goodModuleRan = 0;
+window.resourceErrors = 0;
+window.globalErrors = 0;
+window.onerror = function () { globalErrors++; };
+document.addEventListener('error', function (event) {
+    if (event.target.tagName !== 'SCRIPT') return;
+    if (event.bubbles || event.cancelable || !event.isTrusted)
+        throw Error('invalid module resource error event');
+    resourceErrors++;
+}, true);
+document.addEventListener('DOMContentLoaded', function () {
+    document.body.setAttribute('data-fetch-result',
+        resourceErrors === 4 && globalErrors === 0 &&
+        moduleBodyRan === 0 && goodModuleRan === 2 ? 'pass' :
+        [resourceErrors, globalErrors, moduleBodyRan, goodModuleRan].join(','));
+});
+</script>
+<script type="module" src="/wrong.js"></script>
+<script type="module" src="/entry.js"></script>
+<script type="module" src="/again.js"></script>
+<script type="module" src="/missing.js"></script>
+<script type="module" src="/good.js"></script>
+<script type="module" src="/legacy.js"></script>

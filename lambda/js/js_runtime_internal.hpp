@@ -137,6 +137,8 @@ static inline bool js_map_own_flag(Map* m, const char* key_str, int key_len, boo
 }
 Item js_check_array_sym_iterator();
 extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
+void js_note_event_handler_property_set(Item object, Item key, Item value);
+bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry, void* data, Item value);
 void js_regex_cache_reset();
 void js_module_cache_reset(bool reset_provider_namespaces);
 void js_reset_transient_call_state();

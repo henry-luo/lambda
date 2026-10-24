@@ -391,7 +391,7 @@
       "java": "java/native/JetStream.java",
       "erlang": "erlang/native/jetstream.erl",
       "node_reference": "test/benchmark/jetstream/navier-stokes.js",
-      "repeats": 1
+      "repeats": 15
     },
     "jetstream/richards": {
       "java": "java/native/JetStream.java",
@@ -464,7 +464,7 @@
     "jetstream/deltablue.js": "eab88dd7294bbc775ff1354bc6f1be1f196ff1401b5b21aba2123eb28f296f92",
     "jetstream/hash-map.js": "2a8807fb02f4f35fd741994ccec18c72fd211ef2cff94278317cf4c07c63d8a0",
     "jetstream/n-body.js": "ae2f4fc4cf3a0b126f6c4246e7ab040aac7e6e4584b7e2c21dc7a5bcc1426082",
-    "jetstream/navier-stokes.js": "24ff01d4efb18f994786659b04bdf79d74821461c99e9d8c29c2ea0081ff161c",
+    "jetstream/navier-stokes.js": "d30c56c76cd700d0a0b3b018c47452eb800a2e9468fc11d6c1a7ad94feb85809",
     "jetstream/regex-dna.js": "80d2cadb48c715f0724a42edc6ad87c180a99579b5aea79af0a536d437aa0c1e",
     "jetstream/richards.js": "fdbc6b3f4e7c305247074d8a5e54d4b4ff8550a94053431149fbd4149aa05e4e",
     "jetstream/run_jetstream_node.js": "cfcb39de7a466877bb74044dc9c2a61e6bfff333dc0bbe26403b480a093847f4",

@@ -626,6 +626,8 @@ typedef struct AstIndex {
     NameScope** scopes;
     NameEntry** bindings;
     AstNode** classes;
+    // index-owned declaration identities also survive clones of shared ASTs.
+    struct hashmap* declaration_ids;
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
     AstFunctionIndexEntry* functions;

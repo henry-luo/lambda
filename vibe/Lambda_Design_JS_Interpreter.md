@@ -46,6 +46,73 @@ data objects with static or local computed keys, and static or local-key
 computed member chains. Whole-module MIR fallback is not a promotion. This is
 governed by **D8.1.3v18** and **D8.5.1v4**.
 
+**Module numeric predicate revision (USER, 2026-10-23): D8.1.3v30** extends
+hot-entry promotion to synchronous ES-module top-level declarations and
+function expressions only when the existing parameter-only numeric/boolean
+proof admits their single returned expression. Imports, globals, captures,
+properties, calls, writes and activation observations are absent from that
+proof; methods, nested definitions, suspended definitions, eval and dynamic
+source retain their boundaries. Classification precedes the configured hot
+entry, including a threshold of one. The existing boxed satellite keeps the
+module slab, namespace and callable identity, and handles ordinary coercions
+when later arguments have other types. Forced AST stays interpreted; module
+loop handoff and whole-module admission are unchanged.
+
+**Module predicate call revision (USER, 2026-10-23): D8.1.3v31** extends that
+proof only with direct calls to resolved, non-import top-level function
+declarations. Call arguments obey the same expression proof. The declaration
+proves admission, not a constant callee value: every call reads the source
+module's live binding and uses ordinary invocation. A replacement may allocate,
+observe its receiver, return another type or throw; its behavior and identity
+remain observable. Imports, other outer reads, properties, methods, eval,
+dynamic source and the hot thresholds keep their existing boundaries. The
+strict interpreted expression optimization remains broader than module
+promotion admission. Only the numeric proof and the approved module predicate
+call proof certify a strict activation without observations for the compiled
+light-call entry; general read-only expressions do not. Callees retain their
+own ordinary invoke boundaries.
+
+**Module hot-entry revision (USER, 2026-10-23): D8.1.3v34** extends admission
+to synchronous top-level ES-module declarations, function expressions and public
+instance methods that pass the existing classic-function checks. A method
+requires simple parameters and a class site at module top level or inside one
+top-level synchronous module function/arrow. The shared dependency proof must
+resolve every free lexical binding to the original module slab; wrapper locals,
+parameters, class-self/private bindings and imports remain excluded. Deeper or
+suspended wrappers remain excluded. The measured CSS lexer workload
+needs local loops, parameter property calls and live module arrays as well as
+predicates. Reads, writes and calls use the retained source module slab;
+property operations and invocation retain ordinary coercions, callbacks and
+abrupt completion. Imports are explicitly rejected by the shared scan because
+their live cells are not ordinary slab slots. Captures outside that slab, constructors, accessors, static/computed/private
+methods, super/private access, other nested/suspended definitions, eval and dynamic
+source stay excluded. The original callable retains its source, method identity,
+strict receiver, home and non-constructibility; only checked parameter/body spans
+form the isolated function expression used to compile its body. Thresholds, forced AST, module loop handoff and whole-unit admission
+do not change. On publication, admitted strict definitions retain the scan's
+activation observations as callable analysis flags (**D8.4.1v2**). The ordinary
+compiled light or receiver entry can consume those facts without repeating a
+full activation; the guards still fall back across realms, modules or `with`.
+The numeric/predicate-call proof remains useful before promotion.
+
+**Previous top-level-only experiment (2026-10-23):** the isolated method adapter
+and metadata regressions passed, but the CSS workload was neutral (15790/15803 ms
+control, 15732/15708 ms experiment; checksum `1891615 302068 1876230`). The hot
+`next` and `allocateCursor` definitions are inside an arrow at UTF-8 byte 85262,
+so that experiment was removed under its acceptance rule. Subsequent binding
+inspection found `R`, `L` and `F` are module-slab variables, not wrapper captures.
+The user approved **D8.1.3v34** to admit this one-wrapper shape under the existing
+resolved dependency proof, without a captured-environment bridge. The wrapper-method experiment reached both `next` and `allocateCursor`, but
+its two CSS pairs were neutral (15541/15559 ms control, 15598/15705 ms candidate),
+with the original checksum unchanged. It was removed under the approved
+acceptance rule; method promotion remains unimplemented. Four focused method
+regressions passed normally and with forced collection/freed-memory poisoning.
+Overview, Atlas and pricing still hit the original 120-second script watchdog,
+with no outer timeout, native crash or tracked shutdown leak. Object-method function-expression ASTs stay
+excluded. Evidence and the earlier experiment are under
+`temp/radiant-online-oct23-approved/`; current checks are under
+`temp/radiant-online-oct23-wrapped/`.
+
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
 **Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v22**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
@@ -1123,9 +1190,10 @@ The landed bridge emits only the selected checked boxed wrapper and body; it
 does not emit `js_main`. Until JS MIR analysis facts are persistent beyond a
 lowering session, it rebuilds an isolated parser/binder clone of the retained
 source and identifies the selected body by the stable `FunctionId`. Admission
-therefore accepts only a synchronous classic top-level declaration or function
-expression with no captures or module/global binding reads, calls, nested
-callable, class, `arguments`, `new.target`, `eval`, or `with`. The landed
+accepts synchronous top-level declarations or function expressions with no
+captures outside the source module slab, nested callable, class, `arguments`,
+`new.target`, `eval`, or `with`. Calls use ordinary invocation and module/global
+reads retain their live owners. The landed
 local-data slice admits arrays with no spread, data objects whose static or
 computed keys and values satisfy the local scan, static named-member chains
 rooted in `this`, parameters, or function-local values, and computed member
@@ -1133,9 +1201,30 @@ paths whose receiver and key both satisfy that scan. The object/Reference paths
 preserve source receiver/key or key/value order, exactly-once `ToPropertyKey`,
 and ordinary property-kernel behavior; the satellite appends its clone-local
 static property-key image to the definition's active module slab at its
-encoded base before publication. Spread, methods, accessors, and any nonlocal
-receiver/key/value remain ineligible. The satellite context is retained in the
+encoded base before publication. Spread, object-literal methods/accessors and
+captures outside the slab remain ineligible. The satellite context is retained in the
 owning `EvalContext` until teardown. Every other definition is pinned to T0.
+
+The **D8.1.3v34** module extension uses the same admission scan as classic
+functions, adding an explicit import-binding exclusion. Synchronous top-level
+functions and simple-parameter public instance methods on classes at top level
+or inside one top-level synchronous module function/arrow may read and write live module slots, call their current values and perform the
+admitted local loops/property operations. Captures outside the source module
+slab (including wrapper parameters/locals and class-self bindings), deeper or
+suspended wrappers, constructors/accessors/static/computed/private methods,
+super/private access and activation-sensitive definitions remain excluded. Method satellites
+use checked parameter/body spans without replacing the original callable metadata. The numeric parameter-expression and predicate-call proofs
+still classify the narrow light-call contract before promotion. The ordinary
+hot-call threshold and boxed satellite publication remain authoritative; the
+source module is not re-evaluated and its existing binding slab is not
+reinitialized. Module loop handoff remains excluded.
+
+Hot-entry clones declare only bindings referenced by the selected function's
+shared `AstIndex` reference slice (**D8.2.4**). Each declaration still maps to
+the original module slot. Unrelated declarations from a wide bundle otherwise
+inflate binding/range planning and code generation for the synthetic program
+body even though that body never executes. Loop continuations have a separate
+parsed scope and retain the original name map.
 
 The full JavaScript satellite design consumes `JsScript`-owned:
 

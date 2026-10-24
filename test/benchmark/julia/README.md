@@ -93,9 +93,10 @@ counts come from each Node source's `runIteration()` body:
 | richards, splay | 50 |
 | crypto_sha1 | 25 |
 | deltablue | 20 |
-| navier_stokes, hashmap | 1 |
+| navier_stokes | 15 |
+| hashmap | 1 |
 
-Navier–Stokes times one update; updates 2–15 verify checksum 77 and the shared
+Navier–Stokes times all 15 updates, then verifies checksum 77 and the shared
 density digest -257786486 after timing. Splay builds 8,000 nodes before timing,
 then performs 50 × 80 insert/remove pairs; its fixed Park–Miller generator differs
 from the current Node wrapper's host random generator. DeltaBlue shares AWFY's

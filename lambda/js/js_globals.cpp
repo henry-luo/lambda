@@ -1549,6 +1549,10 @@ static void js_performance_ensure_origin(void) {
     // clocks together keeps timeOrigin + now() consistent with Date.now().
     state->origin_monotonic_ms = js_performance_monotonic_now_ms();
     state->origin_epoch_ms = js_performance_epoch_now_ms();
+    // virtual zero stays frozen until a host turn; use Date's epoch precision
+    // so rounding cannot put its timestamp before the same clock's origin.
+    if (state->virtual_clock_enabled)
+        state->origin_epoch_ms = js_date_time_clip(state->origin_epoch_ms);
     state->origin_epoch = js_heap_epoch;
 }
 
@@ -1557,7 +1561,11 @@ extern "C" double js_performance_monotonic_to_relative(double monotonic_ms) {
     JsPerformanceState* state = js_performance_state();
     return state ? monotonic_ms - state->origin_monotonic_ms : monotonic_ms;
 }
-JS_FORWARD_RETURN(double, js_performance_now_ms, (void), js_performance_monotonic_to_relative, (js_performance_monotonic_now_ms()))
+extern "C" double js_performance_now_ms(void) {
+    // capture the origin before sampling now, including lazy fallback entry.
+    js_performance_ensure_origin();
+    return js_performance_monotonic_to_relative(js_performance_monotonic_now_ms());
+}
 
 extern "C" double js_performance_time_origin_ms(void) {
     js_performance_ensure_origin();
@@ -6570,6 +6578,24 @@ bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
         map_ctor_offset_is_reserved(target.map, entry->byte_offset);
     if (entry && !reserved_constructor_slot && entry->byte_offset >= 0 &&
             entry->flags == 0 && !entry->accessor) {
+        TypeMap* shape = (TypeMap*)target.map->type;
+        TypeId value_type = get_type_id(value);
+        // an existing default data slot needs no descriptor/storage redispatch.
+        // keep global binding synchronization and storage transitions on their owners.
+        if (!target.map->is_static && !shape->nominal && !item_is_list(value) &&
+                entry->type == type_info[value_type].type &&
+                shape_entry_storage_fits_data(entry, target.map->data_cap) &&
+                !js_is_global_this_object_value(target) &&
+                js_map_is_extensible_storage(target.map) &&
+                js_shape_write_same_size_slot(shape, entry, target.map->data, value)) {
+            js_intrinsic_note_property_mutation(target, key);
+            js_note_event_handler_property_set(target, key, value);
+            js_opt_trace_record(JS_OPT_NAMED_FAST_HIT, JS_OPT_REASON_NONE,
+                JS_OPT_OUTCOME_TAKEN);
+            js_opt_trace_record(JS_OPT_ORDINARY_DATA_STORE, JS_OPT_REASON_NONE,
+                JS_OPT_OUTCOME_TAKEN);
+            return true;
+        }
         // A default own data property wins before the prototype chain. Reuse
         // the storage writer because it owns TypeMap transitions for a value
         // whose type no longer fits the named same-slot fast path.
@@ -7372,23 +7398,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     type = get_type_id(obj);
     name_str = it2s(name);
 
-    // J39-7: ES §B.2.2.1 / §10.4.7 — the `__proto__` slot is the [[Prototype]]
-    // internal slot, NOT an own property of plain objects. Object literal
-    // `{__proto__: x}` and `Object.create(proto)` both store the proto via this
-    // slot but the spec says `Object.getOwnPropertyDescriptor(o, '__proto__')`
-    // must return undefined unless `__proto__` was explicitly created as an
-    // accessor or data property (e.g. via accessor syntax `get __proto__()`,
-    // `set __proto__(_)`, or `Object.defineProperty`). Suppress descriptor
-    // synthesis only when the slot is the [[Prototype]] storage (no IS_ACCESSOR
-    // shape flag for `__proto__`).
-    if (type == LMD_TYPE_MAP && name_str->len == 9 &&
-        memcmp(name_str->chars, "__proto__", 9) == 0) {
-        ShapeEntry* _se_pp = js_find_shape_entry(obj, "__proto__", 9);
-        if (!_se_pp || !jspd_is_accessor(_se_pp)) {
-            return make_js_undefined();
-        }
-        // fall through: explicit own accessor — return real descriptor below
-    }
+    // [[Prototype]] has separate internal storage; a public __proto__ data
+    // property must retain its ordinary descriptor and Set behavior (D3.4.7).
 
     if (type == LMD_TYPE_MAP && js_class_id(obj) == JS_CLASS_REGEXP &&
         js_regexp_virtual_prop_name(name_str->chars, (int)name_str->len)) {

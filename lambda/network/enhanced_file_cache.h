@@ -23,6 +23,7 @@ typedef struct HttpCacheHeaders {
     char* last_modified;     // Last-Modified header value
     bool no_cache;           // Cache-Control: no-cache
     bool no_store;           // Cache-Control: no-store
+    const char* content_type; // borrowed final response MIME type while storing
 } HttpCacheHeaders;
 
 // Cache metadata for a single entry
@@ -66,6 +67,9 @@ const char* enhanced_cache_get_directory(const EnhancedFileCache* cache);
 
 // Lookup and store operations (thread-safe)
 char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url);
+// returns an owned MIME value only when its persisted digest matches this body.
+char* enhanced_cache_copy_content_type(EnhancedFileCache* cache, const char* url,
+    const char* content, size_t size);
 char* enhanced_cache_store(EnhancedFileCache* cache, 
                            const char* url, 
                            const char* content, 

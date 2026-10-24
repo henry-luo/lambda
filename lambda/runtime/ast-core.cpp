@@ -6,6 +6,7 @@
 #include <string.h>
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
+#include "../../lib/hashmap_typed.hpp"
 
 extern "C" bool ast_cow_path_segment_equal(AstNode* a, bool a_member,
         AstNode* b, bool b_member) {
@@ -220,12 +221,49 @@ static bool ast_index_rehash(AstIndex* index, uint32_t capacity) {
     return true;
 }
 
+enum AstDeclarationKind : uint8_t {
+    AST_DECLARATION_SCOPE, AST_DECLARATION_BINDING, AST_DECLARATION_CLASS
+};
+
+struct AstDeclarationIdentity {
+    const void* declaration;
+    AstDeclarationKind kind;
+    uint32_t id;
+};
+
+typedef TypedHashMap<AstDeclarationIdentity, HashMapIdentity2MemberKeyOps<
+    AstDeclarationIdentity, &AstDeclarationIdentity::declaration,
+    &AstDeclarationIdentity::kind>> AstDeclarationMap;
+
+static uint32_t ast_index_declaration_id(const AstIndex* index,
+        const void* declaration, AstDeclarationKind kind) {
+    const AstDeclarationIdentity* found = AstDeclarationMap::get(
+        index->declaration_ids, {declaration, kind, UINT32_MAX});
+    return found ? found->id : UINT32_MAX;
+}
+
+static bool ast_index_record_declaration(AstIndex* index,
+        const void* declaration, AstDeclarationKind kind, uint32_t id) {
+    if (!index->declaration_ids) {
+        index->declaration_ids = AstDeclarationMap::create(256);
+        if (!index->declaration_ids) return false;
+    }
+    // identifiers repeatedly publish the same binding/scope in large bundles;
+    // keep identity lookup bounded without putting index-local IDs on shared ASTs.
+    AstDeclarationMap::set(index->declaration_ids, {declaration, kind, id});
+    return !AstDeclarationMap::oom(index->declaration_ids);
+}
+
 bool ast_index_publish_scope(AstIndex* index, NameScope* scope) {
     if (!scope) return true;
-    for (uint32_t i = 0; i < index->scope_count; i++) {
-        if (index->scopes[i] == scope) { scope->scope_id = i; return true; }
+    uint32_t existing = ast_index_declaration_id(index, scope, AST_DECLARATION_SCOPE);
+    if (existing != AST_SCOPE_ID_INVALID) {
+        scope->scope_id = existing;
+        return true;
     }
     if (index->scope_count >= index->capacity) return false;
+    if (!ast_index_record_declaration(index, scope, AST_DECLARATION_SCOPE,
+            index->scope_count)) return false;
     scope->scope_id = index->scope_count; index->scopes[index->scope_count++] = scope;
     return true;
 }
@@ -233,10 +271,7 @@ bool ast_index_publish_scope(AstIndex* index, NameScope* scope) {
 AstBindingId ast_index_find_binding_entry(const AstIndex* index,
         const NameEntry* entry) {
     if (!index || !entry) return AST_BINDING_ID_INVALID;
-    for (uint32_t i = 0; i < index->binding_count; i++) {
-        if (index->bindings[i] == entry) return i;
-    }
-    return AST_BINDING_ID_INVALID;
+    return ast_index_declaration_id(index, entry, AST_DECLARATION_BINDING);
 }
 
 static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry) {
@@ -244,6 +279,8 @@ static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry)
     AstBindingId existing = ast_index_find_binding_entry(index, entry);
     if (existing != AST_BINDING_ID_INVALID) return existing;
     if (index->binding_count >= index->capacity) return AST_BINDING_ID_INVALID;
+    if (!ast_index_record_declaration(index, entry, AST_DECLARATION_BINDING,
+            index->binding_count)) return AST_BINDING_ID_INVALID;
     AstBindingId id = index->binding_count++;
     index->bindings[id] = entry;
     return id;
@@ -283,10 +320,14 @@ static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id)
         return ast_index_publish_scope(index, ((AstFuncNode*)node)->vars);
     case AST_NODE_CLASS: case AST_NODE_CLASS_EXPR: {
         AstClassNode* cls = (AstClassNode*)node;
-        for (uint32_t i = 0; i < index->class_count; i++) {
-            if (index->classes[i] == node) { cls->class_id = i; return true; }
+        uint32_t existing = ast_index_declaration_id(index, node, AST_DECLARATION_CLASS);
+        if (existing != AST_CLASS_ID_INVALID) {
+            cls->class_id = existing;
+            return true;
         }
         if (index->class_count >= index->capacity) return false;
+        if (!ast_index_record_declaration(index, node, AST_DECLARATION_CLASS,
+                index->class_count)) return false;
         cls->class_id = index->class_count;
         index->classes[index->class_count++] = node;
         return true;
@@ -345,6 +386,7 @@ bool ast_index_prepare_binding(AstIndex* index) {
     index->scope_count = 0;
     index->binding_count = 0;
     index->class_count = 0;
+    if (index->declaration_ids) hashmap_clear(index->declaration_ids, false);
     index->function_count = 0;
     index->const_folded_count = 0;
     if (index->slots) memset(index->slots, 0,
@@ -1114,6 +1156,15 @@ bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
     if (!destination || !source) return false;
     ast_index_destroy(destination);
     if (source->count && !ast_index_reserve(destination, source->count)) return false;
+    size_t declaration_cursor = 0;
+    AstDeclarationIdentity* declaration = NULL;
+    while (AstDeclarationMap::next(source->declaration_ids, &declaration_cursor, &declaration)) {
+        if (!ast_index_record_declaration(destination, declaration->declaration,
+                declaration->kind, declaration->id)) {
+            ast_index_destroy(destination);
+            return false;
+        }
+    }
     destination->count = source->count;
     destination->scope_count = source->scope_count;
     destination->binding_count = source->binding_count;
@@ -1188,6 +1239,7 @@ void ast_index_destroy(AstIndex* index) {
         index->subtree_end, index->node_bindings, index->first_children, index->next_siblings,
         index->scopes, index->bindings, index->classes);
     free(index->functions);
+    AstDeclarationMap::destroy(index->declaration_ids);
     ast_index_free_queries(index);
     free(index->slots); free(index->slot_ids);
     memset(index, 0, sizeof(*index));

@@ -261,15 +261,18 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 char* download_http_content_with_cookie_jar(const char* url, size_t* content_size,
                                             struct CookieJar* cookie_jar,
                                             char** effective_url = nullptr);
-// document response metadata is caller-owned and reflects only the final response.
+// completed HTTP error documents retain their body; metadata describes the final response.
 char* download_http_document_with_cookie_jar(const char* url, size_t* content_size,
     struct CookieJar* cookie_jar, char** effective_url, char** content_language,
-    char** content_type = nullptr);
+    char** content_type = nullptr, long* status = nullptr);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 
 // Cache-aware synchronous download. Checks disk cache first; downloads on miss.
 // Returns content (caller mem_free()s) and sets *content_size.
 char* download_http_content_cached(const char* url, size_t* content_size, const char* cache_dir);
+// MIME-sensitive consumers require response metadata bound to the returned body.
+char* download_http_content_cached_typed(const char* url, size_t* content_size,
+    const char* cache_dir, char** content_type);
 
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
 Input* input_from_http_with_name_parent(const char* url, const char* type,

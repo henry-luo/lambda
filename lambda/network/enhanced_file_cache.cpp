@@ -48,6 +48,67 @@ static char* enhanced_cache_path_for_url(const EnhancedFileCache* cache,
     return path;
 }
 
+static char* cache_content_type_path(const char* body_path) {
+    size_t capacity = strlen(body_path) + sizeof(".mime");
+    char* path = (char*)mem_alloc(capacity, MEM_CAT_NETWORK);
+    if (path) str_fmt(path, capacity, "%s.mime", body_path);
+    return path;
+}
+
+static const char cache_content_type_magic[] = "lambda-cache-type-v1\n";
+
+static void cache_store_content_type(const char* body_path, const char* content,
+        size_t size, const HttpCacheHeaders* headers) {
+    char* path = cache_content_type_path(body_path);
+    if (!path) return;
+    const char* type = headers ? headers->content_type : NULL;
+    unsigned char digest[32];
+    size_t length = type ? strlen(type) : 0;
+    if (!type || length > 1024 || strpbrk(type, "\r\n") ||
+            !digest_sha256(content, size, digest)) {
+        file_delete(path);
+        mem_free(path);
+        return;
+    }
+    char record[sizeof(cache_content_type_magic) + 64 + 1024];
+    const size_t prefix = sizeof(cache_content_type_magic) - 1;
+    memcpy(record, cache_content_type_magic, prefix);
+    hex_encode(digest, sizeof(digest), record + prefix);
+    record[prefix + 64] = '\n';
+    memcpy(record + prefix + 65, type, length);
+    // the digest rejects a stale sidecar after replacement or a concurrent writer.
+    if (write_binary_file_atomic(path, record, prefix + 65 + length) != 0)
+        file_delete(path);
+    mem_free(path);
+}
+
+char* enhanced_cache_copy_content_type(EnhancedFileCache* cache, const char* url,
+        const char* content, size_t size) {
+    if (!cache || !url || !content) return NULL;
+    char* body_path = enhanced_cache_path_for_url(cache, url);
+    char* path = body_path ? cache_content_type_path(body_path) : NULL;
+    mem_free(body_path);
+    if (!path) return NULL;
+    char* record = NULL;
+    size_t length = 0;
+    bool loaded = file_exists(path) && file_read_all_limit(path, MEM_CAT_NETWORK,
+        2048, &record, &length);
+    mem_free(path);
+    const size_t prefix = sizeof(cache_content_type_magic) - 1;
+    unsigned char digest[32];
+    char encoded[65];
+    char* result = NULL;
+    if (loaded && length >= prefix + 65 && length <= prefix + 65 + 1024 &&
+            memcmp(record, cache_content_type_magic, prefix) == 0 &&
+            record[prefix + 64] == '\n' && digest_sha256(content, size, digest)) {
+        hex_encode(digest, sizeof(digest), encoded);
+        if (memcmp(record + prefix, encoded, 64) == 0)
+            result = mem_dup_n(record + prefix + 65, length - prefix - 65, MEM_CAT_NETWORK);
+    }
+    mem_free(record);
+    return result;
+}
+
 static void cache_metadata_free(CacheMetadata* meta) {
     if (!meta) return;
     mem_free(meta->cache_path);
@@ -63,6 +124,9 @@ static void cache_entry_evict(const char* url, void* value, size_t bytes, void* 
     EnhancedFileCache* cache = (EnhancedFileCache*)udata;
     if ((!cache || cache->remove_files_on_evict) && meta->cache_path) {
         file_delete(meta->cache_path);
+        char* type_path = cache_content_type_path(meta->cache_path);
+        if (type_path) file_delete(type_path);
+        mem_free(type_path);
     }
     cache_metadata_free(meta);
 }
@@ -285,17 +349,15 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     }
     mem_free(cache_subdir);
 
-    // write file
-    FILE* f = fopen(path, "wb");
-    if (!f) {
+    // publish a complete body before its digest-bound response metadata.
+    if (write_binary_file_atomic(path, content, size) != 0) {
         log_error("cache: failed to write %s: %s", path, strerror(errno));
         mem_free(path);
         pthread_rwlock_unlock(&cache->rwlock);
         return NULL;
     }
 
-    fwrite(content, 1, size, f);
-    fclose(f);
+    cache_store_content_type(path, content, size, headers);
 
     if (meta) {
         char* replacement_path = mem_strdup(path, MEM_CAT_NETWORK);

@@ -1,0 +1,10 @@
+{
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {"selector": "body"},
+      "attribute": "data-fetch-result",
+      "equals": "pass"
+    }
+  ]
+}

@@ -233,12 +233,18 @@ const char* content_type_to_extension(const char* content_type) {
     return ".html";
 }
 
+enum HttpResponsePolicy { HTTP_REQUIRE_SUCCESS, HTTP_DOCUMENT_RESPONSE };
+
 // Download HTTP/HTTPS resource and return content in memory
 static char* download_http_content_impl(const char* url, size_t* content_size,
     const HttpConfig* config, char** effective_url, char** content_language,
-    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE, char** content_type = nullptr) {
+    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE, char** content_type = nullptr,
+    HttpResponsePolicy policy = HTTP_REQUIRE_SUCCESS, long* status = nullptr) {
+    if (content_size) *content_size = 0;
+    if (effective_url) *effective_url = NULL;
     if (content_language) *content_language = NULL;
     if (content_type) *content_type = NULL;
+    if (status) *status = 0;
     if (!init_curl()) {
         return NULL;
     }
@@ -348,9 +354,13 @@ static char* download_http_content_impl(const char* url, size_t* content_size,
     // Check HTTP response code
     long response_code;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    if (status) *status = response_code;
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
+    }
+    // completed error documents retain their origin body; resources still reject HTTP errors.
+    if (response_code >= 400 && (policy == HTTP_REQUIRE_SUCCESS || response_code >= 600)) {
         if (response.cookie_jar && !cookie_jar_flush(response.cookie_jar)) {
             log_error("HTTP: failed to persist response cookies");
         }
@@ -406,8 +416,10 @@ static char* download_http_content_with_enhanced_cache(const char* url,
                                                        const char* cache_dir,
                                                        char** out_cache_path,
                                                        bool require_cache_path,
-                                                       size_t max_bytes = HTTP_MAX_RESPONSE_SIZE) {
+                                                       size_t max_bytes = HTTP_MAX_RESPONSE_SIZE,
+                                                       char** content_type = nullptr) {
     if (content_size) *content_size = 0;
+    if (content_type) *content_type = NULL;
     if (out_cache_path) *out_cache_path = NULL;
     if (!url || !cache_dir) return NULL;
 
@@ -415,7 +427,8 @@ static char* download_http_content_with_enhanced_cache(const char* url,
         cache_dir, HTTP_CACHE_MAX_SIZE, HTTP_CACHE_MAX_ENTRIES);
     if (!cache) {
         log_debug("HTTP: enhanced cache unavailable for %s", url);
-        return require_cache_path ? NULL : download_http_content_impl(url, content_size, NULL, NULL, NULL, max_bytes);
+        return require_cache_path ? NULL : download_http_content_impl(
+            url, content_size, NULL, NULL, NULL, max_bytes, content_type);
     }
 
     char* cache_path = enhanced_cache_lookup(cache, url);
@@ -423,9 +436,17 @@ static char* download_http_content_with_enhanced_cache(const char* url,
         size_t cached_size = 0;
         char* content = nullptr;
         file_read_all_limit(cache_path, MEM_CAT_INPUT_OTHER, http_input_byte_limit(max_bytes), &content, &cached_size);
+        char* cached_type = content && content_type
+            ? enhanced_cache_copy_content_type(cache, url, content, cached_size) : NULL;
+        // legacy bodies without response metadata cannot prove module MIME admission.
+        if (content && content_type && !cached_type) {
+            mem_free(content);
+            content = NULL;
+        }
         if (content) {
             log_debug("HTTP: native cache hit for %s (%zu bytes)", url, cached_size);
             if (content_size) *content_size = cached_size;
+            if (content_type) *content_type = cached_type;
             enhanced_cache_destroy(cache);
             if (out_cache_path) *out_cache_path = cache_path;
             else mem_free(cache_path);
@@ -436,9 +457,14 @@ static char* download_http_content_with_enhanced_cache(const char* url,
     }
 
     size_t downloaded_size = 0;
-    char* content = download_http_content_impl(url, &downloaded_size, NULL, NULL, NULL, max_bytes);
+    char* downloaded_type = NULL;
+    char* content = download_http_content_impl(url, &downloaded_size, NULL, NULL,
+        NULL, max_bytes, &downloaded_type);
     if (content) {
-        cache_path = enhanced_cache_store(cache, url, content, downloaded_size, NULL);
+        HttpCacheHeaders headers = {};
+        // an absent header is a known empty MIME type, distinct from a legacy cache miss.
+        headers.content_type = downloaded_type ? downloaded_type : "";
+        cache_path = enhanced_cache_store(cache, url, content, downloaded_size, &headers);
         if (cache_path) {
             log_debug("HTTP: stored native cache entry for %s", url);
         } else if (require_cache_path) {
@@ -449,6 +475,8 @@ static char* download_http_content_with_enhanced_cache(const char* url,
     }
 
     enhanced_cache_destroy(cache);
+    if (content_type) *content_type = downloaded_type;
+    else mem_free(downloaded_type);
     if (content_size && content) *content_size = downloaded_size;
     if (out_cache_path) *out_cache_path = cache_path;
     else mem_free(cache_path);
@@ -462,14 +490,15 @@ char* download_http_content_with_cookie_jar(const char* url, size_t* content_siz
 }
 
 char* download_http_document_with_cookie_jar(const char* url, size_t* content_size,
-    CookieJar* cookie_jar, char** effective_url, char** content_language, char** content_type) {
+    CookieJar* cookie_jar, char** effective_url, char** content_language, char** content_type,
+    long* status) {
     HttpConfig config = default_http_config;
     // A document navigation owns the resource manager's 60-second page-load
     // budget, rather than the 30-second limit intended for each subresource.
     config.timeout_seconds = 60;
     config.cookie_jar = cookie_jar;
     return download_http_content_impl(url, content_size, &config, effective_url, content_language,
-        HTTP_MAX_RESPONSE_SIZE, content_type);
+        HTTP_MAX_RESPONSE_SIZE, content_type, HTTP_DOCUMENT_RESPONSE, status);
 }
 
 // Download HTTP/HTTPS resource to the native cache and optionally return its path.
@@ -483,6 +512,13 @@ char* download_http_content_cached(const char* url, size_t* content_size, const 
     const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
     return download_http_content_with_enhanced_cache(
         url, content_size, effective_cache_dir, NULL, false);
+}
+
+char* download_http_content_cached_typed(const char* url, size_t* content_size,
+        const char* cache_dir, char** content_type) {
+    return download_http_content_with_enhanced_cache(url, content_size,
+        cache_dir ? cache_dir : "./temp/cache", NULL, false,
+        HTTP_MAX_RESPONSE_SIZE, content_type);
 }
 
 // Returns an Input* for HTTP/HTTPS URL, using memory and file cache

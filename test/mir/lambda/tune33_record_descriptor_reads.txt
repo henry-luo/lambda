@@ -1,0 +1,5 @@
+[null, false, 1]
+[7, [null, false, 1]]
+[9, "changed", 1]
+[[2, 3], "changed", "wide"]
+["other", null, 4]

@@ -399,7 +399,7 @@ static inline void js_note_event_handler_property_set(Item object,
         object, js_name_item(name, name_len), value);
 }
 
-static inline void js_note_event_handler_property_set(Item object, Item key,
+void js_note_event_handler_property_set(Item object, Item key,
                                                        Item value) {
     if (get_type_id(key) != LMD_TYPE_STRING) return;
     String* name = it2s(key);
@@ -4923,6 +4923,10 @@ static bool js_intrinsic_is_error_name(const char* name, int len) {
 
 extern "C" Item js_get_key_core(Item object, Item key,
                                                 Item receiver) {
+    // an own data value is independent of Receiver, including primitive
+    // prototype traversal; accessors and exotic owners keep the full Get.
+    Item named_value = ItemNull;
+    if (js_try_get_own_named_data_no_gc(object, key, &named_value)) return named_value;
     RootFrame property_roots(4);
     Rooted<Item> object_root(property_roots, object);
     Rooted<Item> key_root(property_roots, key);
@@ -6508,7 +6512,7 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
 // Write into an existing slot whose lane is the same byte size as the value's,
 // retagging the entry when the shape permits. Used by array companion maps and
 // by T10-2's predicted-slot initialization -- nothing here is array-specific.
-static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
+bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
         void* data, Item value) {
     if (!entry || !entry->type || !data) return false;
     TypeId field_type = entry->type->type_id;
@@ -8290,9 +8294,16 @@ static inline bool js_named_fast_receiver_map_is_fast(Map* map,
     if (receiver_kind == JS_NAMED_FAST_RECEIVER_ARRAY_PROPS) {
         return map_kind_is_array_props(map->map_kind);
     }
-    return (receiver_kind == JS_NAMED_FAST_RECEIVER_MAP ||
-            receiver_kind == JS_NAMED_FAST_RECEIVER_FUNCTION_PROPS) &&
-        js_object_uses_ordinary_shape((Item){.map = map});
+    if (receiver_kind == JS_NAMED_FAST_RECEIVER_FUNCTION_PROPS)
+        return js_object_uses_ordinary_shape((Item){.map = map});
+    if (receiver_kind != JS_NAMED_FAST_RECEIVER_MAP ||
+            (map->map_kind != MAP_KIND_PLAIN && map->map_kind != MAP_KIND_DESC)) return false;
+    TypeMap* shape = (TypeMap*)map->type;
+    if (!shape || shape->nominal) return false;
+    const JsClassMeta* meta = js_object_meta((Item){.map = map});
+    // intrinsic prototypes can carry plain data even when their class is branded.
+    return !meta || (!meta->ops && !(meta->flags & (JS_CLASS_FLAG_EXOTIC_PROPERTIES |
+        JS_CLASS_FLAG_ERROR_CARRIER | JS_CLASS_FLAG_NATIVE_PAYLOAD)));
 }
 
 static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
@@ -8387,7 +8398,8 @@ static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
     if (out_map) *out_map = map;
     if (out_entry) *out_entry = entry;
     if (out_receiver_kind) *out_receiver_kind = receiver_kind;
-    if (out_value) *out_value = value;
+    // packed fields can lend a movable scalar home; publish the number before escape.
+    if (out_value) *out_value = js_scalar_storage_read(value, false);
     if (out_reason) *out_reason = JS_OPT_REASON_NONE;
     return true;
 }
@@ -8395,6 +8407,24 @@ static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
 
 
 
+
+extern "C" bool js_try_get_own_named_data_no_gc(Item object, Item key, Item* out_value) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map ||
+            get_type_id(key) != LMD_TYPE_STRING) return false;
+    TypeMap* shape = (TypeMap*)object.map->type;
+    // host/nominal owners and Window live properties retain their property hooks.
+    if (!shape || shape->nominal ||
+            js_is_global_this_object_value(object)) return false;
+    NameRef name = it2s(key);
+    if (!name || property_key_kind(name) != NAME_KEY_STRING) return false;
+    JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_KEY;
+    js_named_fast_profile_probe();
+    bool found = js_named_fast_lookup(object, name, property_key_id(name), NULL, NULL,
+        NULL, out_value, &reason, true);
+    if (found) js_named_fast_profile_hit();
+    else js_named_fast_profile_miss(reason);
+    return found;
+}
 
 extern "C" Item js_get_name_id(Item object, NameId name_id) {
     js_named_fast_profile_probe();
@@ -13902,6 +13932,12 @@ static void js_prepare_new_target_for_call(bool install_new_target,
     }
 }
 
+static RootFrameLifetime js_call_result_frame_lifetime(uint64_t* result_home) {
+    // D5.3.3: an explicit caller home receives the result before the callee's
+    // number temporaries retire; calls without one must keep those homes alive.
+    return result_home ? RootFrameLifetime::ACTIVATION : RootFrameLifetime::NESTED;
+}
+
 // JC13/JC22: the one call kernel -- the sole semantic authority for [[Call]]
 // and the body half of [[Construct]]. It is always inlined into its three
 // entries, which differ only in constant operands: js_call_entry_generic (an
@@ -13932,7 +13968,8 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     // a second slot. The super-`this` home stays for every activation: an arrow
     // that runs super() inside a derived constructor publishes through its own
     // activation as well as the constructor's (js_super_bind_this).
-    RootFrame call_roots(7);
+    RootFrame call_roots(7, get_type_id(func_item) == LMD_TYPE_FUNC
+        ? js_call_result_frame_lifetime(result_home) : RootFrameLifetime::NESTED);
     Rooted<Item> this_root(call_roots, this_val);
     Rooted<Item> activation_this_root(call_roots, js_current_this);
     Rooted<Item> activation_new_target_root(call_roots, js_new_target);
@@ -14215,7 +14252,7 @@ static Item js_call_compiled_light_direct(Item func_item, Item this_val, Item* a
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
-    RootFrame callee_roots(1);
+    RootFrame callee_roots(1, js_call_result_frame_lifetime(result_home));
     Rooted<Item> callee_root(callee_roots, func_item);
     RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
         ? (size_t)arg_count : 0);
@@ -14249,7 +14286,7 @@ static Item js_call_compiled_this_direct(Item func_item, Item this_val, Item* ar
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
-    RootFrame call_roots(3);
+    RootFrame call_roots(3, js_call_result_frame_lifetime(result_home));
     Rooted<Item> callee_root(call_roots, func_item);
     Rooted<Item> previous_this_root(call_roots, js_current_this);
     Rooted<Item> previous_home_root(call_roots, js_current_private_home_class);
@@ -14346,7 +14383,7 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD)) {
             // D6.2.2v2: host callbacks retain the MVP layout and caller-owned
             // arguments/result; never read the larger JsFunction invoke slot.
-            RootFrame roots(2);
+            RootFrame roots(2, js_call_result_frame_lifetime(result_home));
             if (!roots.valid()) return ItemError;
             Rooted<Item> callee(roots, func_item), receiver(roots, this_val);
             RootSpan owned_args((!args_prerooted && arg_count > 0) ? (size_t)arg_count : 0);
@@ -19872,10 +19909,37 @@ static Item js_regexp_split_with_ops(Item this_val, Item str, Item limit, const 
     // to the one we cannot, instead of asking exec for an impossible offset.
     bool subject_is_utf8 = !unicode_matching && ops->split_utf8_native &&
         ops->split_utf8_native(splitter_root.get());
+    JsRegexData* scan_data = NULL;
+    // D8.4.1v2: a builtin splitter has no observable failed exec probes.
+    // find its next seat once, then keep the ordinary match/capture protocol.
+    bool skip_failed_probes = ops == &js_regexp_default_ops && s_str &&
+        !unicode_matching && js_regexp_builtin_bulk_eligible(splitter_root.get(), &scan_data) &&
+        !scan_data->needs_utf16_subject && !scan_data->bt && !scan_data->special_property_kind &&
+        js_regex_num_groups(scan_data) == 1 &&
+        // lone UTF-16 surrogates have no seat in a direct UTF-8 search.
+        (s_str->is_ascii || utf8_valid(s_str->chars, s_str->len));
     bool zero_width_at_last_seat = false;
     // The last successful match object, replayed for its captures when the
     // synthesized branch below stands in for an unseatable position.
     while (q < size) {
+        if (skip_failed_probes && !js_split_index_is_trailing_surrogate(it2s(string_root.get()), q)) {
+            String* input = it2s(string_root.get());
+            re2::StringPiece seat;
+            JsRegexMatchResult found = js_regex_match_internal(scan_data,
+                input->chars, (int)input->len, js_utf16_idx_to_byte(input, q),
+                re2::RE2::UNANCHORED, &seat, 1);
+            if (found == JS_REGEX_MATCH_RESOURCE_ERROR)
+                return js_throw_range_error("RegExp match exceeded engine resources");
+            int64_t next = found == JS_REGEX_MATCH_FOUND ? js_utf16_index_from_byte(input,
+                (int)(seat.data() - input->chars)) : size;
+            if (next >= size) {
+                // the skipped sticky failures leave lastIndex at zero; a
+                // match at the terminal boundary is never visited by @@split.
+                JS_RETURN_IF_ERROR(ops->set_last_index(splitter_root.get(), (Item){.item = i2it(0)}));
+                break;
+            }
+            q = next;
+        }
         Item z = ItemNull;
         match_root.set(z);
         bool synthesized = subject_is_utf8 &&

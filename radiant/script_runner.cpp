@@ -20,6 +20,7 @@
 #include <assert.h>
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_interp.hpp"
+#include "../lambda/js/js_source_module.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_events.h"
 #include "../lambda/js/js_runtime.h"
@@ -73,12 +74,6 @@ extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern unsigned int g_js_mir_optimize_level;
 extern Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
-extern char* js_load_script_source_from_cache(const char* path,
-                                              const char* profile,
-                                              const char* execution_mode,
-                                              bool module_mode,
-                                              size_t* out_length,
-                                       InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
 extern void js_cleanup_active_compile(void);
 extern void js_abandon_active_compile_after_signal(void);
 
@@ -802,6 +797,12 @@ driver.send_keys = async function(element, keys) {
 
         uint64_t read_start_us = timing ? time_now_us() : 0;
         content = resource_manager_copy_ready_resource_content(resource_manager, resolved_path, NULL);
+        if (content && module_mode) {
+            // strict MIME admission uses the same final-response snapshot as imports.
+            mem_free(content);
+            content = js_load_script_source_from_cache(resolved_path, "radiant-external",
+                "module", true, NULL);
+        }
         if (timing) {
             timing->source_read_us += time_now_us() - read_start_us;
             if (content) timing->source_loaded_tasks++;
@@ -1120,6 +1121,10 @@ static bool script_task_is_executable(JsScriptTask* task) {
     return script_task_is_executable_classic(task) || script_task_is_executable_module(task);
 }
 
+static bool script_task_has_load_failure(JsScriptTask* task) {
+    return task && task->external && task->status == JS_SCRIPT_TASK_LOAD_FAILED;
+}
+
 static void script_task_mark_ready(JsScriptTaskCollection* collection, JsScriptTask* task) {
     if (!task || task->status != JS_SCRIPT_TASK_READY) return;
 
@@ -1431,7 +1436,7 @@ static bool script_task_collection_has_executable_tasks(JsScriptTaskCollection* 
     if (collection->inline_event_handler_count > 0) return true;
     for (int i = 0; i < collection->scripts->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
-        if (script_task_is_executable(task)) {
+        if (script_task_is_executable(task) || script_task_has_load_failure(task)) {
             return true;
         }
     }
@@ -1901,7 +1906,7 @@ static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
 
     for (int i = 0; i < collection->scripts->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
-        if (!script_task_is_executable(task)) continue;
+        if (!script_task_is_executable(task) && !script_task_has_load_failure(task)) continue;
 
         ArrayList* queue = nullptr;
         if (task->scheduling == JS_SCRIPT_SCHED_ASYNC) {
@@ -1942,6 +1947,15 @@ private:
     bool active;
 };
 
+static void script_task_report_load_failure(Runtime* runtime, JsScriptTask* task,
+        const char* filename) {
+    DomDocument* doc = (DomDocument*)runtime->dom_doc;
+    DomElement* element = doc
+        ? dom_find_element_for_source(doc->root, task->script_element) : NULL;
+    dom_dispatch_resource_event(element, "error");
+    log_error("script_runner: script source load failed: %s", filename);
+}
+
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       JsPreambleState* preamble,
                                       const char* phase_name,
@@ -1953,6 +1967,13 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
     for (int i = 0; i < queue->length; i++) {
         if (item_is_error(js_execution_interrupt_status())) return false;
         JsScriptTask* task = (JsScriptTask*)arraylist_get(queue, i);
+        if (script_task_has_load_failure(task)) {
+            char filename_buf[64];
+            script_task_report_load_failure(runtime, task,
+                script_task_filename(task, filename_buf, sizeof(filename_buf)));
+            task->executed = true;
+            continue;
+        }
         if (!script_task_is_executable(task)) continue;
 
         char filename_buf[64];
@@ -2040,9 +2061,15 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         }
 #endif
         if (get_type_id(result) == LMD_TYPE_ERROR) {
-            script_runner_report_result(result, phase_name, filename);
-            log_error("execute_document_scripts: %s script task failed: %s",
-                      phase_name ? phase_name : "scheduled", filename);
+            if (task->kind == JS_SCRIPT_TASK_MODULE &&
+                    js_module_source_fetch_failed(runtime, filename)) {
+                // HTML reports a failed graph fetch on the script element, not as an executed exception.
+                script_task_report_load_failure(runtime, task, filename);
+            } else {
+                script_runner_report_result(result, phase_name, filename);
+                log_error("execute_document_scripts: %s script task failed: %s",
+                          phase_name ? phase_name : "scheduled", filename);
+            }
         }
         if (!execute_browser_global_sync(runtime, preamble, collection)) {
             fatal_error = true;

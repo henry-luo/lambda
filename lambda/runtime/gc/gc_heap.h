@@ -71,6 +71,17 @@ typedef struct gc_header {
     uint32_t alloc_size;      // 4 bytes - user allocation size (not including header)
 } gc_header_t;                // 16 bytes total, user pointer is 16-byte aligned
 
+// initialize one live slot after its storage has been acquired and zeroed.
+static inline void gc_init_object_header(gc_header_t* header, size_t size,
+        uint16_t type_tag, uint8_t flags, gc_header_t** all_objects) {
+    header->type_tag = type_tag;
+    header->gc_flags = flags;
+    header->marked = 0;
+    header->alloc_size = (uint32_t)size;
+    header->next = *all_objects;
+    *all_objects = header;
+}
+
 /**
  * Callback type for triggering GC collection from allocation paths.
  * The gc_heap calls this when data zone exceeds threshold. Scanner-capable
@@ -275,17 +286,16 @@ typedef struct gc_heap {
     gc_object_zone_t* object_zone;  // non-moving object struct allocator
     gc_data_zone_t* data_zone;      // bump-pointer data buffer allocator (nursery)
     gc_data_zone_t* tenured_data;   // data zone for survivors (promoted on GC)
-    // A full data compaction retires the old tenured zone, but dead objects'
-    // finalizers still read their data-zone side tables (an ArrayNum view's
-    // shape) during sweep, so the zone is released only after sweep.
+    // Full compaction retains its old tenured source until survivor fixups
+    // finish. Dead owners have already finalized against the intact sources.
     gc_data_zone_t* retired_tenured_data;
     size_t total_allocated;         // total bytes allocated (including headers)
     size_t object_count;            // number of live objects
 
-    // Mark stack for GC traversal
-    gc_header_t** mark_stack;       // stack of gray objects to trace
-    int mark_top;                   // current mark stack position
-    int mark_capacity;              // mark stack capacity
+    // Mark stack for depth-first GC traversal.
+    gc_header_t** mark_stack;
+    int mark_top;
+    int mark_capacity;
 
     // Registered root slots: external pointers to locations holding Items.
     // Each slot is a uint64_t* that points to a memory location containing
@@ -323,6 +333,7 @@ typedef struct gc_heap {
     uint64_t data_pressure_last_end_ns;     // when the last nursery-threshold collection returned
     uint64_t data_pressure_last_cost_ns;    // mark-phase cost of that collection
     int collecting;                 // re-entrancy guard (1 = GC in progress)
+    int mark_failed;                // abort before weak processing/sweep on OOM
     gc_collect_callback_t collect_callback;  // called when threshold exceeded
     // Marks Item regions that are not the live side-root stack: the root
     // segments of activations parked off the running stack (RA3).
@@ -382,6 +393,11 @@ typedef struct gc_heap {
 
     gc_tune_stats_t tune;           // performance counters (see gc_tune_stats_t)
     gc_external_stats_t external;   // native payload pressure (not a liveness registry)
+    // collection-local worklist built from marked buffer owners, never roots.
+    gc_header_t** compaction_owners;
+    size_t compaction_owner_count;
+    size_t compaction_owner_capacity;
+    bool compaction_owners_valid;   // allocation failure retains the complete heap walk
 } gc_heap_t;
 
 static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {

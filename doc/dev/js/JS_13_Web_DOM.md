@@ -96,6 +96,16 @@ subclasses and observer delivery against Chromium. Legacy PerformanceTiming
 names, navigation IDs and complete PerformanceEntry/resource reflection remain
 partial; this implements the core [User Timing algorithms](https://www.w3.org/TR/user-timing/).
 
+The realm's monotonic/epoch clock pair is captured at script entry, after host
+clock configuration and before user code can record an earlier `Date.now()`
+timestamp. A full heap-epoch reset retires the pair; later scripts in the same
+realm retain it (**D6.2.2v2**). The lazy `performance.now()` fallback also captures
+the origin before sampling the current clock, keeping its first result nonnegative.
+At virtual time zero, the epoch origin uses Date's whole-millisecond precision;
+otherwise Date rounding places every frozen initial timestamp before that origin.
+High Resolution Time permits a coarser implementation-defined
+[clock resolution](https://www.w3.org/TR/hr-time-3/#dfn-coarsen-time).
+
 **URL constructor failures (verified 2026-10-23).** Invalid input/base parses
 produce a `TypeError` completion. Returning normal null from a native constructor
 previously caused `[[Construct]]` to create a URL-branded object without its

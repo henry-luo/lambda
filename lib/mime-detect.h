@@ -48,6 +48,8 @@ int match_magic(const char* pattern, size_t pattern_len, const char* data, size_
 // Returns a static string — no allocation.  Returns NULL for unknown types.
 const char* mime_extension_from_content_type(const char* content_type);
 const char* mime_extension_from_content_type_serve(const char* content_type);
+// HTML module fetches require a JavaScript MIME essence, including legacy aliases.
+int mime_type_is_javascript(const char* content_type);
 
 // External declarations for MIME type data
 extern MimePattern magic_patterns[];

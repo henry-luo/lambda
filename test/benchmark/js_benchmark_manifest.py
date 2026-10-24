@@ -41,8 +41,8 @@ def navier_density_oracle(runner):
     trailer = runner["jetstream_post_timing_oracle"](oracle_id)
     return {
         "id": oracle_id,
-        "timed_frames": 1,
-        "post_timing_frames": 14,
+        "timed_frames": 15,
+        "post_timing_frames": 0,
         "source_checksum_frame": 15,
         "density_quantization": "floor(value * 1000)",
         "expected_stdout_text": runner["jetstream_post_timing_oracle_marker"](oracle_id),
@@ -73,7 +73,7 @@ def wrapper_for(runner, row, source, profile):
         oracle = navier_density_oracle(runner)
         canonical += "\npost-timing-oracle\n" + oracle["id"] + "\n" + oracle["trailer_sha256"]
         wrapper["post_timing_oracle"] = oracle
-        wrapper["timed_region"] = "one source-defined runIteration payload before post-timing validation"
+        wrapper["timed_region"] = "15 source-defined frames including frame-15 checksum before density validation"
     wrapper["canonical_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
     return wrapper
 

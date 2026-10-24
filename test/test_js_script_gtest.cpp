@@ -15,6 +15,7 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lib/mem_factory.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_internal.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_execution_internal.hpp"
@@ -982,6 +983,67 @@ TEST(JsScriptOwnership, PublishesRangeAndReverseQueryFacts) {
     js_transpiler_destroy(tp);
 }
 
+TEST(JsScriptOwnership, DeclarationIdsRemainLocalAcrossCloneAppendAndRebind) {
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    for (int i = 0; i < 600; i++) {
+        strbuf_append_format(source,
+            "function f%d(value) { let local = value; "
+            "class Local { read() { return local; } } return local; } f%d(%d);\n",
+            i, i, i);
+    }
+    JsTranspiler* tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source->str, source->length, JS_PARSE_SCRIPT));
+    AstIndex* index = &tp->ast_index;
+    ASSERT_GE(index->binding_count, 1800u);
+    ASSERT_GE(index->scope_count, 600u);
+    ASSERT_EQ(index->class_count, 600u);
+
+    AstIndex clone = {}, fragment = {};
+    ASSERT_TRUE(ast_index_clone(&clone, index));
+    // another index can assign different IDs to the same retained declarations.
+    ASSERT_TRUE(ast_index_build_profile(&fragment, index->functions[0].node, &js_profile));
+    for (uint32_t i = 0; i < index->binding_count; i++) {
+        EXPECT_EQ(ast_index_find_binding_entry(index, index->bindings[i]), i);
+        EXPECT_EQ(ast_index_find_binding_entry(&clone, index->bindings[i]), i);
+    }
+    for (uint32_t i = 0; i < clone.scope_count; i++) {
+        ASSERT_TRUE(ast_index_publish_scope(&clone, clone.scopes[i]));
+        EXPECT_EQ(clone.scopes[i]->scope_id, i);
+    }
+    uint32_t scopes = clone.scope_count;
+    for (uint32_t i = 0; i < scopes; i++) ASSERT_TRUE(ast_index_publish_scope(&clone, clone.scopes[i]));
+    EXPECT_EQ(clone.scope_count, scopes);
+
+    JsTranspiler* extra = js_transpiler_create(NULL);
+    ASSERT_NE(extra, nullptr);
+    const char appended[] = "let appended = 1; appended;";
+    ASSERT_TRUE(js_transpiler_parse_c(extra, appended, sizeof(appended) - 1, JS_PARSE_SCRIPT));
+    ASSERT_TRUE(ast_index_append_profile(&clone, extra->ast_root, NULL, &js_profile));
+    NameEntry* binding = extra->ast_index.bindings[0];
+    EXPECT_EQ(ast_index_find_binding_entry(&clone, binding), index->binding_count);
+    EXPECT_EQ(ast_index_find_binding_entry(index, binding), AST_BINDING_ID_INVALID);
+
+    ASSERT_TRUE(ast_index_prepare_binding(&clone));
+    AstNode* use = NULL;
+    for (uint32_t i = 0; i < extra->ast_index.count; i++) {
+        if (extra->ast_index.node_bindings[i] != AST_BINDING_ID_INVALID) {
+            use = extra->ast_index.nodes[i];
+            break;
+        }
+    }
+    ASSERT_NE(use, nullptr);
+    ASSERT_TRUE(ast_index_bind_node(&clone, use, NULL, AST_FUNCTION_ID_INVALID, NULL));
+    EXPECT_EQ(ast_index_find_binding_entry(&clone, binding), 0u);
+    EXPECT_EQ(ast_index_find_binding_entry(&clone, index->bindings[0]), AST_BINDING_ID_INVALID);
+    ast_index_destroy(&clone);
+    ast_index_destroy(&fragment);
+    js_transpiler_destroy(extra);
+    js_transpiler_destroy(tp);
+    strbuf_free(source);
+}
+
 static AstIndexProfileSupport count_index_profile_nodes(const AstIndex* index,
         AstNodeId node_id, void* context) {
     (void)index;
@@ -1290,6 +1352,350 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, ModuleNumericPredicatesRespectBackendAndHotThreshold) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = strcmp(backend, "auto") == 0;
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 10000;
+            const char source[] =
+                "import {counter} from './dep.mjs';"
+                "export let untouched = 17;"
+                "export function digit(value) { return value >= 48 && value <= 57; }"
+                "export const expression = function(value) { return value < 128; };"
+                "export function identity(value) { return value; }"
+                "export default function(value) { return value >= 0; }";
+            Item namespace_obj = js_interp_execute_es_module_source(&runtime,
+                source, sizeof(source) - 1,
+                "test/js/interp_esm/numeric-predicates.mjs", NULL);
+            ASSERT_FALSE(item_is_error(namespace_obj));
+            for (const char* name : {"digit", "expression", "identity", "default"}) {
+                Item function_item = js_get_key_default(namespace_obj, js_make_string(name));
+                ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC) << name;
+                auto* function = (JsFunction*)function_item.function;
+                EXPECT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST);
+                for (uint32_t call = 1; call <= threshold; call++) {
+                    Item argument = flt2it(49.0);
+                    Item result = js_call_function(function_item,
+                        make_js_undefined(), &argument, 1);
+                    ASSERT_FALSE(item_is_error(result)) << backend << ":" << name;
+                    Item expected = strcmp(name, "identity") == 0
+                        ? argument : (Item){.item = b2it(true)};
+                    EXPECT_EQ(js_strict_equal(result, expected).item, b2it(true));
+                    bool promoted = runtime.js_promotion_auto && call == threshold;
+                    EXPECT_EQ(js_fn_body_kind(function), promoted
+                        ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+                    EXPECT_EQ(function->code->p2_promotion.call_count,
+                        runtime.js_promotion_auto ? call : 0u);
+                }
+                EXPECT_EQ(js_strict_equal(function_item, js_get_key_default(
+                    namespace_obj, js_make_string(name))).item, b2it(true));
+                EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+                    js_make_string("untouched")), flt2it(17.0)).item, b2it(true));
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModulePredicateCallsPromoteThroughLiveDeclarationBindings) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = strcmp(backend, "auto") == 0;
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 10000;
+            const char source[] =
+                "function digit(value){return value>=48&&value<=57}"
+                "function chain(value){return digit(value)||value===95}"
+                "export function test(value){return chain(value)}"
+                "export function replace(value){digit=value}"
+                "export function throwing(){throw marker}"
+                "export const marker={};"
+                "export function receiver(){return this===undefined}"
+                "export function tiny(){gc();return 5e-324}";
+            Item namespace_obj = js_interp_execute_es_module_source(&runtime,
+                source, sizeof(source) - 1,
+                "test/js/interp_esm/predicate-calls.mjs", NULL);
+            ASSERT_FALSE(item_is_error(namespace_obj));
+            {
+                RootFrame roots(3);
+                Rooted<Item> ns(roots, namespace_obj);
+                Rooted<Item> predicate(roots, js_get_key_default(ns.get(), js_make_string("test")));
+                Rooted<Item> replace(roots, js_get_key_default(ns.get(), js_make_string("replace")));
+                ASSERT_EQ(get_type_id(predicate.get()), LMD_TYPE_FUNC);
+                auto* function = (JsFunction*)predicate.get().function;
+                Item argument = flt2it(49.0);
+                for (uint32_t call = 1; call <= threshold; call++) {
+                    EXPECT_EQ(js_call_function(predicate.get(), make_js_undefined(), &argument, 1).item,
+                        ITEM_TRUE);
+                    EXPECT_EQ(js_fn_body_kind(function), runtime.js_promotion_auto && call == threshold
+                        ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST);
+                    if (runtime.js_promotion_auto && call == threshold)
+                        EXPECT_EQ(function->invoke, js_call_entry_compiled_light);
+                }
+                for (const char* source : {"49n", "({valueOf(){gc();return 49}})", "Symbol('value')"}) {
+                    Item coerced = transpile_js_to_mir(&runtime, source,
+                        "predicate-call-coercion.js", NULL);
+                    ASSERT_FALSE(item_is_error(coerced));
+                    Item result = js_call_function(predicate.get(), make_js_undefined(), &coerced, 1);
+                    if (!strncmp(source, "Symbol", 6)) EXPECT_TRUE(item_is_error(result));
+                    else EXPECT_EQ(result.item, ITEM_TRUE);
+                }
+                // a replacement can observe the receiver, allocate, or return a scalar;
+                // none of those behaviors may be inferred from the declaration's body.
+                for (const char* name : {"receiver", "tiny"}) {
+                    Item replacement = js_get_key_default(ns.get(), js_make_string(name));
+                    ASSERT_FALSE(item_is_error(js_call_function(replace.get(), make_js_undefined(), &replacement, 1)));
+                    heap_gc_collect();
+                    Item result = js_call_function(predicate.get(), make_js_undefined(), &argument, 1);
+                    ASSERT_FALSE(item_is_error(result));
+                    if (!strcmp(name, "receiver")) EXPECT_EQ(result.item, ITEM_TRUE);
+                    else EXPECT_DOUBLE_EQ(result.get_double(), 5e-324);
+                }
+                Item replacement = js_get_key_default(ns.get(), js_make_string("throwing"));
+                ASSERT_FALSE(item_is_error(js_call_function(replace.get(), make_js_undefined(), &replacement, 1)));
+                Item thrown = js_call_function(predicate.get(), make_js_undefined(), &argument, 1);
+                EXPECT_TRUE(item_is_error(thrown));
+                EXPECT_EQ(js_error_lane_payload(thrown).item,
+                    js_get_key_default(ns.get(), js_make_string("marker")).item);
+                replacement = flt2it(1.0);
+                ASSERT_FALSE(item_is_error(js_call_function(replace.get(), make_js_undefined(), &replacement, 1)));
+                EXPECT_TRUE(item_is_error(js_call_function(predicate.get(), make_js_undefined(), &argument, 1)));
+                EXPECT_EQ(js_get_key_default(ns.get(), js_make_string("test")).item, predicate.get().item);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModulePromotionRetainsImportAndActivationBoundaries) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    runtime.js_promotion_backedge_threshold = 10000;
+    const char source[] =
+        "import {counter,bump} from './dep.mjs';"
+        "let limit = 128;"
+        "export function moduleRead(value) { return value < limit; }"
+        "export function importRead(value) { return value < counter; }"
+        "export function globalRead(value) { return value < Infinity; }"
+        "export function call(value) { return Math.abs(value) < 128; }"
+        "export function importCall(value) { return bump(value) || true; }"
+        "const expression = value => true;"
+        "export function expressionCall(value) { return expression(value); }"
+        "export function evaluated(value) { return eval('value < 128'); }"
+        "export function observed(value) { return arguments[0] < 128; }"
+        "export function defaulted(value = 1) { return value < 128; }"
+        "export const method = {test(value) { return value < 128; }}.test;"
+        "export const nested = (() => function(value) { return value < 128; })();";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime,
+        source, sizeof(source) - 1,
+        "test/js/interp_esm/numeric-boundaries.mjs", NULL);
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    for (const char* name : {"moduleRead", "importRead", "globalRead", "call", "importCall", "expressionCall",
+            "evaluated", "observed", "defaulted", "method", "nested"}) {
+        Item function_item = js_get_key_default(namespace_obj, js_make_string(name));
+        ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC) << name;
+        Item argument = flt2it(1.0);
+        Item result = js_call_function(function_item, make_js_undefined(), &argument, 1);
+        ASSERT_FALSE(item_is_error(result)) << name;
+        EXPECT_EQ(js_strict_equal(result, (Item){.item = b2it(true)}).item, b2it(true));
+        auto* function = (JsFunction*)function_item.function;
+        bool admitted = !strcmp(name, "moduleRead") || !strcmp(name, "globalRead") ||
+            !strcmp(name, "call") || !strcmp(name, "expressionCall");
+        EXPECT_EQ(js_fn_body_kind(function), admitted
+            ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+        EXPECT_EQ(function->code->p2_promotion.state, admitted
+            ? FN_PROMOTION_COMPILED : FN_PROMOTION_PINNED_INTERP) << name;
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleHotEntriesPreserveLiveSlotsAndPropertyCallbacks) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 1;
+            const char source[] = R"JS(
+                export let table = new Uint8Array([48, 49, 65, 57]);
+                let offset = 0;
+                function accept(value) { return value >= 48 && value <= 57; }
+                export function scan(text) {
+                    let sum = offset;
+                    for (let i = 0; i < text.length; i++) {
+                        let value = text.charCodeAt(i);
+                        if (accept(value)) sum += value;
+                    }
+                    return sum + table[0];
+                }
+                export function replace(next, values, callback) {
+                    offset = next; table = values; accept = callback;
+                }
+                export function property(receiver, key, value) {
+                    receiver[key] = value;
+                    return receiver[key](5e-324);
+                }
+                export function beforeInitialization() { return later; }
+                let tdz = false;
+                try { beforeInitialization(); } catch (error) { tdz = error instanceof ReferenceError; }
+                let later = 17;
+                if (!tdz || beforeInitialization() !== 17) throw 'module TDZ';
+                const identity = scan;
+                for (let i = 0; i < 3; i++)
+                    if (scan('a1Z2') !== 147) throw 'initial scan';
+                function letters(value) { return value > 64; }
+                for (let i = 0; i < 3; i++) replace(10, new Uint8Array([7]), letters);
+                gc();
+                if (scan('a1Z2') !== 204 || scan !== identity) throw 'live module slot';
+                let gets = 0, sets = 0, keys = 0;
+                const target = {};
+                const receiver = new Proxy(target, {
+                    get(object, key) { gets++; gc(); return object[key]; },
+                    set(object, key, value) { sets++; gc(); object[key] = value; return true; }
+                });
+                const key = { [Symbol.toPrimitive]() { keys++; gc(); return 'call'; } };
+                function callback(value) { gc(); return this === receiver ? value : 0; }
+                for (let i = 0; i < 3; i++)
+                    if (property(receiver, key, callback) !== 5e-324) throw 'property call';
+                if (gets !== 3 || sets !== 3 || keys !== 6) throw 'property order';
+                const marker = {};
+                const throwing = { get call() { gc(); throw marker; }, set call(value) {} };
+                let thrown = false;
+                try { property(throwing, 'call', callback); } catch (value) { thrown = value === marker; }
+                if (!thrown) throw 'getter completion';
+                function coercing(value) { return value >= 48; }
+                replace(0, new Uint8Array([0]), coercing);
+                let bigintError = false;
+                try { scan({length:1, charCodeAt(){gc();return 49n}}); }
+                catch (error) { bigintError = error instanceof TypeError; }
+                let symbolError = false;
+                try { scan({length:1, charCodeAt(){return Symbol()}}); }
+                catch (error) { symbolError = error instanceof TypeError; }
+                export const ok = bigintError && symbolError;
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source,
+                sizeof(source) - 1, "test/js/interp_esm/hot-module-slots.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+            for (const char* name : {"scan", "replace", "property", "beforeInitialization"}) {
+                auto* function = (JsFunction*)js_get_key_default(ns, js_make_string(name)).function;
+                ASSERT_NE(function, nullptr);
+                bool promoted = runtime.js_promotion_auto &&
+                    (strcmp(name, "beforeInitialization") || threshold == 1);
+                EXPECT_EQ(js_fn_body_kind(function), promoted
+                    ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+                if (promoted) EXPECT_EQ(function->invoke, js_call_entry_compiled_light) << name;
+                // module loops do not hand off their running T0 activation.
+                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ObjectMethodSourceStaysOutsideFunctionSatelliteAdmission) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    Item method = transpile_js_to_mir(&runtime, "({valueOf(){return 17}}).valueOf",
+        "object-method-admission.js", NULL);
+    ASSERT_EQ(get_type_id(method), LMD_TYPE_FUNC);
+    EXPECT_EQ(js_call_function(method, make_js_undefined(), NULL, 0).get_double(), 17);
+    EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), JS_FUNCTION_BODY_AST);
+    EXPECT_EQ(js_runtime_state.auto_mir_owner, nullptr);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleHotEntriesKeepShadowedIntrinsicBindingsPrivate) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] =
+        "const undefined=17, NaN=23, Infinity=42;"
+        "export function read(){return undefined+NaN+Infinity}"
+        "export function refused(){undefined=1}"
+        "if(read()!==82)throw 'private globals';"
+        "let caught=false;try{refused()}catch(e){caught=e instanceof TypeError}"
+        "export const ok=caught&&read()===82&&globalThis.undefined===void 0;";
+    Item ns = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/shadowed-intrinsics.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+    for (const char* name : {"read", "refused"}) {
+        Item function = js_get_key_default(ns, js_make_string(name));
+        ASSERT_EQ(get_type_id(function), LMD_TYPE_FUNC);
+        EXPECT_EQ(js_fn_body_kind((JsFunction*)function.function), JS_FUNCTION_BODY_CODE);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleLocalReadsRetainParameterEvalAndTdzSemantics) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 1;
+        const char source[] = R"JS(
+            function separated(value=1, read=()=>value) {
+                var value=2;
+                eval('var value=3');
+                let local=4;
+                eval('local=5');
+                return read()===1 && value===2 && local===5 && arguments[0]===undefined;
+            }
+            function unmapped(value) { eval('value=7'); return arguments[0]+value; }
+            function localTdz() {
+                let refused=false;
+                try { later; } catch(error) { refused=error instanceof ReferenceError; }
+                let later=17;
+                return refused && later===17;
+            }
+            function captured(value) {
+                const read=()=>value;
+                eval('value=5e-324');
+                gc();
+                return read;
+            }
+            const read=captured(0);
+            gc();
+            export const ok=separated() && unmapped(3)===10 && localTdz() && read()===5e-324;
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source,
+            sizeof(source)-1, "test/js/interp_esm/local-bindings.mjs", NULL);
+        EXPECT_FALSE(item_is_error(ns));
+        if (!item_is_error(ns)) EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
 TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1547,7 +1953,9 @@ TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
     const char source[] =
         "let make=Function('\"use strict\";return ()=>this');let saved=[];"
         "for(let i=0;i<32;i++)saved.push(make.call(i/7));"
-        "let zero=make.call(-0);gc();let ok=Object.is(zero(),-0);"
+        "let zero=make.call(-0),tiny=make.call(5e-324);"
+        "function capture(x){return()=>x}let captured=capture(1e-323);"
+        "gc();let ok=Object.is(zero(),-0)&&tiny()===5e-324&&captured()===1e-323;"
         "for(let i=0;i<32;i++)ok=ok&&saved[i]()===i/7;"
         "function strict(){'use strict';return eval('()=>this')}"
         "let a=strict.call(1/3),b=strict.call(2/3);gc();ok&&a()===1/3&&b()===2/3;";
@@ -1558,6 +1966,36 @@ TEST(JsInterpreter, EscapedNumericReceiversOwnTheirScalarHomes) {
         runtime_init(&runtime);
         Item result = transpile_js_to_mir(&runtime, source, "escaped-numeric-this.js", NULL);
         EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, CallerResultHomeRetiresCalleeNumberTemporaries) {
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        SCOPED_TRACE(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        {
+            RootFrame roots(1);
+            Rooted<Item> function(roots, transpile_js_to_mir(&runtime,
+                "function churn(n){let value=5e-324;"
+                "for(let i=0;i<n;i++)value=value+5e-324;return value}churn;",
+                "callee-number-temporaries.js", NULL));
+            ASSERT_EQ(get_type_id(function.get()), LMD_TYPE_FUNC);
+            Item argument = flt2it(32.0);
+            for (int call = 0; call < 4; call++) {
+                uint64_t result_home = 0;
+                LambdaSideStackSnapshot before = lambda_side_stack_snapshot();
+                Item result = js_call_function_into(function.get(),
+                    make_js_undefined(), &argument, 1, &result_home);
+                EXPECT_FALSE(item_is_error(result));
+                EXPECT_DOUBLE_EQ(result.get_double(), 33 * 5e-324);
+                EXPECT_EQ(lambda_side_stack_snapshot().number_top, before.number_top);
+                heap_gc_collect();
+                EXPECT_DOUBLE_EQ(result.get_double(), 33 * 5e-324);
+            }
+        }
         runtime_cleanup(&runtime);
     }
 }
@@ -2833,7 +3271,11 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
 
     const char source[] =
         "import { bump, counter } from './dep.mjs'; "
-        "bump(); export const answer = counter + 1;";
+        "import * as namespace from './dep.mjs'; "
+        "function shadow(counter) { counter += 1; return counter; } "
+        "function local() { let value = 0; for (let i = 0; i < 32; i++) value += 1; return value; } "
+        "bump(); export const answer = counter + 1; "
+        "export const identities = shadow(2) === 3 && local() === 32 && namespace.counter === counter;";
     ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/main.mjs", NULL);
@@ -2843,6 +3285,7 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     Item answer = js_get_key_default(namespace_obj, js_make_string("answer"));
     ASSERT_FALSE(item_is_error(answer));
     EXPECT_EQ(js_strict_equal(answer, flt2it(42.0)).item, b2it(true));
+    EXPECT_EQ(js_get_key_cstr(namespace_obj, "identities").item, b2it(true));
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/main.mjs"),
         nullptr);
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
@@ -5856,6 +6299,50 @@ TEST(JsInterpreter, EnumeratesOnlySuppliedMappedArguments) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, CapturedParametersUseTheirOwnersMappedArguments) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "function outer(value) { const aliased = arguments; return function inner(other) { "
+        "if (arguments[0] !== other) return false; aliased[0] = 17; "
+        "if (value !== 17) return false; value = 23; return aliased[0] === 23; }; } "
+        "outer(3)(7);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "mapped-arguments-owner.js", NULL);
+    EXPECT_EQ(result.item, b2it(true));
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, BorrowsParametersOnlyForUnobservableExpressionBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "let text = 'abc'; function load(index) { 'use strict'; "
+        "return index < text.length ? text.charCodeAt(index) : 0; } "
+        "function bump(value) { 'use strict'; return ++value; } "
+        "class Box { read(index) { return this.text.charCodeAt(index); } } "
+        "let box = new Box(); box.text = text; box.read(1); load(1); bump(2);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "parameter-expression.js", NULL);
+    EXPECT_EQ(js_strict_equal(result, flt2it(3.0)).item, b2it(true));
+    const char admitted[] = "load;";
+    Item load = js_interp_execute_source(&runtime, admitted, sizeof(admitted) - 1,
+        "read-parameter-expression.js", NULL);
+    ASSERT_EQ(get_type_id(load), LMD_TYPE_FUNC);
+    EXPECT_EQ(((JsFunction*)load.function)->code->parameter_leaf_state, 3);
+    const char refused[] = "bump;";
+    Item bump = js_interp_execute_source(&runtime, refused, sizeof(refused) - 1,
+        "read-parameter-update.js", NULL);
+    ASSERT_EQ(get_type_id(bump), LMD_TYPE_FUNC);
+    EXPECT_EQ(((JsFunction*)bump.function)->code->parameter_leaf_state, 1);
+    const char method[] = "Box.prototype.read;";
+    Item read = js_interp_execute_source(&runtime, method, sizeof(method) - 1,
+        "read-method-expression.js", NULL);
+    ASSERT_EQ(get_type_id(read), LMD_TYPE_FUNC);
+    EXPECT_EQ(((JsFunction*)read.function)->code->parameter_leaf_state, 3);
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, SharesPrivateClassElementsWithTheRuntimeKernel) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -6191,6 +6678,48 @@ run();
         ASSERT_FALSE(item_is_error(result));
         EXPECT_EQ(result.item, b2it(true));
         runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsRegExp, SplitSkipsUnobservableMissesAndKeepsProtocolEffects) {
+    const char* cases[] = {
+        R"JS(let input='x'.repeat(32000),out=input.split(/\r\n?|\n|\f/);out.length===1&&out[0]===input)JS",
+        R"JS(JSON.stringify('a\r\nb\nc\fd'.split(/\r\n?|\n|\f/))==='["a","b","c","d"]')JS",
+        R"JS(JSON.stringify('é😀one\r\ntwo漢\nlast'.split(/\r\n?|\n|\f/))==='["é😀one","two漢","last"]')JS",
+        R"JS(''.split(/(?:)/).length===0&&'ab'.split(/(?:)/).join('|')==='a|b'&&'ab'.split(/$/).join('|')==='ab'&&'baaac'.split(/a*/).join('|')==='b|c')JS",
+        R"JS(let out='😀a'.split(/(?:)/);out.length===3&&out[0].charCodeAt(0)===0xd83d&&out[1].charCodeAt(0)===0xde00&&out[2]==='a'&&'😀a'.split(/(?:)/u).join('|')==='😀|a')JS",
+        R"JS(let seat=/x/y,r=/x/;r.constructor={[Symbol.species]:function(){return seat}};let out='axb'.split(r,1),end=seat.lastIndex;out.length===1&&out[0]==='a'&&end===2&&'abc'.split(r)[0]==='abc'&&seat.lastIndex===0)JS",
+        R"JS(let seat=/$/y,r=/$/;r.constructor={[Symbol.species]:function(){return seat}};let out='abc'.split(r);out.length===1&&out[0]==='abc'&&seat.lastIndex===0)JS",
+        R"JS(let saved=RegExp.prototype.exec,seats=[],out;try{RegExp.prototype.exec=function(s){seats.push(this.lastIndex);return saved.call(this,s)};out='abcx'.split(/x/)}finally{RegExp.prototype.exec=saved}out.join('|')==='abc|'&&seats.join(',')==='0,1,2,3')JS",
+        R"JS(let descriptor=Object.getOwnPropertyDescriptor(RegExp.prototype,'exec'),reads=0,out;try{Object.defineProperty(RegExp.prototype,'exec',{configurable:true,get(){reads++;return descriptor.value}});out='abcx'.split(/x/)}finally{Object.defineProperty(RegExp.prototype,'exec',descriptor)}out.join('|')==='abc|'&&reads===4)JS",
+        R"JS(let seat=/x/y,r=/x/,calls=0;seat.exec=function(s){calls++;return null};r.constructor={[Symbol.species]:function(){return seat}};let out='abc'.split(r);out[0]==='abc'&&calls===3&&seat.lastIndex===2)JS",
+        R"JS(let seat=/x/y,r=/x/,caught=false;r.constructor={[Symbol.species]:function(){return seat}};Object.defineProperty(seat,'lastIndex',{writable:false});try{'abc'.split(r)}catch(e){caught=e instanceof TypeError}caught)JS",
+        R"JS(let seat=/x/y,r=/x/,calls=0;r.constructor={[Symbol.species]:function(){return seat}};let limit={valueOf(){seat.exec=function(){calls++;return null};gc();return 99}};let out='abc'.split(r,limit);out[0]==='abc'&&calls===3)JS",
+        R"JS(JSON.stringify('a1b2'.split(/(\d)/))==='["a","1","b","2",""]')JS",
+        R"JS(/(old)/.exec('old');let input='a\nb\nc',out=input.split(/\n/);out.join('|')==='a|b|c'&&RegExp.lastMatch==='\n'&&RegExp.leftContext==='a\nb'&&RegExp.rightContext==='c'&&RegExp.$1==='')JS",
+    };
+    for (const char* backend : {"ast", "auto", "mir"}) {
+        JsExecutionBackendScope selected(backend);
+        for (bool collect : {false, true}) {
+            for (const char* source : cases) {
+                SCOPED_TRACE(backend);
+                SCOPED_TRACE(collect);
+                SCOPED_TRACE(source);
+                Runtime runtime = {};
+                runtime_init(&runtime);
+                Item setup = transpile_js_to_mir(&runtime, "0;", "regexp-split-setup.js", NULL);
+                ASSERT_FALSE(item_is_error(setup));
+                gc_heap_t* gc = runtime.eval_context->heap->gc;
+                gc_set_force_collect_interval(gc, collect ? 1 : 0);
+                gc_set_poison_freed(gc, collect ? 1 : 0);
+                Item result = transpile_js_to_mir(&runtime, source, "regexp-split-scan.js", NULL);
+                EXPECT_FALSE(item_is_error(result));
+                if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+                gc_set_force_collect_interval(gc, 0);
+                gc_set_poison_freed(gc, 0);
+                runtime_cleanup(&runtime);
+            }
+        }
     }
 }
 

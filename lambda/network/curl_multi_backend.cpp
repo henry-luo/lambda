@@ -13,6 +13,7 @@
 #include "../../lib/byte_builder.h"
 #include <curl/curl.h>
 #include "curl_trust.h"
+#include "curl_response.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -189,11 +190,12 @@ static bool persist_response(CurlMultiTransfer* transfer) {
     if (!res) return false;
 
     if (res->cache) {
+        HttpCacheHeaders headers = curl_response_cache_headers(transfer->easy);
         char* cached_path = enhanced_cache_try_store(res->cache,
                                                      res->url,
                                                      (const char*)transfer->body.data,
                                                      transfer->body.length,
-                                                     NULL);
+                                                     &headers);
         if (cached_path) {
             if (res->local_path) mem_free(res->local_path);
             res->local_path = cached_path;
