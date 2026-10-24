@@ -28,12 +28,30 @@ manual game. The finish and game-over screens also offer Auto Play.
 | Shift | Hold to run faster |
 | Enter / P / Escape | Start, pause, resume |
 | R | Restart the whole course |
+| M | Music on / off |
 
 The buttons below the scene also support holding to move, jump, or run.
 A collected coin or coin block earns 100 points, stomping an enemy earns 200,
 and reaching the flag earns 1,000. There is one complete level, with win and
 game-over screens. The scene uses a fixed 880 × 480 viewport; smaller windows
 can scroll the surrounding page.
+
+## Music
+
+[`_music.ls`](_music.ls) composes an original 51-second background loop as code:
+32 bars in C major at 150 BPM, in the form A A' B A''. A square-wave lead carries
+the tune over off-beat electric-piano stabs, an octave-jumping synth bass and a
+rock kit. The B section holds its chords, switches to the ride cymbal and ends on a
+snare fill, and the final A pass doubles the tune on glockenspiel. The performance
+plays through the music package's bundled TimGM6mb SoundFont with `dom.midi_open`
+(see [Lambda_Music.md](../../../doc/Lambda_Music.md)).
+
+The music follows the round. The SoundFont is read and the session opened only when
+a round first starts, so an unplayed page never opens the audio device. Pausing,
+finishing or losing pauses the music. Restart and Auto Play start it from the top,
+and it loops when it reaches its end. Press **M** or the **♪ MUSIC** button to turn it
+off or on. The session belongs to the shell's `#frame-clock` node, which game redraws
+never retire. The button reads **♪ NO AUDIO** when no audio device is available.
 
 `superlambda_core.ls` contains pure collision, movement, scoring, patrol, and
 life transitions. State lives in the view instance under **S9.1.4**; rendering
@@ -64,6 +82,10 @@ close. It is registered in `test/ui/superlambda_smoke.json`.
 The course replay reaches the checkpoint and finish flag, then starts another
 round. Its waits account for the event harness's 60 Hz input-task turns as well
 as explicit time advances.
+
+`test/ui/superlambda_music.json` checks that the music starts with the round, pauses
+and resumes with it, turns off and on from the key and the button, and keeps playing
+after a restart (headless replays use the offline audio bus).
 
 `test/ui/superlambda_autoplay.json` additionally runs the automatic player to
 the finish and checks pause/resume, manual takeover, restart, and close.

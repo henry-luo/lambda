@@ -248,8 +248,9 @@ bool css_resolved_style_cache_allowed(LayoutContext* context, DomElement* elemen
         !context->doc->view_tree || context->pool != context->doc->view_tree->prop_pool ||
         context->css_query_probe || context->selected_style ||
         context->doc->view_tree->model || element->doc != context->doc ||
-        element->scratch_lived() || element->is_table_fixup() || element->form_control() ||
-        dom_element_is_svg(element) ||
+        element->scratch_lived() || element->is_table_fixup() ||
+        // authored buttons size their DOM children; other controls also read native values.
+        layout_form_control_has_native_intrinsic_size(element) ||
         !dom_element_is_connected(element) ||
         (context->selected_view_tree && context->selected_view_tree != context->doc->view_tree)) return false;
     // vertical flow still owns assigned inline constraints in mutable props;

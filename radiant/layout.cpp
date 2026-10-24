@@ -2447,6 +2447,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 record.commit();
             }
 
+            if (!measuring) {
+                // SVG transition baselines read the selected cascade; publish its validity
+                // before those queries so each property need not rematch every stylesheet.
+                dom_elem->set_styles_resolved(true);
+                dom_elem->set_needs_style_recompute(false);
+            }
+
             // ordered-effect preparation cannot publish motion baselines from provisional boxes.
             if (!lycon->preparing_generated_effects) {
                 css_web_animation_resolve(dom_elem, lycon);
@@ -2468,8 +2475,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 // scroll state that only the item's next content pass rebuilds.
                 flex_retained_forget_content(dom_elem);
                 dom_elem->set_measure_restyled(false);
-                dom_elem->set_styles_resolved(true);
-                dom_elem->set_needs_style_recompute(false);
             }
         } else {
             layout_reset_inherited_font(lycon, dom_elem);

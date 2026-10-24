@@ -3398,7 +3398,7 @@ struct IntrinsicWidthCacheScope {
         ViewBlock* block = lam::unsafe_view_block_element_storage(element);
         entry.retain_across_passes = cacheable && children_retained && !lycon->paged &&
             !element->shadow_root_element() && !element->pseudo && !element->display.list_item &&
-            !(element->form_control() && element->tag() != MARKUP_NAME_BUTTON) &&
+            !layout_form_control_has_native_intrinsic_size(element) &&
             (!layout_element_is_replaced(element) || layout_is_svg_viewport(element->tag())) &&
             !(block->blk && (block->block()->counter_reset || block->block()->counter_increment ||
                             block->block()->counter_set)) &&

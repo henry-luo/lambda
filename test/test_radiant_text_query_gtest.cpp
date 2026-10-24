@@ -5917,6 +5917,93 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
 
 class RadiantFormControls : public RadiantTextQuery {};
 
+TEST_F(RadiantTextQuery, RetainedSvgStylesMatchFreshCascadeAfterInheritedAndLocalChanges) {
+    DomElement* svg = load_script_source(R"HTML(<style>
+        #parent { color:rgb(10,20,30); --paint:rgb(30,40,50); font-size:18px }
+        #result { width:40px; height:30px; fill:var(--paint); stroke:currentColor }
+        #shape { stroke-width:2px; opacity:.75 }
+    </style><div id="parent"><svg id="result" viewBox="0 0 40 30">
+        <rect id="shape" width="20" height="20"/>
+    </svg></div>)HTML");
+    ASSERT_NE(svg, nullptr);
+    DomElement* shape = dom_find_element_by_id(document->root->as_element(), "shape");
+    ASSERT_NE(shape, nullptr);
+    SvgDomStyleScope fresh = {};
+    for (unsigned pass = 0; pass < 4; pass++) {
+        SCOPED_TRACE(pass);
+        if (pass == 1) ASSERT_TRUE(svg->parent_element()->set_attribute("style",
+            "color:rgb(60,70,80);--paint:rgb(90,100,110);font-size:24px"));
+        if (pass == 2) ASSERT_TRUE(shape->set_attribute("style", "fill:red;stroke-width:4px;opacity:.5"));
+        if (pass == 3) ASSERT_TRUE(shape->remove_attribute("style"));
+        document->incremental_layout = pass != 0;
+        layout_html_doc(&ui, document, pass != 0);
+        for (DomElement* element : {svg, shape}) {
+            ASSERT_NE(element->layout_cache, nullptr);
+            ASSERT_NE(element->layout_cache->resolved_style, nullptr);
+            for (const char* name : {"fill", "stroke", "stroke-width", "opacity", "font-size"}) {
+                char retained[128] = {}, reference[128] = {};
+                bool retained_css = false, reference_css = false;
+                const char* a = svg_get_dom_presentation_property(element, name, true,
+                    retained, sizeof(retained), &retained_css);
+                // an instance query without a substituted parent independently selects the cascade.
+                const char* b = svg_get_dom_presentation_property(element, name, true,
+                    reference, sizeof(reference), &reference_css, nullptr, nullptr, &fresh);
+                EXPECT_EQ(a != nullptr, b != nullptr) << name;
+                EXPECT_STREQ(retained, reference) << name;
+                EXPECT_EQ(retained_css, reference_css) << name;
+            }
+        }
+        EXPECT_FLOAT_EQ(svg->width, 40.0f);
+        EXPECT_FLOAT_EQ(svg->height, 30.0f);
+    }
+    document->incremental_layout = false;
+}
+
+TEST_F(RadiantFormControls, AuthoredButtonStylesRetainComputedInputsAcrossSizingQueries) {
+    DomElement* button = load_script_source(R"HTML(<style>
+        body { margin:0; font:20px Arial }
+        #row { display:flex; width:200px }
+        #result { font:inherit; width:50%; padding:4px; border:2px solid; flex:none }
+    </style><div id="row"><button id="result">Label</button></div>)HTML");
+    ASSERT_NE(button, nullptr);
+    layout_html_doc(&ui, document, false);
+    ASSERT_NE(button->form_control(), nullptr);
+    ASSERT_NE(button->layout_cache, nullptr);
+    ASSERT_NE(button->layout_cache->resolved_style, nullptr);
+    FormControlProp* native = button->form;
+    FlexFlowTestContext flow(&ui, document, button);
+    uint32_t revision = radiant::css_resolved_style_input_revision(&flow.layout, button);
+    ASSERT_NE(revision, 0u);
+    uint64_t geometry = retained_subtree_geometry(button);
+    for (float width : {80.0f, 160.0f, 80.0f}) {
+        flow.layout.block.content_width = width;
+        layout_measure_intrinsic_widths(&flow.layout, button, true);
+        EXPECT_EQ(radiant::css_resolved_style_input_revision(&flow.layout, button), revision);
+    }
+    document->incremental_layout = true;
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(retained_subtree_geometry(button), geometry);
+    EXPECT_EQ(button->form.get(), native);
+    EXPECT_FLOAT_EQ(button->width, 100.0f);
+
+    DomElement* row = button->parent_element();
+    ASSERT_TRUE(row->set_attribute("style", "width:120px;font-size:24px"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(button->width, 60.0f);
+    EXPECT_FLOAT_EQ(button->font->font_size, 24.0f);
+    ASSERT_TRUE(button->set_attribute("style", "padding:8px;font-size:16px"));
+    ASSERT_TRUE(dom_text_set_content(button->first_child->as_text(), "A longer label"));
+    layout_html_doc(&ui, document, true);
+    EXPECT_FLOAT_EQ(button->boundary()->padding.left, 8.0f);
+    EXPECT_FLOAT_EQ(button->font->font_size, 16.0f);
+    geometry = retained_subtree_geometry(button);
+    document->incremental_layout = false;
+    layout_html_doc(&ui, document, true);
+    EXPECT_EQ(retained_subtree_geometry(button), geometry);
+    EXPECT_EQ(button->form.get(), native);
+
+}
+
 TEST_F(RadiantFormControls, DefaultTextBackgroundPreservesRoundedBorders) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body{margin:0;background:#ddd}.box{position:absolute;box-sizing:border-box;

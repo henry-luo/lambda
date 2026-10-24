@@ -86,6 +86,64 @@ remain pass-local, with that dependency propagated through enclosing queries.
 Only scalar sizing results cross passes; the existing ownership and invalidation
 rules still govern text fragments and committed geometry.
 
+## Further tuning — computed styles during typing
+
+**D4.5.3v2 / D4.5.1v4**, with **VR15**, govern this follow-up. The release
+profile attributes most keystroke work to repeated CSS and nested flex layout,
+including native buttons and SVG ribbon icons. Acceptance remains the physical
+typing and editing cases above, plus inherited/local button and SVG style
+changes. Focused native style/motion checks precede the Word UI/export runner
+and required Radiant baseline; paired release typing runs quantify the result.
+
+Authored buttons use ordinary DOM content for sizing, so their computed CSS can
+use the existing validated record. Native-value controls keep their adapter.
+SVG computed CSS uses the same record, whose inherited identity already includes
+SVG paints and stroke width; SVG geometry, animation and paint remain with their
+existing consumers. Committed style validity is published before motion baseline
+queries, so SVG transition snapshots can read the selected cascade instead of
+rematching every stylesheet for each property. Speculative measurements still
+do not publish committed validity.
+
+The release comparison uses `c45ab0413` as the baseline, three interleaved pairs
+of 120 characters per document, and one pair of 600 characters. Both builds ran
+the same Word sources at 1440 × 900 without concurrent compilation or tests.
+Input-task timings include event-loop drain and exclude startup and painting.
+
+| Document / workload | Keys per build | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Blank, short | 360 | 65.216 ms | 33.570 ms | 71.927 ms | 38.568 ms |
+| Studio, short | 360 | 71.684 ms | 39.791 ms | 79.195 ms | 48.187 ms |
+| Blank, sustained | 600 | 75.776 ms | 42.046 ms | 129.146 ms | 70.438 ms |
+| Studio, sustained | 600 | 83.014 ms | 49.395 ms | 147.356 ms | 89.792 ms |
+
+Short-run median latency falls 44–49%; sustained median latency falls 40–45%.
+All sixteen text assertions passed across 3,840 physical keystrokes. Long
+paragraphs still have slower individual keys: sustained maxima after the change
+are 151.542 ms (blank) and 171.194 ms (Studio).
+
+The benchmark's optional `--paint` adds a native raster repaint and an opaque
+pixel assertion after every key. A separate 60-key comparison per document
+reduces median input-plus-paint time from 73.651 to 41.438 ms (blank) and from
+79.496 to 47.942 ms (Studio). All pixel and text assertions pass. These timings
+still exclude operating-system display presentation and do not guarantee
+latency for arbitrary documents or hardware.
+
+Qualification passes **86/86 Word UI/export checks**, including physical typing,
+caret/scroll retention, Undo/Redo, page-break typing, native fonts, ribbon fields,
+objects, lists and exports. All **215 native text/layout tests** pass, including
+the new retained button and SVG regressions. The required Radiant baseline
+passes with **6,162 passed, 141 existing partials, two skips and zero failures**.
+Integer-cast lint, diff whitespace, benchmark syntax and formal-index checks
+pass; the index retains its existing duplicate DO25 warning. No formal ruling
+changed. Word model tiers were unchanged and were not rerun for this pass.
+
+Evidence is under `temp/word/performance/`: `fast-comparison.json`,
+`fast-{short,sustained}-{before,after}-*`, `fast-painted-{before,after}-*`,
+`fast-word-final.json`, `fast-native-final.stdout`,
+`fast-radiant-final/test_summary.json`, `fast-binaries.json` and
+`fast-source.patch`. The installed `lambda.exe` matches the measured release
+candidate's SHA-256 in `fast-binaries.json`.
+
 ## Reproduction and verification
 
 `python3 test/demo/word/benchmark_typing.py --repeat 3 --characters 120`
@@ -93,6 +151,7 @@ requires a release build. It records the wall time of each physical input task,
 including its event-loop drain, in `temp/word/performance/`. It excludes startup
 and outer host painting. Compare runs without concurrent compilation or tests.
 This is a diagnostic benchmark, not a machine-dependent CI timing assertion.
+Add `--paint` to include a native raster repaint after each key.
 
 Correctness lives in `test/demo/word/tests/typing.json`,
 `test/ui/template_state_lazy_init.json`, `test/ui/projection_frontier.json`, and

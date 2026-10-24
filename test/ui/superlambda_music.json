@@ -1,0 +1,27 @@
+{
+  "name": "Superlambda background music: start, pause, mute key and button, restart",
+  "html": "test/demo/superlambda/superlambda.ls",
+  "viewport": {"width": 1024, "height": 800},
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"on"},
+    {"type":"advance_time","ms":80,"steps":2},
+    {"type":"click","target":{"selector":"#overlay-action"}},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"playing"},
+    {"type":"advance_time","ms":400,"steps":10},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"playing"},
+    {"type":"key_press","key":"P"},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"on"},
+    {"type":"key_press","key":"P"},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"playing"},
+    {"type":"key_press","key":"M"},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"off"},
+    {"type":"assert_text","target":{"selector":".control-music"},"equals":"♪ MUSIC OFF"},
+    {"type":"click","target":{"selector":".control-music"}},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"playing"},
+    {"type":"key_press","key":"R"},
+    {"type":"advance_time","ms":200,"steps":5},
+    {"type":"assert_attribute","target":{"selector":"#superlambda"},"attribute":"data-music","equals":"playing"},
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":true}
+  ]
+}

@@ -1,5 +1,6 @@
 // Run: ./lambda.exe view test/demo/superlambda/superlambda.ls
 import world: .superlambda_core
+import score: ._music
 import dom
 
 let MODEL = <superlambda_game>
@@ -18,6 +19,7 @@ fn key_command(key) {
   else if (key == "Shift") "run"
   else if (key == "Enter" or key == "p" or key == "P" or key == "Escape") "pause"
   else if (key == "r" or key == "R") "restart"
+  else if (key == "m" or key == "M") "music"
   else ""
 }
 fn control(command, caption, hint) => <button class:("control-" ++ command),
@@ -34,13 +36,67 @@ fn overlay_title(mode) {
   else "Every hero gets another try."
 }
 
-view <superlambda_game> state game: world.new_game() {
+// background music: an original loop composed in _music.ls, played with the music
+// package's bundled SoundFont. The SoundFont is read and the session opened only when
+// a round first starts, so a page that is never played never touches the audio device.
+let SOUNDTRACK = score.performance()
+let SOUNDFONT = sys.lambda.home# ++ "/package/music/soundfonts/TimGM6mb.sf2"
+let MUSIC = {token: null, on: true, playing: false, ticks: 0, failed: false}
+fn music_state(music) {
+  if (music.failed) "unavailable" else if (music.playing) "playing" else if (music.on) "on" else "off"
+}
+fn music_caption(music) {
+  if (music.failed) "♪ NO AUDIO" else if (music.on) "♪ MUSIC ON" else "♪ MUSIC OFF"
+}
+// the session belongs to the shell's clock node, which game redraws never retire.
+fn music_owner(evt) => dom.query_selector(dom.root_node(evt.target), "#frame-clock")
+
+// opens the soundtrack at its start; null when the SoundFont or the audio device is unavailable.
+pn open_music(owner) {
+  var problem = ""
+  let bytes = input(SOUNDFONT, 'binary') ^ { problem = ^.message }
+  if (problem != "") { return null }
+  let opened = dom.midi_open(owner, SOUNDTRACK, bytes)
+  if (opened == null) { return null }
+  // it sits under the game at a moderate level, in a drier room than the default.
+  if (not (dom.midi_command(owner, opened, "volume", 0.55) and dom.midi_command(owner, opened, "reverb", 0.12))) {
+    dom.audio_close(owner, opened)
+    return null
+  }
+  return opened
+}
+
+// keeps the music in step with the game: it plays only while a round runs, starts over
+// for a new round (ticks back at 0), and loops when it reaches its end.
+pn follow_music(owner, music, game) {
+  if (not music.on or game.mode != "playing") {
+    if (music.playing) { dom.midi_command(owner, music.token, "pause", 0.0) }
+    return {*:music, playing: false, ticks: game.ticks}
+  }
+  if (music.failed) { return music }
+  let token = if (music.token == null) open_music(owner) else music.token
+  if (token == null) { return {*:music, failed: true} }
+  let info = dom.midi_info(owner, token)
+  let ok = if (info == null) false
+    else if (game.ticks < music.ticks)
+      dom.midi_command(owner, token, "seek", 0.0) and dom.midi_command(owner, token, "play", 0.0)
+    // `play` resumes a paused session and restarts one that reached its end.
+    else if (not music.playing or info.state == "ended") dom.midi_command(owner, token, "play", 0.0)
+    else true
+  if (not ok) {
+    dom.audio_close(owner, token)
+    return {*:music, token: null, playing: false, failed: true}
+  }
+  return {*:music, token: token, playing: true, ticks: game.ticks}
+}
+
+view <superlambda_game> state game: world.new_game(), music: MUSIC {
   let h = game.hero
   let camera = game.camera;
   <main id:"superlambda", tabindex:"0", 'data-mode':game.mode, 'data-autoplay':string(game.autoplay),
     'data-x':string(round(h.x)), 'data-y':string(round(h.y)),
     'data-grounded':string(h.grounded), 'data-checkpoint':string(game.checkpoint),
-    'data-ticks':string(game.ticks),
+    'data-ticks':string(game.ticks), 'data-music':music_state(music),
     'data-moving':string(contains(game.keys, "right") or contains(game.keys, "left")),
     <section class:"stage", 'aria-label':"Scrolling platform game: Meadow Circuit",
       <img class:"scenery", src:"assets/scenery.svg", alt:"">
@@ -90,7 +146,7 @@ view <superlambda_game> state game: world.new_game() {
             if (game.mode == "ready" or game.mode == "over" or game.mode == "won") {
               <button id:"auto-play", 'data-command':"auto", "Auto Play">
             }
-            <p class:"overlay-keys", "← → move   ·   Space jump   ·   Shift run">
+            <p class:"overlay-keys", "← → move   ·   Space jump   ·   Shift run   ·   M music">
           >
         >
       }
@@ -106,6 +162,7 @@ view <superlambda_game> state game: world.new_game() {
       <div class:"game-menu",
         control("pause", if (game.mode == "playing") "Ⅱ PAUSE" else "▷ START / RESUME", "Start or pause / Enter or P")
         control("restart", "↻ RESTART", "Restart / R")
+        control("music", music_caption(music), "Music on or off / M")
       >
     >
     <div class:"progress", 'aria-label':("Level progress: " ++ string(round(h.x / world.GOAL_X * 100)) ++ " percent"),
@@ -120,7 +177,9 @@ on press(evt) {
   if (game.autoplay and contains(["left", "right", "jump", "run"], command)) {
     game = {*:world.release_controls(game), autoplay: false}
   }
+  if (command == "music") { music = {*:music, on: not music.on} }
   game = world.set_control(game, command, true)
+  if (contains(["pause", "restart", "music"], command)) { music = follow_music(music_owner(evt), music, game) }
 }
 on release(evt) { game = world.set_control(game, event_command(evt), false) }
 on releasecontrols(evt) {
@@ -130,6 +189,8 @@ on releasecontrols(evt) {
 on click(evt) {
   let command = event_command(evt)
   if (contains(["pause", "restart", "auto"], command)) { game = world.action(game, command) }
+  if (command == "music") { music = {*:music, on: not music.on} }
+  if (contains(["pause", "restart", "auto", "music"], command)) { music = follow_music(music_owner(evt), music, game) }
 }
 on mousedown(evt) {
   let command = event_command(evt)
@@ -143,6 +204,8 @@ on frame(evt) {
   if (game.mode == "playing") {
     game = world.tick(if (game.autoplay) world.auto_controls(game) else game)
   }
+  // a finish or game over stops the music; while playing, this also loops it.
+  if (game.mode == "playing" or music.playing) { music = follow_music(music_owner(evt), music, game) }
 }
 
 // Keep the clock and keyboard receiver outside the changing world subtree.
