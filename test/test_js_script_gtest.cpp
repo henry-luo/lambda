@@ -1515,7 +1515,8 @@ TEST(JsInterpreter, ModulePromotionRetainsImportAndActivationBoundaries) {
         EXPECT_EQ(js_strict_equal(result, (Item){.item = b2it(true)}).item, b2it(true));
         auto* function = (JsFunction*)function_item.function;
         bool admitted = !strcmp(name, "moduleRead") || !strcmp(name, "globalRead") ||
-            !strcmp(name, "call") || !strcmp(name, "expressionCall");
+            !strcmp(name, "call") || !strcmp(name, "expressionCall") ||
+            !strcmp(name, "nested"); // D8.1.3v41: one checked module wrapper, no captures.
         EXPECT_EQ(js_fn_body_kind(function), admitted
             ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
         EXPECT_EQ(function->code->p2_promotion.state, admitted
@@ -1605,8 +1606,10 @@ TEST(JsInterpreter, ModuleHotEntriesPreserveLiveSlotsAndPropertyCallbacks) {
                 EXPECT_EQ(js_fn_body_kind(function), promoted
                     ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
                 if (promoted) EXPECT_EQ(function->invoke, js_call_entry_compiled_light) << name;
-                // module loops do not hand off their running T0 activation.
-                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
+                bool handed_off = runtime.js_promotion_auto && threshold > 1 &&
+                    !strcmp(name, "scan");
+                EXPECT_EQ(function->code->p2_promotion.loop_state == FN_LOOP_HANDOFF_READY,
+                    handed_off) << name;
             }
             runtime_cleanup(&runtime);
         }
@@ -1626,6 +1629,708 @@ TEST(JsInterpreter, ObjectMethodSourceStaysOutsideFunctionSatelliteAdmission) {
     EXPECT_EQ(js_call_function(method, make_js_undefined(), NULL, 0).get_double(), 17);
     EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), JS_FUNCTION_BODY_AST);
     EXPECT_EQ(js_runtime_state.auto_mir_owner, nullptr);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleClassMethodsPromoteWithoutReplacingCallableMetadata) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 1;
+            const char source[] = R"JS(
+                let offset = 1;
+                function adjust(value) { return value + offset; }
+                export class Cursor {
+                    constructor() { this.value = 0; }
+                    advance(value) { this.value += adjust(value); return this.value; }
+                    receiver() { return this; }
+                    call(key, callback) { this[key] = callback; return this[key](5e-324); }
+                }
+                const cursor = new Cursor();
+                export const advance = Cursor.prototype.advance;
+                export const receiver = Cursor.prototype.receiver;
+                export const call = Cursor.prototype.call;
+                const source = advance.toString(), home = Object.getPrototypeOf(advance);
+                for(let i=0;i<3;i++) if(cursor.advance(2)!==3*(i+1)) throw 'method receiver';
+                offset=10; gc();
+                if(advance.call(cursor,2)!==21 || advance!==Cursor.prototype.advance) throw 'live binding';
+                const borrowed = {value:0, advance};
+                if(borrowed.advance(2)!==12) throw 'borrowed method';
+                for(let i=0;i<3;i++) if(receiver()!==undefined) throw 'strict this';
+                const target={}; let gets=0,sets=0,keys=0;
+                const proxy=new Proxy(target,{
+                    get(object,key){gets++;gc();return object[key]},
+                    set(object,key,value){sets++;gc();object[key]=value;return true}
+                });
+                const key={ [Symbol.toPrimitive](){keys++;gc();return 'run'} };
+                function callback(value){gc();return this===proxy?value:0}
+                for(let i=0;i<3;i++) if(call.call(proxy,key,callback)!==5e-324) throw 'callback home';
+                if(gets!==3||sets!==3||keys!==6)throw 'property protocol';
+                const marker={}; let thrown=false;
+                try { call.call({set run(value){},get run(){gc();throw marker}},'run',callback); }
+                catch(error){thrown=error===marker}
+                if(!thrown)throw 'throw identity';
+                let constructible=true;
+                try{new advance(1)}catch(error){constructible=!(error instanceof TypeError)}
+                export const ok=!constructible && !Object.hasOwn(advance,'prototype') &&
+                    advance.name==='advance' && advance.length===1 && advance.toString()===source &&
+                    Object.getPrototypeOf(advance)===home;
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source) - 1,
+                "test/js/interp_esm/hot-module-methods.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_default(ns, js_make_string("ok")).item, ITEM_TRUE);
+            for (const char* name : {"advance", "receiver", "call"}) {
+                Item item = js_get_key_default(ns, js_make_string(name));
+                ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+                auto* function = (JsFunction*)item.function;
+                EXPECT_EQ(js_fn_body_kind(function), runtime.js_promotion_auto
+                    ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
+                EXPECT_NE(function->flags & JS_FUNC_FLAG_METHOD, 0u);
+                EXPECT_EQ(js_fn_home_class(function).item,
+                    js_get_key_default(ns, js_make_string("Cursor")).item);
+                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModuleClassMethodPromotionKeepsExcludedShapesInterpreted) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] = R"JS(
+        import {counter} from './dep.mjs';
+        class Base { value(){return 1} }
+        class Sample extends Base {
+            constructor(){super()}
+            get accessor(){return 1}
+            ['computed'](){return 1}
+            static staticMethod(){return 1}
+            #privateMethod(){return 1}
+            privateRead(){return this.#privateMethod()}
+            parentRead(){return super.value()}
+            importRead(){return counter}
+            nested(){const inner=function(){return 1};return inner()}
+            defaulted({value}={value:1}){return value}
+            evaluated(){return eval('1')}
+            observed(){return arguments.length}
+            async suspended(){return 1}
+            *generator(){yield 1}
+            expose(){return this.#privateMethod}
+        }
+        const sample=new Sample();
+        const captured=(()=>{let value=1;return class{read(){return value}}})();
+        export const methods=[Sample, Object.getOwnPropertyDescriptor(Sample.prototype,'accessor').get,
+            sample.computed, Sample.staticMethod, sample.expose(), sample.privateRead, sample.parentRead,
+            sample.importRead, sample.nested, sample.defaulted, sample.evaluated, sample.observed,
+            sample.suspended, sample.generator, new captured().read];
+        for(let i=1;i<methods.length;i++)methods[i].call(sample);
+        export const ok=true;
+    )JS";
+    Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source) - 1,
+        "test/js/interp_esm/numeric-boundaries.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    Item methods = js_get_key_default(ns, js_make_string("methods"));
+    ASSERT_EQ(get_type_id(methods), LMD_TYPE_ARRAY);
+    for (int i = 1; i < 15; i++) {
+        Item method = js_get_key_default(methods, (Item){.item = i2it(i)});
+        ASSERT_EQ(get_type_id(method), LMD_TYPE_FUNC) << i;
+        EXPECT_EQ(js_fn_body_kind((JsFunction*)method.function), JS_FUNCTION_BODY_AST) << i;
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, WrappedModuleMethodsKeepDistinctHomesAndRejectOuterCaptures) {
+    for (const char* backend : {"auto", "ast"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 2;
+        runtime.js_promotion_backedge_threshold = 4;
+        const char source[] = R"JS(
+            export let offset=1;
+            const factory=()=>class {
+                read(value){return this.value+value+offset}
+                receiver(){return this}
+                loop(n){let sum=0;for(let i=0;i<n;i++)sum++;return sum}
+            };
+            export const A=factory(), B=factory();
+            const a=new A(),b=new B();a.value=10;b.value=20;
+            export const first=A.prototype.read, second=B.prototype.read;
+            export const receiver=A.prototype.receiver, loop=A.prototype.loop;
+            const source=first.toString();
+            if(a.read(2)!==13 || a.read(2)!==13 || b.read(2)!==23) throw 'method publication';
+            offset=7;gc();
+            if(first.call({value:1},2)!==10 || second.call(b,2)!==29) throw 'live cells';
+            if(receiver()!==undefined || receiver()!==undefined || a.loop(8)!==8) throw 'receiver or loop';
+            if(first===second || first.toString()!==source || first.name!=='read' ||
+               first.length!==1 || Object.hasOwn(first,'prototype')) throw 'method metadata';
+            const Local=(()=>{let outside=3;return class{read(){return outside}}})();
+            const Self=(()=>class Inner{read(){return Inner}})();
+            const Deep=(()=>()=>class{read(){return offset}})()();
+            export const local=new Local().read, self=new Self().read, deep=new Deep().read;
+            if(local()!==3 || local()!==3 || self()!==Self || self()!==Self ||
+               deep()!==7 || deep()!==7) throw 'excluded method';
+            export const ok=true;
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+            "test/js/interp_esm/wrapped-module-methods.mjs", NULL);
+        ASSERT_FALSE(item_is_error(ns));
+        EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+        for (const char* name : {"first", "second", "receiver", "local", "self", "deep", "loop"}) {
+            Item item = js_get_key_cstr(ns, name);
+            ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC) << name;
+            auto* function = (JsFunction*)item.function;
+            bool eligible = !strcmp(name, "first") || !strcmp(name, "second") || !strcmp(name, "receiver");
+            EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+                runtime.js_promotion_auto && eligible) << name;
+            EXPECT_FALSE(function->code->p2_promotion.loop_entered) << name;
+            EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY) << name;
+            if (!strcmp(name, "first") || !strcmp(name, "second"))
+                EXPECT_EQ(js_fn_home_class(function).item,
+                    js_get_key_cstr(ns, !strcmp(name, "first") ? "A" : "B").item);
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ModuleClassMethodDefaultsKeepParameterAndClosureEnvironments) {
+    for (const char* backend : {"auto", "ast"}) {
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            JsExecutionBackendScope selected(backend);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 4;
+            const char source[] = R"JS(
+                export let offset=1, effects='';
+                const marker={};
+                function failDefault(){gc();throw marker}
+                const factory=()=>class {
+                    make(seed=(effects+='s',2), read=()=>seed, receiver=()=>this) {
+                        let state=seed;
+                        function text(){switch(state){case 2:return `two`;default:return ``}}
+                        const bump=(n=1)=>{state+=n;gc();return state+offset};
+                        return {read:read,receiver:receiver,bump:bump,text:text};
+                    }
+                    split(a=1,read=()=>a){var a=9;return read}
+                    later(read=()=>b,b=2){return read}
+                    tdz(a=(effects+='t',b),b=1){return a}
+                    callback(run=()=>this){return run()}
+                    ordered(a=(effects+='a',1),b=(effects+='b',a+1)){return a+b}
+                    failing(value=(effects+='f',failDefault()),skipped=(effects+='x',1)){return value}
+                };
+                export const A=factory(), B=factory();
+                const a=new A(),b=new B();
+                export const make=A.prototype.make, split=A.prototype.split,
+                    later=A.prototype.later, tdz=A.prototype.tdz, callback=A.prototype.callback,
+                    ordered=A.prototype.ordered, failing=A.prototype.failing;
+                const source=make.toString(),home=Object.getPrototypeOf(make);
+                const old=a.make();a.make(10);let fresh=a.make(undefined);
+                if(effects!=='ss'||old.read()!==2||fresh.read()!==2||fresh.text()!=='two')throw 'default order';
+                if(old.receiver()!==a||fresh.receiver()!==a)throw 'lexical receiver';
+                offset=7;gc();
+                if(old.bump()!==10||fresh.bump(2)!==11||old.read()!==2)throw 'closure cells';
+                const escaped=fresh.bump;fresh=null;gc();
+                if(escaped(3)!==14||old.bump()!==11)throw 'escaped lifetime';
+                for(let i=0;i<3;i++){
+                    if(a.split()()!==1||a.later()()!==2||a.later(undefined,4)()!==4)throw 'parameter scope';
+                    let caught=false;try{a.tdz()}catch(error){caught=error instanceof ReferenceError}
+                    if(!caught)throw 'parameter tdz';
+                    if(a.callback()!==a)throw 'default receiver';
+                }
+                if(effects!=='ssttt')throw 'default count';
+                effects='';
+                for(let i=0;i<3;i++){
+                    if(a.ordered()!==3||a.ordered(10)!==21||a.ordered(10,20)!==30)throw 'ordered defaults';
+                    let failed=false;try{a.failing()}catch(error){failed=error===marker}
+                    if(!failed)throw 'default throw';
+                }
+                if(effects!=='abbfabbfabbf')throw 'ordered effects';
+                let caught=false;
+                try{a.callback(()=>{gc();throw marker})}catch(error){caught=error===marker}
+                if(!caught)throw 'callback throw';
+                let constructible=true;try{new make()}catch(error){constructible=!(error instanceof TypeError)}
+                export const ok=!constructible&&make===A.prototype.make&&make!==B.prototype.make&&
+                    make.name==='make'&&make.length===0&&make.toString()===source&&
+                    Object.getPrototypeOf(make)===home&&!Object.hasOwn(make,'prototype');
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+                "test/js/interp_esm/method-default-closures.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+            for (const char* name : {"make", "split", "later", "tdz", "callback", "ordered", "failing"}) {
+                auto* function = (JsFunction*)js_get_key_cstr(ns, name).function;
+                ASSERT_NE(function, nullptr);
+                EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+                    runtime.js_promotion_auto) << name;
+                EXPECT_EQ(js_fn_home_class(function).item, js_get_key_cstr(ns, "A").item);
+                EXPECT_FALSE(function->code->p2_promotion.loop_entered);
+                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModuleClassMethodDefaultsRejectHiddenCapturesAndExcludedCallables) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] = R"JS(
+        import {counter} from './dep.mjs';
+        const Local=(()=>{let outside=3;return class Inner {
+            imported(value=counter){return value}
+            importArrow(){return ()=>counter}
+            captured(value=outside){return value}
+            captureArrow(){return ()=>outside}
+            self(value=()=>Inner){return value}
+            rest(...values){return values.length}
+            destructured({value}={value:1}){return value}
+            arrowRest(){return (...values)=>values.length}
+            arrowArguments(){return ()=>arguments.length}
+            arrowTarget(){return ()=>new.target}
+            arrowEval(){return ()=>eval('1')}
+            arrowAsync(){return async()=>1}
+            expression(){return function(){return 1}}
+            nestedClass(){return class{}}
+            interpolated(value=1){return `x${value}`}
+        }})();
+        const local=new Local();
+        export const methods=[local.imported,local.importArrow,local.captured,local.captureArrow,
+            local.self,local.rest,local.destructured,local.arrowRest,local.arrowArguments,
+            local.arrowTarget,local.arrowEval,local.arrowAsync,local.expression,local.nestedClass,
+            local.interpolated];
+        for(let i=0;i<methods.length;i++)methods[i].call(local);
+        export function ordinary(value=1){return value}
+        export function ordinaryArrow(){return ()=>1}
+        ordinary();ordinaryArrow();
+        export const ok=true;
+    )JS";
+    Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+        "test/js/interp_esm/method-default-exclusions.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+    Item methods = js_get_key_cstr(ns, "methods");
+    for (int i=0;i<15;i++) {
+        Item item = js_get_key_default(methods, (Item){.item=i2it(i)});
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC) << i;
+        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state,
+            FN_PROMOTION_PINNED_INTERP) << i;
+    }
+    for (const char* name : {"ordinary", "ordinaryArrow"}) {
+        auto* function = (JsFunction*)js_get_key_cstr(ns, name).function;
+        ASSERT_NE(function, nullptr);
+        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << name;
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleArrowsPromoteWithOriginalMetadataAndLiveBindings) {
+    for (const char* backend : {"auto", "ast"}) {
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            JsExecutionBackendScope selected(backend);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 4;
+            const char source[] = R"JS(
+                export let offset=1, operation=value=>value+offset;
+                export const encode=(e,t)=>(e===9&&(e=t),typeof e===`string`&&
+                    (e=Math.min(e.charCodeAt(0),128)<<6),e<<1);
+                export const apply=value=>operation(value), read=()=>offset, update=value=>offset=value;
+                export const call=(object,key,value)=>object[key](value);
+                export const block=n=>{let sum=0;for(let i=0;i<n;i++)sum+=i;return sum};
+                export function literal(){return `a\n\u0042\`\\`}
+                const identity=encode,source=encode.toString(),home=Object.getPrototypeOf(encode);
+                for(let i=0;i<3;i++){
+                    if(encode(10,7)!==20||encode('A')!==8320||encode(9,5)!==10)throw 'encoding';
+                    if(apply(2)!==3||read()!==1||update(1)!==1)throw 'live entry';
+                    if(block(8)!==28||literal()!=='a\nB`\\')throw 'body lowering';
+                }
+                offset=7;operation=value=>value*offset;gc();
+                if(apply(3)!==21||read()!==7)throw 'live callee';
+                if(update('x')!=='x'||read()!=='x'||update(7)!==7)throw 'live type change';
+                let conversions=0;
+                const number={valueOf(){conversions++;gc();return 4}};
+                if(encode(number)!==8||conversions!==1||encode(null)!==0||encode(undefined)!==0)throw 'coercion';
+                for(const value of [Symbol(),1n]){
+                    let caught=false;try{encode(value)}catch(error){caught=error instanceof TypeError}
+                    if(!caught)throw 'numeric abrupt completion';
+                }
+                let gets=0,keys=0;
+                const target={run:function(value){gc();return this===proxy?value:0}};
+                const proxy=new Proxy(target,{get(object,key){gets++;gc();return object[key]}});
+                const key={ [Symbol.toPrimitive](){keys++;gc();return 'run'} };
+                for(let i=0;i<3;i++)if(call(proxy,key,5e-324)!==5e-324)throw 'property receiver';
+                if(gets!==3||keys!==3)throw 'property order';
+                const marker={};let caught=false;
+                try{call({get run(){gc();throw marker}},'run',0)}catch(error){caught=error===marker}
+                if(!caught)throw 'getter throw';
+                let constructible=true;try{new encode(1)}catch(error){constructible=!(error instanceof TypeError)}
+                if(encode.call({value:1},10)!==20||encode.bind({value:2})(10)!==20)throw 'borrowed arrow';
+                export const ok=!constructible&&encode===identity&&encode.name==='encode'&&encode.length===2&&
+                    encode.toString()===source&&Object.getPrototypeOf(encode)===home&&!Object.hasOwn(encode,'prototype');
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+                "test/js/interp_esm/module-arrow-promotion.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+            for (const char* name : {"encode", "apply", "read", "update", "call", "block", "literal"}) {
+                auto* function = (JsFunction*)js_get_key_cstr(ns, name).function;
+                ASSERT_NE(function, nullptr);
+                EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+                    runtime.js_promotion_auto && strcmp(name, "literal") != 0) << name;
+                EXPECT_FALSE(function->code->p2_promotion.loop_entered) << name;
+                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY) << name;
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, ModuleArrowsRejectActivationCapturesAndOtherUnapprovedShapes) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    runtime.js_promotion_backedge_threshold = 4;
+    const char source[] = R"JS(
+        import {counter} from './dep.mjs';
+        export const receiver=()=>this, imported=()=>counter, defaulted=(value=1)=>value,
+            rest=(...values)=>values.length, destructured=({value})=>value,
+            nested=()=>{const child=()=>1;return child()},
+            declaration=()=>{function child(){return 1}return child()},
+            expression=()=>{const child=function(){return 1};return child()},
+            switched=value=>{switch(value){case 0:return 1;default:return 2}},
+            suspended=async()=>1, evaluated=()=>eval('1'),
+            interpolation=value=>`x${value}`, tagged=()=>String.raw`x`;
+        export function ordinaryNested(){function child(){return 1}return child()}
+        export function ordinarySwitch(value){switch(value){case 0:return 1;default:return 2}}
+        export const captured=(()=>{let outside=3;return ()=>outside})();
+        export const argumentsUse=(function(){return ()=>arguments.length})(1);
+        export const targetUse=(function(){return ()=>new.target})();
+        class Site { field=()=>1;static { this.arrow=()=>2 } }
+        const site=new Site();export const field=site.field,staticBlock=Site.arrow;
+        receiver();imported();defaulted();rest();destructured({value:1});nested();declaration();expression();
+        switched(0);suspended();evaluated();interpolation(1);tagged();ordinaryNested();ordinarySwitch(0);
+        captured();argumentsUse();targetUse();field();staticBlock();
+        export const ok=true;
+    )JS";
+    Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+        "test/js/interp_esm/module-arrow-exclusions.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+    for (const char* name : {"receiver", "imported", "defaulted", "rest", "destructured",
+            "nested", "declaration", "expression", "switched", "suspended", "evaluated",
+            "interpolation", "tagged", "ordinaryNested", "ordinarySwitch", "captured",
+            "argumentsUse", "targetUse", "field", "staticBlock"}) {
+        auto* function = (JsFunction*)js_get_key_cstr(ns, name).function;
+        ASSERT_NE(function, nullptr);
+        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << name;
+        EXPECT_FALSE(function->code->p2_promotion.loop_entered) << name;
+    }
+    const char classic[] = "const arrow=value=>value+1;function text(){return `x`}arrow(1);text();[arrow,text];";
+    Item values = js_interp_execute_source(&runtime, classic, sizeof(classic)-1, "classic-arrow.js", NULL);
+    ASSERT_EQ(get_type_id(values), LMD_TYPE_ARRAY);
+    for (int i=0;i<2;i++) {
+        Item item = js_get_key_default(values, (Item){.item=i2it(i)});
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+        EXPECT_EQ(((JsFunction*)item.function)->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, WrappedModuleArrowsKeepIdentityAndLiveModuleBindings) {
+    for (const char* backend : {"auto", "ast"}) {
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            JsExecutionBackendScope selected(backend);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 4;
+            const char source[] = R"JS(
+                import {counter as e} from './dep.mjs';
+                export let offset=1, operation=value=>value+offset;
+                function factory(){return value=>operation(value)}
+                const expression=function(){return value=>offset=value};
+                const arrow=()=> (e,t)=>(e===9&&(e=t),typeof e===`string`&&
+                    (e=Math.min(e.charCodeAt(0),128)<<6),e<<1);
+                export const first=factory(), older=factory(), update=expression(), encode=arrow();
+                const identity=first, source=first.toString(), home=Object.getPrototypeOf(first);
+                for(let i=0;i<3;i++){
+                    if(first(2)!==3||encode(9,5)!==10||encode('A')!==8320)throw 'warm entry';
+                    if(update(1)!==1)throw 'module write';
+                }
+                gc();operation=value=>value*offset;
+                if(update(7)!==7||first(3)!==21||older(3)!==21)throw 'older callable';
+                gc();
+                for(let i=0;i<3;i++)if(older(4)!==28)throw 'sibling entry';
+                if(update('x')!=='x'||!Number.isNaN(first(3)))throw 'live type';
+                update(7);
+                const marker={};let caught=false;
+                try{encode({valueOf(){gc();throw marker}})}catch(error){caught=error===marker}
+                if(!caught||encode.call({x:1},10)!==20||encode.bind({x:2})(10)!==20)throw 'arrow call';
+                let constructible=true;try{new first(1)}catch(error){constructible=!(error instanceof TypeError)}
+                export const ok=first!==older&&first===identity&&first.toString()===source&&
+                    first.name===''&&first.length===1&&Object.getPrototypeOf(first)===home&&
+                    !Object.hasOwn(first,'prototype')&&!constructible;
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+                "test/js/interp_esm/wrapped-module-arrows.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+            for (const char* name : {"first", "older", "update", "encode"}) {
+                Item item = js_get_key_cstr(ns, name);
+                ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC) << name;
+                auto* function = (JsFunction*)item.function;
+                EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+                    runtime.js_promotion_auto) << name;
+                EXPECT_FALSE(function->code->p2_promotion.loop_entered) << name;
+                EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY) << name;
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, WrappedModuleArrowsRejectCapturedAndSuspendedOrDeeperSites) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    runtime.js_promotion_backedge_threshold = 4;
+    const char source[] = R"JS(
+        import {counter as e} from './dep.mjs';
+        export let offset=3, asyncArrow, generatorArrow, asyncWrapperArrow;
+        export const local=(()=>{let offset=7;return ()=>offset})();
+        export const parameter=((offset)=>()=>offset)(9);
+        export const imported=(function(){return ()=>e})();
+        export const self=(function named(){return ()=>named})();
+        export const deep=(()=>()=>()=>offset)()();
+        export const receiver=(function(){return ()=>this}).call({x:1});
+        export const argumentsUse=(function(){return ()=>arguments.length})(1);
+        export const targetUse=(function(){return ()=>new.target})();
+        export const defaulted=(()=> (value=1)=>value)();
+        export const rest=(()=> (...values)=>values.length)();
+        export const destructured=(()=> ({value})=>value)();
+        export const nested=(()=> ()=>{const child=()=>1;return child()})();
+        export const evaluated=(()=> ()=>eval('1'))();
+        async function suspended(){asyncArrow=()=>offset}suspended();
+        (async()=>{asyncWrapperArrow=()=>offset})();
+        function* generator(){generatorArrow=()=>offset}generator().next();
+        class Site {
+            method(){if(arguments.length)return null;return ()=>offset}
+            field=()=>offset;
+            static {this.arrow=()=>offset}
+        }
+        const site=new Site();
+        export const method=site.method(),field=site.field,staticBlock=Site.arrow;
+        for(const fn of [local,parameter,imported,self,deep,receiver,argumentsUse,targetUse,
+            defaulted,rest,nested,evaluated,asyncArrow,asyncWrapperArrow,generatorArrow,method,field,staticBlock])fn();
+        destructured({value:1});
+        export const ok=local()===7&&parameter()===9&&deep()===3;
+    )JS";
+    Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+        "test/js/interp_esm/wrapped-module-arrow-exclusions.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+    for (const char* name : {"local", "parameter", "imported", "self", "deep", "receiver",
+            "argumentsUse", "targetUse", "defaulted", "rest", "destructured", "nested", "evaluated",
+            "asyncArrow", "asyncWrapperArrow", "generatorArrow", "method", "field", "staticBlock"}) {
+        Item item = js_get_key_cstr(ns, name);
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC) << name;
+        auto* function = (JsFunction*)item.function;
+        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << name;
+        EXPECT_FALSE(function->code->p2_promotion.loop_entered) << name;
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, WrappedModuleFunctionsReadLiveInstanceCaptures) {
+    for (const char* backend : {"auto", "ast"}) {
+        for (uint32_t threshold : {1u, 3u}) {
+            SCOPED_TRACE(backend);
+            SCOPED_TRACE(threshold);
+            JsExecutionBackendScope selected(backend);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            runtime.js_promotion_policy_resolved = true;
+            runtime.js_promotion_auto = !strcmp(backend, "auto");
+            runtime.js_promotion_call_threshold = threshold;
+            runtime.js_promotion_backedge_threshold = 4;
+            const char source[] = R"JS(
+                export let t='module shadow', offset=1;
+                function factory(seed){
+                    let t=new Set([seed]);
+                    return {read:function(value){return t.has(value)},
+                        set:value=>t=value};
+                }
+                const older=factory(2),current=factory(3);
+                export const first=current.read,sibling=older.read;
+                export const expression=(function(seed){var local=seed;return function(){return local}})(8);
+                export const arrow=(()=>{const local=9;return function(){return local}})();
+                const identity=first,source=first.toString(),home=Object.getPrototypeOf(first),proto=first.prototype;
+                for(let i=0;i<3;i++)if(!first(3)||first(2)||expression()!==8||arrow()!==9)throw 'initial set';
+                gc();
+                for(let i=0;i<3;i++)if(!sibling(2)||sibling(3))throw 'sibling set';
+                current.set(new Set([7]));gc();
+                if(!first(7)||first(3)||!sibling(2))throw 'live replacement';
+                const order=[],marker={};
+                current.set({get has(){gc();order.push('get');return function(value){
+                    order.push(value);older.set(new Set([9]));gc();throw marker
+                }}});
+                let caught=false;try{first(5)}catch(error){caught=error===marker}
+                if(!caught||order.join(',')!=='get,5'||!sibling(9))throw 'reentry';
+                current.set(new Set([11]));
+                const constructed=new first(11);
+                export const ok=first===identity&&first!==sibling&&first.toString()===source&&
+                    first.length===1&&first.name==='read'&&Object.getPrototypeOf(first)===home&&
+                    first.prototype===proto&&Object.getPrototypeOf(constructed)===proto&&
+                    first.call({x:1},11)&&first.bind({x:2})(11)&&t==='module shadow';
+            )JS";
+            Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+                "test/js/interp_esm/wrapped-function-captures.mjs", NULL);
+            ASSERT_FALSE(item_is_error(ns));
+            EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+            for (const char* name : {"first", "sibling", "expression", "arrow"}) {
+                Item item = js_get_key_cstr(ns, name);
+                ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+                auto* function = (JsFunction*)item.function;
+                EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+                    runtime.js_promotion_auto) << name;
+                EXPECT_FALSE(function->code->p2_promotion.loop_entered);
+            }
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
+TEST(JsInterpreter, WrappedModuleFunctionCapturesPreserveTdzAndScalarOwners) {
+    for (const char* backend : {"auto", "ast"}) {
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 1;
+        const char source[] = R"JS(
+            export let early,readConst,readVar,readBlock;
+            function factory(){
+                early=function(){return value};
+                for(let i=0;i<3;i++){
+                    let caught=false;try{early()}catch(error){caught=error instanceof ReferenceError}
+                    if(!caught)throw 'tdz';
+                }
+                let value=1.23456789012345;
+                const fixed={x:7};var wide=9007199254740991;
+                readConst=function(){gc();return fixed};
+                readVar=function(){gc();return wide};
+                {let local=4;readBlock=function(){return local}}
+                return next=>value=next;
+            }
+            const set=factory();gc();
+            if(early()!==1.23456789012345||readVar()!==9007199254740991||
+                readConst().x!==7||readBlock()!==4)throw 'initial owners';
+            set(-0);gc();if(!Object.is(early(),-0))throw 'signed zero';
+            set(9007199254740991);gc();if(early()!==9007199254740991)throw 'wide int';
+            set({x:8});gc();if(early().x!==8)throw 'object owner';
+            export const ok=readConst()===readConst();
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+            "test/js/interp_esm/wrapped-function-capture-owners.mjs", NULL);
+        ASSERT_FALSE(item_is_error(ns));
+        EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+        for (const char* name : {"early", "readConst", "readVar", "readBlock"}) {
+            Item item = js_get_key_cstr(ns, name);
+            ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC);
+            auto* function = (JsFunction*)item.function;
+            EXPECT_EQ(function->code->p2_promotion.state == FN_PROMOTION_COMPILED,
+                runtime.js_promotion_auto) << name;
+        }
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, WrappedModuleFunctionsRejectUnapprovedCapturesAndWrites) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 1;
+    const char source[] = R"JS(
+        import {counter as imported} from './dep.mjs';
+        export const parameter=(function(value){return function(){return value}})(2);
+        export const write=(function(){let value=1;return function(){return value=2}})();
+        export const increment=(function(){let value=1;return function(){return value++}})();
+        export const compound=(function(){let value=1;return function(){return value+=2}})();
+        export const constant=(function(){const value=1;return function(){value=2}})();
+        export const dependency=(function(){return function(){return imported}})();
+        export const self=(function named(){return function(){return named}})();
+        export const deep=(function(){return function(){let value=1;return function(){return value}}})()();
+        export const receiver=(function(){let value=1;return function(){return this}})();
+        export const nested=(function(){let value=1;return function(){const child=()=>value;return child()}})();
+        export const defaults=(function(value=1){let local=value;return function(){return local}})();
+        export const targetDefault=(function(){let local=1;return function(value=1){return local+value}})();
+        export const evalWrapper=(function(){let local=1;eval('local=2');return function(){return local}})();
+        export const evalArrow=(function(){let local=1;(()=>eval('local=2'))();return function(){return local}})();
+        export const arrow=(function(){let local=1;return ()=>local})();
+        export const catchBinding=(function(){try{throw 1}catch(value){return function(){return value}}})();
+        export const objectMethod=({factory(){let local=1;return function(){return local}}}).factory();
+        class Site{method(){let local=1;return function(){return local}}}
+        export const method=new Site().method();
+        for(const fn of [parameter,write,increment,compound,dependency,self,deep,receiver,nested,
+            defaults,targetDefault,evalWrapper,evalArrow,arrow,catchBinding,objectMethod,method])fn();
+        let caught=false;try{constant()}catch(error){caught=error instanceof TypeError}
+        export const ok=caught&&parameter()===2&&write()===2&&evalWrapper()===2;
+    )JS";
+    Item ns = js_interp_execute_es_module_source(&runtime, source, sizeof(source)-1,
+        "test/js/interp_esm/wrapped-function-capture-exclusions.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+    for (const char* name : {"parameter", "write", "increment", "compound", "constant", "dependency",
+            "self", "deep", "receiver", "nested", "defaults", "targetDefault", "evalWrapper", "evalArrow", "arrow", "catchBinding", "objectMethod", "method"}) {
+        Item item = js_get_key_cstr(ns, name);
+        ASSERT_EQ(get_type_id(item), LMD_TYPE_FUNC) << name;
+        auto* function = (JsFunction*)item.function;
+        EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_PINNED_INTERP) << name;
+        EXPECT_FALSE(function->code->p2_promotion.loop_entered);
+    }
     runtime_cleanup(&runtime);
 }
 
@@ -2179,6 +2884,187 @@ TEST(JsInterpreter, AutoMvpLoopHandoffKeepsLiveBindingsAndReceiver) {
         EXPECT_EQ(get_type_id(compiled), LMD_TYPE_FUNC);
         if (get_type_id(compiled) == LMD_TYPE_FUNC)
             EXPECT_TRUE(function_has_abi(compiled.function, FN_ENTRY_ABI_MVP_LMD));
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleLoopHandoffKeepsShadowedHeadAndLiveModuleBindings) {
+    for (const char* backend : {"auto", "ast"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 100000;
+        runtime.js_promotion_backedge_threshold = 10000;
+        const char source[] = R"JS(
+            export let offset = 1;
+            function update() { offset = 2; gc(); }
+            export function work(index, buffer, callback) {
+                let sum = this.seed;
+                for (let index = 0; index < 20020; index++) {
+                    if (index === 10001) callback();
+                    sum += index + offset;
+                    buffer[index & 3] = sum;
+                }
+                return sum + index;
+            }
+            export const result = work.call({seed: 0.25}, 7,
+                new Float64Array(4), update);
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source,
+            sizeof(source) - 1, "test/js/interp_esm/loop-live-module.mjs", NULL);
+        ASSERT_FALSE(item_is_error(ns));
+        EXPECT_DOUBLE_EQ(js_get_key_cstr(ns, "result").get_double(), 200420236.25);
+        EXPECT_DOUBLE_EQ(js_get_key_cstr(ns, "offset").get_double(), 2);
+        Item work = js_get_key_cstr(ns, "work");
+        ASSERT_EQ(get_type_id(work), LMD_TYPE_FUNC);
+        auto* function = (JsFunction*)work.function;
+        EXPECT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST);
+        EXPECT_EQ(function->code->p2_promotion.loop_entered, !strcmp(backend, "auto"));
+        EXPECT_EQ(function->code->p2_promotion.loop_state == FN_LOOP_HANDOFF_READY,
+            !strcmp(backend, "auto"));
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ModuleLoopHandoffGuardsPrimitiveFactsBeforeAnyCoercion) {
+    for (const char* backend : {"auto", "ast"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 100000;
+        runtime.js_promotion_backedge_threshold = 4;
+        const char source[] = R"JS(
+            export function append(value,n) {
+                for(let i=0;i<n;i++) value+=1;
+                return value;
+            }
+            if(append(10,8)!==18) throw 'numeric continuation';
+            const object={valueOf(){throw 'unexpected coercion'}};
+            if(append(object,0)!==object) throw 'zero-loop identity';
+            if(append('x',2)!=='x11') throw 'changed input kind';
+            if(append(1n,0)!==1n) throw 'bigint identity';
+            const marker=Symbol();
+            if(append(marker,0)!==marker) throw 'symbol identity';
+            export const ok=true;
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source,
+            sizeof(source)-1, "test/js/interp_esm/loop-kind-guards.mjs", NULL);
+        ASSERT_FALSE(item_is_error(ns));
+        EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+        auto* function = (JsFunction*)js_get_key_cstr(ns, "append").function;
+        ASSERT_NE(function, nullptr);
+        EXPECT_EQ(function->code->p2_promotion.loop_entered, !strcmp(backend, "auto"));
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ModuleLoopHandoffTypedStoresKeepCoercionAndProxyKeys) {
+    for (const char* backend : {"auto", "ast"}) {
+        SCOPED_TRACE(backend);
+        JsExecutionBackendScope selected(backend);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        runtime.js_promotion_policy_resolved = true;
+        runtime.js_promotion_auto = !strcmp(backend, "auto");
+        runtime.js_promotion_call_threshold = 100000;
+        runtime.js_promotion_backedge_threshold = 4;
+        const char source[] = R"JS(
+            export function store(owner,key,value) {
+                for(let i=0;i<6;i++) owner[key]=value;
+                return owner[key];
+            }
+            let conversions=0;
+            const value={valueOf(){conversions++;gc();return 4294967297}};
+            const typed=new Uint32Array(2);
+            if(store(typed,-0,value)!==1) throw 'compiled indexed read';
+            if(typed[0]!==1 || conversions!==6) throw 'negative zero or coercion';
+            for(const key of [NaN,Infinity,-1,0.5]) store(typed,key,value);
+            if(conversions!==30 || typed[0]!==1 || typed[1]!==0) throw 'invalid index coercion';
+            const buffer=new ArrayBuffer(8), detached=new Uint32Array(buffer);
+            const detach={valueOf(){buffer.transfer();gc();return 9}};
+            let threw=false;
+            try { store(detached,0,detach); } catch(error) { threw=error instanceof TypeError; }
+            if(!threw || detached.length!==0) throw 'detachment after coercion';
+            let traps=0;
+            const proxy=new Proxy({}, {set(target,key,input,receiver){
+                if(key!=='0' || input!==value || receiver!==proxy) throw 'proxy arguments';
+                traps++;return true;
+            }});
+            store(proxy,-0,value);
+            if(traps!==6 || conversions!==30) throw 'proxy conversion';
+            const frozen=Object.freeze({0:1});
+            threw=false;
+            try { store(frozen,0,2); } catch(error) { threw=error instanceof TypeError; }
+            if(!threw || frozen[0]!==1) throw 'strict store completion';
+            export const ok=true;
+        )JS";
+        Item ns = js_interp_execute_es_module_source(&runtime, source,
+            sizeof(source)-1, "test/js/interp_esm/loop-typed-stores.mjs", NULL);
+        ASSERT_FALSE(item_is_error(ns));
+        EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+        auto* function = (JsFunction*)js_get_key_cstr(ns, "store").function;
+        ASSERT_NE(function, nullptr);
+        EXPECT_EQ(function->code->p2_promotion.loop_entered, !strcmp(backend, "auto"));
+        runtime_cleanup(&runtime);
+    }
+}
+
+TEST(JsInterpreter, ModuleLoopHandoffRejectsCapturesImportsMethodsAndConstWrites) {
+    JsExecutionBackendScope selected("auto");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_promotion_policy_resolved = true;
+    runtime.js_promotion_auto = true;
+    runtime.js_promotion_call_threshold = 100000;
+    runtime.js_promotion_backedge_threshold = 4;
+    const char source[] = R"JS(
+        import {counter} from './dep.mjs';
+        export function imported(n) {
+            for (let i=0; i<n; i++) if (counter < 0) throw 1;
+            return n;
+        }
+        export function nested(n) {
+            function step() { return 1; }
+            let sum=0; for (let i=0; i<n; i++) sum+=step(); return sum;
+        }
+        export function switched(n) {
+            let sum=0;
+            for(let i=0;i<n;i++) switch(i&1) {case 0:sum++;break;default:sum+=2;}
+            return sum;
+        }
+        export const captured = (() => {
+            let value=1;
+            return function(n) { let sum=0; for(let i=0;i<n;i++)sum+=value; return sum; };
+        })();
+        class Box { run(n) { let sum=0; for(let i=0;i<n;i++)sum++; return sum; } }
+        export const method=Box.prototype.run;
+        export function constant(n) {
+            const saved=1;
+            for(let i=0;i<n;i++) if(i===6)saved++;
+            return saved;
+        }
+        let failed=false;
+        try { constant(8); } catch(error) { failed=error instanceof TypeError; }
+        export const ok=failed && imported(8)===8 && nested(8)===8 &&
+            captured(8)===8 && method(8)===8 && switched(8)===12;
+    )JS";
+    Item ns = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/loop-exclusions.mjs", NULL);
+    ASSERT_FALSE(item_is_error(ns));
+    EXPECT_EQ(js_get_key_cstr(ns, "ok").item, ITEM_TRUE);
+    for (const char* name : {"imported", "nested", "switched", "captured", "method", "constant"}) {
+        Item value = js_get_key_cstr(ns, name);
+        ASSERT_EQ(get_type_id(value), LMD_TYPE_FUNC);
+        auto* function = (JsFunction*)value.function;
+        EXPECT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_AST) << name;
+        EXPECT_FALSE(function->code->p2_promotion.loop_entered) << name;
+        EXPECT_NE(function->code->p2_promotion.loop_state, FN_LOOP_HANDOFF_READY) << name;
     }
     runtime_cleanup(&runtime);
 }

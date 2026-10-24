@@ -83,6 +83,11 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                              uint64_t* result_home);
 // P2 promotion is attempted only at an ordinary call-entry boundary.
 bool js_interp_promote_function_if_hot(JsFunction* function);
+// Immutable source identity proves ownership; each load uses the current callable's cells.
+bool js_interp_p2_is_body_capture(JsScript* script, AstFunctionId function_id,
+    NameEntry* entry);
+extern "C" Item js_interp_capture_read(Item self, AstFuncNode* definition,
+    NameEntry* entry);
 // AST and satellite writes publish the same exported aliases and reexports.
 extern "C" void js_interp_publish_export_bindings(JsScript* script,
     NameEntry* entry, Item value);

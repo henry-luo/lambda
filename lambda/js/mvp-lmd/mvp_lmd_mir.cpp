@@ -140,6 +140,7 @@ struct LmdBinding {
     bool implicit_write;
     bool dense_array_storage;
     bool module_cell;
+    bool ast_capture;
     const JsResolvedModuleBinding* module_import;
     LmdWithLookup* with_lookup;
     LmdBinding* fallback;
@@ -353,6 +354,8 @@ struct MvpLmdProgram {
     uint32_t atomics_slot;
     MvpLmdExecution* execution_owner;
     JsScript* satellite_script; // caller-owned module bindings; no second Script evaluation
+    JsScript* satellite_source;
+    AstFunctionId satellite_function_id; // immutable identity, never a closure instance
     uint32_t realm_key;
 };
 struct MvpLmdRealm;
@@ -698,6 +701,19 @@ static MvpLmdClass* class_plan(MvpLmdProgram* p, AstClassNode* ast, LmdBinding* 
     arraylist_append(p->classes, cls);
     return cls;
 }
+static NameEntry* satellite_capture(MvpLmdProgram* p, String* name) {
+    if (!p->satellite_source) return NULL;
+    AstIndex* index = &p->satellite_source->ast_index;
+    uint32_t count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index, p->satellite_function_id, &count);
+    for (uint32_t i = 0; i < count; i++) {
+        NameEntry* entry = index->bindings[references[i].binding_id];
+        if (entry->name->len == name->len && !memcmp(entry->name->chars, name->chars, name->len) &&
+                js_interp_p2_is_body_capture(p->satellite_source, p->satellite_function_id, entry)) return entry;
+    }
+    return NULL;
+}
+
 static void collect_scope(MvpLmdProgram* p, LmdFunction* owner, NameScope* scope) {
     // a module satellite retains private bindings, including shadowed globals.
     bool script_globals = !p->source_module &&
@@ -726,7 +742,15 @@ static void collect_scope(MvpLmdProgram* p, LmdFunction* owner, NameScope* scope
             b->kinds = K_ANY;
         }
         if (p->satellite_script && !owner->id && scope == ((AstScript*)p->frontend->ast_root)->global_vars) {
-            for (NameEntry* original = p->satellite_script->global_scope->first; original; original = original->next) {
+            b->satellite_entry = satellite_capture(p, e->name);
+            b->ast_capture = b->satellite_entry != NULL;
+            if (b->ast_capture) {
+                b->external = b->assigned = b->observed = b->array_observed = true;
+                b->kinds = K_ANY;
+                e->is_const = b->satellite_entry->is_const;
+            }
+            for (NameEntry* original = b->ast_capture ? NULL : p->satellite_script->global_scope->first;
+                    original; original = original->next) {
                 if (original->name->len != e->name->len || memcmp(original->name->chars, e->name->chars, e->name->len)) continue;
                 // the AST caller's module slab remains the live binding owner after promotion.
                 b->module_cell = true; b->slot = original->slot;
@@ -3856,6 +3880,15 @@ static MIR_reg_t binding_cell(LmdCompiler* c, LmdBinding* b) {
     diagnostic(c->program, NULL, "missing closure cell"); return constant(c, ITEM_NULL);
 }
 static MIR_reg_t binding_item(LmdCompiler* c, LmdBinding* b) {
+    if (b->ast_capture) {
+        AstNode* definition = c->program->satellite_source->ast_index.functions[
+            c->program->satellite_function_id].node;
+        // self is the original callable on every entry, even when siblings share compiled code.
+        MIR_reg_t value = em_call_3(&c->em, "js_interp_capture_read", MIR_T_I64,
+            MIR_T_I64, reg(c, c->self), MIR_T_P, relocated(c, (uint64_t)definition),
+            MIR_T_P, relocated(c, (uint64_t)b->satellite_entry), true);
+        check_error(c, value); return value;
+    }
     if (b->module_import) {
         MIR_reg_t value = em_call_1(&c->em, "js_module_binding_get", MIR_T_I64,
             MIR_T_P, relocated(c, (uint64_t)b->module_import), true);
@@ -4119,6 +4152,11 @@ static void write_binding(LmdCompiler* c, LmdBinding* b, LmdValue v, AstNode* si
         with_reference_operation(c, with_reference(c, b, site), site, LMD_PROP_SET, v); return;
     }
     if (!b) { global_binding_access(c, site, true, box(c, v).reg); return; }
+    if (b->ast_capture) {
+        // synthetic dependency declarations own no values; source writes were rejected by admission.
+        if (!initialize) diagnostic(c->program, site, "AST capture is read only");
+        return;
+    }
     if (b->module_import) { fail(c, LMD_MVP_TYPE, site); return; }
     if (b->reflected_global) {
         global_binding_access(c, site, true, box(c, v).reg, false, b->entry->name); return;
@@ -5604,6 +5642,22 @@ static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, As
     if (LmdScalarField* field = scalar_reference(ref)) { scalar_field_write(c, field, value); return; }
     MIR_label_t done = label(c), object = label(c);
     unsigned k = semantic(ref.owner);
+    // satellites receive foreign carriers through the full property ABI;
+    // closed units may instead pair fixed named storage with fixed reads.
+    if (c->program->satellite_script && ref.numeric_key &&
+            ref.deferred_name.reg && (k & (K_OBJECT | K_MAP))) {
+        MIR_label_t ordinary = label(c);
+        em_guard_container(&c->em, ref.owner.reg, LMD_TYPE_MAP, ordinary);
+        branch(c, MIR_BNE, ordinary, reg(c, em_load_at(&c->em, ref.owner.reg,
+            LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "indexed_map_kind")), integer(c, MAP_KIND_TYPED_ARRAY));
+        // Number keys need no spelling for integer-indexed Set; +0 canonicalizes a Number -0 key.
+        MIR_reg_t index = op(c, MIR_DADD, reg(c, to_number(c, ref.deferred_name)),
+            MIR_new_double_op(c->em.ctx, 0), MIR_T_D);
+        MIR_reg_t stored = em_call_3(&c->em, "mvp_lmd_typed_array_store", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_D, reg(c, index),
+            MIR_T_I64, reg(c, box(c, value).reg), true);
+        check_error(c, stored); jump(c, done); put_label(c, ordinary);
+    }
     if (k == K_TYPED_ARRAY) { typed_array_reference(c, ref, site, &value); put_label(c, done); return; }
     if (k & K_TYPED_ARRAY) {
         MIR_label_t ordinary = label(c);
@@ -8688,9 +8742,11 @@ static void scope_capture_initialize(LmdCompiler* c, NameScope* scope, bool body
     for (NameEntry* e = scope ? scope->first : NULL; e; e = e->next) {
         LmdBinding* b = binding(c->program, e);
         // a body var gets its own cell; default closures keep the original parameter cell.
-        bool allocate = body_variables ? e->is_js_body_var : !e->is_parameter;
+        bool copy_parameter = !c->function->eval_environment && c->function->parameter_expressions &&
+            c->function->ast && scope == c->function->ast->vars && e->is_parameter && e->is_js_body_var;
+        bool allocate = (body_variables ? e->is_js_body_var : !e->is_parameter) || copy_parameter;
         if (b && b->owner == c->function && b != c->function->arguments_binding && b->captured && allocate)
-            initialize_capture(c, b, false);
+            initialize_capture(c, b, copy_parameter);
     }
 }
 static void scope_initialize(LmdCompiler* c, NameScope* scope, bool captures = true) {
@@ -8703,7 +8759,7 @@ static void scope_initialize(LmdCompiler* c, NameScope* scope, bool captures = t
             b->target->ast->entry == e && !e->is_annex_b_companion;
         if (!b || (b->owner != c->function && !inline_slot(c, b)) ||
                 (projected_body ? !e->is_js_body_var : e->is_parameter && !hoisted) || b->native || b->intrinsic) continue;
-        if (b == c->function->arguments_binding || b->module_import) continue;
+        if (b == c->function->arguments_binding || b->module_import || b->ast_capture) continue;
         if (!b->reflected_global && b->shape_hint && b->shape_hint->scalar_binding == b) continue;
         LmdScalarField* local = inline_slot(c, b);
         if (local && !is_boxed(local->value)) continue;
@@ -9749,6 +9805,7 @@ static const LmdImport imports[] = {
         JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE) | JIT_IMPORT_ARGS_BORROWED_AUDITED,
         JIT_EXCEPTION_PRESERVES, 0}},
     {"mvp_lmd_property_with_receiver", (void*)mvp_lmd_property_with_receiver, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR)|ARG(4,ITEM))},
+    {"mvp_lmd_typed_array_store", (void*)mvp_lmd_typed_array_store, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,ITEM))},
     {"mvp_lmd_set_prototype", (void*)mvp_lmd_set_prototype, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
     {"mvp_lmd_get_prototype", (void*)mvp_lmd_get_prototype, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM))},
     {"mvp_lmd_define_accessor", (void*)mvp_lmd_define_accessor, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
@@ -9895,6 +9952,8 @@ static const LmdImport imports[] = {
     {"array_copy_owned_items", (void*)array_copy_owned_items, AUDIT(JIT_EFFECT_NO_GC, SCALAR,
         ARG(0,GC_PTR)|ARG(1,SCALAR)|ARG(2,RAW_PTR)|ARG(3,SCALAR))},
     {"js_module_binding_get", (void*)js_module_binding_get, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR))},
+    {"js_interp_capture_read", (void*)js_interp_capture_read,
+        AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,RAW_PTR)|ARG(2,RAW_PTR))},
     {"js_interp_publish_export_bindings", (void*)js_interp_publish_export_bindings,
         AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,RAW_PTR)|ARG(1,RAW_PTR)|ARG(2,ITEM))},
     {"js_set_global_property_after_with_lookup", (void*)js_set_global_property_after_with_lookup,
@@ -14640,32 +14699,70 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     if (script->strict_mode) strbuf_append_str(source, "'use strict';\n");
     // D8.2.4: clone only the checked body's resolved dependencies. Copying a
     // wide module scope made planning and the unused synthetic main quadratic.
-    // Loop continuations have a separate parsed scope and keep their name map.
+    // separately parsed continuations resolve that same slice by spelling.
     AstIndex* index = &script->ast_index;
     bool* referenced = NULL;
-    if (binding_owner == script && index->binding_count) {
+    uint32_t selected_function_count = 0;
+    if (index->binding_count) {
         if (!index->function_reference_offsets) { strbuf_free(source); return ItemError; }
         referenced = (bool*)mem_calloc(index->binding_count, sizeof(bool), MEM_CAT_TEMP);
         if (!referenced) { strbuf_free(source); return ItemError; }
+    }
+    // a contained helper can be the only reader of a live module binding.
+    for (AstFunctionId id = 0; id < index->function_count; id++) {
+        if (!ast_index_node_descends(index, index->functions[id].first_node,
+                index->functions[function_id].first_node)) continue;
+        selected_function_count++;
+        if (!referenced) continue;
         uint32_t count = 0;
-        const AstFunctionReference* references = ast_index_function_references(index, function_id, &count);
+        const AstFunctionReference* references = ast_index_function_references(index, id, &count);
         for (uint32_t i = 0; i < count; i++) referenced[references[i].binding_id] = true;
     }
     for (NameEntry* entry = binding_owner->global_scope->first; entry; entry = entry->next) {
         if (definition->node_type == AST_NODE_FUNC && entry == definition->entry) continue;
         if (referenced) {
-            AstBindingId binding_id = ast_index_find_binding_entry(index, entry);
+            NameEntry* dependency = binding_owner == script ? entry
+                : name_scope_lookup_name_bytes(script->global_scope, entry->name);
+            if (!dependency) continue;
+            AstBindingId binding_id = ast_index_find_binding_entry(index, dependency);
             if (binding_id >= index->binding_count || !referenced[binding_id]) continue;
         }
         strbuf_append_str(source, entry->is_lexical ? "let " : "var ");
         strbuf_append_str_n(source, entry->name->chars, entry->name->len);
         strbuf_append_str(source, ";\n");
     }
+    for (AstBindingId id = 0; referenced && id < index->binding_count; id++) {
+        NameEntry* entry = index->bindings[id];
+        if (!referenced[id] || !js_interp_p2_is_body_capture(script, function_id, entry)) continue;
+        // declarations resolve clone identifiers; reads never use their synthetic storage.
+        strbuf_append_str(source, "let ");
+        strbuf_append_str_n(source, entry->name->chars, entry->name->len);
+        strbuf_append_str(source, ";\n");
+    }
     mem_free(referenced);
     // anonymous default declarations need expression syntax in an isolated unit.
-    bool as_expression = definition->node_type == AST_NODE_FUNC_EXPR || !definition->name;
+    bool method = definition->node_type == AST_NODE_METHOD;
+    bool as_expression = method || definition->node_type == AST_NODE_FUNC_EXPR ||
+        definition->node_type == AST_NODE_ARROW_FUNC || !definition->name;
     if (as_expression) strbuf_append_char(source, '(');
-    strbuf_append_str_n(source, text, length);
+    if (method) {
+        // D8.1.3v38 preserves checked defaults verbatim and the original method metadata.
+        strbuf_append_str(source, "function(");
+        for (AstNode* parameter = definition->params; parameter; parameter = parameter->next) {
+            SourceSpan span = parameter->source_span;
+            if (!js_ast_parameter_binding_identifier(parameter) || span.end_byte <= span.start_byte ||
+                    span.end_byte > script->source_length) { strbuf_free(source); return ItemError; }
+            if (parameter != definition->params) strbuf_append_char(source, ',');
+            strbuf_append_str_n(source, script->source + span.start_byte, span.end_byte - span.start_byte);
+        }
+        strbuf_append_char(source, ')');
+        AstNode* body = definition->body;
+        if (!body || body->node_type != AST_NODE_BLOCK ||
+                body->source_span.end_byte <= body->source_span.start_byte ||
+                body->source_span.end_byte > script->source_length) { strbuf_free(source); return ItemError; }
+        strbuf_append_str_n(source, script->source + body->source_span.start_byte,
+            body->source_span.end_byte - body->source_span.start_byte);
+    } else strbuf_append_str_n(source, text, length);
     if (as_expression) strbuf_append_char(source, ')');
     strbuf_append_char(source, ';');
     MvpLmdExecution* execution = js_runtime_state.auto_mir_owner;
@@ -14682,6 +14779,7 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
     MvpLmdProgram* program = existing ? mvp_lmd_new_unit(execution, &execution->program) : &execution->program;
     if (!program) { strbuf_free(source); return ItemError; }
     program->execution_owner = execution; program->satellite_script = binding_owner;
+    program->satellite_source = script; program->satellite_function_id = function_id;
     program->module_realm = true;
     // satellite parameters arrive from other units; local literals cannot exclude types.
     program->bigints = program->symbols = true;
@@ -14695,10 +14793,18 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
             mvp_lmd_compile_unit(state->program, NULL, 0, 2) ? state->program : NULL;
     }, &compile, &faulted);
     strbuf_free(source);
-    if (!compiled || faulted || program->functions->length != 2) {
+    if (!compiled || faulted || (uint32_t)program->functions->length != selected_function_count + 1) {
         log_error("js-p2-compile: %s functions=%d faulted=%d", program->diagnostic,
             program->functions ? program->functions->length : 0, faulted);
         return ItemError;
+    }
+    if (program->frontend->pass_timing.enabled) {
+        // correlate isolated MIR timings with the original source, including anonymous arrows.
+        log_notice("js-p2-source: file=%s name=%.*s start=%u end=%u",
+            script->reference ? script->reference : "<script>",
+            definition->name ? (int)definition->name->len : 0,
+            definition->name ? definition->name->chars : "",
+            definition->source_span.start_byte, definition->source_span.end_byte);
     }
     RuntimeModuleStateScope owner(context);
     if (!owner.activate(binding_owner->module_state_id)) {
@@ -14729,7 +14835,10 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
 
 Item mvp_lmd_compile_loop_satellite(Runtime* runtime, JsScript* script, const char* source,
         size_t length, const char* function_name) {
-    JsScript* parsed = js_interp_prepare_script(runtime, source, length, "<loop-handoff>", script->strict_mode);
+    // retain the source grammar goal; exported module source is not a Script.
+    JsScript* parsed = script->is_es_module
+        ? js_interp_prepare_es_module_script(runtime, source, length, "<loop-handoff>")
+        : js_interp_prepare_script(runtime, source, length, "<loop-handoff>", script->strict_mode);
     if (!parsed) return ItemError;
     for (AstFunctionId id = 0; id < parsed->ast_index.function_count; id++) {
         auto* definition = (AstFuncNode*)parsed->ast_index.functions[id].node;

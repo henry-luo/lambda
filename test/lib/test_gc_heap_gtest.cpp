@@ -534,6 +534,76 @@ TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
 // growth, registered before their first Item is published, cleared on pop,
 // dropped and re-registered when the owning heap is replaced, and released
 // on destroy.
+TEST_F(GCHeapTest, RootVectorRejectsFailedRangeRegistrationBeforePublishingItems) {
+    EvalContext runtime{};
+    Heap heap{};
+    heap.gc = gc;
+    heap.generation = 1;
+    runtime.heap = &heap;
+    RootVector values;
+    root_vector_init(&values, (Context*)&runtime, "registration failure");
+    Item value = {.item = string_item(make_string("registered-only"))};
+
+    // vector metadata and its first block succeed; the registry growth fails.
+    memtrack_fault_inject(2);
+    bool pushed = root_vector_push(&values, value);
+    memtrack_fault_clear();
+    EXPECT_FALSE(pushed);
+    EXPECT_EQ(root_vector_count(&values), 0);
+    EXPECT_EQ(gc->root_range_count, 0);
+    if (pushed) {
+        root_vector_destroy(&values);
+        return;
+    }
+
+    ASSERT_TRUE(root_vector_push(&values, value));
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, 1u);
+    root_vector_destroy(&values);
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, 0u);
+}
+
+TEST_F(GCHeapTest, RootVectorRollsBackPartialRegistrationAfterHeapReplacement) {
+    EvalContext runtime{};
+    Heap heap{};
+    heap.gc = gc;
+    heap.generation = 1;
+    runtime.heap = &heap;
+    RootVector values;
+    root_vector_init(&values, (Context*)&runtime, "replacement registration failure");
+    for (int i = 0; i <= 2 * ROOT_VECTOR_BLOCK_SLOTS; i++) {
+        ASSERT_TRUE(root_vector_push(&values, ItemNull));
+    }
+    gc_heap_t* replacement = gc_heap_create();
+    ASSERT_NE(replacement, nullptr);
+    heap.gc = replacement;
+    heap.generation = 2;
+    // the first retained block registers; growth for the second block fails.
+    replacement->root_ranges = (gc_root_range_t*)mem_calloc(1, sizeof(gc_root_range_t), MEM_CAT_EVAL);
+    ASSERT_NE(replacement->root_ranges, nullptr);
+    replacement->root_range_capacity = 1;
+    Item value = {.item = string_item(gc_heap_alloc(replacement, 32, LMD_TYPE_STRING))};
+    memtrack_fault_inject(0);
+    bool pushed = root_vector_push(&values, value);
+    memtrack_fault_clear();
+    EXPECT_FALSE(pushed);
+    EXPECT_EQ(root_vector_count(&values), 0);
+    EXPECT_EQ(replacement->root_range_count, 0);
+    EXPECT_EQ(values.heap_generation, 0u);
+    if (!pushed) {
+        ASSERT_TRUE(root_vector_push(&values, value));
+        EXPECT_EQ(replacement->root_range_count, 3);
+        gc_collect_with_root_region(replacement, NULL, 0, NULL, 0);
+        EXPECT_EQ(replacement->object_count, 1u);
+    }
+    root_vector_destroy(&values);
+    EXPECT_EQ(replacement->root_range_count, 0);
+    gc_collect_with_root_region(replacement, NULL, 0, NULL, 0);
+    EXPECT_EQ(replacement->object_count, 0u);
+    gc_heap_destroy(replacement);
+}
+
 TEST_F(GCHeapTest, RootVectorGrowsAddressStableAndFollowsHeapReplacement) {
     EvalContext runtime{};
     Heap heap{};
@@ -617,6 +687,13 @@ TEST_F(GCHeapTest, RootVectorBindsExternalSpan) {
     root_vector_init(&v, (Context*)&runtime, "external-gtest");
     root_vector_bind_external(&v, (Context*)&runtime, slots, 2,
         "external-gtest");
+    memtrack_fault_inject(0);
+    bool registered = root_vector_ensure_external(&v);
+    memtrack_fault_clear();
+    EXPECT_FALSE(registered);
+    EXPECT_EQ(v.heap_generation, 0u);
+    EXPECT_EQ(gc->root_range_count, 0);
+    EXPECT_EQ(root_vector_external_at(&v, 0), nullptr);
     ASSERT_TRUE(root_vector_ensure_external(&v));
     void* object = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
     ASSERT_NE(object, nullptr);
@@ -1401,6 +1478,52 @@ TEST_F(GCHeapTest, TryRegisterRootReportsCanonicalRegistration) {
     EXPECT_EQ(gc_try_register_root(gc, &slot), 1);
     EXPECT_EQ(gc->root_slot_count, 1);
     EXPECT_EQ(gc_try_register_root(nullptr, &slot), 0);
+}
+
+TEST_F(GCHeapTest, ObjectRootsBalanceNestedAndOutOfOrderOwners) {
+    void* first = make_string("first");
+    void* middle = make_string("middle");
+    void* last = make_string("last");
+    ASSERT_TRUE(gc_try_register_object_root(gc, first));
+    ASSERT_TRUE(gc_try_register_object_root(gc, middle));
+    ASSERT_TRUE(gc_try_register_object_root(gc, last));
+    ASSERT_TRUE(gc_try_register_object_root(gc, first));
+    EXPECT_EQ(gc->object_root_count, 3);
+
+    gc_unregister_object_root(gc, middle);
+    gc_unregister_object_root(gc, first);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->object_count, 2u);
+    EXPECT_TRUE(gc_is_managed(gc, first));
+    EXPECT_TRUE(gc_is_managed(gc, last));
+
+    gc_unregister_object_root(gc, first);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->object_count, 1u);
+    EXPECT_TRUE(gc_is_managed(gc, last));
+    gc_unregister_object_root(gc, last);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(gc->object_root_count, 0);
+}
+
+TEST_F(GCHeapTest, RootRangeUpdatesAndOutOfOrderRemovalPreserveLiveness) {
+    uint64_t first[] = {string_item(make_string("first")), string_item(make_string("removed"))};
+    uint64_t last[] = {string_item(make_string("last"))};
+    gc_register_root_range(gc, first, 2);
+    gc_register_root_range(gc, last, 1);
+    gc_register_root_range(gc, first, 1);
+    EXPECT_EQ(gc->root_range_count, 2);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->object_count, 2u);
+
+    gc_unregister_root_range(gc, first);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->object_count, 1u);
+    gc_unregister_root_range(gc, last);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc->object_count, 0u);
+    EXPECT_EQ(gc->root_range_count, 0);
 }
 
 #ifndef NDEBUG

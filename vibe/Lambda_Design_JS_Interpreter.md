@@ -72,7 +72,7 @@ call proof certify a strict activation without observations for the compiled
 light-call entry; general read-only expressions do not. Callees retain their
 own ordinary invoke boundaries.
 
-**Module hot-entry revision (USER, 2026-10-23): D8.1.3v34** extends admission
+**Module hot-entry and loop revision (USER, 2026-10-23/24): D8.1.3v41** extends admission
 to synchronous top-level ES-module declarations, function expressions and public
 instance methods that pass the existing classic-function checks. A method
 requires simple parameters and a class site at module top level or inside one
@@ -88,12 +88,76 @@ their live cells are not ordinary slab slots. Captures outside that slab, constr
 methods, super/private access, other nested/suspended definitions, eval and dynamic
 source stay excluded. The original callable retains its source, method identity,
 strict receiver, home and non-constructibility; only checked parameter/body spans
-form the isolated function expression used to compile its body. Thresholds, forced AST, module loop handoff and whole-unit admission
-do not change. On publication, admitted strict definitions retain the scan's
+form the isolated function expression used to compile its body. Thresholds, forced AST and whole-unit admission do not change. Checked
+top-level synchronous module functions may also hand off at the existing hot-loop
+threshold, preserving live module cells and distinct for-let head bindings. On publication, admitted strict definitions retain the scan's
 activation observations as callable analysis flags (**D8.4.1v2**). The ordinary
 compiled light or receiver entry can consume those facts without repeating a
 full activation; the guards still fall back across realms, modules or `with`.
 The numeric/predicate-call proof remains useful before promotion.
+
+**D8.1.3v36** additionally admits contained synchronous ordinary function
+declarations and switch statements for hot entry of checked top-level module
+functions. Each contained body passes the dependency and activation checks.
+Bindings inside the selected function subtree use ordinary compiled closure
+ownership; other resolved free bindings must be original live module slots.
+Imports, external captures, contained expressions/arrows/methods/classes,
+suspended definitions and eval/dynamic source remain excluded. Classic
+admission, loop handoff, thresholds, forced AST and whole-unit admission do not
+expand. No outer AST environment is bridged.
+
+**D8.1.3v38** additionally admits checked identifier parameter defaults and
+contained synchronous arrows for these module methods. Their subtree proof also
+accepts contained ordinary declarations, switch and constant templates. Every
+initializer and contained body is checked. Captures stay inside the newly
+compiled method subtree or original live module slab; ordinary compiled closure
+ownership handles local captures without bridging an existing AST environment.
+Imports, wrapper/external/class-self/private captures, destructuring/rest,
+contained function expressions/classes/methods, suspended/dynamic definitions
+and arguments/new.target/super remain excluded. Original method identity,
+source/name/length, strict receiver, home and non-constructibility remain
+authoritative. Other method/class exclusions, classic/ordinary-function
+admission, whole-unit admission, thresholds and all loop handoff stay unchanged.
+
+**D8.1.3v40** adds hot entry for synchronous ES-module arrows at module
+level or inside one top-level synchronous function declaration, function
+expression or arrow. Parameters must be simple identifiers, with no activation
+observations (this/arguments/new.target/super). The checked body/dependency
+proof resolves free bindings only to original live module slots or ordinary
+unresolved globals. Original identity, source/name/length, lexical receiver
+metadata and non-constructibility remain authoritative; no existing AST
+environment is bridged. The approved constant-template proof applies. Imports,
+wrapper-local/external/class-self/private captures, deeper/suspended wrappers,
+class/field/static-block sites, defaults/rest/destructuring, nested callable
+bodies beyond the v38 method subtree and eval/dynamic source remain excluded.
+Ordinary nested-declaration/switch promotion stays deferred; classic admission,
+whole-unit admission, thresholds and all loop handoff remain unchanged.
+The measured `Wu` arrow has precisely this one-wrapper shape, zero captures and
+zero activation observations. Its module-level binding initially obscured its
+enclosing initialization arrow; source ownership tracing corrected that
+classification before the user approved this extension.
+
+**D8.1.3v41** adds the user-approved live capture read bridge for checked
+synchronous ordinary function expressions inside one top-level synchronous
+ES-module function declaration, function expression or arrow. Both parameter
+lists must be simple identifiers; the target has no activation observations
+or nested callables. Wrapper and target exclude direct eval/with effects.
+Resolved external bindings may be body let/const/var declarations owned by
+that exact wrapper. Captured parameters, writes, imports, self/private names,
+deeper/suspended/class sites and dynamic source remain excluded. Other
+admission rules, hotness thresholds and all loop handoff stay unchanged.
+
+The satellite declares only referenced dependency names for clone resolution.
+A distinct read-only binding kind lowers captured reads to
+`js_interp_capture_read(currentSelf, originalDefinition, originalBinding)`.
+It validates the original callable identity, finds its owning environment by
+source scope and shares the AST binding reader, including TDZ and scalar
+publication. Definition-owned compiled code stores immutable metadata, never
+an instance environment. The existing precise callable root retains the AST
+payload after promotion, so sibling factories keep distinct live cells and
+callback reentry observes subsequent replacements. Synthetic declarations do
+not initialize or snapshot captures. Original metadata and ordinary
+construction stay authoritative; no wrapper is re-executed.
 
 **Previous top-level-only experiment (2026-10-23):** the isolated method adapter
 and metadata regressions passed, but the CSS workload was neutral (15790/15803 ms
@@ -1205,9 +1269,9 @@ encoded base before publication. Spread, object-literal methods/accessors and
 captures outside the slab remain ineligible. The satellite context is retained in the
 owning `EvalContext` until teardown. Every other definition is pinned to T0.
 
-The **D8.1.3v34** module extension uses the same admission scan as classic
+The **D8.1.3v38** module extension uses the same admission scan as classic
 functions, adding an explicit import-binding exclusion. Synchronous top-level
-functions and simple-parameter public instance methods on classes at top level
+functions and checked public instance methods on classes at top level
 or inside one top-level synchronous module function/arrow may read and write live module slots, call their current values and perform the
 admitted local loops/property operations. Captures outside the source module
 slab (including wrapper parameters/locals and class-self bindings), deeper or
@@ -1217,14 +1281,79 @@ use checked parameter/body spans without replacing the original callable metadat
 still classify the narrow light-call contract before promotion. The ordinary
 hot-call threshold and boxed satellite publication remain authoritative; the
 source module is not re-evaluated and its existing binding slab is not
-reinitialized. Module loop handoff remains excluded.
+reinitialized. **D8.1.3v38** extends only the method subtree to checked identifier
+defaults and contained synchronous arrows, declarations, switch and constant
+templates. Every initializer/body is checked; local captures use ordinary MIR
+closure cells, while outer bindings must be original live module slots.
 
-Hot-entry clones declare only bindings referenced by the selected function's
-shared `AstIndex` reference slice (**D8.2.4**). Each declaration still maps to
+For hot entry only, the approved **D8.1.3v36** extension admits contained synchronous ordinary function
+declarations and switch statements. The scan checks every contained body and
+accepts lexical captures only inside the selected function subtree, using the
+existing compiled closure cells. Module references in contained helpers still
+map to the original live slab. Contained function expressions, arrows, methods,
+classes, suspended/dynamic definitions and external captures remain excluded.
+Classic functions continue to reject nested callables and switch statements.
+
+The first v36 implementation experiment was not retained (2026-10-24). Six focused
+checks pass normally and with forced GC/freed-memory poisoning, but five paired
+original CSS runs have median wall 14.998 s versus control 14.777 s, with equal
+checksum. The tokenizer reaches the call threshold but remains excluded for
+three constant template literals. The user approved those constants separately
+as **D8.1.3v37**; interpolation and tagged templates remain excluded.
+Overview/pricing retain their 120-second watchdogs. Atlas passes with both
+builds on the current server response, so that pass is not attributed to the
+experiment. The nested/switch extension was restored for v37 qualification
+and then removed again after the combined experiments were slower.
+
+**D8.1.3v37** admits an untagged template literal only when it has no
+expressions and exactly one tail quasi with a valid cooked string. This is a
+constant string for the existing MIR lowering; source text and callable
+identity remain original. The scan returns at that checked literal rather than
+admitting arbitrary template elements. Interpolation, tagging, imports,
+external captures and other callable families remain excluded. Classic and
+loop-handoff admission, thresholds, forced AST and whole-unit admission do not
+expand. The v37 implementation is not retained after the slower unmodified
+release workloads; the approved ruling remains pending implementation.
+
+The combined v34/v36/v37 experiment (2026-10-24) passes 11 focused checks,
+also under forced GC/freed-memory poisoning, but original CSS execution is
+14,979/15,115 ms versus qualified control approximately 14,338–14,386 ms.
+Overview/pricing still hit the 120-second watchdog; Atlas passes with the
+candidate and control. O0 and a generic inlining-budget experiment were also
+slower and removed. The qualified v35 code and release are restored. Current
+AST sampling identifies checked defaults and local arrow callbacks in module
+methods (`setSource`, `forEach`, `insert`) as the next boundary. The user approved that limited method scope as
+**D8.1.3v38** on 2026-10-24. The method-only implementation and qualification
+are recorded below. Original method metadata/body checks,
+capture/import exclusions and loop-handoff policy remain authoritative.
+
+**D8.1.3v35** also admits the existing one-way loop handoff for synchronous
+top-level module functions passing that proof. Local live-ins are read from
+the exact-rooted activation at the head; module operations retain the source
+slab and ordinary call kernel. A for-let head is initialized from its current
+live slots inside its own lexical scope, so a same-named outer binding remains
+available after the loop. Unrepresentable states, TDZ and const-write refusals
+remain in T0. Imports, captures, nested callables, methods, suspended definitions,
+eval/dynamic source, whole-unit admission and thresholds do not expand. The
+original CSS line/column pass is hot within its first call: entry-only promotion
+otherwise leaves its long indexing loop in T0. No module source is executed
+again when the continuation is prepared.
+
+Primitive live-ins use checked Number, String or Boolean copies inside the
+cloned body so its ordinary local analysis sees those facts. A cached
+continuation checks those primitive kinds before entry; a mismatch stays in
+T0 without coercion or replay. Objects, BigInts and Symbols receive no such
+copy coercion. These are body-entry guards, not per-site caches (**D8.4.1v2**).
+
+Landed hot-entry clones declare only bindings referenced by the selected
+function's shared `AstIndex` reference slice (**D8.2.4**). The approved v36
+extension requires slices from every contained function as well. Each
+declaration still maps to
 the original module slot. Unrelated declarations from a wide bundle otherwise
 inflate binding/range planning and code generation for the synthetic program
-body even though that body never executes. Loop continuations have a separate
-parsed scope and retain the original name map.
+body even though that body never executes. Loop continuations resolve their
+separately parsed reference slice by name into the original module scope;
+their retained bindings still use the original slab slots.
 
 The full JavaScript satellite design consumes `JsScript`-owned:
 
@@ -1919,3 +2048,164 @@ The former formal clause was:
 > ~~A direct eval's caller first installs the `EvalContext` bridge. Interpreted cells or MIR registers are projected and written back, and a projected binding outranks a global lexical of the same name. Eval-created `var` bindings live in that activation's shared journal.~~
 
 The first retirement step is what JSI36 ratifies. Interpreted callers link their environments, and the bridge text now describes MIR callers only. The projection lost bindings after the eval returned (JS05-L5), missed `arguments` and `new.target` (JS05-L6), and could not tell the caller's own `var` from an outer one (JS05-L7). It also needed source scans in place of const and restricted-name write errors.
+
+### Module loop boundary superseded by D8.1.3v35 (2026-10-23)
+
+~~D8.1.3v34 extends module hot entry only; module loop handoff remains
+excluded.~~ The user approved checked synchronous top-level module loop
+handoff under the existing proof and backedge threshold, with live slab
+bindings and distinct shadowing for-let heads. All other admission boundaries
+remain in force.
+
+
+The v38 method-only implementation (2026-10-24) leaves ordinary v36/v37
+promotion deferred. Its ten focused checks pass normally and under forced
+GC/poisoning. Three original large-CSS pairs give median execution 14,171 ms
+versus control 14,580 ms (wall 14.507 versus 14.933 s), with unchanged checksum.
+The six-pass small workload is modestly faster overall (8,541/8,621 versus
+8,708/8,756 ms). The combined ordinary/method experiment was slower and is
+preserved separately. The method slice also repairs shared MIR parameter-cell
+ownership: a body `var` receives a copied cell after defaults, so escaped default
+closures keep their original parameter cell. Aggregate qualification passes 242 native JS, 92 GC, ten forced-GC boundary
+checks, 121 optimization contracts, all 40,261 Test262 baseline cases and the
+Radiant baseline (8,980 passed, 143 partial, two skipped). Lambda has 8,152
+passing checks overall and the previously recorded PDF golden mismatch.
+Sandbox-blocked macOS media/3D cases pass with system-service access. Final
+original-page replays still time out at 120 s for overview/pricing (128.713 and
+136.294 s total wall); Atlas passes in 42.504 s and also passes control. Every
+replay exits normally with zero tracked live allocations and complete network,
+layout, render, cleanup and timing telemetry. The method improvement is retained;
+no repair is claimed for those two remaining watchdog failures. A top-level
+module-arrow proposal targets the sampled `Wu` definition and awaits the user
+decision required by `doc/Doc_Convention.md` §2. No arrow expansion is implemented.
+
+
+The user approved the limited top-level module-arrow proposal as **D8.1.3v39**
+on 2026-10-24. The admission scan separates constant-template permission from
+the v38 method subtree so it does not restore ordinary nested declarations or
+switch. Every checked arrow rejects activation observations and non-identifier
+parameters, enclosing class/field/static-block sites, enclosing functions and
+captures beyond the source slab. The ordinary satellite compiler retains arrow
+source syntax and lowering. Qualification is recorded in
+`impl/Radiant_Online_Loading_Oct23.md`.
+
+
+The v39 top-level-only experiment (2026-10-24) passes 12 focused and forced-GC
+checks but is slower overall on original CSS. Original source tracing confirms
+that `Wu` is rejected because it has an enclosing initialization arrow, despite
+zero captures and activation observations. The proposal had mistaken the
+module-level binding for a top-level callable definition. No enclosing-function
+exception is inferred from that mistake or from the earlier one-wrapper method
+approval. At that point a checked one-wrapper standalone-arrow scope needed
+a separate user decision under `doc/Doc_Convention.md` §2; none was implemented.
+
+
+The qualified v38 method-only source/release is restored after the slower v39
+experiment;242 native and 10 forced-GC checks pass after a fresh rebuild that
+removes stale candidate objects. Latest original-page replays retain overview's
+120-second watchdog and Atlas's control-matching pass. Candidate pricing
+received HTTP403; the qualified control receives normal HTML and still hits
+120s, so no repair is inferred. The current overview cache matches the captured
+original module body byte-for-byte. At that point the one-wrapper proposal
+awaited the user decision required by **D8.1.3v39** and `doc/Doc_Convention.md` §2.
+
+
+The user approved the checked one-wrapper arrow extension as **D8.1.3v40**
+on 2026-10-24. The implementation shares the existing method wrapper check;
+standalone arrows keep their own body proof and zero-capture/activation gates.
+No method-subtree permission or AST environment bridge is granted to those
+arrows. The finite acceptance cases and release measurements are recorded in
+`impl/Radiant_Online_Loading_Oct23.md`; artifacts are under
+`temp/radiant-online-oct24-contained-arrows/`.
+
+
+The retained v40 slice keeps ordinary-function template/nested/switch promotion
+deferred while admitting constant templates for methods and arrows. The exact
+original Wu source span passes admission and compiles. It passes 246 native and
+14 forced-GC checks; three original large-CSS pairs and two repeated small-CSS
+pairs improve modestly with unchanged checksums. Original-page replay and
+aggregate qualification details remain in the implementation record. Captured
+ordinary function expressions still need a separately approved bridge and stay
+interpreted.
+
+
+The v40 slice is qualified (2026-10-24): 246 native JS, 92 GC, 14 forced-GC,
+121 optimization contracts, all 40,261 Test262 baseline cases and Radiant pass.
+Lambda retains the identical pre-existing PDF golden mismatch, with 8,156
+passing checks overall. Original CSS improves modestly; original overview and
+pricing still hit 120 s, while Atlas passes with both candidate and control.
+The qualified release/modules and source snapshot are verified after the broad
+gates. The remaining captured predicate at byte 44722 is outside **D8.1.3v40**;
+the read-only bridge was proposed at that boundary and subsequently approved as **D8.1.3v41**. Its implementation and new qualification are recorded below.
+
+
+The **D8.1.3v41** live-read slice is qualified (2026-10-24). The source proof
+admits only ordinary function expressions in one ordinary synchronous module
+wrapper, simple parameters and no activation observations. It excludes captured
+parameters/writes, catch/self/private bindings and object-method wrappers as
+well as class/deeper/suspended/dynamic sites. The exact unchanged predicate at
+44722–44867 compiles; the earlier Wu arrow at 103929–104012 still compiles.
+Sibling environments, live replacement, TDZ, scalar ownership, callback order,
+thrown identity and original metadata/construction pass in both AST and AUTO.
+
+Final qualification: 249 native JS, 92 GC, 17 forced-GC/freed-poisoning checks,
+121 optimization contracts, 40,261 Test262 baseline cases with zero regressions
+and Radiant (8,980 pass, 143 partial, two skips). Lambda has 8,159 passes and
+only the identical known PDF golden failure. Three final original release CSS
+pairs preserve checksum 1891615/302068/1876230; median execution is 13,604 vs
+13,805 ms control, about 1.5% faster (wall 13.833 vs 14.088 s). Final overview
+and pricing still hit 120 s, with total times 127.303 and 135.451 s. Atlas
+passes in 41.357 s, also known to pass control. All exit normally with zero
+tracked live allocations. The source and restored root release/modules match
+the frozen qualified package in `temp/radiant-online-oct24-capture-reads/`.
+
+Isolated diagnostic sampling identifies the setSource callback at 91846–91994
+as remaining AST work: 32 sampled million-evaluation intervals across three
+original large-CSS passes. These are work samples, not CPU percentages. It
+reads r/i and reads/writes a/o/s/c from its immediate method body and observes
+lexical this. D8.1.3v41 excludes this method-site/write/receiver bridge. The
+concrete next proposal and ownership/acceptance plan are in
+`temp/radiant-online-oct24-capture-reads/method-callback-capture-proposal.txt`;
+the user subsequently approved that extension as D8.1.3v42 below. No watchdog
+change or single-function explanation of the remaining timeouts is claimed.
+
+
+**D8.1.3v42 (USER, 2026-10-24)** approves checked synchronous arrows directly
+inside public instance methods that pass the existing v38 whole-method proof,
+including checked defaults and existing top-level/one-wrapper class sites.
+The selected arrow has simple parameters and no nested callable bodies or
+activation observations except its method's lexical this. Besides original
+module slots and unresolved globals, it may read immediate-method-body cells
+and write their let/var bindings. Captured parameters/const writes, other
+outer/class-self/private bindings, imports, deeper/other callable sites,
+constructors/accessors/static/computed/private methods, suspended/dynamic
+source, eval/with and arguments/new.target/super stay excluded. Thresholds,
+other admission and all loop handoff do not change.
+
+The experimental callback satellite retains immutable source/binding identities; each access
+uses the current original self. Reads share v41's bridge. Writes share AST
+PutValue's refusal and storage path with original strict/script metadata; no
+new environment or capture-value slab is fabricated. Lexical this uses the
+original AST payload reader, without interpreting an AST function as an MVP
+closure_env. MIR imports precisely root self and written Item operands. Old
+escaped callbacks keep their AST environments even after the containing method
+promotes and creates ordinary MIR callbacks. The measured source is the
+setSource callback at bytes 91846–91994.
+
+The candidate is **not retained**. It compiles that exact original callback and
+passes 252 native JS and 20 forced-GC/freed-poisoning checks, including live
+writes, reentry, TDZ, scalar homes, lexical receiver identity and excluded sites.
+Three unchanged release CSS pairs preserve checksum 1891615/302068/1876230 but
+show no useful gain: median 13,605 versus 13,542 ms control (wall 13.835 versus
+13.766 s). Overview 128.776 s and pricing 135.621 s still report the unchanged
+120 s script watchdog; Atlas passes in 41.803 s, also with the qualified control.
+All three exit normally with zero tracked live bytes/count. These results do
+not establish that callback promotion repairs the watchdogs.
+
+The four engine/test source files and release/modules are restored to the
+qualified D8.1.3v41 hashes; the v42 policy remains approved for future work.
+The candidate patch, source, binary and evidence are preserved under
+`temp/radiant-online-oct24-method-callbacks/`, with `status-final.json` recording
+the rejection. Broader gates were not run for this unhelpful candidate; v41's
+unchanged qualification remains authoritative. The online-loading objective
+remains incomplete.
