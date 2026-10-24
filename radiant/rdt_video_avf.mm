@@ -585,6 +585,15 @@ bool rdt_video_events_pending(RdtVideo* video) {
 
 double rdt_video_get_current_time(RdtVideo* video) {
     if (!video) return 0.0;
+    if (video->player_item) {
+        CMTime current = [video->player_item currentTime];
+        if (CMTIME_IS_VALID(current) && !CMTIME_IS_INDEFINITE(current)) {
+            double seconds = CMTimeGetSeconds(current);
+            if (isfinite(seconds) && seconds >= 0.0) return seconds;
+        }
+    }
+    // the main-queue time observer is asynchronous; keep its sample as a fallback
+    // only while AVFoundation has no usable media time.
     return (double)atomic_load(&video->current_time_ms) / 1000.0;
 }
 
