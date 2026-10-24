@@ -620,7 +620,8 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
         break;
     }
     case LMD_PROP_SET:
-        result.set(js_reflect_set(object.get(), name.get(), argument.get(), target.get())); break;
+        // MIR already supplied a canonical key; Reflect.set would intern it again.
+        result.set(js_set_completion_with_key(object.get(), name.get(), argument.get(), target.get())); break;
     case LMD_PROP_DELETE:
         result.set(js_delete(object.get(), lane, name.get())); break;
     case LMD_PROP_HAS: {

@@ -34,6 +34,15 @@ static void root_vector_zero_external(RootVector* v) {
     memset(v->external_slots, 0, (size_t)v->external_count * sizeof(Item));
 }
 
+static void root_vector_unregister_ranges(RootVector* v, Context* owner, int block_count) {
+    for (int i = 0; i < block_count; i++) {
+        heap_unregister_gc_root_range_for(owner, v->blocks[i]->slots);
+    }
+    if (v->external_slots && v->external_count > 0) {
+        heap_unregister_gc_root_range_for(owner, (uint64_t*)v->external_slots);
+    }
+}
+
 // Registrations die with the heap. When the owner's generation moved, every
 // retained Item belonged to the dead heap. Observing that drops the Items and
 // forgets the registration; it never registers, so the non-publishing
@@ -57,13 +66,17 @@ static bool root_vector_sync_heap(RootVector* v) {
     if (generation == 0) return false;
     if (generation == v->heap_generation) return true;
     if (v->external_slots && v->external_count > 0) {
-        heap_register_gc_root_range_for(root_vector_owner(v),
-            (uint64_t*)v->external_slots, (int)v->external_count);
+        if (!heap_register_gc_root_range_for(owner,
+                (uint64_t*)v->external_slots, (int)v->external_count)) return false;
     }
     for (int i = 0; i < v->block_count; i++) {
         memset(v->blocks[i]->slots, 0, sizeof(v->blocks[i]->slots));
-        heap_register_gc_root_range_for(owner, v->blocks[i]->slots,
-                                        ROOT_VECTOR_BLOCK_SLOTS);
+        if (!heap_register_gc_root_range_for(owner, v->blocks[i]->slots,
+                ROOT_VECTOR_BLOCK_SLOTS)) {
+            // a partial registry must not outlive blocks freed after this failed publication.
+            root_vector_unregister_ranges(v, owner, i);
+            return false;
+        }
     }
     v->heap_generation = generation;
     return true;
@@ -201,12 +214,9 @@ extern "C" void root_vector_destroy(RootVector* v) {
     // heap's registry died with it
     // an already-unregistered vector needs no access to its retired context (D5.3.3).
     bool live = v->heap_generation != 0 && heap_generation_for(owner) == v->heap_generation;
+    if (live) root_vector_unregister_ranges(v, owner, v->block_count);
     for (int i = 0; i < v->block_count; i++) {
-        if (live) heap_unregister_gc_root_range_for(owner, v->blocks[i]->slots);
         mem_free(v->blocks[i]);
-    }
-    if (live && v->external_slots && v->external_count > 0) {
-        heap_unregister_gc_root_range_for(owner, (uint64_t*)v->external_slots);
     }
     if (v->blocks) mem_free(v->blocks);
     Context* keep_owner = v->owner;

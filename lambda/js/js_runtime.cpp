@@ -3551,7 +3551,9 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
         // named "constructor" and violates OrdinaryCreateFromConstructor.
         // Set __proto__ so instance methods are accessible via prototype chain
         if (proto_root.get().item != ItemNull.item && get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-            js_set_prototype(object_root.get(), proto_root.get());
+            // new.target lookup precedes allocation, and the receiver has not
+            // reached fields or user constructors: its cycle walk is vacuous.
+            js_set_prototype_fresh(object_root.get(), proto_root.get());
         }
         bool explicit_derived_constructor = super_own && ctor_own &&
             get_type_id(ctor_root.get()) == LMD_TYPE_FUNC;

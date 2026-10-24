@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 44.0.1 (2026-10-23)
+**Spec version:** 52.0.1 (2026-10-24)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1940,7 +1940,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   Generated `parser.c` remains a reference artifact regenerated from
   `grammar.js` (never hand-edit `parser.c`). Build config generates the build
   files (never hand-edit the Lua). [CGP5v2, rules 5, 7]
-- **D8.1.3v34*** LambdaJS uses its first-party C lexer and hybrid
+- **D8.1.3v42*** LambdaJS uses its first-party C lexer and hybrid
   recursive-descent/Pratt parser for normal JavaScript and TypeScript
   source admission. It reduces directly into the retained `JsAstNode` graph;
   the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
@@ -2067,9 +2067,101 @@ loosely across the corpus — context disambiguates, and we live with it.
   suspended definitions, eval and dynamic source stay excluded. Classification
   precedes the hot call, including threshold one. Boxed satellites preserve the
   source slab, namespace and original callable's identity, source, strict
-  receiver, method home and non-constructibility. Thresholds, forced AST, module
-  loop handoff and whole-unit admission do not change. The parameter-expression
-  proof remains a narrower light-call proof.
+  receiver, method home and non-constructibility. Thresholds, forced AST and
+  whole-unit admission do not change. The parameter-expression proof remains
+  a narrower light-call proof.
+  *(v35, 2026-10-23, USER)* Synchronous top-level ES-module functions passing
+  that body/dependency proof may also use the existing hot-loop, one-way
+  handoff. Module reads, writes and calls retain the original live slab;
+  local live-ins come from the precisely rooted activation at the loop head.
+  A shadowing for-let head retains its own lexical boundary rather than
+  flattening distinct bindings into one name. Unrepresentable live-ins, TDZ,
+  const-write refusals, import/capture/nested-callable/method/suspension/dynamic
+  exclusions and the existing thresholds remain authoritative.
+  *(v36, 2026-10-24, USER)* Hot-entry promotion of checked synchronous
+  top-level ES-module functions additionally admits contained synchronous
+  ordinary function declarations and switch statements. Every contained body
+  passes the same dependency and activation checks. Resolved lexical bindings
+  must belong to the selected function subtree or the original module slab;
+  contained closures use ordinary compiled closure ownership, while module
+  reads and writes retain live source slots. Dependency selection includes
+  references from every contained function. Imports, captures outside that
+  subtree/slab, contained function expressions/arrows/methods/classes,
+  suspended definitions, eval and dynamic source remain excluded. Original
+  callable identity, receiver and construction behavior remain authoritative.
+  No outer AST environment is bridged or module source re-executed. This
+  extension does not change classic-function admission, loop handoff,
+  thresholds, forced AST or whole-unit admission.
+  *(v37, 2026-10-24, USER)* Module hot-entry admission additionally accepts
+  untagged template literals with no substitutions and exactly one valid
+  cooked quasi as constant strings, using the existing lowering and original
+  source. Interpolation and tagged templates remain excluded. All other
+  callable/dependency exclusions, thresholds, classic admission, forced AST,
+  whole-unit admission and loop handoff remain unchanged.
+  *(v38, 2026-10-24, USER)* Checked public instance module methods at
+  the approved class sites additionally admit identifier parameters with
+  checked defaults and contained synchronous arrows, ordinary declarations,
+  switch statements and constant templates. Check every initializer and
+  contained body; resolved bindings must stay within the selected method
+  subtree or original live module slab. Compiled closures own their ordinary
+  environments; no pre-existing AST environment is bridged. Imports,
+  wrapper/external/class-self/private captures, destructuring/rest, contained
+  function expressions/classes/methods, suspended/dynamic definitions and
+  arguments/new.target/super remain excluded. Original method identity,
+  source/name/length, strict receiver, home and non-constructibility remain
+  authoritative. Other class/method exclusions, classic/ordinary-function
+  admission, whole-unit admission, thresholds and all loop handoff stay
+  unchanged.
+  *(v39, 2026-10-24, USER)* Hot entry additionally admits synchronous
+  top-level ES-module arrows with simple identifier parameters, no activation
+  observations (this/arguments/new.target/super) and the existing checked
+  body/dependency proof over live module slots. Preserve original arrow
+  identity, source/name/length, lexical receiver metadata and
+  non-constructibility; no pre-existing AST environment is bridged. The
+  approved constant-template proof applies. Imports, external captures,
+  nested/suspended/dynamic definitions and other existing exclusions remain
+  authoritative. Ordinary nested-declaration/switch promotion stays deferred;
+  classic admission, all loop handoff, whole-unit admission and thresholds
+  remain unchanged.
+  *(v40, 2026-10-24, USER)* These checked module arrows may also be
+  defined inside one top-level synchronous module function declaration,
+  function expression or arrow. Every free binding must still resolve to
+  the original live module slab or an ordinary unresolved global; no
+  wrapper-local, import, external, class-self or private capture is admitted.
+  Deeper/suspended wrappers and class/field/static-block sites stay excluded.
+  Simple parameters, no activation observations, original arrow metadata,
+  the existing body proof and all other v39 boundaries remain authoritative.
+  No pre-existing AST environment is bridged. Ordinary nested-declaration/
+  switch promotion stays deferred; thresholds and all loop handoff are unchanged.
+  *(v41, 2026-10-24, USER)* Checked synchronous ordinary function
+  expressions inside one top-level synchronous ES-module function/arrow may
+  read that wrapper's body let/const/var bindings through their original live
+  AST cells. Both functions require simple identifier parameters and no
+  direct-eval/with effects; the target has no activation observations or
+  nested callable bodies. Each read uses immutable original binding identity
+  and the current original callable's traced environment, preserving TDZ,
+  scalar ownership, sibling instances and live replacement. Captured
+  parameters/writes, imports, self/private bindings, deeper/suspended/class/
+  method/field sites and dynamic source remain excluded. Preserve original callable
+  identity, source/name/length and receiver/construction behavior; never copy
+  captures into module slots or re-execute the wrapper. Other admission,
+  thresholds and all loop handoff remain unchanged.
+  *(v42, 2026-10-24, USER)* Checked synchronous arrows directly inside the bodies of
+  synchronous public instance methods may hot-promote when the entire method
+  passes the existing v38 body/dependency and class-site proof. The target has
+  simple identifier parameters, no nested callable bodies and no activation
+  observations except its original method's lexical this. The method retains
+  its checked defaults. Free bindings may additionally be immediate-method-body
+  let/const/var cells: read consts, and read/write let/var through each current
+  original callable's traced AST environment and shared binding operations.
+  Read lexical this from that original AST payload, never a synthetic MIR
+  closure environment. Preserve live cell/receiver ownership, TDZ, scalar
+  homes, identity, source/name/length and arrow non-constructibility. Captured
+  parameters/const writes, other outer/class-self/private bindings, imports,
+  deeper or other callable sites, suspended/dynamic definitions, eval/with
+  and arguments/new.target/super remain excluded. Constructors, accessors,
+  static/computed/private methods stay excluded. Other admission, thresholds
+  and all loop handoff remain unchanged.
   *(v14, 2026-09-22)* A promoted definition may read
   or write a direct non-computed named property of its ordinary `this`
   receiver. The existing call kernel installs that receiver; P2 appends its
@@ -2714,7 +2806,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.3v21 | Revised 2026-09-24 (USER): a direct eval from interpreted code links its activation to the caller frame's live `JsInterpEnv` chain through one boundary record (`JsInterpEnv::eval_script`). Free names in eval code and in its closures resolve by name through that chain (`js_interp_lookup_name`); EvalDeclarationInstantiation targets the caller's nearest function variable environment (`js_interp_instantiate_linked_eval`); the eval frame borrows the caller's `this`, `new.target`, and home-object homes. A function whose body or nested arrow contains a direct eval materializes `arguments`. The interpreted side of the bridge (projection, write-back, per-activation journal frames) is deleted; MIR callers keep it, with the source scan for strict writes to bridged consts. Strict `eval`/`arguments` targets in every assignment form are parser early errors on both tiers, and the eval-source stack and function eval-origin payload that only the deleted MIR eval unit fed are removed. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3756/3756 (incl. `test_js_gtest` 481/481); ad-hoc `test/language/eval-code` interpreter 214 → 312 of 343, MIR 217 → 218. Residue: MIR callers keep the bridge until P4 shared environment cells, so JS05-L5–L7 persist there; the interpreter keeps parameters and body vars in one function record (the `arrow-fn-body-cntns-arguments-*` eval-code cases); PerformEval's caller-dependent `new.target`/`super` early errors are not enforced. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI36; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.1.3v22 | Ruled 2026-10-03 (USER); **not implemented** beyond the call-threshold default. JS promotion is hotness-only: `JS_FUNC_JIT_THRESHOLD` defaults to 1000 calls (was five), and a loop reaching `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running AST activation to compiled code at the loop-head test, in the D8.1.1v14 shape (continuation over the live bindings, one-way). This supersedes the v13 sentence that no active AST frame transfers to MIR and JSI18's entry-only rule. JS keeps its own selector and knob names. Both thresholds are provisional pending release profiling. Open: P2 admission still rejects calls and outer bindings, so few loops are eligible until it widens; the satellite still re-parses its source. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §9.3/JSI18v2; plan: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md`. |
 | D8.1.3v23 | Revised 2026-10-03 (USER): the `JS_FUNC_JIT_THRESHOLD` default is 100 calls (1000 in v22). A release sweep over 13 JS benchmarks found no row slower at 100 than at 1000, with most of the gap to 5 recovered (mbrot2 22.8 → 12.6 ms, paraffins 82 → 62, nqueens2 50 → 44, puzzle 51 → 42); 100 still keeps rarely called functions interpreted while each promotion re-parses its whole source (17–59 ms at 17–87 KB). `JS_LOOP_JIT_THRESHOLD` (named `JS_JIT_BACKEDGE` until this revision) stays 10000; the call knob is renamed `JS_FUNC_JIT_THRESHOLD` (was `JS_JIT_THRESHOLD`). Both remain provisional; revisit after satellites compile from the retained script (plan E2). Evidence: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md` §11.5. Renamed 2026-10-03 (USER), meaning unchanged: the tier selector `LAMBDA_TIER` is `LAMBDA_EXEC_BACKEND`, `LAMBDA_JIT_THRESHOLD` is `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE` is `LAMBDA_LOOP_JIT_THRESHOLD`, and LambdaJS's `JS_EXECUTION_BACKEND` is `JS_EXEC_BACKEND`; the old names are no longer read. |
-| D8.1.3v34 | Approved 2026-10-23 (USER): synchronous top-level ES-module declarations/expressions and simple-parameter public instance methods may promote under the existing proof. Class sites may be top-level or inside one top-level synchronous module function/arrow, with every resolved free lexical binding in the ordinary module slab. Wrapper-local/class-self/private/import captures and deeper or suspended wrappers stay excluded. Original callable identity/source, strict receiver, method home and non-constructibility remain authoritative; calls use ordinary invocation and live slots. Other method/body exclusions, thresholds, forced AST and module loop/whole-unit admission are unchanged. The approved method extension remains unimplemented after neutral release experiments. Working record: `vibe/Lambda_Design_JS_Interpreter.md` module hot-entry revision and §9.4. |
+| D8.1.3v42 | Partially implemented 2026-10-24. The checked method-body arrow extension is approved but its candidate is not retained: the original callback compiles and 252 native/20 forced-GC checks pass, but CSS median is 13,605 versus 13,542 ms control and overview/pricing retain the 120 s watchdog. Atlas passes with both versions. The patch and evidence remain under `temp/radiant-online-oct24-method-callbacks/`. Source and release/modules are restored to qualified D8.1.3v41: 249 native, 92 GC, 17 forced-GC, 121 optimization contracts, 40,261 Test262 cases and Radiant pass; Lambda retains only the known PDF mismatch. No broader gates ran for the rejected candidate. Working records: `vibe/Lambda_Design_JS_Interpreter.md` §9.4 and `vibe/impl/Radiant_Online_Loading_Oct23.md`. |
 | D8.1.3v29 | Clarified 2026-10-21 (USER): JavaScript defaults to AUTO, including an unset or empty `JS_EXEC_BACKEND`. Supported units start in AST; whole-unit fallback, hot promotion and explicit `mir` use fast MVP MIR. MVP replaces the old MIR engine, not the AUTO tier policy. The redundant `--runtime=mvp-lmd` option remains removed. Performance preservation and remaining effect-analysis gates stay open. Working records: `vibe/jube/JS_MVP_Integration.md`, `vibe/impl/JS_MVP_Integration.md`. |
 | D8.1.3v27 | Ruled 2026-10-20 (USER): preserve fast MVP performance while unifying the default/explicit command and Lambda context, globals, host and lifetime ownership. Implementation and release qualification remain in progress; finer dynamic-effect boundaries remain open. Design and acceptance gates: `vibe/jube/JS_MVP_Integration.md`. |
 | D8.1.3v26 | Revised 2026-10-18: align the retained interpreter with formal MVP direct eval. Both tiers use live `JsInterpEnv` bindings and bound-AST context checks; remove the retired LJS MIR binding-projection journals, source-scan const checks and bridged-eval entry. Lexical receiver payloads use destination-owned Lambda scalar homes in the GC environment. Explicit AST/native and MVP operation profiles remain distinct. Source audit and qualification: `vibe/impl/JS_Interpreter_MVP_Alignment.md`. |
@@ -2870,7 +2962,7 @@ Numbered `DO#` (design-open); each links to its record.
   today the kind-discriminated layout is code-authoritative only; union
   normalization's canonical ordering is unpinned; the type-graph
   de-pointering census (CP §6 census C) is deferred to the same future
-  doc (`§2-types` is its designated home).
+  doc (` §2-types` is its designated home).
 - **DO23** Shape system opens: cross-`Input` type sharing — each `Input` grows its own transition tree (D3.4.3v3) — and shape serialization. *Closed 2026-09-25 with the shape pool's retirement:* the pool's hash-collision policy, its element-name-as-attribute-zero encoding, parse-vs-runtime interning (Shape_Pool Phase 5) and `CachedShape.ref_count`; `byte_offset`'s exclusion from identity is stated in D3.4.2v2.
 - **DO24** Unnamed wide temporaries crossing a loop back edge, under
   D5.2.3's reclaim. **D5.2.2v3 settles the named case**: a wide-capable

@@ -1333,6 +1333,16 @@ static Item js_interp_env_binding_read(JsInterpEnv* env, NameEntry* entry) {
     return js_interp_read_arguments_param(env, entry, value);
 }
 
+extern "C" Item js_interp_capture_read(Item self, AstFuncNode* definition,
+        NameEntry* entry) {
+    if (get_type_id(self) != LMD_TYPE_FUNC ||
+            !function_has_abi(self.function, FN_ENTRY_ABI_JS_FUNCTION)) return ItemError;
+    auto* function = (JsFunction*)self.function;
+    if (!js_fn_ast(function) || js_fn_ast_function(function) != definition) return ItemError;
+    // promotion retains this callable's traced AST payload, including sibling environments.
+    return js_interp_env_binding_read(js_interp_find_binding_env(js_fn_ast(function)->env, entry), entry);
+}
+
 // PutValue's refusals on a declarative binding: its TDZ, a const, and a
 // function expression's own name. Returns true when the write must not store;
 // *result is then the error, or the value a sloppy write leaves in place.
@@ -5967,6 +5977,9 @@ struct JsP2AdmissionScan {
     JsScript* script;
     AstFunctionId function_id;
     const char* reject_reason;
+    bool method_subtree;
+    bool constant_templates;
+    bool body_capture_reads;
 };
 
 static void js_interp_p2_reject(JsP2AdmissionScan* scan,
@@ -5977,12 +5990,40 @@ static void js_interp_p2_reject(JsP2AdmissionScan* scan,
 static void js_interp_p2_scan_node(JsAstNode* node,
         JsP2AdmissionScan* scan);
 
+static void js_interp_p2_scan_parameters(AstFuncNode* definition,
+        JsP2AdmissionScan* scan) {
+    for (JsAstNode* parameter = (JsAstNode*)definition->params; parameter &&
+            !scan->reject_reason; parameter = (JsAstNode*)parameter->next) {
+        if (!scan->method_subtree) {
+            js_interp_p2_scan_node(parameter, scan);
+            continue;
+        }
+        // defaults run in the compiled parameter environment, never an AST bridge.
+        JsAstNode* pattern = js_ast_parameter_pattern(parameter);
+        JsIdentifierNode* identifier = js_ast_parameter_binding_identifier(parameter);
+        if (!identifier || (pattern != (JsAstNode*)identifier &&
+                (pattern->node_type != AST_NODE_ASSIGN_PATTERN ||
+                 ((JsAssignmentPatternNode*)pattern)->left != (JsAstNode*)identifier))) {
+            js_interp_p2_reject(scan, "compound parameter pattern");
+            break;
+        }
+        js_interp_p2_scan_node((JsAstNode*)identifier, scan);
+        js_interp_p2_scan_node(js_ast_parameter_default_value(parameter), scan);
+    }
+}
+
 static void js_interp_p2_scan_child(JsAstNode* child, void* opaque) {
     js_interp_p2_scan_node(child, (JsP2AdmissionScan*)opaque);
 }
 
 static bool js_interp_p2_is_this_identifier(JsAstNode* node) {
     return js_ast_identifier_named(node, "this", 4);
+}
+
+static bool js_interp_p2_is_private_identifier(JsAstNode* node) {
+    String* name = node && node->node_type == AST_NODE_IDENT
+        ? ((JsIdentifierNode*)node)->name : NULL;
+    return name && name->len && name->chars[0] == '#';
 }
 
 // A static member name is an immutable key, not a lexical reference. A
@@ -6003,7 +6044,18 @@ static bool js_interp_p2_is_data_object_property(JsPropertyNode* property) {
             property->key->node_type == AST_NODE_LITERAL);
 }
 
-// P2 has no shared closure ABI. Script top-level bindings are read from the
+static bool js_interp_p2_activation_is_supported(AstFuncNode* definition,
+        bool allow_this = true) {
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(
+        (JsAstNode*)definition->params, (JsAstNode*)definition->body);
+    unsigned allowed = allow_this ? JS_AST_OBSERVES_THIS : 0;
+    return !(facts.observations & ~allowed) &&
+        !facts.has_direct_eval && !facts.has_with &&
+        !facts.has_direct_super_call && !facts.has_lexical_super_call;
+}
+
+// Contained closures stay within MIR; the checked one-wrapper slice reads original AST cells.
+// Script top-level bindings are read from the
 // definition's module slab, globals by name, and calls go through the invoke
 // kernel. Static member names are sealed into the definition's module slab,
 // while their receivers remain local values.
@@ -6013,6 +6065,10 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     switch (node->node_type) {
     case AST_NODE_IDENT: {
         if (js_interp_p2_is_this_identifier(node)) break;
+        if (js_interp_p2_is_private_identifier(node)) {
+            js_interp_p2_reject(scan, "private binding");
+            return;
+        }
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
         NameEntry* entry = identifier->entry;
         // D8.1.3v32: linked JS imports may have no NameEntry import marker.
@@ -6027,13 +6083,18 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         AstNodeId binding_id = entry->node
             ? ast_index_find(&scan->script->ast_index, entry->node)
             : AST_NODE_ID_INVALID;
-        if (binding_id == AST_NODE_ID_INVALID ||
-                binding_id >= scan->script->ast_index.count ||
-                scan->script->ast_index.owner_functions[binding_id] !=
-                    scan->function_id) {
+        AstIndex* index = &scan->script->ast_index;
+        bool local = binding_id < index->count &&
+            (scan->method_subtree
+                ? ast_index_node_descends(index, binding_id,
+                    index->functions[scan->function_id].first_node)
+                : index->owner_functions[binding_id] == scan->function_id);
+        if (!local) {
             // A script top-level binding lives in the retained module slab;
             // the satellite is pointed at its slot. Anything else is a capture.
-            if (entry->scope != scan->script->global_scope) {
+            if (entry->scope != scan->script->global_scope &&
+                    !(scan->body_capture_reads && js_interp_p2_is_body_capture(
+                        scan->script, scan->function_id, entry))) {
                 js_interp_p2_reject(scan, "captured binding");
             }
         }
@@ -6048,6 +6109,11 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
         JsMemberNode* member = (JsMemberNode*)node;
+        // private access needs its class environment, not a module-slab slot.
+        if (!member->computed && js_interp_p2_is_private_identifier(member->property)) {
+            js_interp_p2_reject(scan, "private property");
+            return;
+        }
         if (!js_interp_p2_member_is_supported(member)) {
             js_interp_p2_reject(scan, "property access");
             return;
@@ -6078,8 +6144,23 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         return;
     }
     case AST_NODE_FUNC:
+    case AST_NODE_ARROW_FUNC: {
+        if (!scan->method_subtree) {
+            js_interp_p2_reject(scan, "nested callable");
+            return;
+        }
+        auto* definition = (AstFuncNode*)node;
+        if (definition->is_generator || definition->is_async ||
+                !js_interp_p2_activation_is_supported(definition)) {
+            js_interp_p2_reject(scan, "activation-sensitive nested function");
+            return;
+        }
+        // D8.1.3v38 keeps every contained activation inside the selected subtree.
+        js_interp_p2_scan_parameters(definition, scan);
+        js_interp_p2_scan_node((JsAstNode*)definition->body, scan);
+        return;
+    }
     case AST_NODE_FUNC_EXPR:
-    case AST_NODE_ARROW_FUNC:
     case AST_NODE_METHOD:
         js_interp_p2_reject(scan, "nested callable");
         break;
@@ -6089,6 +6170,24 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         js_interp_p2_reject(scan, "class boundary");
         break;
     case AST_NODE_ARRAY:
+        break;
+    case JS_AST_NODE_TEMPLATE_LITERAL: {
+        auto* literal = (JsTemplateLiteralNode*)node;
+        JsAstNode* quasi = literal->quasis;
+        // D8.1.3v37 admits only a cooked constant; interpolation and tagging
+        // retain their separate admission boundary and ordinary lowering.
+        if (!scan->constant_templates || literal->expressions || !quasi ||
+                quasi->next || quasi->node_type != JS_AST_NODE_TEMPLATE_ELEMENT ||
+                !((JsTemplateElementNode*)quasi)->cooked ||
+                !((JsTemplateElementNode*)quasi)->tail) {
+            js_interp_p2_reject(scan, "template literal");
+        }
+        return;
+    }
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_MATCH_ARM:
+        if (!scan->method_subtree)
+            js_interp_p2_reject(scan, "unplanned syntax");
         break;
     case AST_NODE_ARRAY_PATTERN:
     case AST_NODE_MAP_PATTERN:
@@ -6164,20 +6263,94 @@ static Runtime* js_interp_promotion_policy(void) {
 static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function);
 static bool js_interp_module_predicate_expression(JsFunction* function);
 
+static bool js_interp_p2_has_class_ancestor(AstIndex* index, AstNode* node) {
+    for (AstNode* parent = ast_index_parent(index, node); parent;
+            parent = ast_index_parent(index, parent)) {
+        if (parent->node_type == AST_NODE_CLASS || parent->node_type == AST_NODE_CLASS_EXPR ||
+                parent->node_type == AST_NODE_FIELD || parent->node_type == JS_AST_NODE_STATIC_BLOCK)
+            return true;
+    }
+    return false;
+}
+
+static bool js_interp_p2_has_supported_module_wrapper(AstIndex* index,
+        AstFunctionId function_id) {
+    if (function_id >= index->function_count) return false;
+    AstFunctionId wrapper = ast_index_function_parent(index, function_id);
+    if (wrapper == AST_FUNCTION_ID_INVALID) return true;
+    auto* outer = (AstFuncNode*)index->functions[wrapper].node;
+    AstNode* site = ast_index_parent(index, outer);
+    // object methods share FUNC_EXPR nodes but are not ordinary wrapper functions.
+    if (site && site->node_type == AST_NODE_PROPERTY) {
+        auto* property = (JsPropertyNode*)site;
+        if (property->method || property->is_getter || property->is_setter) return false;
+    }
+    return (outer->node_type == AST_NODE_FUNC || outer->node_type == AST_NODE_FUNC_EXPR ||
+        outer->node_type == AST_NODE_ARROW_FUNC) && !outer->is_async && !outer->is_generator &&
+        ast_index_function_parent(index, wrapper) == AST_FUNCTION_ID_INVALID;
+}
+
+static bool js_interp_p2_simple_parameters(AstFuncNode* definition) {
+    for (AstNode* parameter = definition->params; parameter; parameter = parameter->next)
+        if (parameter->node_type != AST_NODE_IDENT) return false;
+    return true;
+}
+
+bool js_interp_p2_is_body_capture(JsScript* script, AstFunctionId function_id,
+        NameEntry* entry) {
+    if (!script || !entry || !entry->node || entry->is_parameter ||
+            entry->is_function_name_binding || entry->import) return false;
+    AstIndex* index = &script->ast_index;
+    if (function_id >= index->function_count) return false;
+    AstFunctionId wrapper = ast_index_function_parent(index, function_id);
+    AstNodeId declaration = ast_index_find(index, entry->node);
+    if (wrapper >= index->function_count || declaration >= index->count ||
+            index->owner_functions[declaration] != wrapper) return false;
+    auto* outer = (AstFuncNode*)index->functions[wrapper].node;
+    AstNodeId body = ast_index_find(index, outer->body);
+    AstNode* declarator = entry->node->node_type == AST_NODE_IDENT
+        ? ast_index_parent(index, entry->node) : entry->node;
+    // only ordinary body declarations: no parameters, self bindings, classes or function names.
+    return body < index->count && ast_index_node_descends(index, declaration, body) &&
+        declarator && declarator->node_type == AST_NODE_VARIABLE_DECLARATOR;
+}
+
+static bool js_interp_p2_module_method(JsScript* script, AstFuncNode* definition,
+        AstFunctionId function_id) {
+    if (!script->is_es_module || definition->node_type != AST_NODE_METHOD ||
+            function_id >= script->ast_index.function_count) return false;
+    auto* method = (JsMethodDefinitionNode*)definition;
+    if (method->kind != JsMethodDefinitionNode::JS_METHOD_METHOD ||
+            method->computed || method->static_method || !method->key) return false;
+    if (method->key->node_type == AST_NODE_IDENT) {
+        String* name = ((JsIdentifierNode*)method->key)->name;
+        if (!name || !name->len || js_interp_p2_is_private_identifier(method->key)) return false;
+    } else if (method->key->node_type != AST_NODE_LITERAL) return false;
+    AstIndex* index = &script->ast_index;
+    AstNode* body = ast_index_parent(index, definition);
+    AstNode* cls = body ? ast_index_parent(index, body) : NULL;
+    if (!cls || (cls->node_type != AST_NODE_CLASS && cls->node_type != AST_NODE_CLASS_EXPR) ||
+            ((AstClassNode*)cls)->body != body) return false;
+    if (js_interp_p2_has_class_ancestor(index, cls)) return false;
+    return js_interp_p2_has_supported_module_wrapper(index, function_id);
+}
+
 static const char* js_interp_p2_admission_reason(JsFunction* function,
-        AstFunctionId* out_function_id) {
+        AstFunctionId* out_function_id, bool hot_entry) {
     if (out_function_id) *out_function_id = AST_FUNCTION_ID_INVALID;
     JsScript* script = js_fn_ast_script(function);
     AstFuncNode* definition = js_fn_ast_function(function);
     if (!script || !definition || !script->source ||
             script->is_eval_script || script->dynamic_source ||
             (definition->node_type != AST_NODE_FUNC &&
-             definition->node_type != AST_NODE_FUNC_EXPR)) {
+             definition->node_type != AST_NODE_FUNC_EXPR &&
+             definition->node_type != AST_NODE_ARROW_FUNC &&
+             definition->node_type != AST_NODE_METHOD)) {
         return "definition shape";
     }
     if (definition->is_generator || definition->is_async) return "suspended definition";
     // object methods retain function-expression AST nodes but cannot be cloned as function source.
-    if (function->flags & JS_FUNC_FLAG_METHOD)
+    if ((function->flags & JS_FUNC_FLAG_METHOD) && definition->node_type != AST_NODE_METHOD)
         return "method definition shape";
     // D8.1.3v33 shares classic admission, while only the predicate proof grants
     // the light-call contract. Classify before entry even at threshold one.
@@ -6189,23 +6362,55 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
     AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
         ? script->ast_index.owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
+    bool method = definition->node_type == AST_NODE_METHOD;
+    bool arrow = definition->node_type == AST_NODE_ARROW_FUNC;
+    bool body_capture_reads = hot_entry && script->is_es_module &&
+        definition->node_type == AST_NODE_FUNC_EXPR &&
+        function_id < script->ast_index.function_count &&
+        ast_index_function_parent(&script->ast_index, function_id) != AST_FUNCTION_ID_INVALID;
+    if (body_capture_reads) {
+        AstIndex* index = &script->ast_index;
+        if (js_interp_p2_has_class_ancestor(index, definition) ||
+                !js_interp_p2_has_supported_module_wrapper(index, function_id))
+            return "capture wrapper shape";
+        auto* wrapper = (AstFuncNode*)index->functions[ast_index_function_parent(index, function_id)].node;
+        JsAstFunctionFacts facts = js_ast_collect_function_facts(wrapper->params, wrapper->body);
+        if (!js_interp_p2_simple_parameters(definition) || !js_interp_p2_simple_parameters(wrapper) ||
+                facts.has_direct_eval || facts.observes_direct_eval || facts.has_with)
+            return "capture wrapper parameters or dynamic scope";
+        uint32_t count = 0;
+        const AstFunctionReference* references = ast_index_function_references(index, function_id, &count);
+        for (uint32_t i = 0; i < count; i++) {
+            NameEntry* entry = index->bindings[references[i].binding_id];
+            if ((references[i].flags & AST_FUNCTION_REF_WRITE) &&
+                    js_interp_p2_is_body_capture(script, function_id, entry))
+                return "captured binding write";
+        }
+    }
+    // D8.1.3v40 permits one wrapper only when the arrow needs no activation bridge.
+    if (arrow) {
+        if (!hot_entry || !script->is_es_module ||
+                js_interp_p2_has_class_ancestor(&script->ast_index, (AstNode*)definition) ||
+                !js_interp_p2_has_supported_module_wrapper(&script->ast_index, function_id))
+            return "arrow definition shape";
+        if (!js_interp_p2_simple_parameters(definition)) return "arrow parameter shape";
+    }
+    if (method && (!hot_entry || !js_interp_p2_module_method(script, definition, function_id)))
+        return "method definition shape";
     if (function_id == AST_FUNCTION_ID_INVALID ||
-            ast_index_function_parent(&script->ast_index, function_id) !=
-                AST_FUNCTION_ID_INVALID ||
-            ast_function_capture_count(definition) != 0) {
+            (!method && !body_capture_reads && ((!arrow && ast_index_function_parent(&script->ast_index, function_id) !=
+                AST_FUNCTION_ID_INVALID) ||
+            ast_function_capture_count(definition) != 0))) {
         return "closure capture";
     }
-    JsAstFunctionFacts facts = js_ast_collect_function_facts(
-        (JsAstNode*)definition->params, (JsAstNode*)definition->body);
-    if ((facts.observations & ~JS_AST_OBSERVES_THIS) || facts.has_direct_eval || facts.has_with ||
-            facts.has_direct_super_call || facts.has_lexical_super_call) {
+    if (!js_interp_p2_activation_is_supported(definition, !arrow && !body_capture_reads)) {
         return "activation-sensitive function";
     }
-    JsP2AdmissionScan scan = {script, function_id, NULL};
-    for (JsAstNode* parameter = (JsAstNode*)definition->params; parameter &&
-            !scan.reject_reason; parameter = (JsAstNode*)parameter->next) {
-        js_interp_p2_scan_node(parameter, &scan);
-    }
+    // ordinary template promotion remains deferred independently of this slice.
+    JsP2AdmissionScan scan = {script, function_id, NULL,
+        hot_entry && script->is_es_module && method,
+        hot_entry && script->is_es_module && (method || arrow), body_capture_reads};
+    js_interp_p2_scan_parameters(definition, &scan);
     js_interp_p2_scan_node((JsAstNode*)definition->body, &scan);
     if (scan.reject_reason) return scan.reject_reason;
     if (out_function_id) *out_function_id = function_id;
@@ -6238,7 +6443,28 @@ bool js_interp_promote_function_if_hot(JsFunction* function) {
     if (promotion->call_count < policy->js_promotion_call_threshold) return false;
 
     AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
-    const char* reason = js_interp_p2_admission_reason(function, &function_id);
+    const char* reason = js_interp_p2_admission_reason(function, &function_id, true);
+    if (lambda_compiler_timing_enabled()) {
+        // rejected definitions need original ownership facts alongside satellite timings.
+        JsScript* script = js_fn_ast_script(function);
+        AstFuncNode* definition = js_fn_ast_function(function);
+        AstIndex* index = script ? &script->ast_index : NULL;
+        AstNodeId node_id = index && definition ? ast_index_find(index, (AstNode*)definition)
+            : AST_NODE_ID_INVALID;
+        AstFunctionId source_id = index && node_id < index->count
+            ? index->owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
+        log_notice("js-p2-admission: file=%s name=%.*s start=%u parent=%u captures=%d observations=%u reason=%s",
+            script && script->reference ? script->reference : "<script>",
+            function->name ? (int)function->name->len : 0,
+            function->name ? function->name->chars : "",
+            definition ? definition->source_span.start_byte : 0,
+            index && source_id < index->function_count ? ast_index_function_parent(index, source_id)
+                : AST_FUNCTION_ID_INVALID,
+            ast_function_capture_count(definition),
+            definition ? js_ast_collect_function_facts((JsAstNode*)definition->params,
+                (JsAstNode*)definition->body).observations : 0,
+            reason ? reason : "eligible");
+    }
     if (reason) {
         promotion->state = FN_PROMOTION_PINNED_INTERP;
         log_debug("js-p2: pinned definition reason=%s", reason);
@@ -6289,8 +6515,9 @@ static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
         return false;
     }
     JsFunction* function = frame->active_function;
-    // D8.1.3v32 extends hot entry only; module activations never hand off.
-    if (js_fn_ast_script(function)->is_module) return false;
+    // D8.1.3v35 admits checked ES-module functions, never synthetic CJS wrappers.
+    if (js_fn_ast_script(function)->is_module &&
+            !js_fn_ast_script(function)->is_es_module) return false;
     AstFuncNode* definition = js_fn_ast_function(function);
     if (!definition || !function->code || !definition->body ||
             definition->body->node_type != AST_NODE_BLOCK) {
@@ -6338,8 +6565,23 @@ static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
 
 enum { JS_LOOP_LIVE_IN_MAX = 32 };
 
+static uint8_t js_loop_input_kind(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT)
+        return LMD_TYPE_FLOAT;
+    return type == LMD_TYPE_STRING || type == LMD_TYPE_BOOL ? (uint8_t)type : 0;
+}
+
+static void js_loop_append_input(StrBuf* text, uint8_t kind, int index) {
+    strbuf_append_str(text, kind == LMD_TYPE_FLOAT ? " = +" :
+        kind == LMD_TYPE_BOOL ? " = !!" : " = ");
+    strbuf_append_format(text, "__lambda_in%d", index);
+    if (kind == LMD_TYPE_STRING) strbuf_append_str(text, " + \"\"");
+}
+
 struct JsLoopLiveInScan {
     NameScope* scopes[3];        // function vars, body-block lexicals, loop lexicals
+    bool preserve_loop_scope;   // a module for-let head keeps its lexical boundary
     uint32_t region_start;       // body-block lexicals declared here or later are not live
     NameEntry* live[JS_LOOP_LIVE_IN_MAX];
     int count;
@@ -6400,6 +6642,9 @@ static void js_loop_scan_node(JsAstNode* node, void* opaque) {
         for (int i = 0; i < scan->count; i++) {
             if (scan->live[i] == entry) return;
             if (js_interp_name_matches(scan->live[i]->name, entry->name)) {
+                if (scan->preserve_loop_scope &&
+                        ((scan->live[i]->scope == scan->scopes[2]) !=
+                         (entry->scope == scan->scopes[2]))) continue;
                 scan->failure = "shadowed live-in name";
                 return;
             }
@@ -6420,7 +6665,7 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
         JsFunction* function, AstLoopControlNode* loop, uint8_t ordinal,
         FnPromotionCell* cell) {
     AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
-    const char* reason = js_interp_p2_admission_reason(function, &function_id);
+    const char* reason = js_interp_p2_admission_reason(function, &function_id, false);
     if (reason) return reason;
     AstFuncNode* definition = js_fn_ast_function(function);
     JsScript* script = js_fn_ast_script(function);
@@ -6443,6 +6688,9 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     scan.scopes[0] = definition->vars;
     scan.scopes[1] = body->vars;
     scan.scopes[2] = loop->form == LOOP_FORM_FOR_C ? loop->vars : NULL;
+    scan.preserve_loop_scope = script->is_es_module && loop->form == LOOP_FORM_FOR_C &&
+        loop->init && loop->init->node_type == AST_NODE_VAR_STAM &&
+        ((JsVariableDeclarationNode*)loop->init)->kind != JS_VAR_VAR;
     scan.region_start = loop->source_span.start_byte;
     if (loop->form == LOOP_FORM_FOR_C) {
         // the init has run; only the test, update and body continue
@@ -6458,28 +6706,13 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     }
     if (scan.failure) return scan.failure;
 
-    // The evidence for each live-in is the value it holds at this head: a
-    // literal of its type for the never-executed call below, and a typed
-    // array of a kind lowering specializes stays a direct parameter.
-    const char* evidence[JS_LOOP_LIVE_IN_MAX];
-    bool direct[JS_LOOP_LIVE_IN_MAX];
+    uint8_t input_kinds[JS_LOOP_LIVE_IN_MAX];
     for (int i = 0; i < scan.count; i++) {
-        NameEntry* live_entry = scan.live[i];
-        JsInterpEnv* env = js_interp_find_env(frame->env, live_entry->scope);
-        Item value = env && live_entry->slot >= 0 &&
-                (uint32_t)live_entry->slot < env->slot_count
-            ? js_interp_env_slot_read(env, (uint32_t)live_entry->slot, false) : ItemNull;
-        TypeId type = get_type_id(value);
-        evidence[i] = type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-            type == LMD_TYPE_FLOAT ? "0" : type == LMD_TYPE_BOOL ? "false" :
-            type == LMD_TYPE_STRING ? "\"\"" : "undefined";
-        JsTypedArray* typed = js_is_typed_array(value)
-            ? js_get_typed_array_ptr(value.map) : NULL;
-        if (typed && typed->element_type == JS_TYPED_UINT8) evidence[i] = "new Uint8Array(0)";
-        else if (typed && typed->element_type == JS_TYPED_INT32) evidence[i] = "new Int32Array(0)";
-        else if (typed && typed->element_type == JS_TYPED_FLOAT64) evidence[i] = "new Float64Array(0)";
-        else typed = NULL;
-        direct[i] = typed != NULL;
+        NameEntry* entry = scan.live[i];
+        JsInterpEnv* env = js_interp_find_binding_env(frame->env, entry);
+        Item value = env && entry->slot >= 0 && (uint32_t)entry->slot < env->slot_count
+            ? js_interp_env_slot_read(env, (uint32_t)entry->slot, false) : ItemNull;
+        input_kinds[i] = js_loop_input_kind(value);
     }
 
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
@@ -6491,29 +6724,18 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     strbuf_append_str_n(text, script->source, script->source_length);
     strbuf_append_str(text, "\n;function ");
     strbuf_append_str(text, name);
-    // Fresh parameters are copied into same-named `let` locals: lowering does
-    // not type a reassigned parameter or a `var`, but types a block local from
-    // its initializer and assignments (a 10-20x difference on a numeric loop).
-    // A name the region redeclares with `var` keeps a `var` copy, since `let`
-    // and `var` cannot share a name. A typed array is the exception: lowering
-    // types a typed-array parameter from its call sites (behind a runtime kind
-    // guard) but not a local copied from one, so it keeps its own name as a
-    // parameter (primes, matmul, fft2: up to 24x). No live-in is captured or
-    // in its TDZ.
+    // boxed entry parameters are open-world. Guarded primitive copies give
+    // MIR real local facts; an unexecuted call outside the cloned body cannot.
     strbuf_append_char(text, '(');
     for (int i = 0; i < scan.count; i++) {
         if (i) strbuf_append_char(text, ',');
-        if (direct[i]) {
-            strbuf_append_str_n(text, scan.live[i]->name->chars, scan.live[i]->name->len);
-        } else {
-            strbuf_append_format(text, "__lambda_in%d", i);
-        }
+        strbuf_append_format(text, "__lambda_in%d", i);
     }
     strbuf_append_str(text, strict ? ") {'use strict';\n" : ") {\n");
     for (int pass = 0; pass < 2; pass++) {
         bool first = true;
         for (int i = 0; i < scan.count; i++) {
-            if (direct[i]) continue;
+            if (scan.preserve_loop_scope && scan.live[i]->scope == scan.scopes[2]) continue;
             bool is_var = false;
             for (int k = 0; k < scan.redeclared_count; k++) {
                 if (scan.redeclared[k] == scan.live[i]) is_var = true;
@@ -6521,26 +6743,30 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
             if (is_var != (pass == 1)) continue;
             strbuf_append_str(text, first ? (pass ? "var " : "let ") : ", ");
             strbuf_append_str_n(text, scan.live[i]->name->chars, scan.live[i]->name->len);
-            strbuf_append_format(text, " = __lambda_in%d", i);
+            js_loop_append_input(text, input_kinds[i], i);
             first = false;
         }
         if (!first) strbuf_append_str(text, ";\n");
     }
-    if (loop->form == LOOP_FORM_FOR_C) strbuf_append_str(text, "for (;");
+    if (loop->form == LOOP_FORM_FOR_C) {
+        strbuf_append_str(text, "for (");
+        if (scan.preserve_loop_scope) {
+            bool first = true;
+            for (int i = 0; i < scan.count; i++) {
+                NameEntry* entry = scan.live[i];
+                if (entry->scope != scan.scopes[2]) continue;
+                // copying the head inside its own scope preserves an outer
+                // same-named binding used after the completed loop.
+                strbuf_append_str(text, first ? (entry->is_const ? "const " : "let ") : ", ");
+                strbuf_append_str_n(text, entry->name->chars, entry->name->len);
+                js_loop_append_input(text, input_kinds[i], i);
+                first = false;
+            }
+        }
+        strbuf_append_char(text, ';');
+    }
     strbuf_append_str_n(text, script->source + start, end - start);
     strbuf_append_str(text, "\n}\n");
-    // Lowering infers parameter types from the module's call sites, and the
-    // continuation has none. A never-executed call with that evidence gives
-    // it what a caller would; the body stays correct for any other value.
-    strbuf_append_str(text, "if (0) ");
-    strbuf_append_str(text, name);
-    strbuf_append_char(text, '(');
-    for (int i = 0; i < scan.count; i++) {
-        if (i) strbuf_append_char(text, ',');
-        strbuf_append_str(text, evidence[i]);
-    }
-    strbuf_append_str(text, ");\n");
-
     log_debug("js-loop-handoff: continuation source: %s",
         text->str + script->source_length);
     RootFrame roots(1);
@@ -6553,9 +6779,11 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     function->code->compiled_loop_body = compiled.get();
 
     NameEntry** live = (NameEntry**)pool_calloc(script->pool,
-        sizeof(NameEntry*) * (size_t)(scan.count > 0 ? scan.count : 1));
+        (sizeof(NameEntry*) + sizeof(uint8_t)) * (size_t)(scan.count > 0 ? scan.count : 1));
     if (!live) return "out of memory";
     memcpy(live, scan.live, sizeof(NameEntry*) * (size_t)scan.count);
+    // primitive guards share the continuation's existing live-in allocation.
+    memcpy(live + scan.count, input_kinds, (size_t)scan.count);
     cell->loop_live_ins = live;
     cell->loop_live_in_count = (uint8_t)scan.count;
     cell->loop_ordinal = ordinal;
@@ -6602,6 +6830,8 @@ static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
         Item value = js_interp_env_slot_read(env, (uint32_t)entry->slot, false);
         // a binding still in its TDZ: stay in T0, which raises it in order
         if (value.item == ITEM_JS_TDZ) return false;
+        const uint8_t* input_kinds = (const uint8_t*)(cell->loop_live_ins + count);
+        if (input_kinds[i] && input_kinds[i] != js_loop_input_kind(value)) return false;
         arguments.items()[i] = value;
     }
     Item result = mvp_lmd_call_function_satellite(callee_root.get(),

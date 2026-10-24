@@ -597,6 +597,8 @@ int gc_register_ephemeron(gc_heap_t* gc, uint64_t* key_slot,
  * @param count number of Items in the range
  */
 void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count);
+// checked publication: callers must not store Items when registration fails.
+int gc_try_register_root_range(gc_heap_t* gc, uint64_t* base, int count);
 
 /**
  * Unregister a contiguous array of Items previously registered as GC roots.

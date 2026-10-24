@@ -1119,12 +1119,31 @@ int gc_is_nursery_data(gc_heap_t* gc, void* ptr) {
 // Root Slot Registration
 // ============================================================================
 
+// root registries key their first pointer field by identity. Native scopes
+// unwind newest first, so lookup must not rescan older persistent roots.
+static int gc_find_registered_root(const void* roots, int count, size_t stride,
+        const void* key) {
+    for (int i = count; i-- > 0;) {
+        const void* registered;
+        memcpy(&registered, (const uint8_t*)roots + (size_t)i * stride,
+            sizeof(registered));
+        if (registered == key) return i;
+    }
+    return -1;
+}
+
+static void gc_remove_registered_root(void* roots, int* count, size_t stride,
+        int index) {
+    (*count)--;
+    memmove((uint8_t*)roots + (size_t)index * stride,
+        (uint8_t*)roots + (size_t)(index + 1) * stride,
+        (size_t)(*count - index) * stride);
+}
+
 int gc_try_register_root(gc_heap_t* gc, uint64_t* slot) {
     if (!gc || !slot) return 0;
-    // check for duplicate
-    for (int i = 0; i < gc->root_slot_count; i++) {
-        if (gc->root_slots[i] == slot) return 1;
-    }
+    if (gc_find_registered_root(gc->root_slots, gc->root_slot_count,
+            sizeof(*gc->root_slots), slot) >= 0) return 1;
     if (gc->root_slot_count >= gc->root_slot_capacity) {
         int old_capacity = gc->root_slot_capacity;
         void* slots = gc->root_slots;
@@ -1149,26 +1168,21 @@ void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
 
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
     if (!gc || !slot) return;
-    for (int i = 0; i < gc->root_slot_count; i++) {
-        if (gc->root_slots[i] == slot) {
-            // shift remaining entries down
-            for (int j = i; j < gc->root_slot_count - 1; j++) {
-                gc->root_slots[j] = gc->root_slots[j + 1];
-            }
-            gc->root_slot_count--;
-            log_debug("gc_unregister_root: removed slot %p (total: %d)", (void*)slot, gc->root_slot_count);
-            return;
-        }
-    }
+    int index = gc_find_registered_root(gc->root_slots, gc->root_slot_count,
+        sizeof(*gc->root_slots), slot);
+    if (index < 0) return;
+    gc_remove_registered_root(gc->root_slots, &gc->root_slot_count,
+        sizeof(*gc->root_slots), index);
+    log_debug("gc_unregister_root: removed slot %p (total: %d)", (void*)slot, gc->root_slot_count);
 }
 
 int gc_try_register_object_root(gc_heap_t* gc, void* object) {
     if (!gc || !object) return 0;
-    for (int i = 0; i < gc->object_root_count; i++) {
-        if (gc->object_roots[i].object == object) {
-            gc->object_roots[i].ref_count++;
-            return 1;
-        }
+    int index = gc_find_registered_root(gc->object_roots, gc->object_root_count,
+        sizeof(*gc->object_roots), object);
+    if (index >= 0) {
+        gc->object_roots[index].ref_count++;
+        return 1;
     }
     if (gc->object_root_count >= gc->object_root_capacity) {
         void* roots = gc->object_roots;
@@ -1188,18 +1202,15 @@ int gc_try_register_object_root(gc_heap_t* gc, void* object) {
 
 void gc_unregister_object_root(gc_heap_t* gc, void* object) {
     if (!gc || !object) return;
-    for (int i = 0; i < gc->object_root_count; i++) {
-        if (gc->object_roots[i].object != object) continue;
-        if (gc->object_roots[i].ref_count > 1) {
-            gc->object_roots[i].ref_count--;
-            return;
-        }
-        for (int j = i; j < gc->object_root_count - 1; j++) {
-            gc->object_roots[j] = gc->object_roots[j + 1];
-        }
-        gc->object_root_count--;
+    int index = gc_find_registered_root(gc->object_roots, gc->object_root_count,
+        sizeof(*gc->object_roots), object);
+    if (index < 0) return;
+    if (gc->object_roots[index].ref_count > 1) {
+        gc->object_roots[index].ref_count--;
         return;
     }
+    gc_remove_registered_root(gc->object_roots, &gc->object_root_count,
+        sizeof(*gc->object_roots), index);
 }
 
 void gc_no_gc_scope_begin(gc_heap_t* gc) {
@@ -1294,13 +1305,13 @@ int gc_register_ephemeron(gc_heap_t* gc, uint64_t* key_slot,
     return 1;
 }
 
-void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
-    if (!gc || !base || count <= 0) return;
-    for (int i = 0; i < gc->root_range_count; i++) {
-        if (gc->root_ranges[i].base == base) {
-            gc->root_ranges[i].count = count;
-            return;
-        }
+int gc_try_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
+    if (!gc || !base || count <= 0) return 0;
+    int index = gc_find_registered_root(gc->root_ranges, gc->root_range_count,
+        sizeof(*gc->root_ranges), base);
+    if (index >= 0) {
+        gc->root_ranges[index].count = count;
+        return 1;
     }
     if (gc->root_range_count >= gc->root_range_capacity) {
         void* ranges = gc->root_ranges;
@@ -1308,26 +1319,26 @@ void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
                                     &gc->root_range_capacity, gc->root_range_count + 1,
                                     256, MEM_CAT_CONTAINER)) {
             log_error("gc_register_root_range: failed to grow registry");
-            return;
+            return 0;
         }
         gc->root_ranges = (gc_root_range_t*)ranges;
     }
     gc->root_ranges[gc->root_range_count].base = base;
     gc->root_ranges[gc->root_range_count].count = count;
     gc->root_range_count++;
+    return 1;
+}
+
+void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
+    (void)gc_try_register_root_range(gc, base, count);
 }
 
 void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base) {
     if (!gc || !base) return;
-    for (int i = 0; i < gc->root_range_count; i++) {
-        if (gc->root_ranges[i].base == base) {
-            for (int j = i; j < gc->root_range_count - 1; j++) {
-                gc->root_ranges[j] = gc->root_ranges[j + 1];
-            }
-            gc->root_range_count--;
-            return;
-        }
-    }
+    int index = gc_find_registered_root(gc->root_ranges, gc->root_range_count,
+        sizeof(*gc->root_ranges), base);
+    if (index >= 0) gc_remove_registered_root(gc->root_ranges, &gc->root_range_count,
+        sizeof(*gc->root_ranges), index);
 }
 
 void gc_set_force_collect_interval(gc_heap_t* gc, size_t interval) {

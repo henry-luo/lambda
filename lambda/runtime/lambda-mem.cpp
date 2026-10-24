@@ -710,8 +710,8 @@ extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base
                                                   int count) {
     EvalContext* owner = (EvalContext*)runtime;
     if (!owner || !owner->heap || !owner->heap->gc || !base || count <= 0) return false;
-    gc_register_root_range(owner->heap->gc, base, count);
-    return true;
+    // D5.3.3: allocation failure cannot publish an unregistered root span.
+    return gc_try_register_root_range(owner->heap->gc, base, count) != 0;
 }
 
 extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
@@ -752,8 +752,7 @@ extern "C" uint64_t* heap_gc_root_slot_new(uint64_t value) {
 extern "C" bool heap_try_register_gc_root_range(uint64_t* base, int count) {
     if (!context || !context->heap || !context->heap->gc ||
             !base || count <= 0) return false;
-    gc_register_root_range(context->heap->gc, base, count);
-    return true;
+    return gc_try_register_root_range(context->heap->gc, base, count) != 0;
 }
 
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
