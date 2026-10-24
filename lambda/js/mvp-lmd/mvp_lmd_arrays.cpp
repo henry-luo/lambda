@@ -34,6 +34,17 @@ struct MvpLmdSort {
     Rooted<Item>* values;
     Rooted<Item>* error;
 };
+bool mvp_lmd_shape_has_indexed_keys(TypeMap* shape) {
+    if (!shape) return false;
+    if (shape->digit_key_length && (int64_t)shape->digit_key_length == shape->length + 1)
+        return shape->has_digit_key;
+    FOR_EACH_MAP_FIELD(shape, field) {
+        // a digit prefix conservatively covers every canonical array index.
+        if (field->key_kind == NAME_KEY_STRING && field->name && field->name->length &&
+                field->name->str[0] >= '0' && field->name->str[0] <= '9') return true;
+    }
+    return false;
+}
 extern "C" int64_t mvp_lmd_array_indices_use_own_storage(Item owner) {
     if (get_type_id(owner) != LMD_TYPE_ARRAY ||
             container_js_elements_kind(owner.array) == JS_ELEMENTS_SPARSE_TAGGED) return false;
@@ -60,13 +71,7 @@ extern "C" int64_t mvp_lmd_array_indices_use_own_storage(Item owner) {
             if (length && (length->flags & JSPD_NON_WRITABLE)) return false;
         }
         // D8.4.1v2: the field index summarizes names only; links and policy stay live.
-        if (shape && shape->digit_key_length && (int64_t)shape->digit_key_length == shape->length + 1) {
-            if (shape->has_digit_key) return false;
-        } else if (shape) FOR_EACH_MAP_FIELD(shape, field) {
-            // a digit prefix conservatively rejects every canonical array index without interning keys.
-            if (field->key_kind == NAME_KEY_STRING && field->name && field->name->length &&
-                    field->name->str[0] >= '0' && field->name->str[0] <= '9') return false;
-        }
+        if (mvp_lmd_shape_has_indexed_keys(shape)) return false;
         if (!library && !mvp_lmd_class_record(owner)) return true;
         owner = mvp_lmd_get_prototype_with_library(owner, library);
         if (owner.item == ITEM_NULL) return true;

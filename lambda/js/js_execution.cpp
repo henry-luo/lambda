@@ -42,7 +42,7 @@
 MIR_error_func_t g_batch_mir_error_handler = NULL;
 
 // Global MIR optimization level for JS compilation (default: 2).
-// Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
+// Set from CLI (e.g., --opt-level=0), including reusable preamble images.
 unsigned int g_js_mir_optimize_level = 2;
 
 // The Lambda Direct compiler still owns this legacy document policy. LambdaJS

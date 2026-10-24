@@ -243,6 +243,7 @@ void js_realm_slots_destroy(JsRealmSlots* slots);
 void js_realm_slots_clear(JsRealmSlots* slots);
 Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot);
 Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
+Item js_host_intrinsic_constructor(JsRealmSlotId slot, const char* family);
 LAMBDA_RT_API bool js_realm_intrinsic_slots_ensure_roots(void);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
 LAMBDA_RT_API Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index);

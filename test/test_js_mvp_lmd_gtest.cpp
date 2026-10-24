@@ -1009,13 +1009,20 @@ TEST_F(JsFormalMir, StandaloneHostFamiliesShareDescriptorsAndConstructorIdentity
 
 TEST_F(JsFormalMir, LazyHostFamiliesPreserveReplacedAndDeletedGlobals) {
     Item result = run(R"JS(
+        let hits=0;
+        Object.defineProperty(Object.prototype,'TextEncoder',{set(v){hits++},configurable:true});
+        Object.defineProperty(Object.prototype,'encode',{set(v){hits++},configurable:true});
         let replacement=function UserDecoder(){};
         Object.defineProperty(globalThis,'TextDecoder',{value:replacement,writable:false,configurable:false});
         delete globalThis.sessionStorage;
         Object.preventExtensions(globalThis);
+        let storageDescriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
         let Encoder=TextEncoder, storage=localStorage;
         gc();
-        let valid=TextDecoder===replacement && !('sessionStorage' in globalThis) &&
+        delete Object.prototype.TextEncoder;
+        delete Object.prototype.encode;
+        let valid=hits===0 && typeof storageDescriptor.get==='function' &&
+            TextDecoder===replacement && !('sessionStorage' in globalThis) &&
             Object.getOwnPropertyDescriptor(globalThis,'TextDecoder').writable===false &&
             Encoder.prototype.constructor===Encoder && new Encoder().encode('ok').length===2 &&
             storage instanceof Storage;
@@ -1393,6 +1400,76 @@ TEST_F(JsFormalMir, CachedPreambleAndClassicsUseMvpAcrossFreshRealms) {
         }
         reset_runtime();
     }
+}
+
+TEST_F(JsFormalMir, CachedImagesRespectRequestedOptimizationLevel) {
+    struct RestoreLevel {
+        unsigned int saved = g_js_mir_optimize_level;
+        ~RestoreLevel() { g_js_mir_optimize_level = saved; }
+    } restore;
+    JsPreambleState image = {}, consumer = {};
+    const char* source = "function cachedAnswer(){return 42}";
+    g_js_mir_optimize_level = 0;
+    ASSERT_FALSE(item_is_error(compile_js_mir_preamble_len(&runtime, source,
+        strlen(source), "<optimization-level>", &image)));
+    void* entry = NULL;
+    for (int level = 0; level <= 2; level += 2) {
+        reset_runtime();
+        g_js_mir_optimize_level = level;
+        ASSERT_FALSE(item_is_error(instantiate_js_preamble(&runtime, &image, &consumer)));
+        preamble_state_destroy(&consumer);
+        Item function = js_get_key_default(js_get_global_this(), js_make_string("cachedAnswer"));
+        ASSERT_EQ(get_type_id(function), LMD_TYPE_FUNC);
+        if (!level) entry = (void*)function.function->ptr;
+        else EXPECT_NE((void*)function.function->ptr, entry);
+        EXPECT_EQ(it2d(run("cachedAnswer()")), 42);
+    }
+    preamble_state_destroy(&image);
+}
+
+TEST_F(JsFormalMir, ConstantArraysKeepFreshStorageAndScalarOwnership) {
+    ASSERT_EQ(run("function make(){return [1,5e-324,'value',true,null,,42]}"
+        "let a=make(),b=make();a[0]=7;a[1]=3;delete a[2];"
+        "let garbage=[];for(let i=0;i<2000;i++)garbage.push({i});"
+        "b[0]===1&&b[1]===5e-324&&b[2]==='value'&&b[3]===true&&b[4]===null&&"
+        "!Object.hasOwn(b,5)&&b.length===7&&b[6]===42").item, ITEM_TRUE);
+    heap_gc_collect();
+    ASSERT_EQ(run("b[1]===5e-324&&b[2]==='value'&&!Object.hasOwn(b,5)").item, ITEM_TRUE);
+    reset_runtime();
+    ASSERT_EQ(run("function make(){return [[1,5e-324],[],[true,,null]]}"
+        "let a=make(),b=make();a[0][0]=7;a[1].push(2);delete a[2][0];"
+        "b[0][0]===1&&b[0][1]===5e-324&&b[1].length===0&&b[2][0]===true&&"
+        "!Object.hasOwn(b[2],1)&&b[2][2]===null").item, ITEM_TRUE);
+    reset_runtime();
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    strbuf_append_str(source, "function make(){return [");
+    for (int i = 0; i < 2048; i++) strbuf_append_str(source, "[1,5e-324,'value',true,null,,42],");
+    strbuf_append_str(source, "]}var a=make(),b=make();a[0][0]=7;delete a[1][2];b.length===2048");
+    Item created = run(source->str);
+    strbuf_free(source);
+    ASSERT_EQ(created.item, ITEM_TRUE);
+    heap_gc_collect();
+    ASSERT_EQ(run("b[0][0]===1&&b[1][2]==='value'&&b[2047][1]===5e-324&&"
+        "!Object.hasOwn(b[2047],5)&&b[2047][6]===42").item, ITEM_TRUE);
+}
+
+TEST_F(JsFormalMir, ArrayTruncationPreservesIndexedDescriptorRules) {
+    ASSERT_EQ(run("let a=[1,,3,4];a.extra=7;a.length=1;a.length=4;"
+        "a[0]===1&&!Object.hasOwn(a,1)&&!Object.hasOwn(a,2)&&!Object.hasOwn(a,3)&&a.extra===7").item, ITEM_TRUE);
+    reset_runtime();
+    ASSERT_EQ(run("let a=[1,2,3,4],hits=0;"
+        "Object.defineProperty(a,'2',{get(){hits++;return 3},configurable:false});"
+        "let ok=Reflect.defineProperty(a,'length',{value:0,writable:false});"
+        "!ok&&hits===0&&a.length===3&&Object.hasOwn(a,0)&&!Object.hasOwn(a,3)&&"
+        "!Object.getOwnPropertyDescriptor(a,'length').writable").item, ITEM_TRUE);
+    reset_runtime();
+    ASSERT_EQ(run("let a=[];a[1000000]=7;Object.defineProperty(a,'8',{value:2,configurable:false});"
+        "let ok=Reflect.defineProperty(a,'length',{value:0});"
+        "!ok&&a.length===9&&a[8]===2&&!Object.hasOwn(a,1000000)").item, ITEM_TRUE);
+    reset_runtime();
+    ASSERT_EQ(run("let a=[1,2,3];Object.defineProperty(Array.prototype,'2',{value:9,configurable:true});"
+        "a.length=1;delete Array.prototype[2];a.length===1&&!Object.hasOwn(a,2)").item, ITEM_TRUE);
 }
 
 TEST_F(JsFormalMir, CachedHarnessFunctionsServeAstAcrossFreshRealms) {

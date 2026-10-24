@@ -33,10 +33,8 @@ static Item response_create(Item body, Item headers, int status, Item status_tex
     Rooted<Item> bytes(roots, body), header_root(roots, headers);
     Rooted<Item> text(roots, status_text), url_root(roots, url), type_root(roots, type);
     Rooted<Item> state(roots, js_array_new(0)), constructor(roots, ItemNull);
-    Item* retained = js_realm_slot_existing(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_RESPONSE_CONSTRUCTOR);
-    if (!retained) return ItemError;
-    constructor.set(*retained);
+    constructor.set(js_host_intrinsic_constructor(JS_REALM_SLOT_RESPONSE_CONSTRUCTOR, "Response"));
+    JS_RETURN_IF_ERROR(constructor.get());
     // each source remains rooted while publishing its private state edge (D5.3.3).
     JS_RETURN_IF_ERROR(js_array_push(state.get(), bytes.get()));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), header_root.get()));

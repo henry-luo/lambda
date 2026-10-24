@@ -10,6 +10,7 @@ bool mvp_lmd_regexp_intrinsic(Item receiver, Item argument, int operation, Item*
     Item second = Item{.item = ITEM_JS_UNDEFINED});
 struct JsRegexpLastMatch;
 struct JsArrayOps;
+struct JsStaticLiteralRecipe;
 struct JsBufferViewOps;
 extern const JsArrayOps mvp_lmd_array_ops;
 extern const JsBufferViewOps mvp_lmd_buffer_ops;
@@ -466,7 +467,9 @@ double mvp_lmd_number_pow(double base, double exponent);
 int64_t mvp_lmd_string_key(String* string, int64_t typed = 0);
 Item mvp_lmd_array_store(Item array, uint32_t index, Item value);
 int64_t mvp_lmd_array_indices_use_own_storage(Item array);
+bool mvp_lmd_shape_has_indexed_keys(TypeMap* shape);
 Item mvp_lmd_array_new(int64_t length);
+Item mvp_lmd_array_from_recipe(const JsStaticLiteralRecipe* recipe);
 Item mvp_lmd_array_adopt_realm(Item value);
 Item mvp_lmd_array_flatten(Item source, double depth, int64_t length = -1, Item* mapping = nullptr);
 Item mvp_lmd_array_to_string(Item source, Item separator, int64_t library_objects = 1);
