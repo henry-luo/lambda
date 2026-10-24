@@ -447,3 +447,126 @@ Evidence is in `temp/biz-plan/prechange-markdown-native.json` and
 `temp/biz-plan/prechange-ui.log`; baseline expectations were not changed.
 The initial sandbox run blocked macOS window services; rerunning with native
 graphics access completed those checks and removed the page-snapshot failure.
+
+## Large-document SmartArt and embedded-object diagnostics (2026-10-23)
+
+`large-doc-15-MB-docx-file.docx` reproduced 22 warnings. Its SmartArt drawing
+contains `dgm:relIds`, rather than a raster blip, and its embedded video uses a
+VML/EMF preview. The generic inline walker treated the object's shape template,
+formulas and locking metadata as separate unsupported visible elements.
+
+`diagrams.ls` now resolves the story-local diagram-data relationship and retains
+saved node/assistant text, excluding presentation/transition/document metadata.
+OLE objects select the saved preview by `ShapeID` through the shared raster
+relationship reader. Unsupported previews retain a labelled placeholder and
+one diagnostic. Neither path loads external parts or executes embedded content
+(S1.8, D7.2.4v4). SmartArt geometry and EMF decoding remain unsupported: the
+original file now has two explicit limitations, with all six raster drawings,
+the cached chart, SmartArt labels and the object placeholder retained.
+
+All 17 DOCX goldens pass on `auto`, `interp` and `jit`; the original direct-view
+command passes all six native viewer assertions. The required Lambda baseline
+passes 8,103/8,104 checks, including all 1,734 script checks. Its sole failure,
+`PdfFileOutput.LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers`, reproduces
+alone: PDF object 9 differs from the phase-6 golden at byte 760 in both tiers.
+That fixture imports PDF/Radiant modules, without importing DOCX; its expected
+output was not changed. Evidence is under `temp/docx-large/`, including
+`lambda-baseline.log`, `pdf-baseline-isolated.log`, the three `*-final.log`
+golden runs and `viewer-result.json`. `git diff --check` passes.
+
+## Empty stories, saved raster fallbacks and near-edge floats (2026-10-23)
+
+`large-doc-cbbac18c-49b5-4751-943a-3b033aa654be.docx` reproduced 16 warnings:
+two empty-footer stories, five complete saved raster compatibility branches,
+and nine anchored drawings. One of those drawings is a column-relative
+portrait with a 2px offset and 6px left wrapping clearance; its float's outer
+edge still reaches the column edge, so it does not require interior wrapping.
+
+Story diagnostics now inspect saved content, ignoring empty paragraph/run
+metadata and uncached field instructions (S1.8), while preserving warnings for
+cached text, visible borders/shading and unknown constructs. Inspected story
+roots retain structural validation. A complete raster compatibility branch
+uses the ordinary image/drawing diagnostics instead of an additional blanket
+compatibility warning. The shared placement helper accepts positive column
+offsets whose clearance reaches the column edge; interior offsets still warn.
+These remain script-package conversions under D7.2.4v4.
+
+All nine saved images and the extracted text length remain unchanged. The
+eight avoidable warnings are removed. Eight page-relative placements remain
+unsupported and explicitly diagnosed: source-page assignment and page-relative
+coordinates are not implemented by the flowing converter.
+
+All 18 DOCX goldens pass on `auto`, `interp` and `jit`. The original direct-view
+command passes all six native assertions with the rebuilt host. The Lambda
+baseline passes 8,105/8,106 checks, including all 1,736 script checks; its sole
+failure is the same independent PDF phase-6 golden mismatch recorded above.
+Evidence is under `temp/docx-anchors/`: `focused.log`, `interp-final.log`,
+`jit-final.log`, `viewer-result.json` and `lambda-baseline.log`.
+`git diff --check` passes.
+
+## SmartArt layout and saved EMF previews (2026-10-23)
+
+The two remaining warnings in `large-doc-15-MB-docx-file.docx` came from
+unimplemented representations: its SmartArt has declarative layout/color/style
+parts, and its OLE preview is an EMF containing an alpha bitmap and a filename.
+The earlier text/placeholder fallbacks preserved content but could not display
+either saved graphic.
+
+`diagram_layout.ls` now interprets composite, linear, text and space algorithms,
+source point selections and conditions, named dimensional/font constraints,
+text margins, rectangle shapes and theme styles. It uses the saved connection
+order and layout directions, and existing text metrics fit labels inside their
+source boxes. It does not select behavior by template name. Graph cycles,
+unknown algorithms, unsupported effects and omitted saved text reject the
+layout and retain its text fallback with a diagnostic. Data graphs are bounded
+to 128 points/512 edges, and layout expansion to 256 nodes/16 levels.
+
+`metafile.ls` replays the supported EMF bitmap/text records into static SVG.
+Record bounds, counts, bitmap masks, transforms and UTF-16 are validated;
+unimplemented or malformed records retain the object fallback. Premultiplied
+BGRA is converted to a BMP V4 image with explicit alpha masks, preserving
+transparency, source crop and saved text advances. The profile permits at most
+8 MiB, 4,096 records, 65,536 bitmap pixels and 1,024 text code units per record.
+The shared `lambda.io.utf16` decoder replaces the existing IMAP decoder rather
+than duplicating surrogate handling (S2.5.8). Both renderers remain script
+packages (D7.2.4v4); neither executes layout source, fields or embedded object
+payloads (S1.8).
+
+The [OOXML layout node definition](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.diagrams.layoutnode?view=openxml-3.0.1),
+[EMR_ALPHABLEND](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/34e07d4f-aee6-4b63-a4bb-96996ad47669)
+and [EmrText](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/dd585d0a-5d7c-4034-963a-1141af836972)
+define the interpreted source structures. Tint percentages retain the specified
+input fraction and mix the remainder with white, as defined by
+[DrawingML color transforms](https://download.microsoft.com/download/e/1/4/e14fb96f-83b8-4a2a-84db-7fa8acbe061a/Office%20Open%20XML%20Part%203%20-%20Primer.pdf)
+§5.8.3; endpoint and composed-transform regressions cover that direction.
+
+The original document now imports with `unsupported:"error"` and zero
+diagnostics. Its six raster images and cached chart remain; the SmartArt
+renders five rectangles and four labels, and the embedded video displays its
+saved WMV icon and `Wildlife.wmv` filename. The direct native viewer passes
+all eight assertions. The native preview `temp/docx-graphics/visual.png` was
+inspected, and an independent BMP decoder verified row order, colors, full
+transparency and half-alpha from the generated 2×2 fixture.
+
+Independent fixtures vary names, proportions, direction, connection order,
+shade colors and Unicode labels, and reject cycles, unsupported algorithms,
+truncated/unknown EMF records and invalid surrogate sequences. The focused
+DOCX/IMAP checks pass 19/19 on `auto`, `interp` and `jit`, with zero interpreter
+fallbacks. The additional tint regressions pass on both forced tiers. The missing
+business-plan oracle is excluded from those focused runs. The required Lambda
+baseline passes 8,105/8,107 checks (all 2,112 input checks and 1,736/1,737
+script checks). The two failures are the pre-existing PDF object-9 mismatch
+at byte 760 in both tiers and the separately deleted tracked file
+`test/input/docx/biz-plan2.body.txt` (input error E400). Neither expectation
+was changed. Logs and native assertion results are under `temp/docx-graphics/`:
+`auto-final.log`, `interp-final.log`, `jit-final.log`, `tints-interp.log`,
+`tints-jit.log`, `viewer-result.json` and `lambda-baseline-final.log`.
+`git diff --check` passes.
+
+Commit review found that the two original large DOCX inputs are locally ignored.
+Default goldens and UI fixtures therefore use the checked-in `saved-graphics`
+and `saved-anchors` reproductions. `test/input/docx/minimize.py` preserves their
+XML/relationships and EMF records, replaces raster payloads with the existing
+blue test pixel, and omits object/font payloads. The original documents remain
+unchanged and their direct-view acceptance results above remain separate from
+these portable regressions.

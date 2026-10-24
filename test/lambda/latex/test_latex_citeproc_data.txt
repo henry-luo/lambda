@@ -2,3 +2,4 @@
 ["Gödel and logic with CSL and \\unknownword", ["unsupported-bib-command"], true]
 ["A rich CSL title", true, true, true]
 ["duplicate-csl-id", "invalid-csl-json", "cyclic-bib-inheritance"]
+[true, true, true, "invalid-csl-item"]

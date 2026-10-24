@@ -53,6 +53,11 @@ result.citations
 
 `compile` and `process` return `map^`; callers propagate or handle failures with the language's normal error operators. `data.bibtex(text, source)` returns normalized references and parser diagnostics; `data.json(value, source)` accepts captured JSON text or an array and returns `map^`. For diagnostics from an error, use `common.error_issue(error)`; native error codes remain integers.
 
+Plain source forms can use `data.json(value, source, {plain_text: true})` to keep
+literal angle brackets and entities in their text fields. The default remains
+CSL JSON's rich markup; both paths share name/date validation and normalization
+(**S1.8**, **S12.4.1v2**).
+
 Each request has a stable `id`, `items`, optional `note_index`, and optional `mode`. Items support `id`, `locator`, `label`, `prefix`, `suffix`, and an optional local link `target`. Modes are `normal`, `textual`, `author-only`, `suppress-author`, `title-only`, `year-only`, and `full`. Pass the complete request sequence: disambiguation can affect earlier citations. `nocite: ["*"]` includes all references without adding citation history.
 
 Results contain `citations`, `bibliography`, resolved `references`, `diagnostics`, `style_id`, and `locale`. Citations and bibliography entries carry both plain `text` and rich `content`. Use `lambda.doc.latex.to_html` to serialize the rich content through the package's escaping boundary.

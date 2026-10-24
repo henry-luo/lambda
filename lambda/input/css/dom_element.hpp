@@ -705,6 +705,8 @@ bool css_custom_property_name_matches(const char* stored_name,
     size_t lookup_length = (size_t)-1);
 DomElement* dom_parent_element(DomElement* element);
 DomNode* dom_source_parent(DomNode* node);
+DomNode* dom_source_child(DomElement* element, bool first);
+DomNode* dom_source_sibling(DomNode* node, bool forward);
 const CssCustomProp* dom_element_lookup_own_custom_property_entry(DomElement* element,
     const char* name, size_t name_length = (size_t)-1, bool exclude_animations = false);
 void dom_element_invalidate_custom_property_index(DomElement* element);
@@ -1561,6 +1563,9 @@ inline const Element* dom_element_render_source(const DomElement* de) {
 
 // equal template results retain live DOM storage while adopting the new result keys.
 void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current);
+void dom_rebind_render_element(DomDocument* doc, Element* previous, Element* current);
+// only for data/ARIA writes proven independent of selectors and CSS attr() values.
+bool dom_element_set_non_style_metadata(DomElement* element, const char* name, const char* value);
 DomElement* element_dom_map_lookup(struct hashmap* map, Element* elem);
 
 // Resolve a parsed/template Element to its live DOM wrapper. The lifecycle

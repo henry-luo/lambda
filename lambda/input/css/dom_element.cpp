@@ -37,6 +37,41 @@ DomNode* dom_source_parent(DomNode* node) {
     return parent;
 }
 
+static bool dom_is_table_wrapper(DomNode* node) {
+    return node && node->is_element() && node->as_element()->is_table_fixup();
+}
+
+DomNode* dom_source_child(DomElement* element, bool first) {
+    DomNode* child = element ? (first ? element->first_child.get() : element->last_child.get()) : nullptr;
+    while (child) {
+        if (!dom_is_generated_pseudo_node(child)) return child;
+        if (dom_is_table_wrapper(child)) {
+            DomNode* nested = dom_source_child(child->as_element(), first);
+            if (nested) return nested;
+        }
+        child = first ? child->next_sibling.get() : child->prev_sibling.get();
+    }
+    return nullptr;
+}
+
+DomNode* dom_source_sibling(DomNode* node, bool forward) {
+    // anonymous table boxes must not split the source sibling list after layout.
+    DomNode* sibling = node ? (forward ? node->next_sibling.get() : node->prev_sibling.get()) : nullptr;
+    while (true) {
+        while (sibling) {
+            if (!dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (dom_is_table_wrapper(sibling)) {
+                DomNode* nested = dom_source_child(sibling->as_element(), forward);
+                if (nested) return nested;
+            }
+            sibling = forward ? sibling->next_sibling.get() : sibling->prev_sibling.get();
+        }
+        node = node ? node->parent.get() : nullptr;
+        if (!dom_is_table_wrapper(node)) return nullptr;
+        sibling = forward ? node->next_sibling.get() : node->prev_sibling.get();
+    }
+}
+
 DomElement* dom_parent_element(DomElement* element) {
     DomNode* parent_node = dom_source_parent(element);
     DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
@@ -1958,8 +1993,8 @@ static bool dom_element_sync_attribute_mirror(DomElement* element, const char* n
     return dom_element_store_attribute(element, name, first ? first->value.get() : nullptr, !first);
 }
 
-bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
-    DomElement* element = this;
+static bool dom_element_set_attribute_value(DomElement* element, const char* name,
+        const char* value, bool preserve_case, bool invalidate_style) {
     if (!dom_attribute_name_present(name) || !value) return false;
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
@@ -1972,9 +2007,20 @@ bool DomElement::set_attribute(const char* name, const char* value, bool preserv
     if ((recorded || (element->ext && element->ext->attributes_are_recorded)) &&
         !dom_element_record_namespaced_attribute(element, uri, key, value)) return false;
     dom_attribute_nodes_did_set(element, key, value, uri);
-    if (!*uri) dom_element_attribute_did_set(element, key, value, same);
-    else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    if (invalidate_style) {
+        if (!*uri) dom_element_attribute_did_set(element, key, value, same);
+        else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    }
     return true;
+}
+
+bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
+    return dom_element_set_attribute_value(this, name, value, preserve_case, true);
+}
+
+bool dom_element_set_non_style_metadata(DomElement* element, const char* name, const char* value) {
+    if (!element || !name || (strncmp(name, "data-", 5) && strncmp(name, "aria-", 5))) return false;
+    return dom_element_set_attribute_value(element, name, value, false, false);
 }
 
 bool dom_element_set_namespace_identity(DomElement* element,
@@ -3516,13 +3562,13 @@ bool DomElement::is_first_child() {
 
     // CSS 2.1 §5.11.1: :first-child matches an element that is the first
     // child ELEMENT of its parent. Text nodes are not counted.
-    DomElement* parent = static_cast<DomElement*>(element->parent);
-    DomNode* child = parent->first_child;
+    DomElement* parent = static_cast<DomElement*>(dom_source_parent(element));
+    DomNode* child = dom_source_child(parent, true);
     while (child) {
         if (dom_is_css_element_child(child)) {
             return child == (DomNode*)element;
         }
-        child = child->next_sibling;
+        child = dom_source_sibling(child, true);
     }
     return false;
 }
@@ -3535,12 +3581,12 @@ bool DomElement::is_last_child() {
 
     // CSS 2.1 §5.11.1: :last-child matches an element that is the last
     // child ELEMENT of its parent. Text nodes after it are not counted.
-    DomNode* sibling = element->next_sibling;
+    DomNode* sibling = dom_source_sibling(element, true);
     while (sibling) {
         if (dom_is_css_element_child(sibling)) {
             return false;
         }
-        sibling = sibling->next_sibling;
+        sibling = dom_source_sibling(sibling, true);
     }
     return true;
 }
@@ -3565,15 +3611,15 @@ int DomElement::child_index() {
     // Count only element children (not text nodes or comments)
     // According to CSS spec, :nth-child() counts only element nodes
     int index = 0;
-    DomElement* parent = static_cast<DomElement*>(element->parent);
-    DomNode* sibling = parent->first_child;
+    DomElement* parent = static_cast<DomElement*>(dom_source_parent(element));
+    DomNode* sibling = dom_source_child(parent, true);
 
     while (sibling && sibling != element) {
         // Only count element nodes for nth-child
         if (dom_is_css_element_child(sibling)) {
             index++;
         }
-        sibling = sibling->next_sibling;
+        sibling = dom_source_sibling(sibling, true);
     }
 
     return (sibling == element) ? index : -1;
@@ -3597,14 +3643,14 @@ int DomElement::count_child_elements() {
     DomElement* element = this;
 
     int count = 0;
-    DomNode* child = element->first_child;
+    DomNode* child = dom_source_child(element, true);
 
     while (child) {
         // Count source element children; generated layout nodes are not DOM children.
         if (dom_is_css_element_child(child)) {
             count++;
         }
-        child = child->next_sibling;
+        child = dom_source_sibling(child, true);
     }
 
     return count;
@@ -4509,19 +4555,24 @@ void element_dom_map_remove(HashMap* map, Element* elem) {
     ElementDomMap::erase(map, key);
 }
 
+void dom_rebind_render_element(DomDocument* doc, Element* previous, Element* current) {
+    if (!doc || !doc->element_dom_map || previous == current) return;
+    DomElement* node = element_dom_map_lookup(doc->element_dom_map, previous);
+    if (node && dom_element_render_source(node) == previous) {
+        element_dom_map_remove(doc->element_dom_map, previous);
+        dom_node_registry_set_backing_source(doc, node, current);
+        element_dom_map_insert(doc->element_dom_map, current, node);
+    }
+}
+
 void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current) {
     // RAW_ITEM_EQ_OK: unchanged evaluator addresses need no identity handoff.
     if (!doc || !doc->element_dom_map || previous.item == current.item) return;
     TypeId kind = get_type_id(previous);
     if (kind != get_type_id(current)) return;
     if (kind == LMD_TYPE_ELEMENT) {
-        DomElement* node = element_dom_map_lookup(doc->element_dom_map, previous.element);
-        if (node && dom_element_render_source(node) == previous.element) {
-            // a no-op rerender still replaces evaluator identities (D4.5.3).
-            element_dom_map_remove(doc->element_dom_map, previous.element);
-            dom_node_registry_set_backing_source(doc, node, current.element);
-            element_dom_map_insert(doc->element_dom_map, current.element, node);
-        }
+        // a no-op rerender still replaces evaluator identities (D4.5.3).
+        dom_rebind_render_element(doc, previous.element, current.element);
     } else if (kind != LMD_TYPE_ARRAY) {
         return;
     }

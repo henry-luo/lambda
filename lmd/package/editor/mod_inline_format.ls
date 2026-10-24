@@ -16,6 +16,9 @@ pub fn css_get(css,key) => [for (decl in split(css or "",";"),let pair=split(dec
 pub fn css_set(css,key,value) => join([*[for (decl in split(css or "",";") where trim(decl) != "" and
     lower(trim(split(decl,":")[0])) != key) trim(decl)],
     *if (value == null or value == "") [] else [key ++ ": " ++ value]],"; ")
+fn css_properties(css,properties,i) => if (i>=len(properties)) css else
+    css_properties(css_set(css,properties[i].key,properties[i].value),properties,i+1)
+pub fn css_set_many(css,values) => css_properties(css,[for (key,value in values) {key:string(key),value:value}],0)
 pub fn span_css(marks) string {
     let attrs = mark_value(marks,'span')
     if (attrs is array) attrs_get(attrs,'style') or "" else ""

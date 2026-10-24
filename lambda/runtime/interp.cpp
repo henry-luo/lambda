@@ -8707,8 +8707,9 @@ static Item interp_eval_view_activation(Context* host, Script* module,
                 break;
             }
             Item initial = ItemNull;
-            if (handler) {
+            if (handler || tmpl_state_has(model_slot.get(), template_ref, state->name->chars)) {
                 // MIR handlers read the state established by the view body.
+                // redraws also read it directly, including an initialized null value.
                 initial = tmpl_state_get(model_slot.get(), template_ref,
                     state->name->chars);
             } else {

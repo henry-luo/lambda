@@ -17,6 +17,13 @@
       "scroll_into_view": true
     },
     {
+      "type": "assert_count",
+      "target": {
+        "selector": "#table-grips,.table-grip"
+      },
+      "count": 0
+    },
+    {
       "type": "click",
       "target": {
         "selector": "#tab-table",
@@ -29,9 +36,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "[id=\"table.selectCell\"]",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-cell"
       },
       "button": 0,
       "scroll_into_view": true
@@ -46,9 +58,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "[id=\"table.selectRow\"]",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-row"
       },
       "button": 0,
       "scroll_into_view": true
@@ -63,9 +80,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "[id=\"table.selectColumn\"]",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-column"
       },
       "button": 0,
       "scroll_into_view": true
@@ -80,9 +102,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "[id=\"table.selectTable\"]",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#table-select-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-table"
       },
       "button": 0,
       "scroll_into_view": true
@@ -127,6 +154,12 @@
         "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
       },
       "equals": "Back room"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
     },
     {
       "type": "click",
@@ -240,10 +273,22 @@
       "scroll_into_view": true
     },
     {
+      "type": "scroll",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 500,
+        "offset_y": 400
+      },
+      "dy": -6,
+      "dx": 0
+    },
+    {
       "type": "mouse_drag",
       "steps": 8,
       "target": {
-        "selector": "#table-grip-cell"
+        "selector": "#edit-surface tr:nth-child(2) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
       },
       "to_target": {
         "selector": "#edit-surface tr:nth-child(3) td:nth-child(3)",
@@ -261,12 +306,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "#borders-none",
-        "offset_x": 14,
-        "offset_y": 12
-      },
-      "button": 0,
-      "scroll_into_view": true
+        "selector": "#table-borders-menu"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-border-none"
+      }
     },
     {
       "type": "assert_style",
@@ -324,14 +371,18 @@
       "scroll_into_view": true
     },
     {
-      "type": "click",
+      "type": "mouse_drag",
+      "steps": 8,
       "target": {
-        "selector": "#table-grip-row-2",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(1)",
+        "offset_x": 25,
+        "offset_y": 16
       },
-      "button": 0,
-      "scroll_into_view": true
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(3) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
     },
     {
       "type": "assert_count",
@@ -341,14 +392,18 @@
       "count": 3
     },
     {
-      "type": "click",
+      "type": "mouse_drag",
+      "steps": 8,
       "target": {
-        "selector": "#table-grip-column-1",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#edit-surface tr:nth-child(1) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
       },
-      "button": 0,
-      "scroll_into_view": true
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(4) :is(td,th):nth-child(2)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
     },
     {
       "type": "assert_count",
@@ -432,10 +487,21 @@
     {
       "type": "click",
       "target": {
-        "selector": "#table-grip-cell"
+        "selector": "#tab-table"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table-select-menu"
       },
-      "button": 0,
       "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-cell"
+      }
     },
     {
       "type": "assert_count",
@@ -514,14 +580,18 @@
       "equals": "Location"
     },
     {
-      "type": "click",
+      "type": "mouse_drag",
+      "steps": 8,
       "target": {
-        "selector": "#table-grip-column-2",
-        "offset_x": 14,
-        "offset_y": 12
+        "selector": "#edit-surface tr:nth-child(1) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
       },
-      "button": 0,
-      "scroll_into_view": true
+      "to_target": {
+        "selector": "#edit-surface tr:nth-child(4) :is(td,th):nth-child(3)",
+        "offset_x": 25,
+        "offset_y": 16
+      }
     },
     {
       "type": "assert_count",

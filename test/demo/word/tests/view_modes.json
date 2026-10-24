@@ -1,0 +1,926 @@
+{
+  "name": "Word status bar and ribbon view modes, continuous responsive Web Layout, read lock and source selection",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#document-views button"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#document-views"
+      },
+      "attribute": "role",
+      "equals": "group"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "print"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "attribute": "aria-label",
+      "equals": "Read Mode"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-web"
+      },
+      "attribute": "aria-label",
+      "equals": "Web Layout"
+    },
+    {
+      "type": "script",
+      "js": "window.wordOriginal=document.getElementById('edit-surface').textContent;window.wordWebFits=function(){var s=document.getElementById('stage'),b=s.getBoundingClientRect(),p=document.getElementById('paper-wrap').getBoundingClientRect(),d=document.getElementById('edit-surface').getBoundingClientRect(),c=getComputedStyle(s);return Math.abs(p.width-(b.width-parseFloat(c.paddingLeft)-parseFloat(c.paddingRight)))<2&&Math.abs(d.width-p.width)<2&&Math.abs(document.getElementById(\"surface-frame\").getBoundingClientRect().height-d.height)<2&&s.scrollWidth<=s.clientWidth+1};true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "read"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface p"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "X"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('edit-surface').textContent===window.wordOriginal"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "read"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "web"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-web"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('edit-surface').textContent===window.wordOriginal"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#canvas-chrome"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#vertical-ruler"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "script",
+      "js": "window.wordWide=document.getElementById('paper-wrap').getBoundingClientRect().width"
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 760
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('paper-wrap').getBoundingClientRect().width<window.wordWide-200"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-out"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#zoom-label"
+      },
+      "equals": "90%"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#zoom-label"
+      },
+      "equals": "110%"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page > p:nth-of-type(3)"
+      },
+      "start": 10,
+      "end": 10
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('stage').scrollTop=150"
+    },
+    {
+      "type": "script",
+      "js": "window.wordTypingScroll=document.getElementById('stage').scrollTop"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordTypingScroll>100"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('stage').scrollTop-window.wordTypingScroll)<1"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.getElementById('stage').scrollTop-window.wordTypingScroll)<1"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('edit-surface').textContent===window.wordOriginal"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('stage').scrollTop=0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-web-layout.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-web"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "read"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "web"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "print"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-print"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#canvas-chrome"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('.word-page').getBoundingClientRect().width-794*1.1)<2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "BeforeAfter",
+      "clear": false
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 6,
+      "end": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-page-break"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelectorAll('.word-page');a[1].getBoundingClientRect().top-a[0].getBoundingClientRect().bottom<2"
+    },
+    {
+      "type": "type_physical",
+      "text": "Web "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-page[data-page=\"1\"] p"
+      },
+      "equals": "Before"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-page[data-page=\"2\"] p"
+      },
+      "equals": "Web After"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": ".word-page[data-page=\"2\"] p"
+      },
+      "start": 4,
+      "end": 9
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().toString()==='After'"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".word-page"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "var a=document.querySelectorAll('.word-page');a[1].getBoundingClientRect().top-a[0].getBoundingClientRect().bottom>=23"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"format.bold\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-page[data-page=\"2\"] strong"
+      },
+      "equals": "After"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".word-page strong"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-page[data-page=\"2\"] p"
+      },
+      "equals": "Web After"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-page[data-page=\"2\"] p"
+      },
+      "equals": "After"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".word-page"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-page p"
+      },
+      "equals": "BeforeAfter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#exit-focus"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "read"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#exit-focus"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-view",
+      "equals": "web"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#exit-focus"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#exit-focus"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "resize",
+      "width": 640,
+      "height": 760
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "assert_script",
+      "js": "var f=document.querySelector('.statusbar').getBoundingClientRect(),n=document.querySelectorAll('#document-views button,#document-mode,#paper-label,#zoom-label');var ok=true;for(var i=0;i<n.length;i++){var b=n[i].getBoundingClientRect();ok=ok&&b.width>0&&b.left>=f.left&&b.right<=f.right&&b.top>=f.top&&b.bottom<=f.bottom}ok"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-web-layout-narrow.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-page-number"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#stories-header"
+      },
+      "text": "Window layout header",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-stories .primary"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".word-header"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".word-footer"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-header"
+      },
+      "equals": "Window layout header"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".word-footer"
+      },
+      "equals": "Page 1 of 1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".word-header"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": ".word-page p"
+      },
+      "start": 11,
+      "end": 11
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-picture"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-path"
+      },
+      "text": "test/demo/word/tests/picture.svg",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-width"
+      },
+      "text": "160",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-height"
+      },
+      "text": "100",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-picture .primary"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "window.wordImageFrameFits=function(){var i=document.querySelector('#edit-surface img').getBoundingClientRect(),f=document.getElementById('object-handles').getBoundingClientRect();return Math.abs(i.width-f.width)<2&&Math.abs(i.height-f.height)<2&&Math.abs(i.left-f.left)<2&&Math.abs(i.top-f.top)<2};true"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordImageFrameFits()"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('#edit-surface img').getBoundingClientRect().width-160)<2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#zoom-label"
+      },
+      "equals": "110%"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordImageFrameFits()"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('#edit-surface img').getBoundingClientRect().width-176)<2"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "pointerType": "touch",
+      "dx": 44,
+      "dy": 27.5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "200"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "height",
+      "equals": "125"
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordImageFrameFits()"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "160"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-handles"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordImageFrameFits()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-web-layout-picture.png"
+    },
+    {
+      "type": "resize",
+      "width": 560,
+      "height": 760
+    },
+    {
+      "type": "assert_script",
+      "js": "window.wordWebFits()"
+    },
+    {
+      "type": "assert_script",
+      "js": "var f=document.querySelector('.statusbar').getBoundingClientRect(),n=document.querySelectorAll('#document-views button,#document-mode,#paper-label,#zoom-label');var ok=true;for(var i=0;i<n.length;i++){var b=n[i].getBoundingClientRect();ok=ok&&b.width>0&&b.left>=f.left&&b.right<=f.right&&b.top>=f.top&&b.bottom<=f.bottom}ok"
+    }
+  ]
+}

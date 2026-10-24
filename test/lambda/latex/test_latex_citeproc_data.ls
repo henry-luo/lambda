@@ -20,3 +20,8 @@ let rich_html = html.to_html(json.references[0].rich.title);
 [data.json([{id:"same",type:"book"},{id:"same",type:"book"}]) ^ { c.error_issue(^).code },
  data.json({id:"bad"}) ^ { c.error_issue(^).code },
  data.bibtex("@misc{a,crossref={b}}@misc{b,crossref={a}}").diagnostics[0].code]
+let literal = "A <i>literal</i> &amp; title"
+let plain = data.json([{id:"plain",type:"book",title:literal}],"<form>",{plain_text:true})^.references[0];
+[plain.title==literal, plain.rich.title==[literal],
+ html.to_html(plain.rich.title)=="A &lt;i&gt;literal&lt;/i&gt; &amp;amp; title",
+ data.json([{id:"bad",type:"book",author:"unstructured"}],"<form>",{plain_text:true}) ^ { c.error_issue(^).code }]

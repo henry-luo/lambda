@@ -8,10 +8,10 @@
     {"type":"set_editing_selection","target":{"selector":"#edit-surface p"},"start":0,"end":3},
     {"type":"select_option","target":{"selector":"#font-size"},"value":"18"},
     {"type":"assert_value","target":{"selector":"#font-size"},"equals":"18"},
-    {"type":"assert_style","target":{"selector":"#edit-surface span"},"property":"font-size","equals":"24px"},
+    {"type":"assert_style","target":{"selector":"#edit-surface span:not(.word-text-run)"},"property":"font-size","equals":"24px"},
     {"type":"click","target":{"text":"two"}},
     {"type":"assert_value","target":{"selector":"#font-size"},"equals":"11"},
-    {"type":"assert_count","target":{"selector":"#edit-surface span"},"count":1},
+    {"type":"assert_count","target":{"selector":"#edit-surface span:not(.word-text-run)"},"count":1},
     {"type":"assert_text","target":{"selector":"#edit-surface p"},"equals":"one two"},
     {"type":"select_option","target":{"selector":"#line-spacing"},"value":"1.15"},
     {"type":"assert_value","target":{"selector":"#line-spacing"},"equals":"1.15"},
@@ -28,6 +28,6 @@
     {"type":"click","target":{"selector":"#find-clear"}},
     {"type":"assert_value","target":{"selector":"#find-query"},"equals":""},
     {"type":"assert_text","target":{"selector":"#edit-surface p"},"equals":"one two"},
-    {"type":"assert_count","target":{"selector":"#edit-surface span"},"count":1}
+    {"type":"assert_count","target":{"selector":"#edit-surface span:not(.word-text-run)"},"count":1}
   ]
 }

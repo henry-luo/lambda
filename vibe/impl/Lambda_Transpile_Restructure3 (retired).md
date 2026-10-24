@@ -18,7 +18,7 @@ The original geometric mean slowdown vs Node.js across these five benchmarks was
 
 - [Lambda_Transpile_Restructure (retired).md](Lambda_Transpile_Restructure%20(retired).md) — Dual-version function generation (`_n`/`_b`), structured returns (`RetItem`)
 - [Lambda_Transpile_Restructure2 (retired).md](Lambda_Transpile_Restructure2%20(retired).md) — JIT header diet, O(1) sys func lookup, config-driven code gen
-- [Lambda_Box_Unbox.md](../Lambda_Box_Unbox.md) / [Lambda_Box_Unbox2.md](../Lambda_Box_Unbox2.md) — Boxing/unboxing uniformity
+- [Lambda_Box_Unbox (retired).md](<Lambda_Box_Unbox (retired).md>) / [Lambda_Box_Unbox2 (retired).md](<Lambda_Box_Unbox2 (retired).md>) — Boxing/unboxing uniformity
 
 This Phase 3 focuses exclusively on **JIT code quality and runtime call elimination** — the hot-path optimizations that directly affect compute-bound benchmarks.
 

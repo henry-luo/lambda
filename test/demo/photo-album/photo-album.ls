@@ -326,11 +326,12 @@ pn collage_command(owner, st, action) {
 // sliders and the caption edit live; history records each control once, when its edit ends
 pn collage_control(owner, st, id, value, final) {
     let key = if (id == "cl-gutter") "gutter" else if (id == "cl-radius") "radius" else if (id == "cl-border") "border"
-        else if (id == "cl-caption") "caption" else if (id == "cl-aspect") "aspect" else if (id == "cl-credits") "credits" else ""
+        else if (id == "cl-caption") "caption" else if (id == "cl-note") "note" else if (id == "cl-aspect") "aspect"
+        else if (id == "cl-font") "font" else if (id == "cl-credits") "credits" else ""
     if (key == "") { return st }
     let cs = st.collage
     let start = if (st.collage_edit == null) cs.model else st.collage_edit
-    let typed = if (key == "caption" or key == "aspect") value else if (key == "credits") value == true
+    let typed = if (key == "caption" or key == "note" or key == "aspect" or key == "font") value else if (key == "credits") value == true
         else int(round(float(value) ^ { 0.0 }))
     let model = C.set(cs.model, key, typed)
     if (final) { return {*:st, collage:CA.change(owner, CTX, {*:cs, model:start}, model), collage_edit:null} }
@@ -766,9 +767,8 @@ on click(evt) {
         let template = dom.closest(evt.target, "[data-collage-template]")
         let swatch = dom.closest(evt.target, "[data-collage-bg]")
         if (template != null or swatch != null) {
-            let model = if (template != null) C.set(session.collage.model, "template", dom.get_attribute(template, "data-collage-template"))
-                else C.set(session.collage.model, "background", dom.get_attribute(swatch, "data-collage-bg"))
-            session = {*:session, collage:CA.change(owner, CTX, session.collage, model)}
+            if (template != null) { session = {*:session, collage:CA.retemplate(owner, CTX, session.collage, dom.get_attribute(template, "data-collage-template"))} }
+            else { session = {*:session, collage:CA.change(owner, CTX, session.collage, C.set(session.collage.model, "background", dom.get_attribute(swatch, "data-collage-bg")))} }
             return 'handled'
         }
         let button = dom.closest(evt.target, "[data-action]")
@@ -849,8 +849,8 @@ on input(evt) {
         return 'handled'
     }
     if (session.collage != null) {
-        let value = if (id == "cl-caption") dom.get_state(evt.target, "value") else string(dom.range_value(evt.target))
-        if (id != "cl-aspect" and id != "cl-credits") { session = collage_control(owner, session, id, value, false) }
+        let value = if (id == "cl-caption" or id == "cl-note") dom.get_state(evt.target, "value") else string(dom.range_value(evt.target))
+        if (id != "cl-aspect" and id != "cl-font" and id != "cl-credits") { session = collage_control(owner, session, id, value, false) }
         return 'handled'
     }
     if (id == "search") {
@@ -876,6 +876,7 @@ on change(evt) {
     let value = if (id == "cl-credits") dom.get_state(evt.target, "checked")
         else if (id == "cl-gutter" or id == "cl-radius" or id == "cl-border") string(dom.range_value(evt.target))
         else if (id == "cl-aspect") [for (a in C.ASPECTS) a.key][dom.selected_index(evt.target) or 0]
+        else if (id == "cl-font") [for (f in C.FONTS) f.key][dom.selected_index(evt.target) or 0]
         else dom.get_state(evt.target, "value")
     session = collage_control(owner, session, id, value, true)
     return 'handled'

@@ -1,5 +1,5 @@
 {
-  "name": "Photo album collage: templates, swap, crop, history, styling, scrapbook, save/open and export",
+  "name": "Photo album collage: template gallery and looks, swap, crop, history, styling, scrapbook, save/open and export",
   "html": "test/demo/photo-album/photo-album.ls",
   "env": [
     {
@@ -223,6 +223,73 @@
     {
       "type": "assert_script",
       "js": "!document.querySelector('#cl-canvas-host .cl-credits')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.cl-templates .cl-template').length===15 && document.querySelectorAll('.cl-templates [data-slot]').length===0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-template='diamonds']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "const c=document.querySelectorAll('#cl-canvas-host .cl-cell');c.length===6 && [...c].every(e=>/clip-path:polygon/.test(e.getAttribute('style'))) && document.getElementById('cl-font').selectedIndex===0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-template='spotlight']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!!document.querySelector('#cl-canvas-host .cl-plate') && document.getElementById('cl-font').selectedIndex===2 && /Snell Roundhand/.test(document.querySelector('#cl-canvas-host .cl-caption').getAttribute('style'))"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cl-gutter').value==='8' && document.getElementById('cl-radius').value==='4'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cl-note"
+      },
+      "text": "By the sea",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cl-canvas-host .cl-note"
+      },
+      "equals": "By the sea"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-collage-template='balloon']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!!document.querySelector('#cl-canvas-host .cl-mask') && !!document.querySelector('#cl-canvas-host .cl-basket') && document.getElementById('cl-shuffle').style.display==='none'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cl-undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collage"
+      },
+      "attribute": "data-template",
+      "equals": "spotlight"
     },
     {
       "type": "click",

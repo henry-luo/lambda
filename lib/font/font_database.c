@@ -1113,6 +1113,22 @@ FontEntry* font_database_find_local_name_internal(FontDatabase* db, const char* 
     return NULL;
 }
 
+void font_database_parse_all_internal(FontDatabase* db) {
+    if (!db) return;
+    if (!db->scanned) font_database_scan_internal(db);
+    // collection expansion appends real faces; include those before publishing metadata.
+    for (int i = 0; i < db->all_fonts->length; i++) {
+        parse_database_placeholder(db, (FontEntry*)db->all_fonts->data[i]);
+    }
+    // parsed names replace filename guesses, so rebuild indexes rather than retaining stale family keys.
+    hashmap_clear(db->families, false);
+    hashmap_clear(db->postscript_names, false);
+    hashmap_clear(db->file_paths, false);
+    hashmap_clear(db->missing_families, false);
+    db->organized_up_to = 0;
+    organize_fonts_into_families(db);
+}
+
 // ============================================================================
 // Database scanning — 3-phase approach
 // ============================================================================

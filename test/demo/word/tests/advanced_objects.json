@@ -471,18 +471,18 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": ".edit-dialog.edit-dialog-equation"
+        "selector": "#equation-editor-pane"
       },
       "count": 1
     },
     {
       "type": "assert_script",
-      "js": "document.getElementById(\"equation-source\").value === \"E=mc^2\""
+      "js": "document.getElementById(\"equation-editor-source\").value === \"E=mc^2\""
     },
     {
       "type": "click",
       "target": {
-        "selector": ".edit-dialog-cancel"
+        "selector": "#equation-discard"
       }
     },
     {

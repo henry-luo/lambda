@@ -9,7 +9,7 @@ Archive SHA-256: `5407a7682a122baaaa5a15b505290e2d37df54c13c5edef4b09d12c862d822
 Official source imported for the common image library (2026-10-15).
 Local adaptations are made directly in this directory and reviewed through Git.
 No separate patch files are required, per the user-approved source policy in
-`vibe/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
+`vibe/lib/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
 and application directories are omitted; only library targets are built.
 
 Lambda adaptations: allocator callbacks carry operation userdata; palettes and ICO nodes use those callbacks; metadata-only probing skips bitmap allocation; byte order uses `lib/endian.h`; DIB/palette offsets and partial-byte AND masks are validated before access; legacy all-zero 32-bit alpha follows the AND mask.

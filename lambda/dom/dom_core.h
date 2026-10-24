@@ -308,6 +308,7 @@ Item dom_engine_relative_mouse_active(Item a);
 Item dom_engine_set_window_fullscreen(Item a, Item b);
 Item dom_engine_window_fullscreen(Item a);
 Item dom_engine_window_fullscreen_enabled(Item a);
+Item dom_engine_query_local_fonts(Item options);
 Item dom_engine_input_operation(Item a, Item b);
 Item dom_engine_set_range_from_point(Item a, Item b, Item c);
 Item dom_engine_range_max(Item a);

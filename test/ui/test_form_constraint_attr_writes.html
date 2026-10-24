@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Constraint attribute writes after layout</title>
+</head>
+<body>
+<!-- controls start constrained, so the engine's state mirror exists before script changes the attributes -->
+<button id="by-attr" disabled onclick="document.getElementById('log').textContent += 'a'">Remove attribute</button>
+<button id="by-idl" disabled onclick="document.getElementById('log').textContent += 'i'">IDL write</button>
+<input id="locked" readonly required value="x">
+<p id="log">:</p>
+</body>
+</html>

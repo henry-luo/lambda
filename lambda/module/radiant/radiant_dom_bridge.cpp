@@ -139,7 +139,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define js_is_truthy radiant_host_api->script->is_truthy
 #define js_to_string radiant_host_api->script->to_string
 #define dom_after_set_attribute radiant_host_api->dom_catalog->after_set_attribute
-#define dom_after_disabled_attribute_set radiant_host_api->dom_catalog->after_disabled_attribute_set
+#define dom_after_remove_attribute radiant_host_api->dom_catalog->after_remove_attribute
 #define dom_after_default_checked_set radiant_host_api->dom_catalog->after_default_checked_set
 #define dom_after_default_selected_set radiant_host_api->dom_catalog->after_default_selected_set
 #define dom_after_select_multiple_removed radiant_host_api->dom_catalog->after_select_multiple_removed
@@ -1557,8 +1557,15 @@ static int radiant_dom_reflected_bool_set(Item receiver, Item value, Item* out,
                                           const char* attribute, bool notify) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    if (js_is_truthy(value)) elem->set_attribute(attribute, "");
-    else elem->remove_attribute(attribute);
+    // the shared after-write hooks keep focus, select resets and the engine's
+    // disabled/readonly/required mirrors in step with the attribute
+    if (js_is_truthy(value)) {
+        elem->set_attribute(attribute, "");
+        dom_after_set_attribute((void*)elem, attribute, "");
+    } else {
+        elem->remove_attribute(attribute);
+        dom_after_remove_attribute((void*)elem, attribute);
+    }
     if (notify) {
         dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     }
@@ -1584,17 +1591,7 @@ RADIANT_C_API int radiant_dom_m4b_disabled_get(Item receiver, Item* out) {
 }
 
 RADIANT_C_API int radiant_dom_m4b_disabled_set(Item receiver, Item value, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    if (!elem || !out) return 0;
-    if (js_is_truthy(value)) {
-        elem->set_attribute("disabled", "");
-        dom_after_disabled_attribute_set((void*)elem);
-    } else {
-        elem->remove_attribute("disabled");
-    }
-    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
-    *out = value;
-    return 1;
+    return radiant_dom_reflected_bool_set(receiver, value, out, "disabled", true);
 }
 
 RADIANT_C_API int radiant_dom_m4b_multiple2_get(Item receiver, Item* out) {

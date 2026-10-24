@@ -1,6 +1,6 @@
 # Lambda Lib Grep — implementation record
 
-**Design:** `vibe/Lambda_Lib_Grep.md` (GRP1–GRP31). **Started and landed in worktree `lib-grep`:** 2026-10-04. **Status:** phases G-pre, G0–G5, G5A, G6 (packed pair, Teddy) and G7 built and tested on macOS arm64, and after them the count mode (GRP30) and line endings (GRP31); G5B waits on the separate caching proposal; G8 not started.
+**Design:** `vibe/lib/Lib_Grep.md` (GRP1–GRP31). **Started and landed in worktree `lib-grep`:** 2026-10-04. **Status:** phases G-pre, G0–G5, G5A, G6 (packed pair, Teddy) and G7 built and tested on macOS arm64, and after them the count mode (GRP30) and line endings (GRP31); G5B waits on the separate caching proposal; G8 not started.
 
 ## 1. What was built
 

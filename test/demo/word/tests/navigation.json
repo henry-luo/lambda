@@ -1,0 +1,997 @@
+{
+  "name": "Word closeable Navigation pane, heading and page navigation, previews, results and keyboard tabs",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "attribute": "aria-label",
+      "equals": "Close Navigation"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#close-navigation svg"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".navigation-tabs [role=tab]"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-headings"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#navigation-headings"
+      },
+      "attribute": "role",
+      "equals": "tabpanel"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".outline-item"
+      },
+      "count": 5
+    },
+    {
+      "type": "script",
+      "js": "window.navOriginal=document.getElementById('edit-surface').textContent"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".navigation-slot"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#view-navigation"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".navigation-slot"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-headings"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#heading-4"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().anchorNode.textContent==='Make yourself at home'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('stage').scrollTop>200"
+    },
+    {
+      "type": "type_physical",
+      "text": "X"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('edit-surface').textContent===window.navOriginal"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-pages"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".page-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".page-thumbnail h1"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.page-thumbnail').textContent.indexOf('The Open Studio Handbook')>=0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "var c=document.getElementById('nav-page-1').getBoundingClientRect(),p=document.querySelector('.page-thumbnail').getBoundingClientRect(),t=document.querySelector('.navigation-tabs').getBoundingClientRect();p.top>=c.top&&p.bottom<=c.bottom&&p.top>t.bottom"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-navigation-pages-sample.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".page-card"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "First page",
+      "clear": false
+    },
+    {
+      "type": "key_combo",
+      "key": "Enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type_physical",
+      "text": "Second page"
+    },
+    {
+      "type": "key_combo",
+      "key": "Enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type_physical",
+      "text": "Third page"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".page-card"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-page-3"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-page-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('stage').scrollTop<50"
+    },
+    {
+      "type": "type_physical",
+      "text": "Start "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"] p"
+      },
+      "equals": "Start First page"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"] p"
+      },
+      "equals": "First page"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-page-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-page-2"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('stage').scrollTop>800"
+    },
+    {
+      "type": "assert_script",
+      "js": "var p=document.querySelector('#edit-surface .word-page[data-page=\"2\"]').getBoundingClientRect(),s=document.getElementById('stage').getBoundingClientRect();p.top>=s.top-1&&p.top<s.top+100"
+    },
+    {
+      "type": "type_physical",
+      "text": "On "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
+      },
+      "equals": "On Second page"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"2\"] p"
+      },
+      "start": 11,
+      "end": 11
+    },
+    {
+      "type": "key_combo",
+      "key": "Enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".page-card"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-page-3"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Blank"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"3\"] p"
+      },
+      "equals": "Blank"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".page-card"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"3\"] p"
+      },
+      "equals": "Third page"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-page-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('stage').scrollTop<50"
+    },
+    {
+      "type": "type_physical",
+      "text": "Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"] p"
+      },
+      "equals": "First page"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "page",
+      "clear": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-results"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".search-result"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".search-result mark"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-result-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().toString()==='page'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('stage').scrollTop>1500"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-result-2"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-headings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".navigation-empty"
+      },
+      "equals": "Use heading styles to build an outline."
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('nav-tab-headings').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-pages"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#nav-tab-pages"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-results"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#nav-tab-results"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-headings"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-results"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-pages"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".navigation-slot"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-pages"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "f",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".navigation-slot"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nav-tab-results"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#find-query"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#find-clear"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".search-result"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".navigation-empty"
+      },
+      "equals": "Search the document to see results here."
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "missing phrase",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".navigation-empty"
+      },
+      "equals": "No results found."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#find-clear"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-pages"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-web"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-page-3"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Web "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"3\"] p"
+      },
+      "equals": "Web Third page"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-page[data-page=\"1\"] p"
+      },
+      "equals": "First page"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nav-page-3 .word-page p"
+      },
+      "equals": "Third page"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('.page-thumbnail').getBoundingClientRect().width-156)<1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-layout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#orientation-landscape"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "var p=document.querySelector('.page-thumbnail').getBoundingClientRect();p.width>p.height"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word-navigation-pages.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "\ud83d\ude42 Bold target end",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "Bold",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-result-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().toString()==='Bold'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"format.bold\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "Bold target",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-result-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().toString()==='Bold target'"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "\ud83d\ude42 Bold target end"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-discard"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nav-tab-headings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#style-Heading1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#heading-0 .tool-label"
+      },
+      "equals": "Untitled heading"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#heading-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Named heading"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h2"
+      },
+      "equals": "Named heading"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#heading-0 .tool-label"
+      },
+      "equals": "Named heading"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#heading-0 .tool-label"
+      },
+      "equals": "Untitled heading"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-read"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#heading-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "contenteditable",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-view-print"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#heading-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type_physical",
+      "text": "Returned"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h2"
+      },
+      "equals": "Returned"
+    }
+  ]
+}

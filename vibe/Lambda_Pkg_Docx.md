@@ -211,9 +211,11 @@ void-element implementations.
 | Lists with `numFmt="none"` | Nested lists with hidden markers and numbering-level indentation/hanging indent |
 | Tables | `<table>`, row and cell elements; preserve text, nested paragraphs, supported row/column spans, and empty grid slots declared by `gridBefore`/`gridAfter` |
 | Content controls (`w:sdt`) | Display saved `sdtContent` in its inline/block/row/cell context; retain source order and inherited formatting, without executing bindings or editing behavior |
-| Package-internal raster images | `<img>` with a data URI by default, or omit with a diagnostic |
+| Package-internal raster images | `<img>` with a data URI by default, or omit with a diagnostic; a complete saved raster compatibility branch uses the ordinary drawing diagnostics |
 | Cached clustered column charts | SVG through `lambda.chart.chart`, preserving indexed cached values, series order, labels and RGB colors; a data table in plain text |
-| Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors and signed column-start/paragraph offsets with square wrapping on both sides |
+| SmartArt data | Render bounded composite/linear layouts with rectangular text/spacing nodes, source constraints/selection/direction and theme colors as SVG; other layouts retain saved text with a diagnostic |
+| Embedded OLE objects | Show the matching saved raster or bitmap/text EMF preview without reading or executing the object; unsupported previews retain a labelled placeholder and one diagnostic |
+| Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors and signed column-start/paragraph offsets with square wrapping on both sides; a small positive offset is supported when its left clearance still reaches the column edge |
 | No-wrap drawings | Explicit signed column/paragraph offsets, saved extents and source front/behind-text order; raster inset crops preserve their frames |
 | Decorative rectangles | Flat DrawingML preset rectangles with solid RGB/theme fills and no stroke/effects; select a supported modern compatibility branch once |
 | Source presentation | Resolve theme fonts/colors, inherited run size and tracking, paragraph spacing, table grid widths, cell shading/borders, row heights, and page dimensions into validated CSS |
@@ -240,7 +242,10 @@ reference markers and appends labelled annotation text after the body, grouped
 as footnotes, endnotes and comments. Significant source whitespace is retained.
 Missing targets, nested references and custom note marks are diagnosed;
 duplicate/missing annotation IDs, invalid part roots and external annotation
-parts fail package validation. Headers and footers remain unsupported stories.
+parts fail package validation. Headers and footers with saved visible content
+remain unsupported stories. Empty paragraph/formatting metadata and uncached
+field instructions do not create visible story content or an omission warning
+(S1.8); visible borders, shading, cached text and unknown constructs still do.
 Comment range geometry, author metadata and Word's page-local/custom numbering
 are outside this semantic representation. Mammoth-specific embedded style
 maps do not override Lambda's explicit conversion options (S1.8).

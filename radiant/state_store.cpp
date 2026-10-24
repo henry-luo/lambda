@@ -62,6 +62,7 @@ static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewState
 static FormControlProp* form_prop_for_view(View* view);
 static void form_control_bind_text_value_cache(FormControlProp* form, ViewState* view_state);
 static void form_control_clear_text_value_cache(View* view, ViewState* view_state);
+static void form_state_mark_dirty(DocState* state);
 static bool view_element_has_attr(View* view, const char* attr_name);
 static bool form_element_supports_disabled_state(DomElement* element);
 static bool form_control_is_disabled_by_fieldset(DomElement* element);
@@ -658,6 +659,9 @@ static void state_dump_emit_doc_attrs(DumpBuildContext* ctx, ElementBuilder& doc
         map.put("y", (double)state->dropdown_y);
         map.put("w", (double)state->dropdown_width);
         map.put("h", (double)state->dropdown_height);
+        if (state_dump_float_changed(state->dropdown_scroll_y))
+            map.put("scroll_y", (double)state->dropdown_scroll_y);
+        if (state->dropdown_dragging) map.put("dragging", true);
         doc.attr("dropdown", map.final());
     }
     if (state->context_menu_target) {
@@ -1477,6 +1481,7 @@ extern "C" void state_store_set_text_control_selection(DocState* state,
                    sel->direction != editing_direction;
     if (changed) {
         state_store_note_selection_mutation(state);
+        form->caret_scroll_pending = 1;
     }
 
     form->selection_start = start_u16;
@@ -1494,6 +1499,8 @@ extern "C" void state_store_set_text_control_selection(DocState* state,
     sel->mutation_seq = state->selection_mutation_seq;
 
     selection_refresh_presentation(state);
+    // native controls paint their caret in the document recording, which must be invalidated.
+    if (changed) form_state_mark_dirty(state);
 }
 
 static void selection_write_optional_ref(JsonWriter* w, const char* key, View* view) {
@@ -2608,11 +2615,25 @@ static RebuildChildEntry rebuild_child_key(const DomNode* node) {
 }
 
 // A sibling insertion must not transfer a decoder, capture, or subscription to another keyed owner.
+struct RebuildTraversal {
+    bool source;
+    DomNode* parent(DomNode* node) const { return source ? dom_source_parent(node) : node->parent.get(); }
+    DomNode* child(DomNode* node) const {
+        if (!node || !node->is_element()) return nullptr;
+        return source ? dom_source_child(node->as_element(), true) : node->as_element()->first_child.get();
+    }
+    DomNode* sibling(DomNode* node, bool forward = true) const {
+        if (!node) return nullptr;
+        return source ? dom_source_sibling(node, forward) :
+            (forward ? node->next_sibling.get() : node->prev_sibling.get());
+    }
+};
+
 struct RebuildChildIndex {
     HashMap* entries = nullptr;
-    explicit RebuildChildIndex(DomNode* parent) {
-        for (DomNode* child = parent && parent->is_element() ? parent->as_element()->first_child : nullptr;
-             child; child = child->next_sibling) {
+    explicit RebuildChildIndex(DomNode* parent, bool source = false) {
+        RebuildTraversal tree{source};
+        for (DomNode* child = tree.child(parent); child; child = tree.sibling(child)) {
             RebuildChildEntry key = rebuild_child_key(child);
             if (!key.key) continue;
             if (!entries) entries = RebuildChildMap::create(16);
@@ -2649,29 +2670,31 @@ bool view_state_nodes_correspond(const DomNode* old_node,
 }
 
 DomNode* view_state_corresponding_node(DomNode* owner, DomNode* old_root,
-                                      DomNode* new_root) {
+                                      DomNode* new_root, bool source_tree) {
     if (!owner || !old_root || !new_root) return nullptr;
+    // ranges use authored ancestry; layout-only table groups can differ before the next flow.
+    RebuildTraversal tree{source_tree};
     const int max_depth = 256;
     int path[max_depth];
     int depth = 0;
     DomNode* node = owner;
     while (node && node != old_root && depth < max_depth) {
         int index = 0;
-        for (DomNode* sibling = node->prev_sibling; sibling; sibling = sibling->prev_sibling) index++;
+        for (DomNode* sibling = tree.sibling(node, false); sibling; sibling = tree.sibling(sibling, false)) index++;
         path[depth++] = index;
-        node = node->parent;
+        node = tree.parent(node);
     }
     if (node != old_root) return nullptr;
     DomNode* old_node = old_root;
     DomNode* new_node = new_root;
     while (view_state_nodes_correspond(old_node, new_node) && depth > 0) {
         int index = path[--depth];
-        RebuildChildIndex children(new_node);
-        old_node = old_node->is_element() ? old_node->as_element()->first_child : nullptr;
-        new_node = new_node->is_element() ? new_node->as_element()->first_child : nullptr;
+        RebuildChildIndex children(new_node, source_tree);
+        old_node = tree.child(old_node);
+        new_node = tree.child(new_node);
         for (int i = 0; i < index; i++) {
-            if (old_node) old_node = old_node->next_sibling;
-            if (new_node) new_node = new_node->next_sibling;
+            old_node = tree.sibling(old_node);
+            new_node = tree.sibling(new_node);
         }
         new_node = children.match(old_node, new_node);
     }
@@ -2807,6 +2830,14 @@ void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
     view_state_preserve_subtree_identity_impl(state, old_root, new_root);
 }
 
+static void dropdown_reset_scroll(DocState* state) {
+    state->dropdown_scroll_y = 0.0f;
+    state->dropdown_dragging = false;
+    state->dropdown_scrollbar_pressed = false;
+    state->dropdown_drag_start_y = 0.0f;
+    state->dropdown_drag_start_scroll = 0.0f;
+}
+
 static void doc_state_detach_transient_owner(DocState* state, View* view) {
     if (!state || !view) return;
 
@@ -2831,6 +2862,7 @@ static void doc_state_detach_transient_owner(DocState* state, View* view) {
         state->open_dropdown = NULL;
         state->dropdown_width = 0.0f;
         state->dropdown_height = 0.0f;
+        dropdown_reset_scroll(state);
     }
     if (state->context_menu_target == view) {
         doc_state_log_context_menu_target_transition(state, state->context_menu_target, NULL);
@@ -3168,6 +3200,7 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         state->open_dropdown = NULL;
         state->dropdown_width = 0.0f;
         state->dropdown_height = 0.0f;
+        dropdown_reset_scroll(state);
         changed++;
     }
     if (state->context_menu_target && !view_tree_contains_view(root, state->context_menu_target)) {
@@ -3888,6 +3921,15 @@ void radiant_queue_behavior_init_control(DomDocument* doc, View* view) {
 void form_control_invalidate_behavior_init(DocState* state, View* view) {
     if (!state || !view) return;
     ViewState* view_state = form_view_state_get(state, view);
+    // disabled/readonly/required have no dirty flag in HTML: the content
+    // attribute decides. The ViewState only mirrors it (seeded at creation), so
+    // every write must refresh the mirror, or a removed `disabled` leaves the
+    // control disabled for :disabled matching and event dispatch.
+    if (view_state) {
+        form_control_set_disabled(state, view, view_element_has_attr(view, "disabled"));
+        form_control_set_readonly(state, view, view_element_has_attr(view, "readonly"));
+        form_control_set_required(state, view, view_element_has_attr(view, "required"));
+    }
     if (!view_state || !view_state->flags.behavior_inited) return;
     view_state->flags.behavior_inited = 0;
     DomElement* elem = view->is_element() ? lam::dom_require_element(view) : nullptr;
@@ -5055,6 +5097,7 @@ bool form_control_store_text_value(DocState* state, View* view,
     // The prop is rebuilt during relayout; it only borrows the StateStore's
     // durable allocation so text never needs a restore copy.
     form_control_bind_text_value_cache(form, view_state);
+    form->caret_scroll_pending = 1;
     return true;
 }
 
@@ -5458,6 +5501,7 @@ void doc_state_open_dropdown(DocState* state, View* view) {
 
     form_control_open_dropdown(state, view);
     state->open_dropdown = view;
+    dropdown_reset_scroll(state);
     doc_state_log_dropdown_owner_transition(state, old_owner, view);
     state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
@@ -5478,6 +5522,7 @@ void doc_state_close_dropdown(DocState* state, View* view) {
     bool owner_changed = old_owner == target || !view;
     if (owner_changed) {
         state->open_dropdown = NULL;
+        dropdown_reset_scroll(state);
     }
 
     form_control_close_dropdown(state, target);
@@ -5510,11 +5555,86 @@ void doc_state_set_dropdown_geometry(DocState* state,
     state->dropdown_y = y;
     state->dropdown_width = width;
     state->dropdown_height = height;
+    if (state->open_dropdown) {
+        ViewBlock* select = form_block_for_view(state->open_dropdown);
+        if (select) state->dropdown_scroll_y = select_dropdown_geometry(state, select->form).scroll_y;
+    }
     state->full_repaint_requests++; state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
     sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_set_dropdown_geometry");
+}
+
+SelectDropdownGeometry select_dropdown_geometry(const DocState* state,
+                                                const FormControlProp* form) {
+    SelectDropdownGeometry geometry = {};
+    if (!state || !form) return geometry;
+    geometry.row_height = form_select_dropdown_row_height(form);
+    float content = form->option_count * geometry.row_height;
+    geometry.scroll_max = max(content - state->dropdown_height, 0.0f);
+    geometry.scroll_y = min(max(state->dropdown_scroll_y, 0.0f), geometry.scroll_max);
+    if (geometry.scroll_max > 0.0f) {
+        geometry.scrollbar_width = min(FormDefaults::SELECT_SCROLLBAR_WIDTH, state->dropdown_width);
+        ScrollThumbGeometry thumb = scroll_thumb_geometry(state->dropdown_height, content,
+            max(state->dropdown_height - 2.0f, 0.0f), geometry.scroll_y, geometry.scroll_max, 16.0f);
+        geometry.thumb_y = 1.0f + thumb.offset;
+        geometry.thumb_height = thumb.length;
+    }
+    return geometry;
+}
+
+ScrollbarPressPart select_dropdown_scrollbar_part(const DocState* state,
+        const FormControlProp* form, float x, float y) {
+    if (!state || !state->open_dropdown) return SCROLLBAR_PRESS_NONE;
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, form);
+    if (geometry.scrollbar_width <= 0.0f ||
+        x < state->dropdown_x + state->dropdown_width - geometry.scrollbar_width ||
+        x > state->dropdown_x + state->dropdown_width ||
+        y < state->dropdown_y || y > state->dropdown_y + state->dropdown_height) {
+        return SCROLLBAR_PRESS_NONE;
+    }
+    float local_y = y - state->dropdown_y;
+    if (local_y < geometry.thumb_y) return SCROLLBAR_PRESS_VERTICAL_BEFORE;
+    if (local_y > geometry.thumb_y + geometry.thumb_height) return SCROLLBAR_PRESS_VERTICAL_AFTER;
+    return SCROLLBAR_PRESS_VERTICAL_THUMB;
+}
+
+void doc_state_set_dropdown_scroll(DocState* state, float y) {
+    if (!state || !state->open_dropdown) return;
+    ViewBlock* select = form_block_for_view(state->open_dropdown);
+    if (!select) return;
+    float next = min(max(y, 0.0f), select_dropdown_geometry(state, select->form).scroll_max);
+    if (next == state->dropdown_scroll_y) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DROPDOWN, SM_EV_DROPDOWN_SCROLL,
+                               state->open_dropdown);
+    state->dropdown_scroll_y = next;
+    form_state_mark_dirty(state);
+    sm_guard.commit();
+}
+
+void doc_state_set_dropdown_scrollbar_press(DocState* state, bool pressed, bool dragging, float y) {
+    if (!state || (!state->open_dropdown && pressed) ||
+        (state->dropdown_dragging == dragging && state->dropdown_scrollbar_pressed == pressed)) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DROPDOWN, SM_EV_DROPDOWN_DRAG,
+                               state->open_dropdown);
+    state->dropdown_dragging = dragging;
+    state->dropdown_scrollbar_pressed = pressed;
+    state->dropdown_drag_start_y = dragging ? y : 0.0f;
+    state->dropdown_drag_start_scroll = dragging ? state->dropdown_scroll_y : 0.0f;
+    form_state_mark_dirty(state);
+    sm_guard.commit();
+}
+
+void doc_state_reveal_dropdown_option(DocState* state, int index) {
+    if (!state || !state->open_dropdown || index < 0) return;
+    ViewBlock* select = form_block_for_view(state->open_dropdown);
+    if (!select || index >= select->form->option_count) return;
+    SelectDropdownGeometry geometry = select_dropdown_geometry(state, select->form);
+    float top = index * geometry.row_height;
+    if (top < geometry.scroll_y) doc_state_set_dropdown_scroll(state, top);
+    else if (top + geometry.row_height > geometry.scroll_y + state->dropdown_height)
+        doc_state_set_dropdown_scroll(state, top + geometry.row_height - state->dropdown_height);
 }
 
 void doc_state_open_context_menu(DocState* state, View* target,
@@ -5621,7 +5741,7 @@ void form_control_close_dropdown(DocState* state, View* view) {
     form_state_mark_dirty(state);
 }
 
-void form_control_set_hover_index(DocState* state, View* view, int index) {
+void form_control_set_hover_index(DocState* state, View* view, int index, bool reveal) {
     ViewBlock* block = form_block_for_view(view);
     if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_HOVER_INDEX, view);
@@ -5641,6 +5761,7 @@ void form_control_set_hover_index(DocState* state, View* view, int index) {
     }
 
     view_state_log_int_transition(state, view, "form.hover_index", old_index, index);
+    if (reveal && state->open_dropdown == view) doc_state_reveal_dropdown_option(state, index);
     sm_guard.commit();
     form_state_mark_dirty(state);
     radiant_sync_pseudo_state(view, PSEUDO_STATE_HOVER, index >= 0);

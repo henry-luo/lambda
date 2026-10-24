@@ -60,8 +60,11 @@
     },
     {
       "type": "click",
-      "x": 650,
-      "y": 295
+      "target": {
+        "selector": "#edit-surface h2",
+        "offset_x": 100,
+        "offset_y": 14
+      }
     },
     {
       "type": "script",
@@ -69,15 +72,18 @@
     },
     {
       "type": "assert_pixel",
-      "x": 650,
-      "y": 295,
       "search_radius": 10,
       "min_r": 255,
       "max_r": 255,
       "min_g": 0,
       "max_g": 0,
       "min_b": 255,
-      "max_b": 255
+      "max_b": 255,
+      "target": {
+        "selector": "#edit-surface h2",
+        "offset_x": 100,
+        "offset_y": 14
+      }
     },
     {
       "type": "assert_focus",

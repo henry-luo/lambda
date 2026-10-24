@@ -1,0 +1,888 @@
+{
+  "name": "Word Equation ribbon, structures, source editing and layout",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1680,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "BeforeAfter",
+      "clear": false
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 6,
+      "end": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#word').getAttribute('data-tab')==='Equation'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.equation-ribbon .group-structures .ribbon-large').length===11 && document.querySelectorAll('.equation-symbol-quick button').length===20"
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-equation]')).display==='block'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface').textContent.indexOf('Before')>=0 && document.querySelector('#edit-surface').textContent.indexOf('After')>=0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/equation-ribbon.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-fraction"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===3"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-script"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===3"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-radical"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===3"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-integral"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===4"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-large"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===4"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-bracket"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===4"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-function"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===5"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-accent"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===4"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-limit"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===3"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-operator"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===4"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-matrix"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\".equation-template img\").length===4"
+    },
+    {
+      "type": "key_combo",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-inline"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"display\"]===false"
+    },
+    {
+      "type": "assert_script",
+      "js": "getComputedStyle(document.querySelector('#edit-surface img[data-word-equation]')).display==='inline-block'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-display"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"display\"]===true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-justify-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-equation-justify-right"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"justify\"]===\"right\""
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var n=document.querySelector('#edit-surface img[data-word-equation]'),p=n.parentElement;return Math.abs(n.getBoundingClientRect().right-p.getBoundingClientRect().right)<2})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-justify-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-equation-justify-center"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"justify\"]===\"center\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-edit"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement.id==='equation-editor-source'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-source"
+      },
+      "text": "x+1",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"a^2+b^2=c^2\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-apply"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"x+1\""
+    },
+    {
+      "type": "script",
+      "js": "(function(){var n=document.getElementById('equation-editor-source');n.focus();n.setSelectionRange(0,3);})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-fraction"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.equation-template').length===3"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/equation-fraction-gallery.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-choice-stacked"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"\\\\frac{x+1}{b}\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('equation-editor-source').selectionStart===6 && document.getElementById('equation-editor-source').selectionEnd===9"
+    },
+    {
+      "type": "type_physical",
+      "text": "a+b"
+    },
+    {
+      "type": "key_combo",
+      "key": "Enter",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"\\\\frac{a+b}{b}\""
+    },
+    {
+      "type": "script",
+      "js": "(function(){var n=document.getElementById('equation-editor-source');n.focus();n.setSelectionRange(6,9);})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-radical"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-choice-square"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"\\\\frac{\\\\sqrt{a+b}}{b}\""
+    },
+    {
+      "type": "script",
+      "js": "(function(){var n=document.getElementById('equation-editor-source');n.focus();n.setSelectionRange(19,19);})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-symbols-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "(function(){var ids=Array.from(document.querySelectorAll('[id]')).map(function(n){return n.id});return new Set(ids).size===ids.length})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-more-greek-alpha"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"\\\\frac{\\\\sqrt{a+b}}{b\\\\alpha }\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-source"
+      },
+      "text": "speed",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-apply"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "(function(){var n=document.getElementById('equation-editor-source');n.focus();n.setSelectionRange(0,5);})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-normal-text"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"\\\\text{speed}\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-presets-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-choice-euler"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"e^{i\\\\pi}+1=0\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-convert-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-equation-linear"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"linear\"]===true"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/equation-linear.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-convert-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-equation-professional"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"linear\"]===false"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-source"
+      },
+      "text": "\\notSupported{x}",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-apply"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"e^{i\\\\pi}+1=0\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('equation-editor-error').textContent.indexOf('unsupported')>=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#close-equation-pane"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('equation-editor-pane')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-discard"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('equation-editor-pane')===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-edit"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-source"
+      },
+      "text": "",
+      "clear": true
+    },
+    {
+      "type": "script",
+      "js": "(function(){var n=document.getElementById('equation-editor-source');n.focus();n.setSelectionRange(0,0);})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-structure-matrix"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.equation-template').length===4"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/equation-matrix-gallery.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-choice-two"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"source\"]===\"\\\\begin{pmatrix}a&b\\\\\\\\c&d\\\\end{pmatrix}\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-size"
+      },
+      "text": "28",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-color"
+      },
+      "text": "#805bc5",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-number"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement.id==='equation-editor-number'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#equation-editor-number"
+      },
+      "text": "(1)",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-apply"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"number\"]===\"(1)\""
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"size\"]===28"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"color\"]===\"#805bc5\""
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/equation-matrix-pane.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-close"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#word').getAttribute('data-tab')==='Home' && document.getElementById('equation-editor-pane')===null"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"number\"]===\"\""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super+shift"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"number\"]===\"(1)\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/equation-final.png"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "super+shift"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/equations.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/equations.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/equations.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/equations.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface img[data-word-equation]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"#edit-surface img[data-word-equation]\").getAttribute(\"data-word-equation\"))[\"number\"]===\"(1)\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-edit"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('equation-editor-source').value==='\\\\begin{pmatrix}a&b\\\\\\\\c&d\\\\end{pmatrix}'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#equation-close"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#word').getAttribute('data-readonly')==='true'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-equation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('equation-edit').disabled && document.getElementById('equation-inline').disabled"
+    }
+  ]
+}

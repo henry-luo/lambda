@@ -245,14 +245,17 @@
     },
     {
       "type": "assert_pixel",
-      "x": 660,
-      "y": 414,
       "min_r": 168,
       "max_r": 172,
       "min_g": 185,
       "max_g": 189,
       "min_b": 202,
-      "max_b": 206
+      "max_b": 206,
+      "target": {
+        "selector": "#edit-surface img",
+        "offset_x": 100,
+        "offset_y": 55
+      }
     },
     {
       "type": "click",

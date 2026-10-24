@@ -174,6 +174,7 @@ struct RenderExportSourceRequest {
     const char* source;
     const char* base_url;
     bool block_remote_resources;
+    bool xhtml;
 };
 static DomDocument* render_export_load_html_source(RenderExportSession* session,
         int layout_width, int layout_height, void* request) {
@@ -184,7 +185,7 @@ static DomDocument* render_export_load_html_source(RenderExportSession* session,
     Url* base = source->base_url ? url_parse_with_base(source->base_url, session->base_url) : nullptr;
     if (source->base_url && !base) return nullptr;
     DomDocument* doc = load_html_source_doc(source->source, layout_width, layout_height,
-        &config, session->print_media, base ? base : session->base_url.get());
+        &config, session->print_media, base ? base : session->base_url.get(), source->xhtml);
     if (base) url_destroy(base);
     return doc;
 }
@@ -631,7 +632,7 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
 bool render_export_session_begin_source(RenderExportSession* session, const char* source,
         int viewport_width, int viewport_height, bool paged) {
     // source documents use the script-free loader and own their private layout edition.
-    RenderExportSourceRequest request = {source, nullptr, true};
+    RenderExportSourceRequest request = {source, nullptr, true, false};
     return render_export_session_begin_internal(session, viewport_width, viewport_height,
         viewport_width, viewport_height, 1.0f, 1.0f, false, true, paged,
         render_export_load_html_source, &request);
@@ -1920,9 +1921,9 @@ int render_batch_export(UiContext* ui, const char* source, const char* filename,
 }
 
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
-        const char* base_url, bool block_remote_resources) {
+        const char* base_url, bool block_remote_resources, bool xhtml) {
     if (!html_source || !target || !target->output_file || target->kind == RENDER_OUTPUT_SCREEN) return 1;
-    RenderExportSourceRequest request = {html_source, base_url, block_remote_resources};
+    RenderExportSourceRequest request = {html_source, base_url, block_remote_resources, xhtml};
     if (target->paged) return render_output_paged_file(target, render_export_load_html_source, &request);
     bool raster = target->kind == RENDER_OUTPUT_PNG || target->kind == RENDER_OUTPUT_JPEG;
     RenderExportSession session = {};

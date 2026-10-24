@@ -1,0 +1,103 @@
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #e8ebff; background: #070a1c;
+}
+
+/* The backdrop stays put while the page scrolls above it: every layer moves by
+   transform or opacity only, so the viewer can blit it instead of repainting. */
+.backdrop {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  background: linear-gradient(160deg, #070a1c 0%, #0d1033 48%, #120a2a 100%);
+}
+.orb { position: absolute; border-radius: 50%; animation-timing-function: ease-in-out;
+       animation-iteration-count: infinite; animation-direction: alternate; }
+.orb-a { width: 620px; height: 620px; left: -160px; top: -220px;
+         background: radial-gradient(circle, rgba(124, 58, 237, .45) 0%, rgba(124, 58, 237, 0) 68%);
+         animation-name: drift-a; animation-duration: 16s; }
+.orb-b { width: 540px; height: 540px; right: -140px; top: 120px;
+         background: radial-gradient(circle, rgba(14, 165, 233, .32) 0%, rgba(14, 165, 233, 0) 68%);
+         animation-name: drift-b; animation-duration: 20s; }
+.orb-c { width: 680px; height: 680px; left: 30%; bottom: -380px;
+         background: radial-gradient(circle, rgba(236, 72, 153, .26) 0%, rgba(236, 72, 153, 0) 68%);
+         animation-name: drift-c; animation-duration: 24s; }
+@keyframes drift-a { from { transform: translate(0, 0); } to { transform: translate(140px, 90px); } }
+@keyframes drift-b { from { transform: translate(0, 0); } to { transform: translate(-120px, 140px); } }
+@keyframes drift-c { from { transform: translate(0, 0); } to { transform: translate(-160px, -100px); } }
+.lattice { position: absolute; inset: 0; opacity: .55;
+           background-image: radial-gradient(circle, rgba(165, 180, 252, .22) 1px, rgba(165, 180, 252, 0) 1.6px);
+           background-size: 30px 30px; }
+.glyph { position: absolute; bottom: -60px; color: rgba(196, 181, 253, .5); font-weight: 300;
+         animation-name: rise; animation-duration: 14s; animation-timing-function: linear;
+         animation-iteration-count: infinite; }
+@keyframes rise {
+  from { transform: translateY(0); opacity: 0; }
+  15% { opacity: .9; }
+  80% { opacity: .5; }
+  to { transform: translateY(-1100px); opacity: 0; }
+}
+
+.scroller { position: absolute; inset: 0; overflow-y: auto; }
+.page { max-width: 1260px; margin: 0 auto; padding: 0 40px 56px; }
+
+/* hero */
+.hero { display: flex; align-items: center; gap: 48px; padding: 64px 0 44px; }
+.hero-copy { flex: 1; min-width: 0; }
+.eyebrow { margin: 0 0 18px; color: #a5b4fc; font-size: 13px; font-weight: 600; letter-spacing: .22em; }
+h1 { margin: 0; font-size: 60px; line-height: 1.06; font-weight: 800; letter-spacing: -.02em; color: #fff; }
+h1 span { display: block; }
+h1 .ink { color: #a78bfa; animation-name: ink; animation-duration: 9s;
+          animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+@keyframes ink { from { color: #7dd3fc; } 50% { color: #c084fc; } to { color: #7dd3fc; } }
+.lead { max-width: 620px; margin: 22px 0 0; color: #b6bde0; font-size: 17px; line-height: 1.6; }
+.stats { display: flex; gap: 12px; margin-top: 26px; }
+.stat { padding: 7px 14px; border: 1px solid rgba(165, 180, 252, .25); border-radius: 999px;
+        background: rgba(30, 27, 75, .45); color: #b6bde0; font-size: 14px; white-space: nowrap; }
+.stat b { color: #fff; font-weight: 800; }
+.hint { margin: 22px 0 0; color: #7c84b0; font-size: 13px; }
+.emblem { flex: none; width: 270px; height: 270px; }
+
+/* tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 22px; }
+.tile {
+  display: flex; flex-direction: column; margin: 0; padding: 0; overflow: hidden;
+  border: 1px solid rgba(165, 180, 252, .14); border-radius: 18px;
+  background: rgba(14, 17, 42, .78); color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition-property: border-color, background-color; transition-duration: .25s;
+}
+.tile:hover { border-color: var(--hue); background-color: rgba(26, 30, 68, .92); }
+.tile:focus-visible { outline: 2px solid var(--hue); outline-offset: 3px; }
+.tile-art { display: block; flex: none; overflow: hidden; border-bottom: 2px solid var(--hue); }
+.art { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+.tile-copy { display: block; padding: 16px 18px 6px; }
+.tile-tag { display: block; color: var(--hue); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
+.tile-title { display: block; margin-top: 6px; color: #fff; font-size: 20px; font-weight: 700; }
+.tile-blurb { display: block; margin-top: 7px; color: #a7aed3; font-size: 13.5px; line-height: 1.5; }
+.tile-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+             margin-top: auto; padding: 12px 18px 16px; }
+.tile-cmd { padding: 3px 8px; border-radius: 6px; background: rgba(255, 255, 255, .06);
+            color: #8b93bd; font-family: Menlo, monospace; font-size: 11.5px;
+            min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tile-open { flex: none; color: var(--hue); font-size: 13px; font-weight: 700; white-space: nowrap; }
+.tile.running { border-color: var(--hue); }
+.tile.running .tile-open { animation-name: pulse; animation-duration: 1.6s;
+                           animation-iteration-count: infinite; }
+@keyframes pulse { from { opacity: 1; } 50% { opacity: .35; } to { opacity: 1; } }
+
+.page-foot { margin-top: 44px; color: #7c84b0; font-size: 13px; text-align: center; }
+.page-foot code { color: #c4b5fd; font-family: Menlo, monospace; }
+
+.toast {
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+  padding: 10px 18px; border: 1px solid rgba(167, 139, 250, .5); border-radius: 999px;
+  background: rgba(17, 20, 48, .94); color: #e8ebff; font-size: 14px; white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .page { padding: 0 16px 40px; }
+  .hero { flex-direction: column-reverse; align-items: flex-start; gap: 12px; padding-top: 32px; }
+  h1 { font-size: 40px; }
+  .emblem { width: 160px; height: 160px; }
+  .stats { flex-wrap: wrap; }
+}

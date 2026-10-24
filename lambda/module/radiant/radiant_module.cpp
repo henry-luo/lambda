@@ -2673,6 +2673,44 @@ RADIANT_C_API Item fn_radiant_window_fullscreen_enabled(Item node) {
         radiant_dom_node_from_item(node, "WINDOW_FULLSCREEN_ENABLED")));
 }
 
+RADIANT_C_API Item fn_radiant_query_local_fonts(Item options) {
+    RootFrame roots(4);
+    Rooted<Item> opts(roots, options), names(roots, radiant_obj_get(opts.get(), "postscriptNames"));
+    Rooted<Item> result(roots, ItemNull), entry(roots, ItemNull);
+    if (!radiant_item_is_missing(names.get()) && !ItemReader(names.get().to_const()).isArray()) {
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
+            "query_local_fonts: postscriptNames must be an array", nullptr));
+    }
+    ArrayList* faces = font_query_local_fonts(nullptr);
+    if (!faces) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
+        "query_local_fonts: native font enumeration failed", nullptr));
+    result.set(radiant_array_new_item(faces->length));
+    for (int i = 0; i < faces->length; i++) {
+        FontLocalFace* face = (FontLocalFace*)faces->data[i];
+        if (!radiant_item_is_missing(names.get())) {
+            bool matched = false;
+            auto wanted = ItemReader(names.get().to_const()).asArray();
+            for (int64_t j = 0; j < wanted.length(); j++) {
+                ItemReader name = wanted.get(j);
+                if (name.isString() && name.asString()->len == strlen(face->postscript_name) &&
+                    memcmp(name.asString()->chars, face->postscript_name, name.asString()->len) == 0) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) continue;
+        }
+        entry.set(radiant_obj_new());
+        radiant_rooted_obj_set(entry, "postscriptName", radiant_string_item(face->postscript_name));
+        radiant_rooted_obj_set(entry, "fullName", radiant_string_item(face->full_name));
+        radiant_rooted_obj_set(entry, "family", radiant_string_item(face->family));
+        radiant_rooted_obj_set(entry, "style", radiant_string_item(face->style));
+        radiant_array_push_item(result.get(), entry.get());
+    }
+    font_local_fonts_free(faces);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_set_window_title(Item node_item, Item title_item) {
     DomDocument* doc = radiant_window_document_from_item(node_item, "SET_WINDOW_TITLE");
     const char* title = fn_to_cstr(title_item);
@@ -4059,6 +4097,11 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     bool paged = get_type_id(pagination) == LMD_TYPE_BOOL && it2b(pagination);
     if (pagination.item != ItemNull.item && get_type_id(pagination) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: pagination must be boolean");
+    Item source_format = radiant_obj_get(options.get(), "source_format");
+    const char* syntax = get_type_id(source_format) == LMD_TYPE_STRING ? fn_to_cstr(source_format) : nullptr;
+    if (source_format.item != ItemNull.item && (!syntax || (strcmp(syntax, "html") && strcmp(syntax, "xhtml"))))
+        return radiant_string_item("render export: source_format must be html or xhtml");
+    bool xhtml = syntax && !strcmp(syntax, "xhtml");
     Item transparent = radiant_obj_get(options.get(), "transparent");
     if (transparent.item != ItemNull.item && get_type_id(transparent) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: transparent must be boolean");
@@ -4086,7 +4129,7 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     target.paged = paged;
     target.transparent_background = get_type_id(transparent) == LMD_TYPE_BOOL && it2b(transparent);
     int status = render_html_source_to_output_target(source.get(), &target, base_url.get(),
-        get_type_id(local) == LMD_TYPE_BOOL && it2b(local));
+        get_type_id(local) == LMD_TYPE_BOOL && it2b(local), xhtml);
     return status == 0 ? radiant_bool_item(true) : radiant_string_item("render export: layout, resource, encoding, or destination write failed");
 }
 
@@ -5629,6 +5672,7 @@ RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active
 RADIANT_PROVIDE_ENGINE_2(set_window_fullscreen, fn_radiant_set_window_fullscreen)
 RADIANT_PROVIDE_ENGINE_1(window_fullscreen, fn_radiant_window_fullscreen)
 RADIANT_PROVIDE_ENGINE_1(window_fullscreen_enabled, fn_radiant_window_fullscreen_enabled)
+RADIANT_PROVIDE_ENGINE_1(query_local_fonts, fn_radiant_query_local_fonts)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)
 RADIANT_PROVIDE_ENGINE_3(set_range_from_point, fn_radiant_set_range_from_point)
 RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)

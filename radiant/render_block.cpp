@@ -614,12 +614,17 @@ static void render_block_walk_children_phase(RasterRenderContext* rdcon, ViewBlo
     }
 }
 
-// negative layers are lifted to their stacking owner, retaining intervening scroll/overflow scopes.
-static void render_raster_negative_path(RasterRenderContext* rdcon, View* owner, View* target) {
+// signed layers share ancestry replay, retaining intervening scroll/overflow scopes.
+static void render_raster_stacking_path(RasterRenderContext* rdcon, View* owner, View* target) {
     View* child = radiant_stack_path_child(owner, target);
     if (!child) return;
     if (child == target) {
-        render_raster_positioned_view(rdcon, lam::view_require_block(child));
+        BlockBlot saved = rdcon->block;
+        RdtLogicalPoint offset = layout_positioned_parent_offset(child);
+        rdcon->block.x -= offset.x * rdcon->raster_scale;
+        rdcon->block.y -= offset.y * rdcon->raster_scale;
+        render_raster_stacking_view(rdcon, child);
+        rdcon->block = saved;
         return;
     }
     ViewBlock* block = lam::view_as_block(child);
@@ -629,7 +634,7 @@ static void render_raster_negative_path(RasterRenderContext* rdcon, View* owner,
         ViewElement* span = lam::view_as_element(child);
         if (span && span->font) setup_font(rdcon->ui_context, &rdcon->font, span->font);
         if (span && span->in_line && span->inl()->has_color) rdcon->color = span->inl()->color;
-        render_raster_negative_path(rdcon, child, target);
+        render_raster_stacking_path(rdcon, child, target);
         rdcon->font = font; rdcon->color = color;
         return;
     }
@@ -644,19 +649,24 @@ static void render_raster_negative_path(RasterRenderContext* rdcon, View* owner,
     float origin_x = rdcon->block.x, origin_y = rdcon->block.y;
     if (block->scroller) setup_scroller(rdcon, block);
     RenderClipScope overflow = render_clip_push_overflow_scope(rdcon, block, origin_x, origin_y);
-    render_raster_negative_path(rdcon, child, target);
+    render_raster_stacking_path(rdcon, child, target);
     if (overflow.active) render_clip_pop_scope(rdcon, &overflow);
     if (css_clip.active) render_clip_pop_scope(rdcon, &css_clip);
     rdcon->block = saved; rdcon->font = font; rdcon->color = color;
 }
 
-static bool render_raster_negative_layer(void* context, View* owner, View* layer) {
-    render_raster_negative_path((RasterRenderContext*)context, owner, layer);
+static bool render_raster_stacking_layer(void* context, View* owner, View* layer) {
+    render_raster_stacking_path((RasterRenderContext*)context, owner, layer);
     return true;
 }
 
 void render_raster_negative_z_descendants(RasterRenderContext* rdcon, ViewBlock* block) {
-    radiant_stack_visit_negative_z_descendants(block, false, rdcon, render_raster_negative_layer);
+    radiant_stack_visit_negative_z_descendants(block, false, rdcon, render_raster_stacking_layer);
+}
+
+void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* first_child) {
+    if (rdcon && first_child) radiant_stack_visit_positive_z_descendants(
+        first_child->parent, false, rdcon, render_raster_stacking_layer);
 }
 
 static double render_block_finish_children_phase(RasterRenderContext* rdcon, ViewBlock* block,

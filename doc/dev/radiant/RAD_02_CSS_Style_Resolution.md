@@ -13,6 +13,13 @@
 
 ## 1. The seam: Radiant does not parse or cascade CSS
 
+CSS child/sibling combinators and structural pseudo-classes use the source DOM
+axes (`dom_source_parent`, `dom_source_child`, `dom_source_sibling`). Anonymous
+table layout fixups must not change a row's parent or sibling index after
+layout; script-visible child/sibling navigation shares those helpers. The axes
+live in core so selectors and language adapters reuse one implementation without
+module-to-module links (**D7.3.4**).
+
 The single most important thing to understand about this area is what it *does not* do. Radiant never parses a stylesheet and never runs the cascade. Both live entirely in the CSS engine under `lambda/input/css/` (documented in the input/output doc set, not here). By the time a node reaches layout, its element already carries a fully-cascaded `StyleTree*` in `DomElement::specified_style` (`dom_element.hpp:322`), and Radiant's only job is to compute *used values* from it.
 
 The parser produces `CssDeclaration` (`css_style.hpp:765`), each carrying a `CssSpecificity` (`css_style.hpp:747`), a `CssOrigin` (`css_style.hpp:756`), a `source_order`, an `!important` flag, and the parsed `CssValue*`. Selector matching and cascade winner-selection are the style-node system's job: every element owns a `StyleTree` (`css_style_node.hpp:65`) — an `AvlTree` keyed by `CssPropertyId` whose nodes are `StyleNode` (`css_style_node.hpp:48`), each holding a `winning_decl` (`css_style_node.hpp:50`) plus a `weak_list` of losing declarations (`css_style_node.hpp:51`) kept in specificity order for fallback. Radiant reads only `style_node->winning_decl` and never touches the losers.

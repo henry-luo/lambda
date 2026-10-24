@@ -1,0 +1,996 @@
+{
+  "name": "Word icons, emoji, SmartArt and editable charts",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Illustrations stay editable.",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-icons"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".icon-choice"
+      },
+      "count": 20
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#gallery-emojis"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".emoji-key"
+      },
+      "count": 24
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#emoji-1-0"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#emoji-text"
+      },
+      "clear": true,
+      "text": "👩‍🎨"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"emoji-text\").value === \"👩‍🎨\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-emoji .primary"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "👩‍🎨"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "not_contains": "👩‍🎨"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-icons"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#icon-choice-heart"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#icon-color"
+      },
+      "text": "#b43d47",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#icon-width"
+      },
+      "text": "72",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#icon-height"
+      },
+      "text": "72",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#illustration-preview"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".illustration-preview img"
+      },
+      "count": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/icons-dialog.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-icon .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "attribute": "alt",
+      "equals": "Heart"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".object-handle"
+      },
+      "count": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data-word-icon"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "icon"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-icon"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#icon-color"
+      },
+      "text": "#2563eb",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#icon-rotation"
+      },
+      "text": "15",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-icon .primary"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-icon]\").getAttribute(\"data-word-icon\")).rotation===15"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-icon]\").getAttribute(\"data-word-icon\")).rotation===0"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-smartart"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".smartart-choice"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#smartart-choice-hierarchy"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#smartart-text"
+      },
+      "text": "Only one",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-smartart .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-smartart]"
+      },
+      "count": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#smartart-text"
+      },
+      "text": "Studio\nDesign\nPrint\nBuild",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#smartart-width"
+      },
+      "text": "400",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#smartart-height"
+      },
+      "text": "180",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#illustration-preview"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 0
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/smartart-dialog.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-smartart .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-smartart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-smartart]\").getAttribute(\"data-word-smartart\")).layout===\"hierarchy\""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".object-handle"
+      },
+      "count": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-smartart]"
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "smartart"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#smartart-text"
+      },
+      "text": "Plan\nCreate\nShare",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#smartart-choice-cycle"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-smartart .primary"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-smartart]\").getAttribute(\"data-word-smartart\")).layout===\"cycle\""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-smartart]\").getAttribute(\"data-word-smartart\")).layout===\"hierarchy\""
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-chart"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-choice"
+      },
+      "count": 5
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#chart-data"
+      },
+      "text": "A, nope",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-chart .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "count": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#chart-data"
+      },
+      "text": "Design, 10\nPrint, 20\nBuild, 30",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#chart-title"
+      },
+      "text": "Studio hours",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#chart-choice-pie"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#chart-width"
+      },
+      "text": "400",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#chart-height"
+      },
+      "text": "240",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#illustration-preview"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 0
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/chart-dialog.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-chart .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".object-handle"
+      },
+      "count": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "button": 1,
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "attribute": "data-context-kind",
+      "equals": "chart"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-object"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"chart-data\").value===\"Design, 10\\nPrint, 20\\nBuild, 30\""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#chart-title"
+      },
+      "text": "Updated hours",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#chart-choice-line"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-chart .primary"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector(\"img[data-word-chart]\").getAttribute(\"data-word-chart\")).type===\"line\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "attribute": "alt",
+      "equals": "Chart: Updated hours"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "attribute": "alt",
+      "equals": "Chart: Studio hours"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#object-se"
+      },
+      "pointerType": "touch",
+      "dx": 40,
+      "dy": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "attribute": "width",
+      "equals": "440"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "attribute": "width",
+      "equals": "400"
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "text/html",
+      "contains": "data-word-chart"
+    },
+    {
+      "type": "assert_clipboard",
+      "mime": "image/svg+xml",
+      "contains": "<svg"
+    },
+    {
+      "type": "render",
+      "file": "temp/word/tests/illustrations-document.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/illustrations.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/illustrations.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/illustrations.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/illustrations.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "img[data-word-icon]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-icon"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"icon-color\").value === \"#2563eb\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-smartart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "img[data-word-smartart]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-smartart"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"smartart-text\").value === \"Plan\\nCreate\\nShare\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "count": 1
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "img[data-word-chart]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-chart"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"chart-title\").value === \"Updated hours\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-icons"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-smartart"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#insert-chart"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    }
+  ]
+}

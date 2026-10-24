@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><style>
+* { box-sizing:border-box }
+body { margin:0 }
+.shell { width:320px; height:200px; display:flex; flex-direction:column }
+header,footer { flex-shrink:0 }
+.tabs { height:20px }
+.tools { display:flex; padding:4px; min-height:80px }
+.tools div { height:12px; width:20px }
+main { flex:1; min-height:0; overflow:auto }
+main div { height:500px }
+footer { height:20px }
+#explicit .tools { height:80px; min-height:100px }
+#content .tools { box-sizing:content-box; min-height:80px }
+</style></head><body id="result">
+<section class="shell" id="min"><header id="min-header"><div class="tabs"></div><div class="tools" id="min-tools"><div></div></div></header><main id="min-main"><div></div></main><footer id="min-footer"></footer></section>
+<section class="shell" id="explicit"><header id="explicit-header"><div class="tabs"></div><div class="tools"><div></div></div></header><main id="explicit-main"><div></div></main><footer id="explicit-footer"></footer></section>
+<section class="shell" id="content"><header id="content-header"><div class="tabs"></div><div class="tools"><div></div></div></header><main id="content-main"><div></div></main><footer id="content-footer"></footer></section>
+</body></html>

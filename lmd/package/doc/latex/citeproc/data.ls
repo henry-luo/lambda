@@ -93,12 +93,12 @@ pub fn normalize_entries(loaded) {
         diagnostics: loaded.diagnostics ++ [for (item in decoded, issue in item.diagnostics) issue]}
 }
 
-pub fn json(value, file = "<references>") map^ {
+pub fn json(value, file = "<references>", options = {}) map^ {
     let items = if (value is string) parse(value, "json")^ else value
     if (not (items is array or items is list))
         raise c.failure("invalid-csl-json", "CSL JSON must be an array", file)
     else {
-        let decoded = [for (item in items) json_item(item, file)^]
+        let decoded = [for (item in items) json_item(item, file, options)^]
         let ids = [for (item in decoded) item.reference.id]
         if (len(unique(ids)) != len(ids))
             raise c.failure("duplicate-csl-id", "Duplicate CSL JSON reference id", file)
@@ -107,14 +107,15 @@ pub fn json(value, file = "<references>") map^ {
     }
 }
 
-fn json_item(item, file) map^ {
+fn json_item(item, file, options) map^ {
     if (not (item is map) or not (item.id is string or item.id is int) or not (item.type is string))
         raise c.failure("invalid-csl-item", "CSL reference requires id and type", file)
     else if (not valid_names(item) or not valid_dates(item))
         raise c.failure("invalid-csl-item", "CSL names and dates must use structured JSON values", file)
     else {
         let strings = [for (key, value in item where value is string)
-            {key: string(key), decoded: if (c.has(["id", "type", "DOI", "URL"], string(key)))
+            // form fields are literal text; imported CSL JSON retains its rich-markup default.
+            {key: string(key), decoded: if (options.plain_text == true or c.has(["id", "type", "DOI", "URL"], string(key)))
                 {text: value, content: [value], diagnostics: []} else markup.csl(value, file)}]
         let values = c.dictionary([for (part in strings) {key: part.key, value: part.decoded.text}])
         let rich = c.dictionary([for (part in strings) {key: part.key, value: part.decoded.content}])

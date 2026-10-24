@@ -2,7 +2,7 @@
 
 - **Status:** Idea, 2026-10-04; §5.7 and CNT13 added 2026-10-05. Nothing here is ruled; the decisions it needs are CNT1–CNT13 (§9). Phase L0's walker interface has since been built for `io.text_search`: `grep_walk_paths` (`vibe/Lambda_IO_Fulltext_Search.md`, FTX10).
 - **Origin:** after `count: true` landed in `io.grep` (GRP30), the user asked whether the grep library could count lines while ignoring blank lines and C comment lines, then asked what tokei and scc offer, and then whether grep could do what `wc` does (§2.1, §5.6).
-- **Authorities:** `doc/Lambda_Formal_Semantics.md` (S#) and `doc/Lambda_Formal_Design.md` (D#). It builds on the grep library (`vibe/Lambda_Lib_Grep.md`, GRP#) and the `io` module (`vibe/Lambda_IO_Shell.md`).
+- **Authorities:** `doc/Lambda_Formal_Semantics.md` (S#) and `doc/Lambda_Formal_Design.md` (D#). It builds on the grep library (`vibe/lib/Lib_Grep.md`, GRP#) and the `io` module (`vibe/Lambda_IO_Shell.md`).
 - **Prior art read for it (2026-10-04):** scc's README, `processor/workers.go`, `processor/structs.go` and `languages.json` (github.com/boyter/scc), its author's design write-up (boyter.org/posts/sloc-cloc-code), and tokei's README (github.com/XAMPPRocky/tokei).
 
 ## 1. Summary
@@ -254,7 +254,7 @@ The table cannot be avoided: nothing in the tree has the Word_Break property. `u
 
 ## 6. Performance expectations
 
-A directory count should be bound by walking and opening files, as directory grep is: lib/grep's walker is level with ripgrep's on this repository (about 300 ms for 24,000 files, `vibe/Lambda_Lib_Grep.md` §10.1), and counting every line of the repository with lib/grep's count mode already takes 335 ms against ripgrep's 463 ms. Per byte, the engine does what scc does — a table lookup per byte, with token comparisons only at candidates — and in C, with a SIMD byte-class skip, it should match or beat scc's single-core rate. A gate in the grep library's style: counts equal to scc's and tokei's on a fixture corpus, except documented improvements (§5.3), and wall time within 1.5× of scc's on this repository and on a large tree such as the Linux kernel (CNT10, not ruled).
+A directory count should be bound by walking and opening files, as directory grep is: lib/grep's walker is level with ripgrep's on this repository (about 300 ms for 24,000 files, `vibe/lib/Lib_Grep.md` §10.1), and counting every line of the repository with lib/grep's count mode already takes 335 ms against ripgrep's 463 ms. Per byte, the engine does what scc does — a table lookup per byte, with token comparisons only at candidates — and in C, with a SIMD byte-class skip, it should match or beat scc's single-core rate. A gate in the grep library's style: counts equal to scc's and tokei's on a fixture corpus, except documented improvements (§5.3), and wall time within 1.5× of scc's on this repository and on a large tree such as the Linux kernel (CNT10, not ruled).
 
 ## 7. Verification
 

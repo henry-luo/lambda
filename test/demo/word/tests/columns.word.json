@@ -1,0 +1,172 @@
+{
+  "format": "lambda-word",
+  "version": 1,
+  "title": "Column study",
+  "document": {
+    "kind": "node",
+    "tag": "doc",
+    "attrs": [],
+    "content": [
+      {
+        "kind": "node",
+        "tag": "h1",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "A place for ideas",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Opening words. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Flowing text keeps its source identity while readers move from one column to the next. Closing words.",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "h2",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Notes from the studio",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "The closing paragraph stays editable. Each column belongs to the same document.",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "ul",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "li",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "text",
+                "text": "Keep the work in order.",
+                "marks": []
+              }
+            ]
+          },
+          {
+            "kind": "node",
+            "tag": "li",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "text",
+                "text": "Leave room for the next idea.",
+                "marks": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "table",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "node",
+            "tag": "tr",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "node",
+                "tag": "th",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Day",
+                    "marks": []
+                  }
+                ]
+              },
+              {
+                "kind": "node",
+                "tag": "th",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Session",
+                    "marks": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "node",
+            "tag": "tr",
+            "attrs": [],
+            "content": [
+              {
+                "kind": "node",
+                "tag": "td",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Thursday",
+                    "marks": []
+                  }
+                ]
+              },
+              {
+                "kind": "node",
+                "tag": "td",
+                "attrs": [],
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Open studio",
+                    "marks": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "Last paragraph. All of the words are kept.",
+            "marks": []
+          }
+        ]
+      }
+    ]
+  }
+}

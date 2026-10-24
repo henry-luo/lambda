@@ -1,5 +1,5 @@
 {
-  "name": "Equal template results retain DOM identity and rebind later updates",
+  "name": "Equal template branches retain DOM identity through later text updates",
   "html": "test/ui/lambda_equal_render.ls",
   "viewport": {"width": 400, "height": 200},
   "events": [
@@ -11,7 +11,8 @@
     {"type": "click", "target": {"selector": "#change"}},
     {"type": "assert_text", "target": {"selector": "#value"}, "equals": "1"},
     {"type": "click", "target": {"selector": "#noop"}},
-    {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-same", "equals": "false"},
+    {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-same", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-kept", "equals": "yes"},
     {"type": "click", "target": {"selector": "#change"}},
     {"type": "assert_text", "target": {"selector": "#value"}, "equals": "2"}
   ]

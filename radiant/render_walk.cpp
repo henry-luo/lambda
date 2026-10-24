@@ -1,3 +1,4 @@
+#include "layout.hpp"
 #include "render.hpp"
 #include "view.hpp"
 #include "radiant.hpp"
@@ -479,12 +480,16 @@ void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* 
 }
 
 // replay only the ancestry scopes, so lifted layers keep their local geometry and clipping.
-static void render_walk_negative_path(RenderBackend* backend, RenderWalkState* state,
+static void render_walk_stacking_path(RenderBackend* backend, RenderWalkState* state,
                                       View* owner, View* target) {
     View* child = radiant_stack_path_child(owner, target);
     if (!child) return;
     if (child == target) {
+        RenderWalkState saved = *state;
+        RdtLogicalPoint offset = layout_positioned_parent_offset(child);
+        state->x -= offset.x; state->y -= offset.y;
         render_walk_view(backend, state, child);
+        *state = saved;
         return;
     }
     ViewBlock* block = lam::view_as_block(child);
@@ -496,7 +501,7 @@ static void render_walk_negative_path(RenderBackend* backend, RenderWalkState* s
             if (backend->on_font_change) backend->on_font_change(backend->ctx, span->font);
         }
         if (span && span->in_line && span->inl()->has_color) state->color = span->inl()->color;
-        render_walk_negative_path(backend, state, child, target);
+        render_walk_stacking_path(backend, state, child, target);
         *state = saved;
         return;
     }
@@ -512,23 +517,23 @@ static void render_walk_negative_path(RenderBackend* backend, RenderWalkState* s
     bool content_clip = backend->begin_clip && backend->end_clip &&
         backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_CONTENTS);
     if (backend->begin_block_children) backend->begin_block_children(backend->ctx, block);
-    render_walk_negative_path(backend, state, child, target);
+    render_walk_stacking_path(backend, state, child, target);
     if (backend->end_block_children) backend->end_block_children(backend->ctx, block);
     if (content_clip) backend->end_clip(backend->ctx);
     if (shape_clip) backend->end_clip(backend->ctx);
     *state = saved;
 }
 
-static bool render_walk_negative_layer(void* context, View* owner, View* layer) {
+static bool render_walk_stacking_layer(void* context, View* owner, View* layer) {
     RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)context;
-    render_walk_negative_path(driver->backend, driver->state, owner, layer);
+    render_walk_stacking_path(driver->backend, driver->state, owner, layer);
     return true;
 }
 
 void render_walk_negative_z_descendants(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     RenderWalkBlockDriver driver = {};
     driver.backend = backend; driver.state = state;
-    radiant_stack_visit_negative_z_descendants(block, false, &driver, render_walk_negative_layer);
+    radiant_stack_visit_negative_z_descendants(block, false, &driver, render_walk_stacking_layer);
 }
 
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
@@ -569,16 +574,9 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
 void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
 
-    ArrayList* positive_views = radiant_stack_collect_positive_z_descendants(
-        view, "[RAD_CAP_RENDER_Z]");
-    if (!positive_views) return;
-    radiant_stack_sort_in_paint_order(positive_views);
-
-    for (int i = 0; i < positive_views->length; i++) {
-        if (render_walk_aborted(backend)) break;
-        render_walk_view(backend, state, (View*)positive_views->data[i]);
-    }
-    arraylist_free(positive_views);
+    RenderWalkBlockDriver driver = {};
+    driver.backend = backend; driver.state = state;
+    radiant_stack_visit_positive_z_descendants(view->parent, false, &driver, render_walk_stacking_layer);
 }
 
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {

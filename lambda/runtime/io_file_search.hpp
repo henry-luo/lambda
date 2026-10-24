@@ -1,6 +1,6 @@
 // io_file_search.hpp — what io.grep and io.text_search share: option reading,
 // sources, the walk options of GRP14/GRP22, and result values naming files
-// (vibe/Lambda_Lib_Grep.md §9B, vibe/Lambda_IO_Fulltext_Search.md FTX12).
+// (vibe/lib/Lib_Grep.md §9B, vibe/Lambda_IO_Fulltext_Search.md FTX12).
 #pragma once
 
 #include "transpiler.hpp"

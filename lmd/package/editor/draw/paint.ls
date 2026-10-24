@@ -35,12 +35,18 @@ pub fn arrow_preview(kind,side,target) => <svg class:"arrow-preview",width:58,he
     <defs (arrow_marker(kind,target))>
     <path d:"M 10 12 H 54",fill:"none",stroke:"currentColor",'stroke-width':1.6,
         ["marker-" ++ side]:if (kind == "none") "none" else "url(#" ++ target ++ ")">>
-pub fn text(node,b,label,edge=false) {
+pub fn text(node,b,label,edge=false,options={}) {
     let lines = split(label,"\n")
     let size = model.attr(node,"font-size")
     let align = model.attr(node,"text-align")
-    let x = if (align == "left") b.x+12 else if (align == "right") b.x+b.width-12 else b.x+b.width/2;
-    <g *[for (i,line in lines) <text x:if (edge) b.x+b.width/2 else x,y:b.y+b.height/2+size*0.35+(i-(len(lines)-1)/2)*size*1.3,
-        'font-family':"Arial, sans-serif",'font-size':size,'font-weight':model.attr(node,"font-weight"),
-        'text-anchor':if (edge or align == "center") "middle" else if (align == "left") "start" else "end",fill:model.attr(node,"text-color"),line>]>
+    let inset = if (options.inset==null) 12 else options.inset
+    let x = if (align == "left") b.x+inset else if (align == "right") b.x+b.width-inset else b.x+b.width/2
+    let middle = b.y+b.height/2+size*0.35-(len(lines)-1)*size*0.65
+    let top = if (options.vertical=="top") b.y+inset+size else if (options.vertical=="bottom")
+        b.y+b.height-inset-(len(lines)-1)*size*1.3 else middle;
+    <g *[for (i,line in lines) <text x:if (edge) b.x+b.width/2 else x,y:top+i*size*1.3,
+        'font-family':options.font or "Arial, sans-serif",'font-size':size,'font-weight':model.attr(node,"font-weight"),
+        'font-style':if (options.italic==true) "italic" else "normal",stroke:options.stroke or "none",'stroke-width':options.weight or 0,
+        'text-anchor':if (edge or align == "center") "middle" else if (align == "left") "start" else "end",
+        fill:options.fill or model.attr(node,"text-color"),line>]>
 }

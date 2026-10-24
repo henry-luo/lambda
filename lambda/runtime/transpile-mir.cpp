@@ -48818,18 +48818,22 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
         const char* state_name = se->name->chars;
         log_debug("mir: view state init: %s", state_name);
 
-        // transpile default value expression
-        MIR_reg_t default_val;
+        // state survives redraws; do not repeat an initializer whose value is already retained.
+        MIR_reg_t default_val = emit_null_item_reg(mt);
+        MIR_reg_t initialized = emit_call_3(mt, "tmpl_state_has", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, model_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)tmpl_ref),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_name));
+        MIR_label_t state_ready = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, state_ready), MIR_new_reg_op(mt->ctx, initialized)));
         if (se->value) {
-            default_val = transpile_box_item(mt, se->value);
-        } else {
-            // no default: use ItemNull
-            default_val = new_reg(mt, "null_default", MIR_T_I64);
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            MIR_reg_t initial_value = transpile_box_item(mt, se->value);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, default_val),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+                MIR_new_reg_op(mt->ctx, initial_value)));
         }
+        emit_label(mt, state_ready);
 
         // call tmpl_state_get_or_init(model_item, template_ref, state_name, default)
         // signature: Item(Item, const char*, const char*, Item)

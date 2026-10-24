@@ -2324,7 +2324,7 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view);
 void render_outline_deferred(RasterRenderContext* rdcon, ViewBlock* view);
 void render_children(RasterRenderContext* rdcon, View* view);
 void render_raster_positioned_children(RasterRenderContext* rdcon, ViewBlock* block);
-void render_raster_positioned_view(RasterRenderContext* rdcon, ViewBlock* block);
+void render_raster_stacking_view(RasterRenderContext* rdcon, View* view);
 void render_raster_negative_z_descendants(RasterRenderContext* rdcon, ViewBlock* block);
 void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* view);
 bool render_raster_custom_layout_children(RasterRenderContext* rdcon, ViewBlock* block);
@@ -3247,6 +3247,8 @@ bool radiant_stack_in_paint_phase(View* view, RadiantPaintPhase phase);
 RadiantPaintPhase radiant_stack_paint_phase(unsigned index);
 View* radiant_stack_path_child(View* ancestor, View* descendant);
 void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
+    bool (*visit)(void* context, View* owner, View* layer));
+void radiant_stack_visit_positive_z_descendants(View* owner, bool reverse, void* context,
     bool (*visit)(void* context, View* owner, View* layer));
 bool radiant_stack_is_out_of_flow_positioned(View* view);
 bool radiant_stack_is_deferred_from_normal_flow(View* view);
@@ -4619,7 +4621,7 @@ int render_export_session_to_pdf(RenderExportSession* session, const char* filen
 int render_batch_export(UiContext* ui, const char* source, const char* filename,
     float viewport_width, float viewport_height, float device_scale);
 int render_html_source_to_output_target(const char* html_source, RenderOutputTarget* target,
-    const char* base_url = nullptr, bool block_remote_resources = false);
+    const char* base_url = nullptr, bool block_remote_resources = false, bool xhtml = false);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,

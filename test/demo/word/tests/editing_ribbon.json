@@ -1,0 +1,839 @@
+{
+  "name": "Word Home Editing ribbon: Find, Replace, Select, menus and selection preservation",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".group-editing"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#ribbon-find svg,#ribbon-replace svg,#ribbon-select svg"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-replace"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#replace-text"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#find-query"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#replace-one[disabled],#replace-all[disabled]"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#ribbon-find-menu"
+      },
+      "attribute": "aria-expanded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-find-next[disabled],#context-find-previous[disabled]"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-navigation"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#find-query"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('find-query').getBoundingClientRect().width>0"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "studio",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#search-summary"
+      },
+      "contains": "matches"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-find"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-find-next"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-find-previous"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Match "
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-replace"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#replace-text"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "cat cat cat",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "cat",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-find-previous"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "Match 3 of 3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-find-next"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "equals": "Match 1 of 3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-replace"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#replace-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#replace-text"
+      },
+      "text": "dog",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-one"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "dog cat cat"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-all"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "dog dog dog"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 2,
+      "end": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "attribute": "aria-haspopup",
+      "equals": "menu"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-select-cell[disabled],#context-select-row[disabled],#context-select-column[disabled],#context-select-table[disabled]"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-paragraph"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "type",
+      "text": "Selected paragraph"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Selected paragraph"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-select-all"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_clipboard",
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "type",
+      "text": "Entire document",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Entire document"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "cat",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "cat cat cat"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('ribbon-select').focus();"
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-select-all"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-context-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sample"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-btn.edit-dialog-discard"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:nth-child(2)"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-select-cell[disabled]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-cell"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-select-row[disabled]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-row"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-select-column[disabled]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-column"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-select-table[disabled]"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-table"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-cell-selected=true]"
+      },
+      "count": 12
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-view"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#view-reading"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-home"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#ribbon-replace[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-select-paragraph[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-all"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.getSelection().toString().indexOf('The Open Studio Handbook')>=0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#find-query"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#exit-focus"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "f",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#find-query"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word.focus-mode"
+      },
+      "count": 0
+    },
+    {
+      "type": "resize",
+      "width": 700,
+      "height": 520
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.getElementById('word-context-menu').getBoundingClientRect();b.x>=0&&b.y>=0&&b.right<=700&&b.bottom<=520"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/editing-ribbon-menu.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#ribbon-find"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#find-query"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('find-query').getBoundingClientRect().width>0"
+    }
+  ]
+}

@@ -319,6 +319,8 @@ struct SimEvent {
     bool expected_drag_drop_target;
     bool has_expected_open_dropdown;
     bool expected_open_dropdown;
+    bool has_expected_dropdown_dragging;
+    bool expected_dropdown_dragging;
     bool has_expected_context_menu_open;
     bool expected_context_menu_open;
     bool has_expected_context_menu_enabled;
@@ -339,6 +341,7 @@ struct SimEvent {
     bool has_expected_dropdown_y;
     bool has_expected_dropdown_width;
     bool has_expected_dropdown_height;
+    bool has_expected_dropdown_scroll_y;
     bool has_expected_context_menu_x;
     bool has_expected_context_menu_y;
     bool has_expected_context_menu_width;
@@ -351,6 +354,7 @@ struct SimEvent {
     float expected_dropdown_y;
     float expected_dropdown_width;
     float expected_dropdown_height;
+    float expected_dropdown_scroll_y;
     float expected_context_menu_x;
     float expected_context_menu_y;
     float expected_context_menu_width;
@@ -438,6 +442,8 @@ struct EventSimContext {
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double input_turn_ms;        // virtual latency per input primitive; zero uses explicit waits only
     double event_interval_ms;    // delay between commands; zero supports exact-time rendering checks
+    bool profile_events;         // opt-in release-build wall timings, indexed like the fixture events
+    double* event_durations_ms;
     bool initial_render;        // export fixtures may assert vector paint before the first raster pass
     double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work

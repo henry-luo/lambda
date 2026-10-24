@@ -260,6 +260,33 @@ Handle lifetime is reference-counted and cache-anchored. A `FontProp` holds a ca
 
 ## 7. Relationship to the text-layout and render consumers
 
+Local font discovery is also owned by `lib/font/`: `font_query_local_fonts`
+returns an owned UTF-8 metadata snapshot, sorted and deduplicated by PostScript
+name; `font_local_fonts_free` releases it. macOS enumerates registered CoreText
+descriptors without loading faces or starting automatic downloads. Other
+platforms reuse the existing system-directory/Windows-registry database and
+expand lazy collection entries before returning face metadata. The neutral
+`dom.query_local_fonts(options)` operation and JS `window.queryLocalFonts()`
+share this mechanism through the appended catalog slot (**D7.4.4**).
+
+The selected milestone is installed-font listing in Word's ribbon, selection
+toolbar and WordArt dialog, including exact PostScript filtering, Unicode metadata, and retaining
+missing document fonts in the picker. Focused checks cover native snapshot
+ownership, Lambda access without a JS realm, JS Promise/conversion behavior in
+AST and MIR, and native picker editing; qualification uses the library, Lambda
+and Radiant baselines. Font binary access and browser permission policy remain
+separate work; Linux and Windows use their existing discovery backends.
+
+Verified on macOS 2026-10-23: native metadata ownership, exact face filtering,
+Lambda access in all three tiers, JS Promise behavior in AST/MIR, and both
+language bridges under forced GC pass. All Word model, UI and export checks
+pass, as do the library, Radiant and Test262 gates. The Lambda baseline retains
+one pre-existing phase-6 PDF golden mismatch, reproduced identically with the
+saved binary from before this change. The rebuilt module-boundary audit flags
+the existing `radiant_dom_m4b_src_get` import introduced by `149f020b3d0`;
+the font API adds no deferred Class-F import. Linux and Windows enumeration
+remain unverified on their native hosts.
+
 This doc stops at the handle and its metrics; the consumers are documented elsewhere. [RAD_06 — Inline & Text Layout](RAD_06_Inline_and_Text_Layout.md) is the primary caller: it calls `setup_font` to fill `lycon->font`, then during the per-character line-breaking loop calls `font_load_glyph`/`font_measure_text`/`font_get_kerning` directly on the handle and reads `LoadedGlyph` metrics for the fallback-metric blend. Notably there is **no persisted shaped glyph buffer** — a `TextRect` stores only byte ranges and a width, so [RAD_13 — Render Walk & Painters](RAD_13_Render_Walk_Painters.md) re-runs `setup_font` and re-loads glyphs at paint time; layout and render re-measure independently from the same byte ranges. That duplication (and its risk of layout/paint metric divergence) is a text-layout/render concern, cross-linked here but owned by those docs.
 
 ---

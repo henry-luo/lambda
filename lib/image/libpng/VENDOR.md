@@ -9,7 +9,7 @@ Archive SHA-256: `71a2c5b1218f60c4c6d2f1954c7eb20132156cae90bdb90b566c24db002782
 Official source imported for the common image library (2026-10-15).
 Local adaptations are made directly in this directory and reviewed through Git.
 No separate patch files are required, per the user-approved source policy in
-`vibe/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
+`vibe/lib/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
 and application directories are omitted; only library targets are built.
 
 

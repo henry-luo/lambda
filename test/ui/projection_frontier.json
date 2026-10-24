@@ -1,0 +1,379 @@
+{
+  "html": "test/lambda/ui/projection_frontier.ls",
+  "viewport": {
+    "width": 600,
+    "height": 400
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#frame-scrollport"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#scroll-frame"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#frame-scrollport"
+      },
+      "view_scroll_y": 352,
+      "tolerance": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#draft"
+      },
+      "text": "draft value",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "window.retainedInput=document.getElementById('draft');window.retainedBranch=document.getElementById('stable');window.retainedRoot=document.getElementById('counter');true"
+    },
+    {
+      "type": "script",
+      "js": "window.metadataRecords=[];window.metadataObserver=new MutationObserver(records=>{for(const r of records)metadataRecords.push([r.attributeName,r.oldValue])});metadataObserver.observe(document.getElementById('metadata'),{attributes:true,attributeOldValue:true})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#counter"
+      },
+      "attribute": "data-count",
+      "equals": "1"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#draft"
+      },
+      "equals": "draft value"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#controlled"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('draft')===retainedInput&&document.getElementById('stable')===retainedBranch&&document.getElementById('counter')===retainedRoot"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#probe"
+      },
+      "property": "color",
+      "equals": "rgb(12, 34, 56)"
+    },
+    {
+      "type": "assert_script",
+      "js": "metadataRecords.length===2&&metadataRecords.every(r=>r[1]==='0')&&document.getElementById('metadata').getAttribute('aria-label')==='1'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#extra"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#draft"
+      },
+      "equals": "draft value"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#controlled"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-revision"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "equals": "1:0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "attribute": "data-observed-revision",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-revision"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "equals": "2:0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "attribute": "data-observed-revision",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-revision"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "equals": "3:0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "attribute": "data-observed-revision",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-revision"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "equals": "4:0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "attribute": "data-observed-revision",
+      "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-revision"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "equals": "5:0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#nested-increment"
+      },
+      "attribute": "data-observed-revision",
+      "equals": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-revision"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-increment"
+      },
+      "equals": "0:1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-revision"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-increment"
+      },
+      "equals": "0:2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-revision"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-increment"
+      },
+      "equals": "0:3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-revision"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-increment"
+      },
+      "equals": "0:4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed-increment"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-revision"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fixed-increment"
+      },
+      "equals": "0:5"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 // Collage layouts and edits: every tiled template covers its area without gaps or overlaps for
-// 2, 7 and 30 photos; masks, scrapbook prints, swaps, crops, history and credits.
+// 2, 7 and 30 photos; lattices, masks, print styles, looks, swaps, crops, history and credits.
 import L: ~~.mod_library
 import C: ~~.mod_collage
 
@@ -28,9 +28,42 @@ let undone = C.undo(h1, swapped)
 let redone = C.redo(undone.history, undone.model)
 let book = C.layout({*:model(7, "scrapbook"), gutter:16}, aspects(7))
 let moved = C.place(model(7, "scrapbook"), 1, {x:10.0, y:20.0, w:300.0, rot:5.0})
-let banded = C.layout({*:base, caption:"Summer", credits:true, gutter:20}, aspects(7));
+let banded = C.layout({*:base, caption:"Summer", credits:true, gutter:20}, aspects(7))
+// lattice cells: one per slot, inside the canvas, and no two shapes overlap: diamonds by the L1
+// distance of their centres, equal hexagons by their centre distance
+fn centre(c) => {x:c.x + c.w / 2.0, y:c.y + c.h / 2.0}
+fn apart(a, b, diamond) => (let p = centre(a), let q = centre(b),
+    if (diamond) abs(p.x - q.x) + abs(p.y - q.y) >= (a.w + b.w) / 2.0 - 0.01
+    else math.sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)) >= a.w - 0.01)
+fn lattice(t, n) {
+    let lay = C.layout(model(n, t), aspects(n))
+    let cells = lay.cells;
+    [len(cells), sort([for (c in cells) c.slot]) == [for (i in 0 to (n - 1)) i],
+        all([for (c in cells) c.x >= 0.0 and c.y >= 0.0 and c.x + c.w <= lay.width + 0.01 and c.y + c.h <= lay.height + 0.01]),
+        all([for (i in 0 to (n - 1), j in 0 to (n - 1) where i < j) apart(cells[i], cells[j], t == "diamonds")])]
+}
+let pile = C.layout(model(7, "pile"), aspects(7)).cells
+let polaroids = C.layout(model(7, "polaroids"), aspects(7)).cells
+let keepsake = C.layout(model(4, "keepsake"), aspects(4)).cells
+let styled = C.apply_template(moved, "polaroids")
+fn text_at(t) => (let l = C.layout({*:model(7, t), caption:"Summer", note:"By the sea"}, aspects(7)),
+    [r2(l.caption.y), r2(l.note.y), l.plate != null]);
 {
-    tiled: [for (t in ["grid", "mosaic", "magazine", "heart", "circle"]) [t, [for (n in [2, 7, 30]) tiles(model(n, t), n)]]],
+    tiled: [for (t in ["grid", "mosaic", "magazine", "frame", "spotlight", "heart", "circle", "star", "balloon"]) [t, [for (n in [2, 7, 30]) tiles(model(n, t), n)]]],
+    lattices: [for (t in ["diamonds", "honeycomb"]) [t, [for (n in [2, 7, 30]) lattice(t, n)]]],
+    // the frame's hero is ringed: every other cell lies on the ring, outside the hero
+    frame: (let c = C.layout(model(15, "frame"), aspects(15)).cells, let h = c[0],
+        all([for (k in slice(c, 1, 15)) not overlap(h, k)]) and h.x > 0.0 and h.y > 0.0),
+    pile: [pile[last].slot, pile[last].w > pile[0].w, all([for (c in pile) not c.label])],
+    polaroids: [all([for (c in polaroids) c.rot == 0.0 and r2(c.h) == r2(C.print_height(c.w, 1.0))]),
+        // the short last row is centred
+        r2(polaroids[6].x + polaroids[6].w / 2.0) == 1000.0],
+    keepsake: [for (c in keepsake) c.rot > 0.0],
+    balloon: [for (d in C.layout(model(7, "balloon"), aspects(7)).decor) d.kind],
+    texts: [for (t in ["mosaic", "frame", "spotlight"]) [t, text_at(t)]],
+    look: [styled.template, styled.background, styled.font, styled.gutter, styled.slots[1].free, C.apply_template(base, "bogus") == base],
+    fonts: [C.set(base, "font", "script").font, C.set(base, "font", "bogus").font, C.font({*:base, font:null}).key,
+        C.set(base, "note", "Hi").note],
     grid_cols: [for (c in C.layout(model(7, "grid"), aspects(7)).cells) [r2(c.x), r2(c.y), r2(c.w)]],
     masks: [C.layout(model(7, "circle"), aspects(7)).mask.clip, slice(C.layout(model(7, "heart"), aspects(7)).mask.clip, 0, 24)],
     scrapbook: [len(book.cells), all([for (c in book.cells) c.kind == "print" and c.x >= 0.0 and c.y >= 0.0 and

@@ -13,10 +13,14 @@ pub fn placement(node, width, height) {
     let h_offset = offset(c.child(h,"posOffset",c.WP))
     let v_offset = offset(c.child(v,"posOffset",c.WP))
     let square = c.child(anchor,"wrapSquare",c.WP)
+    let effect = c.child(anchor,"effectExtent",c.WP)
+    let gaps = [for (side in ["T","R","B","L"])
+        c.pixels(c.attr(anchor,"dist" ++ side,"")) + c.pixels(c.attr(effect,lower(side),""))]
     let block_wrap = c.child(anchor,"wrapTopAndBottom",c.WP) != null
     let wrap = c.attr(square,"wrapText","")
     let aligned = h_offset == null and contains(["left","center","right"],align)
-    let column_start = align == "" and h_offset != null and h_offset <= 0
+    // a positive image offset still wraps at the column edge when its clearance reaches that edge.
+    let column_start = align == "" and h_offset != null and h_offset/9525.0 <= gaps[3]
     let vertical = (v_offset == null and c.text(c.child(v,"align",c.WP)) == "top") or
         (v_offset != null and c.child(v,"align",c.WP) == null)
     let relative = anchor != null and width > 0 and
@@ -33,10 +37,7 @@ pub fn placement(node, width, height) {
             (column_start and wrap == "bothSides" or
              align == "center" and wrap == "largest" or
              align == "left" and contains(["bothSides","right","largest"],wrap) or
-             align == "right" and contains(["bothSides","left","largest"],wrap)))
-    let effect = c.child(anchor,"effectExtent",c.WP)
-    let gaps = [for (side in ["T","R","B","L"])
-        c.pixels(c.attr(anchor,"dist" ++ side,"")) + c.pixels(c.attr(effect,lower(side),""))];
+             align == "right" and contains(["bothSides","left","largest"],wrap)));
     if (anchor == null) {value:null,unsupported:false}
     else if (absolute) {value:{absolute:true,order:layer,
         behind:contains(["1","true"],c.attr(anchor,"behindDoc","")),
@@ -114,4 +115,11 @@ pub fn shape(node, colors) {
 pub fn shape_choice(choice, colors) {
     let nodes = c.children(choice,null,null);
     len(nodes) > 0 and all([for (node in nodes) node.uri == c.W and node.tag == "drawing" and shape(node,colors) != null])
+}
+pub fn raster_choice(choice) {
+    let nodes = c.children(choice,null,null);
+    len(nodes) > 0 and all([for (node in nodes) node.uri == c.W and node.tag == "drawing" and
+        len(c.descendants(node,"blip",c.A)) == 1 and len(c.descendants(node,"txbxContent",c.W)) == 0 and
+        len(c.descendants(node,"wsp",c.WPS)) == 0 and len(c.descendants(node,"chart",c.CH)) == 0 and
+        len(c.descendants(node,"relIds",c.DGM)) == 0])
 }

@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Positive layers across paragraph anchors</title>
+<style>
+html,body { margin:0; width:320px; height:300px; overflow:hidden; }
+#owner { position:relative; z-index:0; width:320px; height:300px; background:white; }
+.anchor { position:relative; height:100px; }
+#high,#low { position:absolute; left:20px; width:100px; height:60px; }
+#high { top:20px; z-index:4; background:blue; }
+#low { top:-80px; z-index:1; background:red; }
+#clipper { position:absolute; left:200px; top:20px; width:40px; height:40px; overflow:hidden; }
+#clipped { position:relative; z-index:9; width:100px; height:100px; background:orange; }
+#isolated { position:absolute; z-index:0; left:20px; top:150px; width:100px; height:80px; background:yellow; }
+#local { position:absolute; z-index:99; left:10px; top:10px; width:70px; height:50px; background:magenta; }
+#outside { position:absolute; z-index:1; left:40px; top:170px; width:40px; height:20px; background:lime; }
+#ordinary { margin-left:150px; height:0; }
+#relative-deep { position:relative; z-index:2; left:10px; top:-90px; width:40px; height:25px; background:teal; }
+#absolute-deep { position:absolute; z-index:2; left:220px; top:110px; width:40px; height:25px; background:teal; }
+#root-layer { position:fixed; z-index:20; left:280px; top:260px; width:30px; height:30px; background:lime; }
+</style></head><body><div id="owner">
+<div class="anchor"><div id="high"></div></div><div class="anchor"><div id="low"></div></div>
+<div id="ordinary"><div id="relative-deep"></div><div id="absolute-deep"></div></div>
+<div id="clipper"><div id="clipped"></div></div>
+<div id="isolated"><div id="local"></div></div><div id="outside"></div>
+</div><div id="root-layer"></div></body></html>

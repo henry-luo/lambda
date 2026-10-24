@@ -200,6 +200,12 @@
       }
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table-design"
+      }
+    },
+    {
       "type": "select_option",
       "target": {
         "selector": "#table-style"
@@ -213,6 +219,12 @@
       },
       "attribute": "data-word-table-style",
       "equals": "soft"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      }
     },
     {
       "type": "click",
@@ -241,11 +253,11 @@
       "count": 9
     },
     {
-      "type": "select_option",
+      "type": "click",
       "target": {
-        "selector": "#cell-alignment"
+        "selector": "#cell-align-bottomRight"
       },
-      "value": "bottomRight"
+      "scroll_into_view": true
     },
     {
       "type": "assert_style",
@@ -262,7 +274,14 @@
     {
       "type": "click",
       "target": {
-        "selector": "[id=\"table.deleteTable\"]"
+        "selector": "#table-delete-menu"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-delete-table"
       }
     },
     {

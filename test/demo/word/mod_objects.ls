@@ -6,15 +6,28 @@ import commands: lambda.editor.mod_commands
 import image: lambda.editor.mod_image
 import media: lambda.doc.media
 import inline_format: lambda.editor.mod_inline_format
+import geom: lambda.editor.draw.geometry
 
 pub fn settings(n,key,defaults=null) {
     let stored = parse(attrs_get(n.attrs,symbol(key)) or "null",'json') ^ { null }
-    if (not (stored is map)) defaults else if (defaults==null) stored else {*:defaults,*:stored}
+    // Missing or malformed metadata must not make an ordinary picture match an object kind.
+    if (not (stored is map)) null else if (defaults==null) stored else {*:defaults,*:stored}
 }
 pub fn source(graphic) string^ => media.data_uri(binary(format(graphic,'xml')^),"image/svg+xml")^
+pub fn dimensions_valid(p) => geom.finite_number(p.width) and p.width>=16 and p.width<=650 and
+    geom.finite_number(p.height) and p.height>=16 and p.height<=2000 and
+    geom.finite_number(p.rotation) and p.rotation>=-180 and p.rotation<=180
+pub fn transform_style(n,angle=null,layout=null) {
+    let rotation = if (angle==null) (float(attrs_get(n.attrs,'data-word-rotation')) ^ {0}) or 0 else angle
+    let p = layout or settings(n,"data-word-layout")
+    let parts = [*if (rotation==0) [] else ["rotate(" ++ string(rotation) ++ "deg)"],
+        *if (p.flip_x==true or p.flip_y==true) ["scale(" ++ string(if (p.flip_x==true) -1 else 1) ++ "," ++
+            string(if (p.flip_y==true) -1 else 1) ++ ")"] else []];
+    if (len(parts)==0) null else join(parts," ")
+}
 pub fn rotate_transaction(tx,path,angle) {
-    let css = attrs_get(node_at(tx.doc_after,path).attrs,'style')
-    let style = inline_format.css_set(css,"transform",if (angle==0) null else "rotate(" ++ string(angle) ++ "deg)")
+    let n = node_at(tx.doc_after,path)
+    let style = inline_format.css_set(attrs_get(n.attrs,'style'),"transform",transform_style(n,angle))
     tx_step(tx_step(tx,step_set_attr(path,'style',style)),step_set_attr(path,'data-word-rotation',angle))
 }
 pub fn transaction(editor,key,p,graphic,width,height,label,selected=null) map^ {

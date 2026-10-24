@@ -417,11 +417,11 @@
       "equals": "Table"
     },
     {
-      "type": "select_option",
+      "type": "click",
       "target": {
-        "selector": "#cell-alignment"
+        "selector": "#cell-align-center"
       },
-      "value": "center"
+      "scroll_into_view": true
     },
     {
       "type": "assert_script",

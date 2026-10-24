@@ -1,0 +1,217 @@
+{
+  "name": "Native fonts populate ribbon, floating toolbar and WordArt and apply installed families",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "queryLocalFonts().then(function(faces){window.nativeFontFaces=faces;});true"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.isArray(window.nativeFontFaces)&&nativeFontFaces.length>0"
+    },
+    {
+      "type": "assert_script",
+      "js": "var values=Array.from(document.querySelectorAll('#font-family option')).map(function(o){return o.value});nativeFontFaces.every(function(f){return values.includes(f.family)})&&new Set(values).size===values.length"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font-family"
+      }
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#font-family",
+        "offset_x": 30,
+        "offset_y": 40
+      },
+      "dx": 0,
+      "dy": 999
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#font-family"
+      },
+      "open_dropdown": true,
+      "dropdown_scroll_y": 0
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/font-ribbon-scrollbar.png"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#font-family",
+        "offset_x": 30,
+        "offset_y": 40
+      },
+      "dx": 0,
+      "dy": -999
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font-family",
+        "offset_x": 30,
+        "offset_y": 30
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var picker=document.getElementById('font-family');picker.value===picker.options[picker.options.length-10].value"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Native font editing",
+      "clear": false
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 6
+    },
+    {
+      "type": "assert_script",
+      "js": "window.nativeFontFamily=nativeFontFaces.map(function(f){return f.family}).find(function(n){return !['Georgia','Arial','Times New Roman','Courier New'].includes(n)});typeof nativeFontFamily==='string'"
+    },
+    {
+      "type": "assert_script",
+      "js": "var picker=document.getElementById('font-family');picker.value=nativeFontFamily;picker.dispatchEvent(new Event('change',{bubbles:true}));true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('font-family').value===nativeFontFamily&&getComputedStyle(document.querySelector('#edit-surface span:not(.word-text-run)')).fontFamily.includes(nativeFontFamily)"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "key_combo",
+      "key": "ArrowRight",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#selection-toolbar"
+      },
+      "property": "visibility",
+      "equals": "visible"
+    },
+    {
+      "type": "assert_script",
+      "js": "var values=Array.from(document.querySelectorAll('#mini-font-family option')).map(function(o){return o.value});nativeFontFaces.every(function(f){return values.includes(f.family)})&&new Set(values).size===values.length"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('mini-font-family').value===nativeFontFamily"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/native-font-pickers.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mini-font-family"
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/native-font-menu.png"
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#mini-font-family",
+        "offset_x": 30,
+        "offset_y": 40
+      },
+      "dx": 0,
+      "dy": -999
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/word/tests/font-mini-scrolled.png"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('mini-font-family').value===nativeFontFamily"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mini-font-family",
+        "offset_x": 30,
+        "offset_y": 30
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var picker=document.getElementById('mini-font-family');window.nativeFontFamily=picker.options[picker.options.length-10].value;picker.value===nativeFontFamily&&Array.from(document.querySelectorAll('#edit-surface span:not(.word-text-run)')).some(function(span){return getComputedStyle(span).fontFamily.includes(nativeFontFamily)})"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-surface p').textContent==='Native font editing'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-wordart"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var values=Array.from(document.querySelectorAll('#art-font option')).map(function(o){return o.value});nativeFontFaces.every(function(f){return values.includes(f.family)})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('art-font').value=nativeFontFamily;true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-wordart .primary"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.querySelector('#edit-surface img[data-word-wordart]').getAttribute('data-word-wordart')).font===nativeFontFamily"
+    }
+  ]
+}

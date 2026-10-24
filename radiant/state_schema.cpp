@@ -422,6 +422,12 @@ static const StateTransitionRule RADIANT_STATE_RULES[] = {
     { SM_FAMILY_DROPDOWN, SM_VC_ANY, SM_STATE_ANY, SM_EV_DROPDOWN_SET_GEOMETRY,
       SM_GUARD_NONE, SM_RULE_TO(SM_TO_DROPDOWN_SAME), 0, NULL, 0,
       "dropdown.set_geometry" },
+    { SM_FAMILY_DROPDOWN, SM_VC_ANY, SM_STATE_ANY, SM_EV_DROPDOWN_SCROLL,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_DROPDOWN_SAME), 0, NULL, 0,
+      "dropdown.scroll" },
+    { SM_FAMILY_DROPDOWN, SM_VC_ANY, SM_STATE_ANY, SM_EV_DROPDOWN_DRAG,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_DROPDOWN_SAME), 0, NULL, 0,
+      "dropdown.drag" },
 
     { SM_FAMILY_CONTEXT_MENU, SM_VC_ANY, SM_STATE_ANY, SM_EV_CONTEXT_MENU_OPEN,
       SM_GUARD_NONE, SM_RULE_TO(SM_TO_CONTEXT_OPEN), 0, NULL, 0,
@@ -538,6 +544,8 @@ extern const uint32_t RADIANT_INVARIANT_COUNT =
         case SM_EV_DROPDOWN_OPEN: return "dropdown_open";
         case SM_EV_DROPDOWN_CLOSE: return "dropdown_close";
         case SM_EV_DROPDOWN_SET_GEOMETRY: return "dropdown_set_geometry";
+        case SM_EV_DROPDOWN_SCROLL: return "dropdown_scroll";
+        case SM_EV_DROPDOWN_DRAG: return "dropdown_drag";
         case SM_EV_CONTEXT_MENU_OPEN: return "context_menu_open";
         case SM_EV_CONTEXT_MENU_CLOSE: return "context_menu_close";
         case SM_EV_CONTEXT_MENU_HOVER: return "context_menu_hover";

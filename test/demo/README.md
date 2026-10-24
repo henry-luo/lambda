@@ -2,8 +2,14 @@
 
 Run `./lambda.exe demo <name>` from the repository root, or `./lambda demo <name>`
 from an unpacked release. Each named demo uses the same viewer as `lambda view`.
-Run `lambda demo --list` for the catalog. With no name, `lambda demo` opens the
-bundled document viewer with its startup splash (D7.2.4).
+Run `lambda demo --list` for the catalog.
+
+With no name, `lambda demo` opens the demo index (`index.ls`): one animated tile per
+demo. A click starts that demo as its own `lambda demo <name>` process, so it opens
+in a window of its own; closing the index also closes the demos it started. The
+tile catalog is in `index.ls` and its art in `mod_demo_art.ls`; a new named demo
+needs an entry there as well as in `LAMBDA_DEMOS` (`lambda/main.cpp`). The document
+viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 
 | Name | Entry point | Guide |
 | --- | --- | --- |

@@ -1,0 +1,28 @@
+{
+  "name": "Form constraints follow disabled/readonly/required attribute writes after layout",
+  "html": "test/ui/test_form_constraint_attr_writes.html",
+  "viewport": {"width": 500, "height": 300},
+  "events": [
+    {"type": "advance_time", "ms": 50},
+    {"type": "assert_state", "target": {"selector": "#by-attr"}, "state": ":disabled", "value": true},
+    {"type": "assert_script", "js": "const t=document.getElementById('locked');t.matches(':read-only')&&t.matches(':required')"},
+
+    {"type": "log", "message": "removeAttribute and the IDL setter both re-enable a control"},
+    {"type": "script", "js": "document.getElementById('by-attr').removeAttribute('disabled');document.getElementById('by-idl').disabled=false"},
+    {"type": "assert_state", "target": {"selector": "#by-attr"}, "state": ":disabled", "value": false},
+    {"type": "assert_state", "target": {"selector": "#by-idl"}, "state": ":disabled", "value": false},
+    {"type": "click", "target": {"selector": "#by-attr"}},
+    {"type": "click", "target": {"selector": "#by-idl"}},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": ":ai"},
+
+    {"type": "log", "message": "readonly and required follow removal too"},
+    {"type": "script", "js": "const t=document.getElementById('locked');t.removeAttribute('readonly');t.required=false"},
+    {"type": "assert_script", "js": "const t=document.getElementById('locked');t.matches(':read-write')&&t.matches(':optional')"},
+
+    {"type": "log", "message": "re-adding disabled blocks activation again"},
+    {"type": "script", "js": "document.getElementById('by-attr').setAttribute('disabled','')"},
+    {"type": "assert_state", "target": {"selector": "#by-attr"}, "state": ":disabled", "value": true},
+    {"type": "click", "target": {"selector": "#by-attr"}},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": ":ai"}
+  ]
+}

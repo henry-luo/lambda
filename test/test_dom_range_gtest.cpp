@@ -546,6 +546,31 @@ TEST_F(DomMutationTest, PreRemoveCollapsesEndpointInsideRemovedSubtree) {
     EXPECT_TRUE(dom_range_collapsed(r));
 }
 
+TEST_F(DomMutationTest, PresentationReplacementKeepsSurroundingSelectionAndRebasesRetiredText) {
+    DomRange* around = dom_range_create(state);
+    DomRange* inside = dom_range_create(state);
+    dom_range_link_into_state(state, around);
+    dom_range_link_into_state(state, inside);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(around, p, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end(around, p, 2, &exc));
+    ASSERT_TRUE(dom_range_set_start(inside, t1, 2, &exc));
+    ASSERT_TRUE(dom_range_set_end(inside, t1, 4, &exc));
+
+    ASSERT_TRUE(p->remove_child(t1));
+    ASSERT_TRUE(p->insert_before(t2, c));
+    dom_reconcile_post_replace(state, t1, t2);
+
+    EXPECT_EQ(around->start.node, p);
+    EXPECT_EQ(around->start.offset, 1u);
+    EXPECT_EQ(around->end.node, p);
+    EXPECT_EQ(around->end.offset, 2u);
+    EXPECT_FALSE(dom_range_collapsed(around));
+    EXPECT_EQ(inside->start.node, p);
+    EXPECT_EQ(inside->start.offset, 1u);
+    EXPECT_TRUE(dom_range_collapsed(inside));
+}
+
 // pre_remove: endpoint at (parent, off>index) decrements
 TEST_F(DomMutationTest, PreRemoveDecrementsLaterSiblingOffsets) {
     DomRange* r = dom_range_create(state);

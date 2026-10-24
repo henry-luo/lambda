@@ -21,7 +21,48 @@ at a caret sets the marks for subsequent typing.
 
 The interface follows photo-album's white panels, cool gray sidebar, blue
 accents, rounded controls, and system typography. Both demos use the shared
-outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
+outline SVG icons in `../mod_icons.ls`. Word's `mod_ribbon_icons.ls` adds bright
+blue document, violet creative, teal data, and amber review accents, with saturated
+fine contours and matching tinted fills. Equation controls share the same palette.
+The ribbons share command sizes, group captions, selection states, and horizontal
+scrolling; Insert pairs large primary commands with compact secondary actions.
+Command labels use at most two balanced lines, with button widths fitting the
+full text. Compact icons, stacked controls, and galleries keep the ribbon at
+80 px without group captions, or 97 px with captions. Document illustrations
+retain their own colors and typography.
+
+Ribbon group labels are hidden by default for a shorter ribbon. Toggle
+**View → Ribbon Group Labels** to show or hide them across all tabs, including
+contextual ribbons. The choice stays active when opening or creating documents
+in the same app session. Startup defaults live in `mod_app.ls`'s
+`default_settings`; `app.initial({show_ribbon_group_labels:true})` enables labels
+at startup without changing document content.
+
+References adds document-owned sources for books, journal articles, and websites.
+Use **Insert Citation → Add New Source**, or create sources without citing them
+through **Manage Sources**. The source form supports personal/corporate authors,
+year, publication details, page ranges, DOI, URL, and accessed date; **Show all
+bibliography fields** exposes the optional fields. Separate personal authors
+with semicolons and enter names as `Last, First`.
+
+Choose APA, Chicago author–date, or IEEE. These reuse Lambda's bundled CSL
+processor and its [documented coverage](../../../lmd/package/doc/latex/citeproc/README.md).
+Double-click a citation or use its context menu to change its page locator or
+edit its source. Source/style edits update the citation fields and bibliography
+in one undo step. **Bibliography** inserts the cited sources at the caret;
+**Update Citations & Bibliography** refreshes fields after text edits, rich paste,
+or rearrangement. IEEE numbering follows first citation order. A cited source
+cannot be deleted until its citations are removed. Typing after insertion starts
+outside the citation.
+
+Source records and fields survive editable snapshots and HTML; PDF preserves
+the formatted output. A copied citation carries an embedded source, so pasting
+it into another document keeps it resolvable. State and source positions remain
+owned by the immutable editor model (**S1.4**, **D7.2.5**). This core workflow
+does not include Zotero integration, CSL style installation, note citations, or
+Word citation-field/DOCX source interoperability. Each field cites one source.
+The existing restriction on structural edits during tracked changes also
+applies to citation insertion and bibliography updates.
 
 ## Available workflow
 
@@ -39,11 +80,23 @@ outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
   before/after, left indentation, and first-line indentation in one undo step.
   Tab/Shift+Tab adjust list indentation while keeping the caret in the item;
   the same indentation appears in editable snapshots, HTML, and PDF exports.
+  The Editing group opens Find and Replace in Navigation. Find's dropdown moves
+  between matches; Select offers the whole document, current paragraph, and
+  table cell/row/column/table selections. Dropdowns support keyboard navigation.
+  Selecting text opens a floating formatting toolbar with font and size,
+  emphasis, highlighting, text color, and paragraph alignment. It preserves the
+  selected range through repeated formatting, follows scrolling and zoom, and
+  stays within the document viewport. Escape or using another pane dismisses it.
+  Ribbon, floating-toolbar and WordArt font pickers discover installed native
+  families when the workspace opens, through `dom.query_local_fonts`. A document's
+  requested family remains selectable when it is missing locally. Long native
+  menus show a draggable scrollbar, accept wheel scrolling, and keep the current
+  keyboard choice visible without scrolling the document.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.
   Shapes offers fifteen basic, flowchart, and decorative shapes with editable
-  size, fill, outline color/weight, rotation, and text. Shapes use shared contours, sit inline with text,
+  size, fill, outline color/weight, rotation, and text. Shapes use shared contours and start inline with text,
   and retain their settings in snapshots and HTML; PDF includes their SVG image.
   Click an existing picture or shape to select it, then open its settings, or
   double-click it to edit directly.
@@ -52,6 +105,42 @@ outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
   or heading and isolates a new editable paragraph between two page boundaries.
   The Symbol dialog offers punctuation, mathematics, currencies, Greek letters,
   and arrows, plus custom text of 1–64 printable Unicode characters.
+- Table Design appears beside Table Layout when the caret or selection is in a
+  table. It provides ten style previews; Header Row, Total Row, First/Last Column,
+  and Banded Rows/Columns options; selected-cell shading with custom colors; and
+  a border pen with line style, weight, color, and all/outside/inside/individual
+  edge presets. Borders opens the existing detailed dialog. Direct cell fills
+  and borders survive style changes. A transparent selection overlay keeps
+  fills visible while selecting cells. Design settings and direct formatting
+  persist in snapshots, HTML, and PDF; each change takes one undo step.
+- Table Layout provides Select and Delete menus, view-only gridlines, table
+  properties, row/column insertion, merge/split cells, split table, AutoFit to
+  contents/window or fixed columns, cell height/width in points, row/column
+  distribution, a nine-position alignment grid, text direction, and cell margins.
+  A shared visual grid accounts for rowspans and colspans in selection, borders,
+  merge/split, and insertion/deletion. Splitting keeps the content in the first
+  resulting cell; merging preserves each cell's text and marks with line breaks.
+  Size fields retain focus while typing. Table ranges survive native caret echoes.
+  Data tools sort by text or number, keep header/footer groups, repeat leading
+  rows through a real `thead`, and convert cells into formatted paragraphs with
+  tabs, commas, or paragraph separators. Formula supports SUM, AVERAGE, MIN, MAX,
+  and COUNT over ABOVE/BELOW/LEFT/RIGHT, one cell, or an A1:B3 range. Results update
+  when Calculate is pressed; this is a bounded formula dialog, not Word's full field
+  language. Sorting vertically merged cells requires splitting them first, and
+  merges stay within a row group. Pen/eraser table drawing remains unimplemented.
+  Layout edits preserve surrounding content and take one undo step. Snapshots,
+  HTML, and PDF retain table sizes, margins, direction, and repeated header groups.
+- Illustrations: **Icons / Emojis** offers twenty outline icons with editable
+  color, dimensions, and rotation, and a Unicode emoji gallery with custom
+  sequences. Emojis insert as ordinary editable text. **SmartArt** arranges
+  2–8 text items as a process, hierarchy, cycle, or list. **Chart** offers column,
+  bar, line, pie, and doughnut charts, with editable title, color, and up to
+  twenty `Label, Value` rows. Negative values work in Cartesian charts; pie and
+  doughnut charts require nonnegative values with a positive total. Preview
+  checks data before insertion. Double-click or use the focused object's
+  context menu to edit it. Icons, SmartArt, and charts use the same move, resize,
+  rotation, copy/paste, and undo controls as other illustrations; metadata and
+  self-contained SVG survive snapshots and HTML, and PDF keeps their appearance.
 - Header and Footer: repeating text, left/center/right alignment, font size,
   on-screen edge distance, and an option to leave the first page blank.
   `{PAGE}` and `{NUMPAGES}` fields update with explicit screen sheets and actual
@@ -66,7 +155,7 @@ outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
   upward/downward arch, and wave transforms; editable text, font, size, colors,
   and dimensions. Equations and WordArt remain editable inline SVG objects in
   snapshots and HTML; PDF preserves their appearance.
-- Object transforms: select a picture, shape, or WordArt to show four corner
+- Object transforms: select a picture, shape, WordArt, icon, SmartArt, or chart to show four corner
   resize handles and a circular rotation handle. Drag the object body to move
   it into a paragraph, list item, empty block, or table cell; a caret previews
   the drop position. The first drag can select the object and move it together.
@@ -76,6 +165,42 @@ outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
   settings also accept exact dimensions and a rotation from −180° to 180°.
   WordArt resizing scales its lettering; shape text keeps its font size.
   Handles follow zoom and scrolling and are hidden in read mode and dialogs.
+- Shape Format appears when a shape or WordArt is selected. It offers shape
+  presets, Edit Shape, Text Box, fill/outline color menus, outline weight and
+  dashes, an outer shadow, WordArt text styles, text colors, and exact dimensions.
+  Shape text supports horizontal alignment, top/middle/bottom alignment, and
+  90°/270° direction. The Format Pane provides custom colors, gradients,
+  opacity, native fonts, bold/italic shape text, text inset, rotation, and alt
+  text. WordArt also exposes its existing curved text transforms in the pane.
+  Arrange tools remain available in this ribbon. Formatting preserves placement,
+  reflection, and surrounding text, and survives undo, clipboard, saving, and
+  HTML/PDF export. Custom paths, edit points, 3D, glow, and soft edges are not
+  implemented.
+- Equation appears when an equation is selected. It provides preset equations,
+  Unicode symbol galleries, and eleven structure galleries, including fractions,
+  roots, scripts, integrals, accents, brackets, functions, limits, and matrices.
+  Open the LaTeX source editor or double-click an equation; select source text
+  before choosing a structure to wrap it. Apply or Ctrl/⌘ Enter updates the
+  document; invalid drafts leave the applied equation intact. Close Equation
+  applies a valid draft, while Discard Draft closes without applying it.
+  Professional/linear views, actual inline/display flow, justification, size,
+  color, and explicit equation labels persist in snapshots, clipboard, and
+  HTML/PDF exports. Labels are manual; Word's UnicodeMath grammar, automatic
+  equation numbering, and structured in-canvas math editing are not implemented.
+- Object Format appears when an image-backed object is selected. Its Arrange
+  group is also available in Layout: nine page-margin positions, inline/square
+  left or right/top and bottom/front/behind wrapping, layer order, six page-margin
+  alignments, rotation, and horizontal/vertical flips. Layout Options accepts
+  exact paragraph-relative positions and distance from text. Floating objects
+  drag freely; inline and flow objects retain caret-based relocation. Each edit
+  is undoable and persists in snapshots, rich clipboard content, HTML and PDF.
+  The Selection Pane selects covered objects and hides/shows them. Check 2–20
+  objects on one explicit page, then choose Group; the group moves, resizes
+  proportionally and rotates as one object. Ungroup recovers editable members
+  with their composed transforms and preserves the surrounding text. Groups
+  must fit within 650 × 2000 px. Contour wrapping, page-fixed anchors,
+  multi-object distribution, and DOCX drawing interoperability remain outside
+  this core workflow. Position presets capture the current page geometry.
 - Bookmarks: name the current paragraph, list targets, Go to, delete, or move an
   existing name to another paragraph. Names use up to 40 ASCII letters, digits,
   or underscores and cannot start with a digit. Each paragraph has one bookmark.
@@ -85,17 +210,32 @@ outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
   bookmark navigation while disabling insertion and deletion.
 - Contextual Table ribbon: rows above/below, columns left/right, row/column/table
   deletion, four table styles, and nine cell alignments. Select cells, rows,
-  columns, or the whole table from the ribbon or context menu. Edge grips select
-  rows/columns; drag the small cell grip for a rectangular range, or Shift-click
-  another cell to extend a selection. Borders offers solid, dashed, dotted,
+  columns, or the whole table from the ribbon or context menu. Drag within a
+  cell to select text; crossing into another cell selects a rectangular cell
+  range, including whole rows, columns, or the table when covered. Shift-click
+  and Shift+arrow keys extend the range. Borders offers solid, dashed, dotted,
   double, or no lines, a width and color, and all/outside/inside/individual-edge
   presets. Formatting applies to the selected cells in one undo step. Copy
   includes table HTML and tab-separated text; pasting a grid into selected cells
   preserves the existing table. Delete clears cell contents. Tab/Shift+Tab move
   between cells; Tab at the final cell adds a row.
-- Layout: A4, Letter, and A5 paper; portrait/landscape; preset or custom margins
-  in millimetres; explicit page breaks. Paper geometry changes the editing
-  canvas and exported PDF pages. Invalid margins keep the dialog open.
+- Layout: A4, Letter, and A5 paper; portrait/landscape; explicit page breaks.
+  Margins offers Normal, Narrow, Moderate, Wide and Mirrored presets with page
+  previews and inch measurements. Custom Margins edits millimetres and switches
+  between normal and facing-page inside/outside edges without discarding fields.
+  Mirrored pages alternate margins in the editor, thumbnails, headers/footers
+  and PDFs; rulers track the visible page and edit the corresponding stored edge.
+  Margin changes support undo and editable/HTML round trips (**D7.2.5**).
+  Invalid margins or insufficient header/column space keep the document intact.
+- Columns: Layout → Columns offers One, Two, Three, and More Columns for a custom
+  count (1–6), spacing in millimetres, and an optional separator line. Columns
+  apply to the whole document; text, lists and tables flow through the same
+  source nodes. Headers/footers stay full width. Column changes support history,
+  snapshots, HTML round trips, thumbnails, Read Mode and Web Layout. Page setup
+  and ruler margins retain at least 20 mm per column. PDF uses paginated native
+  body regions through `radiant.export_document` with `source_format:"xhtml"`
+  (**D2.10**, **D7.2.5**). Unequal Left/Right presets, section-specific settings
+  and explicit column breaks remain unsupported.
 - Review: comments anchored to selected text, author and quoted context, a
   sidebar, previous/next and Go to text, resolve/reopen, and delete. Overlapping
   anchors survive character formatting and editing; comment changes support undo.
@@ -106,11 +246,38 @@ outline SVG icons in `../mod_icons.ls`; the document keeps its own typography.
   cancels it. Review and editing both support undo/redo. Snapshot and HTML
   preserve pending revisions; PDF exports visible revision marks and text export
   uses the final text with pending deletions omitted.
-- Navigation: document headings, Unicode-aware case-insensitive search with a
-  Match case toggle, previous/next match, replacement, and one-step undo for
-  Replace all across formatting runs within a paragraph.
-- View: navigation pane, read mode, focus mode, and 50–150% zoom. The ruler stays
-  above the document viewport and follows horizontal scrolling and zoom. Explicit page
+- Navigation: close the pane with its × button and reopen it from View or Find.
+  Headings, Pages, and Results tabs support clicks and arrow/Home/End keys.
+  Headings jump to their text; Pages shows content thumbnails with the document's
+  paper proportions and jumps to each on-screen sheet, including blank pages.
+  Thumbnails update after edits, page breaks, and undo without adding editing
+  bindings or duplicate bookmark IDs. Read Mode and Web Layout support navigation.
+  Results lists clickable match excerpts with the query highlighted. Search is
+  Unicode-aware and case-insensitive, with a Match case toggle, previous/next
+  match, replacement, and separate undo steps
+  for Replace and Replace all across formatting runs within a paragraph.
+- View: Read Mode, Print Layout, and Web Layout are available in the status bar
+  and View ribbon, with the active view highlighted. Read Mode prevents editing;
+  Print Layout shows paper sheets, margins, headers/footers, and rulers. Web Layout
+  presents an editable continuous document that reflows with the window and zoom,
+  hiding paper gaps, headers/footers, and rulers. Returning to Print Layout retains
+  paper settings and explicit page breaks. Switching views preserves the document,
+  selection, and undo history; leaving Read Mode restores the previous editing view.
+  Navigation, focus mode, and 50–150% zoom remain independent. Centimeter rulers
+  stay above and to the left of the document viewport, with shaded page margins
+  and zero at the writing area's origin. They follow scrolling and zoom; the
+  vertical scale restarts for each page. Drag the shaded margin boundaries to
+  resize left/right margins on the horizontal ruler and top/bottom margins on
+  the vertical ruler. The upper left triangle sets the first-line indent; the
+  lower left triangle sets the hanging indent while holding the first line in
+  place. The rectangle moves both together, and the right triangle sets the
+  right indent. Controls follow the current paragraph, including list items and
+  table cells. A drag previews the layout with a guide and creates one undo step
+  when released; Escape cancels it. Arrow keys adjust a focused control by 1 pt
+  or 0.5 mm; Shift makes the step ten times larger. Read Mode disables these
+  controls. Page margins retain room for the body and configured headers/footers.
+  The bottom status bar shows writing or
+  reading mode, paper size, orientation, and page count. Explicit page
   breaks create separate editable sheets with the chosen size and margins;
   ordinary Enter continues on the same sheet. PDF export paginates using
   that document's paper, orientation, margins, and explicit page breaks.
@@ -201,6 +368,10 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 Character formatting splits only the selected portions of boundary leaves.
 Their selection positions are remapped explicitly, including backwards ranges;
 ordinary replace-step mapping would collapse positions inside a replaced leaf.
+Text leaves retain separate inline wrappers in the live projection, so
+Mark content normalization cannot merge away their source paths when formatting
+is cleared (**S2.6.5**, **D7.2.5**). The toolbar retains its geometry in UI state;
+viewport movement only repositions its overlay, preserving document selection.
 Replace all applies existing insertion transactions from the final match
 backwards and composes their steps into one history item. View changes and
 selection movement never change the saved document checkpoint (**S1.4**,
@@ -318,25 +489,52 @@ python3 test/demo/word/run_tests.py --model-only
 ./test/test_state_store_gtest.exe --gtest_filter='StateStoreDomMutationTest.CaretFrameOffsetExcludesAncestorScroll'
 ```
 
+For a shared build, `--lambda-exe` can point at a stable executable snapshot.
+`--ui-only --ui-start-at <fixture>` resumes an interrupted UI run while retaining
+its generated files for the export checks; use the same code and host binary.
+
 The runner checks model, snapshot, and HTML/Markdown/text/DOCX import goldens on
 interpreter, auto, and JIT tiers; then replays typing/history/save,
 formatting/search/table, open/export/dirty-guard/focus, table-caret, scrolled-caret,
 table navigation/settings, pictures/links, paragraph/search, page setup, comments,
 cover/blank pages, bookmarks/internal links, symbols, repeated stories, equations,
-WordArt, shape settings, and tracked revisions
+WordArt, shape settings, icons/emojis, SmartArt, charts, and tracked revisions
 in headless Radiant. It checks the result records and exported file contents,
 including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are
 `temp/word-initial.png` and `temp/word-edited.png`. Test reruns replace only
 their own named files under `temp/word/`.
+The ribbon-appearance replay captures all eight ribbons, checks shared height and label/caption
+bounds, opens insertion dialogs, and verifies command access after narrowing the
+window to 900 pixels. Browsing the tools must leave the document unchanged.
+The citations replays cover source forms, authors and source types, validation,
+locators, all three CSL styles, bibliography refresh, context actions, native
+typing after a field, read mode, and snapshot/HTML/PDF persistence. Their model
+golden adds undo/redo, source-carrying rich paste, and escaped/Unicode titles.
 The object-transform replay covers mouse/touch resizing, rotation, Shift
 snapping, Escape, zoom, undo/redo, read mode, and editable/HTML/PDF persistence.
+The illustrations replay checks Unicode emoji input, all three insertion
+dialogs, invalid data, gallery previews, focused menus, edits, resize handles,
+copy/paste, undo/redo, read mode, and snapshot/HTML/PDF exports. Its model
+golden also checks every layout/chart type and metadata after rich paste.
+The Table Design replay checks contextual tabs, gallery previews, all six style
+options, visible header/band colors, selection-aware shading and borders,
+preserved direct formatting, undo/redo, HTML reopening, PDF export, and read mode.
+The Table Layout replay checks its controls, gridline preference, merge/split
+and history, size-field focus, alignment, margins, text direction, properties,
+selection-preserving distribution, AutoFit, headers, formulas, sort, table
+splitting, conversion, and exports. Its model golden also checks spans during
+row/column edits, rectangular selection closure, caret echoes, invalid requests,
+row groups, and snapshot/HTML round trips on every execution tier.
 The object-move replay covers a first drag on an unselected object, mouse/touch
 moves into text, lists, and cells, drop preview, cancellation, invalid drops,
 selection, undo/redo, zoom, read mode, and the four resize cursors.
-The table-selection replay covers ribbon/context/grip selection, rectangular
+The table-selection replay covers ribbon/context selection, direct rectangular
 drag and Shift-click ranges, border styling and history, rich clipboard grid
-paste, replacement typing, deletion, and read mode. Logical node/multi-node
+paste, replacement typing, deletion, and read mode. The table-drag replay checks
+text selection within one cell, automatic cell/row/column/table selection in
+both drag directions, live previews, keyboard extension, cancellation, zoom,
+and ordinary editing after a cell-range selection. Logical node/multi-node
 selections retain source paths while native text geometry receives a caret in
 the first cell (**D7.2.5**). Cell lookup uses native DOM identity, so similarly
 structured cells cannot alias. A raster unit test checks actual dashed, dotted,
@@ -345,12 +543,45 @@ The viewport replay checks caret/list clipping above the workspace and stable
 physical typing, including Space and arrow keys, at normal and increased zoom.
 Geometric bullets share the document transform during zoom; visible and clipped
 marker pixels are checked on both sides of the document viewport boundary.
-The ruler replay checks second-page scrolling, horizontal alignment, zoom,
-resizing, focus mode, and stable typing. Workspace chrome sits outside the
-document's vertical caret clip while sharing its horizontal offset (**D7.2.5**).
+The ruler replay checks both axes against live page bounds, centimeter spacing,
+margin origins, second-page scrolling, zoom, resizing, focus/read modes, and
+stable typing. Native scrollbar drags in both directions update both rulers
+while held, including at clamped limits; unchanged offsets emit no extra scroll
+events. Paper/orientation/margin changes update the rulers and bottom
+status bar, including at narrow widths. `mod_ruler.ls` keeps this chrome outside
+the document's caret clip and source tree (**D7.2.5**).
+The ruler-edit replay covers all four margins; first-line, hanging, left, and
+right indents; live guides, exact cancellation, range and caret preservation,
+undo/redo, keyboard adjustments, read mode, and zoom with horizontal scrolling.
+Model goldens check size limits, header space, selected paragraphs, imported
+length units, and table-cell paragraph creation with mapped selection and undo.
+Ruler previews stay outside document history; a completed gesture uses the same
+page or paragraph transaction as the dialogs (**S1.4**, **D7.2.5**).
+The margins replay checks presets and previews, custom mode/field preservation,
+validation, mirrored page/ruler geometry, thumbnails, stories, editing and file
+round trips. The export fixture checks exact preset text edges and alternating
+inside/outside edges in ordinary and column PDFs with independent PDF extraction.
+The view-modes replay checks status/ribbon synchronization, read-only typing,
+continuous page flow, story visibility, window/zoom reflow, image handles and
+resizing, and selection/undo preservation across page breaks and view changes.
+It also checks stable Space/arrow-key scrolling and narrow status bars.
+`mod_view.ls` keeps presentation choices outside the document and its history
+(**D7.2.5**).
+The navigation replay checks closing/reopening, keyboard tabs, heading jumps,
+live page thumbnails, blank-page navigation and typing, search-result jumps,
+read-only selection, Web Layout, zoom, and paper orientation. Read Mode uses
+ordinary Selection operations rather than the editable-surface completion bridge;
+leaf wrappers keep those selections aligned with the source (**D7.2.5**).
 The page-break typing replay checks immediate typing after a paragraph split,
 an empty new page, and undo/redo. It also puts the native caret on the editor's
 unmapped wrapper to verify typing retains the document and logical caret.
+The columns replay covers text fragmented across columns, caret/typing, history,
+custom spacing and rules, validation, page breaks, table-cell edits, responsive
+views and file round trips. `_columns_export.ls` checks default HTML and explicit
+XHTML export; the long PDF must contain five sheets and no leading blank. When
+`pdftotext` is available, the harness verifies all 100 paragraphs appear once and
+headers/page fields repeat correctly. Applied source nodes remain singular
+through the presentation wrappers (**D7.2.5**).
 The context-menu replay checks clipboard edits, selection preservation,
 formatting, history, keyboard navigation, read-mode copying, and small-window bounds.
 The focused-item replay checks each item menu and its command target, including
