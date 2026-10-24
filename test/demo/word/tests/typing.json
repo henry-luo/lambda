@@ -1,0 +1,179 @@
+{
+  "name": "Word rapid physical typing retains ribbon controls, caret, scrolling and history",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 720
+  },
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "window.typingRibbon=document.querySelector('.ribbon-shell');window.typingFonts=document.getElementById('font-family');window.typingStage=document.getElementById('stage');window.typingHoverStyle=getComputedStyle(document.getElementById('new')).backgroundColor;true"
+    },
+    {
+      "type": "type_physical",
+      "text": "F"
+    },
+    {
+      "type": "type_physical",
+      "text": "a"
+    },
+    {
+      "type": "type_physical",
+      "text": "s"
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "y"
+    },
+    {
+      "type": "type_physical",
+      "text": "p"
+    },
+    {
+      "type": "type_physical",
+      "text": "i"
+    },
+    {
+      "type": "type_physical",
+      "text": "n"
+    },
+    {
+      "type": "type_physical",
+      "text": "g"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "k"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "type_physical",
+      "text": "p"
+    },
+    {
+      "type": "type_physical",
+      "text": "s"
+    },
+    {
+      "type": "type_physical",
+      "text": " "
+    },
+    {
+      "type": "type_physical",
+      "text": "u"
+    },
+    {
+      "type": "type_physical",
+      "text": "p"
+    },
+    {
+      "type": "type_physical",
+      "text": "."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Fast typing keeps up."
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.ribbon-shell')===typingRibbon&&document.getElementById('font-family')===typingFonts&&document.getElementById('stage')===typingStage&&document.getElementById('new').matches(':hover')&&getComputedStyle(document.getElementById('new')).backgroundColor===typingHoverStyle"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface p"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "type_physical",
+      "text": "!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Fast typing keeps up!."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"edit.undo\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Fast typing keeps up."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"edit.redo\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "Fast typing keeps up!."
+    }
+  ]
+}

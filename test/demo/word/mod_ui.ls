@@ -49,6 +49,15 @@ let alignments = [{id:"para.alignLeft",icon:"align_left",value:"left"},{id:"para
 let text_colors = [{value:"#24334b",label:"Ink"},{value:"#2864ad",label:"Blue"},
     {value:"#b43d47",label:"Red"},{value:"#28745d",label:"Green"}]
 
+// choose one word boundary; intrinsic button width keeps both lines fully visible.
+fn ribbon_label(label) {
+    let words = split(label," ")
+    let lines = if (len(words)<2) [label] else {
+        let at = sort(1 to (len(words)-1),(i)=>abs(len(join(slice(words,0,i)," "))-len(join(slice(words,i)," "))))[0];
+        [join(slice(words,0,at)," "),join(slice(words,at)," ")]
+    };
+    [for (line in lines) <span class:"ribbon-label-line",line>]
+}
 view <word_button> {
     let graphic = if (~.icon is string) ribbon_icons.icon(~.icon,16) else ~.icon;
     <button id:~.id, type:"button", class:"tool " ++ (~.class or ""), title:~.title or ~.label,
@@ -60,7 +69,8 @@ view <word_button> {
         *:if (~.disabled) {disabled:""} else {},
         if (~.preview!=null) ~.preview else null;
         if (graphic != null) <span class:"tool-icon",["aria-hidden"]:"true",graphic> else null;
-        <span class:"tool-label", ~.content or ~.label>;
+        <span class:"tool-label", *if (~.content!=null) [~.content] else if (contains(~.class or "","ribbon-large") or contains(~.class or "","table-large-tool"))
+            ribbon_label(~.label) else [~.label]>;
         if (~.menu!=null) <span class:"menu-chevron",["aria-hidden"]:"true",icon("down",10)> else null;
         if (~.shortcut!=null) <span class:"context-key",~.shortcut> else null>
 }
@@ -374,7 +384,8 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
 }
 fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
     edit_mark_active(editor,model.spec(id).mark),false,"icon-only")
-fn group(label,items) => <div class:"ribbon-group group-" ++ replace(lower(label)," ","-"), <div class:"group-tools", *items> <div class:"group-label", label>>
+fn group(label,items) => <div class:"ribbon-group group-" ++ replace(lower(label)," ","-"),role:"group",["aria-label"]:label,
+    <div class:"group-tools", *items> <div class:"group-label", label>>
 fn large(id,action,label,graphic,params={},pressed=false,disabled=false,title=null) =>
     button(id,action,label,graphic,params,pressed,disabled,"ribbon-large",title)
 fn selector(id,command,values,current,css="",param="value",disabled=false) =>
@@ -478,7 +489,7 @@ pub fn selection_toolbar(st) => if (not mini.visible(st)) null else {
             selector("mini-color","format.color",text_colors,model.char_value(editor,"color","#24334b"),"mini-color","color");
             <span class:"mini-divider">;
             *[for (choice in alignments) button("mini-" ++ choice.icon,choice.id,model.spec(choice.id).label,
-                choice.icon,{},align==choice.value,false,"icon-only")]>],st.mini_box)
+                choice.icon,{},align==choice.value,false,"icon-only")]>])
 }
 
 pub fn view_buttons(layout,read_only,status=false) => [for (choice in views.modes)
@@ -487,7 +498,7 @@ pub fn view_buttons(layout,read_only,status=false) => [for (choice in views.mode
 fn equation_widgets() => {button:button,menu:menu_button,group:group,menu_item:menu_item}
 pub fn equation_pane(st) => equation_ui.pane(st,equation_widgets())
 
-pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_families=[],layout="print",focused=false,table_pen=table_design.pen,table_gridlines=false,object_picks=[],shape_draft=null) {
+pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_families=[],layout="print",focused=false,table_pen=table_design.pen,table_gridlines=false,object_picks=[],shape_draft=null,show_ribbon_group_labels=false) {
     let block = model.current_block(editor)
     let style = attrs_get(block.node.attrs,'data-word-style') or "Normal"
     let align = model.css_get(attrs_get(block.node.attrs,'style'),"text-align") or "left";
@@ -621,8 +632,10 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_f
     else if (tab == "Table") table_layout_ribbon(editor,read_only,opened_menu,table_gridlines)
     else <div class:"ribbon-groups view-ribbon",
         group("Document views",view_buttons(layout,read_only))
-        group("Show",[button("view-navigation","view.navigationPane","Navigation","sidebar",{},nav),
-            button("view-focus","view.focusMode","Focus","focus",{},focused)])
+        group("Show",[<div class:"ribbon-command-stack",
+            button("view-navigation","view.navigationPane","Navigation","sidebar",{},nav)
+            button("view-ribbon-labels","view.ribbonGroupLabels","Ribbon Group Labels","text_box",{},show_ribbon_group_labels)
+            button("view-focus","view.focusMode","Focus","focus",{},focused)>])
         group("Zoom",[button("zoom-out","view.zoomOut","Zoom out","minus"),button("zoom-reset","view.zoomReset","100%","zoom_reset"),
             button("zoom-in","view.zoomIn","Zoom in","plus")])
     >

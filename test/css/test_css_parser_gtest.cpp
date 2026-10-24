@@ -84,6 +84,20 @@ TEST_F(CssParserTest, ValueDependencySearchVisitsCompleteMixedTrees) {
     EXPECT_TRUE(css_value_contains_percentage(nodes[3]));
 }
 
+TEST_F(CssParserTest, AttributeDependenciesIncludeVariableAndEnvironmentFallbacks) {
+    const char* dependent[] = {"color:attr(data-color)",
+        "color:var(--missing, attr(data-color))", "color:env(missing, attr(data-color))"};
+    for (const char* source : dependent) {
+        CssDeclaration* declaration = css_parse_declaration_text(source, strlen(source), pool);
+        ASSERT_NE(declaration, nullptr) << source;
+        EXPECT_TRUE(css_value_contains_attr_reference(declaration->value)) << source;
+    }
+    const char* source = "color:var(--color, red)";
+    CssDeclaration* declaration = css_parse_declaration_text(source, strlen(source), pool);
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_FALSE(css_value_contains_attr_reference(declaration->value));
+}
+
 TEST_F(CssParserTest, LinguisticFunctionsValidateTokensBeforeDecoding) {
     const char* valid[] = {":lang(en)", ":lang( en, 'de-*-DE' )", ":lang(\"*\")",
         ":lang(\\65 n)", ":lang(en/**/,fr)", ":lang(\"\")", ":lang(en", ":dir(sideways)",

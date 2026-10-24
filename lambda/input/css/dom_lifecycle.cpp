@@ -97,6 +97,7 @@ __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*
 __attribute__((weak)) void view_tree_release_detached_embedded_documents(ViewTree*, DomNode*) {}
 __attribute__((weak)) void view_tree_prepare_detached_subtree(DomNode*) {}
 __attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
+__attribute__((weak)) uint32_t view_state_detach_subtree(DocState*, DomNode*) { return 0; }
 __attribute__((weak)) void form_control_release_prop(DomElement*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
 __attribute__((weak)) void dom_retire_release_render_result(DomDocument*, Item) {}
@@ -739,6 +740,8 @@ static size_t dom_retire_collect(DomDocument* doc) {
                 }
                 DomNodeRecord* blocked = nullptr;
                 if (dom_subtree_can_retire(doc, root, &blocked)) {
+                    // durable control/media state survives detachment, but must end before its weak node identity retires (D4.5.1v4).
+                    view_state_detach_subtree(doc->state, root);
                     if (doc->view_tree) {
                         view_tree_release_retired_subtree(doc->view_tree, root);
                     }

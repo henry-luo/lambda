@@ -1,12 +1,13 @@
 // colored chrome reuses the album's contours; document icons keep their own color (D7.2.5).
 import outline: ~~.mod_icons
 
-let palettes = {blue:{ink:"#53677f",accent:"#3478cc",wash:"#e3efff"},
-    violet:{ink:"#5d6380",accent:"#805bc5",wash:"#eee7fb"},
-    teal:{ink:"#536b79",accent:"#278993",wash:"#e0f2f3"},
-    amber:{ink:"#6d6b75",accent:"#be8a31",wash:"#fff0d5"},
-    rose:{ink:"#6c667b",accent:"#c26073",wash:"#f9e7ec"},
-    slate:{ink:"#65758b",accent:"#65758b",wash:"#eaf0f6"},
+// saturated contours keep small ribbon glyphs crisp against the white panels.
+pub let palettes = {blue:{ink:"#1764c0",accent:"#0a84ff",wash:"#d6eaff"},
+    violet:{ink:"#7444c4",accent:"#a14af5",wash:"#efe0ff"},
+    teal:{ink:"#007f91",accent:"#00b4c7",wash:"#d0f5f5"},
+    amber:{ink:"#b76a00",accent:"#ffab00",wash:"#fff0bf"},
+    rose:{ink:"#c63265",accent:"#ff477d",wash:"#ffe1eb"},
+    slate:{ink:"#426b9e",accent:"#548ee6",wash:"#e1edff"},
     ink:{ink:"currentColor",accent:"currentColor",wash:"none"}}
 let families = [
     {tone:"blue",names:["cover","blank_page","page_break","header","footer","page_number","document","folder","save","export",
@@ -136,8 +137,8 @@ pub fn icon(graphic,size=20) {
         ["aria-hidden"]:"true",["data-icon"]:graphic,["data-icon-tone"]:tone,
         if (detail.fill!=null) <path class:"color-icon-fill",d:detail.fill,fill:p.wash,stroke:"none"> else null;
         if (detail.solid!=null) <path class:"color-icon-solid",d:detail.solid,fill:p.accent,stroke:"none"> else null;
-        <g class:"color-icon-ink",if (contour!=null) <path d:contour,fill:"none",stroke:p.ink,'stroke-width':1.5,
-            'stroke-linecap':"round",'stroke-linejoin':"round"> else outline.glyph(base,p.ink,1.5)>;
+        <g class:"color-icon-ink",if (contour!=null) <path d:contour,fill:"none",stroke:p.ink,'stroke-width':1.0,
+            'stroke-linecap':"round",'stroke-linejoin':"round"> else outline.glyph(base,p.ink,1.0)>;
         if (detail.accent!=null) <path class:"color-icon-accent",d:detail.accent,fill:"none",stroke:p.accent,
-            'stroke-width':1.65,'stroke-linecap':"round",'stroke-linejoin':"round"> else null>
+            'stroke-width':1.0,'stroke-linecap':"round",'stroke-linejoin':"round"> else null>
 }

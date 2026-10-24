@@ -31,7 +31,8 @@ import equation_edit: .mod_equation_edit
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
 
-edit <word_app> state st:app.initial() {
+// keep render-only calculations out of the handler activation scope.
+fn workspace(st) {
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     let words = model.word_count(st.editor.doc);
     let in_table = model.table_context(st.editor) != null
@@ -43,12 +44,14 @@ edit <word_app> state st:app.initial() {
     let paper = page.settings(st.editor.doc)
     let page_count = len(page.sheets(st.editor.doc))
     let layout = if (st.read_only) "print" else st.layout;
+    let comment_css = review.css(st.editor.doc);
     <body id:"word", class:trim((if (st.focused) "focus-mode " else "") ++
         (if (st.nav and st.search_mode!=null) "search-open " else "") ++ (if (layout=="web") "web-layout " else "") ++
         (if (st.show_changes) "" else "hide-changes")), ["data-dirty"]:string(dirty), ["data-view"]:views.active(st.layout,st.read_only),
         ["data-revision"]:string(st.editor.model_revision), ["data-tab"]:tab, ["data-readonly"]:string(st.read_only),
         ["data-table-gridlines"]:string(st.table_gridlines),
-        <style review.css(st.editor.doc)>
+        ["data-ribbon-group-labels"]:string(st.show_ribbon_group_labels),
+        if (comment_css!="") <style comment_css> else null;
         <header class:"titlebar",
             <div class:"brand", <span class:"brand-mark", ui.icon("document",24)> <span "Word"> <span class:"brand-divider"> <span class:"brand-detail", "LAMBDA">>
             <div class:"document-title", st.file_state.envelope.title; <span class:"save-indicator", if (dirty) "  •  Unsaved" else "  •  Saved">>
@@ -63,7 +66,7 @@ edit <word_app> state st:app.initial() {
                     ui.button("tab-" ++ replace(lower(name)," ","-"),"ui.tab",if (name=="Table") "Table Layout" else name,null,{tab:name},tab==name,false,"tab")];
                 <div class:"tab-spacer">
                 ui.button("sample","file.sample","Studio example")>
-            ui.ribbon(st.editor,tab,st.nav,st.read_only,st.show_changes,st.context.menu,st.fonts,st.layout,st.focused,st.table_pen,st.table_gridlines,st.object_picks,st.shape_draft)
+            ui.ribbon(st.editor,tab,st.nav,st.read_only,st.show_changes,st.context.menu,st.fonts,st.layout,st.focused,st.table_pen,st.table_gridlines,st.object_picks,st.shape_draft,st.show_ribbon_group_labels)
         >
         <main class:"workspace",
             <div class:"navigation-slot", style:if (st.nav and not st.focused) "display:block" else "display:none",
@@ -95,17 +98,10 @@ edit <word_app> state st:app.initial() {
         ui.dialog(st.dialog,st.file_state,st.editor,st.read_only,st.fonts)
     >
 }
+edit <word_app> state st:app.initial() { workspace(st) }
 on beforeinput() { return 'pass' }
 on word_toolbar_ready(evt) {
     if (not ruler.dragging(evt.target)) mini.position(evt.target)
-    return 'pass'
-}
-on word_toolbar_commit(evt) {
-    if (ruler.dragging(evt.target)) { return 'pass' }
-    let before = st.mini_box
-    st = app.position_toolbar(st,evt.target)
-    // a geometry snapshot redraws the shell; retain its source range through that projection.
-    if (st.mini_box!=before) controller.restore(tables.native_editor(st.editor),not st.read_only and st.dialog==null)
     return 'pass'
 }
 on word_object_select(req) {
@@ -228,9 +224,13 @@ on editaction(evt) {
     return run.result
 }
 on selectionchange(evt) {
-    st = app.selection_changed(st,evt)
+    let next = app.selection_changed(st,evt)
+    if (next!=st) { st = next }
 }
-on word_selectionchange(req) { st = app.selection_changed(st,req.event) }
+on word_selectionchange(req) {
+    let next = app.selection_changed(st,req.event)
+    if (next!=st) { st = next }
+}
 on keyup(evt) {
     // native navigation completes after keydown; promote its final source range.
     if (st.dialog==null and not tables.structural(st.editor) and not app.is_control(evt.target) and

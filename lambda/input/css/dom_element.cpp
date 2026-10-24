@@ -1993,8 +1993,8 @@ static bool dom_element_sync_attribute_mirror(DomElement* element, const char* n
     return dom_element_store_attribute(element, name, first ? first->value.get() : nullptr, !first);
 }
 
-bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
-    DomElement* element = this;
+static bool dom_element_set_attribute_value(DomElement* element, const char* name,
+        const char* value, bool preserve_case, bool invalidate_style) {
     if (!dom_attribute_name_present(name) || !value) return false;
     char lower_name[128];
     const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
@@ -2007,9 +2007,20 @@ bool DomElement::set_attribute(const char* name, const char* value, bool preserv
     if ((recorded || (element->ext && element->ext->attributes_are_recorded)) &&
         !dom_element_record_namespaced_attribute(element, uri, key, value)) return false;
     dom_attribute_nodes_did_set(element, key, value, uri);
-    if (!*uri) dom_element_attribute_did_set(element, key, value, same);
-    else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    if (invalidate_style) {
+        if (!*uri) dom_element_attribute_did_set(element, key, value, same);
+        else { element->advance_style_version(); element->set_needs_style_recompute(true); }
+    }
     return true;
+}
+
+bool DomElement::set_attribute(const char* name, const char* value, bool preserve_case) {
+    return dom_element_set_attribute_value(this, name, value, preserve_case, true);
+}
+
+bool dom_element_set_non_style_metadata(DomElement* element, const char* name, const char* value) {
+    if (!element || !name || (strncmp(name, "data-", 5) && strncmp(name, "aria-", 5))) return false;
+    return dom_element_set_attribute_value(element, name, value, false, false);
 }
 
 bool dom_element_set_namespace_identity(DomElement* element,
@@ -4544,19 +4555,24 @@ void element_dom_map_remove(HashMap* map, Element* elem) {
     ElementDomMap::erase(map, key);
 }
 
+void dom_rebind_render_element(DomDocument* doc, Element* previous, Element* current) {
+    if (!doc || !doc->element_dom_map || previous == current) return;
+    DomElement* node = element_dom_map_lookup(doc->element_dom_map, previous);
+    if (node && dom_element_render_source(node) == previous) {
+        element_dom_map_remove(doc->element_dom_map, previous);
+        dom_node_registry_set_backing_source(doc, node, current);
+        element_dom_map_insert(doc->element_dom_map, current, node);
+    }
+}
+
 void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item current) {
     // RAW_ITEM_EQ_OK: unchanged evaluator addresses need no identity handoff.
     if (!doc || !doc->element_dom_map || previous.item == current.item) return;
     TypeId kind = get_type_id(previous);
     if (kind != get_type_id(current)) return;
     if (kind == LMD_TYPE_ELEMENT) {
-        DomElement* node = element_dom_map_lookup(doc->element_dom_map, previous.element);
-        if (node && dom_element_render_source(node) == previous.element) {
-            // a no-op rerender still replaces evaluator identities (D4.5.3).
-            element_dom_map_remove(doc->element_dom_map, previous.element);
-            dom_node_registry_set_backing_source(doc, node, current.element);
-            element_dom_map_insert(doc->element_dom_map, current.element, node);
-        }
+        // a no-op rerender still replaces evaluator identities (D4.5.3).
+        dom_rebind_render_element(doc, previous.element, current.element);
     } else if (kind != LMD_TYPE_ARRAY) {
         return;
     }

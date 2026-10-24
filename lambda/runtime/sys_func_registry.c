@@ -125,6 +125,7 @@ extern void tmpl_state_set(Item model_item, const char* template_ref,
                            const char* state_name, Item value);
 extern Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
                                    const char* state_name, Item default_value);
+extern bool tmpl_state_has(Item model_item, const char* template_ref, const char* state_name);
 
 // render map (reactive UI Phase 3 — observer-based reconciliation)
 extern void render_map_record(Item source_item, const char* template_ref,
@@ -3609,6 +3610,7 @@ JitImport jit_runtime_imports[] = {
     {"tmpl_state_get", FPTR(tmpl_state_get)},
     {"tmpl_state_set", FPTR(tmpl_state_set)},
     {"tmpl_state_get_or_init", FPTR(tmpl_state_get_or_init)},
+    {"tmpl_state_has", FPTR(tmpl_state_has)},
 
     // ========================================================================
     // Render map (reactive UI Phase 3 — observer-based reconciliation)

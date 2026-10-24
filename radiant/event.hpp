@@ -68,6 +68,7 @@ bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 bool radiant_set_input_capabilities(UiContext* uicon, const CssInputCapabilities* input);
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
+bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name);
 void* radiant_document_element_from_point(DomDocument* doc, float x, float y);
 void* radiant_subtree_element_from_point(DomElement* root, float x, float y);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
@@ -1152,6 +1153,8 @@ void dom_state_invalidate_all_range_layouts(DocState* state);
 // Call BEFORE removing `child` from its parent. Captures parent + index
 // internally and adjusts ranges/selection per the "removing steps".
 void dom_mutation_pre_remove(DocState* state, DomNode* child);
+// call after a one-for-one presentation swap; transfer ranges without a logical deletion (D4.5.3).
+void dom_reconcile_post_replace(DocState* state, DomNode* child, DomNode* replacement);
 
 // Call AFTER inserting a single `node` into `parent` (i.e. node->parent == parent
 // and dom_node_child_index(node) is its final position). Adjusts ranges per
@@ -2922,7 +2925,7 @@ void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
 bool view_state_nodes_correspond(const DomNode* old_node, const DomNode* new_node);
 // Resolve an owner through the same structural correspondence as retained state.
 DomNode* view_state_corresponding_node(DomNode* owner, DomNode* old_root,
-                                      DomNode* new_root);
+                                      DomNode* new_root, bool source_tree = false);
 bool view_state_ref_follow_rebuild(DomDocument* doc, DomNodeRef* owner,
     DomNode* old_root, DomNode* new_root,
     DomNodePinReason reason = DOM_NODE_PIN_REASON_COUNT);

@@ -34,9 +34,11 @@ import equation: .mod_equation
 import equation_edit: .mod_equation_edit
 import equation_catalog: .mod_equation_catalog
 
-pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
+pub let default_settings = {show_ribbon_group_labels:false}
+pub fn initial(settings=default_settings) => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
+    show_ribbon_group_labels:settings.show_ribbon_group_labels==true,
     fonts:sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family)=>lower(family)),
-    tab:"Home",equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,context:null,mini_hidden:false,mini_box:null,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
+    tab:"Home",equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
     zoom:1.0,nav:true,nav_tab:"headings",nav_target:null,ruler_focus:null,layout:"print",read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
@@ -59,14 +61,10 @@ pn illustration_values(node,kind,current) {
 pub let focus_document = controller.focus
 pub let is_control = controller.is_control
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
-pub fn hide_toolbar(st) => {*:st,mini_hidden:true,mini_box:null}
+pub fn hide_toolbar(st) => {*:st,mini_hidden:true}
 pub pn refresh_toolbar(st,node) {
     ruler.refresh(node)
-    if (mini.visible(st)) mini.save_geometry(node)
-}
-pub fn position_toolbar(st,node) {
-    let box = if (mini.visible(st)) mini.measure(node) else null;
-    if (box==st.mini_box) st else {*:st,mini_box:box}
+    if (mini.visible(st)) mini.refresh(node)
 }
 pub pn selected_all(st,node) {
     if (st.editor.selection.kind!='all') { return false }
@@ -319,7 +317,8 @@ pn dialog_command(st,action,node) {
 }
 pub pn command(st,id,params,node,retain_focus=false) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
-    if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or (params.tab=="Review" and not st.revisions)} }
+    // auto-opened comments follow Review instead of staying latched across ribbon changes.
+    if (id == "ui.tab") { return {*:st,tab:params.tab,review:params.tab=="Review" and not st.revisions} }
     if (starts_with(id,"ui.equation") and not contains(["ui.equation","ui.equationSettings","ui.equationPreset"],id)) {
         if (id=="ui.equationCancel" or (st.read_only and id=="ui.equationClose")) {
             if (not st.read_only) focus_document(node)
@@ -576,6 +575,7 @@ pub pn command(st,id,params,node,retain_focus=false) {
         return {*:st,editor:model.select_paragraph(mounted(st.editor,node)),status:"Paragraph selected"}
     }
     if (id == "view.navigationPane") { return {*:st,nav:not st.nav} }
+    if (id == "view.ribbonGroupLabels") { return {*:st,show_ribbon_group_labels:not st.show_ribbon_group_labels} }
     if (id=="ui.closeNavigation") { focus_document(node); return {*:st,nav:false} }
     if (id=="ui.navigationTab") {
         if (not any([for (tab in navigation.tabs) tab.id==params.tab])) { return st }

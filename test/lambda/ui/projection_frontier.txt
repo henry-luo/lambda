@@ -1,0 +1,33 @@
+<html
+  <head
+    <style
+      "#counter[data-count='1'] #probe {color:rgb(12,34,56);}">>
+  <body
+    <section id: "counter", data-count: "0",
+      <div id: "stable",
+        <input id: "draft", value: "seed">
+        <span id: "probe",
+          "unchanged">>
+      <button id: "increment",
+        "Increment">
+      <button id: "scroll-frame",
+        "Scroll on frame">
+      <span id: "count",
+        "0">
+      <input id: "controlled", value: "0">
+      <div id: "metadata", data-revision: "0", aria-label: "0",
+        "metadata">
+      <div id: "frame-scrollport", style: "height:64px;overflow:auto",
+        <div style: "height:400px">
+        <div id: "frame-scroll-target", style: "height:16px",
+          "end">>>
+    <section id: "nested-parent",
+      <span id: "nested-revision",
+        "0">
+      <button id: "nested-increment",
+        "0:0">>
+    <section id: "fixed-parent",
+      <span id: "fixed-revision",
+        "0">
+      <button id: "fixed-increment",
+        "0:0">>>>

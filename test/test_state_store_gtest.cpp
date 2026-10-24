@@ -349,9 +349,11 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     ASSERT_TRUE(root->remove_child(control));
     ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     EXPECT_EQ(dom_node_ref_validate(&doc, detached_ref), nullptr);
-    EXPECT_GT(state_store_prune_after_reflow(doc.state), 0u);
     ViewStateEntry query = {.view_id = detached_ref.expected_id, .kind = VIEW_STATE_FORM_CONTROL};
+    // retirement must release durable state even without a layout tree or another reflow.
     EXPECT_EQ(hashmap_get(doc.state->view_state_map, &query), nullptr);
+    EXPECT_TRUE(radiant_state_validate_interaction(doc.state, nullptr));
+    EXPECT_EQ(state_store_prune_after_reflow(doc.state), 0u);
     state_store_destroy(&doc);
     doc.destroy();
 }

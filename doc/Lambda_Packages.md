@@ -73,7 +73,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, a deck clock with host control, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
-| `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda demo` adds the startup splash |
+| `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda view` on `doc_viewer.html` adds the startup splash |
 | `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor.draw` | `lambda.editor.draw`, `lambda.editor.draw.view` | Library, initial native profile | Programmable vertices/edges, ports, custom paths, topology, shared transactions, archives, SVG and retained canvases | `lambda demo draw`; see [drawing API](../lmd/package/editor/draw/README.md) |
 | `editor.raster` | `lambda.editor.raster`, `lambda.editor.raster.view` | Library, initial layered profile | Raster layer/group commands, masks, translation, shared history and retained canvas presentation | `lambda demo photos`; see [raster API](../lmd/package/editor/raster/README.md) |
@@ -1325,9 +1325,10 @@ for a query helper, a focus helper and an E224 example.
 
 ### 10.4 `doc` — the bundled document viewer
 
-Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home;
-`lambda demo` with no name opens the adjacent `doc_viewer.html` startup splash.
-Named demos use `lambda demo <name>`; see the [demo catalog](../test/demo/README.md).
+Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home; the
+adjacent `doc_viewer.html` is its startup splash. `lambda demo` with no name opens
+the demo index, and named demos use `lambda demo <name>`; see the
+[demo catalog](../test/demo/README.md).
 The viewer browses the current working directory and loads documents on selection. Its
 Seti icon font and license ship in `package/doc/icons/`, and its bundled math fonts
 come from `package/doc/math/fonts/`. These application resources belong to the shipped

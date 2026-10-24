@@ -44,15 +44,18 @@ pn request(node,event) {
     if (owner!=null) dom.request_frame(owner,event)
 }
 pub pn refresh(node) { request(node,"word_toolbar_ready") }
-pub pn save_geometry(node) { request(node,"word_toolbar_commit") }
 fn frame_style(box) => "left:" ++ string(box.left or 0) ++ "px;top:" ++ string(box.top or 0) ++ "px;visibility:" ++
     (if (box.visible) "visible" else "hidden") ++
     (if (box.max_width==null) "" else ";max-width:" ++ string(box.max_width) ++ "px")
-// viewport movement repaints only the overlay; editor commands retain the geometry in UI state.
+// viewport movement updates presentation geometry without a document-state redraw.
 pub pn position(node) {
     let toolbar = dom.get_element_by_id(dom.document_element(node),"selection-toolbar")
-    if (toolbar!=null) dom.set_attribute(toolbar,"style",frame_style(measure(node)))
+    if (toolbar!=null) {
+        let style = frame_style(measure(node))
+        // placement is presentation state; it must not recreate the gesture's template inputs.
+        if (dom.get_attribute(toolbar,"style")!=style) dom.set_attribute(toolbar,"style",style)
+    }
 }
-pub fn frame(rendered,box) =>
+pub fn frame(rendered) =>
     <div id:"selection-toolbar",class:"selection-toolbar",role:"toolbar",["aria-label"]:"Selection formatting",
-        style:frame_style(box),*rendered>
+        style:frame_style(null),*rendered>

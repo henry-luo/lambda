@@ -7541,7 +7541,8 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
     doc->pending_scroll_into_view_block = block_align;
     doc->pending_scroll_into_view_inline = inline_align;
     doc->pending_scroll_into_view_behavior = behavior;
-    if (doc->state) doc_state_request_reflow(doc->state);
+    // scrolling changes presentation; the geometry checkpoint validates flow separately.
+    if (doc->state) doc_state_request_repaint(doc->state);
 }
 
 static Item dom_focus_method(DomElement* elem, bool focus,

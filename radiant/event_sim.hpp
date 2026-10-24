@@ -442,6 +442,8 @@ struct EventSimContext {
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double input_turn_ms;        // virtual latency per input primitive; zero uses explicit waits only
     double event_interval_ms;    // delay between commands; zero supports exact-time rendering checks
+    bool profile_events;         // opt-in release-build wall timings, indexed like the fixture events
+    double* event_durations_ms;
     bool initial_render;        // export fixtures may assert vector paint before the first raster pass
     double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work

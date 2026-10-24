@@ -62,6 +62,7 @@ static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewState
 static FormControlProp* form_prop_for_view(View* view);
 static void form_control_bind_text_value_cache(FormControlProp* form, ViewState* view_state);
 static void form_control_clear_text_value_cache(View* view, ViewState* view_state);
+static void form_state_mark_dirty(DocState* state);
 static bool view_element_has_attr(View* view, const char* attr_name);
 static bool form_element_supports_disabled_state(DomElement* element);
 static bool form_control_is_disabled_by_fieldset(DomElement* element);
@@ -1480,6 +1481,7 @@ extern "C" void state_store_set_text_control_selection(DocState* state,
                    sel->direction != editing_direction;
     if (changed) {
         state_store_note_selection_mutation(state);
+        form->caret_scroll_pending = 1;
     }
 
     form->selection_start = start_u16;
@@ -1497,6 +1499,8 @@ extern "C" void state_store_set_text_control_selection(DocState* state,
     sel->mutation_seq = state->selection_mutation_seq;
 
     selection_refresh_presentation(state);
+    // native controls paint their caret in the document recording, which must be invalidated.
+    if (changed) form_state_mark_dirty(state);
 }
 
 static void selection_write_optional_ref(JsonWriter* w, const char* key, View* view) {
@@ -2611,11 +2615,25 @@ static RebuildChildEntry rebuild_child_key(const DomNode* node) {
 }
 
 // A sibling insertion must not transfer a decoder, capture, or subscription to another keyed owner.
+struct RebuildTraversal {
+    bool source;
+    DomNode* parent(DomNode* node) const { return source ? dom_source_parent(node) : node->parent.get(); }
+    DomNode* child(DomNode* node) const {
+        if (!node || !node->is_element()) return nullptr;
+        return source ? dom_source_child(node->as_element(), true) : node->as_element()->first_child.get();
+    }
+    DomNode* sibling(DomNode* node, bool forward = true) const {
+        if (!node) return nullptr;
+        return source ? dom_source_sibling(node, forward) :
+            (forward ? node->next_sibling.get() : node->prev_sibling.get());
+    }
+};
+
 struct RebuildChildIndex {
     HashMap* entries = nullptr;
-    explicit RebuildChildIndex(DomNode* parent) {
-        for (DomNode* child = parent && parent->is_element() ? parent->as_element()->first_child : nullptr;
-             child; child = child->next_sibling) {
+    explicit RebuildChildIndex(DomNode* parent, bool source = false) {
+        RebuildTraversal tree{source};
+        for (DomNode* child = tree.child(parent); child; child = tree.sibling(child)) {
             RebuildChildEntry key = rebuild_child_key(child);
             if (!key.key) continue;
             if (!entries) entries = RebuildChildMap::create(16);
@@ -2652,29 +2670,31 @@ bool view_state_nodes_correspond(const DomNode* old_node,
 }
 
 DomNode* view_state_corresponding_node(DomNode* owner, DomNode* old_root,
-                                      DomNode* new_root) {
+                                      DomNode* new_root, bool source_tree) {
     if (!owner || !old_root || !new_root) return nullptr;
+    // ranges use authored ancestry; layout-only table groups can differ before the next flow.
+    RebuildTraversal tree{source_tree};
     const int max_depth = 256;
     int path[max_depth];
     int depth = 0;
     DomNode* node = owner;
     while (node && node != old_root && depth < max_depth) {
         int index = 0;
-        for (DomNode* sibling = node->prev_sibling; sibling; sibling = sibling->prev_sibling) index++;
+        for (DomNode* sibling = tree.sibling(node, false); sibling; sibling = tree.sibling(sibling, false)) index++;
         path[depth++] = index;
-        node = node->parent;
+        node = tree.parent(node);
     }
     if (node != old_root) return nullptr;
     DomNode* old_node = old_root;
     DomNode* new_node = new_root;
     while (view_state_nodes_correspond(old_node, new_node) && depth > 0) {
         int index = path[--depth];
-        RebuildChildIndex children(new_node);
-        old_node = old_node->is_element() ? old_node->as_element()->first_child : nullptr;
-        new_node = new_node->is_element() ? new_node->as_element()->first_child : nullptr;
+        RebuildChildIndex children(new_node, source_tree);
+        old_node = tree.child(old_node);
+        new_node = tree.child(new_node);
         for (int i = 0; i < index; i++) {
-            if (old_node) old_node = old_node->next_sibling;
-            if (new_node) new_node = new_node->next_sibling;
+            old_node = tree.sibling(old_node);
+            new_node = tree.sibling(new_node);
         }
         new_node = children.match(old_node, new_node);
     }
@@ -5077,6 +5097,7 @@ bool form_control_store_text_value(DocState* state, View* view,
     // The prop is rebuilt during relayout; it only borrows the StateStore's
     // durable allocation so text never needs a restore copy.
     form_control_bind_text_value_cache(form, view_state);
+    form->caret_scroll_pending = 1;
     return true;
 }
 

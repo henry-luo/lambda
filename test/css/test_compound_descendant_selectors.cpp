@@ -86,6 +86,34 @@ TEST_F(CompoundDescendantSelectorTest, TableFixupsPreserveSourceAxesAndStructura
 // Compound Selector Tests
 // ============================================================================
 
+TEST_F(CompoundDescendantSelectorTest, RejectAncestorBeforeCountingFilteredSiblings) {
+    DomElement parent = {}, options[64] = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    parent.tag_name = lam::up("select");
+    parent.first_child = lam::own<DomNode>(&options[0]);
+    parent.last_child = lam::up<DomNode>(&options[63]);
+    for (size_t i = 0; i < 64; i++) {
+        options[i].node_type = DOM_NODE_ELEMENT;
+        options[i].tag_name = lam::up("option");
+        options[i].parent = lam::up<DomNode>(&parent);
+        if (i) options[i].prev_sibling = lam::up<DomNode>(&options[i - 1]);
+        if (i + 1 < 64) options[i].next_sibling = lam::own<DomNode>(&options[i + 1]);
+    }
+    CssStylesheet* sheet = css_parse_stylesheet(CreateEngine(),
+        "table > option:nth-child(2n of option) {color:red}", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_GT(sheet->rule_count, 0);
+    auto* selector = (CssSelector*)sheet->rules[0]->data.style_rule.selector;
+    SelectorMatcher* matcher = selector_matcher_create(pool.get());
+    ASSERT_NE(matcher, nullptr);
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, &options[63], nullptr));
+    // an unrelated table rule must not scan the native font menu's siblings.
+    EXPECT_LT(matcher->total_matches, 8u);
+    parent.tag_name = lam::up("table");
+    EXPECT_TRUE(selector_matcher_matches(matcher, selector, &options[63], nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, &options[62], nullptr));
+}
+
 TEST_F(CompoundDescendantSelectorTest, CompoundSelector_ElementWithClass) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);

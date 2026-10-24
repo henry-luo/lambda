@@ -6,11 +6,15 @@ import equation: .mod_equation
 import authoring: .mod_equation_edit
 import catalog: .mod_equation_catalog
 import objects: .mod_objects
+import ribbon_icons: .mod_ribbon_icons
 
-fn structure_icon(s) => <svg class:"app-icon color-icon",width:"34",height:"34",viewBox:"0 0 40 38",
-    ["aria-hidden"]:"true",["data-icon"]:"equation-" ++ s.id,["data-icon-tone"]:"violet",
-    <rect x:"2",y:"3",width:"36",height:"31",rx:"5",fill:"#f2edfb">
-    <text x:"20",y:"25",'text-anchor':"middle",'font-family':"Georgia, serif",'font-size':if (len(s.glyph)>2) 20 else 27,fill:"#66518e",s.glyph>>
+fn structure_icon(s) {
+    let p = ribbon_icons.palettes.violet;
+    <svg class:"app-icon color-icon",width:"34",height:"34",viewBox:"0 0 40 38",
+        ["aria-hidden"]:"true",["data-icon"]:"equation-" ++ s.id,["data-icon-tone"]:"violet",
+        <rect x:"2",y:"3",width:"36",height:"31",rx:"5",fill:p.wash>
+        <text x:"20",y:"25",'text-anchor':"middle",'font-family':"Georgia, serif",'font-size':if (len(s.glyph)>2) 20 else 27,fill:p.ink,s.glyph>>
+}
 fn thumbnail(source) {
     let p = equation.render({*:equation.defaults,source:source,size:20}) ^ {null};
     if (p==null) null else <img src:objects.source(p.element)^,alt:source>

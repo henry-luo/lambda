@@ -276,16 +276,10 @@ static bool selector_matcher_matches_column(SelectorMatcher* matcher,
     CssCompoundSelector* left_compound);
 
 static bool selector_matcher_matches_complex_at(SelectorMatcher* matcher,
-                                                CssSelector* selector,
-                                                int compound_index,
-                                                DomElement* element) {
-    if (!matcher || !selector || compound_index < 0 || !element) return false;
-    if (!selector_matcher_matches_compound(
-            matcher, selector->compound_selectors[compound_index], element)) {
-        return false;
-    }
-    if (compound_index == 0) return true;
+    CssSelector* selector, int compound_index, DomElement* element);
 
+static bool selector_matcher_matches_complex_relation(SelectorMatcher* matcher,
+    CssSelector* selector, int compound_index, DomElement* element) {
     CssCombinator combinator = selector->combinators[compound_index - 1];
     switch (combinator) {
         case CSS_COMBINATOR_DESCENDANT: {
@@ -325,6 +319,31 @@ static bool selector_matcher_matches_complex_at(SelectorMatcher* matcher,
         default:
             return false;
     }
+}
+
+static bool selector_matcher_matches_complex_at(SelectorMatcher* matcher,
+    CssSelector* selector, int compound_index, DomElement* element) {
+    if (!matcher || !selector || compound_index < 0 || !element) return false;
+    CssCompoundSelector* compound = selector->compound_selectors[compound_index];
+    if (!compound) return false;
+    bool defer_sibling_scan = false;
+    if (compound_index > 0) {
+        for (size_t i = 0; i < compound->simple_selector_count; i++) {
+            if (!compound->simple_selectors[i]) return false;
+            CssSelectorType type = compound->simple_selectors[i]->type;
+            if (type == CSS_SELECTOR_PSEUDO_NTH_CHILD || type == CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD ||
+                type == CSS_SELECTOR_PSEUDO_NTH_OF_TYPE || type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE) {
+                defer_sibling_scan = true;
+                break;
+            }
+        }
+    }
+    // reject unrelated ancestry before scanning a wide sibling list for every table-band rule.
+    if (defer_sibling_scan && !selector_matcher_matches_complex_relation(
+            matcher, selector, compound_index, element)) return false;
+    if (!selector_matcher_matches_compound(matcher, compound, element)) return false;
+    return compound_index == 0 || defer_sibling_scan || selector_matcher_matches_complex_relation(
+        matcher, selector, compound_index, element);
 }
 
 struct SelectorColumnOccupation {

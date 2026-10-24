@@ -1311,6 +1311,9 @@ void render(GLFWwindow* window) {
         }
         doc_state_clear_reflow(state);
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
+    } else if (ui_context.document && ui_context.document->pending_scroll_into_view_target.address) {
+        // scroll-only requests still reach the checkpoint when no flow invalidation is pending.
+        layout_update_document(&ui_context, ui_context.document);
     }
 
     if (ui_context.document && (ui_context.document->view_tree || ui_context.paged_view)) {

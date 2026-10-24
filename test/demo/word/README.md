@@ -21,11 +21,22 @@ at a caret sets the marks for subsequent typing.
 
 The interface follows photo-album's white panels, cool gray sidebar, blue
 accents, rounded controls, and system typography. Both demos use the shared
-outline SVG icons in `../mod_icons.ls`. Word's `mod_ribbon_icons.ls` adds subtle
-fills and blue document, violet creative, teal data, and amber review accents.
+outline SVG icons in `../mod_icons.ls`. Word's `mod_ribbon_icons.ls` adds bright
+blue document, violet creative, teal data, and amber review accents, with saturated
+fine contours and matching tinted fills. Equation controls share the same palette.
 The ribbons share command sizes, group captions, selection states, and horizontal
 scrolling; Insert pairs large primary commands with compact secondary actions.
-Document illustrations retain their own colors and typography.
+Command labels use at most two balanced lines, with button widths fitting the
+full text. Compact icons, stacked controls, and galleries keep the ribbon at
+80 px without group captions, or 97 px with captions. Document illustrations
+retain their own colors and typography.
+
+Ribbon group labels are hidden by default for a shorter ribbon. Toggle
+**View → Ribbon Group Labels** to show or hide them across all tabs, including
+contextual ribbons. The choice stays active when opening or creating documents
+in the same app session. Startup defaults live in `mod_app.ls`'s
+`default_settings`; `app.initial({show_ribbon_group_labels:true})` enables labels
+at startup without changing document content.
 
 References adds document-owned sources for books, journal articles, and websites.
 Use **Insert Citation → Add New Source**, or create sources without citing them

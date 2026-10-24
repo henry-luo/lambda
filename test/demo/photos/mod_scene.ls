@@ -7,6 +7,10 @@ import transforms: lambda.editor.raster.transform
 import tone: lambda.editor.raster.tone
 import canvas: lambda.editor.raster.canvas
 import guides: lambda.editor.raster.guides
+import icons: ~~.mod_icons
+
+// reuse shared contours where the tool and graphic names differ.
+let tool_graphics = {move:"pointer",ellipse:"circle",erase:"clear",bucket:"shading"}
 
 pub fn button(id,action,label) => <button id:id,'data-action':action,type:"button",label>
 fn field(id,label,value="",kind="text") => <label *[<span label>,<input id:id,type:kind,value:string(value)>]>
@@ -65,7 +69,7 @@ pub fn tree() => <main id:"photos",tabindex:"0",'data-error':"", *[
     <div class:"workspace", *[
         <nav class:"tool-rail",'aria-label':"Tools", *[
             *[for (tool in tools.catalog) <button id:"tool-" ++ tool.id,'data-tool':tool.id,
-                title:tool.label ++ " (" ++ upper(tool.key) ++ ")",*[tool.icon,<small (tool.label)>]>]]>,
+                title:tool.label ++ " (" ++ upper(tool.key) ++ ")",*[icons.icon(tool_graphics[tool.id] or tool.id,22),<small (tool.label)>]>]]>,
         <section id:"stage",class:"raster-stage",tabindex:"0",'aria-label':"Image workspace",
             <div class:"raster-surface",<canvas id:"preview",class:"raster-canvas",width:1,height:1,'aria-label':"Layer composition">
                 <canvas class:"raster-selection",width:1,height:1,'aria-label':"Selection coverage"> <div class:"raster-target">

@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "test/demo/word"
 ARTIFACTS = ROOT / "temp/word/tests"
-UI_FIXTURES = ("smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
+UI_FIXTURES = ("typing", "smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
                         "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "ribbon_appearance", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
                         "stories", "advanced_objects", "equations", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry")
 
@@ -60,7 +60,7 @@ def main():
         for script in sorted((DEMO / "tests").glob("*_test.ls")):
             name = f"{script.stem}-{tier}"
             env = {**os.environ, "LAMBDA_EXEC_BACKEND": tier}
-            result = run(name, [executable, str(script.relative_to(ROOT))], env)
+            result = run(name, [executable, "--no-log", str(script.relative_to(ROOT))], env)
             expected = script.with_suffix(".txt").read_text().rstrip()
             passed = result is not None and result.returncode == 0 and result.stdout.rstrip() == expected
             detail = ""
@@ -102,7 +102,7 @@ def main():
         for fixture in fixtures:
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
-            result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",
+            result = run(fixture, [executable, "--no-log", "view", "test/demo/word/word.ls", "--headless",
                                   "--event-file", f"test/demo/word/tests/{fixture}.json",
                                   "--event-result", str(result_path)],
                          {**os.environ, "LAMBDA_EXEC_BACKEND": "auto"})
@@ -112,7 +112,7 @@ def main():
                       and counts.get("passed", 0) > 0 and counts.get("failed", 1) == 0)
             record(fixture, passed, f"{counts.get('passed', 0)} assertions")
         for feature in ("columns", "margins", "object_layout", "shape_format", "equations"):
-            exported = run(feature + "-export", [executable, "run", f"test/demo/word/tests/_{feature}_export.ls"])
+            exported = run(feature + "-export", [executable, "--no-log", "run", f"test/demo/word/tests/_{feature}_export.ls"])
             record(feature + "-export-api", exported is not None and exported.returncode == 0 and
                    exported.stdout.strip() == (DEMO / f"tests/_{feature}_export.txt").read_text().strip())
         long_pdf = ROOT / "temp/word/columns-long.pdf"

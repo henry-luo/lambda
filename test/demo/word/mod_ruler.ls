@@ -105,6 +105,10 @@ pub fn paragraph_geometry(editor,node,zoom) {
         origin:box.x+(pad_left-left)*zoom,left:box.x+pad_left*zoom,right:box.x+box.width-pad_right*zoom,
         values:{indent:left*0.75,right:right*0.75,first:pixels(target,"text-indent")*0.75}}
 }
+// geometry refreshes often repeat; unchanged accessibility values need no DOM mutation.
+pn attribute(node,key,value) {
+    if (dom.get_attribute(node,key)!=value) dom.set_attribute(node,key,value)
+}
 pn indent_position(editor,node,zoom) {
     let root = dom.document_element(node)
     let ruler = dom.get_element_by_id(root,"horizontal-ruler")
@@ -117,8 +121,8 @@ pn indent_position(editor,node,zoom) {
             let x = if (s.id=="right") g.right else g.left+if (s.id=="first") g.values.first/0.75*zoom else 0
             let value = if (s.id=="hanging") g.values.indent else g.values[s.id]
             dom.style_set_property(handle,"left",string(x-box.x) ++ "px")
-            dom.set_attribute(handle,"aria-valuenow",string(rounded_tenth(value)))
-            dom.set_attribute(handle,"aria-valuetext",string(rounded_tenth(value)) ++ " pt")
+            attribute(handle,"aria-valuenow",string(rounded_tenth(value)))
+            attribute(handle,"aria-valuetext",string(rounded_tenth(value)) ++ " pt")
         }
     }
 }
@@ -177,10 +181,10 @@ pn paint_rulers(doc,node,zoom) {
             let handle = dom.query_selector(region,"[data-ruler-margin=" ++ s.id ++ "]")
             dom.style_set_property(handle,if (vertical) "top" else "left",string((if (s.sign==1) g[s.id]*zoom
                 else (if (vertical) dom.bounding_box(region).height else g.width*zoom)-g[s.id]*zoom)) ++ "px")
-            dom.set_attribute(handle,"aria-valuenow",string(p[s.id]))
-            dom.set_attribute(handle,"aria-valuetext",string(p[s.id]) ++ " mm")
-            dom.set_attribute(handle,"aria-label",margin_name(p,s,page_no) ++ " page margin")
-            dom.set_attribute(handle,"title",margin_name(p,s,page_no) ++ " page margin — drag to resize")
+            attribute(handle,"aria-valuenow",string(p[s.id]))
+            attribute(handle,"aria-valuetext",string(p[s.id]) ++ " mm")
+            attribute(handle,"aria-label",margin_name(p,s,page_no) ++ " page margin")
+            attribute(handle,"title",margin_name(p,s,page_no) ++ " page margin — drag to resize")
         }
         for (tick in dom.query_selector_all(region,".ruler-mark"))
             dom.style_set_property(tick,if (vertical) "top" else "left",string(((if (vertical) g.top else g.left)+
@@ -223,7 +227,7 @@ pn guide_position(node,drag) {
     let guide = dom.get_element_by_id(dom.document_element(node),"ruler-guide")
     let x = region.x+offset
     let y = region.y+offset
-    dom.set_attribute(guide,"style",if ((not drag.vertical and (x<viewport.x or x>viewport.x+viewport.width)) or
+    attribute(guide,"style",if ((not drag.vertical and (x<viewport.x or x>viewport.x+viewport.width)) or
         (drag.vertical and (y<viewport.y or y>viewport.y+viewport.height))) "visibility:hidden" else
         "left:" ++ string(if (drag.vertical) viewport.x else x) ++ "px;top:" ++ string(if (drag.vertical) y else viewport.y) ++
         "px;width:" ++ string(if (drag.vertical) viewport.width else 1) ++ "px;height:" ++ string(if (drag.vertical) 1 else viewport.height) ++ "px")
@@ -233,12 +237,12 @@ pn end_drag(editor,node,drag,release=true) {
         if (entry.style==null) {
             if (dom.get_attribute(entry.node,"style")!=null) dom.remove_attribute(entry.node,"style")
         }
-        else dom.set_attribute(entry.node,"style",entry.style)
+        else attribute(entry.node,"style",entry.style)
     }
     paint_rulers(editor.doc,node,drag.zoom)
     sync(stage(node))
     indent_position(editor,node,drag.zoom)
-    dom.set_attribute(dom.get_element_by_id(dom.document_element(node),"ruler-guide"),"style","visibility:hidden")
+    attribute(dom.get_element_by_id(dom.document_element(node),"ruler-guide"),"style","visibility:hidden")
     refresh(node)
     if (release) dom.release_pointer_capture(owner(node),drag.pointer)
     dom.remove_attribute(dom.document_element(node),"data-word-ruler-drag")
@@ -267,7 +271,7 @@ on pointerdown(evt) {
         values:model.paragraph_indents({*:~.editor,selection:{kind:'node',path:e.path}}),
         padding:{indent:pixels(block_node(~.editor,evt.target,e.path),"padding-left"),right:pixels(block_node(~.editor,evt.target,e.path),"padding-right")}}]
     // publish the claim before focus can send selectionchange; template attributes update after this handler.
-    dom.set_attribute(dom.document_element(evt.target),"data-word-ruler-drag",initial.control)
+    attribute(dom.document_element(evt.target),"data-word-ruler-drag",initial.control)
     drag = {*:initial,pointer:evt.pointerId,x:evt.clientX,y:evt.clientY,targets:targets,
         styles:[for (n in dom.query_selector_all(controller.surface(dom.document_element(evt.target)),".word-page,.word-story," ++ model.block_selector))
             {node:n,style:dom.get_attribute(n,"style")}]}
@@ -348,7 +352,7 @@ pub pn position(editor,node,zoom) {
         let ruler = dom.get_element_by_id(dom.document_element(node),"horizontal-ruler")
         let page_no = visible_page(editor,node)
         if (dom.get_attribute(ruler,"data-page")!=string(page_no)) {
-            dom.set_attribute(ruler,"data-page",string(page_no))
+            attribute(ruler,"data-page",string(page_no))
             paint_rulers(editor.doc,node,zoom)
         }
     }

@@ -1331,11 +1331,14 @@ String* css_grid_serialize_placement(Pool* pool, const CssGridLineReference line
     return stringbuf_to_string(output);
 }
 
-enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_DIMENSION, CSS_SEARCH_IMAGE_SET, CSS_SEARCH_PERCENTAGE};
+enum CssValueSearch {CSS_SEARCH_VAR, CSS_SEARCH_PENDING, CSS_SEARCH_LENGTH_UNIT, CSS_SEARCH_DIMENSION, CSS_SEARCH_IMAGE_SET, CSS_SEARCH_PERCENTAGE, CSS_SEARCH_ATTR};
 
 static bool css_value_matches_search(const CssValue* value, CssValueSearch search,
     CssUnit first, CssUnit second) {
     if (!value) return false;
+    if (search == CSS_SEARCH_ATTR) return value->type == CSS_VALUE_TYPE_ATTR ||
+        (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+         value->data.function->name && strcmp(value->data.function->name, "attr") == 0);
     if (search == CSS_SEARCH_IMAGE_SET) return css_value_is_image_set(value);
     if (search == CSS_SEARCH_DIMENSION)
         return value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE ||
@@ -1351,12 +1354,19 @@ static bool css_value_matches_search(const CssValue* value, CssValueSearch searc
         (search == CSS_SEARCH_PENDING && (strcmp(function->name, "env") == 0 || strcmp(function->name, "attr") == 0)));
 }
 
+static const CssValue* css_value_dependency_fallback(const CssValue* value) {
+    if (value->type == CSS_VALUE_TYPE_VAR && value->data.var_ref) return value->data.var_ref->fallback;
+    if (value->type == CSS_VALUE_TYPE_ENV && value->data.env_ref) return value->data.env_ref->fallback;
+    if (value->type == CSS_VALUE_TYPE_ATTR && value->data.attr_ref) return value->data.attr_ref->fallback;
+    return nullptr;
+}
+
 static bool css_value_contains(CssValueSearch search, const CssValue* value,
     CssUnit first = CSS_UNIT_PX, CssUnit second = CSS_UNIT_PX) {
     if (!value) return false;
     if (css_value_matches_search(value, search, first, second)) return true;
     if (value->type != CSS_VALUE_TYPE_LIST && value->type != CSS_VALUE_TYPE_FUNCTION &&
-        value->type != CSS_VALUE_TYPE_TOKEN_SEQUENCE) return false;
+        value->type != CSS_VALUE_TYPE_TOKEN_SEQUENCE && !css_value_dependency_fallback(value)) return false;
     ArrayList* pending = arraylist_new(8);
     if (!pending) return true;  // inability to exclude a dependency must still enter its validation path
     bool found = !arraylist_append(pending, (void*)value);
@@ -1364,6 +1374,7 @@ static bool css_value_contains(CssValueSearch search, const CssValue* value,
         const CssValue* current = (const CssValue*)pending->data[--pending->length];
         if (css_value_matches_search(current, search, first, second)) { found = true; break; }
         const CssValue* const* children = nullptr;
+        const CssValue* fallback = css_value_dependency_fallback(current);
         int count = 0;
         if (current->type == CSS_VALUE_TYPE_LIST) {
             children = current->data.list.values; count = current->data.list.count;
@@ -1372,6 +1383,9 @@ static bool css_value_contains(CssValueSearch search, const CssValue* value,
         } else if (current->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE) {
             // owned spelling wraps the same dependency tree used by typed consumers.
             children = &current->data.tokens.value; count = 1;
+        } else if (fallback) {
+            // attr() dependencies can hide behind a var()/env() fallback.
+            children = &fallback; count = 1;
         }
         for (int index = 0; children && index < count; index++) {
             if (children[index] && !arraylist_append(pending, (void*)children[index])) { found = true; break; }
@@ -1391,6 +1405,10 @@ bool css_value_contains_var_reference(const CssValue* value) {
 
 bool css_value_contains_pending_substitution(const CssValue* value) {
     return css_value_contains(CSS_SEARCH_PENDING, value);
+}
+
+bool css_value_contains_attr_reference(const CssValue* value) {
+    return css_value_contains(CSS_SEARCH_ATTR, value);
 }
 
 bool css_value_contains_percentage(const CssValue* value) {

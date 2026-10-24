@@ -121,8 +121,11 @@
     },
     {
       "type": "assert_pixel",
-      "x": 643,
-      "y": 187,
+      "target": {
+        "selector": "#canvas-chrome",
+        "offset_x": 381,
+        "offset_y": -2
+      },
       "search_radius": 0,
       "min_r": 255,
       "max_r": 255,
@@ -140,8 +143,11 @@
     },
     {
       "type": "assert_pixel",
-      "x": 525,
-      "y": 179,
+      "target": {
+        "selector": "#canvas-chrome",
+        "offset_x": 263,
+        "offset_y": -2
+      },
       "search_radius": 0,
       "min_r": 255,
       "max_r": 255,
@@ -152,8 +158,11 @@
     },
     {
       "type": "assert_pixel",
-      "x": 525,
-      "y": 206,
+      "target": {
+        "selector": "#canvas-chrome",
+        "offset_x": 263,
+        "offset_y": -2
+      },
       "min_r": 255,
       "max_r": 255,
       "min_g": 255,
@@ -223,8 +232,11 @@
     },
     {
       "type": "assert_pixel",
-      "x": 485,
-      "y": 206,
+      "target": {
+        "selector": "#canvas-chrome",
+        "offset_x": 223,
+        "offset_y": -2
+      },
       "min_r": 255,
       "max_r": 255,
       "min_g": 255,

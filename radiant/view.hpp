@@ -3829,6 +3829,7 @@ struct FormControlProp {
     float    scroll_y;
     float    caret_blink_t;
     uint8_t  caret_on : 1;
+    uint8_t  caret_scroll_pending : 1; // edits/navigation reveal once; repainting preserves manual scrolling.
 
 
     // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use

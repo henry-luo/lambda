@@ -3306,11 +3306,14 @@ static bool settle_template_retransform(EventContext* evcon,
     if (!render_map_has_dirty()) return false;
     RetransformResult results[16];
     int count = 0;
+    uint64_t transform_start = time_now_ns();
     {
         // only published render results follow the runtime's canonical result Input.
         TemplateUiAllocationScope render_scope(context, true);
         count = render_map_retransform_with_results(results, 16);
     }
+    if (shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice("[TEMPLATE_PROFILE] transform_ms=%.3f",
+        time_elapsed_ms_f(transform_start, time_now_ns()));
     int available = count <= 16 ? count : 16;
     int reported = 0;
     DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
@@ -7162,6 +7165,39 @@ static bool dom_js_rule_is_scope(CssRule* rule, void*) {
     return rule && rule->type == CSS_RULE_SCOPE;
 }
 
+static bool dom_js_selector_mentions_attribute(CssSelector* selector, void* data) {
+    return dom_js_selector_mentions_mutation_attribute(selector, (const char*)data);
+}
+
+static bool dom_js_rule_has_attribute_value_dependency(CssRule* rule, void* data) {
+    // scope/container/keyframe state has dependencies beyond a style rule's selector list.
+    if (rule->type == CSS_RULE_SCOPE || rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_KEYFRAMES)
+        return true;
+    if (dom_js_rule_selector_has_match(rule, dom_js_selector_mentions_attribute, data)) return true;
+    if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTING && rule->type != CSS_RULE_NESTED_DECLARATIONS)
+        return false;
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* declaration = rule->data.style_rule.declarations[i];
+        if (declaration && css_value_contains_attr_reference(declaration->value)) return true;
+    }
+    return false;
+}
+
+static bool dom_js_style_has_attribute_value(StyleNode* node, void* data) {
+    bool* found = (bool*)data;
+    if (node->winning_decl && css_value_contains_attr_reference(node->winning_decl->value)) *found = true;
+    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next)
+        if (weak->declaration && css_value_contains_attr_reference(weak->declaration->value)) *found = true;
+    return true;
+}
+
+bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
+    if (!doc || !element || !name) return true;
+    bool found = false;
+    if (element->specified_style) style_tree_foreach(element->specified_style, dom_js_style_has_attribute_value, &found);
+    return found || dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, (void*)name);
+}
+
 static bool dom_js_selector_has_attribute_dependency(CssSelector* selector, void* context) {
     return dom_js_selector_has_relational_mutation_attribute_dependency(
         selector, *(const char**)context);
@@ -8195,6 +8231,13 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
     int mutations = doc->js.mutation_count;
 
     if (mutations == 0) {
+        // scrollIntoView queues geometry work without publishing a DOM mutation.
+        if (doc->pending_scroll_into_view_target.address &&
+                layout_update_document(evcon->ui_context, doc)) {
+            // scrolling may expose skipped content and request a subsequent flow update.
+            doc_state_request_repaint((DocState*)doc->state);
+            evcon->need_repaint = true;
+        }
         log_info("[TIMING] html event handler: %.2fms (no DOM changes)",
                  time_elapsed_ms_f(t_start, t_handler));
         return;
@@ -10690,7 +10733,8 @@ static DomDocument* hover_resolve_document(View* view) {
 static void sync_hover_pseudo_state_after_transition(DocState* state,
                                                      View* prev_hover,
                                                      View* new_target) {
-    if (!state) return;
+    // retained template redraws can re-hit the same node without a hover transition.
+    if (!state || prev_hover == new_target) return;
 
     DomDocument* doc = hover_resolve_document(new_target);
     if (!doc) doc = hover_resolve_document(prev_hover);

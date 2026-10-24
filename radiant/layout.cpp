@@ -12,6 +12,7 @@
 #include "../lib/str.h"
 #include "../lib/hash.h"
 #include "../lib/time_util.h"
+#include "../lib/shell.h"
 
 extern "C" {
 #include "../lib/memtrack.h"
@@ -6208,13 +6209,21 @@ void layout_publish_document_geometry(UiContext* ui, DomDocument* doc) {
 static bool layout_document_geometry_current(UiContext* ui, DomDocument* doc) {
     if (!doc->view_tree || !doc->view_tree->root || !doc->view_tree->document_layout ||
         !doc->view_tree->document_layout->valid || (doc->root && doc->root->layout_dirty) ||
-        (doc->state && doc->state->needs_reflow) || doc->pending_scroll_into_view_target.address)
+        (doc->state && doc->state->needs_reflow))
         return false;
     const DocumentLayoutPublication& a = *doc->view_tree->document_layout;
     DocumentLayoutPublication b = layout_document_inputs(ui, doc);
-    return layout_document_environment_equal(a, b) && a.mutation_epoch == b.mutation_epoch &&
+    bool current = layout_document_environment_equal(a, b) && a.mutation_epoch == b.mutation_epoch &&
         a.style_epoch == b.style_epoch && a.cascade_epoch == b.cascade_epoch &&
         a.input_revision == b.input_revision;
+    if (!current && shell_getenv("RADIANT_TEMPLATE_PROFILE")) log_notice(
+        "[TEMPLATE_PROFILE] geometry_miss mutation=%llu:%llu style=%llu:%llu cascade=%llu:%llu input=%u:%u font=%llu:%llu",
+        (unsigned long long)a.mutation_epoch, (unsigned long long)b.mutation_epoch,
+        (unsigned long long)a.style_epoch, (unsigned long long)b.style_epoch,
+        (unsigned long long)a.cascade_epoch, (unsigned long long)b.cascade_epoch,
+        a.input_revision, b.input_revision,
+        (unsigned long long)a.font_generation, (unsigned long long)b.font_generation);
+    return current;
 }
 
 bool layout_update_document(UiContext* ui, DomDocument* doc) {
@@ -6228,6 +6237,10 @@ bool layout_update_document(UiContext* ui, DomDocument* doc) {
         // invalidation is a retained reflow, not a new view-pool epoch.
         bool reflow = doc->view_tree && doc->view_tree->root;
         layout_html_doc(ui, doc, reflow);
+    } else if (doc->pending_scroll_into_view_target.address) {
+        // current flow is sufficient for scrolling; retain viewport/font/style validation above.
+        if (!layout_scroll_into_view_without_relayout(ui, doc))
+            layout_html_doc(ui, doc, true);
     }
     // scroll writes change sticky placement without invalidating box flow.
     layout_resolve_scrolled_sticky(doc->view_tree);

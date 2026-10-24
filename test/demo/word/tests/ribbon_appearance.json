@@ -7,8 +7,29 @@
   },
   "events": [
     {
+      "type": "assert_style",
+      "target": {"selector": ".ribbon-group .group-label"},
+      "property": "display",
+      "equals": "none"
+    },
+    {"type": "click", "target": {"selector": "#tab-view"}},
+    {
+      "type": "assert_attribute",
+      "target": {"selector": "#view-ribbon-labels"},
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {"type": "click", "target": {"selector": "#view-ribbon-labels"}},
+    {
+      "type": "assert_style",
+      "target": {"selector": ".ribbon-group .group-label"},
+      "property": "display",
+      "equals": "block"
+    },
+    {"type": "click", "target": {"selector": "#tab-home"}},
+    {
       "type": "script",
-      "js": "window.wordRibbonHeight=document.querySelector(\".ribbon-groups\").getBoundingClientRect().height;window.wordRibbonLabelsFit=function(){return Array.from(document.querySelectorAll(\".ribbon-groups .ribbon-large,.ribbon-groups .table-large-tool\")).every(function(b){var r=b.getBoundingClientRect(),l=b.querySelector(\".tool-label\").getBoundingClientRect();return l.left>=r.left-1 && l.right<=r.right+1 && l.bottom<=r.bottom+1;})};window.wordRibbonCaptionsFit=function(){var rr=document.querySelector(\".ribbon-groups\").getBoundingClientRect();return Math.abs(rr.height-window.wordRibbonHeight)<=1 && Array.from(document.querySelectorAll(\".ribbon-groups .group-label\")).every(function(g){var r=g.getBoundingClientRect(),t=g.parentElement.querySelector(\".group-tools\").getBoundingClientRect();return r.top>=t.bottom-1 && r.bottom<=rr.bottom;})};"
+      "js": "window.wordRibbonHeight=document.querySelector(\".ribbon-groups\").getBoundingClientRect().height;window.wordRibbonLabelsFit=function(){return Array.from(document.querySelectorAll(\".ribbon-groups .ribbon-large,.ribbon-groups .table-large-tool\")).every(function(b){var r=b.getBoundingClientRect(),l=b.querySelector(\".tool-label\").getBoundingClientRect();var line=parseFloat(getComputedStyle(b.querySelector(\".tool-label\")).lineHeight);return l.left>=r.left-1 && l.right<=r.right+1 && l.bottom<=r.bottom+1 && l.height<=2*line+1;})};window.wordRibbonCaptionsFit=function(){var rr=document.querySelector(\".ribbon-groups\").getBoundingClientRect();return Math.abs(rr.height-window.wordRibbonHeight)<=1 && Array.from(document.querySelectorAll(\".ribbon-groups .group-label\")).every(function(g){var r=g.getBoundingClientRect(),t=g.parentElement.querySelector(\".group-tools\").getBoundingClientRect();return r.top>=t.bottom-1 && r.bottom<=rr.bottom;})};"
     },
     {
       "type": "render",
