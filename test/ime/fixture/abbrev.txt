@@ -1,0 +1,9 @@
+2:b'j	北京 bei'jing 4800	背景 bei'jing 4700
+2:f'a	方案 fang'an 4000
+2:f'g	反感 fan'gan 3500
+2:h'y	行业 hang'ye 4300
+2:l's	绿色 lv'se 4000
+2:n'e	女儿 nv'er 4000
+2:x'a	西安 xi'an 3900
+2:z'g	资格 zi'ge 5100	中国 zhong'guo 5000
+4:b'j'd'x	北京大学 bei'jing'da'xue 5200	北境大雪 bei'jing'da'xue 1

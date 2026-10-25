@@ -1,0 +1,26 @@
+{
+  "format_version": 1,
+  "fixture_sha256": "376c7ecc665c1215f706e801d5790bd66d04fb0c2de89a37e15dbe720a15ba93",
+  "provenance": "Minimum rank/coverage counts from the frozen untuned M1 baseline, before ranking parameter selection; source evidence: temp/ime_chinese/m1/baseline-untuned.json and baseline-canonical.json",
+  "scope": "Repository-authored corpus only; not a representative quality claim",
+  "minimum": {
+    "full": {
+      "found": 64,
+      "top_1": 44,
+      "top_3": 56,
+      "top_9": 63
+    },
+    "initials": {
+      "found": 64,
+      "top_1": 20,
+      "top_3": 32,
+      "top_9": 50
+    },
+    "fuzzy": {
+      "found": 64,
+      "top_1": 37,
+      "top_3": 47,
+      "top_9": 58
+    }
+  }
+}
