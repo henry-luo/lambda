@@ -27,7 +27,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
 | `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
-| `slides` | `slides/northstar.slides` | [Slides](slides/README.md) |
+| `slides` | `slides/slides.ls` | [Slides](slides/README.md) |
 | `readability` | `readability/readability.ls` | [Reader View](readability/README.md) |
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
 | `mail` | `mail/mail.ls` | [Mail](mail/README.md) |

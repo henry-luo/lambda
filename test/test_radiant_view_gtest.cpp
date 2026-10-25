@@ -524,7 +524,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"superlambda", "#superlambda[data-mode=ready]"},
         {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},
-        {"slides", ".slide-player"},
+        {"slides", "#slides-editor #stage"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"chart", ".demo-tile"},
     };
