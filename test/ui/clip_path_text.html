@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<head><title>clip-path clips text glyphs</title></head>
+<!-- each row of solid block glyphs is cut halfway by clip-path: inset(0 50% 0 0) -->
+<body style="margin:0;background:#f8f6f1;font:48px/60px Menlo, 'DejaVu Sans Mono', monospace;color:#1d5fc4">
+<div id="plain" style="position:absolute;left:100px;top:20px;width:400px;height:60px;clip-path:inset(0 50% 0 0)">████████████</div>
+<div id="rotated" style="position:absolute;left:100px;top:120px;width:400px;height:60px;clip-path:inset(0 50% 0 0);transform:rotate(-1.5deg)">████████████</div>
+<div id="rotated-child" style="position:absolute;left:100px;top:220px;width:400px;height:60px;clip-path:inset(0 50% 0 0)"><div style="transform:rotate(-1.5deg)">████████████</div></div>
+</body>
+</html>
