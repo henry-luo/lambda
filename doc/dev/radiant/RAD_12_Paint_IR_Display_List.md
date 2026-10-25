@@ -3,6 +3,7 @@
 > **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
 > **Scoped source refresh:** 2026-10-19 — whole-subtree marker/cache eligibility during split paint phases (§6); 2026-10-21 — paint layers (§6).
 > **Scoped source refresh:** 2026-10-23 — outer-shadow replay clipping and scratch lifetime (§5).
+> **Scoped source refresh:** 2026-10-25 — glyph items carry the clip-shape stack (§8).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two retained rendering intermediate representations that sit between the layout/view tree and the pixel/vector backends: the target-neutral, semantic **PaintIR** and its raster-only lowering, the **DisplayList**. It describes why Radiant records draw commands into an immutable buffer and replays them separately (single-threaded, tiled-parallel, or via retained fragments), the record→replay data flow through the `rc_*` painter gateway, the `RenderBackend` vtable that SVG/PDF plug into by consuming PaintIR directly, and the supporting clip/transform/tile/retained-cache machinery. The per-feature painters (backgrounds, borders, glyphs), the raster surface, and PDF/SVG page assembly are [RAD_13](RAD_13_Render_Walk_Painters.md)'s and [RAD_14](RAD_14_SVG_Vector_Graph.md)'s subjects and are only cross-referenced here.
 >
