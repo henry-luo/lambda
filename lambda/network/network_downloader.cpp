@@ -2,6 +2,7 @@
 // Network download implementation using libcurl
 
 #include "network_downloader.h"
+#include "../../lib/host_paths.h"
 #include "http_client.h"
 #include "network_resource_manager.h"
 #include "cookie_jar.h"
@@ -359,7 +360,7 @@ bool network_download_resource(NetworkResource* res) {
     if (!res->local_path) {
         // Generate a temporary filename
         char temp_path[512];
-        snprintf(temp_path, sizeof(temp_path), "./temp/download_%p.tmp", (void*)res);
+        snprintf(temp_path, sizeof(temp_path), "%s/download_%p.tmp", host_path(HOST_PATH_TEMP), (void*)res);
         
         // Write content to file
         FILE* f = fopen(temp_path, "wb");

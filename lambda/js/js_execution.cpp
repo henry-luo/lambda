@@ -1,4 +1,5 @@
 #include "js_execution_internal.hpp"
+#include "../../lib/host_paths.h"
 #include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_source_module.hpp"
@@ -901,8 +902,8 @@ char* js_load_script_source_from_cache(const char* path,
         char* downloaded = is_data
             ? (char*)parse_data_uri(path, data_type, sizeof(data_type), &source_length)
             : module_mode ? download_http_content_cached_typed(path, &source_length,
-                "./temp/cache", &response_type)
-            : download_http_content_cached(path, &source_length, "./temp/cache");
+                host_path_dir(HOST_PATH_CACHE, "cache"), &response_type)
+            : download_http_content_cached(path, &source_length, host_path_dir(HOST_PATH_CACHE, "cache"));
         if (downloaded && module_mode &&
                 !mime_type_is_javascript(is_data ? data_type : response_type)) {
             // module fetch failure precedes parsing, including redirected HTML responses.

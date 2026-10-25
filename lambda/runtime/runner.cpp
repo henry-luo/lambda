@@ -12,6 +12,7 @@
 #include <psapi.h>
 #endif
 #include "transpiler.hpp"
+#include "../../lib/host_paths.h"
 #include "doc_context.hpp"
 #include "write_set.hpp"
 #include "ast_build.hpp"
@@ -330,33 +331,23 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 // ============================================================================
 // Lambda Home Path
 // ============================================================================
-// g_lambda_home is the directory containing Lambda's runtime assets (the
+// HOST_PATH_HOME is the directory containing Lambda's runtime assets (the
 // package tree). Dev and release share one layout: assets live in ./lmd/ in
-// both the source checkout and the release folder; LAMBDA_HOME overrides it.
+// both the source checkout and the release folder; LAMBDA_HOME or an
+// embedding host overrides it (host_paths.h, MB13).
 //
 // The name "lmd" avoids a name clash between the lambda executable and a
 // directory of the same name on macOS/Linux.
-const char* g_lambda_home = "./lmd";
-
 void lambda_home_init(void) {
-    const char* env = shell_getenv("LAMBDA_HOME");
-    if (env && env[0]) g_lambda_home = env;
+    host_paths_init_from_env();
 #ifndef LAMBDA_NO_LATEX
     // bundled TeX resources follow the document package namespace (D7.2.4v3, D7.2.7v2).
-    char* tex_dir = lambda_home_path("package/doc/latex/tex");
+    char* tex_dir = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex");
     tex::set_resource_dir(tex_dir);
     if (tex_dir) mem_free(tex_dir);
 #endif
 }
 
-// Build a malloc'd path "<g_lambda_home>/<rel>".  Caller must free().
-char* lambda_home_path(const char* rel) {
-    size_t home_len = strlen(g_lambda_home);
-    size_t rel_len  = strlen(rel);
-    char* out = mem_join3(g_lambda_home, home_len, "/", 1, rel, rel_len, MEM_CAT_SYSTEM);
-    if (!out) return NULL;
-    return out;
-}
 
 
 #if _WIN32
@@ -563,8 +554,8 @@ void lambda_profile_record_js_compilation(const char* script_path,
 void profile_dump_to_file() {
 #ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!profile_enabled || profile_count == 0) return;
-    create_dir_recursive("temp");
-    FILE* f = fopen("temp/phase_profile.txt", "w");
+    host_path_ensure(HOST_PATH_TEMP);
+    FILE* f = fopen(host_path_dir(HOST_PATH_TEMP, "phase_profile.txt"), "w");
     if (!f) return;
     // TSV format v3: build own-time detail separates the resolve walk from its
     // inline analyses;

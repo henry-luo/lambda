@@ -2378,6 +2378,7 @@
         "lib/html_entities.cpp",
         "lib/line_framer.c",
         "lib/log.c",
+        "lib/host_paths.c",
         "lib/mem_context.c",
         "lib/mem_factory.c",
         "lib/mem_vm.c",

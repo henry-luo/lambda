@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 #include "../lib/tagged.hpp"
+#include "../lib/host_paths.h"
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/str.h"
@@ -1218,13 +1219,9 @@ void log_init_wrapper() {
     // --no-log is process-scoped; reloading log.conf here used to silently
     // re-enable categories and make parallel view fixtures race on log.txt.
     if (log_is_disabled()) return;
-    // empty existing log file and load config only when log.conf is present (dev/debug mode)
-    // in release mode (no log.conf), skip to avoid creating log.txt in the working directory
-    if (file_exists("log.conf")) {
-        FILE *file = fopen("log.txt", "w");
-        if (file) { fclose(file); }
-        log_parse_config_file("log.conf");
-    }
+    // empty the log and load config only when log.conf is present (dev/debug mode);
+    // release mode (no log.conf) creates no log file in the host's log directory
+    log_reload_config_in_dir(host_path(HOST_PATH_LOG));
 }
 // Layout test function for headless testing
 static int window_finish_event_sim(EventSimContext* sim_ctx) {
@@ -1725,7 +1722,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
         // The state owner must exist before top-level loading so page scripts,
         // document cookies, and the first HTTP request share one profile jar.
-        file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+        file_cache = enhanced_cache_create(host_path_dir(HOST_PATH_CACHE, "cache"), 100 * 1024 * 1024, 10000);
         ui_context.browsing_session = session_create(thread_pool, file_cache);
         if (!ui_context.browsing_session) {
             log_error("view: failed to create browsing session");
@@ -1841,7 +1838,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             network_downloader_init_shared();
             if (!doc->resource_manager) {
                 if (!file_cache) {
-                    file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+                    file_cache = enhanced_cache_create(host_path_dir(HOST_PATH_CACHE, "cache"), 100 * 1024 * 1024, 10000);
                 }
                 radiant_init_network_support(doc, NULL, file_cache);
                 if (doc->resource_manager) {

@@ -2,6 +2,7 @@
 // Shared-LRU implementation with HTTP cache policy
 
 #include "enhanced_file_cache.h"
+#include "../../lib/host_paths.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
@@ -248,7 +249,7 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size,
     EnhancedFileCache* cache = (EnhancedFileCache*)mem_calloc(1, sizeof(EnhancedFileCache), MEM_CAT_NETWORK);
     if (!cache) return NULL;
 
-    cache->cache_dir = mem_strdup(cache_dir ? cache_dir : "./temp/radiant_cache", MEM_CAT_NETWORK);
+    cache->cache_dir = mem_strdup(cache_dir ? cache_dir : host_path_dir(HOST_PATH_CACHE, "radiant_cache"), MEM_CAT_NETWORK);
     cache->max_size_bytes = max_size;
     cache->max_entries = max_entries > 0 ? max_entries : 10000;
     cache->max_concurrent_writes = 2;

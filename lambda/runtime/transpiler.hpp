@@ -189,9 +189,9 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 
 // Lambda home: directory containing runtime assets (the package tree).
 // Default "./lmd" in both dev and release; override with LAMBDA_HOME env var.
-extern const char* g_lambda_home;
-void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)
-char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<rel>"; caller frees
+// the package tree is HOST_PATH_HOME: host_path_join(HOST_PATH_HOME, rel)
+#include "../../lib/host_paths.h"
+void lambda_home_init(void);    // call once at startup: host-path env overrides, TeX resources
 
 void* alloc_const(Transpiler* tp, size_t size);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);

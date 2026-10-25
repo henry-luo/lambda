@@ -13437,7 +13437,7 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
     // D7.2.4v2: shipped source mirrors every component below lambda.*.
     size_t prefix_len = strlen("lambda.");
     StrView physical = {module.str + prefix_len, module.length - prefix_len};
-    strbuf_append_format(path, "%s/package/", g_lambda_home);
+    strbuf_append_format(path, "%s/package/", host_path(HOST_PATH_HOME));
     strbuf_append_replace_char_n(path, physical.str, physical.length, '.', '/');
     return true;
 }

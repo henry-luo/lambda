@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../../lib/host_paths.h"
 #include "write_set.hpp"
 #include "lambda-number-types.hpp"
 #include "re2_wrapper.hpp"
@@ -49581,7 +49582,7 @@ static void transpile_mir_ast_lower(MirModuleBuild* build) {
     // canonical finalized dump emitted below, not this earlier snapshot, and
     // must not have its private file raced by the developer convenience.
     if (mir_dump_instrumentation_enabled() && !mir_dump_explicit_path()) {
-        mir_dump_write_context(ctx, "temp/mir_dump.txt", false);
+        mir_dump_write_context(ctx, host_path_dir(HOST_PATH_TEMP, "mir_dump.txt"), false);
     }
 #endif
     if (mt.property_keys && mt.property_keys->length > 0) {
@@ -49671,7 +49672,7 @@ static bool transpile_mir_ast_finalize(MirModuleBuild* build,
 #else
     const bool mir_dump_default_enabled = false;
 #endif
-    mir_dump_finalized(ctx, "temp/mir_dump.txt", mir_dump_default_enabled);
+    mir_dump_finalized(ctx, host_path_dir(HOST_PATH_TEMP, "mir_dump.txt"), mir_dump_default_enabled);
 
     // Load module for linking (required before MIR_link)
     if (effects_valid) MIR_load_module(ctx, mt.module);

@@ -245,6 +245,13 @@ void log_set_default_format(const char *pattern);
 /* Configuration parsing */
 int log_parse_config_file(const char *filename);
 int log_parse_config_string(const char *config);
+/* Relative output files named by a config resolve against `dir` (NULL or ""
+   = the working directory); the host's log directory (host_paths.h). */
+void log_set_output_dir(const char *dir);
+/* Development reload: when <dir>/log.conf exists, empty <dir>/log.txt and
+   parse the config. Release runs ship no log.conf and create nothing.
+   Returns 1 when a config was loaded. */
+int log_reload_config_in_dir(const char *dir);
 
 /* Indentation management functions */
 void log_set_indent(int indent);

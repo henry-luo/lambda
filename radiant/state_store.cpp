@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "../lib/host_paths.h"
 #include "../lib/file.h"
 #include "state_store_internal.hpp"
 #include "view.hpp"
@@ -218,17 +219,9 @@ void radiant_state_cleanup_interned_names(void) {
 // Mark State Dump
 // ============================================================================
 
+// state dumps live in the host's temp directory (host_paths.h, MB13)
 static void state_dump_make_temp_dir(void) {
-#if defined(_WIN32) && !defined(__MINGW32__)
-    _mkdir("temp");
-    _mkdir("temp\\state");
-#elif defined(_WIN32)
-    mkdir("temp");
-    mkdir("temp/state");
-#else
-    mkdir("temp", 0755);
-    mkdir("temp/state", 0755);
-#endif
+    create_dir(host_path_dir(HOST_PATH_TEMP, "state"));
 }
 
 bool StateDumpLog::init(const char* doc_name) {
@@ -236,8 +229,8 @@ bool StateDumpLog::init(const char* doc_name) {
 
     pid = (int)getpid();
     event_state_log_sanitize_doc_name(doc_name, doc_id, sizeof(doc_id));
-    snprintf(path, sizeof(path), "./temp/state/state_%d_%s.mark",
-             pid, doc_id);
+    snprintf(path, sizeof(path), "%s/state_%d_%s.mark",
+             host_path_dir(HOST_PATH_TEMP, "state"), pid, doc_id);
 
     out = fopen(path, "w");
     if (!out) {

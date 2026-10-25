@@ -1,4 +1,5 @@
 #include "js_exec_profile.h"
+#include "../../lib/host_paths.h"
 #include "../lambda-data.hpp"
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
@@ -188,9 +189,9 @@ static void js_opt_trace_append_named_fast_no_entry_details(StrBuf* buf) {
 
 void js_opt_trace_dump(void) {
     if (!js_opt_trace_is_enabled() || g_js_opt_trace_dumped) return;
-    create_dir_recursive("temp");
+    host_path_ensure(HOST_PATH_TEMP);
     char default_path[128];
-    snprintf(default_path, sizeof(default_path), "temp/js_opt_trace_%ld.tsv",
+    snprintf(default_path, sizeof(default_path), "%s/js_opt_trace_%ld.tsv", host_path(HOST_PATH_TEMP),
         (long)js_profile_getpid());
     const char* out_path = getenv("JS_OPT_TRACE_OUT");
     if (!out_path || !out_path[0]) out_path = default_path;

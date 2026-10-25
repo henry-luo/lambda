@@ -1,6 +1,6 @@
 # Lambda and Radiant on iOS — Design Proposal
 
-**Date:** 2026-10-26 (rev 5: P1.1 done — Radiant platform seam (MB7) and window tick (MB8))
+**Date:** 2026-10-26 (rev 6: host paths (MB13) done; the rest of P1.2 awaits Xcode)
 **Status:** **PROPOSAL — not ratified.** Nothing here revises an `S#`/`D#` ruling yet. §10 lists the spec changes this design would need; each needs a user ruling before it lands.
 **User direction (2026-10-25):** Phase 1 is a **developer-build MVP**: several simple demos running on the user's own iPhone, installed from Xcode. App Store distribution is out of phase 1. External Jube modules are deferred to a later phase. Phase 1 is specified in **§1** and overrides the full-port sections where they differ.
 **Design authority:** `doc/Lambda_Formal_Design.md` — D1.1, D1.3v3, D7.1.1, D7.1.4v2 (headless profile C), D7.1.6 (`lambda-cli`), **D7.1.7v6 (`lambda-wasm`, the no-JIT precedent)**, D8.1.1v18 (T0/AUTO tiering), D8.1.3v42 (LambdaJS AST interpreter), D8.5 (MIR cache), D4.5 (Radiant seam).
@@ -202,6 +202,66 @@ The backend reports translated `RdtEvent`s and window notifications through seve
 | `make lint ARGS='--rule ^no-int-cast-radiant$'` | no violations |
 
 Not verified: the Linux and Windows builds. The X11/Win32 native-window branches and the webview/IME edits for those platforms are written but uncompiled here.
+
+
+### 1.9 P1.2, SDK-independent part: host paths (2026-10-26)
+
+P1.2's cross-build needs Xcode, which this machine does not have yet. The host-paths half of P1.2 (MB13) needs no SDK and is done.
+
+**`lib/host_paths.h`** holds five base directories:
+
+| Kind | Default (desktop, unchanged) | Override | Holds |
+|---|---|---|---|
+| `HOST_PATH_HOME` | `./lmd` | `LAMBDA_HOME` | the read-only package tree |
+| `HOST_PATH_CACHE` | `./temp` | `LAMBDA_CACHE_DIR` | `cache/` (HTTP and Radiant state), `radiant_cache/` |
+| `HOST_PATH_TEMP` | `./temp` | `LAMBDA_TEMP_DIR` | `io` temp files and directories, downloads, developer dumps (MIR dump, profiles, event/state logs, `--mem-dump`) |
+| `HOST_PATH_LOG` | `.` | `LAMBDA_LOG_DIR` | `log.conf` and its relative outputs (`log.txt`) |
+| `HOST_PATH_DOCUMENTS` | `.` | `LAMBDA_DOCUMENTS_DIR` | user documents (first consumer: the iOS demo picker, P1.4) |
+
+The API has five calls:
+
+- `host_paths_set` is for an embedding host, called before start-up;
+- `host_path` returns a base;
+- `host_path_join` returns a caller-owned `<base>/<rel>`;
+- `host_path_dir` returns a stable `<base>/<rel>` for long-lived directory strings;
+- `host_path_ensure` creates a base.
+
+What changed around it:
+
+- **Package home.** It replaces `g_lambda_home`/`lambda_home_path` outright: `lambda_home_init` now just applies the environment overrides.
+- **Logging.** `lib/log.c` gained `log_set_output_dir`, which resolves relative config outputs against the log directory, and `log_reload_config_in_dir`. The latter replaces two copied "empty `log.txt`, parse `log.conf`" blocks in Radiant. `log.c` itself takes no new dependency: the 19 test targets that hand-list it are untouched.
+- **Call sites.** About 35 sites moved: cache roots (14), temp files and developer dumps, and the log configuration.
+- **Left alone on purpose:**
+  - `sys.home`/`sys.temp`, which report the OS directories (iOS maps both into the sandbox);
+  - the `temp:` path scheme and other `"temp"` names;
+  - the event-file harness's rule that fixtures write only under the repo's `temp/`;
+  - `test_output/` dumps;
+  - the npm installer's project-local `.lambda/` (deferred with Jube);
+  - the unbuilt `font_config.c`.
+- **Wasm.** The manifest gained `lib/host_paths.c`, with environment lookups and directory creation guarded by `LAMBDA_NO_AMBIENT_PROVIDERS` / `LAMBDA_NO_FILE_IO`, following the existing convention. It was not rebuilt; there is no Emscripten here.
+
+**Pitfall found by the gates: process-lifetime strings must not use the tracked heap.** The first version kept the bases and memoized `host_path_dir` strings in `mem_*` allocations. Two things went wrong:
+
+- At exit they showed up as live bytes, failing every `[MEMTRACK_LIVE] bytes=0` check (the GC-stress sweep and the Radiant view tests).
+- Freeing them in a teardown hook crashed (SIGTRAP in `free`). `memtrack` keys tracking on a thread-local flag, so a string first allocated on an untracked network thread is a raw `malloc` without a header. Freed on the tracked main thread, `mem_free` reads a header that isn't there.
+
+The fix is static storage for the bases and the memo table: there is no heap, no teardown, and it is the same whichever thread asks first. Only `host_path_join` allocates, and its caller frees on the same thread.
+
+**Verification.**
+
+- **From an empty foreign working directory with all five bases redirected:**
+  - three package-importing goldens match;
+  - the Tetris UI script passes 12/12;
+  - **nothing is written to the working directory**;
+  - `log.txt`, the MIR dump, the phase profile, the memory snapshot and Radiant's state database land in the redirected directories.
+- **The pre-change binary, same setup:** it writes `temp/` (MIR dump, cache database, profile, snapshot) into the working directory and never finds the log configuration.
+- **Gates.** `make test-lambda-baseline` passes 8232/8232. `make test-radiant-baseline` passes 6177; its one failure is the pre-existing `CssCascadeMemory` budget, with byte counts identical to the base commit.
+
+**Next.** The rest of P1.2 needs Xcode and an iOS simulator runtime:
+
+- cross-built dependencies;
+- the iOS platform block and `Lambda.xcframework`;
+- `simctl spawn` of the Lambda baseline.
 
 ## 2. iOS platform constraints
 

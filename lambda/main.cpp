@@ -1,4 +1,5 @@
 #include "input/input.hpp"
+#include "../lib/host_paths.h"
 #include "input/input-postscript.hpp"
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
@@ -2544,13 +2545,17 @@ static int lambda_main_impl(int argc, char *argv[]) {
         i--;
     }
 
-    // Initialize logging system with config file if available
-    if (!no_log && file_exists("log.conf")) {
+    // Initialize logging system with config file if available; log.conf and
+    // its relative outputs live in the host's log directory (MB13)
+    log_set_output_dir(host_path(HOST_PATH_LOG));
+    char* log_conf = host_path_join(HOST_PATH_LOG, "log.conf");
+    if (!no_log && log_conf && file_exists(log_conf)) {
         // log.conf exists, load it
-        if (log_parse_config_file("log.conf") != LOG_OK) {
+        if (log_parse_config_file(log_conf) != LOG_OK) {
             fprintf(stderr, "Warning: Failed to parse log.conf, using defaults\n");
         }
     }
+    mem_free(log_conf);
     log_init("");  // Initialize with parsed config or defaults
 
     if (no_log) log_disable_all();
@@ -2561,7 +2566,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         if (strcmp(argv[i], "--mem-dump") == 0 ||
             strncmp(argv[i], "--mem-dump=", 11) == 0) {
             const char* eq = strchr(argv[i], '=');
-            g_lambda_main_mem_dump_path = (eq && eq[1]) ? eq + 1 : "./temp/mem_snapshot.json";
+            g_lambda_main_mem_dump_path = (eq && eq[1]) ? eq + 1 : host_path_dir(HOST_PATH_TEMP, "mem_snapshot.json");
             for (int j = i; j < argc - 1; j++) {
                 argv[j] = argv[j + 1];
             }
@@ -4213,7 +4218,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // the viewer ships with the package tree and follows LAMBDA_HOME (D7.2.4).
         if (filename == NULL) {
-            g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.ls");
+            g_lambda_main_viewer_path = host_path_join(HOST_PATH_HOME, "package/doc/doc_viewer.ls");
             filename = g_lambda_main_viewer_path;
             log_info("VIEW_DEFAULT: opening bundled document viewer: %s", filename);
         }
@@ -4287,7 +4292,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 } else {
                     // Write non-HTML content to temp file with appropriate extension
                     char temp_path[256];
-                    snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
+                    snprintf(temp_path, sizeof(temp_path), "%s/lambda_view_http%s", host_path(HOST_PATH_TEMP), effective_ext ? effective_ext : ".html");
                     FILE* f = fopen(temp_path, "wb");
                     if (!f) {
                         printf("Error: Failed to create temp file for HTTP content\n");
