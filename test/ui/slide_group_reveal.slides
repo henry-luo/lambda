@@ -1,0 +1,22 @@
+// Groups hidden by visibility alone (appear, wipe-in) must hide their nested objects until the
+// cue, including text. Each group holds a solid block and a line of solid block glyphs.
+<presentation id: "group-reveal", width: 640, height: 360,
+    <slide id: "one", background: "#ffffff",
+        <group id: "appear-group", x: 40, y: 40, width: 560, height: 80,
+            <content id: "appear-block", x: 0, y: 0, width: 120, height: 80,
+                <div style: "width:120px;height:80px;background:#1d5fc4;">
+            >
+            <text id: "appear-text", x: 160, y: 10, width: 400, height: 60, font_size: 48, color: "#1d5fc4",
+                style: "font-family:Menlo, 'DejaVu Sans Mono', monospace;line-height:60px;", "████████">
+        >
+        <group id: "wipe-group", x: 40, y: 200, width: 560, height: 80,
+            <content id: "wipe-block", x: 0, y: 0, width: 120, height: 80,
+                <div style: "width:120px;height:80px;background:#1d5fc4;">
+            >
+            <text id: "wipe-text", x: 160, y: 10, width: 400, height: 60, font_size: 48, color: "#1d5fc4",
+                style: "font-family:Menlo, 'DejaVu Sans Mono', monospace;line-height:60px;", "████████">
+        >
+        <cue <effect target: "appear-group", kind: 'appear'>>
+        <cue <effect target: "wipe-group", kind: 'wipe-in', from: 'left', duration: 1000, easing: 'linear'>>
+    >
+>

@@ -250,7 +250,9 @@ Parallel duration is the longest child span; sequence duration is their sum.
 Entry cues must precede click cues. Entrances establish their initial hidden
 state before the first build. Completed tracks retain their final values.
 Hidden effect wrappers use visibility, pointer exclusion, `aria-hidden` and
-`inert`; each player's controls remain outside the animated canvas.
+`inert`; each player's controls remain outside the animated canvas. Shown
+objects inherit visibility and pointer events, so a hidden group hides the
+objects nested in it.
 
 Motion paths contain continuous segments `[x0,y0,x1,y1]` or cubic segments
 `[x0,y0,c1x,c1y,c2x,c2y,x1,y1]`. Coordinates are offsets from the authored box.

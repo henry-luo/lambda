@@ -1,0 +1,25 @@
+{
+  "name": "Slide groups hidden by appear and wipe-in hide nested blocks and text until their cue; mid-wipe, the group's clip (inset from the left) cuts nested text too",
+  "html": "test/ui/slide_group_reveal.slides",
+  "viewport": {"width": 800, "height": 560},
+  "events": [
+    {"type": "advance_time", "ms": 300, "steps": 3},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=appear-block]", "offset_x": 60, "offset_y": 40}, "force_render": true, "min_r": 240},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=appear-text]", "offset_x": 40, "offset_y": 30}, "min_r": 240},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-block]", "offset_x": 60, "offset_y": 40}, "min_r": 240},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-text]", "offset_x": 40, "offset_y": 30}, "min_r": 240},
+    {"type": "click", "target": {"selector": "#group-reveal [data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 200, "steps": 4},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=appear-block]", "offset_x": 60, "offset_y": 40}, "force_render": true, "max_r": 80, "min_b": 150},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=appear-text]", "offset_x": 40, "offset_y": 30}, "max_r": 80, "min_b": 150},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-text]", "offset_x": 40, "offset_y": 30}, "min_r": 240},
+    {"type": "click", "target": {"selector": "#group-reveal [data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 500, "steps": 10},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-block]", "offset_x": 60, "offset_y": 40}, "force_render": true, "min_r": 240},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-text]", "offset_x": 40, "offset_y": 30}, "min_r": 240},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-text]", "offset_x": 200, "offset_y": 30}, "max_r": 80, "min_b": 150},
+    {"type": "advance_time", "ms": 800, "steps": 8},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-block]", "offset_x": 60, "offset_y": 40}, "force_render": true, "max_r": 80, "min_b": 150},
+    {"type": "assert_pixel", "target": {"selector": "#group-reveal [data-slide-object=wipe-text]", "offset_x": 40, "offset_y": 30}, "max_r": 80, "min_b": 150}
+  ]
+}
