@@ -6,6 +6,7 @@ import model: .mod_model
 import home: .mod_home
 import document: .mod_document
 import ribbon_icons: .mod_ribbon_icons
+import ribbon: ~~.mod_ribbon
 
 pub let emphasis = [{id:"bold",mark:'strong'},{id:"italic",mark:'em'},{id:"underline",mark:'u'},
     {id:"strikethrough",icon:"strike",mark:'del'},{id:"subscript",mark:'sub'},{id:"superscript",mark:'sup'}]
@@ -32,12 +33,10 @@ pub fn ribbon(editor,read_only,opened,font_families,chrome,ui) {
     let boxed = model.char_value(editor,"border","")!="";
     <div class:"ribbon-groups home-ribbon",
         // icon-only history row with Save and Print below it, like Google Docs' toolbar start.
-        ui.group("Undo",[<div class:"history-tools",
-            tool(ui,"edit.undo","edit.undo","Undo","undo",{},false,not edit_can_undo(editor))
-            tool(ui,"edit.redo","edit.redo","Redo","redo",{},false,not edit_can_redo(editor))>,
-            <div class:"history-tools",
-                tool(ui,"home-save","file.save","Save","save")
-                tool(ui,"file.print","file.print","Print","print")>])
+        ui.group("Undo",ribbon.history_tools((action,label,graphic)=>{
+            let command = (if (action in ["undo","redo"]) "edit." else "file.") ++ action;
+            tool(ui,if (action=="save") "home-save" else command,command,label,graphic,{},false,
+                if (action=="undo") not edit_can_undo(editor) else if (action=="redo") not edit_can_redo(editor) else false)}))
         ui.group("Clipboard",[<div class:"ribbon-command-row",
             <div class:"paste-split",
                 ui.button("home-paste","clipboard.paste","Paste","paste",{},false,read_only,"ribbon-large")

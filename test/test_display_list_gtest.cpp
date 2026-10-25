@@ -640,6 +640,45 @@ TEST_F(DisplayListTest, ReplayedGlyphCoverageKeepsTransparentEdges) {
     EXPECT_EQ((pixel >> 24) & 0xFFu, 64u);
 }
 
+TEST_F(DisplayListTest, MinifiedGlyphPreservesThinStrokesAtEverySourcePhase) {
+    const float scales[] = {0.125f, 0.25f, 0.5f};
+    for (float scale : scales) for (int column = 0; column < 8; column++) {
+        uint8_t ink[64] = {};
+        for (int row = 0; row < 8; row++) ink[row * 8 + column] = 255;
+        uint32_t pixels[16] = {};
+        ImageSurface surface = {};
+        surface.width = surface.height = 4; surface.pitch = 16; surface.pixels = pixels;
+        DlDrawGlyph glyph = {};
+        glyph.bitmap.buffer = ink; glyph.bitmap.width = glyph.bitmap.height = 8;
+        glyph.bitmap.pitch = 8; glyph.bitmap.pixel_mode = GLYPH_PIXEL_GRAY;
+        glyph.color = test_color(0xffffffff); glyph.clip = {0, 0, 4, 4};
+        glyph.has_transform = true; glyph.transform = rdt_matrix_scale(scale, scale);
+        dl_replay_draw_glyph(&surface, &glyph);
+        unsigned coverage = 0;
+        for (uint32_t pixel : pixels) coverage += pixel >> 24;
+        // a one-pixel stem contributes its full area, independently of sample alignment.
+        EXPECT_NEAR(coverage, 255.0f * 8.0f * scale * scale, 4.0f * scale) << scale << ":" << column;
+    }
+}
+
+TEST_F(DisplayListTest, MinifiedGlyphFractionalEdgesAndTilesConserveCoverage) {
+    uint8_t ink[64]; memset(ink, 255, sizeof(ink));
+    uint32_t pixels[4] = {}, tile_pixels[2] = {};
+    ImageSurface surface = {}, tile = {};
+    surface.width = surface.height = 2; surface.pitch = 8; surface.pixels = pixels;
+    tile.width = 2; tile.height = 1; tile.pitch = 8; tile.pixels = tile_pixels; tile.tile_offset_y = 1;
+    DlDrawGlyph glyph = {};
+    glyph.bitmap.buffer = ink; glyph.bitmap.width = glyph.bitmap.height = 8;
+    glyph.bitmap.pitch = 8; glyph.bitmap.pixel_mode = GLYPH_PIXEL_GRAY;
+    glyph.color = test_color(0xffffffff); glyph.clip = {0, 0, 2, 2}; glyph.has_transform = true;
+    glyph.transform = {0.125f, 0, 0.25f, 0, 0.125f, 0.25f, 0, 0, 1};
+    dl_replay_draw_glyph(&surface, &glyph);
+    dl_replay_draw_glyph_at_offset(&tile, &glyph, 0, 1, nullptr);
+    const unsigned expected[] = {143, 48, 48, 16};
+    for (unsigned i = 0; i < 4; i++) EXPECT_EQ(pixels[i] >> 24, expected[i]);
+    EXPECT_EQ(tile_pixels[0], pixels[2]); EXPECT_EQ(tile_pixels[1], pixels[3]);
+}
+
 TEST_F(DisplayListTest, DrawPictureUsesBackendSizeForBounds) {
     char picture_token = 0;
     RdtPicture* picture = (RdtPicture*)&picture_token;

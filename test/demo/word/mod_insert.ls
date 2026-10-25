@@ -5,13 +5,9 @@ import lambda.editor.mod_source_pos
 import lambda.editor.mod_transaction
 import commands: lambda.editor.mod_commands
 import inline_format: lambda.editor.mod_inline_format
+import symbol_sets: ~~.mod_symbols
 
-pub let symbols = [
-    {name:"Punctuation",chars:["©","®","™","§","¶","†","‡","•","…","—","–","«","»","“","”","’"]},
-    {name:"Mathematics",chars:["±","×","÷","≠","≈","≤","≥","∞","√","∑","∏","∫","°","½","¼","¾"]},
-    {name:"Currency & Greek",chars:["€","£","¥","¢","α","β","γ","δ","ε","θ","λ","μ","π","σ","φ","Ω"]},
-    {name:"Arrows",chars:["←","↑","→","↓","↔","↕","⇒","⇔"]}
-]
+pub let symbols = symbol_sets.symbols
 
 pub let bookmark_prefix = "word-bookmark-"
 pub fn bookmark_id(name) => bookmark_prefix ++ name

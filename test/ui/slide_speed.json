@@ -13,16 +13,16 @@
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
     {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-rate", "equals": "4"},
     {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "4×"},
-    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 74, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
     {"type": "mouse_drag", "target": {"selector": "#demo-speed"}, "dx": -120, "dy": 0},
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "0.5"},
     {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "0.5×"},
     {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 6, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
-    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "max_r": 30, "max_g": 60, "max_b": 80},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 74, "offset_y": 6}, "max_r": 30, "max_g": 60, "max_b": 80},
     {"type": "mouse_drag", "target": {"selector": "#demo-speed"}, "dx": 120, "dy": 0},
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
     {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "4×"},
-    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 74, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220},
     {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 6, "offset_y": 6}, "max_r": 30, "max_g": 60, "max_b": 80},
     {"type": "key_press", "key": "Home"},
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "0.5"},
@@ -31,7 +31,7 @@
     {"type": "key_press", "key": "ArrowRight"},
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "0.75"},
     {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "0.75×"},
-    {"type": "click", "target": {"selector": "#demo-speed", "offset_x": 103, "offset_y": 10}},
+    {"type": "click", "target": {"selector": "#demo-speed", "offset_x": 79, "offset_y": 10}},
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
     {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-index", "equals": "0"},
     {"type": "assert_attribute", "target": {"selector": "#demo"}, "attribute": "data-slide-autoplay", "equals": "false"},
@@ -54,6 +54,6 @@
     {"type": "assert_value", "target": {"selector": "#demo-speed"}, "equals": "4"},
     {"type": "assert_text", "target": {"selector": ".slide-speed-value"}, "equals": "4×"},
     {"type": "advance_time", "ms": 700, "steps": 14},
-    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 98, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220}
+    {"type": "assert_pixel", "target": {"selector": "#demo-speed", "offset_x": 74, "offset_y": 6}, "min_r": 220, "min_g": 220, "min_b": 220}
   ]
 }

@@ -801,7 +801,7 @@ static void render_text_input(RasterRenderContext* rdcon, ViewBlock* block, Form
                                                       (int)preedit_end) * s - scroll_px;
         if (ux1 > ux0) {
             Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
-            rc_fill_rect(rdcon, ux0, text_y + font_size_scaled - 2.0f * s,
+            fill_rect(rdcon, ux0, text_y + font_size_scaled - 2.0f * s,
                          ux1 - ux0, 1.0f * s, underline);
         }
     }
@@ -818,7 +818,8 @@ static void render_text_input(RasterRenderContext* rdcon, ViewBlock* block, Form
             float caret_w = 2.0f * s;
             // The auto caret follows the control's text color on light and dark backgrounds.
             Color caret_color = radiant_caret_color_for_view(block);
-            rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
+            // the caret shares the glyph transform, including a scaled editor canvas.
+            fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
         }
     }
 
@@ -1625,7 +1626,7 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
                     ux1 -= ux_scroll;
                     float uy = content_y + start_line * line_height +
                         font_size_scaled - 2.0f * s - uy_scroll;
-                    rc_fill_rect(rdcon, ux0, uy, ux1 - ux0, 1.0f * s, underline);
+                    fill_rect(rdcon, ux0, uy, ux1 - ux0, 1.0f * s, underline);
                 }
             }
         }
@@ -1693,7 +1694,7 @@ static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormCo
 
             // draw textarea caret via RdtVector
             Color ta_caret_color = radiant_caret_color_for_view(block);
-            rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
+            fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }
     render_clip_pop_scope(rdcon, &clip_scope);

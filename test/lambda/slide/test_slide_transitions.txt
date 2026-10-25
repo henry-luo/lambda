@@ -1,0 +1,9 @@
+{
+  catalog: [true, true, true, true, true, true, true, true, true, true, true, true],
+  visual: [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  editing: [true, true, true, true, true, true, true],
+  timing: [true, true, true, true, true, true, true, true, true],
+  lifecycle: [true, true, true, true, true, true, true, true],
+  media: [true, true],
+  invalid: [true, true, true, true, true, true, true]
+}

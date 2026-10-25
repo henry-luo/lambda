@@ -1,6 +1,9 @@
 // Shared album-style outline icons: one 24-unit grid, rounded 1.7-unit strokes.
 let table_grid = "M3 4h18v16H3z M3 9h18 M3 14h18 M9 4v16 M15 4v16"
 let strokes = {
+    calendar:"M4 5h16v16H4z M4 10h16 M8 3v4 M16 3v4 M8 14h2 M14 14h2 M8 18h2 M14 18h2",
+    screenshot:"M3 5h18v13H3z M8 21h8 M12 18v3 M7 9h3 M7 9v3 M17 14h-3 M17 14v-3",
+
     citation:"M4 5h7v7H7c0 3 1 4 3 5v3c-5-1-6-5-6-9z M14 5h7v7h-4c0 3 1 4 3 5v3c-5-1-6-5-6-9z",
     sources:"M4 6h12v15H4z M8 3h12v15 M7 10h6 M7 14h6 M7 18h4",
     bibliography:"M4 3h16v18H4z M7 3v18 M10 7h7 M10 11h7 M10 15h5",

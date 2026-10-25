@@ -61,7 +61,7 @@ fn object_patch(obj, visual, roots, pairs, old_visuals, new_visuals, t, incoming
             else blended.opacity * (if (incoming) t else 1.0 - t)
         {geometry: {*: geometry(pair.a, pair.b, t), dom_key: obj.dom_key},
          visual: {*: blended, id: obj.id, dom_key: obj.dom_key, opacity: opacity,
-            paint: if (pair.compatible) color.css(color.sample(pair.ac, pair.bc, t)) else visual.paint}}
+            paint: if (pair.compatible) color.css(color.sample(c.value(av.paint_rgba,pair.ac), pair.bc, t)) else visual.paint}}
     }
 }
 
@@ -69,8 +69,8 @@ pub fn sample(plan, ps) {
     let scene = plan.slides[ps.slide]
     let previous = plan.slides[ps.outgoing]
     let t = ease.sample('ease-in-out', min(1.0, max(0.0, ps.time_ms / scene.transition_duration)))
-    let old_visuals = samples.scene(previous, len(previous.cues) - 1,
-        if (len(previous.cues) > 0) previous.cues[len(previous.cues) - 1].duration_ms else 0.0)
+    let old_visuals = samples.triggered(previous,samples.scene(previous, len(previous.cues) - 1,
+        if (len(previous.cues) > 0) previous.cues[len(previous.cues) - 1].duration_ms else 0.0),c.value(ps.outgoing_triggered,[]))
     let new_visuals = samples.scene(scene, -1, 0.0)
     {incoming: [for (i, obj in scene.targets) object_patch(obj, new_visuals[i], [for (root in scene.objects) root.id], scene.morph.pairs, old_visuals, new_visuals, t, true)],
      outgoing: [for (i, obj in previous.targets) object_patch(obj, old_visuals[i], [for (root in previous.objects) root.id], scene.morph.pairs, old_visuals, new_visuals, t, false)],

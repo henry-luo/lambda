@@ -16,6 +16,50 @@
         "selector": "#slides-editor"
       },
       "attribute": "data-slides",
+      "equals": "18"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#thumbnails .thumbnail"
+      },
+      "equals": 18
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#deck-title"
+      },
+      "equals": "Northstar / Strategy 2027"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
       "equals": "2"
     },
     {
@@ -57,7 +101,7 @@
         "selector": "#slides-editor"
       },
       "attribute": "data-dirty",
-      "equals": "false"
+      "equals": "true"
     },
     {
       "type": "assert_value",
@@ -93,12 +137,12 @@
         "selector": "#slides-editor"
       },
       "attribute": "data-undo",
-      "equals": "1"
+      "equals": "2"
     },
     {
       "type": "click",
       "target": {
-        "selector": "#undo"
+        "selector": "#home-undo"
       }
     },
     {
@@ -111,7 +155,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#redo"
+        "selector": "#home-redo"
       }
     },
     {
@@ -137,7 +181,7 @@
         "selector": "#slides-editor"
       },
       "attribute": "data-undo",
-      "equals": "2"
+      "equals": "3"
     },
     {
       "type": "assert_script",
@@ -146,7 +190,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#undo"
+        "selector": "#home-undo"
       }
     },
     {
@@ -160,6 +204,12 @@
       "type": "click",
       "target": {
         "selector": "[data-tab=Insert]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-shapes"
       }
     },
     {
@@ -320,6 +370,12 @@
     {
       "type": "click",
       "target": {
+        "selector": "#arrange"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
         "selector": "#duplicate"
       }
     },
@@ -329,6 +385,12 @@
         "selector": "#slide-render .slide-object"
       },
       "equals": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#arrange"
+      }
     },
     {
       "type": "click",
@@ -382,6 +444,12 @@
     {
       "type": "click",
       "target": {
+        "selector": "#slide-actions"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
         "selector": "#duplicate-slide"
       }
     },
@@ -392,6 +460,12 @@
       },
       "attribute": "data-slides",
       "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-actions"
+      }
     },
     {
       "type": "click",

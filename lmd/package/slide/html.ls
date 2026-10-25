@@ -1,6 +1,7 @@
 import c: .common
 import samples: .sample
 import theme: .theme
+import masks: .masks
 
 // Player chrome colours, font and radius are `--slide-ui-*` custom properties whose
 // fallbacks are the original values; hosts override them in CSS or with the `ui` option.
@@ -15,42 +16,56 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-text { width: 100%; height: 100%; white-space: pre-wrap; }
 .slide-text p { margin: 0 0 0.6em; }
 .slide-image { width: 100%; height: 100%; }
-.slide-controls { position: relative; display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
-    gap: 8px; padding: 14px 24px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
+.slide-controls { position: relative; display: flex; align-items: center; flex-wrap: nowrap; height: 52px; box-sizing: border-box;
+    gap: 8px; padding: 8px 12px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
 .slide-controls button, .slide-console button, .slide-overview button { appearance: none; box-sizing: border-box; font-family: inherit;
     font-size: 13px; font-weight: 600; line-height: 20px; padding: 8px 16px;
     border: 1px solid var(--slide-ui-control-border, #365263); border-radius: var(--slide-ui-radius, 8px); background: var(--slide-ui-control, #1b3445); color: var(--slide-ui-text, #e5eef2);
     cursor: pointer; box-shadow: var(--slide-ui-shadow, 0 1px 2px #081724); }
+.slide-toolbar-items { display:flex; flex:1; min-width:0; height:34px; align-items:center; gap:6px;
+    overflow-x:auto; overflow-y:hidden; white-space:nowrap; }
+.slide-toolbar-items>* { flex-shrink:0; }
+/* auto margins center a short row and fall to zero when it needs to scroll. */
+.slide-toolbar-items>:first-child { margin-left:auto; }.slide-toolbar-items>:last-child { margin-right:auto; }
+.slide-controls button.slide-icon-button { display:inline-flex; flex-shrink:0; align-items:center; justify-content:center;
+    width:32px; min-width:32px; height:32px; padding:0; }
+.slide-controls svg { display:block; flex-shrink:0; pointer-events:none; }
+.slide-controls button[hidden],.slide-controls .slide-exit-fullscreen { display:none; }
+.slide-controls [aria-pressed=true] .slide-enter-fullscreen { display:none; }
+.slide-controls [aria-pressed=true] .slide-exit-fullscreen { display:block; }
+.slide-controls button[aria-pressed=true] { border-color:var(--slide-ui-accent,#8be2c6); color:var(--slide-ui-accent,#8be2c6); background:var(--slide-ui-control-active,#122b3c); }
 .slide-controls button:hover { background: var(--slide-ui-control-hover, #28495c); border-color: var(--slide-ui-control-hover-border, #5c8495); }
 .slide-controls button:active { background: var(--slide-ui-control-active, #122b3c); }
 .slide-controls button:focus-visible { outline: 2px solid var(--slide-ui-accent, #8be2c6); outline-offset: 3px; }
 .slide-controls button[data-slide-command=next] { background: var(--slide-ui-accent, #8be2c6); border-color: var(--slide-ui-accent, #8be2c6);
-    color: var(--slide-ui-accent-text, #102b35); font-weight: 700; padding-left: 24px; padding-right: 24px; }
+    color: var(--slide-ui-accent-text, #102b35); font-weight: 700; }
 .slide-controls button[data-slide-command=next]:hover { background: var(--slide-ui-accent-hover, #b0efdb); border-color: var(--slide-ui-accent-hover, #b0efdb); }
 .slide-controls button[data-slide-command=next]:active { background: var(--slide-ui-accent-active, #69c8ab); }
-.slide-controls button[data-slide-command=restart] { margin-left: 8px; background: transparent; }
+.slide-controls button[data-slide-command=restart] { background: transparent; }
 .slide-controls button[data-slide-command=restart]:hover { background: var(--slide-ui-control-hover, #28495c); }
-/* the hide arrow sits out of flow at the bar's bottom-right, so wrapping and bar height are unchanged */
-.slide-controls button.slide-toolbar-hide { position: absolute; right: 12px; bottom: 12px; padding: 6px 10px; line-height: 0;
+/* keep Hide outside the scrolling items, beside the bottom-right reveal corner. */
+.slide-controls button.slide-toolbar-hide { line-height: 0;
     background: transparent; border-color: transparent; box-shadow: none; color: var(--slide-ui-muted, #afc5d0); }
 .slide-controls button.slide-toolbar-hide:hover { background: var(--slide-ui-control-hover, #28495c); color: var(--slide-ui-text, #e5eef2); }
 /* invisible hot corner over the stage's bottom-right, present only while the toolbar is hidden */
 .slide-toolbar-reveal { display: none; position: absolute; right: 0; bottom: 0; width: 64px; height: 64px; z-index: 16; }
 .slide-player[data-slide-toolbar=false] .slide-toolbar-reveal { display: block; }
-.slide-speed { display: flex; align-items: center; gap: 10px; margin-left: 8px;
-    padding: 8px 12px; border: 1px solid var(--slide-ui-border, #2b4353); border-radius: var(--slide-ui-radius, 8px);
+.slide-speed { display: flex; align-items: center; gap: 6px; margin:0;
+    padding: 0 6px;
     font-size: 12px; font-weight: 600; line-height: 20px; color: var(--slide-ui-muted, #afc5d0); }
-.slide-speed-input { width: 104px; height: 20px; margin: 0; padding: 0; cursor: pointer; accent-color: var(--slide-ui-accent, #8be2c6); }
+/* override the default input face while retaining native range interaction. */
+.slide-speed-input { width: 80px; height: 20px; margin: 0; padding: 0; border:0; background:transparent; box-shadow:none;
+    cursor: pointer; accent-color: var(--slide-ui-accent, #8be2c6); }
 .slide-speed-input:focus-visible { outline: 2px solid var(--slide-ui-accent, #8be2c6); outline-offset: 3px; }
-.slide-speed-value { min-width: 36px; color: var(--slide-ui-accent, #8be2c6); text-align: right; }
-.slide-status { margin-left: 8px; padding: 8px 14px; border: 1px solid var(--slide-ui-border, #2b4353); border-radius: var(--slide-ui-radius, 8px);
-    font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0.5px; color: var(--slide-ui-muted, #afc5d0); }
+.slide-speed-value { min-width: 28px; color: var(--slide-ui-accent, #8be2c6); text-align: right; }
+.slide-status { margin:0; padding: 6px 8px; border: 1px solid var(--slide-ui-border, #2b4353); border-radius: var(--slide-ui-radius, 8px);
+    font-size: 12px; font-weight: 600; line-height: 18px; letter-spacing: 0.5px; color: var(--slide-ui-muted, #afc5d0); }
 .slide-player { position: relative; }
 .slide-workspace { display: flex; align-items: flex-start; }
 .slide-audience { position: relative; flex-shrink: 0; }
-.slide-picker { width: 70px; box-sizing: border-box; padding: 8px; border: 1px solid var(--slide-ui-control-border, #365263); border-radius: 6px;
+.slide-picker { width: 46px; height:32px; box-sizing: border-box; padding: 5px 6px; border: 1px solid var(--slide-ui-control-border, #365263); border-radius: 6px;
     background: var(--slide-ui-control, #1b3445); color: var(--slide-ui-text, #e5eef2); font-size: 13px; }
-.slide-picker-label { font-size: 12px; color: var(--slide-ui-muted, #afc5d0); }
+@media(max-width:760px) { .slide-speed>span:first-child { display:none; } }
 .slide-console { display: none; box-sizing: border-box; flex-shrink: 0; padding: 16px; overflow: auto;
     background: var(--slide-ui-background, #102333); color: var(--slide-ui-text, #e5eef2); border-left: 1px solid var(--slide-ui-control-border, #365263); font-size: 14px; font-family: var(--slide-ui-font, Arial, sans-serif); }
 .slide-console h2 { font-size: 18px; margin: 0 0 16px; }
@@ -79,8 +94,9 @@ pub fn effect_properties(v, previous = null) {
     let invisible = v.visible < 0.5 or v.opacity <= 0.0
     let visibility_changed = previous == null or invisible != (previous.visible < 0.5 or previous.opacity <= 0.0)
     let clip_changed = previous == null or v.clip != previous.clip or
-        (v.clip > 0.0 and v.clip_direction != previous.clip_direction)
-    let clip_css = if (not clip_changed) null else if (v.clip <= 0.0) "none" else {
+        (v.clip > 0.0 and (v.clip_direction != previous.clip_direction or v.clip_pattern != previous.clip_pattern))
+    let clip_css = if (not clip_changed) null else if (v.clip <= 0.0) "none"
+        else if (v.clip_pattern != null) masks.reveal(v.clip_pattern,1.0-v.clip,v.clip_width,v.clip_height,v.clip_direction) else {
         let amount = c.fmt(v.clip * 100.0) ++ "%"
         "inset(" ++ (if (v.clip_direction == 'left') "0 0 0 " ++ amount
             else if (v.clip_direction == 'right') "0 " ++ amount ++ " 0 0"
@@ -101,7 +117,7 @@ pub fn effect_style(v) => join([for (key, value in effect_properties(v)) string(
 fn shape_content(obj, visual, instance) {
     let src = obj.source
     let paint_fill = visual.paint
-    let stroke = if (src.kind == 'line') paint_fill else c.value(src.stroke, "none")
+    let stroke = if (src.kind == 'line') paint_fill else c.value(visual.stroke,c.value(src.stroke, "none"))
     let stroke_width = c.num(src, "stroke_width", 1.0)
     let kind = c.value(src.kind, 'rect')
     let paint = {id: instance ++ "-paint-" ++ obj.dom_key, fill: paint_fill,

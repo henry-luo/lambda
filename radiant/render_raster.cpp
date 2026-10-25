@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "raster_sampling.hpp"
 #include "../lib/log.h"
 
 #include <algorithm>
@@ -68,42 +69,20 @@ static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float
                                     bool premultiply_samples) {
     int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
     int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
-    int ix0 = std::max(0, (int)x0);
-    int iy0 = std::max(0, (int)y0);
-    int ix1 = std::min(src_w, (int)(x1 + 1.0f));
-    int iy1 = std::min(src_h, (int)(y1 + 1.0f));
-
-    if (ix0 >= ix1 || iy0 >= iy1) return 0;
-
     float sum_r = 0;
     float sum_g = 0;
     float sum_b = 0;
     float sum_a = 0;
-    float total_weight = 0;
-
-    for (int y = iy0; y < iy1; y++) {
-        float wy = 1.0f;
-        if (y < y0) wy = 1.0f - (y0 - y);
-        if (y + 1 > y1) wy = y1 - y;
-        if (wy <= 0) continue;
-
-        uint8_t* row = (uint8_t*)src->pixels + y * src->pitch;
-        for (int x = ix0; x < ix1; x++) {
-            float wx = 1.0f;
-            if (x < x0) wx = 1.0f - (x0 - x);
-            if (x + 1 > x1) wx = x1 - x;
-            if (wx <= 0) continue;
-
-            float w = wx * wy;
+    float total_weight = raster_visit_sample_area(src_w, src_h, x0, y0, x1, y1,
+        [&](int y, int x, float w) {
+            uint8_t* row = (uint8_t*)src->pixels + y * src->pitch;
             uint32_t pixel = *((uint32_t*)(row + x * 4));
             if (premultiply_samples) pixel = render_pixel_premultiply_abgr(pixel);
             sum_r += (pixel & 0xFF) * w;
             sum_g += ((pixel >> 8) & 0xFF) * w;
             sum_b += ((pixel >> 16) & 0xFF) * w;
             sum_a += ((pixel >> 24) & 0xFF) * w;
-            total_weight += w;
-        }
-    }
+        });
 
     if (total_weight <= 0) return 0;
 

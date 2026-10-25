@@ -3,7 +3,7 @@
 `lambda.slide` authors decks as Lambda elements, compiles their cues, and displays
 them in Radiant. The package is source Lambda under D7.2.4; rendering uses the
 shared host boundary under D7.5.3. Compilation and sampling are pure functions;
-live templates perform DOM writes and request frames under S12.1.1v2/S12.1.3.
+live templates perform DOM writes and request frames under S12.1.1v3/S12.1.3.
 
 ## Quick start
 
@@ -74,17 +74,19 @@ The active layer carries `data-slide-active`. Static exports (`snapshot`,
 | `initial_state(plan, options = {})` | Initial playback state. |
 | `reduce(plan, playback, event)^` | Updated playback state for a command or frame. |
 | `sample(plan, playback)^` | Deterministic object visuals for the selected slide/build. |
-| `needs_frame(playback)` | Whether an unpaused cue, transition or autoplay dwell needs another frame. |
+| `needs_frame(playback)` | Whether an unpaused cue, transition, autoplay dwell or authored After timer needs another frame. |
 | `diagnostic(plan, playback, frame_token = 0)` | IDs, time, phase, generation, active cue tracks and frame token. |
 | `timeline(deck, options = {})^` | The deck clock under autoplay: `{duration_ms, slides: [{id, start_ms, end_ms}]}` (see [Deck clock and host control](#deck-clock-and-host-control)). |
 | `position(plan, playback)` | The deck time a playback state shows, in milliseconds. |
 
 `options` accepts `instance`, `width`, `height`, `base_uri`, `reduced_motion`,
-`autostart`, `controls` and `ui` (see [Player chrome](#player-chrome)), plus
+`autostart`, `controls`, `start_slide` and `ui` (see [Player chrome](#player-chrome)), plus
 `autoplay_dwell_ms` (default 3000). Dimensions and the dwell
 interval are positive finite numbers; flags are booleans. Instance
 IDs are nonempty ASCII letters/digits/underscore/hyphen. Embedded players use
 their configured dimensions; automatic viewport fitting belongs to `page`.
+`start_slide` is a zero-based integer within the deck (default 0). It initializes
+the rendered layer and playback position before activation, including media.
 
 The compiler rejects unknown attributes, duplicate IDs, missing effect targets,
 invalid numeric values, unsupported effects, and overlapping parallel writers
@@ -143,9 +145,13 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
   arrow and the bottom-right reveal corner, and ignores the H key. A click on the stage
   belongs to the host and does not advance the deck.
 - A `slide_command` event's `detail` is a reducer event without `time_ms`; the
-  event's own time stamp is used. Accepted commands are `play`, `pause`,
-  `resume`, `next`, `previous`, `restart`, `end`, `jump`, `seek`, `seek_time`
-  and `speed`.
+  event's own time stamp is used. Accepted commands are `activate`, `play`, `pause`,
+  `resume`, `next`, `previous`, `restart`, `end`, `jump`, `seek`, `seek_time`,
+  `speed`, `stop`, `restart-slide` and `trigger`. `trigger` requires `target`,
+  the explicit ID of an object owning a triggered cue.
+  `activate` starts entry builds and authored After timing;
+  `stop` parks playback, cancels automatic progression and closes its cue sound.
+  Hosts should stop an embedded player before removing it.
 - The player root publishes `data-slide-duration`, and, with `data-slide-time`
   at each command or build boundary, `data-slide-position` and
   `data-slide-position-at`: the deck time and the frame time it was sampled at.
@@ -158,7 +164,7 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
 | Element | Attributes and behavior |
 |---|---|
 | `presentation` | `id`, `title`, `width`, `height`, `theme`, default `master`, `base_uri`; presenter defaults `autostart`, `reduced_motion`, `autoplay_dwell_ms`. Defaults to 1280 × 720. |
-| `slide` | `id`, `title`, `background`, `layout`, `theme`, `master`, `transition`, `transition_duration`, `direction`. |
+| `slide` | `id`, `title`, `background`, `layout`, `theme`, `master`, `transition`, `transition_duration`, `direction`, `transition_variant`, `transition_sound`, `advance_on_click`, `advance_after`. |
 | `master` | Reusable slide attributes and objects; requires `id`; optional `extends` selects a parent master. |
 | `layout` | Named object bounds; requires `id` and one or more `placeholder` children. |
 | `placeholder` | Layout slot with `role`, `x`, `y`, `width`, `height`, in logical slide units. |
@@ -168,10 +174,12 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
 | `content` | Ordinary HTML/SVG or another package's element output, inside an authored box. |
 | `group` | Nested slide objects with local coordinates. |
 | `notes` | Rich speaker content excluded from the audience canvas; shown in the presenter console and included in `handout`. |
-| `cue` | `id`, `start: 'entry'/'click'`; contains effects, `parallel`, or `sequence`. |
+| `cue` | `id`, `start: 'entry'/'click'/'with-previous'/'after-previous'`, optional `trigger` object ID; contains effects, `parallel`, or `sequence`. |
 
 Common object attributes are `id`, `x`, `y`, `width`, `height`, `rotation`, `scale`,
-`opacity`, `role`, `class`, `style`, and `morph_id`. Width/height/scale are positive;
+`opacity`, `role`, `class`, `style`, `morph_id`, and `metadata`. Optional
+`metadata` is a map of application annotations, retained in `source` and ignored
+by placement and paint (S1.4, D7.5.3). Width/height/scale are positive;
 opacity is in [0,1]. Built-in layouts are `'blank'`, `'title'`, `'title-body'`,
 `'two-column'`, `'three-column'`, `'section'`, `'quote'`, `'image-left'`, and
 `'image-right'`; roles are `'title'`, `'body'`, `'left'`, `'center'`, `'right'`,
@@ -237,7 +245,7 @@ dimensions appropriate to wrapping content; the helper does not measure text.
 
 ## Effects and transitions
 
-Effects accept `target`, `kind`, `duration` in milliseconds, `delay`, `easing`, and
+Effects accept an optional scene-unique `id`, `target`, `kind`, `duration` in milliseconds, `delay`, `easing`, and
 positive integer `repeat`. Supported easing names are `'linear'`, `'ease'`,
 `'ease-in'`, `'ease-out'`, `'ease-in-out'`, `'ease-in-cubic'`, `'ease-out-cubic'`,
 and `'ease-in-out-cubic'`; four-number cubic Bézier arrays are also accepted.
@@ -246,11 +254,14 @@ and `'ease-in-out-cubic'`; four-number cubic Bézier arrays are also accepted.
 |---|---|
 | `appear`, `disappear`, `fade-in`, `fade-out` | None. |
 | `fly-in`, `fly-out` | `from: 'left'/'right'/'top'/'bottom'`, `distance`. |
-| `zoom-in`, `zoom-out`, `pulse` | `scale`. |
+| `zoom-in`, `zoom-out`, `pulse`, `grow` | `scale`; `grow` retains its final scale, while `pulse` returns. |
 | `spin` | `angle`. |
 | `wipe-in`, `wipe-out` | `from`; rectangular CSS inset clipping. The revealed area grows toward the `from` edge: `from: 'right'` draws left to right, `from: 'top'` rises from the bottom. |
 | `motion` | `path`, optional `orient: 'auto'`. |
 | `highlight` | `color`; preceding highlights supply the next starting color. |
+| `line-color` | `color`; independently animates a native shape's visible outline. |
+| `transparency` | `opacity` in [0,1]; retains its final opacity. |
+| `blinds-in`, `checkerboard-in`, `dissolve-in` | Deterministic SVG path masks; the first two accept `from`. |
 | `keyframes` | `channel`, `stops`, optional `from` for clip direction. |
 
 Parallel duration is the longest child span; sequence duration is their sum.
@@ -258,6 +269,26 @@ Entry cues must precede click cues. Entrances establish their initial hidden
 state before the first build. Completed tracks retain their final values.
 Hidden effect wrappers use visibility, pointer exclusion, `aria-hidden` and
 `inert`; each player's controls remain outside the animated canvas.
+
+`with-previous` and `after-previous` merge into the preceding navigable build.
+They start at the immediately preceding cue's beginning or end, respectively,
+and require an earlier ordinary cue. The merged build keeps source cue IDs as
+address aliases. Channel conflicts are validated after scheduling; color
+continuity follows chronological track order. Entry builds still precede click
+builds. Authoring remains a pure source transformation (S1.4/S12.1.1v3).
+
+A cue with `trigger: "object-id"` and `start: 'click'` runs outside the main
+navigation timeline. Clicking that object's descendants also fires it, including
+in an embedded player with hidden controls or a slide with clicking disabled.
+The host may dispatch `{command: "trigger", target: "object-id"}`. Independently
+fired cues share pause and playback speed; firing again restarts the matching
+cues. Fired tracks overlay ordinary visuals in firing order, retaining their
+completed values. Unfired entrances remain hidden. Trigger playback cancels Play
+and defers authored After timing until active builds finish. Navigation to a
+different slide, Restart, Previous and seeking discard trigger activations;
+outgoing transitions preserve the fired visuals. Main-timeline snapshots and
+handouts do not fire triggers. Fill/line color effects apply to native shapes
+and text as appropriate; embedded HTML/SVG remains an opaque content object.
 
 Motion paths contain continuous segments `[x0,y0,x1,y1]` or cubic segments
 `[x0,y0,c1x,c1y,c2x,c2y,x1,y1]`. Coordinates are offsets from the authored box.
@@ -271,10 +302,42 @@ ending at 1, with strictly increasing fractions. Colors accept hex
 uses sRGB channels with premultiplied alpha; CSS serialization follows sampling.
 Static CSS paint values may use other supported CSS color syntax.
 
-Slide transitions are `'cut'`, `'fade'`, `'push'`, `'slide'`, and `'morph'`.
-`direction` is `'left'`, `'right'`, `'top'`, or `'bottom'`; default duration is
-300 ms. Fade keeps the outgoing layer opaque while the incoming layer fades in.
-Transitions exclude pointer/focus input on both layers until completion.
+Slide transitions are `'none'`, `'cut'`, `'fade'`, `'push'`, `'wipe'`, `'split'`,
+`'reveal'`, `'random-bars'`, `'shape'`, `'uncover'`, `'cover'` and `'morph'`.
+The original `'slide'` spelling remains an alias for cover behavior.
+`direction` is `'left'`, `'right'`, `'top'` or `'bottom'`, describing travel;
+for example `'left'` brings incoming content from the right. Default duration is
+300 ms. None and normal Cut switch immediately. Fade overlays the outgoing layer;
+Push moves both layers, Cover moves the incoming layer and Uncover the outgoing
+layer. Wipe clips the incoming layer; Reveal clips and moves the outgoing layer.
+Random Bars uses a deterministic staggered strip clip. These are package samples
+of supported CSS geometry under S12.1.1v3/D7.5.3, rather than a separate animation
+engine. Pointer/focus input on both layers is excluded during a transition.
+
+`transition_variant` selects `'normal'`/`'through-black'` for Fade and Cut,
+`'out'`/`'in'` for Split, and `'circle'`/`'diamond'`/`'box'` for Shape. Other
+transitions accept `'normal'`. Split and Bars use left/right for horizontal
+geometry and top/bottom for vertical geometry. Through-black Cut holds a black
+interval between its two abrupt switches. Zero-duration and reduced-motion
+playback snap to the destination.
+
+`advance_on_click: false` disables ordinary stage-click advancement. Explicit
+buttons, navigation links and keyboard commands still work. `advance_after`
+is an optional nonnegative number of milliseconds: its timer begins when the
+slide's final build completes, and works without Play. Zero advances on the next
+frame. Omit it or use `null` to require manual navigation. During Play, it replaces
+the default dwell before the next slide; click builds keep `autoplay_dwell_ms`.
+Pause/Resume and speed changes retain timer progress. The final slide stays parked.
+In a standalone page, an initial After timer or sound cue requests entry activation
+on load, even when `autostart` is omitted. Embedded hosts send `activate`.
+
+`transition_sound: {name: "Chime", src: "cue.wav"}` plays a single cue on entry.
+Sources may be local/remote URLs or base64 data URIs; relative sources use
+`base_uri`. Acquisition stays procedural, and the existing native audio interface
+owns playback under S12.1.3/D7.5.3/D7.5.4. Pause pauses the cue; leaving, stopping or
+closing the player releases it. Audio errors appear in the status and
+`data-slide-sound-error` without stopping the visual timeline. `data-slide-sound`
+reports `playing`, `paused`, `silent` or `error`. Static output does not play sounds.
 
 Morph matches explicit, unique `morph_id` values on flat objects with explicit
 author IDs. It interpolates authored bounds, rotation, scale, sampled endpoint
@@ -292,8 +355,14 @@ time. Restart returns to slide 1 and replays its entry cues; `restart-slide`
 replays the current slide through the reducer. `autostart: true` runs only the
 opening entry cues; the `activate` command exposes that same manual activation.
 
+The player toolbar is a single row of icon controls with tooltips and accessible
+names, including Previous/Next, Play/Pause/Resume, Restart and presenter tools.
+It reuses the packaged icon catalog (D7.2.5). Narrow windows scroll the items
+horizontally; the hide arrow remains visible at the right edge. Full-screen
+changes update the icon and accessible action name without replacing the button.
+
 The toolbar's **Speed** slider selects 0.5×–4× in 0.25× steps, with a live rate
-readout. It scales animations, transitions and autoplay dwell time; the default
+readout. It scales animations, transitions, autoplay dwell and authored After timers; the default
 three-second dwell therefore takes 1.5 seconds at 2×. Changes preserve current
 progress and pause state, and the selected speed survives Restart and manual
 navigation. Focus the slider and use arrows or Home/End for keyboard control.
@@ -319,11 +388,11 @@ preview reads “End of presentation”. The console is visible in the viewer;
 this is not a separate speaker window for a second display.
 
 **Overview** shows numbered slide titles; selecting one jumps to that slide and
-closes the overview. **Slide / Go** accepts a one-based slide number or an exact
-slide ID; Enter submits. Invalid input reports an error without navigation.
+closes the overview. The slide field and **Go** icon accept a one-based slide
+number or an exact slide ID; Enter submits. Invalid input reports an error without navigation.
 **Blackout** covers the audience canvas in black. **Pointer** enables a red laser
 that follows the mouse over the canvas. **Full screen** (or F) toggles the
-viewer window's full screen and reads **Exit full screen** while active. Entering
+viewer window's full screen; its tooltip reads **Exit full screen** while active. Entering
 full screen (by button, F, F11 or `--fullscreen`) hides the toolbar and leaving it
 shows the toolbar again. The button shows
 only when the player's window can go full screen, not in an embed or a headless
@@ -367,10 +436,11 @@ use generation-checked document ownership (D4.5.1v4), and host values use precis
 roots (D5.3.3). A failed command, rejected live style value or refused frame request pauses the
 affected player and reports a message in its status. Restart retries playback;
 an invalid authored value must be corrected before that retry can succeed.
-`data-slide-index/cue/phase/paused/autoplay/rate` describe discrete live state; `data-slide-time`
+`data-slide-index/cue/phase/paused/autoplay/timed/rate` describe discrete live state; `data-slide-time`
 is updated at command/park boundaries. Use the pure diagnostic function for an
 exact supplied playback state.
 
-No PPTX import/export, browser animation runtime, video export, editor, arbitrary
-shape reveal, or 3D transition catalog is included. Detailed validation and
+The slide editor is available through `lambda demo slides`. PPTX interchange,
+video export, arbitrary masks/path deformation and 3D transitions remain outside
+the delivered catalog. Detailed validation and
 release measurement results are in the [implementation report](../vibe/impl/Lambda_Impl_Slide_Presentation.md).

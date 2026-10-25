@@ -1,5 +1,6 @@
 // presenter tools use wall time, independently of the deck's animation clock.
 import c: .common
+import toolbar_ui: .toolbar
 
 pub fn initial_state() => {console: false, overview: false, toolbar: true, blackout: false, pointer: false,
     elapsed_ms: 0.0, anchor_ms: 0.0, running: false, started: false}
@@ -33,12 +34,11 @@ pub fn title(scene) => c.as_text(c.value(scene.source.title, scene.id))
 pub fn button(command, label) => <button type: "button", ["data-slide-tool"]: command, label>
 
 pub fn toolbar(plan, key) => [
-    button("console", "Presenter"), button("overview", "Overview"),
-    <label class: "slide-picker-label", ["for"]: key ++ "-picker", "Slide">,
-    <input id: key ++ "-picker", class: "slide-picker", type: "text", value: "1", ["aria-label"]: "Slide number or ID">,
-    button("go", "Go"), button("blackout", "Blackout"), button("pointer", "Pointer"),
+    toolbar_ui.button("console", "Presenter"), toolbar_ui.button("overview", "Overview"),
+    <input id: key ++ "-picker", class: "slide-picker", type: "text", value: "1", ["aria-label"]: "Slide number or ID",title:"Go to slide number or ID">,
+    toolbar_ui.button("go", "Go to slide"), toolbar_ui.button("blackout", "Blackout"), toolbar_ui.button("pointer", "Pointer"),
     // hidden until the player's document learns its window can go full screen (live.sync_fullscreen)
-    <button type: "button", ["data-slide-tool"]: "fullscreen", ["aria-label"]: "Toggle full screen (F)", hidden: "", "Full screen">]
+    toolbar_ui.button("fullscreen", "Full screen","data-slide-tool",{hidden:""})]
 
 pub fn console_tree(key) => <aside class: "slide-console", ["aria-label"]: "Presenter console", ["aria-hidden"]: "true", inert: "",
     <h2 "Presenter console">

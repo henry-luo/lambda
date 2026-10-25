@@ -1,0 +1,9 @@
+{
+  catalog: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  timing: [true, true, true, true, true, true, true],
+  triggers: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  authoring: [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  paint: [true, true],
+  masks: [true, true, true],
+  invalid: [true, true, true, true, true, true, true]
+}

@@ -2798,10 +2798,13 @@ RdtLogicalPoint view_geometry_document_viewport_offset(
     DomDocument* root_document, DomDocument* target_document,
     ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
+typedef bool (*ViewGeometryTextPointResolver)(View*, RdtLogicalPoint, RdtLogicalPoint,
+                                             RdtLogicalPoint*);
 bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
                                 RdtLogicalPoint origin,
                                 bool include_trailing_edges,
-                                ViewGeometryTextHit* out_hit);
+                                ViewGeometryTextHit* out_hit,
+                                ViewGeometryTextPointResolver resolve_point = nullptr);
 
 bool view_geometry_rect_contains_point(Rect rect, RdtLogicalPoint point);
 bool view_geometry_rect_contains_rect(Rect outer, Rect inner, float epsilon);

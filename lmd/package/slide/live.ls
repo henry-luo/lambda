@@ -9,23 +9,18 @@ import transitions: .transitions
 import morph: .morph
 import presenter: .presenter
 import clock: .clock
+import sound: .sound
+import toolbar: .toolbar
 
 fn instance(options) => c.as_text(c.value(options.instance, "slide"))
 // `controls: false` is for hosts that drive playback through slide_command: no control bar
 fn has_controls(options) => c.value(options.controls, true)
 // commands a host may send with a slide_command event; detail carries the reducer's fields
-let host_commands = ["play", "pause", "resume", "next", "previous", "restart", "end", "jump", "seek", "seek_time", "speed"]
+let host_commands = ["activate", "play", "pause", "resume", "next", "previous", "restart", "end", "jump", "seek", "seek_time", "speed", "stop", "trigger", "restart-slide"]
 fn event_owner(target, options) {
     let owner = dom.closest(target, ".slide-player")
     if (owner != null and dom.get_attribute(owner, "id") == instance(options)) owner else null
 }
-
-// down arrow at the bar's bottom-right; once hidden, the .slide-toolbar-reveal hot corner brings it back
-fn hide_button() => <button class: "slide-toolbar-hide", type: "button", ["data-slide-tool"]: "toolbar",
-    ["aria-label"]: "Hide toolbar (H)", title: "Hide toolbar (H)",
-    <svg width: "14", height: "14", viewBox: "0 0 14 14", ["aria-hidden"]: "true",
-        <path d: "M3 5 L7 9 L11 5", fill: "none", stroke: "currentColor", ["stroke-width"]: "2",
-            ["stroke-linecap"]: "round", ["stroke-linejoin"]: "round">>>
 
 fn tree(plan, options) {
     let key = instance(options)
@@ -37,28 +32,27 @@ fn tree(plan, options) {
         style: (if (c.value(options.fit_viewport, false)) "" else "width:" ++ c.px(c.value(options.width, plan.width)) ++ ";") ++
             html.ui_style(plan),
         *[<div class: "slide-workspace", *[
-            <div class: "slide-audience", *[html.stage(plan, {slide: 0, cue: -1, time_ms: 0.0}, options),
+            <div class: "slide-audience", *[html.stage(plan, {slide: c.value(options.start_slide,0), cue: -1, time_ms: 0.0}, options),
                 <div class: "slide-blackout", ["data-slide-tool"]: "blackout", ["aria-hidden"]: "true">,
                 <div class: "slide-pointer", ["aria-hidden"]: "true">,
                 presenter.overview_tree(plan)]>, presenter.console_tree(key)]>,
         *(if (controls) [<div class: "slide-toolbar-reveal", ["aria-hidden"]: "true">] else []),
         // without controls the bar stays mounted but hidden: status and speed writes still find it
-        <div class: "slide-controls", *:(if (controls) {} else {style: "display:none;", inert: "", ["aria-hidden"]: "true"}),
-            *[<button type: "button", ["data-slide-command"]: "previous", "Previous">,
-            <button type: "button", ["data-slide-command"]: "play", "Play">,
-            <button type: "button", ["data-slide-command"]: "pause", "Pause">,
-            <button type: "button", ["data-slide-command"]: "resume", "Resume">,
-            <button type: "button", ["data-slide-command"]: "next", "Next">,
-            <button type: "button", ["data-slide-command"]: "restart", "Restart">,
+        <div class: "slide-controls", role:"toolbar",["aria-label"]:"Slide show controls",
+            *:(if (controls) {} else {style: "display:none;", inert: "", ["aria-hidden"]: "true"}),
+            <div class:"slide-toolbar-items",
+            *[for (entry in [{id:"previous",label:"Previous"},{id:"play",label:"Play"},{id:"pause",label:"Pause"},
+                {id:"resume",label:"Resume"},{id:"next",label:"Next"},{id:"restart",label:"Restart"}])
+                toolbar.button(entry.id,entry.label,"data-slide-command")];
             <label class: "slide-speed", ["for"]: key ++ "-speed",
                 <span "Speed">
                 <input id: key ++ "-speed", class: "slide-speed-input", type: "range",
                     min: "0.5", max: "4", step: "0.25", value: "1", ["aria-label"]: "Playback speed">
                 <span class: "slide-speed-value", "1×">
-            >,
-            <span class: "slide-status", ["aria-live"]: "polite", "1 / " ++ string(len(plan.slides))>,
-            *presenter.toolbar(plan, key),
-            *(if (controls) [hide_button()] else [])]
+            >;
+            <span class: "slide-status", ["aria-live"]: "polite", string(c.value(options.start_slide,0)+1) ++ " / " ++ string(len(plan.slides))>;
+            *presenter.toolbar(plan, key)>;
+            if (controls) toolbar.button("toolbar","Hide toolbar","data-slide-tool",{},"slide-toolbar-hide") else null
         >]
     >
 }
@@ -67,10 +61,9 @@ pn patch_layer(owner, id, visual, previous = null) {
     if (visual == previous) { return null }
     let node = dom.get_element_by_id(owner, id)
     if (node != null) {
-        if (previous == null or visual.opacity != previous.opacity)
-            set_style(node, "opacity", c.fmt(visual.opacity))^
-        if (previous == null or visual.tx != previous.tx or visual.ty != previous.ty)
-            set_style(node, "transform", "translate(" ++ c.px(visual.tx) ++ "," ++ c.px(visual.ty) ++ ")")^
+        let current = transitions.properties(visual)
+        let prior = if (previous == null) {} else transitions.properties(previous);
+        for (key,value in current where value != prior[key]) set_style(node,string(key),value)^
     }
 }
 
@@ -102,6 +95,10 @@ pn patch_visual(owner, v, key, previous = null) {
                 if (hidden) dom.set_attribute(node, "inert", "")
                 else if (dom.has_attribute(node, "inert")) dom.remove_attribute(node, "inert")
             }
+            if ((previous == null or previous.stroke != v.stroke) and v.stroke != null) {
+                let outline = dom.get_element_by_id(node,key ++ "-paint-" ++ v.dom_key)
+                if (outline != null and lower(dom.node_name(outline)) != "line") set_style(outline,"stroke",v.stroke)^
+            }
             if (previous == null or previous.paint != v.paint) {
                 let text = dom.query_selector(node, ".slide-text")
                 let shape_node = dom.get_element_by_id(node, key ++ "-paint-" ++ v.dom_key)
@@ -132,8 +129,8 @@ pn patch_morph(owner, plan, ps, key) {
 
 fn layer_id(key, index) => key ++ "-s" ++ string(index)
 fn shown_layers(ps) => if (ps.outgoing >= 0) [ps.outgoing, ps.slide] else [ps.slide]
-fn final_visuals(scene) array^ => sampler.scene(scene, len(scene.cues) - 1,
-    if (len(scene.cues) > 0) scene.cues[len(scene.cues) - 1].duration_ms else 0.0)^
+fn final_visuals(scene,fired=[]) array^ => sampler.triggered(scene,sampler.scene(scene, len(scene.cues) - 1,
+    if (len(scene.cues) > 0) scene.cues[len(scene.cues) - 1].duration_ms else 0.0),fired)
 
 // A slide renders the first time it is needed and stays mounted; later visits
 // change state only, never markup (user ruling 2026-10-07).
@@ -158,6 +155,8 @@ pn show_layers(owner, plan, before, ps, key) {
         set_style(layer, "z-index", if (index == ps.slide) "2" else "1")^
         if (index == ps.slide) dom.set_attribute(layer, "data-slide-active", "true")
         else if (dom.has_attribute(layer, "data-slide-active")) dom.remove_attribute(layer, "data-slide-active")
+        // cached layers retain media nodes; pause playback when their slide leaves the audience.
+        if (index != ps.slide) for (media in dom.query_selector_all(layer,"audio,video")) dom.media_command(media,"pause",null)
         if (visible) {
             let scene = plan.slides[index]
             set_style(layer, "background", html.layer_background(plan, scene))^
@@ -171,14 +170,16 @@ pn show_layers(owner, plan, before, ps, key) {
 
 pn present(owner, plan, before, ps, options, painted, tools, now_ms) {
     let key = instance(options)
+    let starting = not dom.has_attribute(owner,"data-slide-index")
     let switched = before.slide != ps.slide or before.outgoing != ps.outgoing
     let is_morph = ps.phase == 'transition' and plan.slides[ps.slide].transition == 'morph'
     let visuals = if (switched or not is_morph) player.sample(plan, ps)^ else null
+    if (starting or switched) set_style(dom.query_selector(owner,".slide-canvas"),"background",transitions.background(plan,ps))^
     if (switched) {
         for (index in shown_layers(ps)) ensure_layer(owner, plan, index, key)^
         show_layers(owner, plan, before, ps, key)^
         // a slide leaving through a transition shows its final build
-        if (ps.outgoing >= 0) patch_objects(owner, final_visuals(plan.slides[ps.outgoing])^, null, key)^
+        if (ps.outgoing >= 0) patch_objects(owner, final_visuals(plan.slides[ps.outgoing],c.value(ps.outgoing_triggered,[]))^, null, key)^
     }
     if (is_morph) patch_morph(owner, plan, ps, key)^
     else patch_objects(owner, visuals, if (switched) null else painted, key)^
@@ -196,21 +197,21 @@ pn present(owner, plan, before, ps, options, painted, tools, now_ms) {
             if (dom.has_attribute(layer, "aria-hidden")) dom.remove_attribute(layer, "aria-hidden")
         }
     }
-    let diagnostics = {index: ps.slide, cue: ps.cue, phase: c.as_text(ps.phase), paused: ps.paused, autoplay: ps.autoplay, rate: ps.playback_rate}
-    let old_diagnostics = {index: before.slide, cue: before.cue, phase: c.as_text(before.phase), paused: before.paused, autoplay: before.autoplay, rate: before.playback_rate}
+    let diagnostics = {index: ps.slide, cue: ps.cue, phase: c.as_text(ps.phase), paused: ps.paused, autoplay: ps.autoplay, timed:ps.timed, rate: ps.playback_rate}
+    let old_diagnostics = {index: before.slide, cue: before.cue, phase: c.as_text(before.phase), paused: before.paused, autoplay: before.autoplay, timed:before.timed, rate: before.playback_rate}
     for (property, value in diagnostics where value != old_diagnostics[property] or not dom.has_attribute(owner, "data-slide-" ++ string(property)))
         dom.set_attribute(owner, "data-slide-" ++ string(property), string(value))
     // Publish parked/command time without invalidating attribute selectors every frame.
     // the deck position goes with it, stamped with its sample time: a host extrapolates while playing
-    if (not player.needs_frame(ps) or before.generation != ps.generation or before.paused != ps.paused) {
+    if ((not player.needs_frame(ps) and before != ps) or before.generation != ps.generation or before.paused != ps.paused or not dom.has_attribute(owner,"data-slide-position")) {
         dom.set_attribute(owner, "data-slide-time", c.fmt(ps.time_ms))
         dom.set_attribute(owner, "data-slide-position", c.fmt(clock.position(plan, ps)))
         dom.set_attribute(owner, "data-slide-position-at", c.fmt(now_ms))
     }
     if (before.slide != ps.slide)
         set_text(dom.query_selector(owner, ".slide-status"), string(ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
-    if (before.slide != ps.slide) {
-        sync_navigation(owner, plan, before.slide, ps.slide)
+    if (starting or before.slide != ps.slide) {
+        sync_navigation(owner, plan, if (starting) 0 else before.slide, ps.slide)
         if (tools.console) sync_console(owner, plan, ps.slide, key)^
     }
     if (before.playback_rate != ps.playback_rate)
@@ -219,7 +220,7 @@ pn present(owner, plan, before, ps, options, painted, tools, now_ms) {
     return if (is_morph) null else visuals
 }
 
-pn commit_event(owner, plan, before, event, options, token, painted, tools) {
+pn commit_event(owner, plan, before, event, options, token, painted, tools, voice = null) {
     if (token > 0) { dom.cancel_frame(owner, token) }
     let result = player.reduce(plan, before, event) ^ { {ps: {*: before, paused: true}, problem: ^.message} } ~
         { {ps: ~, problem: null} }
@@ -227,9 +228,18 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools) {
     var displayed = {problem: null, painted: null}
     present(owner, plan, before, result.ps, options, painted, tools, c.value(event.time_ms, before.anchor_ms)) ^ { displayed = {problem: ^.message, painted: null} } ~
         { displayed = {problem: null, painted: ~} }
-    let scheduled = if (result.problem is null and displayed.problem is null and player.needs_frame(result.ps)) dom.request_frame(owner, "slide_frame") else 0
+    let audio = sound.sync(owner,voice,plan,result.ps,c.as_text(event.command) == "stop")
+    let sound_state = if (audio.error != null) "error" else if (audio.token == null) "silent" else dom.audio_state(owner,audio.token)
+    if (dom.get_attribute(owner,"data-slide-sound") != sound_state) dom.set_attribute(owner,"data-slide-sound",sound_state)
+    if (audio.error != null) {
+        if (dom.get_attribute(owner,"data-slide-sound-error") != audio.error) dom.set_attribute(owner,"data-slide-sound-error",audio.error)
+    } else if (dom.has_attribute(owner,"data-slide-sound-error")) dom.remove_attribute(owner,"data-slide-sound-error")
+    if (audio.error != null and audio.error != voice.error) set_text(dom.query_selector(owner,".slide-status"),audio.error)
+    // audio has a native clock; keep polling its one voice after visual playback parks.
+    let needs_delivery = player.needs_frame(result.ps) or (audio.token != null and not result.ps.paused)
+    let scheduled = if (result.problem is null and displayed.problem is null and needs_delivery) dom.request_frame(owner, "slide_frame") else 0
     let problem = if (not (result.problem is null)) result.problem else if (not (displayed.problem is null)) displayed.problem
-        else if (player.needs_frame(result.ps) and scheduled == 0) "slide: player.frame: host refused frame delivery" else null
+        else if (needs_delivery and scheduled == 0) "slide: player.frame: host refused frame delivery" else null
     if (not (problem is null)) {
         dom.set_attribute(owner, "data-slide-error", problem)
         dom.set_attribute(owner, "data-slide-paused", "true")
@@ -238,7 +248,7 @@ pn commit_event(owner, plan, before, event, options, token, painted, tools) {
         dom.remove_attribute(owner, "data-slide-error")
         set_text(dom.query_selector(owner, ".slide-status"), string(result.ps.slide + 1) ++ " / " ++ string(len(plan.slides)))
     }
-    return {ps: if (not (problem is null)) {*: result.ps, paused: true} else result.ps, token: scheduled, painted: if (problem is null) displayed.painted else null}
+    return {sound:audio,ps: if (not (problem is null)) {*: result.ps, paused: true} else result.ps, token: scheduled, painted: if (problem is null) displayed.painted else null}
 }
 
 pn show(node, visible, display = "block", interactive = true) {
@@ -346,15 +356,31 @@ pn action(owner, plan, session, command, value, now_ms, options) {
             clock_token = changed.token
         }
     }
-    let next = commit_event(owner, plan, session.ps, event, options, session.token, session.painted, tools)
+    let next = commit_event(owner, plan, session.ps, event, options, session.token, session.painted, tools, session.sound)
     if (command == "go") dom.focus_set(owner, false)
     // keep session fields commit_event does not own (the hot corner's arming)
     return {*: session, *: next, tools: tools, clock_token: clock_token}
 }
 
-view <slide_player> state session: {ps: player.initial_state(~.plan, ~.options), token: 0, painted: null,
+pn trigger_target(node,triggers) {
+    if (node == null or dom.matches(node,".slide-player")) { return null }
+    let id = dom.get_attribute(node,"data-slide-object")
+    if (id != null and any([for (cue in triggers) cue.trigger == id])) { return id }
+    return trigger_target(dom.parent_element(node),triggers)
+}
+
+view <slide_player> state session: {ps: player.initial_state(~.plan, ~.options), token: 0, painted: null,sound:null,
     tools: {*: presenter.initial_state(), toolbar: has_controls(~.options)}, clock_token: 0, reveal_armed: true} {
     ~.rendered
+}
+on closerequest(evt) {
+    let owner = dom.get_element_by_id(dom.root_node(evt.target),instance(~.options))
+    if (owner != null) {
+        sound.close(owner,session.sound)
+        if (session.token > 0) dom.cancel_frame(owner,session.token)
+        if (session.clock_token > 0) dom.cancel_frame(owner,session.clock_token)
+    }
+    return 'pass'
 }
 on slide_fit(evt) {
     if (evt.event_phase != 2) { return 'pass' }
@@ -364,7 +390,7 @@ on slide_fit(evt) {
 on slide_frame(evt) {
     if (evt.detail != session.token or evt.event_phase != 2) { return 'pass' }
     let next = commit_event(evt.target, ~.plan, session.ps, {command: 'frame', time_ms: evt.time_stamp},
-        ~.options, 0, session.painted, session.tools)
+        ~.options, 0, session.painted, session.tools, session.sound)
     session = {*: session, *: next}
     return 'handled'
 }
@@ -385,7 +411,7 @@ on slide_command(evt) {
     let detail = evt.detail
     if (evt.event_phase != 2 or not (detail is map) or not contains(host_commands, c.as_text(detail.command))) { return 'pass' }
     let next = commit_event(evt.target, ~.plan, session.ps, {*: detail, time_ms: evt.time_stamp},
-        ~.options, session.token, session.painted, session.tools)
+        ~.options, session.token, session.painted, session.tools, session.sound)
     if (c.as_text(detail.command) == "speed" and next.ps.playback_rate == detail.rate)
         dom.set_state(dom.query_selector(evt.target, ".slide-speed-input"), "value", c.fmt(detail.rate))
     session = {*: session, *: next}
@@ -406,7 +432,7 @@ on input(evt) {
     if (owner == null or not dom.matches(evt.target, ".slide-speed-input")) { return 'pass' }
     let next = commit_event(owner, ~.plan, session.ps,
         {command: 'speed', rate: dom.range_value(evt.target), time_ms: evt.time_stamp},
-        ~.options, session.token, session.painted, session.tools)
+        ~.options, session.token, session.painted, session.tools, session.sound)
     session = {*: session, *: next}
     return 'handled'
 }
@@ -415,10 +441,18 @@ on click(evt) {
     if (owner == null) { return 'pass' }
     let tool = dom.closest(evt.target, "[data-slide-tool]")
     let button = dom.closest(evt.target, "[data-slide-command]")
-    let interactive = dom.closest(evt.target, "a, input, button, select, textarea, [contenteditable], [role=button], [role=link]")
+    let trigger = trigger_target(evt.target,~.plan.slides[session.ps.slide].triggers)
+    if (tool == null and button == null and any([for (cue in ~.plan.slides[session.ps.slide].triggers) cue.trigger == trigger])) {
+        let next = commit_event(owner,~.plan,session.ps,{command:'trigger',target:trigger,time_ms:evt.time_stamp},
+            ~.options,session.token,session.painted,session.tools,session.sound)
+        session = {*:session,*:next}
+        return 'handled'
+    }
+    let interactive = dom.closest(evt.target, "a, input, button, select, textarea, audio, video, [contenteditable], [role=button], [role=link]")
     if (tool == null and button == null and (interactive != null or dom.closest(evt.target, ".slide-stage") == null)) { return 'pass' }
     // without controls the host owns playback input: a click on the stage is the host's
     if (tool == null and button == null and not has_controls(~.options)) { return 'pass' }
+    if (tool == null and button == null and not ~.plan.slides[session.ps.slide].advance_on_click) { return 'pass' }
     let command = if (tool != null) dom.get_attribute(tool, "data-slide-tool")
         else if (button != null) dom.get_attribute(button, "data-slide-command") else "next"
     let value = if (tool != null and dom.has_attribute(tool, "data-slide-destination")) dom.get_attribute(tool, "data-slide-destination")
@@ -502,7 +536,9 @@ view <slide_document> {
 on load(evt) {
     fit_document(evt.target, ~.plan, ~.options)
     sync_fullscreen(dom.get_element_by_id(evt.target, instance(~.options)))
-    if (c.value(~.options.autostart, false)) {
+    let first = ~.plan.slides[c.value(~.options.start_slide,0)]
+    // authored entry timing/sound also needs a bootstrap when no host sends activate.
+    if (c.value(~.options.autostart, false) or first.advance_after != null or first.transition_sound != null) {
         let owner = dom.get_element_by_id(evt.target, instance(~.options))
         if (owner != null) dom.request_frame(owner, "slide_activate")
     }
@@ -528,7 +564,10 @@ pn sync_fullscreen(owner) {
     // a change of mode (including a --fullscreen start) toggles the toolbar in the player
     if (on != was) { dom.dispatch(owner, {type: "slide_fullscreen", bubbles: false, detail: {fullscreen: on}}) }
     dom.set_attribute(button, "aria-pressed", string(on))
-    set_text(button, if (on) "Exit full screen" else "Full screen")
+    // keep the SVG children mounted; pressed state selects the enter/exit glyph.
+    let label = if (on) "Exit full screen" else "Full screen"
+    dom.set_attribute(button,"aria-label",label)
+    dom.set_attribute(button,"title",label ++ " (F)")
     if (dom.window_fullscreen_enabled(owner)) { dom.remove_attribute(button, "hidden") }
     else { dom.set_attribute(button, "hidden", "") }
 }
@@ -536,7 +575,7 @@ pn sync_fullscreen(owner) {
 pn fit_document(target, plan, options, after_layout = false) {
     let owner = dom.get_element_by_id(target, instance(options))
     if (owner != null) {
-        // toolbar wrapping also changes during a resize's layout commit.
+        // measure the committed toolbar bounds after viewport changes.
         if (after_layout) dom.request_frame(owner, "slide_fit")
         else fit_player(owner, plan, {*: options, fit_viewport: true})
     }

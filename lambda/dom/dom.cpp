@@ -14548,11 +14548,13 @@ static Item dom_text_control_boundary_from_point(DomElement* elem,
     uint32_t offset_u16 = tc_utf8_to_utf16_offset(value ? value : "",
         value_len, hit.offset);
 
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "node", dom_wrap_element(elem));
-    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
-    dom_realm_set_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
-    return out;
+    // the geometry read is shared by Lambda and JS, with IDL UTF-16 offsets.
+    RootFrame roots(1);
+    Rooted<Item> node(roots, dom_wrap_element(elem));
+    static const char* const keys[] = { "node", "offset", "byteOffset" };
+    Item values[] = { node.get(), (Item){.item = i2it((int64_t)offset_u16)},
+        (Item){.item = i2it((int64_t)hit.offset)} };
+    return dom_result_map(elem->doc, keys, values, 3);
 }
 JS_FORWARD_ITEM(dom_text_control_caret_bounds_bridge, (void* elem), dom_text_control_caret_bounds, ((DomElement*)elem))
 JS_FORWARD_ITEM(dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))

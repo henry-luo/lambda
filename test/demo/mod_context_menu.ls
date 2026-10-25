@@ -7,18 +7,22 @@ pub fn has_selection(selection) => selection.kind=='node' or selection.kind=='al
 view <context_frame> { ~.rendered }
 on render(evt) {
     if (evt.event_phase==2) {
-        let root = dom.root_node(evt.target)
-        let menu = dom.get_element_by_id(root,~.id)
-        let box = dom.bounding_box(menu)
-        let viewport = dom.bounding_box(dom.get_element_by_id(root,~.owner))
-        // measure rendered rows before clamping so the last action stays reachable.
-        dom.style_set_property(menu,"left",string(max(8,min(box.x,viewport.width-box.width-8))) ++ "px")
-        dom.style_set_property(menu,"top",string(max(8,min(box.y,viewport.height-box.height-8))) ++ "px")
+        fit(evt.target,~.id,~.owner)
         if (~.autofocus) focus(evt.target,~.id)
     }
     return 'pass'
 }
 pub fn frame(id,owner,rendered,autofocus=true) => apply(<context_frame id:id,owner:owner,rendered:rendered,autofocus:autofocus>)
+
+// measure rendered rows before clamping so the last action stays reachable.
+pub pn fit(node,id,owner) {
+    let root = dom.root_node(node)
+    let menu = dom.get_element_by_id(root,id)
+    let box = dom.bounding_box(menu)
+    let viewport = dom.bounding_box(dom.get_element_by_id(root,owner))
+    dom.style_set_property(menu,"left",string(max(8,min(box.x,viewport.width-box.width-8))) ++ "px")
+    dom.style_set_property(menu,"top",string(max(8,min(box.y,viewport.height-box.height-8))) ++ "px")
+}
 
 pub pn focus(node,id) {
     let menu = dom.get_element_by_id(dom.root_node(node),id)
