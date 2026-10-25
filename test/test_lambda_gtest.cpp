@@ -134,6 +134,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
     "test/lambda/archive",
+    "test/lambda/ime",
     "test/lambda/docbook/proc",
     "test/demo/word/tests/proc",
     "test/demo/photo/tests/proc",
