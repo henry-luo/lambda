@@ -17,6 +17,11 @@
 #endif
 #include <pthread.h>
 #define NATIVE_GL_ENABLED 1
+// WebGL queries this pname; Apple's core-profile gl3.h omits it (it used to
+// arrive through view.hpp's legacy gl.h, which now stays in the platform backend)
+#ifndef GL_ALIASED_POINT_SIZE_RANGE
+#define GL_ALIASED_POINT_SIZE_RANGE 0x846D
+#endif
 #endif
 
 #include "view.hpp"

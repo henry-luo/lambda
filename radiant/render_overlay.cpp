@@ -17,14 +17,14 @@ typedef struct SelectionPaintCtx {
 } SelectionPaintCtx;
 
 static void render_caret_in_scroll_clips(RasterRenderContext* rdcon, View* ancestor,
-        RdtLogicalPoint document_offset, Rect rect, Color color) {
+        RdtLogicalPoint document_offset, Rect rect, Color color, const RdtMatrix* transform) {
     if (!ancestor) {
-        rc_fill_rect(rdcon, rect.x, rect.y, rect.width, rect.height, color);
+        render_painter_fill_transformed_rect(rdcon, &rect, color.c, transform);
         return;
     }
     RenderClipScope clip = render_clip_push_viewport_scope(
         rdcon, lam::view_as_block(ancestor), document_offset);
-    render_caret_in_scroll_clips(rdcon, ancestor->parent_view(), document_offset, rect, color);
+    render_caret_in_scroll_clips(rdcon, ancestor->parent_view(), document_offset, rect, color, transform);
     render_clip_pop_scope(rdcon, &clip);
 }
 
@@ -48,20 +48,19 @@ static void render_caret(RasterRenderContext* rdcon, DocState* state) {
     }
 
     float s = rdcon->raster_scale;
-    RdtLogicalPoint point = view_geometry_local_to_window(
-        view, {caret_x, caret_y},
-        {iframe_offset_x, iframe_offset_y}, scroll_state_resolve_view_geometry);
-    float x = point.x;
-    float y = point.y;
-
-    float css_x = x;
-    float css_y = y;
-    caret_project_previous_visual_rect(state, css_x, css_y, caret_height);
-
-    x *= s;  y *= s;
-    float height = caret_height * s;
-    float caret_width = 3.0f * s;
-
+    RdtMatrix frame;
+    if (!view_get_client_matrix(view, &frame)) return;
+    RdtMatrix embedding = rdt_matrix_translate(iframe_offset_x, iframe_offset_y);
+    frame = rdt_matrix_multiply(&embedding, &frame);
+    // caret snapshots use containing-block coordinates; the client matrix starts at the view's origin.
+    Rect rect = {caret_x - view->x, caret_y - view->y, 3.0f, caret_height};
+    Bound bounds;
+    if (!rdt_matrix_project_rect_bounds(&frame, rect.x, rect.y,
+            rect.x + rect.width, rect.y + rect.height,
+            &bounds.left, &bounds.top, &bounds.right, &bounds.bottom)) return;
+    caret_project_previous_visual_rect(state, bounds.left, bounds.top, bounds.bottom - bounds.top);
+    RdtMatrix raster_scale = {s, 0, 0, 0, s, 0, 0, 0, 1};
+    RdtMatrix transform = rdt_matrix_multiply(&raster_scale, &frame);
 
     DomNode* caret_node = lam::view_dom_node(view);
     if (caret_node && !caret_node->is_element()) caret_node = caret_node->parent;
@@ -69,7 +68,7 @@ static void render_caret(RasterRenderContext* rdcon, DocState* state) {
         ? static_cast<ViewSpan*>(caret_node->as_element()) : nullptr;
     Color caret_color = radiant_caret_color_for_view(caret_element);
     render_caret_in_scroll_clips(rdcon, view->parent_view(),
-        {iframe_offset_x, iframe_offset_y}, {x, y, caret_width, height}, caret_color);
+        {iframe_offset_x, iframe_offset_y}, rect, caret_color, &transform);
 }
 
 static RdtLogicalPoint selection_paint_to_canvas(const SelectionPaintCtx* ctx,

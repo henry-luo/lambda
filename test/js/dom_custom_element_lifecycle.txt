@@ -1,0 +1,12 @@
+upgrade retains existing node: pass
+constructors initialize native nodes: pass
+upgrade observes initial attributes: pass
+connection sees initialized private fields: pass
+attribute reactions respect caller guards: pass
+observed attribute transitions: pass
+disconnect and reconnect preserve identity: pass
+template custom elements stay inert: pass
+import upgrades into current registry: pass
+clone constructs independent state: pass
+native reactions retain receivers across gc: pass
+CUSTOM_ELEMENT_LIFECYCLE_DONE

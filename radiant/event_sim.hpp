@@ -84,7 +84,7 @@
 #include "../lambda/input/css/css_environment.hpp"
 
 // Forward declarations
-struct GLFWwindow;
+struct RadiantWindow;
 struct Pool;
 struct Arena;
 struct EventSimRenderCommand;
@@ -199,7 +199,7 @@ struct SimEvent {
     int button;                  // mouse button (0=left, 1=right, 2=middle)
     int mods;                    // modifier keys (RDT_MOD_*)
     bool window_focused;         // native window_focus event state
-    int key;                     // GLFW key code
+    int key;                     // RdtKeyCode (GLFW numbering)
     int wait_ms;                 // wait duration in milliseconds
     int expected_view_type;      // for assertions
     int expected_char_offset;    // for assertions
@@ -511,7 +511,7 @@ void event_sim_free(EventSimContext* ctx);
 // Process next event if ready
 // Returns true if simulation is still running
 // uicon is cast to UiContext* internally
-bool event_sim_update(EventSimContext* ctx, void* uicon, GLFWwindow* window, double current_time);
+bool event_sim_update(EventSimContext* ctx, void* uicon, struct RadiantWindow* window, double current_time);
 
 // Headless hosts use these to wait on the JS loop until the next assertion
 // attempt, while waking early when an actual timer or task becomes ready.

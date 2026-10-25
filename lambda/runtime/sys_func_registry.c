@@ -232,7 +232,9 @@ extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 // Phase 8C: Image() constructor (defined in dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
-// helper functions for map pipe iteration in JIT
+#ifndef LAMBDA_NO_MIR
+// helper functions for map pipe iteration in JIT; only the JIT import table
+// below references them
 static int64_t pipe_map_len(void* keys_ptr) {
     return symbol_key_list_len(keys_ptr);
 }
@@ -246,6 +248,7 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
     if (!key_sym) return ITEM_NULL;
     return y2it(key_sym);
 }
+#endif // !LAMBDA_NO_MIR
 #endif // !LAMBDA_IO_STATIC_VALUES
 
 

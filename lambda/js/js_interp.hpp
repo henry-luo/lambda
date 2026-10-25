@@ -10,9 +10,15 @@
 // Tree-walking execution tier. It intentionally shares the JS object/value
 // helpers and the Runtime/EvalContext ownership model with MIR lowering.
 static inline bool js_ast_interpreter_forced(void) {
+#ifdef LAMBDA_NO_MIR
+    // a T0-only build has no MVP tier: every unit is forced to the AST
+    // executor and fails closed when unsupported (vibe/Lambda_Design_Mobile.md MB4)
+    return true;
+#else
     const char* backend = getenv("JS_EXEC_BACKEND");
     return backend && (strcmp(backend, "ast") == 0 ||
         strcmp(backend, "interpreter") == 0);
+#endif
 }
 
 // A selected AUTO root keeps nested module loads in the AST executor. This is
@@ -28,9 +34,13 @@ static inline bool js_ast_interpreter_requested(void) {
 // outside that executor's coverage keep the established MIR fallback rather
 // than publishing a mixed-tier realm.
 static inline bool js_execution_auto_requested(void) {
+#ifdef LAMBDA_NO_MIR
+    return false;  // AUTO needs the MVP fallback, which this build excludes
+#else
     const char* backend = getenv("JS_EXEC_BACKEND");
     // D8.1.3v29: tier selection defaults to AUTO; activated MIR uses MVP.
     return !backend || !backend[0] || strcmp(backend, "auto") == 0;
+#endif
 }
 // Parse, bind, and retain a classic Script without evaluating it. Batch hosts
 // use this to keep a harness AST across fresh per-test realms.

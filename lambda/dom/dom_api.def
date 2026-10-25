@@ -524,6 +524,7 @@ DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", do
 
 // no member: the engine boundary hit-test has no JS spelling on an element
 DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, text_control_boundary_from_point, geometry, 3, "fn(n: any, x: number, y: number) -> any", dom_core_text_control_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
 
 DOM_OP(CORE, focus,  focus, 2, "pn(n: any, options: any) -> null", dom_core_focus, DOM_F_MUTATES, "", html_element, "", "")
 DOM_OP(CORE, blur,   focus, 1, "pn(n: any) -> null", dom_core_blur, DOM_F_MUTATES, "", html_element, "", "")

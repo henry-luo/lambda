@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 struct WebViewManager {
-    GLFWwindow* window;
+    RadiantWindow* window;
     struct TrackedHandle {
         WebViewHandle* handle;
         int mode;  // WebViewMode: 0=window, 1=layer
@@ -27,7 +27,7 @@ struct WebViewManager {
     int handle_capacity;
 };
 
-WebViewManager* webview_manager_create(GLFWwindow* window) {
+WebViewManager* webview_manager_create(RadiantWindow* window) {
     if (!window) {
         log_error("webview_manager_create: NULL window");
         return nullptr;

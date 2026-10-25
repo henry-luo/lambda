@@ -655,6 +655,10 @@ An interactive terminal keeps its input history in `~/.lambda_history`; `LAMBDA_
 | Variable | Values | Description |
 |----------|--------|-------------|
 | `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lmd` (source checkout and release bundle alike), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
+| `LAMBDA_CACHE_DIR` | path | Base of the purgeable caches (`<dir>/cache` for HTTP and Radiant state, `<dir>/radiant_cache`). Default: `./temp` |
+| `LAMBDA_TEMP_DIR` | path | Scratch files (`io` temp files, downloads) and developer dumps (`mir_dump.txt`, profiles, event/state logs). Default: `./temp` |
+| `LAMBDA_LOG_DIR` | path | Where `log.conf` is read from and where its relative outputs (`log.txt`) are written. Default: the working directory |
+| `LAMBDA_DOCUMENTS_DIR` | path | Base directory for user documents, for hosts without a meaningful working directory. Default: the working directory |
 | `LAMBDA_EXEC_BACKEND` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL always uses its persistent interpreter session; the tier only decides when hot functions compile (`jit`: at the first call) |
 | `LAMBDA_REPL_HISTORY` | path | REPL history file (default `~/.lambda_history`; empty disables) |
 | `JUBE_MODULE_PATH` | path | Where Node modules are discovered (default: `./modules` beside the executable) |

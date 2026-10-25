@@ -1,0 +1,652 @@
+{
+  "name": "Slides: thumbnail drag reorder, insertion marker, cancellation, auto-scroll, history and saved presentation order",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "window.thumbnailIds=()=>Array.from(document.querySelectorAll('#thumbnails [data-slide-id]')).map(e=>e.getAttribute('data-slide-id'));window.originalIds=thumbnailIds();window.retainedThumbnail=document.querySelector('[data-slide-id=opening] .thumb-render')"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "[data-slide-id=chapter-4]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slide-reordering",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slide-drop",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('[data-slide-id=opening] .thumb-render')===retainedThumbnail"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#slide-drop-marker"
+      },
+      "visible": true
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/reorder/dragging.png"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "[data-slide-id=chapter-4]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify([originalIds[1],originalIds[2],originalIds[0],...originalIds.slice(3)])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slide-reordering",
+      "equals": "false"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#slide-drop-marker"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "2"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "[data-slide-id=chapter-2]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "[data-slide-id=chapter-2]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      },
+      "pointerType": "mouse",
+      "dx": 2,
+      "dy": 2,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      },
+      "pointerType": "mouse",
+      "dx": 0,
+      "dy": 15,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "[data-slide-id=chapter-4]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "[data-slide-id=chapter-4]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slide-reordering",
+      "equals": "false"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slide-drop",
+      "equals": "-1"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=chapter-3]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "[data-slide-id=chapter-2]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "[data-slide-id=chapter-2]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify([originalIds[0],originalIds[2],originalIds[1],...originalIds.slice(3)])"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "3"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "x": 80,
+      "y": 810
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 24
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('thumbnails').scrollTop>150"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slide-reordering",
+      "equals": "true"
+    },
+    {
+      "type": "mouse_up",
+      "x": 80,
+      "y": 810
+    },
+    {
+      "type": "assert_script",
+      "js": "thumbnailIds().indexOf('opening')>3&&JSON.stringify(thumbnailIds().filter(x=>x!=='opening'))===JSON.stringify(originalIds.slice(1))"
+    },
+    {
+      "type": "script",
+      "js": "window.scrolledDown=document.getElementById('thumbnails').scrollTop"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "x": 80,
+      "y": 215
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 40
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('thumbnails').scrollTop<scrolledDown"
+    },
+    {
+      "type": "mouse_up",
+      "x": 80,
+      "y": 215
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "Edited before reordering",
+      "clear": true
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "[data-slide-id=opening]"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "[data-slide-id=chapter-3]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "[data-slide-id=chapter-3]",
+        "offset_x": 40,
+        "offset_y": 2
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "equals": "Edited before reordering"
+    },
+    {
+      "type": "script",
+      "js": "window.savedOrder=thumbnailIds()"
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/reordered.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/reordered.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(thumbnailIds())===JSON.stringify(savedOrder)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "contains": "Grow with focus."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/reorder/finished.png"
+    }
+  ]
+}

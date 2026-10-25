@@ -2,6 +2,7 @@
 // Dedicated curl multi network thread for Radiant HTTP resource transfers.
 
 #include "curl_multi_backend.h"
+#include "../../lib/host_paths.h"
 #include "http_client.h"
 #include "network_resource_manager.h"
 #include "cookie_jar.h"
@@ -204,7 +205,7 @@ static bool persist_response(CurlMultiTransfer* transfer) {
 
     if (!res->local_path) {
         char temp_path[512];
-        snprintf(temp_path, sizeof(temp_path), "./temp/download_%p.tmp", (void*)res);
+        snprintf(temp_path, sizeof(temp_path), "%s/download_%p.tmp", host_path(HOST_PATH_TEMP), (void*)res);
 
         FILE* f = fopen(temp_path, "wb");
         if (!f) {

@@ -160,6 +160,7 @@ Item dom_core_remove_node(Item n, Item index);
 Item dom_core_attach_shadow(Item n, Item init);
 Item dom_core_compare_document_position(Item a, Item b);
 Item dom_core_boundary_from_point(Item n, Item x, Item y, Item behavior);
+Item dom_core_text_control_boundary_from_point(Item n, Item x, Item y);
 Item dom_core_focus(Item n, Item options);
 Item dom_core_blur(Item n);
 Item dom_core_show_popover(Item n);

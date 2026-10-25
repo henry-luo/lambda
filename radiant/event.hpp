@@ -155,7 +155,7 @@ typedef enum  {
 
 typedef struct Event {
     EventType type;
-    double timestamp;  // in seconds, populated using glfwGetTime()
+    double timestamp;  // in seconds, on the platform backend clock (radiant_platform_time)
 } Event;
 
 // mouse/pointer motion event
@@ -184,25 +184,107 @@ typedef struct ScrollEvent : MousePositionEvent{
 #define RDT_MOD_ALT     (1 << 2)
 #define RDT_MOD_SUPER   (1 << 3)  // Cmd on macOS, Win on Windows
 
-// Virtual key codes (subset of common keys)
+// Virtual key codes. The numbering is GLFW 3.4's, so the desktop backend
+// translates by identity; other backends map their native codes onto it.
 typedef enum {
-    RDT_KEY_UNKNOWN = 0,
-    // Navigation keys
-    RDT_KEY_LEFT = 263,
-    RDT_KEY_RIGHT = 262,
-    RDT_KEY_UP = 265,
-    RDT_KEY_DOWN = 264,
-    RDT_KEY_HOME = 268,
-    RDT_KEY_END = 269,
-    RDT_KEY_PAGE_UP = 266,
-    RDT_KEY_PAGE_DOWN = 267,
-    // Editing keys
-    RDT_KEY_BACKSPACE = 259,
-    RDT_KEY_DELETE = 261,
+    RDT_KEY_UNRECOGNIZED = -1,  // a physical key the platform could not identify
+    RDT_KEY_UNKNOWN = 0,        // no key (Radiant's cleared/initial state)
+    // Printable keys
+    RDT_KEY_SPACE = 32,
+    RDT_KEY_APOSTROPHE = 39,
+    RDT_KEY_COMMA = 44,
+    RDT_KEY_MINUS = 45,
+    RDT_KEY_PERIOD = 46,
+    RDT_KEY_SLASH = 47,
+    RDT_KEY_0 = 48,
+    RDT_KEY_1 = 49,
+    RDT_KEY_2 = 50,
+    RDT_KEY_3 = 51,
+    RDT_KEY_4 = 52,
+    RDT_KEY_5 = 53,
+    RDT_KEY_6 = 54,
+    RDT_KEY_7 = 55,
+    RDT_KEY_8 = 56,
+    RDT_KEY_9 = 57,
+    RDT_KEY_SEMICOLON = 59,
+    RDT_KEY_EQUAL = 61,
+    RDT_KEY_A = 65,
+    RDT_KEY_B = 66,
+    RDT_KEY_C = 67,
+    RDT_KEY_D = 68,
+    RDT_KEY_E = 69,
+    RDT_KEY_F = 70,
+    RDT_KEY_G = 71,
+    RDT_KEY_H = 72,
+    RDT_KEY_I = 73,
+    RDT_KEY_J = 74,
+    RDT_KEY_K = 75,
+    RDT_KEY_L = 76,
+    RDT_KEY_M = 77,
+    RDT_KEY_N = 78,
+    RDT_KEY_O = 79,
+    RDT_KEY_P = 80,
+    RDT_KEY_Q = 81,
+    RDT_KEY_R = 82,
+    RDT_KEY_S = 83,
+    RDT_KEY_T = 84,
+    RDT_KEY_U = 85,
+    RDT_KEY_V = 86,
+    RDT_KEY_W = 87,
+    RDT_KEY_X = 88,
+    RDT_KEY_Y = 89,
+    RDT_KEY_Z = 90,
+    RDT_KEY_LEFT_BRACKET = 91,
+    RDT_KEY_BACKSLASH = 92,
+    RDT_KEY_RIGHT_BRACKET = 93,
+    RDT_KEY_GRAVE_ACCENT = 96,
+    RDT_KEY_WORLD_1 = 161,
+    RDT_KEY_WORLD_2 = 162,
+    // Function, navigation and editing keys
+    RDT_KEY_ESCAPE = 256,
     RDT_KEY_ENTER = 257,
     RDT_KEY_TAB = 258,
-    RDT_KEY_ESCAPE = 256,
-    RDT_KEY_SPACE = 32,
+    RDT_KEY_BACKSPACE = 259,
+    RDT_KEY_INSERT = 260,
+    RDT_KEY_DELETE = 261,
+    RDT_KEY_RIGHT = 262,
+    RDT_KEY_LEFT = 263,
+    RDT_KEY_DOWN = 264,
+    RDT_KEY_UP = 265,
+    RDT_KEY_PAGE_UP = 266,
+    RDT_KEY_PAGE_DOWN = 267,
+    RDT_KEY_HOME = 268,
+    RDT_KEY_END = 269,
+    RDT_KEY_CAPS_LOCK = 280,
+    RDT_KEY_SCROLL_LOCK = 281,
+    RDT_KEY_NUM_LOCK = 282,
+    RDT_KEY_PRINT_SCREEN = 283,
+    RDT_KEY_PAUSE = 284,
+    RDT_KEY_F1 = 290,
+    RDT_KEY_F2 = 291,
+    RDT_KEY_F3 = 292,
+    RDT_KEY_F4 = 293,
+    RDT_KEY_F5 = 294,
+    RDT_KEY_F6 = 295,
+    RDT_KEY_F7 = 296,
+    RDT_KEY_F8 = 297,
+    RDT_KEY_F9 = 298,
+    RDT_KEY_F10 = 299,
+    RDT_KEY_F11 = 300,
+    RDT_KEY_F12 = 301,
+    RDT_KEY_F13 = 302,
+    RDT_KEY_F14 = 303,
+    RDT_KEY_F15 = 304,
+    RDT_KEY_F16 = 305,
+    RDT_KEY_F17 = 306,
+    RDT_KEY_F18 = 307,
+    RDT_KEY_F19 = 308,
+    RDT_KEY_F20 = 309,
+    RDT_KEY_F21 = 310,
+    RDT_KEY_F22 = 311,
+    RDT_KEY_F23 = 312,
+    RDT_KEY_F24 = 313,
+    RDT_KEY_F25 = 314,
     RDT_KEY_LEFT_SHIFT = 340,
     RDT_KEY_LEFT_CONTROL = 341,
     RDT_KEY_LEFT_ALT = 342,
@@ -211,23 +293,40 @@ typedef enum {
     RDT_KEY_RIGHT_CONTROL = 345,
     RDT_KEY_RIGHT_ALT = 346,
     RDT_KEY_RIGHT_SUPER = 347,
-    // Clipboard/editing shortcut keys (A, B, C, I, U, V, X, Z) and Y for redo on Win/Linux
-    RDT_KEY_A = 65,
-    RDT_KEY_B = 66,
-    RDT_KEY_C = 67,
-    RDT_KEY_I = 73,
-    RDT_KEY_U = 85,
-    RDT_KEY_V = 86,
-    RDT_KEY_X = 88,
-    RDT_KEY_Y = 89,
-    RDT_KEY_Z = 90,
+    RDT_KEY_MENU = 348,
+    // Keypad
+    RDT_KEY_KP_0 = 320,
+    RDT_KEY_KP_1 = 321,
+    RDT_KEY_KP_2 = 322,
+    RDT_KEY_KP_3 = 323,
+    RDT_KEY_KP_4 = 324,
+    RDT_KEY_KP_5 = 325,
+    RDT_KEY_KP_6 = 326,
+    RDT_KEY_KP_7 = 327,
+    RDT_KEY_KP_8 = 328,
+    RDT_KEY_KP_9 = 329,
+    RDT_KEY_KP_DECIMAL = 330,
+    RDT_KEY_KP_DIVIDE = 331,
+    RDT_KEY_KP_MULTIPLY = 332,
+    RDT_KEY_KP_SUBTRACT = 333,
+    RDT_KEY_KP_ADD = 334,
+    RDT_KEY_KP_ENTER = 335,
+    RDT_KEY_KP_EQUAL = 336,
 } RdtKeyCode;
+
+// Mouse button indices (GLFW numbering, as for keys)
+typedef enum {
+    RDT_MOUSE_BUTTON_LEFT = 0,
+    RDT_MOUSE_BUTTON_RIGHT = 1,
+    RDT_MOUSE_BUTTON_MIDDLE = 2,
+} RdtMouseButton;
 
 // Keyboard key event
 typedef struct KeyEvent : Event {
     int key;              // virtual key code (RdtKeyCode)
     int scancode;         // platform-specific scancode
     int mods;             // modifier flags (RDT_MOD_*)
+    bool repeat;          // KEY_DOWN produced by auto-repeat rather than a press
 } KeyEvent;
 
 // Text input event (Unicode character input)
@@ -252,7 +351,7 @@ typedef struct FocusEvent : Event {
 typedef union RdtEvent {
     struct {
         EventType type;
-        double timestamp;  // in seconds, populated using glfwGetTime()
+        double timestamp;  // in seconds, on the platform backend clock (radiant_platform_time)
     };
     MousePositionEvent mouse_position;
     MouseButtonEvent mouse_button;
@@ -1656,6 +1755,9 @@ bool dom_selection_resolve_layout(DomSelection* selection);
 // performed in (i.e. the absolute logical coordinates produced by the view
 // geometry helpers, NOT physical/device pixels).
 DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float vy);
+// clamp blank space to a text row within one editing surface, using its painted coordinate plane.
+bool dom_range_find_text_edge_at(View* root_view, float vx, float vy,
+    ViewGeometryTextPointResolver resolve_point, ViewGeometryTextHit* out_hit);
 
 // ---------------------------------------------------------------------------
 // Multi-rect rendering helper

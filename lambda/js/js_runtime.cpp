@@ -2396,6 +2396,8 @@ static Item js_private_storage_object(Item object) {
 
 static bool js_private_storage_has_own(Item object, Item private_key) {
     if (!js_private_key_string(private_key)) return false;
+    if (is_virtual_container_type_id(get_type_id(object)) && js_host_object_type(object))
+        return js_has_own_property(object, private_key).item == ITEM_TRUE;
     Item lookup_object = js_private_storage_object(object);
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
     JsShapeSlotStatus status = js_own_shape_slot_status_name_id(

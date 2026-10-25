@@ -1247,7 +1247,6 @@ bool MarkEditor::owns_ui_node_storage(const void* storage) const {
 }
 
 Item MarkEditor::import_child(Item child, bool preserve_ui_nodes) {
-    if (builder_->is_in_arena(child)) return child;
     // keep a live UI node by identity only when its storage is one this editor
     // vouches for; reading a node header in front of a GC object would read
     // garbage and could leave a GC pointer in the document (D4.5.2)
@@ -1257,6 +1256,9 @@ Item MarkEditor::import_child(Item child, bool preserve_ui_nodes) {
     if ((ui_mode_ || preserve_ui_nodes) &&
         (registered || owns_ui_node_storage(storage)) &&
         mark_editor_is_ui_dom_node(child)) return child;
+    // retained template children may be projection handles; preserve live UI identity
+    // before recursively inspecting their backing as a plain Mark subtree (D4.5.2).
+    if (builder_->is_in_arena(child)) return child;
     return builder_->deep_copy(child);
 }
 

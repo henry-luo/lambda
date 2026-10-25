@@ -74,10 +74,14 @@ pub fn graphic(p,prefix="word-shape-") {
                     paint.text(label,text_box,p.text,false,{*:text_options,fill:p.text_outline})> else null
                 paint.text(label,text_box,p.text,false,text_options)>>>
 }
-pub fn transaction(editor,params,selected=null) map^ {
+pub fn parameters(params) map^ {
     let p = {*:defaults,*:params}
     if (not valid(p)) raise error("Word: choose a shape, valid dimensions/colors, outline 0–12, rotation −180–180°, and text up to 200 characters")
-    else if (selected!=null and settings(selected.node)==null) raise error("Word: select a shape first")
+    else p
+}
+pub fn transaction(editor,params,selected=null) map^ {
+    let p = parameters(params)^;
+    if (selected!=null and settings(selected.node)==null) raise error("Word: select a shape first")
     else {
         let label = [for (entry in catalog where entry.id==p.kind) entry.label][0]
         objects.transaction(editor,"data-word-shape",p,graphic(p),p.width,p.height,if (p.alt!="") p.alt else if (p.text=="") label else p.text,selected)^

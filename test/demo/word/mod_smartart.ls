@@ -48,8 +48,12 @@ pub fn graphic(p) {
             shapes.graphic({*:shapes.defaults,kind:if (p.layout=="process") "arrow" else "rounded",width:b.width,height:b.height,
                 fill:p.color,stroke:p.color,weight:1,size:size,text:wrapped_text,text_color:"#ffffff"})>]>
 }
-pub fn transaction(editor,params,selected=null) map^ {
+pub fn parameters(params) map^ {
     let p = {*:defaults,*:params}
     if (not valid(p)) raise error("Word: choose a layout, 2–8 lines of text (up to 60 characters each), a #RRGGBB color, and valid dimensions/rotation")
-    else objects.transaction(editor,"data-word-smartart",p,graphic(p),p.width,p.height,"Diagram: " ++ join(labels(p)," → "),selected)^
+    else p
+}
+pub fn transaction(editor,params,selected=null) map^ {
+    let p = parameters(params)^;
+    objects.transaction(editor,"data-word-smartart",p,graphic(p),p.width,p.height,"Diagram: " ++ join(labels(p)," → "),selected)^
 }

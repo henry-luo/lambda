@@ -5973,6 +5973,9 @@ bool js_interp_script_is_supported(JsScript* script) {
     return supported;
 }
 
+#ifndef LAMBDA_NO_MIR
+// P2 promotion: admission scan, hot-function satellites and loop handoff.
+// All of it lowers through MIR, so a T0-only build compiles the stubs below.
 struct JsP2AdmissionScan {
     JsScript* script;
     AstFunctionId function_id;
@@ -6846,6 +6849,15 @@ static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
         : (JsInterpCompletion){JS_INTERP_RETURN, result, NULL, 0};
     return true;
 }
+#else
+// a T0-only build has no satellite tier: nothing promotes and no loop
+// hands off (vibe/Lambda_Design_Mobile.md MB4)
+bool js_interp_promote_function_if_hot(JsFunction*) { return false; }
+static bool js_interp_loop_handoff_begin(JsInterpFrame*, AstLoopControlNode*,
+        JsInterpLoopHandoff*) { return false; }
+static bool js_interp_loop_handoff_try(JsInterpFrame*, AstLoopControlNode*,
+        JsInterpLoopHandoff*, JsInterpCompletion*) { return false; }
+#endif // LAMBDA_NO_MIR
 
 static Item js_interp_configure_function_metadata(Item function_item) {
     if (get_type_id(function_item) != LMD_TYPE_FUNC) return function_item;
@@ -7063,6 +7075,8 @@ static JsAstNode* js_interp_parameter_leaf_expression(JsFunction* function) {
     return expression;
 }
 
+#ifndef LAMBDA_NO_MIR
+// only the P2 admission scan asks this
 static bool js_interp_module_predicate_expression(JsFunction* function) {
     JsAstNode* expression = js_interp_parameter_leaf_expression(function);
     if (!expression) return false;
@@ -7075,6 +7089,7 @@ static bool js_interp_module_predicate_expression(JsFunction* function) {
     if (scan.supported) function->code->parameter_leaf_state = 4;
     return scan.supported;
 }
+#endif
 
 static bool js_interp_call_parameter_leaf(JsFunction* function, Item* args,
         int arg_count, Item* result) {

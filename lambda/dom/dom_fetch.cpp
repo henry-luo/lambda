@@ -7,6 +7,7 @@
  */
 #include "../js/js_runtime.h"
 #include "../js/js_headers.h"
+#include "../js/js_response.h"
 #include "dom.h"
 #include "dom_xhr.h"
 #include "realm/dom_realm.h"
@@ -78,6 +79,7 @@ typedef struct JsFetchWork {
     char** response_headers;
     int    response_header_count;
     long   status_code;
+    bool   redirected;
     int    curl_error;
     char   error_msg[CURL_ERROR_SIZE];
     const char* initiator;
@@ -191,6 +193,11 @@ static size_t fetch_header_cb(char* buffer, size_t size, size_t nmemb, void* use
     JsFetchWork* fw = (JsFetchWork*)userdata;
     if (!fw) return total;
     if (atomic_load32(&fw->cancelled) != 0) return 0;
+    if (total >= 5 && !memcmp(buffer, "HTTP/", 5)) {
+        // intermediate redirect bodies do not belong to the final Fetch response.
+        fw->response.length = 0;
+        if (fw->response.data) fw->response.data[0] = '\0';
+    }
 
     // XHR consumes these exact response header lines after the shared fetch
     // transport returns to the document thread.
@@ -323,10 +330,15 @@ static void fetch_work_cb(uv_work_t* req) {
     curl_use_host_trust_store(fw->easy);    // fetch() verifies by curl's default; same roots as everything else
     cookie_jar_import_curl(fw->cookie_jar, fw->easy);
 
-    if (fw->method) {
+    if (fw->method && !strcmp(fw->method, "POST")) {
+        // a custom POST would override libcurl's required 303 rewrite to GET.
+        curl_easy_setopt(fw->easy, CURLOPT_POST, 1L);
+    } else if (fw->method && !strcmp(fw->method, "HEAD")) {
+        curl_easy_setopt(fw->easy, CURLOPT_NOBODY, 1L);
+    } else if (fw->method) {
         curl_easy_setopt(fw->easy, CURLOPT_CUSTOMREQUEST, fw->method);
     }
-    if (fw->body && fw->body_len > 0) {
+    if (fw->body) {
         curl_easy_setopt(fw->easy, CURLOPT_POSTFIELDS, fw->body);
         curl_easy_setopt(fw->easy, CURLOPT_POSTFIELDSIZE, (long)fw->body_len);
     }
@@ -340,6 +352,12 @@ static void fetch_work_cb(uv_work_t* req) {
 
     if (res == CURLE_OK) {
         curl_easy_getinfo(fw->easy, CURLINFO_RESPONSE_CODE, &fw->status_code);
+        long redirects = 0;
+        curl_easy_getinfo(fw->easy, CURLINFO_REDIRECT_COUNT, &redirects);
+        fw->redirected = redirects > 0;
+        char* final_url = nullptr;
+        curl_easy_getinfo(fw->easy, CURLINFO_EFFECTIVE_URL, &final_url);
+        if (final_url) snprintf(fw->url, sizeof(fw->url), "%s", final_url);
     }
 
     curl_easy_cleanup(fw->easy);
@@ -376,7 +394,7 @@ static Item build_response_object(JsFetchWork* fw) {
     // the response owns a traced byte buffer; no realm-wide body index or retention cap.
     response.set(dom_realm_response_from_bytes(fw->response.data,
         (int)fw->response.length, headers.get(), (int)fw->status_code,
-        status_text.get(), url.get()));
+        status_text.get(), url.get(), fw->redirected));
     JS_RETURN_IF_ERROR(response.get());
 
     // XMLHttpRequest reuses fetch's worker transport. Preserve the response
@@ -500,16 +518,22 @@ extern "C" void js_fetch_dispatch_pending(void) {
 static Item fetch_apply_options(JsFetchWork* fw, Item options) {
     if (js_is_nullish(options)) return js_status_ok();
     if (!js_is_object_value(options)) return js_throw_type_error("Invalid fetch options");
-    RootFrame roots(5);
+    RootFrame roots(7);
     Rooted<Item> source(roots, options), value(roots, ItemNull), entries(roots, ItemNull);
     Rooted<Item> key(roots, ItemNull), pair(roots, ItemNull);
+    Rooted<Item> bytes(roots, ItemNull), content_type(roots, ItemNull);
 
     value.set(dom_realm_get_cstr(source.get(), "body"));
     JS_RETURN_IF_ERROR(value.get());
-    if (get_type_id(value.get()) == LMD_TYPE_STRING) {
-        String* body = it2s(value.get());
-        fw->body = mem_dup_n(body->chars, body->len, MEM_CAT_JS_RUNTIME);
-        fw->body_len = body->len;
+    if (!js_is_nullish(value.get())) {
+        // constructors and transport share BodyInit byte snapshots and inferred MIME.
+        bytes.set(js_fetch_body_bytes(value.get(), content_type));
+        JS_RETURN_IF_ERROR(bytes.get());
+        const char* data = nullptr;
+        int length = 0;
+        if (!js_item_bytes(bytes.get(), &data, &length)) return ItemError;
+        fw->body = mem_dup_n(data, (size_t)length, MEM_CAT_JS_RUNTIME);
+        fw->body_len = (size_t)length;
         if (!fw->body) return ItemError;
     }
 
@@ -517,6 +541,20 @@ static Item fetch_apply_options(JsFetchWork* fw, Item options) {
     JS_RETURN_IF_ERROR(value.get());
     entries.set(js_headers_list_from_init(value.get(), true));
     JS_RETURN_IF_ERROR(entries.get());
+    if (get_type_id(content_type.get()) == LMD_TYPE_STRING && it2s(content_type.get())->len) {
+        bool present = false;
+        key.set(js_name_item("content-type"));
+        for (int64_t index = 0; index < js_array_length(entries.get()); index++) {
+            pair.set(js_elements_get_int(entries.get(), index));
+            if (js_strict_equal(js_elements_get_int(pair.get(), 0), key.get()).item == ITEM_TRUE) present = true;
+        }
+        if (!present) {
+            pair.set(js_array_new(0));
+            js_array_push(pair.get(), key.get());
+            js_array_push(pair.get(), content_type.get());
+            js_array_push(entries.get(), pair.get());
+        }
+    }
     for (int64_t i = 0, count = js_array_length(entries.get()); i < count; i++) {
         pair.set(js_elements_get_int(entries.get(), i));
         key.set(js_elements_get_int(pair.get(), 0));

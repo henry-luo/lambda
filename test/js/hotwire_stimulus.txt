@@ -1,0 +1,13 @@
+Stimulus 3.2.2
+controllers and nested scopes: pass
+typed values: pass
+initial value callbacks: pass
+actions parameters and prevent: pass
+classes and target isolation: pass
+external value changes: pass
+dynamic target connection: pass
+dynamic target disconnection: pass
+controller reconnection: pass
+retained controller after gc: pass
+application stops actions: pass
+STIMULUS_DONE

@@ -7,7 +7,7 @@ import compose: .compose
 
 pub fn compile(deck, options = {}) map^ {
     let checked_options = if (not (options is map)) raise c.fail("options", "expected map")
-    let checked_options_attrs = c.attributes(options, ["instance", "width", "height", "base_uri", "reduced_motion", "autostart", "autoplay_dwell_ms", "ui", "controls"], "options")^;
+    let checked_options_attrs = c.attributes(options, ["instance", "width", "height", "base_uri", "reduced_motion", "autostart", "autoplay_dwell_ms", "ui", "controls", "start_slide"], "options")^;
     let checked_options_ui = themes.ui_style(options.ui, "options.ui")^;
     let checked_options_numbers = c.numbers(options, ["width", "height", "autoplay_dwell_ms"], true, "options")^;
     let checked_instance = if (options.instance != null and not c.instance_id(options.instance)) raise c.fail("options", "invalid instance ID")
@@ -33,6 +33,7 @@ pub fn compile(deck, options = {}) map^ {
     let guard_3 = if (len(invalid) > 0) raise c.fail("deck", "unsupported presentation child")
     let layouts = compose.layouts(deck, width, height)^;
     let slides = [for (i, node in compose.slides(deck, width, height, theme, layouts)^) timeline.compile(scene.build(node, i, width, height, theme, layouts)^)^]
+    let checked_start = if (options.start_slide != null and (not (options.start_slide is int) or options.start_slide < 0 or options.start_slide >= len(slides))) raise c.fail("options","invalid start_slide")
     let guard_4 = if (len(slides) == 0) raise c.fail("deck", "presentation has no slides")
     let checked_3 = c.check_unique(slides, "deck")^;
     let prepared = [for (i, scene in slides) if (i > 0 and scene.transition == 'morph')

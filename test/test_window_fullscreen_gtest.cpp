@@ -190,7 +190,7 @@ TEST(WindowFullscreenKeys, ToggleRepeatAndEscapeUseOneHostGate) {
     UiContext ui = {};
     ui.fullscreen.available = true;
     RdtEvent event = {};
-    rdt_event_set_key(&event, RDT_EVENT_KEY_DOWN, GLFW_KEY_F11, 0, 0, 0);
+    rdt_event_set_key(&event, RDT_EVENT_KEY_DOWN, RDT_KEY_F11, 0, 0, 0);
     EXPECT_TRUE(radiant_window_fullscreen_key(&ui, &event));
     EXPECT_TRUE(ui.fullscreen.requested);
     EXPECT_TRUE(radiant_window_fullscreen_key(&ui, &event));
@@ -229,7 +229,7 @@ TEST(WindowFullscreenKeys, ToggleRepeatAndEscapeUseOneHostGate) {
 TEST(WindowFullscreenKeys, WindowlessHostsAndModifiedShortcutsPassThrough) {
     UiContext ui = {};
     RdtEvent event = {};
-    rdt_event_set_key(&event, RDT_EVENT_KEY_DOWN, GLFW_KEY_F11, 0, 0, 0);
+    rdt_event_set_key(&event, RDT_EVENT_KEY_DOWN, RDT_KEY_F11, 0, 0, 0);
     EXPECT_FALSE(radiant_window_fullscreen_key(&ui, &event));
     ui.fullscreen.available = true;
     event.key.mods = RDT_MOD_CTRL;

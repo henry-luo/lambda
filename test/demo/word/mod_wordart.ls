@@ -31,7 +31,7 @@ pub fn graphic(p,prefix="wordart-") {
         lettering(p,if (p.style=="hollow") "none" else if (p.style=="gradient") "url(#" ++ prefix ++ "fill)" else p.fill,
             if (contains(["outlined","hollow"],p.style)) p.outline else "none",prefix)>
 }
-pub fn transaction(editor,params,selected=null) map^ {
+pub fn parameters(params) map^ {
     let p = {*:defaults,*:params}
     if (not (p.text is string) or trim(p.text)=="" or len(split(p.text,""))>120 or contains(p.text,"\n") or
         not contains(styles,p.style) or not contains(transforms,p.transform) or
@@ -40,5 +40,9 @@ pub fn transaction(editor,params,selected=null) map^ {
         not (p.size is number) or p.size<12 or p.size>120 or not colors.hex_color(p.fill) or not colors.hex_color(p.outline) or
         not (p.rotation is number) or p.rotation< -180 or p.rotation>180 or not (p.alt is string) or len(p.alt)>1000)
         raise error("Word: enter 1–120 characters, valid dimensions and colors, and a supported Word Art style")
-    else objects.transaction(editor,"data-word-wordart",p,graphic(p),p.width,p.height,if (p.alt=="") p.text else p.alt,selected)^
+    else p
+}
+pub fn transaction(editor,params,selected=null) map^ {
+    let p = parameters(params)^;
+    objects.transaction(editor,"data-word-wordart",p,graphic(p),p.width,p.height,if (p.alt=="") p.text else p.alt,selected)^
 }

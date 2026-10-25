@@ -51,6 +51,7 @@
 extern char *strdup(const char *s);
 #include <stdbool.h>
 #include "file.h"
+#include "host_paths.h"
 #include "log.h"
 #include "str.h"
 
@@ -995,15 +996,18 @@ static int file_temp_open_unique(const char* prefix, const char* suffix, char** 
     if (out_path) *out_path = NULL;
     const char* pfx = prefix ? prefix : "tmp";
     const char* sfx = suffix ? suffix : "";
+    // unique files live in the host's temp directory (host_paths.h, MB13)
+    const char* base = host_path(HOST_PATH_TEMP);
     if (!out_path || !file_temp_component_valid(pfx, false) ||
-        !file_temp_component_valid(sfx, true) || !create_dir("temp")) {
+        !file_temp_component_valid(sfx, true) || !create_dir(base)) {
         log_error("FILE-TEMP-NAME: invalid prefix or suffix");
         return -1;
     }
 
     size_t path_size = 0;
     if (!math_checked_add(strlen(pfx), strlen(sfx), &path_size) ||
-        !math_checked_add(path_size, 5 + 1 + 16 + 1, &path_size)) return -1;
+        !math_checked_add(path_size, strlen(base), &path_size) ||
+        !math_checked_add(path_size, 1 + 1 + 16 + 1, &path_size)) return -1;
     char* path = (char*)mem_alloc(path_size, MEM_CAT_TEMP);
     if (!path) return -1;
 
@@ -1013,7 +1017,7 @@ static int file_temp_open_unique(const char* prefix, const char* suffix, char** 
         unsigned int random_a = 0;
         unsigned int random_b = 0;
         if (rand_s(&random_a) != 0 || rand_s(&random_b) != 0) break;
-        snprintf(path, path_size, "temp/%s_%08x%08x%s", pfx,
+        snprintf(path, path_size, "%s/%s_%08x%08x%s", base, pfx,
                  random_a, random_b, sfx);
         fd = _open(path, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY,
                    _S_IREAD | _S_IWRITE);
@@ -1021,7 +1025,7 @@ static int file_temp_open_unique(const char* prefix, const char* suffix, char** 
         if (errno != EEXIST) break;
     }
 #else
-    snprintf(path, path_size, "temp/%s_XXXXXX%s", pfx, sfx);
+    snprintf(path, path_size, "%s/%s_XXXXXX%s", base, pfx, sfx);
     size_t suffix_len = strlen(sfx);
     if (suffix_len > INT_MAX) {
         mem_free(path);
@@ -1056,12 +1060,14 @@ char* file_temp_create(const char* prefix, const char* suffix) {
 
 char* dir_temp_create(const char* prefix) {
     const char* pfx = prefix ? prefix : "tmpdir";
-    if (!file_temp_component_valid(pfx, false) || !create_dir("temp")) {
+    const char* base = host_path(HOST_PATH_TEMP);
+    if (!file_temp_component_valid(pfx, false) || !create_dir(base)) {
         log_error("DIR-TEMP-NAME: invalid prefix");
         return NULL;
     }
     size_t path_size = 0;
-    if (!math_checked_add(strlen(pfx), 5 + 1 + 16 + 1, &path_size)) return NULL;
+    if (!math_checked_add(strlen(pfx), strlen(base), &path_size) ||
+        !math_checked_add(path_size, 1 + 1 + 16 + 1, &path_size)) return NULL;
     char* path = (char*)mem_alloc(path_size, MEM_CAT_TEMP);
     if (!path) return NULL;
 #ifdef _WIN32
@@ -1070,13 +1076,13 @@ char* dir_temp_create(const char* prefix) {
         unsigned int random_a = 0;
         unsigned int random_b = 0;
         if (rand_s(&random_a) != 0 || rand_s(&random_b) != 0) break;
-        snprintf(path, path_size, "temp/%s_%08x%08x", pfx, random_a, random_b);
+        snprintf(path, path_size, "%s/%s_%08x%08x", base, pfx, random_a, random_b);
         if (CreateDirectoryA(path, NULL)) { created = true; break; }
         if (GetLastError() != ERROR_ALREADY_EXISTS) break;
     }
     if (!created) {
 #else
-    snprintf(path, path_size, "temp/%s_XXXXXX", pfx);
+    snprintf(path, path_size, "%s/%s_XXXXXX", base, pfx);
     if (!mkdtemp(path)) {
 #endif
         log_error("DIR-TEMP-CREATE: cannot reserve a unique directory");

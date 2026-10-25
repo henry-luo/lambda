@@ -44,8 +44,6 @@
 #include <pthread.h>
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
-extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
-                                              void* type_list);
 extern "C" void ensure_jit_imports_initialized(void);
 extern __thread Context* input_context;
 
@@ -62,7 +60,10 @@ static LambdaTier g_lambda_tier = LAMBDA_TIER_AUTO;
 #endif
 
 static InterpState* interp_current_state(void);
+#ifndef LAMBDA_NO_MIR
+// promotion policy: only the MIR region below consults it
 static bool interp_whole_script_poc_enabled(void);
+#endif
 static bool interp_whole_script_publish_function(Script* script,
         AstFuncNode* def, Function* known_fn);
 
@@ -80,6 +81,22 @@ void lambda_tier_set(LambdaTier tier) {
 // absent MIR services own neither promotion state nor worker lifetimes.
 #define INTERP_DISABLED_MIR_HOOK(type, name, args, result) \
     type name args { return result; }
+
+// D8.1.1v17: an interactive session arms this around each entry. The SIGINT
+// handler only stores the flag (async-signal-safe); T0 raises the fault at its
+// next call entry or loop back-edge. The flag stays set until the session
+// clears it, so a procedure-boundary handler that consumes the fault is
+// re-faulted at the next poll and the entry still ends. T0 polls it in every
+// profile, so it sits outside the MIR-only region below.
+static volatile sig_atomic_t g_interp_interrupt_requested = 0;
+void interp_interrupt_request(void) { g_interp_interrupt_requested = 1; }
+void interp_interrupt_clear(void) { g_interp_interrupt_requested = 0; }
+
+static inline void interp_poll_interrupt(void) {
+    if (g_interp_interrupt_requested) {
+        lambda_recovery_frame_raise_fault(LAMBDA_FAULT_INTERRUPTED, ERR_OK);
+    }
+}
 
 #ifndef LAMBDA_NO_MIR
 typedef struct AstPromotionOverlayEntry {
@@ -194,22 +211,6 @@ FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* def) {
         return NULL;
     }
     return &entry->cell;
-}
-
-
-// D8.1.1v17: an interactive session arms this around each entry. The SIGINT
-// handler only stores the flag (async-signal-safe); T0 raises the fault at its
-// next call entry or loop back-edge. The flag stays set until the session
-// clears it, so a procedure-boundary handler that consumes the fault is
-// re-faulted at the next poll and the entry still ends.
-static volatile sig_atomic_t g_interp_interrupt_requested = 0;
-void interp_interrupt_request(void) { g_interp_interrupt_requested = 1; }
-void interp_interrupt_clear(void) { g_interp_interrupt_requested = 0; }
-
-static inline void interp_poll_interrupt(void) {
-    if (g_interp_interrupt_requested) {
-        lambda_recovery_frame_raise_fault(LAMBDA_FAULT_INTERRUPTED, ERR_OK);
-    }
 }
 
 static void interp_satellite_compile_job(void* opaque) {
@@ -797,7 +798,9 @@ static FnPromotionCell* interp_frame_cell(InterpFrame* frame);
 static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
 static bool interp_promote_function_from_tail(Function* fn);
+#ifndef LAMBDA_NO_MIR
 static uint32_t interp_jit_threshold(void);
+#endif
 static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
     const char* fallback_name, int index);
 static bool interp_constrained_type_matches(InterpFrame* f,
@@ -879,36 +882,6 @@ static void interp_apply_path_steps(Scratch& acc, const AstPathSegment* steps,
 // ---------------------------------------------------------------------------
 // Bindings
 // ---------------------------------------------------------------------------
-
-// Post-order import cone excluding the root — the same shape run_script_mir
-// collects, rebuilt here because that helper is static to the MIR translation
-// unit and its cone is only populated on the lowering path.
-static void interp_cone_postorder(Script* script, ArrayList* cone, ArrayList* seen) {
-    if (!script) return;
-    for (int i = 0; i < seen->length; i++) if (seen->data[i] == script) return;
-    arraylist_append(seen, script);
-    if (script->direct_imports) {
-        for (int i = 0; i < script->direct_imports->length; i++) {
-            interp_cone_postorder((Script*)script->direct_imports->data[i], cone, seen);
-        }
-    }
-    arraylist_append(cone, script);
-}
-
-static ArrayList* interp_collect_import_cone(Script* main_script) {
-    if (!main_script || !main_script->direct_imports ||
-            main_script->direct_imports->length == 0) return NULL;
-    ArrayList* with_main = arraylist_new(8);
-    ArrayList* seen = arraylist_new(8);
-    interp_cone_postorder(main_script, with_main, seen);
-    arraylist_free(seen);
-    ArrayList* cone = arraylist_new(with_main->length);
-    for (int i = 0; i < with_main->length; i++) {
-        if (with_main->data[i] != main_script) arraylist_append(cone, with_main->data[i]);
-    }
-    arraylist_free(with_main);
-    return cone;
-}
 
 static LambdaModuleState* interp_module_state(Script* module) {
     EvalContext* owner = context;
@@ -8948,7 +8921,7 @@ static Script* interp_repl_item_import(AstNode* item) {
 static ArrayList* interp_repl_import_cone(Script* imported) {
     ArrayList* cone = arraylist_new(4);
     ArrayList* seen = arraylist_new(4);
-    interp_cone_postorder(imported, cone, seen);
+    script_import_cone_postorder(imported, cone, seen);
     arraylist_free(seen);
     return cone;
 }
@@ -9152,7 +9125,7 @@ Item interp_call_package_export(Runtime* runtime, const char* package_name,
 // Post-order over the import cone, then the main script — the order
 // run_script_mir walks, so each initializer observes its dependencies.
 static Item interp_execute(Runner* runner, InterpState* st) {
-    ArrayList* cone = interp_collect_import_cone(runner->script);
+    ArrayList* cone = collect_import_cone(runner->script);
     if (cone) {
         for (int i = 0; i < cone->length; i++) {
             Script* module = (Script*)cone->data[i];

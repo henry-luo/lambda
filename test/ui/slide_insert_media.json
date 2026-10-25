@@ -1,0 +1,467 @@
+{
+  "name": "Slides Insert: rendered screenshots, Zoom, links, actions and native media",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"Insert\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-screenshot"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#insert-field-mode"
+      },
+      "value": "slide"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-insert-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render img').getAttribute('src').indexOf('data:image/png;base64,') === 0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-zoom"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#insert-field-target"
+      },
+      "value": "story"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#insert-field-label"
+      },
+      "text": "Explore the story",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-insert-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render [data-slide-insert=zoom] img').getAttribute('src').length > 1000"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-destination=\"story\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-link"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#insert-field-label"
+      },
+      "text": "Our story",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#insert-field-target"
+      },
+      "value": "story"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-insert-dialog",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-insert=link] button"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-action"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#insert-field-label"
+      },
+      "text": "Finish",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#insert-field-command"
+      },
+      "value": "end"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-insert-dialog",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=end]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-video"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#insert-field-path"
+      },
+      "text": "../../media/test_video_audio.mp4",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-insert-dialog",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-audio"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#insert-field-path"
+      },
+      "text": "../../media/test_audio.m4a",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-insert-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render video').hasAttribute('controls') && document.querySelector('#slide-render audio').hasAttribute('controls')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show video"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show audio"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#editor-show video').play()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#editor-show video').paused === false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#editor-show video').paused"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/insert-media.png"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import review: .mod_review
 import stories: .mod_stories
 import changes: .mod_changes
 import print: .mod_print
+import exports: ~~.mod_export
 
 let tags = ['doc','p','h1','h2','h3','h4','h5','h6','blockquote','ul','ol','li',
     'table','thead','tbody','tfoot','tr','td','th','pre','code','span','strong','em','u','b','i','del','s','sub','sup','a','img','br','hr','div',
@@ -148,25 +149,14 @@ pub fn pdf_document(doc,title,plain=false) string^ {
         format(<html *:map(root),xml_head; *[for (child in content(root) where child!=head) child]>,'xml')^
     }
 }
-// render to a pending file, then rename, so a failed export never replaces an existing PDF.
-pn write_pdf(source,width,height,source_format,path) any^ {
-    let pending = path ++ ".word-" ++ string(int(clock()*1000000)) ++ ".pdf"
-    let result = radiant.export_document(source,pending,{format:"pdf",width:width,height:height,pagination:true,source_format:source_format})
-    if (result != true) {
-        io.delete(pending) ^ { null }
-        raise error("Word: " ++ string(result))
-    }
-    io.rename(pending,path) ^ { io.delete(pending) ^ { null }; raise ^ }
-    return true
-}
 pub pn export_document(doc,title,path,plain=false) any^ {
     let extension = lower(split(path,".")[last])
     if (extension == "html") { output(html_document(doc,title)^,path,{format:'text',atomic:true})^ }
     else if (extension == "txt") { output(model.plain_text(doc) ++ "\n",path,{format:'text',atomic:true})^ }
     else if (extension == "pdf") {
         let geometry = page.geometry(doc)
-        write_pdf(pdf_document(doc,title,plain)^,geometry.width,geometry.height,
-            if (columns.settings(doc).count>1) "xhtml" else "html",path)^
+        exports.pdf(pdf_document(doc,title,plain)^,geometry.width,geometry.height,
+            if (columns.settings(doc).count>1) "xhtml" else "html",path,"Word")^
     }
     else { raise error("Word: export as .html, .txt, or .pdf") }
     return true
@@ -199,5 +189,5 @@ pub pn export_sheets(doc,title,values,starts,path) any^ {
     let height = lay.height_mm*96/25.4
     let body = join([for (uri in images) "<div class=\"print-sheet\" style=\"width:" ++ string(width) ++ "px;height:" ++ string(height) ++
         "px\"><img class=\"print-image\" alt=\"\" src=\"" ++ uri ++ "\" style=\"width:" ++ string(width) ++ "px;height:" ++ string(height) ++ "px\"></div>"],"")
-    return write_pdf(print_head(title,lay) ++ "<body>" ++ body ++ "</body></html>",lay.width,lay.height,"html",path)^
+    return exports.pdf(print_head(title,lay) ++ "<body>" ++ body ++ "</body></html>",lay.width,lay.height,"html",path,"Word")^
 }

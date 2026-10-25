@@ -311,7 +311,7 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
     case DOM_NODE_ELEMENT: {
         if (!tag) return ItemNull;
         DomElement* elem = (DomElement*)dom_create_backed_element_bridge(document, tag);
-        return elem ? dom_wrap_element(elem) : ItemNull;
+        return elem ? dom_realm_custom_element_upgrade(dom_wrap_element(elem)) : ItemNull;
     }
     case DOM_NODE_TEXT: {
         const char* s = text ? text : "";

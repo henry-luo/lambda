@@ -334,14 +334,15 @@ bool dom_boundary_from_source_pos(DomNode* dom_root, const SourcePosC* pos,
     return false;
 }
 
-extern "C" const char* glfwGetClipboardString(GLFWwindow* window) {
+// state_store.cpp mirrors the OS clipboard through the platform seam
+const char* radiant_platform_get_clipboard(RadiantWindow* window) {
     (void)window;
     return NULL;
 }
 
-extern "C" void glfwSetClipboardString(GLFWwindow* window, const char* string) {
+void radiant_platform_set_clipboard(RadiantWindow* window, const char* text) {
     (void)window;
-    (void)string;
+    (void)text;
 }
 
 extern "C" void clipboard_store_write_text(const char* text) {

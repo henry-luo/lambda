@@ -33,14 +33,14 @@ void radiant_register_resource_processor();
 void radiant_register_event_hooks();
 
 // F7: platform IME shims (radiant/ime_mac.mm, radiant/ime_win.cpp).
-// Take an opaque GLFWwindow*; resolve focus/state through provided
+// Take the native window through radiant_ui_get_native_window; resolve focus/state through provided
 // `state_provider` callback to keep them free of view.hpp / Cocoa
 // header collisions (e.g. Carbon `Rect`).
 extern "C" void radiant_ime_mac_attach(UiContext* uicon);
 extern "C" void radiant_ime_win_attach(UiContext* uicon);
 
 // application icon for the Dock / window (radiant/app_icon.cpp)
-extern "C" void radiant_app_icon_install(GLFWwindow* window);
+extern "C" void radiant_app_icon_install(RadiantWindow* window);
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
 extern "C" void radiant_clipboard_mac_init(void);
 #endif
@@ -204,17 +204,15 @@ bool ui_context_set_device_scale(UiContext* uicon,
 bool ui_context_enable_native_graphics(UiContext* uicon) {
     if (!uicon) return false;
     if (uicon->window) return true;
-    #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-    #endif
-    #ifdef __APPLE__
-    glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
-    #endif
-    if (!glfwInit()) { log_error("[NATIVE_GRAPHICS_HOST] GLFW initialization failed");return false; }
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    uicon->window=glfwCreateWindow(1,1,"Lambda Headless",nullptr,nullptr);
+    if (!radiant_platform_init(true)) {
+        log_error("[NATIVE_GRAPHICS_HOST] platform initialization failed");
+        return false;
+    }
+    uicon->window = radiant_platform_create_window(1, 1, "Lambda Headless", false);
     if (!uicon->window) {
-        log_error("[NATIVE_GRAPHICS_HOST] hidden window creation failed");glfwTerminate();return false;
+        log_error("[NATIVE_GRAPHICS_HOST] hidden window creation failed");
+        radiant_platform_terminate();
+        return false;
     }
     log_info("[NATIVE_GRAPHICS_HOST] hidden graphics host ready");
     return true;
@@ -268,19 +266,16 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         viewport_height = window_height; // CSS pixels
     } else {
         // GUI mode: create window
-        // Force X11 backend on Linux to ensure window visibility in mixed Wayland/XWayland environments
-        #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-        #endif
-        if (!glfwInit()) {
-            log_error("GLFW init failed");
+        if (!radiant_platform_init(false)) {
+            log_error("platform init failed");
             return EXIT_FAILURE;
         }
 
-        // create a window and its OpenGL context
-        window = glfwCreateWindow(window_width, window_height, "Lambda Radiant Text Rendering", NULL, NULL);
+        // create a window and its presentation context
+        window = radiant_platform_create_window(window_width, window_height,
+                                                "Lambda Radiant Text Rendering", true);
         if (!window) {
-            log_error("GLFW window create failed");
+            log_error("platform window create failed");
             return EXIT_FAILURE;
         }
         // GUI mode only: headless runs must not touch the Dock or a window icon
@@ -290,14 +285,14 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
 #endif
 
         // ensure window is shown and focused (needed on some Wayland/XWayland setups)
-        glfwShowWindow(window);
-        glfwFocusWindow(window);
+        radiant_platform_show_window(window);
+        radiant_platform_focus_window(window);
 
         // get logical and actual pixel ratio
         int pixel_w, pixel_h;
         int logical_w, logical_h;
-        glfwGetFramebufferSize(window, &pixel_w, &pixel_h);
-        glfwGetWindowSize(window, &logical_w, &logical_h);
+        radiant_platform_get_framebuffer_size(window, &pixel_w, &pixel_h);
+        radiant_platform_get_window_size(window, &logical_w, &logical_h);
         float scale_x = logical_w > 0 ? (float)pixel_w / logical_w : 1.0f;
         float scale_y = logical_h > 0 ? (float)pixel_h / logical_h : 1.0f;
         log_info("ui_context_init: scale factor: %.2f x %.2f, framebuffer size: %d x %d", scale_x, scale_y, pixel_w, pixel_h);
@@ -386,8 +381,13 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
 // F7: opaque accessors used by IME shims (ime_mac.mm / ime_win.cpp) so
 // those translation units don't need to include view.hpp (which collides
 // with Cocoa's `Rect`).
-extern "C" GLFWwindow* radiant_ui_get_glfw_window(UiContext* uicon) {
-    return uicon ? uicon->window : nullptr;
+extern "C" void* radiant_ui_get_native_window(UiContext* uicon) {
+    return uicon ? radiant_platform_native_window(uicon->window) : nullptr;
+}
+extern "C" void radiant_ui_get_content_scale(UiContext* uicon, float* x, float* y) {
+    if (x) *x = 1.0f;
+    if (y) *y = 1.0f;
+    if (uicon && uicon->window) radiant_platform_get_content_scale(uicon->window, x, y);
 }
 extern "C" DocState* radiant_ui_get_state(UiContext* uicon) {
     if (!uicon || !uicon->document) return nullptr;
@@ -646,15 +646,15 @@ void UiContext::destroy() {
     window_surface = nullptr;
     surface = nullptr;
 
-    // Only tear down GLFW if a window was created (i.e., non-headless mode).
-    // Calling glfwTerminate() without a prior glfwInit() is undefined behavior.
+    // Only tear down the platform if a window was created (i.e., non-headless
+    // mode); terminating an uninitialized windowing library is undefined.
     if (window) {
         if (mouse_state.sys_cursor) {
-            glfwDestroyCursor(mouse_state.sys_cursor);
+            radiant_platform_destroy_cursor(mouse_state.sys_cursor);
             mouse_state.sys_cursor = nullptr;
         }
-        glfwDestroyWindow(window);
+        radiant_platform_destroy_window(window);
         window = nullptr;
-        glfwTerminate();
+        radiant_platform_terminate();
     }
 }

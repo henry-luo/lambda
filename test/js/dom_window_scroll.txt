@@ -1,0 +1,6 @@
+window scrolling methods: pass
+window and document share offsets: pass
+relative scrolling and offset aliases: pass
+dictionary preserves omitted axis: pass
+window reflects element scroll writes: pass
+scroll to top: pass

@@ -1,59 +1,5 @@
-#include "mvp_lmd.h"
-#include "mvp_lmd_runtime.h"
-#include "mvp_lmd_async.h"
-#include "mvp_lmd_dynamic.h"
-#include "../js_transpiler.hpp"
-#include "../js_source_module.hpp"
-#include "../js_runtime.h"
-#include "../js_host_hooks.h"
-#include "../js_builtin_catalog.hpp"
-#include "../js_well_known_names.h"
-#include "../js_props.h"
-#include "../js_runtime_state.hpp"
-#include "../js_execution_internal.hpp"
-#include "../js_event_loop.h"
-#include "../js_interp.hpp"
-#include "../js_interp_env.h"
-#include "../js_typed_array.h"
-#include "../../ts/ts_ast.hpp"
-#include "../../ts/ts_runtime.h"
-#include "../../dom/dom.h"
-#include "../../jube/jube_registry.h"
-#include "../../runtime/mir_emitter_shared.hpp"
-#include "../../runtime/mir_policy.hpp"
-#include "../../runtime/runtime-state.h"
-#include "../../runtime/heap_api.h"
-#include "../../runtime/lambda-root-frame.hpp"
-#include "../../runtime/lambda-error.h"
-#include "../../runtime/context_capsule.h"
-#include "../../runtime/activation.h"
-#include "../../runtime/recovery_frame.h"
-#include "../../input/input.hpp"
-#include "../../core/lambda-decimal.hpp"
-#include "../../mir/mir-gen.h"
-#include "../../../lib/mem.h"
-#include "../../../lib/utf.h"
-#include "../../../lib/time_util.h"
-#include "../../../lib/math_utils.h"
-#include "../../../lib/strbuf.h"
-#include "../../../lib/atomic.h"
-#include "../../../lib/hashmap_typed.hpp"
-#include <math.h>
+#include "mvp_lmd_internal.h"
 
-enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
-    K_STRING = 16, K_ARRAY = 32, K_FUNCTION = 64, K_OBJECT = 128, K_MAP = 256,
-    K_TYPED_ARRAY = 512, K_BIGINT = 1024, K_SYMBOL = 2048, K_ANY = 4095, K_BOXED = 4096 };
-enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
-    I_MATH, I_INT32_ARRAY, I_UINT8_ARRAY, I_FLOAT64_ARRAY, I_ARRAY, I_STRING, I_ERROR,
-    I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY,
-    I_EVAL_ERROR, I_RANGE_ERROR, I_REFERENCE_ERROR, I_SYNTAX_ERROR, I_TYPE_ERROR, I_URI_ERROR, I_AGGREGATE_ERROR,
-    I_BOOLEAN, I_BIGINT, I_FUNCTION, I_ARRAYBUFFER, I_DATAVIEW, I_TEST262, I_INT8_ARRAY, I_INT16_ARRAY, I_UINT16_ARRAY,
-    I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_UINT8_CLAMPED_ARRAY, I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY, I_PROMISE, I_EVAL, I_DECODE_URI, I_ENCODE_URI, I_DECODE_COMPONENT, I_ENCODE_COMPONENT, I_SET_TIMEOUT, I_CLEAR_TIMEOUT, I_SET_INTERVAL, I_CLEAR_INTERVAL, I_QUEUE_MICROTASK, I_WEAK_MAP, I_WEAK_SET, I_SHARED_ARRAYBUFFER, I_ESCAPE, I_UNESCAPE, I_WEAK_REF, I_FINALIZATION_REGISTRY, I_ATOMICS, I_COUNT };
-static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
-    "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
-    "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",
-    "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt", "Function", "ArrayBuffer", "DataView", "$262", "Int8Array", "Int16Array", "Uint16Array",
-    "Uint32Array", "Float32Array", "Uint8ClampedArray", "BigInt64Array", "BigUint64Array", "Float16Array", "Promise", "eval", "decodeURI", "encodeURI", "decodeURIComponent", "encodeURIComponent", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "WeakMap", "WeakSet", "SharedArrayBuffer", "escape", "unescape", "WeakRef", "FinalizationRegistry", "Atomics"};
 // MIR needs ABI offsets for inherited callable and nominal class records, as in the Lambda emitter.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
@@ -63,164 +9,12 @@ static constexpr size_t LMD_CLASS_FIELD_KEYS_OFFSET = offsetof(MvpLmdClass, fiel
 static constexpr size_t LMD_CLASS_INITIALIZERS_OFFSET = offsetof(MvpLmdClass, initializers);
 #pragma clang diagnostic pop
 static const ArrayNumElemType typed_lanes[] = {ELEM_INT32, ELEM_UINT8, ELEM_FLOAT64};
-static const int typed_intrinsics[] = {I_INT8_ARRAY, I_UINT8_ARRAY, I_INT16_ARRAY, I_UINT16_ARRAY,
-    I_INT32_ARRAY, I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_FLOAT64_ARRAY, I_UINT8_CLAMPED_ARRAY,
-    I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY};
-static int typed_intrinsic(int id) {
-    for (int type = 0; type < 12; type++) if (typed_intrinsics[type] == id) return type;
-    return -1;
-}
 static const struct { const char* name; const char* native; int arity;
     double (*unary)(double); double (*binary)(double, double); bool binary_once = false; } math_operations[] = {
     {"sqrt", "sqrt", 1, sqrt}, {"sin", "sin", 1, sin}, {"floor", "floor", 1, floor}, {"trunc", "trunc", 1, trunc},
     {"abs", "fn_abs_f", 1, fn_abs_f}, {"min", "fn_min2_u", 2, NULL, fn_min2_u}, {"max", "fn_max2_u", 2, NULL, fn_max2_u},
     {"ceil", "ceil", 1, ceil}, {"cos", "cos", 1, cos}, {"round", "floor", 1, floor}, {"random", "math_splitmix64", 0},
     {"pow", "mvp_lmd_number_pow", 2, NULL, mvp_lmd_number_pow, true}};
-struct LmdRange { double lower = 0, upper = 0; unsigned state = 0; };
-// lane bits follow typed_lanes; ITEMS admits only proven unchanged numeric literals.
-enum { LMD_ARRAY_ITEMS = 8, LMD_ARRAY_UNKNOWN = 16 };
-struct LmdArrayFacts { unsigned lanes = 0; LmdRange length; LmdRange elements; };
-struct LmdFunction;
-struct LmdObjectPlan;
-struct LmdShapeSet { int count; LmdObjectPlan* plans[4]; };
-struct LmdValue;
-struct LmdScalarField;
-struct LmdInlineFrame;
-struct LmdInlineBody;
-struct LmdNumericRegion;
-struct LmdDenseArrayLoopPlan;
-struct LmdWithLookup;
-struct LmdRegionRead { LmdNumericRegion* region; int parent; String* name;
-    unsigned kind; int index; LmdFunction* target; LmdShapeSet shapes; };
-struct LmdNumericRegion {
-    LmdFunction* function; int parameters; unsigned kinds[8];
-    int count; LmdRegionRead reads[16]; int nodes; bool calls; bool allocates; bool computes; bool loops;
-    int sites; AstNodeId site_ids[128]; int site_reads[128];
-};
-struct LmdBinding {
-    NameEntry* entry;
-    NameEntry* satellite_entry;
-    LmdFunction* owner;
-    LmdFunction* target;
-    AstNode* initializer;
-    uint32_t slot;
-    unsigned kinds;
-    unsigned seed_kinds;
-    LmdRange range;
-    AstNode* update;
-    unsigned writes;
-    unsigned range_changes;
-    bool assigned;
-    bool observed;
-    bool private_name;
-    bool external;
-    bool native;
-    bool integer;
-    uint8_t intrinsic;
-    bool dominated;
-    MIR_reg_t reg;
-    int scalar_home;
-    LmdObjectPlan* shape_hint;
-    LmdShapeSet shapes;
-    LmdArrayFacts array;
-    unsigned array_changes;
-    bool array_observed;
-    MIR_reg_t number_present;
-    LmdRange present_range;
-    unsigned present_range_changes;
-    uint8_t integral_indices; // compiler proof: 0 unexamined, 1 unknown, 2 integral or nonfinite
-    bool reflected_global;
-    bool fixed_global;
-    bool source_assigned;
-    bool source_observed;
-    bool closed_global;
-    unsigned source_kinds;
-    uint8_t reflected_intrinsic;
-    bool class_name;
-    bool captured;
-    bool implicit_write;
-    bool dense_array_storage;
-    bool module_cell;
-    bool ast_capture;
-    const JsResolvedModuleBinding* module_import;
-    LmdWithLookup* with_lookup;
-    LmdBinding* fallback;
-};
-struct LmdWithLookup { LmdBinding* object; LmdWithLookup* outer; };
-struct LmdPrivateBindingKey { AstNode* owner; String* name; LmdBinding* binding; };
-using LmdPrivateBindings = TypedHashMap<LmdPrivateBindingKey,
-    HashMapIdentity2MemberKeyOps<LmdPrivateBindingKey, &LmdPrivateBindingKey::owner, &LmdPrivateBindingKey::name>>;
-struct LmdFunction {
-    AstFuncNode* ast;
-    MIR_item_t item;
-    MIR_item_t forward;
-    char name[40];
-    uint32_t id;
-    // pack analysis flags into alignment gaps to preserve ordinary function allocation size.
-    bool native;
-    bool integer;
-    bool integer_region;
-    bool scalar_factory;
-    void* address;
-    bool closed_calls;
-    bool direct_args;
-    bool reflected_entry;
-    bool uses_process;
-    LmdObjectPlan* shape_hint;
-    LmdShapeSet shapes;
-    unsigned returns;
-    int arity;
-    LmdRange range;
-    unsigned range_changes;
-    FnReturnAnalysis return_abi;
-    MirImportEntry entry;
-    MIR_var_t signature[LAMBDA_MAX_FUNCTION_ARGS];
-    LmdArrayFacts array;
-    unsigned array_changes;
-    MvpLmdClass* home;
-    LmdFunction* parent;
-    ArrayList* captures;
-    bool lexical_receiver;
-    bool receiver_captured;
-    bool observes_receiver;
-    bool owns_captures;
-    bool complex_params;
-    bool parameter_expressions;
-    bool duplicate_params;
-    uint8_t formal_length;
-    uint8_t home_slot;
-    bool non_constructible;
-    bool constructor;
-    bool static_method;
-    LmdBinding* arguments_binding;
-    LmdBinding* body_arguments_binding;
-    bool mapped_arguments;
-    bool object_home;
-    bool lexical_super;
-    bool direct_eval;
-    bool eval_environment;
-    bool eval_lookup;
-    bool eval_capture;
-    LmdNumericRegion* numeric_region;
-};
-struct LmdObjectPlan { AstNode* literal; TypeMap* blueprint; TypeMap* shape;
-    LmdBinding* scalar_binding; LmdScalarField* scalar_fields;
-    LmdFunction* constructor; AstNode* initializers[4];
-    LmdFunction* prototype_owner; };
-struct LmdScalarFactoryPlan { LmdObjectPlan object; LmdFunction* function; AstNode* value; };
-struct LmdDeletedShapePlan { LmdObjectPlan object; LmdObjectPlan* source; ShapeEntry* removed; };
-struct MvpLmdRealm;
-struct MvpLmdCode {
-    atomic_int32 references;
-    MIR_context_t mir;
-    StrBuf* image;
-    ArrayList* addresses;
-    size_t relocation_count;
-    unsigned int optimize_level;
-    char* source;
-    size_t source_length;
-    char* reference;
-};
 void mvp_lmd_code_retain(MvpLmdCode* code) {
     if (code) atomic_inc32(&code->references);
 }
@@ -234,237 +28,6 @@ size_t mvp_lmd_code_bytes(const MvpLmdCode* code) {
     return code ? sizeof(*code) + code->image->length +
         code->addresses->length * sizeof(void*) + code->source_length +
         (code->reference ? strlen(code->reference) + 1 : 0) : 0;
-}
-struct MvpLmdProgram {
-    bool typescript;
-    bool relocatable;
-    ArrayList* relocations;
-    MvpLmdCode* code;
-    const MvpLmdCode* cached_code;
-    MvpLmdRealm* module_controller;
-    JsTranspiler* frontend;
-    MvpLmdProgram* realm_program;
-    JsSourceModuleRecord* source_module;
-    void* module_state;
-    uint32_t module_state_id;
-    uint32_t module_slot_count;
-    uint32_t module_eval_slot;
-    uint32_t compilation_stage;
-    bool module_realm;
-    bool script_published;
-    bool script_bindings_pending;
-    bool slots_registered;
-    MIR_context_t mir;
-    MIR_module_t module;
-    ArrayList* functions;
-    ArrayList* bindings;
-    HashMap* private_bindings;
-    Item* slots;
-    uint32_t slot_count;
-    char diagnostic[192];
-    MvpLmdFailurePhase failure_phase;
-    bool linked;
-    MirImportEntry entry;
-    LmdBinding intrinsics[I_COUNT - 1];
-    TypeNominal families[2];
-    TypeMap* roots[2];
-    ArrayList* objects;
-    LmdBinding** intrinsic_uses;
-    LmdBinding** with_objects;  // statement-owned cells; absent in units without object environments
-    LmdBinding** with_bindings; // per-reference views, leaving lexical declaration identities intact
-    HashMap* import_cache;
-    unsigned* literal_kinds;
-    Item* character_items;
-    uint32_t* template_slots;    // AST site to one-based registered cache slot
-    bool immutable_objects;
-    bool property_callbacks;
-    bool coercion_callbacks;
-    bool bigints;
-    bool symbols;
-    bool iterators;
-    bool array_holes;
-    bool excludes_sparse_arrays;
-    bool array_named_properties;
-    bool array_method_overrides;
-    bool map_method_overrides;
-    bool primitive_method_overrides;
-    bool math_observed;
-    bool performance_observed;
-    bool date_observed;
-    ArrayList* classes;
-    bool receiver_abi;
-    bool function_construction; // source evidence gates optional own-read specialization
-    bool function_prototype_observed;
-    bool deletes_properties;
-    bool host_enabled;
-    bool native_host_values;
-    bool closed_stdio;
-    bool direct_stdio;
-    bool host_active;
-    bool timers;
-    uint32_t timer_slot;
-    uint32_t host_slot;
-    uint32_t global_slot;
-    uint64_t random_state;
-    bool global_receiver;
-    bool global_reflection;
-    bool global_bindings_exposed;
-    bool global_mutations_closed;
-    bool global_math_observed;
-    bool global_primitive_method_overrides;
-    MvpLmdHostState host;
-    MvpLmdLibraryState* library;
-    bool library_active;
-    bool library_runtime;
-    uint32_t library_slot;
-    uint32_t iterator_family_slot;
-    uint32_t regexp_iterator_slot;
-    uint32_t iterator_base_slot;
-    bool errors;
-    uint32_t error_slot;
-    bool primitives;
-    uint32_t primitive_slot;
-    bool weak_collections;
-    bool weak_lifetimes;
-    uint32_t weak_slot;
-    bool buffers;
-    bool shared_buffer;
-    uint32_t shared_buffer_slot;
-    bool test262_host;
-    uint32_t buffer_slot;
-    bool typed_storage;
-    bool typed_explicit;
-    unsigned typed_named_kinds;
-    LmdRange typed_named_range;
-    unsigned typed_named_range_changes;
-    uint32_t typed_slot;
-    bool promises;
-    uint32_t promise_slot;
-    bool async_generators;
-    uint32_t async_generator_slot;
-    bool async_functions;
-    uint32_t async_function_slot;
-    bool generator_functions;
-    uint32_t generator_function_slot;
-    bool suspended_constructor_observed;
-    bool dynamic_source;
-    bool global_alias_store;
-    uint8_t* eval_references; // absent outside units with syntactic direct eval
-    uint32_t eval_slot;
-    ArrayList* dynamic_scripts; // retained AST/code records outlive precise function finalizers
-    bool atomics;
-    uint32_t atomics_slot;
-    MvpLmdExecution* execution_owner;
-    JsScript* satellite_script; // caller-owned module bindings; no second Script evaluation
-    JsScript* satellite_source;
-    AstFunctionId satellite_function_id; // immutable identity, never a closure instance
-    uint32_t realm_key;
-};
-struct MvpLmdRealm;
-struct MvpLmdExecution {
-    MvpLmdProgram program;
-    MvpLmdProgram* last_program;
-    EvalContext* owner_context;
-    Runtime* host_runtime;
-    Runtime* owned_runtime; // standalone clients use the same canonical owner and teardown
-    bool shared_realm;
-    MvpLmdHost retained_host;
-    Item result;
-    const MvpLmdHost* host;
-    MvpLmdRealm* realm;
-    ArrayList* units;
-    uint32_t next_realm_key;
-    mutable char result_diagnostic[512]; // reporting text is separate from the guest Error.message
-};
-struct MvpLmdRealm {
-    Runtime runtime;                  // controller for the existing EvalContext; owns no heap
-    Runtime* active_runtime;
-    MvpLmdProgram* program;
-    MvpLmdExecution* execution;
-    const MvpLmdHost* host;
-};
-static MvpLmdProgram* mvp_lmd_new_unit(MvpLmdExecution* execution, MvpLmdProgram* realm) {
-    if (!execution->units) execution->units = arraylist_new(8);
-    if (!execution->units) return NULL;
-    auto* program = (MvpLmdProgram*)mem_calloc(1, sizeof(MvpLmdProgram), MEM_CAT_EVAL);
-    if (!program) return NULL;
-    if (!arraylist_append(execution->units, program)) { mem_free(program); return NULL; }
-    program->execution_owner = execution;
-    program->realm_program = realm;
-    if (realm) {
-        program->library = realm->library;
-        program->host_enabled = realm->host_enabled;
-        program->test262_host = realm->test262_host;
-    }
-    return program;
-}
-void mvp_lmd_runtime_reset() {
-    if (!context || !js_active_runtime_state) return;
-    Runtime* runtime = context->runtime;
-    for (int i = 0; runtime && runtime->scripts && i < runtime->scripts->length; i++) {
-        js_script_reset_heap(js_script_from_script((Script*)runtime->scripts->data[i]));
-    }
-    // queued work is already retired by js_batch_reset. Drop heap-derived
-    // owners before replacement; Script extensions retain compiler metadata.
-    js_runtime_state.formal_mir_owner = NULL;
-    js_runtime_state.auto_mir_owner = NULL;
-    js_runtime_state.promises.host_ops = NULL;
-    js_runtime_state.promises.host_context = NULL;
-    js_runtime_state.modules.source_ops = NULL;
-    js_runtime_state.modules.source_owner = NULL;
-    context_capsule_extensions_drop_owner(context, MVP_LMD_MODULE_OWNER);
-    context_capsule_extensions_drop_owner(context, MVP_LMD_DYNAMIC_OWNER);
-    context_capsule_extensions_drop_owner(context, MVP_LMD_REGEXP_OWNER);
-    context_capsule_extensions_drop_owner(context, MVP_LMD_CAPSULE_OWNER);
-}
-MvpLmdProgram* mvp_lmd_program_realm(MvpLmdProgram* program) {
-    return program && program->realm_program ? program->realm_program : program;
-}
-MvpLmdProgram* mvp_lmd_program_for_global(MvpLmdProgram* program, Item global) {
-    MvpLmdExecution* execution = program ? program->execution_owner : NULL;
-    if (!execution || get_type_id(global) != LMD_TYPE_MAP) return NULL;
-    auto matches = [&](MvpLmdProgram* candidate) {
-        return !candidate->realm_program && candidate->global_receiver && candidate->slots &&
-            candidate->slots[candidate->global_slot].item == global.item;
-    };
-    if (matches(&execution->program)) return &execution->program;
-    for (int i = 0; execution->units && i < execution->units->length; i++) {
-        auto* candidate = (MvpLmdProgram*)execution->units->data[i];
-        if (matches(candidate)) return candidate;
-    }
-    // prepared native globals may predate the formal realm. They retain the
-    // caller's bridge policy when no MVP owner exists; no new realm is created.
-    return NULL;
-}
-uint32_t mvp_lmd_program_realm_key(MvpLmdProgram* program) {
-    return program ? mvp_lmd_program_realm(program)->realm_key : 0;
-}
-extern "C" const JsTemplateObjectOps* mvp_lmd_template_object_ops() {
-    static const JsTemplateObjectOps ops = {
-        [](int count) { return mvp_lmd_array_new(count); },
-        [](Item array, int index, Item value) { return mvp_lmd_array_store(array, index, value); },
-        [](Item object, Item raw) { return mvp_lmd_named_set(object, "raw", raw,
-            JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE); },
-        [](Item object) { return mvp_lmd_object_integrity(object, 1); }
-    };
-    return &ops;
-}
-extern "C" Item mvp_lmd_template_object(MvpLmdProgram* program, JsTemplateLiteralNode* literal, int64_t slot) {
-    if (program->slots[slot].item) return program->slots[slot];
-    int count = ast_linked_node_count(literal->quasis);
-    RootSpan values(count * 2);
-    if (!values.valid()) return ItemError;
-    Item* cooked = values.items(); Item* raw = cooked + count;
-    int index = 0;
-    for (AstNode* node = literal->quasis; node; node = node->next, index++) {
-        JsTemplateElementNode* element = (JsTemplateElementNode*)node;
-        cooked[index].item = element->cooked ? s2it(element->cooked) : ITEM_JS_UNDEFINED;
-        raw[index].item = s2it(element->raw);
-    }
-    Item object = js_build_template_object_with_ops(cooked, raw, count, mvp_lmd_template_object_ops());
-    // publish only a complete frozen object; the execution owner traces this site cache.
-    if (!item_is_error(object)) program->slots[slot] = object;
-    return object;
 }
 static Item math_call(Context*, MvpLmdProgram* program, Item* args, uint64_t count, Item self, Item, Item) {
     const JsBuiltinMethodSpec* operation = (const JsBuiltinMethodSpec*)((MvpLmdNativeCallable*)self.function)->state;
@@ -634,17 +197,6 @@ static void mvp_lmd_nominal_initialize(MvpLmdClass* cls, String* name, MvpLmdPro
         shapes[i]->nominal = i ? &cls->prototype_nominal : &cls->nominal;
     }
 }
-Item mvp_lmd_object_create(MvpLmdProgram* p, Item prototype) {
-    TypeId type = get_type_id(prototype);
-    if (!mvp_lmd_is_object(prototype) && type != LMD_TYPE_NULL)
-        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> parent(roots, prototype), object(roots, mvp_lmd_object_new(p->roots[0], 0));
-    if (item_is_error(object.get())) return object.get();
-    Item result = mvp_lmd_set_prototype(object.get(), parent.get());
-    return item_is_error(result) ? result : object.get();
-}
 
 static bool mvp_lmd_class_plan_elements(MvpLmdClass* cls) {
     AstClassNode* ast = cls->ast;
@@ -812,106 +364,6 @@ static LmdBinding* private_binding(MvpLmdProgram* p, AstNode* site, String* name
 }
 static void walk(AstNode* n, LmdWalk* state);
 static void child(AstNode* n, void* context) { walk(n, (LmdWalk*)context); }
-static __thread MvpLmdLibraryState** mvp_lmd_library_slot;
-static __thread Context* mvp_lmd_library_context;
-__thread MvpLmdLibraryState* mvp_lmd_foreign_library;
-const char* mvp_lmd_program_reference(MvpLmdProgram* program) {
-    return program && program->frontend ? program->frontend->reference : NULL;
-}
-MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program) {
-    if (program) return program->library_runtime ? program->library : NULL;
-    // derived TLS points into the owning context capsule; teardown clears it.
-    // an activation may restore an empty cache saved before another turn's first promotion.
-    if (context != mvp_lmd_library_context || !mvp_lmd_library_slot) {
-        mvp_lmd_library_context = context;
-        mvp_lmd_library_slot = (MvpLmdLibraryState**)context_capsule_extension(context, MVP_LMD_CAPSULE_OWNER, 0);
-        mvp_lmd_foreign_library = mvp_lmd_library_slot && *mvp_lmd_library_slot &&
-            (*mvp_lmd_library_slot)->default_realm ? *mvp_lmd_library_slot : NULL;
-    }
-    return mvp_lmd_library_slot ? *mvp_lmd_library_slot : NULL;
-}
-NameRef mvp_lmd_internal_name(MvpLmdInternalName name) {
-    static const char* names[] = {"MVP [[Prototype]]", "MVP [[Extensible]]",
-        "MVP [[PrimitiveValue]]", "MVP [[DateValue]]", "MVP [[ErrorData]]",
-        "MVP [[ParameterMap]]", "MVP [[RegExpSource]]", "MVP [[RegExpFlags]]",
-        "RegExp iterator matcher", "RegExp iterator string", "RegExp iterator global",
-        "RegExp iterator unicode", "RegExp iterator done", "MVP [[IteratorNext]]",
-        "MVP [[CustomElementName]]", "URL record", "PerformanceObserver record",
-        "PerformanceObserverEntryList record"};
-    static_assert(sizeof(names) / sizeof(names[0]) == LMD_INTERNAL_NAME_COUNT);
-    static const ContextCapsuleOps ops = {"js-mvp-internal-names", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
-        sizeof(NameRef) * LMD_INTERNAL_NAME_COUNT, NULL, NULL, NULL};
-    auto* keys = (NameRef*)context_capsule_extension(context, MVP_LMD_CAPSULE_OWNER, 1);
-    if (!keys) {
-        keys = (NameRef*)mem_calloc(LMD_INTERNAL_NAME_COUNT, sizeof(NameRef), MEM_CAT_EVAL);
-        if (!keys) return NULL;
-        if (!context_capsule_extension_install(context, MVP_LMD_CAPSULE_OWNER, 1, keys, &ops)) {
-            mem_free(keys); return NULL;
-        }
-    }
-    if (!keys[name]) keys[name] = name_pool_create_unique_private(context->name_pool,
-        {names[name], strlen(names[name])});
-    return keys[name];
-}
-MvpLmdRealmScope::MvpLmdRealmScope(MvpLmdProgram* program, bool native_realm) {
-    previous = mvp_lmd_program_library();
-    foreign = mvp_lmd_foreign_library;
-    current = native_realm ? NULL : program ? mvp_lmd_program_library(program) : previous;
-    if (current != previous && mvp_lmd_library_slot) {
-        *mvp_lmd_library_slot = current;
-        mvp_lmd_foreign_library = current && current->default_realm ? current : NULL;
-        if (js_active_runtime_state) {
-            previous_promise_context = js_runtime_state.promises.host_context;
-            js_runtime_state.promises.host_context = native_realm ? NULL : mvp_lmd_program_realm(program);
-        }
-    }
-}
-MvpLmdRealmScope::~MvpLmdRealmScope() {
-    if (current != previous) {
-        if (mvp_lmd_library_slot) *mvp_lmd_library_slot = previous;
-        mvp_lmd_foreign_library = foreign;
-        if (js_active_runtime_state) js_runtime_state.promises.host_context = previous_promise_context;
-    }
-}
-Item MvpLmdRealmScope::complete(Item result, bool force_error_payload) {
-    if (!current || (current == previous && !force_error_payload)) return result;
-    if (current->abort_kind && previous && !previous->abort_kind) {
-        previous->abort_kind = current->abort_kind; previous->abort_site = current->abort_site;
-    }
-    if (item_is_error(result)) {
-        RootFrame roots(1);
-        if (!roots.valid()) return ItemError;
-        Rooted<Item> error(roots, result);
-        // materialize an implicit JS error before restoring the caller's intrinsics.
-        Item caught = mvp_lmd_caught_value(current, error.get());
-        return item_is_error(caught) ? caught : error.get();
-    }
-    return result;
-}
-struct MvpLmdRealmAmbient {
-    Context* context;
-    MvpLmdLibraryState** slot;
-    MvpLmdLibraryState* current;
-    MvpLmdLibraryState* foreign;
-};
-static void mvp_lmd_realm_save(void* opaque) {
-    auto* state = (MvpLmdRealmAmbient*)opaque;
-    state->current = mvp_lmd_program_library();
-    state->context = mvp_lmd_library_context;
-    state->slot = mvp_lmd_library_slot;
-    state->foreign = mvp_lmd_foreign_library;
-}
-static void mvp_lmd_realm_load(const void* opaque) {
-    const auto* state = (const MvpLmdRealmAmbient*)opaque;
-    mvp_lmd_library_context = state->context;
-    mvp_lmd_library_slot = state->slot;
-    if (state->slot) *state->slot = state->current;
-    mvp_lmd_foreign_library = state->foreign;
-}
-static const ActivationAmbientHook mvp_lmd_realm_ambient = {
-    sizeof(MvpLmdRealmAmbient), mvp_lmd_realm_save, mvp_lmd_realm_save, mvp_lmd_realm_load, NULL};
-[[maybe_unused]] static const bool mvp_lmd_realm_ambient_registered =
-    activation_register_ambient_hook(&mvp_lmd_realm_ambient);
 static void require_library(MvpLmdProgram* p, AstNode* site) {
     if (p->library_runtime) return;
     if (!p->library) p->library = (MvpLmdLibraryState*)pool_calloc(p->frontend->pool, sizeof(MvpLmdLibraryState));
@@ -10385,117 +9837,6 @@ static bool plan_callable_shapes(MvpLmdProgram* p, MvpLmdClass* cls, int count,
     }
     return true;
 }
-Item mvp_lmd_function_source(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
-    if (!mvp_lmd_is_callable(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    Item dynamic = mvp_lmd_dynamic_function_source(receiver);
-    if (dynamic.item != ITEM_JS_UNDEFINED) return dynamic;
-    if (!mvp_lmd_is_proxy(receiver)) {
-        MvpLmdCallable* function = (MvpLmdCallable*)receiver.function;
-        AstNode* definition = function->constructor && function->home && function->home->ast ?
-            (AstNode*)function->home->ast : (AstNode*)function->def;
-        if (definition) {
-            JsTranspiler* source = function->program->frontend;
-            SourceSpan span = definition->source_span;
-            if (span.end_byte > source->source_length || span.end_byte < span.start_byte)
-                return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-            const char* text = source->source + span.start_byte;
-            uint32_t length = span.end_byte - span.start_byte;
-            // shared method spans omit the class-only static prefix and its trivia.
-            // class constructors retain their complete ClassExpression/Declaration source.
-            if (definition->node_type != AST_NODE_CLASS && definition->node_type != AST_NODE_CLASS_EXPR)
-                js_function_source_span(source->source, source->source_length,
-                    (const AstFuncNode*)definition, &text, &length);
-            String* result = heap_strcpy(text, length);
-            return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        }
-        if (function->native_source && function->ptr != (fn_ptr)mvp_lmd_function_bound)
-            return js_named_native_function_source_item(((MvpLmdNativeCallable*)function)->source_name);
-    }
-    // bound and proxy callables never expose their target's retained source.
-    return js_named_native_function_source_item(NULL);
-}
-extern "C" Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix) {
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> owner(roots, function), name(roots, key);
-    name.set(js_function_name_display(name.get().get_string(), prefix));
-    if (item_is_error(name.get())) return name.get();
-    // SetFunctionName defines a configurable property; assignment would ignore
-    // the already-created, nonwritable empty name.
-    JsPropertyDescriptor descriptor = {};
-    descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-    js_pd_set_configurable(&descriptor, true);
-    descriptor.value = name.get();
-    Item prepared = mvp_lmd_function_prepare(owner.get());
-    if (item_is_error(prepared)) return prepared;
-    MvpLmdProgram* program = ((MvpLmdCallable*)owner.get().function)->program;
-    String* property = name_pool_create_len(program->frontend->name_pool, "name", 4);
-    if (!property) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    // minimal realms use the owner's canonical pool without initializing native JS intrinsics.
-    Item defined = mvp_lmd_define_own_property(owner.get(),
-        Item{.item = s2it(property)}, &descriptor);
-    return item_is_error(defined) || defined.item == ITEM_FALSE ?
-        item_is_error(defined) ? defined : mvp_lmd_fail(LMD_MVP_TYPE, 0) : owner.get();
-}
-extern "C" Item mvp_lmd_function_prepare(Item owner) {
-    Function* function = owner.function;
-    // native own properties are materialized by the shared descriptor kernel.
-    if (function_has_abi(function, FN_ENTRY_ABI_JS_FUNCTION)) return owner;
-    if (function->entry_abi != FN_ENTRY_ABI_MVP_LMD || !function->requires_runtime_context)
-        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    MvpLmdCallable* callable = (MvpLmdCallable*)function;
-    if (callable->properties || callable->constructor) return owner;
-    const AstFuncNode* ast = (const AstFuncNode*)function->def;
-    bool has_prototype = ast && (!callable->non_constructible || ast->is_generator);
-    if (function->closure_field_count > UINT8_MAX - 3) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    RootFrame roots(1);
-    if (!roots.valid()) return ItemError;
-    Rooted<Item> held(roots, owner);
-    MvpLmdProgram* p = callable->program;
-    int64_t prefix = 0;
-    String* inferred = ast && !ast->name ? named_evaluation_spelling(p, (AstNode*)ast, &prefix) : NULL;
-    MvpLmdClass* cls = (MvpLmdClass*)pool_calloc(p->frontend->pool, sizeof(MvpLmdClass));
-    if (!cls) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    mvp_lmd_nominal_initialize(cls, ast && ast->name ? ast->name : inferred ? inferred :
-        name_pool_create_len(p->frontend->name_pool, "", 0), p);
-    if (ast && ast->is_generator) cls->nominal.base = ast->is_async
-        ? &p->library->async_generator->nominal : &p->library->generator.nominal;
-    cls->owner = function; cls->property_slot = function->closure_field_count;
-    LmdObjectPlan* layout = ast && p->function_construction ? object_plan(p, (AstNode*)ast, true) : NULL;
-    if (layout) {
-        cls->allocation_shape = (TypeMap*)pool_calloc(p->frontend->pool, sizeof(TypeMap));
-        if (!cls->allocation_shape) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        *cls->allocation_shape = *layout->blueprint;
-        cls->allocation_shape->nominal = &cls->nominal;
-    }
-    // function own keys are created in length/name/prototype order; constructor belongs to the prototype.
-    if (!plan_callable_shapes(p, cls, has_prototype ? ast && ast->is_generator ? 3 : 4 : 2,
-            JSPD_NON_WRITABLE, JSPD_NON_CONFIGURABLE))
-        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    typemap_hash_build(&cls->static_shape, p->frontend->pool);
-    typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
-    int count = cls->property_slot;
-    Item* env = (Item*)heap_calloc_closure_env((count + 3) * sizeof(Item));
-    if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    function = held.get().function; callable = (MvpLmdCallable*)function;
-    if (count) memcpy(env, function->closure_env, count * sizeof(Item));
-    function->closure_env = env; function->closure_field_count = count + 3;
-    callable->properties = cls;
-    Item initialized = mvp_lmd_class_new(cls, held.get());
-    if (item_is_error(initialized)) return initialized;
-    if (inferred) {
-        Item named = mvp_lmd_function_set_name(held.get(), Item{.item = s2it(inferred)}, prefix);
-        if (item_is_error(named)) return named;
-    }
-    // closed synchronous units retain their nominal chain without reflective function intrinsics.
-    if (ast && (ast->is_async || (ast->is_generator && p->library->generator_function_values))) {
-        Item parent = ast->is_generator ? ast->is_async ? p->library->async_generator_values[4]
-            : p->library->generator_function_values[1] : p->library->async_function_values[1];
-        Item linked = mvp_lmd_set_prototype(held.get(), parent);
-        if (item_is_error(linked)) return linked;
-    }
-    return initialized;
-}
 extern "C" Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* p) {
     LmdFunction* f = (LmdFunction*)p->functions->data[code_id];
     Function* value = (Function*)heap_calloc(f->ast->is_generator || f->ast->is_async ? sizeof(MvpLmdNativeCallable) :
@@ -10704,20 +10045,6 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
     return mvp_lmd_class_values(cls)[0];
 }
 
-Item mvp_lmd_dynamic_class(MvpLmdProgram* p, AstClassNode* ast, Item base, Item constructor) {
-    if (!p || !ast) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    MvpLmdClass plan = {};
-    plan.ast = ast; plan.dynamic = true; plan.constructor_id = -1;
-    if (!mvp_lmd_class_plan_elements(&plan)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    mvp_lmd_nominal_initialize(&plan, ast->name ? ast->name
-        : name_pool_create_len(p->frontend->name_pool, "", 0), p);
-    if (!plan_callable_shapes(p, &plan, 4, JSPD_NON_WRITABLE,
-            JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE))
-        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    typemap_hash_build(&plan.static_shape, p->frontend->pool);
-    typemap_hash_build(&plan.prototype_shape, p->frontend->pool);
-    return mvp_lmd_class_new(&plan, base, constructor);
-}
 
 static void plan_library_class(MvpLmdProgram* p, MvpLmdClass* cls, const char* name,
         TypeId prototype_type = LMD_TYPE_MAP) {
@@ -11098,58 +10425,6 @@ static void plan_global_bindings(MvpLmdProgram* p) {
         p->intrinsic_uses[i] = reflected[intrinsic];
     }
 }
-static bool mvp_lmd_intrinsic_enabled(MvpLmdProgram* p, int i) {
-    if ((i == I_STRING || i == I_NUMBER || i == I_BOOLEAN || i == I_BIGINT) && !p->primitives) return false;
-    if ((i == I_ERROR || (i >= I_EVAL_ERROR && i <= I_AGGREGATE_ERROR)) && !p->errors) return false;
-    if (typed_intrinsic(i) >= 0 && !p->typed_storage) return false;
-    if (i >= I_ARRAYBUFFER && i <= I_FLOAT16_ARRAY && !p->buffers) return false;
-    if (i == I_SHARED_ARRAYBUFFER && !p->shared_buffer) return false;
-    if (i == I_ATOMICS && !p->atomics) return false;
-    if (i == I_PROMISE && !p->promises) return false;
-    if ((i == I_WEAK_MAP || i == I_WEAK_SET) && !p->weak_collections) return false;
-    if ((i == I_WEAK_REF || i == I_FINALIZATION_REGISTRY) && !p->weak_lifetimes) return false;
-    if (i == I_EVAL && !p->dynamic_source) return false;
-    if (i >= I_SET_TIMEOUT && i <= I_QUEUE_MICROTASK && !p->timers) return false;
-    if (i == I_TEST262 && !p->test262_host) return false;
-    return !(i >= I_PERFORMANCE && i <= I_REQUIRE && !p->host_active);
-}
-static Item mvp_lmd_intrinsic_value(MvpLmdProgram* p, int i) {
-    int library = i == I_JSON ? LMD_LIBRARY_JSON : i == I_DATE ? LMD_LIBRARY_DATE :
-        i == I_REGEXP ? LMD_LIBRARY_REGEXP : i == I_SYMBOL ? LMD_LIBRARY_SYMBOL :
-        i == I_SET ? LMD_LIBRARY_SET : i == I_REFLECT ? LMD_LIBRARY_REFLECT :
-        i == I_PROXY ? LMD_LIBRARY_PROXY : i == I_FUNCTION ? LMD_LIBRARY_FUNCTION :
-        i == I_IS_NAN ? LMD_LIBRARY_GLOBAL_NAN :
-        i == I_ESCAPE || i == I_UNESCAPE ? LMD_LIBRARY_ESCAPE + i - I_ESCAPE :
-        i >= I_DECODE_URI && i <= I_ENCODE_COMPONENT ? LMD_LIBRARY_DECODE_URI + i - I_DECODE_URI : -1;
-    if (i == I_PARSE_INT) return p->library->values[LMD_LIBRARY_PARSE_INT];
-    return i == I_UNDEFINED ? Item{.item = ITEM_JS_UNDEFINED} : i == I_NAN ? push_d(NAN) :
-        i == I_INFINITY ? push_d(INFINITY) : i == I_GLOBAL_THIS ? p->slots[p->global_slot] :
-        library >= 0 ? p->library->values[library] : p->slots[p->intrinsics[i - 1].slot];
-}
-Item mvp_lmd_realm_intrinsic(const char* name, size_t length) {
-    MvpLmdLibraryState* library = mvp_lmd_program_library();
-    if (!library || !library->intrinsics_ready || library->native_callable_values) return ItemNull;
-    MvpLmdProgram* program = library->object.program;
-    // immutable intrinsic slots remain authoritative after guest global replacement.
-    if (length == 10 && !memcmp(name, "TypedArray", 10))
-        return library->typed_values ? library->typed_arrays[
-            sizeof(typed_intrinsics) / sizeof(typed_intrinsics[0])].values[0] : ItemNull;
-    const struct { const char* name; int slot; } globals[] = {
-        {"parseFloat", LMD_LIBRARY_PARSE_FLOAT}, {"isFinite", LMD_LIBRARY_GLOBAL_FINITE},
-        {"gc", LMD_LIBRARY_GC}, {"structuredClone", LMD_LIBRARY_STRUCTURED_CLONE}
-    };
-    for (const auto& global : globals)
-        if (strlen(global.name) == length && !memcmp(name, global.name, length))
-            return library->values[global.slot];
-    if (length == 5 && !memcmp(name, "print", 5))
-        return program->host.values ? program->host.values[LMD_HOST_PRINT] : ItemNull;
-    for (int i = 1; i < I_COUNT; i++) {
-        const char* spelling = intrinsic_names[i - 1];
-        if (strlen(spelling) == length && !memcmp(spelling, name, length))
-            return mvp_lmd_intrinsic_enabled(program, i) ? mvp_lmd_intrinsic_value(program, i) : ItemNull;
-    }
-    return ItemNull;
-}
 static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
     Item global = p->slots[p->global_slot];
     RootFrame roots(1);
@@ -11213,111 +10488,6 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
         if (item_is_error(result)) return result;
     }
     return global;
-}
-Item mvp_lmd_dynamic_global_this(MvpLmdProgram* p, bool required) {
-    if (!p && js_active_runtime_state && js_runtime_state.formal_mir_owner) {
-        auto* library = mvp_lmd_program_library();
-        p = library ? library->object.program : &js_runtime_state.formal_mir_owner->program;
-    }
-    return p && p->global_receiver
-        ? p->slots[p->global_slot] : required ? mvp_lmd_fail(LMD_MVP_CAPABILITY, 0) : ItemNull;
-}
-bool mvp_lmd_dynamic_retain_script(MvpLmdProgram* p, JsScript* script) {
-    if (!p->dynamic_scripts) p->dynamic_scripts = arraylist_new(4);
-    return p->dynamic_scripts && arraylist_append(p->dynamic_scripts, script);
-}
-Item mvp_lmd_dynamic_global(MvpLmdProgram* p, Item key, Item value, int64_t operation, bool strict) {
-    bool host_entry = !p;
-    if (!p && js_active_runtime_state && js_runtime_state.formal_mir_owner) {
-        auto* library = mvp_lmd_program_library();
-        p = library ? library->object.program : &js_runtime_state.formal_mir_owner->program;
-    }
-    p = mvp_lmd_program_realm(p);
-    if (!p || !p->dynamic_source || get_type_id(key) != LMD_TYPE_STRING)
-        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    bool script = operation & JS_INTERP_HOST_SCRIPT;
-    operation &= ~JS_INTERP_HOST_SCRIPT;
-    RootFrame roots(2);
-    if (!roots.valid()) return ItemError;
-    uint64_t home = 0;
-    Rooted<Item> name(roots, key), input(roots, lambda_item_adopt_scalar_home(value, &home));
-    if (host_entry && operation == JS_INTERP_HOST_SET) {
-        // shared host services publish native callbacks through the existing
-        // AST/native callable membrane, preserving its identity cache.
-        input.set(mvp_lmd_dynamic_import_value(p, input.get()));
-        if (item_is_error(input.get())) return input.get();
-    }
-    key = name.get(); value = input.get();
-    bool found = false;
-    Item lexical = mvp_lmd_dynamic_lexical(p, key, value, operation, &found);
-    if (found || item_is_error(lexical)) return lexical;
-    if (operation == JS_INTERP_HOST_HAS_LEXICAL) return Item{.item = ITEM_FALSE};
-    Item global = p->slots[p->global_slot];
-    // the checked read shares an own-descriptor lookup while retaining ordered
-    // HasProperty/Get for inherited bindings and proxies.
-    if (operation == JS_INTERP_HOST_GET)
-        return mvp_lmd_class_property(global, name.get(), ItemNull, LMD_PROP_GET_BINDING);
-    if (operation == JS_INTERP_HOST_CHECK_DECLARE_LEXICAL) {
-        JsPropertyDescriptor descriptor = {};
-        Item present = mvp_lmd_get_own_property(global, name.get(), &descriptor);
-        if (item_is_error(present)) return present;
-        return present.item == ITEM_TRUE && !js_pd_is_configurable(&descriptor)
-            ? mvp_lmd_fail(LMD_MVP_SYNTAX, 0) : Item{.item = ITEM_TRUE};
-    }
-    if (operation == JS_INTERP_HOST_CHECK_DECLARE_FUNCTION || operation == JS_INTERP_HOST_DECLARE_FUNCTION) {
-        JsPropertyDescriptor current = {};
-        Item present = mvp_lmd_get_own_property(global, name.get(), &current);
-        if (item_is_error(present)) return present;
-        bool configurable = present.item != ITEM_TRUE || js_pd_is_configurable(&current);
-        if (present.item != ITEM_TRUE) {
-            Item extensible = mvp_lmd_object_extensible(global, 0);
-            if (item_is_error(extensible)) return extensible;
-            if (extensible.item != ITEM_TRUE) return mvp_lmd_fail(script ? LMD_MVP_SYNTAX : LMD_MVP_TYPE, 0);
-        } else if (!configurable && (!js_pd_is_data(&current) ||
-                !(current.flags & JS_PD_WRITABLE) || !(current.flags & JS_PD_ENUMERABLE))) {
-            return mvp_lmd_fail(script ? LMD_MVP_SYNTAX : LMD_MVP_TYPE, 0);
-        }
-        if (operation == JS_INTERP_HOST_CHECK_DECLARE_FUNCTION) return Item{.item = ITEM_TRUE};
-        // configurable globals become ordinary eval function bindings; otherwise
-        // preserve their attributes and update only the validated data value.
-        JsPropertyDescriptor descriptor = {};
-        descriptor.flags = JS_PD_HAS_VALUE;
-        descriptor.value = input.get();
-        if (configurable) {
-            descriptor.flags |= JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE |
-                JS_PD_WRITABLE | JS_PD_ENUMERABLE;
-            js_pd_set_configurable(&descriptor, !script);
-        }
-        Item defined = mvp_lmd_define_own_property(global, name.get(), &descriptor);
-        return !item_is_error(defined) && defined.item != ITEM_TRUE
-            ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : defined;
-    }
-    bool declaration = operation == JS_INTERP_HOST_DECLARE || operation == JS_INTERP_HOST_CHECK_DECLARE;
-    Item present = mvp_lmd_property_with_receiver(global, name.get(), ItemNull,
-        declaration ? LMD_PROP_OWN : LMD_PROP_HAS, global);
-    if (item_is_error(present)) return present;
-    if (operation == JS_INTERP_HOST_HAS) return present;
-    if (declaration) {
-        if (present.item == ITEM_TRUE) return Item{.item = ITEM_TRUE};
-        Item extensible = mvp_lmd_object_extensible(global, 0);
-        if (item_is_error(extensible)) return extensible;
-        if (extensible.item != ITEM_TRUE) return operation == JS_INTERP_HOST_CHECK_DECLARE && input.get().item == ITEM_TRUE
-            ? Item{.item = ITEM_FALSE} : mvp_lmd_fail(LMD_MVP_TYPE, 0);
-        if (operation == JS_INTERP_HOST_CHECK_DECLARE) return Item{.item = ITEM_TRUE};
-        // Script var bindings are non-configurable; eval vars retain their separate contract.
-        JsPropertyDescriptor descriptor = {};
-        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
-            JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
-        js_pd_set_configurable(&descriptor, !script);
-        descriptor.value = Item{.item = ITEM_JS_UNDEFINED};
-        return mvp_lmd_define_own_property(global, name.get(), &descriptor);
-    }
-    if (present.item != ITEM_TRUE && (operation == JS_INTERP_HOST_GET ||
-            (operation == JS_INTERP_HOST_SET && strict))) return mvp_lmd_fail(LMD_MVP_REFERENCE, 0);
-    int mode = operation == JS_INTERP_HOST_GET ? LMD_PROP_GET :
-        operation == JS_INTERP_HOST_SET ? LMD_PROP_SET : LMD_PROP_DELETE;
-    return mvp_lmd_property_with_receiver(global, name.get(), input.get(),
-        mode | (strict ? LMD_PROP_STRICT : 0), global);
 }
 static Item mvp_lmd_prepare_global_vars(MvpLmdProgram* program, NameScope* scope) {
     RootFrame roots(1);
@@ -14112,30 +13282,6 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
     }
     return ItemNull;
 }
-Item mvp_lmd_create_realm(Context*, MvpLmdProgram* owner, Item*, uint64_t, Item, Item, Item) {
-    MvpLmdExecution* execution = owner->execution_owner;
-    if (!execution) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    if (execution->next_realm_key == UINT32_MAX) return ItemError;
-    auto* program = mvp_lmd_new_unit(execution, NULL);
-    if (!program) return ItemError;
-    program->realm_key = ++execution->next_realm_key;
-    program->module_realm = true; // complete intrinsic surface, with its own global and lexical owner
-    program->host_enabled = owner->host_enabled;
-    program->test262_host = owner->test262_host;
-    // realm creation may run inside an async/generator activation's small native stack.
-    bool faulted = false;
-    void* compiled = activation_call_on_base([](void* opaque) -> void* {
-        auto* unit = (MvpLmdProgram*)opaque;
-        return mvp_lmd_compile_unit(unit, "", 0, 1) && mvp_lmd_compile_unit(unit, NULL, 0, 2)
-            ? unit : NULL;
-    }, program, &faulted);
-    if (!compiled || faulted)
-        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    program->library->default_realm = execution->program.library;
-    MvpLmdRealmScope realm(program);
-    Item result = mvp_lmd_instantiate_unit(execution, program, execution->host);
-    return realm.complete(item_is_error(result) ? result : program->library->buffer_values[6]);
-}
 static Item mvp_lmd_enter_unit(MvpLmdProgram* p, bool instantiate = false) {
     LmdFunction* main = (LmdFunction*)p->functions->data[0];
     Item undefined = {.item = ITEM_JS_UNDEFINED};
@@ -14301,57 +13447,6 @@ static Item mvp_module_import_meta(void* owner, JsSourceModuleRecord* record) {
     Item written = mvp_lmd_named_set(object.get(), "url", url.get());
     return item_is_error(written) ? written : object.get();
 }
-Runtime* mvp_lmd_prepare_module_realm(void* owner) {
-    auto* program = mvp_lmd_program_realm((MvpLmdProgram*)owner);
-    auto* execution = program->execution_owner;
-    if (program->module_controller) return program->module_controller->active_runtime;
-    auto* realm = (MvpLmdRealm*)mem_calloc(1, sizeof(MvpLmdRealm), MEM_CAT_EVAL);
-    if (!realm) return NULL;
-    if (!execution->units) execution->units = arraylist_new(8);
-    if (!execution->units) { mem_free(realm); return NULL; }
-    realm->execution = execution;
-    realm->program = program;
-    realm->host = execution->host;
-    realm->runtime.eval_context = execution->owner_context;
-    realm->runtime.use_mir_direct = true;
-    realm->runtime.optimize_level = 2;
-    Runtime* parent = execution->host_runtime ? execution->host_runtime : execution->owned_runtime;
-    if (parent) {
-        realm->runtime.resource_policy = parent->resource_policy;
-        realm->runtime.js_document_base_url = parent->js_document_base_url;
-        realm->runtime.js_import_maps = parent->js_import_maps;
-        realm->runtime.import_base_dir = parent->import_base_dir;
-    }
-    // child realms share the heap and scheduler, but own independent module registries.
-    realm->active_runtime = parent && !program->realm_key ? parent : &realm->runtime;
-    static const ContextCapsuleOps capsule = {"js-mvp-module-realm", CONTEXT_CAPSULE_LIFETIME_REALM,
-        sizeof(MvpLmdRealm), NULL, NULL, [](void* opaque) {
-            auto* realm = (MvpLmdRealm*)opaque;
-            if (realm->active_runtime == &realm->runtime)
-                module_registry_cleanup_for_runtime(&realm->runtime);
-            // native agent AST bodies can outlive their queues until shared-heap
-            // finalization; the existing program script list owns that tail.
-            if (realm->runtime.scripts) {
-                if (!realm->program->dynamic_scripts)
-                    realm->program->dynamic_scripts = arraylist_new(8);
-                for (int i = 0; i < realm->runtime.scripts->length; i++)
-                    arraylist_append(realm->program->dynamic_scripts, realm->runtime.scripts->data[i]);
-                realm->runtime.scripts->length = 0;
-                runtime_free_all_scripts(&realm->runtime);
-            }
-            realm->program->module_controller = NULL;
-            if (realm->execution->realm == realm) realm->execution->realm = NULL;
-            mem_free(realm);
-        }};
-    if (!context_capsule_extension_install(execution->owner_context, MVP_LMD_MODULE_OWNER,
-            program->realm_key, realm, &capsule)) { mem_free(realm); return NULL; }
-    program->module_controller = realm;
-    if (!program->realm_key) {
-        execution->realm = realm;
-        if (!parent) execution->owner_context->runtime = &realm->runtime;
-    }
-    return realm->active_runtime;
-}
 static const JsSourceModuleOps mvp_lmd_source_module_ops = {
     mvp_module_prepare, mvp_module_plan, mvp_module_local_binding, mvp_module_link,
     mvp_module_instantiate, mvp_module_evaluate, mvp_lmd_same_value, mvp_module_import_meta, mvp_module_error,
@@ -14360,11 +13455,6 @@ static const JsSourceModuleOps mvp_lmd_source_module_ops = {
     [](void* owner, Item error) { return mvp_lmd_caught_value(((MvpLmdProgram*)owner)->library, error); },
     [](void* owner, Item value) { return mvp_lmd_dynamic_import_value((MvpLmdProgram*)owner, value, true); }
 };
-Item mvp_lmd_dynamic_import(MvpLmdProgram* program, Item specifier, const char* reference) {
-    program = mvp_lmd_program_realm(program);
-    MvpLmdRealmScope realm(program);
-    return realm.complete(js_source_dynamic_import(specifier, reference, &mvp_lmd_source_module_ops, program));
-}
 static bool global_alias_stores_are_closed(MvpLmdProgram* p) {
     if (program_has_existing_global(p)) return false;
     const AstIndex* tree = &p->frontend->ast_index;
@@ -15118,4 +14208,156 @@ void mvp_lmd_destroy(MvpLmdExecution* e) {
     if (e->realm) mem_free(e->realm);
     mvp_lmd_release_unit(p);
     mem_free(e);
+}
+// Gives a generated MVP callable its own class: length/name/prototype
+// shapes and the closure slots behind them. The shared gate in
+// mvp_lmd_program.cpp admits only MVP callables here.
+Item mvp_lmd_function_materialize(Item owner) {
+    Function* function = owner.function;
+    MvpLmdCallable* callable = (MvpLmdCallable*)function;
+    if (callable->properties || callable->constructor) return owner;
+    const AstFuncNode* ast = (const AstFuncNode*)function->def;
+    bool has_prototype = ast && (!callable->non_constructible || ast->is_generator);
+    if (function->closure_field_count > UINT8_MAX - 3) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, owner);
+    MvpLmdProgram* p = callable->program;
+    int64_t prefix = 0;
+    String* inferred = ast && !ast->name ? named_evaluation_spelling(p, (AstNode*)ast, &prefix) : NULL;
+    MvpLmdClass* cls = (MvpLmdClass*)pool_calloc(p->frontend->pool, sizeof(MvpLmdClass));
+    if (!cls) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    mvp_lmd_nominal_initialize(cls, ast && ast->name ? ast->name : inferred ? inferred :
+        name_pool_create_len(p->frontend->name_pool, "", 0), p);
+    if (ast && ast->is_generator) cls->nominal.base = ast->is_async
+        ? &p->library->async_generator->nominal : &p->library->generator.nominal;
+    cls->owner = function; cls->property_slot = function->closure_field_count;
+    LmdObjectPlan* layout = ast && p->function_construction ? object_plan(p, (AstNode*)ast, true) : NULL;
+    if (layout) {
+        cls->allocation_shape = (TypeMap*)pool_calloc(p->frontend->pool, sizeof(TypeMap));
+        if (!cls->allocation_shape) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        *cls->allocation_shape = *layout->blueprint;
+        cls->allocation_shape->nominal = &cls->nominal;
+    }
+    // function own keys are created in length/name/prototype order; constructor belongs to the prototype.
+    if (!plan_callable_shapes(p, cls, has_prototype ? ast && ast->is_generator ? 3 : 4 : 2,
+            JSPD_NON_WRITABLE, JSPD_NON_CONFIGURABLE))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    typemap_hash_build(&cls->static_shape, p->frontend->pool);
+    typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
+    int count = cls->property_slot;
+    Item* env = (Item*)heap_calloc_closure_env((count + 3) * sizeof(Item));
+    if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    function = held.get().function; callable = (MvpLmdCallable*)function;
+    if (count) memcpy(env, function->closure_env, count * sizeof(Item));
+    function->closure_env = env; function->closure_field_count = count + 3;
+    callable->properties = cls;
+    Item initialized = mvp_lmd_class_new(cls, held.get());
+    if (item_is_error(initialized)) return initialized;
+    if (inferred) {
+        Item named = mvp_lmd_function_set_name(held.get(), Item{.item = s2it(inferred)}, prefix);
+        if (item_is_error(named)) return named;
+    }
+    // closed synchronous units retain their nominal chain without reflective function intrinsics.
+    if (ast && (ast->is_async || (ast->is_generator && p->library->generator_function_values))) {
+        Item parent = ast->is_generator ? ast->is_async ? p->library->async_generator_values[4]
+            : p->library->generator_function_values[1] : p->library->async_function_values[1];
+        Item linked = mvp_lmd_set_prototype(held.get(), parent);
+        if (item_is_error(linked)) return linked;
+    }
+    return initialized;
+}
+Item mvp_lmd_dynamic_class(MvpLmdProgram* p, AstClassNode* ast, Item base, Item constructor) {
+    if (!p || !ast) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    MvpLmdClass plan = {};
+    plan.ast = ast; plan.dynamic = true; plan.constructor_id = -1;
+    if (!mvp_lmd_class_plan_elements(&plan)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    mvp_lmd_nominal_initialize(&plan, ast->name ? ast->name
+        : name_pool_create_len(p->frontend->name_pool, "", 0), p);
+    if (!plan_callable_shapes(p, &plan, 4, JSPD_NON_WRITABLE,
+            JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    typemap_hash_build(&plan.static_shape, p->frontend->pool);
+    typemap_hash_build(&plan.prototype_shape, p->frontend->pool);
+    return mvp_lmd_class_new(&plan, base, constructor);
+}
+Item mvp_lmd_create_realm(Context*, MvpLmdProgram* owner, Item*, uint64_t, Item, Item, Item) {
+    MvpLmdExecution* execution = owner->execution_owner;
+    if (!execution) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    if (execution->next_realm_key == UINT32_MAX) return ItemError;
+    auto* program = mvp_lmd_new_unit(execution, NULL);
+    if (!program) return ItemError;
+    program->realm_key = ++execution->next_realm_key;
+    program->module_realm = true; // complete intrinsic surface, with its own global and lexical owner
+    program->host_enabled = owner->host_enabled;
+    program->test262_host = owner->test262_host;
+    // realm creation may run inside an async/generator activation's small native stack.
+    bool faulted = false;
+    void* compiled = activation_call_on_base([](void* opaque) -> void* {
+        auto* unit = (MvpLmdProgram*)opaque;
+        return mvp_lmd_compile_unit(unit, "", 0, 1) && mvp_lmd_compile_unit(unit, NULL, 0, 2)
+            ? unit : NULL;
+    }, program, &faulted);
+    if (!compiled || faulted)
+        return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    program->library->default_realm = execution->program.library;
+    MvpLmdRealmScope realm(program);
+    Item result = mvp_lmd_instantiate_unit(execution, program, execution->host);
+    return realm.complete(item_is_error(result) ? result : program->library->buffer_values[6]);
+}
+Runtime* mvp_lmd_prepare_module_realm(void* owner) {
+    auto* program = mvp_lmd_program_realm((MvpLmdProgram*)owner);
+    auto* execution = program->execution_owner;
+    if (program->module_controller) return program->module_controller->active_runtime;
+    auto* realm = (MvpLmdRealm*)mem_calloc(1, sizeof(MvpLmdRealm), MEM_CAT_EVAL);
+    if (!realm) return NULL;
+    if (!execution->units) execution->units = arraylist_new(8);
+    if (!execution->units) { mem_free(realm); return NULL; }
+    realm->execution = execution;
+    realm->program = program;
+    realm->host = execution->host;
+    realm->runtime.eval_context = execution->owner_context;
+    realm->runtime.use_mir_direct = true;
+    realm->runtime.optimize_level = 2;
+    Runtime* parent = execution->host_runtime ? execution->host_runtime : execution->owned_runtime;
+    if (parent) {
+        realm->runtime.resource_policy = parent->resource_policy;
+        realm->runtime.js_document_base_url = parent->js_document_base_url;
+        realm->runtime.js_import_maps = parent->js_import_maps;
+        realm->runtime.import_base_dir = parent->import_base_dir;
+    }
+    // child realms share the heap and scheduler, but own independent module registries.
+    realm->active_runtime = parent && !program->realm_key ? parent : &realm->runtime;
+    static const ContextCapsuleOps capsule = {"js-mvp-module-realm", CONTEXT_CAPSULE_LIFETIME_REALM,
+        sizeof(MvpLmdRealm), NULL, NULL, [](void* opaque) {
+            auto* realm = (MvpLmdRealm*)opaque;
+            if (realm->active_runtime == &realm->runtime)
+                module_registry_cleanup_for_runtime(&realm->runtime);
+            // native agent AST bodies can outlive their queues until shared-heap
+            // finalization; the existing program script list owns that tail.
+            if (realm->runtime.scripts) {
+                if (!realm->program->dynamic_scripts)
+                    realm->program->dynamic_scripts = arraylist_new(8);
+                for (int i = 0; i < realm->runtime.scripts->length; i++)
+                    arraylist_append(realm->program->dynamic_scripts, realm->runtime.scripts->data[i]);
+                realm->runtime.scripts->length = 0;
+                runtime_free_all_scripts(&realm->runtime);
+            }
+            realm->program->module_controller = NULL;
+            if (realm->execution->realm == realm) realm->execution->realm = NULL;
+            mem_free(realm);
+        }};
+    if (!context_capsule_extension_install(execution->owner_context, MVP_LMD_MODULE_OWNER,
+            program->realm_key, realm, &capsule)) { mem_free(realm); return NULL; }
+    program->module_controller = realm;
+    if (!program->realm_key) {
+        execution->realm = realm;
+        if (!parent) execution->owner_context->runtime = &realm->runtime;
+    }
+    return realm->active_runtime;
+}
+Item mvp_lmd_dynamic_import(MvpLmdProgram* program, Item specifier, const char* reference) {
+    program = mvp_lmd_program_realm(program);
+    MvpLmdRealmScope realm(program);
+    return realm.complete(js_source_dynamic_import(specifier, reference, &mvp_lmd_source_module_ops, program));
 }

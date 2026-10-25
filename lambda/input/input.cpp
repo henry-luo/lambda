@@ -1,4 +1,5 @@
 #include "../../lib/utf.h"
+#include "../../lib/host_paths.h"
 #include "input.hpp"
 #include "../io/wiki_format.hpp"
 #include "../io/fs_node.hpp"
@@ -2547,7 +2548,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         const char* type_str = type ? type->chars : NULL;
         const char* flavor_str = flavor ? flavor->chars : NULL;
 
-        Input* input = input_from_http(url->chars, type_str, flavor_str, "./temp/cache");
+        Input* input = input_from_http(url->chars, type_str, flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"));
         url_destroy(abs_url);
         return input;
     }
@@ -2659,7 +2660,7 @@ static Input* input_from_target_impl(Target* target, String* type,
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
             return input_from_http_with_name_parent(url->href->chars, type_str,
-                flavor_str, "./temp/cache", name_parent);
+                flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"), name_parent);
         }
         else if (target->scheme == TARGET_SCHEME_SYS) {
             log_debug("input_from_target: sys:// URL detected");
@@ -2691,7 +2692,7 @@ static Input* input_from_target_impl(Target* target, String* type,
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
             Input* input = input_from_http_with_name_parent(url_buf->str, type_str,
-                flavor_str, "./temp/cache", name_parent);
+                flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"), name_parent);
             strbuf_free(url_buf);
             return input;
         }
