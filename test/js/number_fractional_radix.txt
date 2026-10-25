@@ -1,0 +1,7 @@
+fractional binary and hexadecimal: pass
+fractional base36 and sign: pass
+captured method and radix truncation: pass
+Redux random-id formatting shape: pass
+integer and special values: pass
+invalid radix errors: pass
+NUMBER_FRACTIONAL_RADIX_DONE

@@ -1,0 +1,7 @@
+callable string keys cross native reflection: pass
+callable Symbol keys cross native reflection: pass
+component static hoisting: pass
+reflection retained across collection: pass
+proxy reflection filters key kinds: pass
+typed-array reflection retains Symbol keys: pass
+FUNCTION_OWN_KEYS_FOREIGN_DONE

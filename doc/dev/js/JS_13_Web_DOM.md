@@ -47,6 +47,43 @@ payload, including readonly getters and normal Event inheritance. This adds the
 script interface, without claiming CSP policy enforcement. The corresponding
 `test/js/` fixtures exercise captured members in AST/MIR and forced-GC runs.
 
+**React compatibility (2026-10-25).** `HTMLInputElement.prototype.checked` and
+`HTMLTextAreaElement.prototype.value` publish their declared native accessors
+before wrapper creation (**D7.4.4**), allowing React's instance value trackers
+to delegate to the original setters. Behavior predicates inspect current DOM
+attributes. Native click dispatch holds a precisely rooted package completion
+across author listeners: checkbox/radio policy performs pre-activation, then
+commits notifications or restores canceled activation (**D5.3.3**, DOM Dispatch
+ES26). Completion retains the behavior dispatch/emit context so nested form
+notifications share the normal reactive event path. Native Promise expandos
+use the shared metadata property protocol in MIR as well as AST; own keys
+retain Symbols and the carrier owns extensibility (**D3.4.7**).
+`test/js/react` supplies the pinned React 19.3.1 production
+fixture, while `test/ui/react_compatibility.json` replays physical counter and
+checkbox updates through an HTML script. This milestone qualifies the tested
+bundled browser path; remaining React/browser scope is listed in the
+[implementation record](../../../vibe/impl/Lambda_Impl_React.md).
+
+**Hotwire compatibility (2026-10-25).** Pinned Stimulus 3.2.2 and Turbo 8.0.23
+fixtures cover controllers, Streams, Frames, Drive, and HTTP forms against
+Lambda's native server. Realm-owned custom-element definitions and weak state
+preserve native wrapper identity during construction/upgrades; private fields
+use the native property hooks in AST and MIR (**D3.4.7, D7.4.4**). Attribute
+callbacks run at setter boundaries; connection callbacks use the backup
+microtask queue. Construction frames, queued reactions, and template caches
+have precise roots (**D5.3.3**). Complete custom-element reaction stacks remain
+outside this milestone. `DOMParser` uses the inert full HTML document parser,
+preserving head metadata. Range removal updates both the native links and Mark
+children. Window scrolling delegates to the existing document scroll root in
+CLI and rendered documents; the headless event loop gives fetched-content
+continuations a rendering opportunity before waiting on later timers.
+Fetch transport shares BodyInit serialization with Request/Response, including
+URLSearchParams MIME inference. Redirect responses expose the final URL and
+redirected flag, discard intermediate bodies, and let libcurl rewrite POST on
+303. The fixture guide and exact validation evidence are in
+[Hotwire tests](../../../test/js/hotwire/README.md) and the
+[implementation record](../../../vibe/impl/Lambda_Impl_Hotwire.md).
+
 **Geometry observer checkpoints (verified 2026-10-21).** Forced layout requests
 one deferred geometry sample per observer realm. Resize/Intersection observers
 compare the settled box after the current script's writes; temporary hide/read/
@@ -382,7 +419,7 @@ Measurement uses **Lambda's unified font engine** (`lib/font/`): a singleton `Fo
 
 **XMLHttpRequest** (`lambda/dom/dom_xhr.cpp`) stores request state in its realm capsule. Asynchronous requests reuse fetch's libuv transport; explicit synchronous requests use `http_fetch`. Completion walks `readyState` 2→3→4 and dispatches callbacks. Construction roots the wrapper, status descriptor, and upload target until publication; methods use the shared rooted native installer (**D5.3.3**, **D6.2.2v2**). The asynchronous body handoff consumes an ArrayBuffer so UTF-8 text decoding cannot alter transport bytes. The HTTP backing (`http_fetch`, `FetchResponse`) is shared with [JS_14 — Node Compatibility](JS_14_Node_Compat.md).
 
-**fetch** (`lambda/dom/dom_fetch.cpp`) returns `Promise<Response>`. `lambda/js/js_response.cpp` publishes the realm's native `Response` constructor and prototype. A branded private record owns GC-traced body bytes and Headers, replacing the public body index and fixed response table (**D3.4.7**, **D5.3.3**). Captured getters and methods validate that record even after the public prototype changes. Non-null bodies are consumed once; `text` decodes UTF-8, `json` rejects malformed JSON, and `arrayBuffer`/`bytes`/`blob` produce owned native values. `clone` independently owns bytes and a Headers snapshot without invoking a replaced public iterator. Constructor input supports strings, ArrayBuffer views, and native Blob/File values. Stream bodies, the `body` stream getter, `formData`, and static Response factories remain incomplete; see the [Fetch Body specification](https://fetch.spec.whatwg.org/#body-mixin).
+**fetch** (`lambda/dom/dom_fetch.cpp`) returns `Promise<Response>`. `lambda/js/js_response.cpp` publishes native `Response` and `Request` constructors. Branded private records own GC-traced body bytes and Headers (**D3.4.7**, **D5.3.3**). Captured getters and methods validate those records even after the public prototype changes. Non-null bodies are consumed once; `text` decodes UTF-8, `json` rejects malformed JSON, and `arrayBuffer`/`bytes`/`blob` produce owned native values. `clone` independently owns bytes and a Headers snapshot. The cached `body` getter exposes null for absent bodies and a byte-backed readable stream otherwise; its retained pull closure shares the consumed flag with the Body methods. Request adds URL/method validation, request-input copying and dependent abort signals. It reuses the Response byte/consumption mechanism for local data-router loaders and actions. Constructor input supports strings, ArrayBuffer views, and native Blob/File values. Streaming input bodies, complete stream locking/tee/cancellation, `formData`, static Response factories, the remaining RequestInit policies and passing Request objects directly to the fetch transport remain incomplete; see the [Fetch Body specification](https://fetch.spec.whatwg.org/#body-mixin). Pinned React ecosystem fixtures and the runtime fixes they exposed are recorded in `vibe/impl/Lambda_Impl_React_Ecosystem.md`.
 
 **FormData** (`dom_formdata.cpp`) carries native branding and entries with IDL methods and Blob/File coercion. **Navigator** (`dom_clipboard.cpp`) has a native interface prototype with branded readonly getters. Its existing host preferences and clipboard/permissions/serviceWorker objects live in a private traced record; `languages` is frozen, and captured getters ignore public shadows (**D3.4.7**, **D5.3.3**). The shared interface installer supplies an illegal constructor with the correct zero-argument metadata (**D6.2.2v2**). **navigator.clipboard** uses the platform clipboard store and native ClipboardItem/Blob/File objects.
 

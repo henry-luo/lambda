@@ -1,0 +1,146 @@
+{
+  "format_version": 1,
+  "sources": {
+    "aosp": {
+      "files": {
+        "NOTICE": {
+          "bytes": 10690,
+          "sha256": "b5830d96fb5a7e7e7ebcc295f352846b4b998e78fdc8f9aa68e134d2e4b39986",
+          "url": "https://android.googlesource.com/platform/packages/inputmethods/PinyinIME/+/49aebad1c1cfbbcaa9288ffed5161e79e57c3679/NOTICE?format=TEXT"
+        },
+        "rawdict_utf16_65105_freq.txt": {
+          "bytes": 3570346,
+          "sha256": "408700f28a56091fa07f3b849a0f134fbfc71e6b2ae9b3f52973a5b076f599ff",
+          "url": "https://android.googlesource.com/platform/packages/inputmethods/PinyinIME/+/49aebad1c1cfbbcaa9288ffed5161e79e57c3679/jni/data/rawdict_utf16_65105_freq.txt?format=TEXT"
+        }
+      },
+      "license": "Apache-2.0",
+      "provenance_flags": [
+        "AOSP does not document the corpus underlying its frequencies."
+      ],
+      "revision": "49aebad1c1cfbbcaa9288ffed5161e79e57c3679"
+    },
+    "hanlp": {
+      "files": {
+        "CoreNatureDictionary.txt": {
+          "bytes": 2162581,
+          "sha256": "f6452b4c61e8cf3746f4dc3ee4299e581639d463057f56198e623657d4ef553d",
+          "url": "https://raw.githubusercontent.com/hankcs/HanLP/dadd5c76a53eb05cc84720628b89e4a334d5d753/data/dictionary/CoreNatureDictionary.txt"
+        },
+        "LICENSE": {
+          "bytes": 11336,
+          "sha256": "0788f02c6c7a72ee8ae609eaf008f239c50e8404d776a3c1ecb0f037b2323849",
+          "url": "https://raw.githubusercontent.com/hankcs/HanLP/dadd5c76a53eb05cc84720628b89e4a334d5d753/LICENSE"
+        },
+        "README.md": {
+          "bytes": 45270,
+          "sha256": "5a4af8332c6cde38e87b61717a24419d8635b94f2daaed745a4c99ee4be40fe5",
+          "url": "https://raw.githubusercontent.com/hankcs/HanLP/dadd5c76a53eb05cc84720628b89e4a334d5d753/README.md"
+        },
+        "pinyin.txt": {
+          "bytes": 463102,
+          "sha256": "92ae8a12ebe8057ca09dd516b87f1efb51b82856810b4cb088b65881ab99e92c",
+          "url": "https://raw.githubusercontent.com/hankcs/HanLP/dadd5c76a53eb05cc84720628b89e4a334d5d753/data/dictionary/pinyin/pinyin.txt"
+        }
+      },
+      "license": "Apache-2.0",
+      "provenance_flags": [
+        "CoreNatureDictionary frequencies are reported as derived from the 2014 People’s Daily corpus."
+      ],
+      "revision": "dadd5c76a53eb05cc84720628b89e4a334d5d753"
+    },
+    "jieba": {
+      "files": {
+        "LICENSE": {
+          "bytes": 1075,
+          "sha256": "18ba0984839f85853b29fadaf992f7dba8fd0ca0fbeae34de2b8735222dc7a37",
+          "url": "https://raw.githubusercontent.com/fxsjy/jieba/67fa2e36e72f69d9134b8a1037b83fbb070b9775/LICENSE"
+        },
+        "README.md": {
+          "bytes": 31879,
+          "sha256": "d6754b68da8fae70d2fb93b8100f41d55e2c0c262230c1017a053ad8154d85c1",
+          "url": "https://raw.githubusercontent.com/fxsjy/jieba/67fa2e36e72f69d9134b8a1037b83fbb070b9775/README.md"
+        },
+        "dict.txt": {
+          "bytes": 5071852,
+          "sha256": "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8",
+          "url": "https://raw.githubusercontent.com/fxsjy/jieba/67fa2e36e72f69d9134b8a1037b83fbb070b9775/jieba/dict.txt"
+        }
+      },
+      "license": "MIT",
+      "provenance_flags": [
+        "The upstream origin of dict.txt is undocumented."
+      ],
+      "revision": "67fa2e36e72f69d9134b8a1037b83fbb070b9775"
+    },
+    "phrase_pinyin_data": {
+      "files": {
+        "LICENSE": {
+          "bytes": 1066,
+          "sha256": "89ac55df747e4776088c3e77531ef61b973a1a59dd8e6a4548a58996da9a4f70",
+          "url": "https://raw.githubusercontent.com/mozillazg/phrase-pinyin-data/195893902791321fe38ae7b4ebdd9905389cfd41/LICENSE"
+        },
+        "README.md": {
+          "bytes": 2565,
+          "sha256": "79e9b1a13e6948af49c055a75a792df7844429bb8de3d38c75f383886e100654",
+          "url": "https://raw.githubusercontent.com/mozillazg/phrase-pinyin-data/195893902791321fe38ae7b4ebdd9905389cfd41/README.md"
+        },
+        "pinyin.txt": {
+          "bytes": 1257299,
+          "sha256": "5eff64ffd4de072b7e7f96baec560c3366887f93e762cc35ef0a8f62a7259b73",
+          "url": "https://raw.githubusercontent.com/mozillazg/phrase-pinyin-data/195893902791321fe38ae7b4ebdd9905389cfd41/pinyin.txt"
+        }
+      },
+      "license": "MIT",
+      "provenance_flags": [
+        "Origins of the initial MIT phrase lists are unspecified; issue #53 used an unnamed online dictionary."
+      ],
+      "revision": "195893902791321fe38ae7b4ebdd9905389cfd41"
+    },
+    "pinyin_data": {
+      "files": {
+        "LICENSE": {
+          "bytes": 1076,
+          "sha256": "9c048697be2502a16e8bcb282d5d465a07295b2def0ffb05a269c5d39dbe1586",
+          "url": "https://raw.githubusercontent.com/mozillazg/pinyin-data/9d05c9e29cb6a7e5c79f2f5279f5c1014246a19a/LICENSE"
+        },
+        "README.md": {
+          "bytes": 4956,
+          "sha256": "864b2e4f9e4dbdb01bfa32892b78c25bd982eb45fa6faf1d6c701be3d3f707d3",
+          "url": "https://raw.githubusercontent.com/mozillazg/pinyin-data/9d05c9e29cb6a7e5c79f2f5279f5c1014246a19a/README.md"
+        },
+        "pinyin.txt": {
+          "bytes": 985559,
+          "sha256": "90c11bd680ccfe7f2617a6e25abdb1fb87b5540df3e6f011ca50aaf3c7263a89",
+          "url": "https://raw.githubusercontent.com/mozillazg/pinyin-data/9d05c9e29cb6a7e5c79f2f5279f5c1014246a19a/pinyin.txt"
+        }
+      },
+      "license": "MIT",
+      "provenance_flags": [],
+      "revision": "9d05c9e29cb6a7e5c79f2f5279f5c1014246a19a"
+    },
+    "unihan": {
+      "files": {
+        "LICENSE": {
+          "bytes": 1995,
+          "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+          "url": "https://www.unicode.org/license.txt"
+        },
+        "Scripts.txt": {
+          "bytes": 196089,
+          "sha256": "0071fd81b6aeae25f6e8bce8efec3066a6476a91b49bdb2f52dc76e817862a6a",
+          "url": "https://www.unicode.org/Public/18.0.0/ucd/Scripts.txt"
+        },
+        "Unihan.zip": {
+          "bytes": 8340649,
+          "sha256": "4c93ea9c1f636451729a840978f1667a53886af37ba854fdcce109721c63d43e",
+          "url": "https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip"
+        }
+      },
+      "license": "Unicode-3.0",
+      "provenance_flags": [],
+      "revision": "18.0.0"
+    }
+  },
+  "unicode_version": "18.0.0"
+}

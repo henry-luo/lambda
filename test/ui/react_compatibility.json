@@ -1,0 +1,17 @@
+{
+  "name": "React bundled HTML scripts and physical controlled events",
+  "html": "test/ui/react_compatibility.html",
+  "viewport": {"width": 480, "height": 220},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "body"}, "attribute": "data-react-result", "equals": "pass"},
+    {"type": "assert_text", "target": {"selector": "#react-live-count"}, "contains": "0"},
+    {"type": "click", "target": {"selector": "#react-live-button"}},
+    {"type": "assert_text", "target": {"selector": "#react-live-count"}, "contains": "1"},
+    {"type": "click", "target": {"selector": "#react-live-check"}},
+    {"type": "assert_checked", "target": {"selector": "#react-live-check"}, "checked": true},
+    {"type": "assert_text", "target": {"selector": "#react-live-check-state"}, "contains": "checked"},
+    {"type": "click", "target": {"selector": "#react-live-check"}},
+    {"type": "assert_checked", "target": {"selector": "#react-live-check"}, "checked": false},
+    {"type": "assert_text", "target": {"selector": "#react-live-check-state"}, "contains": "unchecked"}
+  ]
+}

@@ -1,0 +1,526 @@
+{
+  "name": "Marble Drop sound effects, pause, mute, rewind and native voices",
+  "html": "test/demo/marble-drop/marble-drop.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 1100
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "on"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inlet-A"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "on"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "drop"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "1"
+    },
+    {
+      "type": "advance_time",
+      "ms": 320,
+      "steps": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "switch"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-voices",
+      "equals": "0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1200,
+      "steps": 30
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "pocket"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "3"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "win"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-voices",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "6"
+    },
+    {
+      "type": "key_press",
+      "key": "M"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sound"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "on"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "6"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "win"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-4"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-voices",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 800,
+      "steps": 20
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "catch"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "11"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-3"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2000,
+      "steps": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "pocket"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "15"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-1"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "miss"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "18"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "steel"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "21"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 4000,
+      "steps": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "27"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "win"
+    },
+    {
+      "type": "key_press",
+      "key": "M"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-voices",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-8"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/sound-controls.png"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

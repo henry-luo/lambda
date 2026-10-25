@@ -29,6 +29,7 @@
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/runtime/template_registry.h"
+#include "../lambda/runtime/interp.hpp"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/lambda.h"         // Context (input_context)
@@ -3447,6 +3448,27 @@ static View* settle_author_templates_for_ua(EventContext* evcon, View* target,
     return rebuilt_target;
 }
 
+// handler continuations retain the same nested dispatch/emit waist as their entry call.
+class EmitHandlerScope {
+public:
+    EmitHandlerContext current = {};
+    EmitHandlerContext* previous;
+
+    EmitHandlerScope(DomDocument* doc, View* target, Item model, const char* template_ref,
+                     EventContext* evcon, Rooted<Item>* nested_selection)
+        : previous(g_emit_handler_ctx) {
+        current.doc = doc;
+        current.target = target;
+        current.model_item = model;
+        current.template_ref = template_ref;
+        current.evcon = evcon;
+        current.nested_model_selection_root = nested_selection;
+        g_emit_handler_ctx = &current;
+    }
+    void restore() { g_emit_handler_ctx = previous; }
+    ~EmitHandlerScope() { restore(); }
+};
+
 // Bind the document's script runtime, build the event value, invoke one template
 // handler, then reconcile any model change back into layout. Shared by both
 // dispatch walks: the author-template walk passes the item apply() matched as the
@@ -3529,17 +3551,10 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     }
 
     // set up emit context so handlers can call emit()
-    EmitHandlerContext emit_ctx;
-    emit_ctx.doc = doc;
-    emit_ctx.target = target;
-    emit_ctx.model_item = model_root.get();
-    emit_ctx.template_ref = template_ref;
-    emit_ctx.evcon = evcon;
-    emit_ctx.has_nested_model_selection = false;
-    emit_ctx.nested_model_selection_root = &nested_model_selection_root;
-    emit_ctx.nested_model_revision = 0;
-    EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
-    g_emit_handler_ctx = &emit_ctx;
+    EmitHandlerScope emit_scope(doc, target, model_root.get(), template_ref,
+        evcon, &nested_model_selection_root);
+    EmitHandlerContext& emit_ctx = emit_scope.current;
+    EmitHandlerContext* saved_emit_ctx = emit_scope.previous;
 
     uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
@@ -3558,7 +3573,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     }
 
     // restore emit context
-    g_emit_handler_ctx = saved_emit_ctx;
+    emit_scope.restore();
 
     // A bubbled form-control click can be a no-op; rebuilding its
     // edit template drops the focus just established by mouse down.
@@ -4215,7 +4230,8 @@ static TemplateEntry* behavior_match_walk(View* target, const char* event_name,
         DomElement* dom_elem = lam::dom_require_element(node);
         if (dom_elem->is_synthetic()) continue;
         Item elem_item;
-        elem_item.element = dom_element_render_source(dom_elem);
+        // behavior predicates observe live DOM attributes, including JS-created controls.
+        elem_item.element = dom_element_to_element(dom_elem);
         TemplateEntry* tmpl = template_registry_match_behavior(
             g_template_registry, elem_item, event_name);
         if (tmpl) {
@@ -4293,6 +4309,55 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
 
 static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
                                          const char* type, View* related);
+
+// package policy returns one precisely rooted completion for HTML's
+// pre-activation/commit/cancel stages, shared by trusted and synthetic clicks.
+class ClickActivationScope {
+    EventContext* evcon;
+    RootFrame roots;
+    Rooted<Item> event;
+    Rooted<Item> completion;
+    Rooted<Item> result;
+    Rooted<Item> model;
+    Rooted<Item> nested_selection;
+    bool finished;
+public:
+    ClickActivationScope(EventContext* owner, View* target, const char* type)
+        : evcon(owner), roots(5), event(roots, owner ? owner->dom_event : ItemNull),
+          completion(roots, ItemNull), result(roots, ItemNull), model(roots, ItemNull),
+          nested_selection(roots, ItemNull), finished(false) {
+        if (!owner || !type || strcmp(type, "click") || !context) return;
+        Item callback = ItemNull;
+        dispatch_behavior_handler(owner, target, "clickpreactivate", nullptr,
+            nullptr, &callback);
+        completion.set(callback);
+        // behavior-only hooks must not replace the author-visible click record.
+        event_context_set_dom_event(owner, event.get());
+    }
+
+    void finish(bool canceled) {
+        if (finished) return;
+        finished = true;
+        if (get_type_id(completion.get()) != LMD_TYPE_FUNC) return;
+        model.set(radiant_dom_wrap_node(evcon->target));
+        EmitHandlerScope emit_scope(event_context_target_document(evcon), evcon->target,
+            model.get(), nullptr, evcon, &nested_selection);
+        TemplateUiAllocationScope handler_scope(context, false);
+        Item argument = {.item = b2it(canceled)};
+        // cold T0 callbacks need interpreter admission; compiled entries have no AST module.
+        result.set(function_has_abi(completion.get().function, FN_ENTRY_ABI_LAMBDA_INTERPRETED)
+            ? interp_call_runtime_function(context->runtime, completion.get().function, &argument, 1)
+            : fn_call1(completion.get().function, argument));
+        if (item_is_error(result.get())) log_error("click activation: package completion failed");
+        event_context_set_dom_event(evcon, event.get());
+        // continuations have no template-entry epilogue to publish nested emit mutations.
+        evcon->dom_event_author_dirty = evcon->dom_event_author_dirty || render_map_has_dirty();
+        evcon->dom_event_ua_handled = true;
+        evcon->need_repaint = true;
+    }
+
+    ~ClickActivationScope() { finish(true); }
+};
 
 bool radiant_document_has_autofocus(DomElement* root) {
     if (!root) return false;
@@ -4976,17 +5041,14 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
         EventTargetPath target_path = {};
         DomDocument* doc = event_context_target_document(evcon);
         bool target_path_valid = capture_event_target_path(doc, target, &target_path);
+        // completed activation may have left author work from its change notification.
+        View* ua_target = settle_author_templates_for_ua(
+            evcon, target, target_path_valid ? &target_path : nullptr,
+            out_model_reconciled);
         if (!allow_behavior || radiant_dom_event_default_prevented(evcon->dom_event)) {
-            // author-only dispatch still precedes physical click defaults;
-            // keep their target on the rebuilt tree even without a UA handler.
-            settle_author_templates_for_ua(evcon, target,
-                target_path_valid ? &target_path : nullptr, out_model_reconciled);
             return false;
         }
         if (!evcon->dom_event_ua_handled) {
-            View* ua_target = settle_author_templates_for_ua(
-                evcon, target, target_path_valid ? &target_path : nullptr,
-                out_model_reconciled);
             if (!ua_target) return false;
             evcon->dom_event_ua_handled = dispatch_behavior_handler(
                 evcon, ua_target, event_name, intent, out_model_reconciled);
@@ -5018,6 +5080,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
         build_dom_event_record(doc, target, event_name, evcon, intent, native_event.get()));
     Item event = event_root.get();
     event_context_set_dom_event(evcon, event);
+
+    ClickActivationScope activation(evcon, target, event_name);
 
     EventTargetPath target_path = {};
     bool target_path_valid = capture_event_target_path(doc, target, &target_path);
@@ -5057,15 +5121,17 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     radiant_dom_event_member_set(event, "__stop_imm", ItemNull, &ignored);
     radiant_dom_event_member_set(event, "__dispatch_flag", ItemNull, &ignored);
 
+    bool prevented = radiant_dom_event_default_prevented(event);
+    // activation notifications precede reconciliation, which can retire the captured control.
+    activation.finish(prevented);
     // The UA tier observes the DOM after all author participants have settled.
     // Rebind through the structural path when regeneration replaced its target.
     View* ua_target = settle_author_templates_for_ua(
         evcon, target, target_path_valid ? &target_path : nullptr,
         out_model_reconciled);
-    bool prevented = radiant_dom_event_default_prevented(event);
     evcon->default_prevented = prevented;
-    bool ua_handled = false;
-    if (allow_behavior && !prevented && ua_target) {
+    bool ua_handled = evcon->dom_event_ua_handled;
+    if (allow_behavior && !prevented && ua_target && !ua_handled) {
         ua_handled = dispatch_behavior_handler(evcon, ua_target, event_name, intent,
                                                out_model_reconciled);
         evcon->dom_event_ua_handled = ua_handled;
@@ -9248,6 +9314,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     RootFrame roots(2);
     Rooted<Item> event_root(roots, build_event(userdata));
     event_context_set_dom_event(evcon, event_root.get());
+    ClickActivationScope activation(evcon, target, event_name);
     EventTargetPath target_path = {};
     bool target_path_valid = capture_event_target_path(target_doc, target, &target_path);
     Rooted<Item> target_root(roots, dom_wrap_element(dom_target));
@@ -9255,6 +9322,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     s_synthetic_dom_dispatch_raw_event = event_root.get();
     dom_dispatch_event(target_root.get(), event_root.get());
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
+    activation.finish(radiant_dom_event_default_prevented(event_root.get()));
     bool prevented = radiant_dom_event_default_prevented(event_root.get());
     evcon->default_prevented = prevented;
     // cancellation suppresses UA behavior, but author state still needs its redraw.
@@ -9264,7 +9332,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     if (run_ua_tier) {
         View* ua_target = settle_author_templates_for_ua(
             evcon, target, target_path_valid ? &target_path : nullptr, nullptr);
-        if (!prevented && resolved_event_name && ua_target) {
+        if (!prevented && resolved_event_name && ua_target && !evcon->dom_event_ua_handled) {
             evcon->dom_event_ua_handled = dispatch_behavior_handler(
                 evcon, ua_target, resolved_event_name, intent, nullptr);
             prevented = radiant_dom_event_default_prevented(event_root.get());
@@ -11517,10 +11585,13 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     Rooted<Item> target_root(roots, target_item);
     Rooted<Item> event_root(roots, event_item);
     event_context_set_dom_event(&evcon, event_root.get());
+    const char* dispatch_type = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+    ClickActivationScope activation(&evcon, evcon.target, dispatch_type);
     Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
     s_synthetic_dom_dispatch_raw_event = event_root.get();
     Item result = dom_dispatch_event(target_root.get(), event_root.get());
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
+    activation.finish(radiant_dom_event_default_prevented(event_root.get()));
     if (!item_is_error(result)) {
         // Listener code may have replaced the target subtree. The JS dispatch
         // is complete, but native default behavior must not touch retired bytes.

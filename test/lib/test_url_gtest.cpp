@@ -96,6 +96,23 @@ TEST_F(UrlTest, FileUrlHasOpaqueOrigin) {
     url_destroy(url);
 }
 
+TEST_F(UrlTest, RelativeResolutionPreservesDerivedOrigin) {
+    Url* base = url_parse("https://example.com:8080/dir/page?q=old#old");
+    ASSERT_NE(base, nullptr);
+    const char* references[] = {"", "next", "../next", "/next", "?q=new", "#new"};
+    for (const char* reference : references) {
+        Url* resolved = url_parse_with_base(reference, base);
+        ASSERT_NE(resolved, nullptr);
+        EXPECT_STREQ(url_get_origin(resolved), "https://example.com:8080");
+        url_destroy(resolved);
+    }
+    Url* external = url_parse_with_base("//other.example:443/path", base);
+    ASSERT_NE(external, nullptr);
+    EXPECT_STREQ(url_get_origin(external), "https://other.example");
+    url_destroy(external);
+    url_destroy(base);
+}
+
 TEST_F(UrlTest, FileUrlPreservesEmptyAuthorityInHref) {
     Url* url = url_parse("file:///workspace/page.html");
     ASSERT_NE(url, nullptr);

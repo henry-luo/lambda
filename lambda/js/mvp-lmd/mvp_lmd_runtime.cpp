@@ -1,5 +1,6 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_runtime.h"
+#include "../js_runtime_internal.hpp"
 #include "../js_host_hooks.h"
 #include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
@@ -167,8 +168,13 @@ extern "C" Item mvp_lmd_number_to_radix_string(double value, double radix) {
         radix = trunc(radix);
         if (!isfinite(radix) || radix < 2 || radix > 36) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
         if (radix != 10 && isfinite(value)) {
-            // exact integers reuse the core arbitrary-radix formatter; fractional radix conversion is outside this subset.
-            if (value != trunc(value)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+            // fractional radix conversion shares the ordinary Number algorithm.
+            if (value != trunc(value)) {
+                RootFrame roots(1);
+                Rooted<Item> number(roots, push_d(value));
+                Item argument = {.item = i2it((int64_t)radix)};
+                return js_numeric_prototype_algorithm(number.get(), JS_NUMERIC_TO_STRING, &argument, 1);
+            }
             Item integer = bigint_from_double(value);
             return item_is_error(integer) ? integer : mvp_lmd_bigint_to_string(integer, radix);
         }

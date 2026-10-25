@@ -1771,14 +1771,19 @@ static Item js_proxy_missing_own_key_error(Item key) {
 }
 
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, proxy), trap_root(roots, ItemNull);
+    Rooted<Item> keys_root(roots, ItemNull), target_keys_root(roots, ItemNull);
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return js_array_new(0);
     JS_ASSIGN_OR_RETURN(trap, js_proxy_get_trap(pd, "ownKeys", 7));
+    trap_root.set(trap);
     if (trap.item == ItemNull.item) {
         return js_reflect_own_keys(PD_TARGET(pd));
     }
     Item args[1] = { PD_TARGET(pd) };
     JS_ASSIGN_OR_RETURN(trap_result, js_call_function(trap, PD_HANDLER(pd), args, 1));
+    keys_root.set(trap_result);
 
     Item key_list = trap_result;
     if (get_type_id(key_list) != LMD_TYPE_ARRAY) {
@@ -1788,6 +1793,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
             result_type != LMD_TYPE_FLOAT && result_type != LMD_TYPE_BOOL &&
             result_type != LMD_TYPE_STRING && !js_key_is_symbol(key_list)) {
             JS_ASSIGN_OR_RETURN_INTO(key_list, js_array_like_to_array(key_list));
+            keys_root.set(key_list);
         }
     }
 
@@ -1822,6 +1828,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     Item target = PD_TARGET(pd);
     if (!js_is_extensible(target)) {
         Item target_keys = js_reflect_own_keys(target);
+        target_keys_root.set(target_keys);
         int target_len = js_array_length(target_keys);
         // Every target key must be in trap result
         for (int i = 0; i < target_len; i++) {
@@ -1841,6 +1848,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     } else {
         // Must include all non-configurable keys
         Item target_keys = js_reflect_own_keys(target);
+        target_keys_root.set(target_keys);
         int target_len = js_array_length(target_keys);
         for (int i = 0; i < target_len; i++) {
             Item tk = js_elements_get_int(target_keys, i);
@@ -1861,6 +1869,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     }
 
     Item result = js_array_new(0);
+    target_keys_root.set(result);
     for (int i = 0; i < len; i++) {
         js_array_push(result, js_elements_get_int(key_list, i));
     }
@@ -2387,6 +2396,8 @@ static Item js_private_storage_object(Item object) {
 
 static bool js_private_storage_has_own(Item object, Item private_key) {
     if (!js_private_key_string(private_key)) return false;
+    if (is_virtual_container_type_id(get_type_id(object)) && js_host_object_type(object))
+        return js_has_own_property(object, private_key).item == ITEM_TRUE;
     Item lookup_object = js_private_storage_object(object);
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
     JsShapeSlotStatus status = js_own_shape_slot_status_name_id(
@@ -4353,7 +4364,7 @@ static JsPropertyOpResult js_meta_property_own_keys(Item target, uint64_t lane,
         return js_property_op_result(true, js_proxy_trap_own_keys(target));
     }
     Item completion = ItemNull;
-    return js_property_op_result(js_property_ops_own_property_names(
+    return js_property_op_result(js_property_ops_own_keys(
         target, &completion), completion);
 }
 
@@ -4396,7 +4407,8 @@ extern "C" bool js_dispatch_property_op(
         bool bypass_accessor_dispatch, Item* out_result) {
     if (out_result) *out_result = ItemNull;
     Item key = ItemNull;
-    bool needs_key = operation != JS_EXOTIC_OWN_KEYS;
+    bool needs_key = operation != JS_EXOTIC_OWN_KEYS &&
+        operation != JS_EXOTIC_IS_EXTENSIBLE && operation != JS_EXOTIC_PREVENT_EXTENSIONS;
     if (needs_key) {
         key = observable_key.item != ItemNull.item
             ? observable_key : js_property_key_from_lane(lane);
@@ -4418,6 +4430,8 @@ extern "C" bool js_dispatch_property_op(
         case JS_EXOTIC_GET_OWN_PROPERTY_DESCRIPTOR:
             callback = ops->get_own_property_descriptor; break;
         case JS_EXOTIC_OWN_KEYS: callback = ops->own_keys; break;
+        case JS_EXOTIC_IS_EXTENSIBLE: callback = ops->is_extensible; break;
+        case JS_EXOTIC_PREVENT_EXTENSIONS: callback = ops->prevent_extensions; break;
         case JS_EXOTIC_HAS_OWN:
             callback = ops->get_own_property_descriptor; break;
         }
@@ -12607,7 +12621,9 @@ JS_COLLECTION_SIZE_BODY(js_intrinsic_set_size_body, JS_COLLECTION_SIZE_SET)
 
 Item js_intrinsic_collection_iterator_next_body(Item callee,
         Item this_value, Item* args, int argc, uint64_t* result_home) {
-    Item this_val = this_value;
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, this_value), value(roots, ItemNull);
+    Item this_val = owner.get();
         // Collection iterator .next()
         if (get_type_id(this_val) != LMD_TYPE_MAP) {
             return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
@@ -12651,10 +12667,10 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
             return js_make_iter_result(make_js_undefined(), true);
         }
         // get value based on mode
-        Item val;
         if (mode == 2) {
             // entries: [key, value] for Map; [value, value] for Set
-            Item pair = js_array_new(2);
+            value.set(js_array_new(2));
+            Item pair = value.get();
             Item key = js_collection_node_read_item(node,
                 JS_COLLECTION_NODE_KEY);
             if (coll_type == JS_COLLECTION_SET) {
@@ -12665,18 +12681,17 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
                 js_elements_set_int(pair, 1, js_collection_node_read_item(node,
                     JS_COLLECTION_NODE_VALUE));
             }
-            val = pair;
         } else if (mode == 1) {
-            val = js_collection_node_read_item(node, JS_COLLECTION_NODE_KEY);
+            value.set(js_collection_node_read_item(node, JS_COLLECTION_NODE_KEY));
         } else {
             // values: for Set, key IS the value; for Map, node's value
-            val = js_collection_node_read_item(node, coll_type == JS_COLLECTION_SET
-                ? JS_COLLECTION_NODE_KEY : JS_COLLECTION_NODE_VALUE);
+            value.set(js_collection_node_read_item(node, coll_type == JS_COLLECTION_SET
+                ? JS_COLLECTION_NODE_KEY : JS_COLLECTION_NODE_VALUE));
         }
-        // advance to next node
+        // advancing allocates property keys before the yielded value reaches its result owner.
         js_set_key_cstr(this_val, "__last_node__", (Item){.item = i2it((int64_t)(uintptr_t)node)});
         js_set_key_cstr(this_val, "__node_ptr__", (Item){.item = i2it((int64_t)(uintptr_t)node->next)});
-        return js_make_iter_result(val, false);
+        return js_make_iter_result(value.get(), false);
 
 }
 
@@ -28119,13 +28134,13 @@ static Item js_get_iterator_record(Item iterable, bool asynchronous);
 
 // Helper: create {value, done} iterator result object
 extern "C" Item js_make_iter_result(Item value, bool done) {
-    JS_ROOTS(roots, value_root, js_retain_scalar(value), result_root, js_promise_public_object());
-    String* val_key = heap_create_name("value", 5);
-    String* done_key = heap_create_name("done", 4);
+    JS_ROOTS(roots, value_root, js_retain_scalar(value), result_root, js_promise_public_object(),
+        value_key, js_name_item("value", 5), done_key, js_name_item("done", 4));
     // Property insertion may collect; retain both the fresh result map and a
     // scalar payload still owned by the generator state-result container.
-    JS_ASSIGN_OR_RETURN(value_result, js_promise_create_data_property(result_root.get(), (Item){.item = s2it(val_key)}, value_root.get()));
-    JS_ASSIGN_OR_RETURN(done_result, js_promise_create_data_property(result_root.get(), (Item){.item = s2it(done_key)},
+    // both keys remain live while either property insertion can collect.
+    JS_ASSIGN_OR_RETURN(value_result, js_promise_create_data_property(result_root.get(), value_key.get(), value_root.get()));
+    JS_ASSIGN_OR_RETURN(done_result, js_promise_create_data_property(result_root.get(), done_key.get(),
         (Item){.item = b2it(done)}));
     return result_root.get();
 }
@@ -30067,29 +30082,53 @@ static JsPropertyOpResult js_promise_property_get(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
+    RootFrame roots(5);
+    Rooted<Item> owner_root(roots, target), key_root(roots, key),
+        value_root(roots, value), receiver_root(roots, receiver), base_root(roots, ItemNull);
     JsPromisePropertyContext ctx;
-    if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
+    if (!js_promise_property_prepare(owner_root.get(), key_root.get(), receiver_root.get(), false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
     }
-    if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
-        return {JS_PROPERTY_OP_COMPLETE, js_promise_throw_type_error(
-            "Cannot create Promise property storage")};
+    key_root.set(ctx.key);
+    receiver_root.set(ctx.receiver);
+    base_root.set(ctx.expando);
+    Item own = get_type_id(base_root.get()) == LMD_TYPE_MAP
+        ? js_has_own_property(base_root.get(), key_root.get()) : Item{.item = ITEM_FALSE};
+    if (item_is_error(own)) return {JS_PROPERTY_OP_COMPLETE, own};
+    if (!it2b(own)) {
+        // absent own slots inherit from the carrier, never the storage map's prototype.
+        base_root.set(js_get_prototype(owner_root.get()));
+        if (base_root.get().item == ITEM_NULL || base_root.get().item == ITEM_JS_UNDEFINED)
+            return {JS_PROPERTY_OP_FALLTHROUGH, ItemNull};
     }
-    Item stored = js_set_completion_with_key(ctx.expando, ctx.key, value, ctx.receiver);
+    Item stored = js_set_completion_with_key(base_root.get(), key_root.get(),
+        value_root.get(), receiver_root.get());
     return {JS_PROPERTY_OP_COMPLETE, stored};
 }
 
 static JsPropertyOpResult js_promise_property_define(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
+    RootFrame roots(4);
+    Rooted<Item> owner_root(roots, target), key_root(roots, key),
+        descriptor_root(roots, descriptor), expando_root(roots, ItemNull);
     JsPromisePropertyContext ctx;
-    if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
+    if (!js_promise_property_prepare(owner_root.get(), key_root.get(), receiver, true, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
     }
     if (get_type_id(ctx.expando) != LMD_TYPE_MAP) {
         return {JS_PROPERTY_OP_COMPLETE, js_promise_throw_type_error(
             "Cannot create Promise property storage")};
     }
-    Item result = js_object_define_property(ctx.expando, ctx.key, descriptor);
+    key_root.set(ctx.key);
+    expando_root.set(ctx.expando);
+    // the native carrier owns extensibility; descriptor lookup may collect before the write.
+    if (!ctx.promise->extensible) {
+        Item current = js_object_get_own_property_descriptor(expando_root.get(), key_root.get());
+        if (item_is_error(current)) return {JS_PROPERTY_OP_COMPLETE, current};
+        if (current.item == ITEM_JS_UNDEFINED)
+            return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
+    }
+    Item result = js_object_define_property(expando_root.get(), key_root.get(), descriptor_root.get());
     if (item_is_error(result)) return {JS_PROPERTY_OP_COMPLETE, result};
     return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
 }
@@ -30108,23 +30147,23 @@ static JsPropertyOpResult js_promise_property_delete(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_has(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
+    RootFrame roots(4);
+    Rooted<Item> owner_root(roots, target), key_root(roots, key),
+        expando_root(roots, ItemNull), prototype_root(roots, ItemNull);
     JsPromisePropertyContext ctx;
-    if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
+    if (!js_promise_property_prepare(owner_root.get(), key_root.get(), receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
     }
-    if (get_type_id(ctx.expando) == LMD_TYPE_MAP &&
-            it2b(js_has_own_property(ctx.expando, ctx.key))) {
-        return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
+    key_root.set(ctx.key);
+    expando_root.set(ctx.expando);
+    if (get_type_id(expando_root.get()) == LMD_TYPE_MAP) {
+        Item own = js_has_own_property(expando_root.get(), key_root.get());
+        if (item_is_error(own) || it2b(own)) return {JS_PROPERTY_OP_COMPLETE, own};
     }
-    Item proto = js_get_prototype(target);
-    if (proto.item != ItemNull.item && proto.item != ITEM_JS_UNDEFINED) {
-        if (it2b(js_has_own_property(proto, ctx.key))) {
-            return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
-        }
-        bool found = false;
-        (void)js_prototype_lookup_ex(proto, ctx.key, &found);
-        if (found) return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
-    }
+    prototype_root.set(js_get_prototype(owner_root.get()));
+    // prototype Get completion does not prove presence and may invoke a getter.
+    if (prototype_root.get().item != ItemNull.item && prototype_root.get().item != ITEM_JS_UNDEFINED)
+        return {JS_PROPERTY_OP_COMPLETE, js_in(key_root.get(), prototype_root.get())};
     return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
 }
 
@@ -30148,7 +30187,20 @@ static JsPropertyOpResult js_promise_property_own_keys(Item target, uint64_t lan
         return {JS_PROPERTY_OP_COMPLETE, js_array_new(0)};
     }
     return {JS_PROPERTY_OP_COMPLETE, get_type_id(ctx.expando) == LMD_TYPE_MAP
-        ? js_object_get_own_property_names(ctx.expando) : js_array_new(0)};
+        ? js_reflect_own_keys(ctx.expando) : js_array_new(0)};
+}
+
+static JsPropertyOpResult js_promise_property_is_extensible(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    JsPromise* promise = js_get_promise(target);
+    return {JS_PROPERTY_OP_COMPLETE, (Item){.item = b2it(promise && promise->extensible)}};
+}
+
+static JsPropertyOpResult js_promise_property_prevent_extensions(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    JsPromise* promise = js_get_promise(target);
+    if (promise) promise->extensible = false;
+    return {JS_PROPERTY_OP_COMPLETE, (Item){.item = b2it(promise != nullptr)}};
 }
 
 extern const JsPropertyOps js_promise_property_ops = {
@@ -30156,7 +30208,7 @@ extern const JsPropertyOps js_promise_property_ops = {
     js_promise_property_define, js_promise_property_delete,
     js_promise_property_has, js_promise_property_descriptor,
     js_promise_property_own_keys,
-    NULL, NULL, NULL, NULL,
+    NULL, NULL, js_promise_property_is_extensible, js_promise_property_prevent_extensions,
 };
 
 static VMapVtable js_promise_vtable = {

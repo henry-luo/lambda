@@ -1,0 +1,11 @@
+clone preserves ordered duplicate entries: pass
+clone owns an independent list: pass
+array pairs are converted and copied: pass
+Map sequence: pass
+custom iterable and single iterator lookup: pass
+record own enumerable properties: pass
+USVString normalization retains record lookup key: pass
+primitive and default conversion: pass
+invalid sequence and coercion errors: pass
+iterator exception identity: pass
+URL_SEARCH_PARAMS_CONSTRUCTOR_DONE

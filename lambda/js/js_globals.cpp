@@ -148,7 +148,8 @@ static const JsHostGlobalSpec js_host_globals[] = {
     {"TransformStream", JS_HOST_GROUP_STREAMS}, {"TextEncoderStream", JS_HOST_GROUP_STREAMS},
     {"TextDecoderStream", JS_HOST_GROUP_STREAMS}, {"ByteLengthQueuingStrategy", JS_HOST_GROUP_STREAMS},
     {"CountQueuingStrategy", JS_HOST_GROUP_STREAMS}, {"Headers", JS_HOST_GROUP_HEADERS},
-    {"Response", JS_HOST_GROUP_HEADERS}, {"performance", JS_HOST_GROUP_PERFORMANCE},
+    {"Response", JS_HOST_GROUP_HEADERS}, {"Request", JS_HOST_GROUP_HEADERS},
+    {"performance", JS_HOST_GROUP_PERFORMANCE},
     {"Performance", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceObserver", JS_HOST_GROUP_PERFORMANCE},
     {"PerformanceObserverEntryList", JS_HOST_GROUP_PERFORMANCE},
     {"PerformanceEntry", JS_HOST_GROUP_PERFORMANCE}, {"PerformanceMark", JS_HOST_GROUP_PERFORMANCE},
@@ -530,6 +531,7 @@ extern "C" void js_defprop_set_internal_state(Item obj, Item key, Item value);
 static Item js_require_object_type(Item arg, const char* method_name);
 static Item js_defprop_get_internal_state(Item obj, const char* key, int keylen, bool* found);
 static bool js_property_key_to_public_symbol(Item key, Item* out_symbol);
+static void js_collect_own_symbol_keys_from_map(Item result, Map* map);
 
 // Tune5 P1: global descriptor/enumeration code delegates to the ordinary
 // classifier owned by js_props.cpp; TypedArray classification remains exotic.
@@ -1287,7 +1289,8 @@ bool js_property_ops_delete_property(Item obj, Item key, Item* out_result) {
 
 static bool js_is_engine_internal_enumeration_key(const char* name, int name_len);
 
-bool js_property_ops_own_property_names(Item object, Item* out_result) {
+bool js_property_ops_own_keys(Item object, Item* out_result) {
+    JS_ROOTS(roots, owner, object, output, ItemNull);
     if (is_virtual_container_type_id(get_type_id(object)) &&
         js_host_object_own_property_names(object, out_result)) {
         return true;
@@ -1300,6 +1303,7 @@ bool js_property_ops_own_property_names(Item object, Item* out_result) {
         js_object_has_class(object, JS_CLASS_TYPED_ARRAY)) {
         Map* m = object.map;
         Item result = js_array_new(0);
+        output.set(result);
         int len = js_typed_array_length(object);
         for (int i = 0; i < len; i++) {
             String* name = js_property_index_name(i);
@@ -1309,8 +1313,7 @@ bool js_property_ops_own_property_names(Item object, Item* out_result) {
         TypeMap* tm = (TypeMap*)m->type;
         ShapeEntry* e = tm ? tm->shape : NULL;
         while (e) {
-            // getOwnPropertyNames excludes Symbols; byte reconstruction would
-            // otherwise turn an identity key into an unrelated string key.
+            // string keys precede Symbols; the final pass retains Symbol identity.
             if (e->key_kind != NAME_KEY_STRING) {
                 e = typemap_next_field(tm, e);
                 continue;
@@ -1330,6 +1333,7 @@ bool js_property_ops_own_property_names(Item object, Item* out_result) {
             js_array_push(result, key_item);
             e = typemap_next_field(tm, e);
         }
+        js_collect_own_symbol_keys_from_map(result, object.map);
         *out_result = result;
         return true;
     }
@@ -8455,12 +8459,29 @@ static Item js_append_string_wrapper_indices(Item result, int length) {
     return ItemNull;
 }
 
+static Item js_filter_own_keys_kind(Item keys, TypeId kind) {
+    RootFrame roots(2);
+    Rooted<Item> source(roots, keys), result(roots, ItemNull);
+    JS_RETURN_IF_ERROR(source.get());
+    result.set(js_array_new(0));
+    for (int64_t i = 0, count = js_array_length(source.get()); i < count; i++) {
+        Item key = js_elements_get_int(source.get(), i);
+        if (get_type_id(key) == kind) JS_RETURN_IF_ERROR(js_array_push(result.get(), key));
+    }
+    return result.get();
+}
+
 extern "C" Item js_object_get_own_property_names(Item object) {
     JS_ROOTS(roots, object_root, object, result_root, ItemNull, names_root, ItemNull);
+    MvpLmdRealmScope owner(mvp_lmd_property_program(object));
+    // guest callables have their own ABI; native reflection must use their property owner.
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+        return js_filter_own_keys_kind(js_reflect_own_keys(object), LMD_TYPE_STRING);
 
     Item exotic_result = ItemNull;
     if (js_dispatch_property_op(JS_EXOTIC_OWN_KEYS, object, 0, ItemNull,
-            object, ItemNull, ItemNull, false, &exotic_result)) return exotic_result;
+            object, ItemNull, ItemNull, false, &exotic_result))
+        return js_filter_own_keys_kind(exotic_result, LMD_TYPE_STRING);
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
@@ -9403,11 +9424,19 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
 }
 
 extern "C" Item js_object_get_own_property_symbols(Item object) {
+    JS_ROOTS(roots, object_root, object, result_root, ItemNull);
+    MvpLmdRealmScope owner(mvp_lmd_property_program(object));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))
+        return js_filter_own_keys_kind(js_reflect_own_keys(object), LMD_TYPE_SYMBOL);
     TypeId object_type = get_type_id(object);
     if (object_type == LMD_TYPE_NULL || object_type == LMD_TYPE_UNDEFINED ||
         object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot convert undefined or null to object");
     }
+    Item exotic_keys = ItemNull;
+    if (js_dispatch_property_op(JS_EXOTIC_OWN_KEYS, object, 0, ItemNull,
+            object, ItemNull, ItemNull, false, &exotic_keys))
+        return js_filter_own_keys_kind(exotic_keys, LMD_TYPE_SYMBOL);
 
     Item object_value = object;
     if (object_type != LMD_TYPE_MAP && !js_is_js_array(object) &&
@@ -9416,20 +9445,12 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
         object_type = get_type_id(object_value);
     }
 
+    object_root.set(object_value);
     Item result_arr = js_array_new(0);
+    result_root.set(result_arr);
 
     if (js_is_proxy(object_value)) {
-        JS_ASSIGN_OR_RETURN(keys, js_reflect_own_keys(object_value));
-        if (get_type_id(keys) != LMD_TYPE_ARRAY) return result_arr;
-        int key_count = js_array_length(keys);
-        for (int i = 0; i < key_count; i++) {
-            Item key = js_elements_get_int(keys, i);
-            Item symbol = ItemNull;
-            if (js_property_key_to_public_symbol(key, &symbol)) {
-                js_array_push(result_arr, symbol);
-            }
-        }
-        return result_arr;
+        return js_filter_own_keys_kind(js_reflect_own_keys(object_value), LMD_TYPE_SYMBOL);
     }
 
     if (js_is_js_array(object_value)) {
@@ -11149,6 +11170,14 @@ extern "C" Item js_object_prevent_extensions(Item obj) {
         }
         return result;
     }
+    // native internal-slot carriers own extensibility through their metadata protocol.
+    Item native_result = ItemNull;
+    if (js_dispatch_property_op(JS_EXOTIC_PREVENT_EXTENSIONS, obj, 0, ItemNull,
+            obj, ItemNull, ItemNull, false, &native_result)) {
+        JS_RETURN_IF_ERROR(native_result);
+        return js_is_truthy(native_result) ? obj :
+            js_throw_type_error("Object.preventExtensions: target rejected the operation");
+    }
     Item host_result = ItemNull;
     if (jube_member_extensibility(obj, true, &host_result)) return host_result;
     // ES6: non-objects return the argument
@@ -11166,6 +11195,9 @@ extern "C" Item js_object_is_extensible(Item obj) {
     if (js_is_proxy(obj)) {
         return js_proxy_trap_is_extensible(obj);
     }
+    Item native_result = ItemNull;
+    if (js_dispatch_property_op(JS_EXOTIC_IS_EXTENSIBLE, obj, 0, ItemNull,
+            obj, ItemNull, ItemNull, false, &native_result)) return native_result;
     Item host_result = ItemNull;
     if (jube_member_extensibility(obj, false, &host_result)) return host_result;
     // ES6: non-objects are not extensible
@@ -12622,6 +12654,16 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
 }
 
 extern "C" Item js_delete_property(Item obj, Item key) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(obj));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(obj)) {
+        RootFrame roots(2);
+        Rooted<Item> owner_root(roots, obj), key_root(roots, key);
+        key_root.set(mvp_lmd_property_key(key_root.get()));
+        // MVP deletes rebuild storage; native tombstones are invisible to its shape reads.
+        return item_is_error(key_root.get()) ? key_root.get() :
+            mvp_lmd_property_with_receiver(owner_root.get(), key_root.get(), ItemNull,
+                LMD_PROP_DELETE, owner_root.get());
+    }
     // TypeError if base is null or undefined (non-object-coercible)
     // But only when the preceding operation did not return an ERROR Item.
     if (obj.item == ITEM_NULL || obj.item == ITEM_JS_UNDEFINED) {
@@ -13495,6 +13537,38 @@ extern "C" Item js_new_AbortController(void) {
     js_globals_set_native_method(controller_root.get(), "abort", js_abort_controller_abort);
 
     return controller_root.get();
+}
+
+static Item js_abort_follow_parent(Item parent, Item controller) {
+    RootFrame roots(4);
+    Rooted<Item> source(roots, parent), target(roots, controller);
+    Rooted<Item> reason(roots, js_get_key_cstr(source.get(), "reason"));
+    Rooted<Item> method(roots, js_new_native_function(js_abort_controller_abort));
+    Item argument = reason.get();
+    return js_call_function(method.get(), target.get(), &argument, 1);
+}
+
+Item js_abort_signal_follow(Item source) {
+    RootFrame roots(6);
+    Rooted<Item> parent(roots, source), controller(roots, js_new_AbortController());
+    Rooted<Item> signal(roots, js_get_key_cstr(controller.get(), "signal"));
+    Rooted<Item> callback(roots, ItemNull), method(roots, ItemNull), event(roots, js_name_item("abort"));
+    if (get_type_id(parent.get()) == LMD_TYPE_NULL || get_type_id(parent.get()) == LMD_TYPE_UNDEFINED)
+        return signal.get();
+    if (!js_object_has_class(parent.get(), JS_CLASS_ABORT_SIGNAL))
+        return js_throw_type_error("Request signal must be an AbortSignal");
+    if (js_is_truthy(js_get_key_cstr(parent.get(), "aborted"))) {
+        JS_RETURN_IF_ERROR(js_abort_follow_parent(parent.get(), controller.get()));
+    } else {
+        // the parent's listener owns the dependent controller through a traced binding.
+        callback.set(js_new_native_function(js_abort_follow_parent));
+        Item held[] = {parent.get(), controller.get()};
+        callback.set(js_bind_function(callback.get(), make_js_undefined(), held, 2));
+        method.set(js_new_native_function(js_abort_signal_addEventListener));
+        Item args[] = {event.get(), callback.get()};
+        JS_RETURN_IF_ERROR(js_call_function(method.get(), parent.get(), args, 2));
+    }
+    return signal.get();
 }
 
 // AbortController.prototype.abort(reason)
@@ -14388,6 +14462,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
     case JS_HOST_GROUP_HEADERS: {
         js_install_headers(global.get());
         js_install_response(global.get());
+        js_install_request(global.get());
         break;
     }
     case JS_HOST_GROUP_PERFORMANCE: {
@@ -17398,6 +17473,14 @@ static Item js_url_record(Item receiver) {
         js_url_field_count, "Illegal URL receiver");
 }
 
+Item js_url_get_component(Item receiver, const char* name) {
+    JS_ASSIGN_OR_RETURN(record, js_url_record(receiver));
+    for (int index = 0; index < js_url_field_count; index++) {
+        if (!strcmp(name, js_url_fields[index].name)) return js_elements_get_int(record, index);
+    }
+    return make_js_undefined();
+}
+
 static Item js_url_field_get(Item callee, Item receiver, Item*, int, uint64_t*) {
     size_t index = js_fn_native((JsFunction*)callee.function)->target.bits;
     JS_ASSIGN_OR_RETURN(record, js_url_record(receiver));
@@ -17644,7 +17727,11 @@ static Item js_readable_stream_make_byob_request(Item stream, Item view) {
 static Item js_readable_stream_reader_read(Item env_item, Item view) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return js_promise_resolve(make_js_undefined());
-    Item stream = env[0];
+    RootFrame roots(7);
+    Rooted<Item> stream_root(roots, env[0]), view_root(roots, view);
+    Rooted<Item> chunks_root(roots, ItemNull), result_root(roots, ItemNull);
+    Rooted<Item> controller_root(roots, ItemNull), method_root(roots, ItemNull), source_root(roots, ItemNull);
+    Item stream = stream_root.get();
     bool is_byob = js_web_stream_item_is_true(env[1]);
 
     if (is_byob && js_is_typed_array(view) && js_typed_array_byte_length(view) == 0) {
@@ -17653,11 +17740,13 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
     }
 
     Item chunks = js_get_key_cstr(stream, "__chunks__");
+    chunks_root.set(chunks);
     int64_t index = 0;
     Item index_item = js_get_key_cstr(stream, "__read_index__");
     if (get_type_id(index_item) == LMD_TYPE_INT) index = it2i(index_item);
 
     Item result = js_new_object();
+    result_root.set(result);
     int64_t len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
     if (index < len) {
         js_set_key_cstr(result, "value", js_elements_get_int(chunks, index));
@@ -17665,18 +17754,22 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
         js_set_key_cstr(stream, "__read_index__", (Item){.item = i2it(index + 1)});
     } else {
         Item pull_fn = js_get_key_cstr(stream, "__pull__");
+        method_root.set(pull_fn);
         if (js_is_callable(pull_fn) &&
             !js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
-            Item* controller_env = js_alloc_env2(stream, view);
             Item controller = js_new_object();
-            js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1,
-                                           controller_env, 2));
-            js_set_key_cstr(controller, "close", js_new_native_closure(js_readable_stream_controller_close, 0,
-                                           controller_env, 2));
+            controller_root.set(controller);
+            Item* controller_env = js_alloc_env2(stream, view);
+            // publish a closure owner before any later allocation can collect its environment.
+            source_root.set(js_new_native_closure(js_readable_stream_controller_enqueue, 1, controller_env, 2));
+            js_set_key_cstr(controller, "enqueue", source_root.get());
+            source_root.set(js_new_native_closure(js_readable_stream_controller_close, 0, controller_env, 2));
+            js_set_key_cstr(controller, "close", source_root.get());
             js_set_key_cstr(controller, "byobRequest", js_readable_stream_make_byob_request(stream, view));
             JS_ASSIGN_OR_RETURN(pull_result, js_call_function(pull_fn,
                 js_get_key_cstr(stream, "__source__"), &controller, 1));
             chunks = js_get_key_cstr(stream, "__chunks__");
+            chunks_root.set(chunks);
             len = get_type_id(chunks) == LMD_TYPE_ARRAY ? js_array_length(chunks) : 0;
             if (index < len) {
                 js_set_key_cstr(result, "value", js_elements_get_int(chunks, index));
@@ -17696,7 +17789,9 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
 }
 
 static Item js_readable_stream_get_reader_stub(Item options) {
-    Item stream = js_get_this();
+    RootFrame roots(3);
+    Rooted<Item> stream_root(roots, js_get_this()), method_root(roots, ItemNull), reader_root(roots, ItemNull);
+    Item stream = stream_root.get();
     bool byob = false;
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_ELEMENT) {
         Item mode = js_get_key_cstr(options, "mode");
@@ -17706,8 +17801,10 @@ static Item js_readable_stream_get_reader_stub(Item options) {
         }
     }
     Item* env = js_alloc_env2(stream, (Item){.item = b2it(byob)});
+    method_root.set(js_new_native_closure(js_readable_stream_reader_read, 1, env, 2));
     Item reader = js_new_object();
-    js_set_key_cstr(reader, "read", js_new_native_closure(js_readable_stream_reader_read, 1, env, 2));
+    reader_root.set(reader);
+    js_set_key_cstr(reader, "read", method_root.get());
     return reader;
 }
 

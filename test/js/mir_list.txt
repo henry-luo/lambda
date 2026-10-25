@@ -5,11 +5,14 @@
 collection_gc_retention
 dynamic_string_no_name_id_exhaustion
 for_destructure_closure
+function_own_keys_foreign
 generator_shadowed_loop_yield
 lib_fast_diff
 nested_reused_scope_env
 number_methods
+number_fractional_radix
 opt_p5_modvar
+promise_expando
 sparse_basic
 sparse_density_conversion
 stack_api_scalar_homes
@@ -17,5 +20,7 @@ tco
 tune6_intrinsic_reflect_define
 typed_arrays
 type_infer_ip6
+url_search_params_constructor
 regression_mir_native_return_completion
+dom_custom_element_lifecycle
 jsi35_eval_mir_caller

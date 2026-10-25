@@ -1,0 +1,18 @@
+constructor metadata and branding: pass
+headers and inferred content type: pass
+clone owns headers and body: pass
+text body consumption: pass
+consumed body rejection: pass
+consumed clone rejection: pass
+binary body snapshot: pass
+empty GET body: pass
+body stream identity and null body: pass
+body stream consumes shared bytes: pass
+dependent abort signals: pass
+already-aborted source signal: pass
+request input transfers body: pass
+request body override preserves metadata: pass
+method body signal and URL validation: pass
+prototype accessors validate receivers: pass
+Request subclass prototype: pass
+REQUEST_BODY_DONE

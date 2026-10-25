@@ -1,0 +1,17 @@
+React Router 8.5.0
+route matching utilities: pass
+nested routes params search and outlet context: pass
+NavLink active semantics: pass
+canceled link navigation: pass
+Link navigation: pass
+search parameter update: pass
+replace navigation and location state: pass
+history back after replace: pass
+wildcard route: pass
+data router async loader and Request: pass
+loader redirect: pass
+action submission and action data: pass
+route error boundary and Response: pass
+superseded loader cancellation: pass
+router disposal: pass
+REACT_ROUTER_DONE

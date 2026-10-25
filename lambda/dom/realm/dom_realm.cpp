@@ -16,8 +16,8 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
 
 Item dom_realm_get(Item o, Item k) { return js_get_key_default(o, k); }
 Item dom_realm_response_from_bytes(const void* bytes, int length, Item headers,
-        int status, Item status_text, Item url) {
-    return js_response_from_bytes(bytes, length, headers, status, status_text, url);
+    int status, Item status_text, Item url, bool redirected) {
+    return js_response_from_bytes(bytes, length, headers, status, status_text, url, redirected);
 }
 Item dom_realm_get_cstr(Item o, const char* k) { return js_get_key_cstr(o, k); }
 Item dom_realm_set(Item o, Item k, Item v) { return js_set_key_default(o, k, v); }

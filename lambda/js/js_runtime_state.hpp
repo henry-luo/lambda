@@ -220,6 +220,7 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_HEADERS_CONSTRUCTOR = JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE +
         JS_CLASS__COUNT,
     JS_REALM_SLOT_RESPONSE_CONSTRUCTOR,
+    JS_REALM_SLOT_REQUEST_CONSTRUCTOR,
     JS_REALM_SLOT_GENERATOR_FUNCTION_CONSTRUCTOR,
     JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_CONSTRUCTOR,
     JS_REALM_SLOT_ASYNC_FUNCTION_CONSTRUCTOR,
@@ -308,6 +309,9 @@ struct JsDomState : RootVector {
     Item media_play_requests = {};
     Item media_poll_function = {};
     Item media_poll_timer = {};
+    Item custom_element_states = {};
+    Item custom_element_construction = {};
+    Item custom_element_reactions = {};
     uint64_t web_animation_sequence = 0;
     bool media_poll_running = false;
     bool design_mode = false;

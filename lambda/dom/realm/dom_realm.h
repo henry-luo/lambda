@@ -92,7 +92,7 @@ Item dom_realm_promise_reject(Item reason);
 Item dom_realm_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 Item dom_realm_promise_all(Item iterable);
 Item dom_realm_response_from_bytes(const void* bytes, int length, Item headers,
-    int status, Item status_text, Item url);
+    int status, Item status_text, Item url, bool redirected = false);
 void dom_realm_microtask_flush(void);
 Item dom_realm_structured_clone(Item value);
 Item dom_realm_queue_task(DomRealmFn1 callback, Item value);

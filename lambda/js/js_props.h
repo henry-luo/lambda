@@ -88,6 +88,8 @@ typedef enum JsPropertyOperation {
     JS_EXOTIC_HAS_OWN = 5,
     JS_EXOTIC_GET_OWN_PROPERTY_DESCRIPTOR = 6,
     JS_EXOTIC_OWN_KEYS = 7,
+    JS_EXOTIC_IS_EXTENSIBLE = 8,
+    JS_EXOTIC_PREVENT_EXTENSIONS = 9,
 } JsPropertyOperation;
 
 bool js_dispatch_property_op(JsPropertyOperation operation,

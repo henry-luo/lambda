@@ -196,6 +196,7 @@ typedef struct DocumentScriptPhaseTiming {
     uint64_t cache_instantiations;
 } DocumentScriptPhaseTiming;
 
+Element* get_html_root_element(Input* input);
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
 void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc, Pool* pool,
                                        Url* base_url, DocumentScriptPhaseTiming* timing);

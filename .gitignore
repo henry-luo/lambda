@@ -64,6 +64,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
+!test/js/react/package-lock.json
+!test/js/hotwire/package-lock.json
 !test/lambda/graph/mermaid/reference/package-lock.json
 !test/ui/dtna_reference/app/package-lock.json
 yarn.lock
@@ -185,3 +187,7 @@ analysis-results*/
 # Kept so a past Result_N can be re-measured without rebuilding; see
 # test/benchmark/exe/MANIFEST.md.
 test/benchmark/exe/
+
+# Prepared Chinese IME dictionary packs (vibe/Lambda_Pkg_IME_Chinese.md §6).
+# Not committed until the user decides how the data is distributed (IME-O7).
+lmd/package/ime/chinese/data/

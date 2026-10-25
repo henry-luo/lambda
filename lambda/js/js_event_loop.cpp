@@ -1940,8 +1940,25 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             js_animation_frame_drain(64);
         }
 
-        // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
-        result = lambda_uv_run();
+        if (dom_get_ui_context() && !animation_frame_drain_active) {
+            // I/O continuations can enqueue rAF after the initial frame drain.
+            // Give each native turn a rendering opportunity before blocking on
+            // a later timer, otherwise fetched HTML waits for timeout callbacks.
+            do {
+                result = uv_run(loop, UV_RUN_NOWAIT);
+                js_event_loop_render_checkpoint();
+                if (js_animation_frame_has_pending()) {
+                    js_animation_frame_drain(64);
+                    continue;
+                }
+                if (!result || watchdog_state.fired) break;
+                result = uv_run(loop, UV_RUN_ONCE);
+                js_event_loop_render_checkpoint();
+                if (js_animation_frame_has_pending()) js_animation_frame_drain(64);
+            } while (!watchdog_state.fired && (result || js_animation_frame_has_pending()));
+        } else {
+            result = lambda_uv_run();
+        }
         js_event_loop_render_checkpoint();
 
         int animation_frames = 0;

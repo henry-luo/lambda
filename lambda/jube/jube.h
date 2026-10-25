@@ -580,6 +580,8 @@ struct JubeHostScriptAPI {
     // Intrinsic identities must survive replacement of script-visible globals.
     Item (*well_known_symbol)(const char* name);
     Item (*iterator_prototype)(void);
+    // Shared WebIDL sequence-of-string-pairs / record conversion, before host validation.
+    Item (*string_pairs_from_init)(Item source, bool byte_strings);
 };
 
 // ---------------------------------------------------------------------------

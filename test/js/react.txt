@@ -1,0 +1,21 @@
+React 19.3.1
+mount/context/effects: pass
+ref identity: pass
+delegated click: pass
+style mutation: pass
+batched functional updates: pass
+keyed identity: pass
+portal propagation: pass
+native input accessors: pass
+controlled text: pass
+controlled checkbox: pass
+controlled radio: pass
+initial select/textarea: pass
+controlled select/textarea: pass
+scheduled updates: pass
+unmount cleanup: pass
+hydration identity/update: pass
+suspense fallback: pass
+lazy resolution: pass
+class error boundary: pass
+REACT_DONE

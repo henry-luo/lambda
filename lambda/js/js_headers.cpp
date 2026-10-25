@@ -117,7 +117,16 @@ static Item header_update(Item entries, Item name, Item value, HeaderOperation o
     return result.get();
 }
 
-static Item header_convert_sequence(Item iterable) {
+static Item webidl_convert_string(Item input, bool byte_strings) {
+    if (byte_strings) return js_fetch_byte_string(input);
+    RootFrame roots(1);
+    Rooted<Item> text(roots, js_to_string(input));
+    JS_RETURN_IF_ERROR(text.get());
+    return js_string_text_with_ops(text.get(), JS_STRING_INTRINSIC_TO_WELL_FORMED,
+        make_js_undefined(), nullptr);
+}
+
+static Item webidl_convert_string_sequence(Item iterable, bool byte_strings) {
     RootFrame roots(4);
     Rooted<Item> source(roots, iterable), iterator(roots, js_get_iterator(source.get()));
     JS_RETURN_IF_ERROR(iterator.get());
@@ -126,7 +135,7 @@ static Item header_convert_sequence(Item iterable) {
         value.set(js_iterator_step(iterator.get()));
         JS_RETURN_IF_ERROR(value.get());
         if (value.get().item == JS_ITER_DONE_SENTINEL) break;
-        value.set(js_fetch_byte_string(value.get()));
+        value.set(webidl_convert_string(value.get(), byte_strings));
         // WebIDL sequence conversion propagates errors without IteratorClose.
         JS_RETURN_IF_ERROR(value.get());
         JS_RETURN_IF_ERROR(js_array_push(result.get(), value.get()));
@@ -165,11 +174,12 @@ static bool header_request_forbidden(Item name, Item value) {
     return false;
 }
 
-Item js_headers_list_from_init(Item init, bool request_guard) {
+Item js_webidl_string_pairs_from_init(Item init, bool byte_strings) {
     RootFrame roots(9);
-    Rooted<Item> source(roots, init), raw(roots, js_array_new(0)), list(roots, ItemNull);
+    Rooted<Item> source(roots, init), raw(roots, js_array_new(0));
     Rooted<Item> method(roots, ItemNull), iterator(roots, ItemNull), pair(roots, ItemNull);
     Rooted<Item> key(roots, ItemNull), value(roots, ItemNull), keys(roots, ItemNull);
+    Rooted<Item> property(roots, ItemNull);
     if (source.get().item == ITEM_JS_UNDEFINED) return raw.get();
     if (!js_is_object_value(source.get())) return js_throw_type_error("Invalid HeadersInit");
     method.set(js_get_key_default(source.get(), js_well_known_symbol_key(1)));
@@ -186,7 +196,7 @@ Item js_headers_list_from_init(Item init, bool request_guard) {
             if (pair.get().item == JS_ITER_DONE_SENTINEL) break;
             if (!js_is_object_value(pair.get())) {
                 value.set(js_throw_type_error("Header entry is not a sequence"));
-            } else value.set(header_convert_sequence(pair.get()));
+            } else value.set(webidl_convert_string_sequence(pair.get(), byte_strings));
             JS_RETURN_IF_ERROR(value.get());
             // Convert the entire WebIDL sequence before validating entry size.
             JS_RETURN_IF_ERROR(js_array_push(raw.get(), value.get()));
@@ -200,17 +210,27 @@ Item js_headers_list_from_init(Item init, bool request_guard) {
             JS_RETURN_IF_ERROR(pair.get());
             if (get_type_id(pair.get()) != LMD_TYPE_MAP ||
                     !js_is_truthy(js_get_key_default(pair.get(), js_name_item("enumerable")))) continue;
-            key.set(js_fetch_byte_string(key.get()));
+            property.set(key.get());
+            key.set(webidl_convert_string(key.get(), byte_strings));
             JS_RETURN_IF_ERROR(key.get());
-            value.set(js_get_key_default(source.get(), key.get()));
+            value.set(js_get_key_default(source.get(), property.get()));
             JS_RETURN_IF_ERROR(value.get());
-            value.set(js_fetch_byte_string(value.get()));
+            value.set(webidl_convert_string(value.get(), byte_strings));
             JS_RETURN_IF_ERROR(value.get());
             pair.set(header_pair(key.get(), value.get()));
             JS_RETURN_IF_ERROR(pair.get());
             JS_RETURN_IF_ERROR(js_array_push(raw.get(), pair.get()));
         }
     }
+    return raw.get();
+}
+
+Item js_headers_list_from_init(Item init, bool request_guard) {
+    RootFrame roots(5);
+    Rooted<Item> raw(roots, js_webidl_string_pairs_from_init(init, true));
+    JS_RETURN_IF_ERROR(raw.get());
+    Rooted<Item> list(roots, ItemNull), pair(roots, ItemNull);
+    Rooted<Item> key(roots, ItemNull), value(roots, ItemNull);
     list.set(js_array_new(0));
     // WebIDL performs all string conversions before Fetch validates/fills.
     for (int64_t i = 0, count = js_array_length(raw.get()); i < count; i++) {

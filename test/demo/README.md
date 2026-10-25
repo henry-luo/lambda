@@ -14,6 +14,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | Name | Entry point | Guide |
 | --- | --- | --- |
 | `tetris` | `tetris/tetris.ls` | [Tetris](tetris/TETRIS.md) |
+| `marble-drop` | `marble-drop/marble-drop.ls` | [Marble Drop](marble-drop/README.md) |
 | `sentence-game` | `sentence-game/sentence-game.ls` | [Build Sentence](sentence-game/README.md) |
 | `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
 | `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
