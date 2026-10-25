@@ -499,6 +499,7 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_EQ(result.exit_code, strcmp(name, "unknown-demo") == 0 ? 1 : 0) << output;
         EXPECT_NE(strstr(output, "Usage: lambda demo [name] [view options]"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/tetris/tetris.ls"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/marble-drop/marble-drop.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/sentence-game/sentence-game.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/scene3d/index.html"), nullptr) << output;
         EXPECT_EQ(strstr(output, "asset-gallery"), nullptr) << output;
@@ -521,6 +522,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         // with no name, `lambda demo` opens the demo index (test/demo/index.ls).
         {nullptr, "#demo-index .tile[data-demo=doom]"},
         {"tetris", "#tetris[data-mode=ready]"},
+        {"marble-drop", "#marble-drop[data-level='1']"},
         {"superlambda", "#superlambda[data-mode=ready]"},
         {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},

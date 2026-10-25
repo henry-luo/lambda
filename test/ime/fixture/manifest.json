@@ -1,0 +1,18 @@
+{
+  "format": "lambda.ime.chinese.pack",
+  "format_version": 1,
+  "profile": "zh-Hans",
+  "fixture": "Repository-authored synthetic candidates (MIT); not an upstream dictionary",
+  "files": {
+    "lexicon": {
+      "bytes": 586,
+      "lines": 29,
+      "postings": 35
+    },
+    "abbrev": {
+      "bytes": 319,
+      "lines": 9,
+      "postings": 12
+    }
+  }
+}
