@@ -1,0 +1,11 @@
+const form = document.createElement('form');
+form.action = '/submit';
+form.method = 'POST';
+form.enctype = 'text/plain';
+form.target = 'result';
+console.log('form submission attributes: ' + (form.getAttribute('action') === '/submit' && form.getAttribute('method') === 'POST' && form.getAttribute('enctype') === 'text/plain' && form.getAttribute('target') === 'result'));
+console.log('form method normalization: ' + (form.method === 'post'));
+form.encoding = 'application/x-www-form-urlencoded';
+console.log('form encoding aliases enctype: ' + (form.enctype === 'application/x-www-form-urlencoded' && form.getAttribute('enctype') === 'application/x-www-form-urlencoded'));
+form.setAttribute('method', 'invalid');
+console.log('invalid form method defaults to get: ' + (form.method === 'get'));

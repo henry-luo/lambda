@@ -33,6 +33,12 @@
 #include <stdlib.h>
 #include <limits.h>
 
+// DOM-only targets omit the Mark service. The strong DOM waist implementation
+// also removes backing children, so later appends cannot resurrect deleted nodes.
+extern "C" __attribute__((weak)) bool dom_remove_backed_child(DomElement* parent, DomNode* child) {
+    return parent && child && parent->remove_child(child);
+}
+
 // Selection mutations are noted in StateStore so the DOM-facing selection,
 // shadow EditingSelection, projection caches, and selectionchange
 // coalescing all share one mutation sequence. Weak defaults let DOM-only
@@ -1622,11 +1628,11 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
                 if (clone && fragment) (static_cast<DomNode*>(fragment))->append_child(clone);
             } else if (op == ROP_EXTRACT) {
                 dom_range_pre_remove(r->state, c);
-                parent->remove_child(c);
+                dom_remove_backed_child(parent, c);
                 if (fragment) (static_cast<DomNode*>(fragment))->append_child(c);
             } else {
                 dom_range_pre_remove(r->state, c);
-                parent->remove_child(c);
+                dom_remove_backed_child(parent, c);
             }
         }
         // Process last partial.

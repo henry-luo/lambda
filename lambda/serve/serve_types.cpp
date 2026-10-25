@@ -114,6 +114,7 @@ const char* http_status_string(int status_code) {
         case 206: return "Partial Content";
         case 301: return "Moved Permanently";
         case 302: return "Found";
+        case 303: return "See Other";
         case 304: return "Not Modified";
         case 307: return "Temporary Redirect";
         case 308: return "Permanent Redirect";

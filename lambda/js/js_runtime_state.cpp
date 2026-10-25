@@ -996,7 +996,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     if (!state || !visit) return;
     visit(&state->clipboard, &state->clipboard.blob_prototype, 8,
         "clipboard prototypes and drag session", data);
-    visit(&state->dom, &state->dom.implementation, 9,
+    visit(&state->dom, &state->dom.implementation, 12,
         "DOM singleton wrappers", data);
     visit(&state->performance, &state->performance.object, 10,
         "Performance timing buffers and interfaces", data);

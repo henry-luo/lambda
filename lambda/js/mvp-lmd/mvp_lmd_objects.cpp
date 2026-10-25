@@ -553,6 +553,22 @@ extern "C" Item mvp_lmd_private_element(Item owner, Item key, Item input, int64_
     Rooted<Item> object(roots, owner), name(roots, key), storage(roots, owner);
     Rooted<Item> value(roots, lambda_item_adopt_scalar_home(input, &home));
     bool add = operation == LMD_PRIVATE_ADD || operation == LMD_PRIVATE_METHOD;
+    if (is_virtual_container_type_id(get_type_id(object.get())) && js_host_object_type(object.get())) {
+        // native subclass instances own fields through their declared property
+        // hooks; their physical carrier is not an MVP Map allocation.
+        Item present = js_has_own_property(object.get(), name.get());
+        if (item_is_error(present)) return present;
+        if (operation == LMD_PRIVATE_HAS) return present;
+        if (add == (present.item == ITEM_TRUE)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        if (operation == LMD_PRIVATE_GET) return js_get_key_default(object.get(), name.get());
+        if (operation == LMD_PRIVATE_SET)
+            return js_private_property_set(object.get(), name.get(), value.get(), 1);
+        Item result = js_private_field_define(object.get(), name.get(), value.get());
+        if (item_is_error(result) || operation != LMD_PRIVATE_METHOD) return result;
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_WRITABLE;
+        return mvp_lmd_define_own_property(object.get(), name.get(), &descriptor);
+    }
     if (mvp_lmd_is_proxy(object.get())) {
         storage.set(js_proxy_private_slots(object.get(), add, []() {
             return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0);

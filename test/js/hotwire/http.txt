@@ -1,0 +1,20 @@
+Hotwire HTTP 8.0.23
+lambda server responds: pass
+frame fetch and matching extraction: pass
+stimulus connects fetched html: pass
+frame completes loading: pass
+frame link navigation: pass
+form receives turbo stream response: pass
+stimulus connects streamed html: pass
+form submitter restored: pass
+drive replaces body and title: pass
+drive updates url and history: pass
+stimulus survives drive visit: pass
+post follows 303 redirect: pass
+422 renders validation errors: pass
+validation preserves visit url: pass
+server observed frame request headers: pass
+server observed stream accept header: pass
+server parsed submitted form fields: pass
+server observed redirect destination: pass
+HOTWIRE_HTTP_DONE

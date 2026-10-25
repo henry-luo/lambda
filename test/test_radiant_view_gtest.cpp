@@ -1388,15 +1388,23 @@ TEST(RadiantViewTest, WindowScrollOnlyEmitsForPositionChanges) {
     FILE* page_file = fopen(page, "wb");
     ASSERT_NE(nullptr, page_file);
     const char* document =
-        "<!doctype html><script>"
+        "<!doctype html><style>body{height:2000px}</style><body><script>"
         "var scroll_events = 0;"
         "window.addEventListener('scroll', function(){ scroll_events++; });"
         "window.scrollTo(0, 0);"
         "if (scroll_events !== 0) throw Error('no-op scroll dispatched an event');"
         "window.scrollTo({left: 0, top: 12});"
-        "if (scroll_events !== 1) throw Error('position-changing scroll event count');"
+        // CSSOM View queues/coalesces scroll events at the rendering update.
+        "if (scroll_events !== 0) throw Error('scroll event dispatched synchronously');"
         "window.scroll(0, 12);"
+        "if (scroll_events !== 0) throw Error('aliased scroll dispatched synchronously');"
+        "requestAnimationFrame(function(){"
+        "if (scroll_events !== 1) throw Error('position-changing scroll event count');"
+        "window.scroll(0,12);"
+        "requestAnimationFrame(function(){"
         "if (scroll_events !== 1) throw Error('aliased no-op scroll dispatched an event');"
+        "console.log('WINDOW_SCROLL_EVENTS_DONE');"
+        "});});"
         "</script>";
     ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
     ASSERT_EQ(0, fclose(page_file));
@@ -1409,6 +1417,8 @@ TEST(RadiantViewTest, WindowScrollOnlyEmitsForPositionChanges) {
     ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
     EXPECT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_NE(nullptr, strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "",
+        "WINDOW_SCROLL_EVENTS_DONE"));
     shell_result_free(&shell_result);
     EXPECT_FALSE(test_radiant_view_file_contains(view_log,
         "execute_document_scripts: post-dom exception"));

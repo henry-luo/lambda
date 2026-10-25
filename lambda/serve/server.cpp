@@ -114,8 +114,8 @@ void server_destroy(Server *server) {
 
 int server_start(Server *server, int port) {
     if (!server) return -1;
-    if (port <= 0) port = server->config.port;
-    if (port <= 0) port = 3000;
+    if (port < 0) port = server->config.port;
+    if (port < 0 || port > 65535) return -1;
     server->config.port = port;
 
     int r = uv_tcp_init(server->loop, &server->http_handle);
@@ -143,7 +143,12 @@ int server_start(Server *server, int port) {
     }
 
     server->http_listening = 1;
-    log_info("server listening on http://%s:%d", bind, port);
+    // port zero lets the OS reserve a unique listener without a probe/bind race.
+    int address_length = sizeof(addr);
+    r = uv_tcp_getsockname(&server->http_handle, (struct sockaddr*)&addr, &address_length);
+    if (r != 0) { server_stop(server); return -1; }
+    server->config.port = ntohs(addr.sin_port);
+    log_info("server listening on http://%s:%d", bind, server->config.port);
     return 0;
 }
 
