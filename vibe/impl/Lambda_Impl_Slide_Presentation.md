@@ -1,11 +1,67 @@
 # Lambda Slide Presentation — Implementation
 
-> **Status:** milestones 13.1–13.5 met on the measured decks, 2026-10-07 (see the acceptance round); not yet merged.
+> **Status:** presenter milestones 13.1–13.5 met on the measured decks, 2026-10-07; core slide editor delivered 2026-10-25 (see below).
 > **Authorized scope:** implement [the package design](../Lambda_Pkg_Slides.md);
 > no PPTX import/export.
 > **Contracts:** D7.2.4/D7.5.3 package and host boundaries; S12.1.1v2/S12.1.3
 > pure transformations and procedural event handlers; S2.6.3 element splicing;
 > D4.5.1v4/D5.3.3 ownership and precise roots; D7.2.2 boxed import entries; D2.1.3 tagged string leaves.
+
+## Slide editor — 2026-10-25
+
+The demo entry is now `test/demo/slides/slides.ls`; `lambda demo slides` opens an
+authoring application. Northstar and the three smaller decks remain independent
+`.slides` samples and retain their direct presenter entry points. The editor
+reuses the slide compiler, baseline visual sampler, HTML renderer and live player
+under D7.2.4/D7.5.3; immutable document edits follow S1.4/S12.1.1v2 and procedural
+DOM handlers follow S12.1.3. No semantics or host API ruling changes are needed.
+
+The finite authoring milestone covers:
+
+1. Select slides and nested objects; edit plain text on the canvas, rich content
+   as Mark, appearance, geometry and notes; move and resize with one undo step
+   per gesture. A stationary pointer event only selects.
+2. Insert, copy, duplicate, delete and reorder objects/slides; maintain unique
+   object IDs and remove deleted targets' effects and empty cue wrappers.
+3. Choose themes/layouts, entrance builds and transitions; preserve explicit
+   authored overrides. Editing composed content detaches the affected slide
+   from its master while retaining other slides and shared definitions.
+4. Open/save `.slides`, keep deck-relative image resources across Save As,
+   export HTML handouts, and present the in-memory edited deck without a save.
+5. Launch the editor through the demo catalog and keep standalone sample
+   presentation behavior intact.
+
+`mod_model.ls` owns validated value transformations and bounded undo history;
+`mod_view.ls` owns editor markup; `mod_app.ls` publishes retained regions and
+adapts commands; `slides.ls` owns event routing and the independent presenter
+session. Existing source helpers supply element construction, slide compilation,
+sampling, geometry and minimal-write DOM publication. The photo album's image
+source resolver moved to `test/demo/mod_resources.ls` so both embedded hosts use
+the same resolution policy. Authoring drafts never rewrite the sample files.
+
+Verification budget: the three discovered editor goldens and neighboring slide /
+photo-album goldens in interpreter and JIT modes; focused editor UI replays for
+rendered editing/gestures/history, inline editing, files, samples and presenting;
+the existing standalone presenter replays; one focused GC/poison check; a CLI
+build and the demo-catalog native launch check. No layout/runtime/package engine
+source changes or performance claims are part of this milestone. Broad engine
+baselines are reserved for a change in those owning stages.
+
+Delivered scope excludes PPTX interchange, multi-object selection, a visual
+master editor, an animation timeline and autosave. Rich HTML/SVG is preserved
+and edited as Mark rather than through a rich text toolbar. These are subsequent
+authoring milestones, not presenter regressions.
+
+Acceptance evidence: the CLI and native catalog runner build; the catalog launch
+case passes with the editor selector. The two editor UI fixtures pass 83
+assertions in JIT mode, including native field drafts, visible object paint and
+geometry, inline commit/cancel, current-slide presentation and Escape ownership.
+The standalone Northstar and playback-control replays pass 38 and 23 assertions.
+Neighboring slide/photo-album goldens pass in interpreter and JIT modes, including
+the three editor goldens for value/history/composition and transformed resize
+anchor invariance. A focused every-allocation GC plus freed-memory poisoning
+replay passes edited text, undo/redo and presenter teardown. Visual reviews of
+the starter and Northstar editor are under `temp/slides/`; whitespace checks pass.
 
 ## Presenter tools, themes and composition — 2026-10-07
 

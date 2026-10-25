@@ -7,6 +7,13 @@ live templates perform DOM writes and request frames under S12.1.1v2/S12.1.3.
 
 ## Quick start
 
+For interactive authoring, run `./lambda.exe demo slides`. The editor supports
+slide and object editing, undo/redo, `.slides` open/save, HTML handout export,
+speaker notes and presentation of the current deck. Choose Northstar and the
+other examples from **Samples**. See the [editor guide](../test/demo/slides/README.md)
+for controls and the current feature scope. It uses the existing package and
+DOM boundary under D7.2.4/D7.5.3 and procedural handlers under S12.1.3.
+
 A deck is a `.slides` file: Mark data (D2.9.3) whose root is `<presentation>`.
 
 ```mark

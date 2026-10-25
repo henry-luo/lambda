@@ -2472,7 +2472,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"chart", "test/demo/chart/index.html"},
     {"cityscape", "test/demo/cityscape/cityscape.ls"},
     {"photo-album", "test/demo/photo-album/photo-album.ls"},
-    {"slides", "test/demo/slides/northstar.slides"},
+    {"slides", "test/demo/slides/slides.ls"},
     {"readability", "test/demo/readability/readability.ls"},
     {"archive", "test/demo/archive/archive.ls"},
     {"mail", "test/demo/mail/mail.ls"},
