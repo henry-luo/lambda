@@ -1,0 +1,9 @@
+checked accessor: pass
+receiver validation: pass
+checkbox canceled preactivation: pass
+dynamic checkbox commit: pass
+radio canceled preactivation: pass
+dynamic radio commit: pass
+radio changed-group cancellation: pass
+nested cancellation snapshots: pass
+CLICK_ACTIVATION_DONE

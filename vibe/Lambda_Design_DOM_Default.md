@@ -59,10 +59,12 @@ Dispatch order for a discrete event on a target element (ES5, ES22–ES29):
 
 ```
 [N] hit test → one native event record → target path
+[L] behavior-only clickpreactivate → checkedness + rooted completion
 [N] AUTHOR TIER — one propagation cascade:
       JS capture → JS target/bubble → Lambda template at that node
       │  either participant may cancel: preventDefault / 'prevent-default'
       ▼
+[L] activation completion → canceled rollback or input/change notifications
 [N] record.default_prevented? → settle only
 [L] UA TIER — at most one behavior Lambda call per discrete event:
       walk target→root; first element whose behavior entry declares this
@@ -506,7 +508,7 @@ Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/dom/*.ls`, `lambda
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
 | `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | for an ordinary content hit, after author cancellation and element-local press behavior settle, behavior-only `mousepress` reaches `mouse.ls`; it chooses mouse focus plus `select` / `extend` / word / line / all. Native resolves live hit/caret geometry, owns selection and drag state, emits selection events, and paints. A scrollbar hit instead reaches `scrollbarpress` (ES33), and never changes document focus or selection. Link navigation never runs here; only an uncancelled `click` may reach package-owned activation. A slider's ordinary handler may claim its press and capture the pointer without preventing this stage (F20) | ✅ dispatch · ✅ default (ES32 / ES33) |
-| `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | trusted and synthetic entries reach one package activation stage for checkbox / radio / `<select>` open-close and popover. Cancellation settles before the package write, so no cross-realm checkedness restore is needed. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted | 🟡 — per element, see §3.9 |
+| `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | trusted and synthetic entries share package-owned checkbox/radio pre-activation and cancellation snapshots (ES26). Listeners observe pre-activated checkedness; canceled clicks restore it without input/change. Other click defaults, including select/popover, remain after author dispatch. Label association lookup stays native (`for=` is not an ancestor walk) | 🟡 — per element, see §3.9 |
 | dropdown option click | no spec event — the popup overlay is not DOM | — | native geometry resolves the row; behavior-only **`optioncommit`** carries the index; `form.ls` commits and closes (F2c). One commit path shared by pointer, Enter, and the test harness | ✅ |
 | open `<select>` popup outside release | no spec event — the popup overlay is not DOM | dismiss the open picker | native verifies that the release misses both anchor and popup; behavior-only **`dropdowndismiss`** lets the owning `<select>` in `form.ls` close it (ES34) | ✅ |
 | `dblclick` | UI Events; cancelable | UA convention: word selection | `mouse.ls` maps the final press's click count to `selectWord`; triple-or-higher maps to line/all selection. The final primary click still emits `dblclick` (detail 2) to `ondblclick` / EventTarget listeners without a second selection action | ✅ (ES32) |
@@ -682,10 +684,21 @@ resolution, canonical state storage, and form/link execution mechanics;
 submit/reset decisions, and popover policy through waist primitives (S12.1.3);
 native keeps canonical state at the S9.1.4/D4.5.1v3 seam.
 
-There is no checkedness diff, no JS-side pre-activation, and no cancellation
-restore across realms: a canceled click reaches no package write, so listeners
-observe the pre-default state. The one author/UA pipeline is therefore the
-ES10 owner for both trusted and synthetic click activation (ES25/ES26).
+There is no cross-realm checkedness diff or JS-specific activation policy.
+The behavior-only `clickpreactivate` hook performs HTML's legacy pre-activation
+and returns a package procedure capturing the original checkbox state or radio
+peer. Native dispatch precisely roots that completion through author listeners
+and invokes it with the cancellation result (**D5.3.3**, ES26). The package
+either restores its snapshot or emits input/change; the current click record
+marks activation handled so the normal UA tier cannot toggle a second time.
+Completion retains the normal behavior dispatch/emit context, keeping nested
+input/change on the same reactive pipeline before author reconciliation.
+Behavior matching uses the live DOM element's attributes, rather than its
+original render-source value, so dynamically created or retargeted controls
+receive the same policy. The one author/UA pipeline remains the ES10 owner for
+trusted and synthetic activation. This corrects F19's late checkedness timing
+for React's delegated change tracking; see
+[implementation record](impl/Lambda_Impl_React.md).
 `test/ui/dom_synthetic_activation.json` and
 `test/ui/js_dispatch_radio_group.json` prove load-time `click()`, radio
 selection, cancellation timing, exclusivity, and popover visibility. **ESO49

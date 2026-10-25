@@ -173,10 +173,13 @@ radio exclusivity, cancellation, and popover activation.
 
 Before F19, the native pipeline decided whether the behavior template might act
 by observing whether the JS realm changed checkedness (`js_did_activation`) and
-by restoring state after a canceled pre-activation. F19 deletes both because
-the UA tier now writes only after cancellation has settled. This removes a
-per-control reconciliation protocol rather than moving it to another seam
-(ES26).
+by restoring state after a canceled pre-activation. F19 deleted that duplicated
+policy. The React compatibility work implements ES26's package-owned capture
+and restore: a behavior-only pre-activation hook returns a precisely rooted
+completion procedure, invoked after author dispatch to commit notifications or
+roll back cancellation. Both native entries use that same package operation;
+no JS/native state diff returns (D5.3.3, S12.1.3). See
+[the implementation record](impl/Lambda_Impl_React.md).
 
 ### 3.5 Ordering asymmetries at the author tier
 

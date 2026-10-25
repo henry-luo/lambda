@@ -2,6 +2,13 @@
 
 Date: June 2026
 
+> **Implementation update, 2026-10-25:** pinned React 19.3.1 browser bundles
+> already execute through the first-party parser and AST/MIR tiers
+> (**D8.1.3v42**). The permanent fixture and shared form/Promise repairs are
+> recorded in [Lambda_Impl_React](../impl/Lambda_Impl_React.md). The UMD-first
+> phases below are the original proposal: React 19 no longer ships UMD, and
+> external JSX transformation/bundling is the implemented first workflow.
+
 ## Goal
 
 Enhance LambdaJS and Radiant so a real React application can run inside the

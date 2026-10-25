@@ -1,0 +1,588 @@
+{
+  "name": "Slides editor: visible edits, gestures, history, slides, themes and presentation",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#thumbnails .thumbnail"
+      },
+      "equals": 2
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.getElementById('paper').getBoundingClientRect();return r.width>300&&r.height>200})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-s0-o1"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-selected",
+      "equals": "s0-o1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-text"
+      },
+      "equals": "Your next big idea"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-text"
+      },
+      "text": "A better story",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#apply-text"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "equals": "A better story"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "equals": "Your next big idea"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "equals": "A better story"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "dx": 40,
+      "dy": 20,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "+document.getElementById('slides-editor').getAttribute('data-x')>80 && parseFloat(document.getElementById('edit-place-s0-o1').style.left)>80"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-x"
+      },
+      "equals": "80"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Insert]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-rect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-selected",
+      "equals": "s0-o3"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 4
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-fill"
+      },
+      "text": "#0057b8",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-kind"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-paint-s0-o3"
+      },
+      "attribute": "fill",
+      "equals": "#0057b8"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#edit-s0-o3"
+      },
+      "min_b": 150,
+      "max_r": 40,
+      "max_g": 120,
+      "search_radius": 3
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "text": "420",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-kind"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "equals": "420"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-place-s0-o3"
+      },
+      "property": "width",
+      "equals": "420px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-width",
+      "equals": "420"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "text": "300",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-kind"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": ".editor-handle"
+      },
+      "dx": 30,
+      "dy": 20,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "+document.getElementById('slides-editor').getAttribute('data-width')>300 && parseFloat(document.getElementById('edit-place-s0-o3').style.width)>300"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Home]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#duplicate"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-slide"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-up"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#duplicate-slide"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete-slide"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Design]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#theme-midnight"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/edited.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "present"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#editor-show .slide-layer"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "b"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-blackout",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "present"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-blackout",
+      "equals": "false"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "edit"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "equals": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"2\"]"
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "f5",
+      "mods_str": "shift"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "2"
+    }
+  ]
+}

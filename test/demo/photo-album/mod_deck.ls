@@ -2,6 +2,7 @@
 // A deck is Mark data with a <presentation> root (SLD1); photo paths are `prefix` + "photos/<file>",
 // so a deck saved in <corpus>/slideshows/ uses prefix "../".
 import L: .mod_library
+import resources: ~~.mod_resources
 
 pub let W = 1280
 pub let H = 720
@@ -139,18 +140,8 @@ pub fn deck(lib, options) {
         *[for (i, s in slides) (let built = slide_for(lib, s, i, options), if (postcard) framed(built) else built)]>
 }
 
-// An embedded player resolves image sources against the album page, not the deck file, so a
-// loaded deck's relative image paths are resolved against the deck's folder first. Iteration
-// uses content(): `for` over an element also yields its attribute values.
-fn resolve_object(o, base) => if (not (o is element)) o
-    else if (name(o) == 'image' and o.src is string) <image *:{*:map(o), src:url_resolve(base, o.src)}>
-    else if (name(o) == 'group') <group *:map(o), *[for (k in content(o)) resolve_object(k, base)]>
-    else o
-fn resolve_child(c, base) => if (not (c is element)) c
-    else if (name(c) == 'slide') <slide *:map(c), *[for (o in content(c)) resolve_object(o, base)]>
-    else if (name(c) == 'master') <master *:map(c), *[for (o in content(c)) resolve_object(o, base)]>
-    else c
-pub fn resolve_sources(deck, base) => <presentation *:map(deck), *[for (c in content(deck)) resolve_child(c, base)]>
+// shared with the slide editor so saved relative resources have one resolution policy.
+pub fn resolve_sources(deck, base) => resources.slide_sources(deck,base)
 
 // file name for a deck title
 pub fn file_name(title) => L.slug(title, "slideshow") ++ ".slides"

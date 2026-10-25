@@ -47,6 +47,23 @@ payload, including readonly getters and normal Event inheritance. This adds the
 script interface, without claiming CSP policy enforcement. The corresponding
 `test/js/` fixtures exercise captured members in AST/MIR and forced-GC runs.
 
+**React compatibility (2026-10-25).** `HTMLInputElement.prototype.checked` and
+`HTMLTextAreaElement.prototype.value` publish their declared native accessors
+before wrapper creation (**D7.4.4**), allowing React's instance value trackers
+to delegate to the original setters. Behavior predicates inspect current DOM
+attributes. Native click dispatch holds a precisely rooted package completion
+across author listeners: checkbox/radio policy performs pre-activation, then
+commits notifications or restores canceled activation (**D5.3.3**, DOM Dispatch
+ES26). Completion retains the behavior dispatch/emit context so nested form
+notifications share the normal reactive event path. Native Promise expandos
+use the shared metadata property protocol in MIR as well as AST; own keys
+retain Symbols and the carrier owns extensibility (**D3.4.7**).
+`test/js/react` supplies the pinned React 19.3.1 production
+fixture, while `test/ui/react_compatibility.json` replays physical counter and
+checkbox updates through an HTML script. This milestone qualifies the tested
+bundled browser path; remaining React/browser scope is listed in the
+[implementation record](../../../vibe/impl/Lambda_Impl_React.md).
+
 **Geometry observer checkpoints (verified 2026-10-21).** Forced layout requests
 one deferred geometry sample per observer realm. Resize/Intersection observers
 compare the settled box after the current script's writes; temporary hide/read/

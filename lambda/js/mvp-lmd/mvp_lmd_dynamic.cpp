@@ -552,8 +552,9 @@ bool mvp_lmd_foreign_property(Item owner, Item key, Item value, Item receiver,
             operation != LMD_FOREIGN_DESCRIPTOR && operation != LMD_FOREIGN_PROJECT &&
             operation != LMD_FOREIGN_GET_PROTOTYPE) return false;
     bool virtual_type = is_virtual_container_type_id(get_type_id(owner));
-    bool host = virtual_type && js_host_object_type(owner);
-    bool data_map = get_type_id(owner) == LMD_TYPE_VMAP && !host && !js_promise_is(owner) &&
+    // native Promise expandos belong to the shared property kernel, not MVP map storage.
+    bool host = virtual_type && (js_host_object_type(owner) || js_promise_is(owner));
+    bool data_map = get_type_id(owner) == LMD_TYPE_VMAP && !host &&
         !js_module_namespace_record(owner);
     if (virtual_type && !host && !data_map) return false;
     *completion = ItemError;

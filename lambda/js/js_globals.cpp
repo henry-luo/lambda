@@ -11149,6 +11149,14 @@ extern "C" Item js_object_prevent_extensions(Item obj) {
         }
         return result;
     }
+    // native internal-slot carriers own extensibility through their metadata protocol.
+    Item native_result = ItemNull;
+    if (js_dispatch_property_op(JS_EXOTIC_PREVENT_EXTENSIONS, obj, 0, ItemNull,
+            obj, ItemNull, ItemNull, false, &native_result)) {
+        JS_RETURN_IF_ERROR(native_result);
+        return js_is_truthy(native_result) ? obj :
+            js_throw_type_error("Object.preventExtensions: target rejected the operation");
+    }
     Item host_result = ItemNull;
     if (jube_member_extensibility(obj, true, &host_result)) return host_result;
     // ES6: non-objects return the argument
@@ -11166,6 +11174,9 @@ extern "C" Item js_object_is_extensible(Item obj) {
     if (js_is_proxy(obj)) {
         return js_proxy_trap_is_extensible(obj);
     }
+    Item native_result = ItemNull;
+    if (js_dispatch_property_op(JS_EXOTIC_IS_EXTENSIBLE, obj, 0, ItemNull,
+            obj, ItemNull, ItemNull, false, &native_result)) return native_result;
     Item host_result = ItemNull;
     if (jube_member_extensibility(obj, false, &host_result)) return host_result;
     // ES6: non-objects are not extensible
@@ -12622,6 +12633,16 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
 }
 
 extern "C" Item js_delete_property(Item obj, Item key) {
+    MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(obj));
+    if (mvp_lmd_program_library() && mvp_lmd_owns_properties(obj)) {
+        RootFrame roots(2);
+        Rooted<Item> owner_root(roots, obj), key_root(roots, key);
+        key_root.set(mvp_lmd_property_key(key_root.get()));
+        // MVP deletes rebuild storage; native tombstones are invisible to its shape reads.
+        return item_is_error(key_root.get()) ? key_root.get() :
+            mvp_lmd_property_with_receiver(owner_root.get(), key_root.get(), ItemNull,
+                LMD_PROP_DELETE, owner_root.get());
+    }
     // TypeError if base is null or undefined (non-object-coercible)
     // But only when the preceding operation did not return an ERROR Item.
     if (obj.item == ITEM_NULL || obj.item == ITEM_JS_UNDEFINED) {

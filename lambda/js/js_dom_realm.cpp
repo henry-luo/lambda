@@ -592,6 +592,11 @@ static bool _input_receiver(Item receiver) {
         jube_iface_type_by_name("input_element", 13);
 }
 
+static bool _textarea_receiver(Item receiver) {
+    return virtual_host_data(receiver) && virtual_host_type(receiver) ==
+        jube_iface_type_by_name("textarea_element", 16);
+}
+
 static bool _element_namespace_receiver(Item receiver, const char* expected) {
     void* element = _element_receiver(receiver) ? dom_unwrap_element(receiver) : nullptr;
     const char* uri = element ? dom_element_namespace_uri(element) : nullptr;
@@ -862,7 +867,9 @@ static void _install_node_interface_members(Item global) {
     static const char* const href_members[] = {"href", NULL};
     static const char* const src_members[] = {"src", NULL};
     static const char* const dataset_members[] = {"dataset", NULL};
-    static const char* const input_members[] = {"value", "validity", NULL};
+    // form libraries capture native accessors before installing instance trackers.
+    static const char* const input_members[] = {"value", "checked", "validity", NULL};
+    static const char* const textarea_members[] = {"value", NULL};
     static const struct {
         const char* interface_name;
         const char* host_name;
@@ -897,6 +904,7 @@ static void _install_node_interface_members(Item global) {
         {"HTMLMediaElement", "html_element", _element_receiver, src_members},
         {"HTMLInputElement", "html_element", _element_receiver, src_members},
         {"HTMLInputElement", "input_element", _input_receiver, input_members},
+        {"HTMLTextAreaElement", "textarea_element", _textarea_receiver, textarea_members},
     };
     RootFrame roots(1);
     Rooted<Item> prototype_root(roots, ItemNull);

@@ -43,30 +43,56 @@ fn attr_int(elem, name, fallback) {
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
 view <input type:'checkbox'> state checked, indeterminate {}
 on init(evt) { aria.reflect(~) }
-on click(evt) {
-    // decline rather than claim: a disabled control has no activation
-    // behavior, so the event falls through as unhandled
-    if (dom.get_state(~, "disabled")) { return 'pass' }
-    dom.set_state(~, "checked", not dom.get_state(~, "checked"))
-    dom.set_state(~, "indeterminate", false)
-    // the control's own state has settled; notify listeners (HTML 4.10.5)
-    // The event spelling, rather than the bare name: `input` and `change` both
-    // bubble and are not cancelable (HTML 4.10.5), which is exactly what the
-    // name form assumes -- so this is the same dispatch, said explicitly, and
-    // it is what gives the event-valued path its coverage in the UI fixtures.
-    dom.dispatch(~, { type: "input", bubbles: true, cancelable: false })
-    dom.dispatch(~, { type: "change", bubbles: true, cancelable: false })
-}
+on clickpreactivate(evt) { begin_checkable_activation(~) }
+on click(evt) { activate_checkable(~) }
 
-// The check half on its own, so the click default and the arrow-key default
-// share one transition rather than each writing checkedness its own way.
-pn select_radio(radio) {
+// pre-activation and arrow-key policy share the same exclusive state write.
+pn set_radio_checked(radio) {
     for (peer in tree.radio_group(radio)) {
         dom.set_state(peer, "checked", false)
     }
     dom.set_state(radio, "checked", true)
-    dom.dispatch(radio, "input")
-    dom.dispatch(radio, "change")
+}
+
+pn notify_checkable(control) {
+    dom.dispatch(control, { type: "input", bubbles: true, cancelable: false })
+    dom.dispatch(control, { type: "change", bubbles: true, cancelable: false })
+}
+
+pn select_radio(radio) { set_radio_checked(radio) notify_checkable(radio) }
+
+// HTML pre-activation runs before click listeners; its closure owns rollback
+// state across nested dispatch and GC without adding policy to native code.
+pn begin_checkable_activation(control) {
+    if (dom.get_state(control, "disabled")) { return null }
+    let checkbox = dom.get_attribute(control, "type") == "checkbox";
+    let checked = dom.get_state(control, "checked");
+    let indeterminate = dom.get_state(control, "indeterminate");
+    let previous = if (checkbox) null else
+        [for (peer in tree.radio_group(control) where dom.get_state(peer, "checked")) peer][0];
+    if (checkbox) {
+        dom.set_state(control, "checked", not checked)
+        dom.set_state(control, "indeterminate", false)
+    } else if (not checked) { set_radio_checked(control) }
+    return pn (canceled) => {
+        if (canceled) {
+            if (checkbox) {
+                dom.set_state(control, "checked", checked)
+                dom.set_state(control, "indeterminate", indeterminate)
+            } else {
+                let still_grouped = previous != null and
+                    len([for (peer in tree.radio_group(control) where dom.same_node(peer, previous)) peer]) > 0;
+                if (still_grouped) { set_radio_checked(previous) }
+                else { dom.set_state(control, "checked", false) }
+            }
+        } else if (checkbox or not checked) { notify_checkable(control) }
+    }
+}
+
+// a document with no author dispatch still enters the same package operation.
+pn activate_checkable(control) {
+    let complete = begin_checkable_activation(control);
+    if (complete == null) 'pass' else complete(false)
 }
 
 // ESO59: arrow-key navigation inside a radio group. HTML makes a radio group one
@@ -108,11 +134,8 @@ fn group_direction(evt) {
 // too. Claiming activation without it would silently drop the deselection half.
 view <input type:'radio'> state checked, keyboard_activation_armed: false {}
 on init(evt) { aria.reflect(~) }
-on click(evt) {
-    if (dom.get_state(~, "disabled")) { return 'pass' }
-    if (dom.get_state(~, "checked")) { return 'pass' }
-    select_radio(~)
-}
+on clickpreactivate(evt) { begin_checkable_activation(~) }
+on click(evt) { activate_checkable(~) }
 
 // This template owns `keydown` for a radio outright, so it carries the shared
 // Space-activation policy too; declaring the arrows here without it would drop

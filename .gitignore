@@ -64,6 +64,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
+!test/js/react/package-lock.json
 !test/lambda/graph/mermaid/reference/package-lock.json
 !test/ui/dtna_reference/app/package-lock.json
 yarn.lock
