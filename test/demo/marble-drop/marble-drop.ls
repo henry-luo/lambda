@@ -90,6 +90,6 @@ on closerequest(evt) {
     return 'pass'
 }
 
-<html lang:"en", <head <meta charset:"UTF-8"><title "Marble Drop — Eight Little Inventions">
+<html lang:"en", <head <meta charset:"UTF-8"><title "Marble Drop — The Inventor’s Workshop">
     <link rel:"stylesheet",href:"marble-drop.css">>;
     apply(<marble_shell>)>
