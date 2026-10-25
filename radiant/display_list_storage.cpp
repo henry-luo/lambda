@@ -137,6 +137,10 @@ bool dl_content_fingerprint(const DisplayList* list, uint64_t* fingerprint) {
                 hash = dl_fingerprint_clip_shapes(hash, source->fill_surface_rect.clip_shapes.get());
                 clear(offsetof(DisplayItem, fill_surface_rect.clip_shapes), sizeof(void*));
                 break;
+            case DL_DRAW_GLYPH:
+                hash = dl_fingerprint_clip_shapes(hash, source->draw_glyph.clip_shapes.get());
+                clear(offsetof(DisplayItem, draw_glyph.clip_shapes), sizeof(void*));
+                break;
             case DL_BEGIN_ELEMENT: case DL_END_ELEMENT:
                 // accessibility semantics do not paint
                 clear(offsetof(DisplayItem, element_marker.semantics), sizeof(RenderSemanticGroup));
@@ -1406,6 +1410,10 @@ static bool dl_clone_item_payload(DisplayList* dst, const DisplayList* source,
         case DL_FILL_SURFACE_RECT:
             if (!dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
                                           in->fill_surface_rect.clip_shapes)) return false;
+            break;
+        case DL_DRAW_GLYPH:
+            if (!dl_copy_clip_shape_stack(dst, &out->draw_glyph.clip_shapes,
+                                          in->draw_glyph.clip_shapes)) return false;
             break;
         case DL_BLIT_SURFACE_SCALED:
             out->blit_surface_scaled.snapshot_lease = lam::up(image_surface_snapshot_retain(in->blit_surface_scaled.snapshot_lease));

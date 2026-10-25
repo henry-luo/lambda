@@ -270,7 +270,10 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
 
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
-                   const RdtMatrix* transform, uint64_t resource_generation) {
+                   const RdtMatrix* transform, uint64_t resource_generation,
+                   ClipShape** clip_shapes, int clip_depth) {
+    lam::Up<const DlClipShapeStack> clips;
+    if (!dl_store_clip_shapes(dl, &clips, clip_shapes, clip_depth)) return;
     DisplayItem* item = dl_alloc_item(dl);
     if (!item) return;
     item->op = DL_DRAW_GLYPH;
@@ -289,6 +292,7 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
         item->draw_glyph.transform = *transform;
     }
     item->draw_glyph.clip = clip ? *clip : dl_unbounded_clip();
+    item->draw_glyph.clip_shapes = clips;
 }
 
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,

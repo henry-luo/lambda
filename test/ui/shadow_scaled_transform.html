@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><title>Box-shadow inside a scaled-down canvas</title></head>
+<!-- the card's local shadow box passes the window's pixel width, but its scaled image does not -->
+<body style="margin:0;background:#f8f6f1;width:1200px;height:700px;position:relative">
+<div style="position:absolute;left:0;top:0;width:1280px;height:720px;transform-origin:0 0;transform:translate(26px,0px) scale(0.839)">
+  <div style="position:absolute;left:840px;top:240px;width:368px;height:380px">
+    <div style="width:100%;height:100%;transform:translate(0px,0px) rotate(0deg) scale(1,1)">
+      <div id="card" style="width:368px;height:380px;box-sizing:border-box;border-radius:16px;background:#16202e;box-shadow:0 18px 40px rgba(22,32,46,0.6)"></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

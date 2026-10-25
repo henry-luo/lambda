@@ -435,7 +435,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         case DL_DRAW_GLYPH: {
             rdt_vector_flush_batch(vec);
-            dl_replay_draw_glyph_at_offset(tile_surface, &item->draw_glyph, tile_x, tile_y);
+            dl_replay_draw_glyph_at_offset(tile_surface, &item->draw_glyph, tile_x, tile_y, scratch);
 #ifndef NDEBUG
             items_drawn++;
 #endif

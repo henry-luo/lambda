@@ -328,6 +328,28 @@ Css3dPaintPlane Css3dPaintContext::enter(ViewBlock* block) {
     return previous;
 }
 
+// A paint layer or 3D plane rasterises its whole subtree into the root's extent, so the
+// descendants' shadows, outlines and filters count too: the root's own overflow alone cut a
+// child's shadow at the layer edge (a slide card inside its animated object).
+struct Css3dSubtreeOverflow {
+    float density;
+    float overflow;
+};
+
+static bool css3d_subtree_overflow_visit(View* view, bool entering, void* context) {
+    Css3dSubtreeOverflow* result = static_cast<Css3dSubtreeOverflow*>(context);
+    const ViewBlock* block = entering ? lam::view_as_block(view) : nullptr;
+    if (block) result->overflow = fmaxf(result->overflow,
+        render_geometry_block_visual_overflow(block, result->density));
+    return true;
+}
+
+static float css3d_subtree_visual_overflow(ViewBlock* root, float density) {
+    Css3dSubtreeOverflow result = {density, 0.0f};
+    view_geometry_walk_tree(root, css3d_subtree_overflow_visit, &result);
+    return result.overflow;
+}
+
 Rect css3d_block_paint_rect(RasterRenderContext* rdcon, ViewBlock* block) {
     float x = rdcon->block.x / rdcon->raster_scale + block->x;
     float y = rdcon->block.y / rdcon->raster_scale + block->y;
@@ -341,7 +363,7 @@ Rect css3d_block_paint_rect(RasterRenderContext* rdcon, ViewBlock* block) {
             true, rdcon->content_bounds_cache, &low, &high);
         min_y = fminf(min_y, low); max_y = fmaxf(max_y, high);
     }
-    float overflow = render_geometry_block_visual_overflow(block, rdcon->raster_scale);
+    float overflow = css3d_subtree_visual_overflow(block, rdcon->raster_scale);
     return {x + min_x - overflow, y + min_y - overflow,
         max_x - min_x + 2.0f * overflow, max_y - min_y + 2.0f * overflow};
 }

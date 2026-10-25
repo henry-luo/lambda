@@ -48,10 +48,7 @@ void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color) {
     if (left >= right || top >= bottom) return;
 
     int y_off = surface->tile_offset_y;
-    bool need_shape_clip = clip_depth > 0 &&
-        !clip_shapes_rect_inside(clip_shapes, clip_depth,
-            (float)left + 0.5f, (float)top + 0.5f,
-            (float)(right - left - 1), (float)(bottom - top - 1));
+    bool need_shape_clip = !clip_shapes_pixel_box_inside(clip_shapes, clip_depth, left, top, right, bottom);
 
     for (int i = top; i < bottom; i++) {
         int rl = left;
@@ -389,10 +386,7 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
     bool straight_source = src->alpha_mode == IMAGE_ALPHA_STRAIGHT;
     bool premultiplied_destination = dst->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
 
-    bool need_shape_clip = (clip_depth > 0) &&
-        !clip_shapes_rect_inside(clip_shapes, clip_depth,
-            (float)left + 0.5f, (float)top + 0.5f,
-            (float)(right - left - 1), (float)(bottom - top - 1));
+    bool need_shape_clip = !clip_shapes_pixel_box_inside(clip_shapes, clip_depth, left, top, right, bottom);
 
     int y_off = dst->tile_offset_y;
     // 1:1 copy of a whole-pixel-aligned source (cached layers, canvases): integer

@@ -71,8 +71,10 @@ static inline void glyph_blend_coverage_pixel(uint8_t* p, Color color, uint32_t 
     render_pixel_source_over_coverage(p, color, coverage);
 }
 
+// Clip-path shapes narrow each destination row, as they do for direct fills (raster_fill_rect).
 static inline void glyph_draw_coverage_bitmap(ImageSurface* surface, const GlyphBitmap* bitmap,
-                                              int x, int y, const Bound* clip, Color color) {
+                                              int x, int y, const Bound* clip, Color color,
+                                              ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
     if (!surface || !bitmap || !clip || color.a == 0) return;
 
     int left = (int)clip->left > x ? (int)clip->left : x;
@@ -80,10 +82,14 @@ static inline void glyph_draw_coverage_bitmap(ImageSurface* surface, const Glyph
     int top = (int)clip->top > y ? (int)clip->top : y;
     int bottom = (int)clip->bottom < y + (int)bitmap->height ? (int)clip->bottom : y + (int)bitmap->height;
     if (left >= right || top >= bottom) return;
+    bool shaped = !clip_shapes_pixel_box_inside(clip_shapes, clip_depth, left, top, right, bottom);
 
     for (int i = top - y; i < bottom - y; i++) {
+        int row_left = left, row_right = right;
+        if (shaped) clip_shapes_scanline_bounds(clip_shapes, clip_depth, (float)(y + i) + 0.5f,
+                                                left, right, &row_left, &row_right);
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i - surface->tile_offset_y) * surface->pitch;
-        for (int j = left - x; j < right - x; j++) {
+        for (int j = row_left - x; j < row_right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
             uint32_t intensity = glyph_sample_coverage_pixel(bitmap, i, j);
@@ -100,7 +106,9 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
                                                           int x, int y, const Bound* clip,
                                                           Color color, const RdtMatrix* transform,
                                                           float surface_origin_x,
-                                                          float surface_origin_y) {
+                                                          float surface_origin_y,
+                                                          ClipShape** clip_shapes = nullptr,
+                                                          int clip_depth = 0) {
     if (!surface || !bitmap || !clip || !transform || color.a == 0) return;
 
     // CSS 3D planes paint with projective matrices: bound the glyph after the homogeneous divide,
@@ -130,12 +138,16 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
 
     RdtMatrix inverse = {};
     if (!rdt_matrix_inverse(transform, &inverse)) return;
+    bool shaped = !clip_shapes_pixel_box_inside(clip_shapes, clip_depth, left, top, right, bottom);
 
     // sample destination coverage so full-page and tiled replay rasterize transforms identically.
     for (int dst_y = top; dst_y < bottom; dst_y++) {
+        int row_left = left, row_right = right;
+        if (shaped) clip_shapes_scanline_bounds(clip_shapes, clip_depth, (float)dst_y + 0.5f,
+                                                left, right, &row_left, &row_right);
         int local_y = (int)((float)dst_y - surface_origin_y);
         uint8_t* row_pixels = (uint8_t*)surface->pixels + local_y * surface->pitch;
-        for (int dst_x = left; dst_x < right; dst_x++) {
+        for (int dst_x = row_left; dst_x < row_right; dst_x++) {
             float src_abs_x = 0.0f;
             float src_abs_y = 0.0f;
             if (!rdt_matrix_project_point(
@@ -156,7 +168,8 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
 }
 
 static inline void glyph_draw_color_bgra_bitmap(ImageSurface* surface, const GlyphBitmap* bitmap,
-                                                int x, int y, const Bound* clip) {
+                                                int x, int y, const Bound* clip,
+                                                ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
     if (!surface || !bitmap || !clip) return;
 
     float bscale = bitmap->bitmap_scale;
@@ -170,13 +183,17 @@ static inline void glyph_draw_color_bgra_bitmap(ImageSurface* surface, const Gly
     int top = (int)clip->top > y ? (int)clip->top : y;
     int bottom = (int)clip->bottom < y + target_h ? (int)clip->bottom : y + target_h;
     if (left >= right || top >= bottom) return;
+    bool shaped = !clip_shapes_pixel_box_inside(clip_shapes, clip_depth, left, top, right, bottom);
 
     float inv_scale = 1.0f / bscale;
     for (int dy = top - y; dy < bottom - y; dy++) {
+        int row_left = left, row_right = right;
+        if (shaped) clip_shapes_scanline_bounds(clip_shapes, clip_depth, (float)(y + dy) + 0.5f,
+                                                left, right, &row_left, &row_right);
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + dy - surface->tile_offset_y) * surface->pitch;
         float src_y = dy * inv_scale;
 
-        for (int dx = left - x; dx < right - x; dx++) {
+        for (int dx = row_left - x; dx < row_right - x; dx++) {
             if (x + dx < 0 || x + dx >= surface->width) continue;
             float src_x = dx * inv_scale;
             GlyphColorSample sample = glyph_sample_bgra_bilinear(bitmap, src_x, src_y);

@@ -391,6 +391,16 @@ on slide_command(evt) {
     session = {*: session, *: next}
     return 'handled'
 }
+// entering full screen hides the toolbar (the hot corner and H still bring it back);
+// leaving full screen shows it again. The page view sends this from sync_fullscreen.
+on slide_fullscreen(evt) {
+    if (evt.event_phase != 2 or not (evt.detail is map) or not has_controls(~.options)) { return 'pass' }
+    let want_toolbar = not evt.detail.fullscreen
+    if (session.tools.toolbar != want_toolbar) {
+        session = action(evt.target, ~.plan, session, "toolbar", null, evt.time_stamp, ~.options)^
+    }
+    return 'handled'
+}
 on input(evt) {
     let owner = event_owner(evt.target, ~.options)
     if (owner == null or not dom.matches(evt.target, ".slide-speed-input")) { return 'pass' }
@@ -513,7 +523,10 @@ pn sync_fullscreen(owner) {
     let button = if (owner == null) null else dom.query_selector(owner, "button[data-slide-tool=fullscreen]")
     if (button == null) { return null }
     let on = dom.window_fullscreen(owner)
+    let was = dom.get_attribute(owner, "data-slide-fullscreen") == "true"
     dom.set_attribute(owner, "data-slide-fullscreen", string(on))
+    // a change of mode (including a --fullscreen start) toggles the toolbar in the player
+    if (on != was) { dom.dispatch(owner, {type: "slide_fullscreen", bubbles: false, detail: {fullscreen: on}}) }
     dom.set_attribute(button, "aria-pressed", string(on))
     set_text(button, if (on) "Exit full screen" else "Full screen")
     if (dom.window_fullscreen_enabled(owner)) { dom.remove_attribute(button, "hidden") }

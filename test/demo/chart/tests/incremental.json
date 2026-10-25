@@ -1,0 +1,268 @@
+{
+  "name": "Incremental gallery first frame, scroll priority and retained selection",
+  "viewport": {
+    "width": 1180,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dashboard-gallery > .card"
+      },
+      "count": 44,
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-placeholder"
+      },
+      "min": 40,
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-card svg"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-0 [data-play-command=\"pause\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#animation-0 .lambda-chart"
+      },
+      "attribute": "data-chart-playback",
+      "equals": "paused"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-1 [data-play-command=\"pause\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#animation-1 .lambda-chart"
+      },
+      "attribute": "data-chart-playback",
+      "equals": "paused"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-placeholder"
+      },
+      "min": 1,
+      "assert_timeout": 1
+    },
+    {
+      "type": "script",
+      "js": "globalThis.galleryEnd=document.getElementById('example-43').getBoundingClientRect().bottom+window.scrollY"
+    },
+    {
+      "type": "scroll_to",
+      "target": {
+        "selector": "#example-43"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 14
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#example-43 .lambda-chart > svg"
+      },
+      "min": 1,
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-placeholder"
+      },
+      "min": 1,
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 1,
+      "js": "window.scrollY>1000&&Math.abs(document.getElementById('example-43').getBoundingClientRect().bottom+window.scrollY-galleryEnd)<2"
+    },
+    {
+      "type": "scroll_to",
+      "target": {
+        "selector": "#example-0"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#example-0 .lambda-chart > svg"
+      },
+      "count": 1,
+      "assert_timeout": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#example-0 .bars rect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#example-0 .bars rect"
+      },
+      "attribute": "fill",
+      "equals": "#e15759",
+      "assert_timeout": 1
+    },
+    {
+      "type": "script",
+      "js": "globalThis.loadingScroll=window.scrollY"
+    },
+    {
+      "type": "advance_time",
+      "ms": 3000,
+      "steps": 50
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dashboard-gallery .lambda-chart > svg"
+      },
+      "count": 44,
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-placeholder"
+      },
+      "count": 0,
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#example-0 .bars rect"
+      },
+      "attribute": "fill",
+      "equals": "#e15759",
+      "assert_timeout": 1
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 1,
+      "js": "Math.abs(window.scrollY-loadingScroll)<2"
+    },
+    {
+      "type": "scroll_to",
+      "target": {
+        "selector": "#example-0"
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/chart-incremental/dashboard.png"
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 1,
+      "js": "[0,1,2].every(i=>{var f=document.querySelector('#example-'+i+' .chart-frame').getBoundingClientRect(),s=document.querySelector('#example-'+i+' .lambda-chart > svg').getBoundingClientRect();return s.width>0&&s.width<=f.width+1&&Math.abs((s.left+s.right)-(f.left+f.right))<2})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-index .demo-tile"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "a[href=\"normal.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dashboard-gallery > .card"
+      },
+      "count": 44,
+      "assert_timeout": 60000,
+      "assert_interval": 50
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-placeholder"
+      },
+      "min": 40,
+      "assert_timeout": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".chart-index .demo-tile"
+      },
+      "count": 3
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".dashboard-gallery"
+      },
+      "count": 0
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

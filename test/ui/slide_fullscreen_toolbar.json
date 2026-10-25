@@ -1,0 +1,17 @@
+{
+  "name": "Entering full screen hides the slide toolbar; leaving shows it again",
+  "html": "test/demo/slides/presenter_tools.slides",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "advance_time", "ms": 200, "steps": 4},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "flex"},
+    {"type": "assert_script", "js": "(document.getElementById('presenter-demo').dispatchEvent(new CustomEvent('slide_fullscreen', {bubbles: false, detail: {fullscreen: true}})), true)"},
+    {"type": "advance_time", "ms": 64, "steps": 4},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "none"},
+    {"type": "assert_rect", "target": {"selector": ".slide-stage"}, "height": 800},
+    {"type": "assert_style", "target": {"selector": ".slide-toolbar-reveal"}, "property": "display", "equals": "block"},
+    {"type": "assert_script", "js": "(document.getElementById('presenter-demo').dispatchEvent(new CustomEvent('slide_fullscreen', {bubbles: false, detail: {fullscreen: false}})), true)"},
+    {"type": "advance_time", "ms": 64, "steps": 4},
+    {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "flex"}
+  ]
+}

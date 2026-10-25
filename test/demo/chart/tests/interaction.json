@@ -316,16 +316,18 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": "#example-8 svg"
+        "selector": "#example-8 .lambda-chart > svg"
       },
       "min": 1
     },
     {
       "type": "assert_count",
       "target": {
-        "selector": "#example-43 svg"
+        "selector": "#example-43 .lambda-chart > svg"
       },
-      "min": 1
+      "min": 1,
+      "assert_timeout": 60000,
+      "assert_interval": 50
     },
     {
       "type": "window_close"

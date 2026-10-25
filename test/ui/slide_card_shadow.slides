@@ -1,0 +1,23 @@
+// A card's box-shadow near the right edge of a slide scaled down to fit a window narrower than
+// the slide. On the first slide the card's object is the paint layer, and the shadow lies past
+// the object's box. The faded-in second slide is captured as one layer, wider than the window.
+// Empty probe objects mark slide points just right of and below each card, where the shadow
+// must still show.
+<presentation id: "card-shadow", width: 1280, height: 720, autostart: true,
+    <slide id: "object-layer", background: "#f8f6f1",
+        <content id: "card-a", x: 840, y: 240, width: 368, height: 380,
+            <div style: "width:368px;height:380px;border-radius:16px;background:#16202e;box-shadow:0 18px 40px rgba(22,32,46,0.6);">
+        >
+        <content id: "a-right", x: 1214, y: 420, width: 4, height: 4>
+        <content id: "a-right-far", x: 1226, y: 420, width: 4, height: 4>
+        <content id: "a-below", x: 1000, y: 640, width: 4, height: 4>
+    >
+    <slide id: "slide-layer", background: "#f8f6f1", transition: 'fade', transition_duration: 200,
+        <content id: "card-b", x: 840, y: 240, width: 368, height: 380,
+            <div style: "width:368px;height:380px;border-radius:16px;background:#16202e;box-shadow:0 18px 40px rgba(22,32,46,0.6);">
+        >
+        <content id: "b-right", x: 1214, y: 420, width: 4, height: 4>
+        <content id: "b-right-far", x: 1226, y: 420, width: 4, height: 4>
+        <content id: "b-below", x: 1000, y: 640, width: 4, height: 4>
+    >
+>

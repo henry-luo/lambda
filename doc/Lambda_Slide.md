@@ -316,7 +316,9 @@ closes the overview. **Slide / Go** accepts a one-based slide number or an exact
 slide ID; Enter submits. Invalid input reports an error without navigation.
 **Blackout** covers the audience canvas in black. **Pointer** enables a red laser
 that follows the mouse over the canvas. **Full screen** (or F) toggles the
-viewer window's full screen and reads **Exit full screen** while active; it shows
+viewer window's full screen and reads **Exit full screen** while active. Entering
+full screen (by button, F, F11 or `--fullscreen`) hides the toolbar and leaving it
+shows the toolbar again. The button shows
 only when the player's window can go full screen, not in an embed or a headless
 run. The **⌄** arrow at the control bar's
 bottom-right hides the toolbar; moving the mouse into the player's bottom-right

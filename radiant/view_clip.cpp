@@ -199,6 +199,12 @@ bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
     return true;
 }
 
+bool clip_shapes_pixel_box_inside(ClipShape** shapes, int depth,
+    int left, int top, int right, int bottom) {
+    return depth <= 0 || clip_shapes_rect_inside(shapes, depth,
+        (float)left + 0.5f, (float)top + 0.5f, (float)(right - left - 1), (float)(bottom - top - 1));
+}
+
 void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     float y, int base_left, int base_right, int* out_left, int* out_right) {
     int left = base_left, right = base_right;

@@ -80,7 +80,8 @@ Press **P** for notes, the next-slide preview and an independent timer in a dock
 console. **O** opens the title overview; the slide picker accepts a number or ID.
 **H**, or the **⌄** arrow at the toolbar's bottom-right, hides the toolbar; **H** or moving
 the mouse into the bottom-right corner brings it back. **B** blacks out the canvas, and **L** enables the
-laser pointer, and **F** (or the **Full screen** button) toggles full screen. **Escape**
+laser pointer, and **F** (or the **Full screen** button) toggles full screen, which hides the
+toolbar until you reach for the bottom-right corner. **Escape**
 clears blackout, pointer and overview first; once none is active it leaves full screen,
 or closes the viewer. These tools also
 work on the other decks. The console shares the viewer with the audience canvas.

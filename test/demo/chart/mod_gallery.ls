@@ -1,4 +1,7 @@
 import chart: lambda.chart.chart
+import sizing: lambda.chart.sizing
+import svg: lambda.chart.svg
+import events: lambda.chart.events
 import dom
 
 pub fn page(title, caption, body) => <html lang:"en",
@@ -11,8 +14,50 @@ pub fn page(title, caption, body) => <html lang:"en",
         <footer <a href:"index.html","← Back to charts">>
     >>>;
 
-pub fn panel(id, title, caption, image, wide = false) => <section id:id,class:if (wide) "card wide" else "card",
+pub fn panel(id, title, caption, image, wide = false, attrs = {}) => <section *:attrs,id:id,class:if (wide) "card wide" else "card",
     <h2 title>; <p class:"caption",caption>; <div class:"chart-frame",image>>;
+
+// Reserve authored chart dimensions before generating its SVG, keeping the scroll range stable.
+view <deferred_panel> state ready:false {
+    let image = if (ready) apply(~.model) else
+        <div class:"chart-placeholder",role:"status",'aria-label':"Loading chart",
+            svg.svg_root(~.size.width,~.size.height,[],{'aria-hidden':"true"});
+            events.controls([],null)>;
+    panel(~.id,~.title,"",image,false,{'data-chart-pending':string(not ready),'aria-busy':string(not ready)})
+}
+on chart_materialize(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    ready = true
+    'handled'
+}
+pub fn deferred(id, title, spec) {
+    let size = sizing.resolve_view(spec);
+    if (size is error) size else <deferred_panel id:id,title:title,model:chart.model(spec),size:{width:size.width,height:size.height}>
+}
+
+view <progressive_gallery> state started:false {
+    <div class:"gallery dashboard-gallery",'data-gallery-started':started,
+        for (panel in ~.panels) apply(panel)>
+}
+on render(evt) {
+    if (evt.event_phase != 2 or started) { return 'pass' }
+    started = true
+    dom.request_frame(evt.target,"gallery_chunk")
+    'handled'
+}
+on gallery_chunk(evt) {
+    let pending = dom.query_selector_all(evt.target,"[data-chart-pending='true']")
+    if (len(pending) == 0) { return 'handled' }
+    let viewport = dom.viewport_size(evt.target)
+    let visible = [for (node in pending,let box = dom.bounding_box(node)
+        where box.bottom > 0 and box.top < viewport.height) node]
+    let next = if (len(visible) > 0) visible[0] else pending[0]
+    dom.dispatch(next,{type:"chart_materialize",bubbles:false})
+    // A new request belongs to the next frame, so input and paint run between charts.
+    if (len(pending) > 1) { dom.request_frame(evt.target,"gallery_chunk") }
+    'handled'
+}
+pub fn progressive(panels) => apply(<progressive_gallery panels:panels>)
 
 // Each apply owns its player and controls, including bubbled notifications (S12.1.3).
 view <animated_card> state phase:"Ready" {

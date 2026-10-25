@@ -1,0 +1,18 @@
+{
+  "name": "Slide card: the box-shadow right of and below a card stays whole in an object's paint layer and in a slide layer wider than the window",
+  "html": "test/ui/slide_card_shadow.slides",
+  "viewport": {"width": 1200, "height": 717},
+  "device_scale": 2,
+  "events": [
+    {"type": "advance_time", "ms": 600, "steps": 12},
+    {"type": "assert_pixel", "target": {"selector": "#card-shadow [data-slide-object=a-right]", "offset_x": 1, "offset_y": 1}, "force_render": true, "max_r": 236},
+    {"type": "assert_pixel", "target": {"selector": "#card-shadow [data-slide-object=a-right-far]", "offset_x": 1, "offset_y": 1}, "max_r": 244},
+    {"type": "assert_pixel", "target": {"selector": "#card-shadow [data-slide-object=a-below]", "offset_x": 1, "offset_y": 1}, "max_r": 236},
+    {"type": "click", "target": {"selector": "#card-shadow [data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 800, "steps": 16},
+    {"type": "assert_attribute", "target": {"selector": "#card-shadow"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "assert_pixel", "target": {"selector": "#card-shadow [data-slide-object=b-right]", "offset_x": 1, "offset_y": 1}, "force_render": true, "max_r": 236},
+    {"type": "assert_pixel", "target": {"selector": "#card-shadow [data-slide-object=b-right-far]", "offset_x": 1, "offset_y": 1}, "max_r": 244},
+    {"type": "assert_pixel", "target": {"selector": "#card-shadow [data-slide-object=b-below]", "offset_x": 1, "offset_y": 1}, "max_r": 236}
+  ]
+}

@@ -88,8 +88,10 @@ void rc_draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y
                    Color color, bool is_color_emoji, const Bound* clip,
                    const RdtMatrix* transform, uint64_t resource_generation) {
     PaintRecordTarget target = rc_record_target(rdcon);
+    // clip-path shapes mask the glyph as they mask direct fills
     paint_record_draw_glyph(&target, "rc_draw_glyph", bitmap, x, y, color,
-                            is_color_emoji, clip, transform, resource_generation);
+                            is_color_emoji, clip, transform, resource_generation,
+                            rdcon ? rdcon->clip_shapes : nullptr, rdcon ? rdcon->clip_shape_depth : 0);
 }
 
 void rc_draw_picture(RasterRenderContext* rdcon, RdtPicture* picture,

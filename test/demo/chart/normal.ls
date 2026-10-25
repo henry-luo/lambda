@@ -45,6 +45,6 @@ gallery.page("Normal charts","Play a transition, pick a mark, or brush a range. 
         >
         <h2 class:"section-heading",string(len(examples)) ++ " dashboard examples">
         <p class:"caption","Hover or focus marks to inspect them. Click to select; Shift-click to add marks; double-click to clear. Each chart keeps its own selection.">
-        <div class:"gallery dashboard-gallery",for (i,entry in examples)
-            gallery.panel("example-" ++ string(i),entry.label,"",chart.interactive(catalog.live(catalog.spec(entry))))>
+        gallery.progressive([for (i,entry in examples)
+            gallery.deferred("example-" ++ string(i),entry.label,catalog.live(catalog.spec(entry)))])
     >)

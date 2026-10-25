@@ -936,30 +936,59 @@ typedef struct OuterShadowImage {
     int height;
 } OuterShadowImage;
 
+// The shadow's blurred pixel box, cut to `limit`: the visible region in the same space as the
+// shadow geometry (device pixels, or local pixels for a transformed shadow).
+static bool outer_shadow_pixel_box(float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                                   float blur_radius, const Bound& limit,
+                                   int* x0, int* y0, int* x1, int* y1) {
+    float pad = blur_radius < 0 ? 0 : blur_radius;
+    *x0 = (int)fmaxf(limit.left, floorf(shadow_x - pad)); // INT_CAST_OK: pixel box
+    *y0 = (int)fmaxf(limit.top, floorf(shadow_y - pad)); // INT_CAST_OK: pixel box
+    *x1 = (int)fminf(limit.right, ceilf(shadow_x + shadow_w + pad)); // INT_CAST_OK: pixel box
+    *y1 = (int)fminf(limit.bottom, ceilf(shadow_y + shadow_h + pad)); // INT_CAST_OK: pixel box
+    return *x1 > *x0 && *y1 > *y0;
+}
+
+static Bound outer_shadow_surface_limit(const ImageSurface* surface) {
+    return {0.0f, 0.0f, (float)surface->width, (float)surface->height};
+}
+
+// A transformed shadow rasterises in its local (pre-transform) pixels, so its visible bound is
+// the target clip mapped back through the transform. Clamping local coordinates to the window
+// surface's size cut every shadow whose local extent passed it: a slide canvas scaled down to
+// fit, or a paint layer capture larger than the window. The bound keeps the blur's reach past
+// the clip, so pixels at the clip edge still fade from the whole shape. A singular or
+// viewer-crossing transform has no finite local bound; the shadow then keeps its full box.
+static Bound outer_shadow_local_limit(const Bound& clip, const RdtMatrix* transform, float blur_radius) {
+    Bound limit = {-1e7f, -1e7f, 1e7f, 1e7f};
+    RdtMatrix inverse;
+    float l, t, r, b;
+    if (transform && rdt_matrix_inverse(transform, &inverse) &&
+        rdt_matrix_project_rect_bounds(&inverse, clip.left, clip.top, clip.right, clip.bottom,
+                                       &l, &t, &r, &b)) {
+        float pad = blur_radius < 0 ? 0 : blur_radius;
+        limit = {floorf(l - pad), floorf(t - pad), ceilf(r + pad), ceilf(b + pad)};
+    }
+    return limit;
+}
+
 // Both retained-image and immediate-composite shadows must rasterize and blur
 // the same isolated source, or their edge falloff diverges. With a scope the
 // buffer belongs to it; without one it stays with `sa` (the retained display
 // list's arena, released with the list).
 static bool build_outer_shadow_image(
-    ScratchArena* sa, ScratchMark* scope, ImageSurface* surface,
+    ScratchArena* sa, ScratchMark* scope, const Bound& limit,
     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
     float sr_tl, float sr_tr, float sr_br, float sr_bl,
     Color shadow_color, float blur_radius, OuterShadowImage* image)
 {
-    if (!surface || shadow_color.a == 0) return false;
+    if (shadow_color.a == 0) return false;
 
-    float pad = blur_radius < 0 ? 0 : blur_radius;
-    int br_x0 = (int)floorf(shadow_x - pad);
-    int br_y0 = (int)floorf(shadow_y - pad);
-    int br_x1 = (int)ceilf(shadow_x + shadow_w + pad);
-    int br_y1 = (int)ceilf(shadow_y + shadow_h + pad);
-    if (br_x0 < 0) br_x0 = 0;
-    if (br_y0 < 0) br_y0 = 0;
-    if (br_x1 > surface->width) br_x1 = surface->width;
-    if (br_y1 > surface->height) br_y1 = surface->height;
+    int br_x0, br_y0, br_x1, br_y1;
+    if (!outer_shadow_pixel_box(shadow_x, shadow_y, shadow_w, shadow_h, blur_radius, limit,
+                                &br_x0, &br_y0, &br_x1, &br_y1)) return false;
     int br_w = br_x1 - br_x0;
     int br_h = br_y1 - br_y0;
-    if (br_w <= 0 || br_h <= 0) return false;
 
     size_t buf_n = (size_t)br_w * br_h;
     uint32_t* shadow_buf = scope
@@ -1019,7 +1048,7 @@ void render_outer_shadow_blur_composite(
     if (!surface || !surface->pixels || shadow_color.a == 0) return;
     OuterShadowImage image = {};
     ScratchScope scope(sa);
-    if (!build_outer_shadow_image(sa, &scope.mark, surface,
+    if (!build_outer_shadow_image(sa, &scope.mark, outer_shadow_surface_limit(surface),
             shadow_x, shadow_y, shadow_w, shadow_h,
             sr_tl, sr_tr, sr_br, sr_bl, shadow_color, blur_radius, &image)) return;
     uint32_t* shadow_buf = image.pixels;
@@ -1058,7 +1087,7 @@ void render_outer_shadow_blur_composite(
 }
 
 static uint32_t* render_outer_shadow_blur_image(
-    ScratchArena* sa, ImageSurface* surface,
+    ScratchArena* sa, const Bound& limit,
     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
     float sr_tl, float sr_tr, float sr_br, float sr_bl,
     Color shadow_color, float blur_radius,
@@ -1069,10 +1098,10 @@ static uint32_t* render_outer_shadow_blur_image(
     if (out_y) *out_y = 0;
     if (out_w) *out_w = 0;
     if (out_h) *out_h = 0;
-    if (!sa || !surface || shadow_color.a == 0) return nullptr;
+    if (!sa || shadow_color.a == 0) return nullptr;
 
     OuterShadowImage image = {};
-    if (!build_outer_shadow_image(sa, nullptr, surface,
+    if (!build_outer_shadow_image(sa, nullptr, limit,
             shadow_x, shadow_y, shadow_w, shadow_h,
             sr_tl, sr_tr, sr_br, sr_bl, shadow_color, blur_radius, &image)) return nullptr;
     uint32_t* shadow_buf = image.pixels;
@@ -1153,19 +1182,16 @@ static ShadowImageCache* shadow_image_cache_for(DomDocument* document) {
 
 // The cached shadow image for this geometry, built on a miss. Null when the shadow paints
 // nothing or the cache cannot hold it; `x`/`y` receive its pixel origin in paint coordinates.
-static ImageSurface* shadow_image_cached(RasterRenderContext* rdcon,
+static ImageSurface* shadow_image_cached(RasterRenderContext* rdcon, const Bound& limit,
     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
     float sr_tl, float sr_tr, float sr_br, float sr_bl, Color color, float blur,
     int exclude_type, const float* exclude_params, int* x, int* y) {
-    ImageSurface* target = rdcon->ui_context ? rdcon->ui_context->surface : nullptr;
     DomDocument* document = rdcon->ui_context ? rdcon->ui_context->document : nullptr;
-    if (!target || !document || color.a == 0 || memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH) return nullptr;
+    if (!document || color.a == 0 || memtrack_get_pressure_level() >= MEM_PRESSURE_HIGH) return nullptr;
     // the same pixel box build_outer_shadow_image derives
-    float pad = blur < 0 ? 0 : blur;
-    int x0 = max(0, (int)floorf(shadow_x - pad)), y0 = max(0, (int)floorf(shadow_y - pad)); // INT_CAST_OK: pixel box
-    int x1 = min(target->width, (int)ceilf(shadow_x + shadow_w + pad)); // INT_CAST_OK: pixel box
-    int y1 = min(target->height, (int)ceilf(shadow_y + shadow_h + pad)); // INT_CAST_OK: pixel box
-    if (x1 <= x0 || y1 <= y0) return nullptr;
+    int x0, y0, x1, y1;
+    if (!outer_shadow_pixel_box(shadow_x, shadow_y, shadow_w, shadow_h, blur, limit, &x0, &y0, &x1, &y1))
+        return nullptr;
     ShadowImageKey key = {};
     float values[] = {shadow_x - x0, shadow_y - y0, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, blur,
         (float)color.r, (float)color.g, (float)color.b, (float)color.a, (float)exclude_type,
@@ -1188,7 +1214,7 @@ static ImageSurface* shadow_image_cached(RasterRenderContext* rdcon,
     // the build allocates unscoped scratch; rewind it once the pixels are copied out
     ScratchMark mark = scratch_mark(&rdcon->scratch);
     int bx = 0, by = 0, bw = 0, bh = 0;
-    uint32_t* pixels = render_outer_shadow_blur_image(&rdcon->scratch, target, shadow_x, shadow_y,
+    uint32_t* pixels = render_outer_shadow_blur_image(&rdcon->scratch, limit, shadow_x, shadow_y,
         shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, color, blur, exclude_type, exclude_params,
         &bx, &by, &bw, &bh);
     size_t bytes = (size_t)bw * (size_t)bh * 4u;
@@ -1300,9 +1326,11 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         exclude_params[4] = r_tl;       exclude_params[5] = r_tr;
         exclude_params[6] = r_br;       exclude_params[7] = r_bl;
 
+        // the current target clip (window or paint layer capture) bounds the local image
+        Bound local_limit = xform ? outer_shadow_local_limit(rdcon->block.clip, xform, s_blur) : Bound{};
         // hard shadows also exclude the border-box, even for transparent square boxes.
         int cached_x = 0, cached_y = 0;
-        ImageSurface* cached = xform && rdcon->ui_context->surface ? shadow_image_cached(rdcon,
+        ImageSurface* cached = xform && rdcon->ui_context->surface ? shadow_image_cached(rdcon, local_limit,
             shadow_x, shadow_y, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, s->color, s_blur,
             exclude_type, exclude_params, &cached_x, &cached_y) : nullptr;
         if (cached) {
@@ -1314,7 +1342,7 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
             ScratchArena* shadow_arena = &rdcon->dl->arena;
             int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;
             uint32_t* shadow_pixels = render_outer_shadow_blur_image(
-                shadow_arena, rdcon->ui_context->surface,
+                shadow_arena, local_limit,
                 shadow_x, shadow_y, shadow_w, shadow_h,
                 sr_tl, sr_tr, sr_br, sr_bl,
                 s->color, s_blur,

@@ -3532,6 +3532,10 @@ bool clip_point_in_shape(ClipShape* cs, float px, float py);
 bool clip_point_in_rounded_rect(float px, float py, Rect rect, const Corner* radius);
 bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
     float x, float y, float w, float h);
+// whether every pixel center of [left, right) x [top, bottom) lies inside the shapes, so a
+// direct-pixel op can skip per-row masking
+bool clip_shapes_pixel_box_inside(ClipShape** shapes, int depth,
+    int left, int top, int right, int bottom);
 void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     float y, int base_left, int base_right, int* out_left, int* out_right);
 ClipShape clip_shape_from_params(int type, const float* params);

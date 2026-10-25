@@ -767,6 +767,15 @@ typedef struct {
 } DlDrawImage;
 
 typedef struct {
+    int depth;
+    int type[RDT_MAX_CLIP_SHAPES];
+    float params[RDT_MAX_CLIP_SHAPES][RDT_CLIP_PARAM_COUNT];
+    int polygon_count[RDT_MAX_CLIP_SHAPES];
+    lam::OwnArr<float> polygon_vx[RDT_MAX_CLIP_SHAPES];  // display-list arena copies
+    lam::OwnArr<float> polygon_vy[RDT_MAX_CLIP_SHAPES];
+} DlClipShapeStack;
+
+typedef struct {
     uint64_t resource_generation; // 0 means not safe for retained reuse
     GlyphBitmap bitmap;      // copy of bitmap descriptor (buffer pointer borrowed)
     int x, y;                // destination pixel position
@@ -775,6 +784,8 @@ typedef struct {
     bool has_transform;
     RdtMatrix transform;
     Bound clip;              // rectangular clip bounds at recording time
+    // clip-path shapes: glyphs replay as direct pixels, outside the vector clip stack
+    lam::Up<const DlClipShapeStack> clip_shapes; // immutable list-arena payload; null is the empty stack
 } DlDrawGlyph;
 
 typedef struct {
@@ -790,15 +801,6 @@ typedef struct {
     RdtMatrix transform;
     RdtFillRule rule;
 } DlPushClip;
-
-typedef struct {
-    int depth;
-    int type[RDT_MAX_CLIP_SHAPES];
-    float params[RDT_MAX_CLIP_SHAPES][RDT_CLIP_PARAM_COUNT];
-    int polygon_count[RDT_MAX_CLIP_SHAPES];
-    lam::OwnArr<float> polygon_vx[RDT_MAX_CLIP_SHAPES];  // display-list arena copies
-    lam::OwnArr<float> polygon_vy[RDT_MAX_CLIP_SHAPES];
-} DlClipShapeStack;
 
 // Direct-pixel fill (selection highlights, surface clear, etc.)
 typedef struct {
@@ -1195,7 +1197,8 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
                    const RdtMatrix* transform = nullptr,
-                   uint64_t resource_generation = 0);
+                   uint64_t resource_generation = 0,
+                   ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
 // takes one picture reference, released when the list is cleared; replay preserves it.
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
@@ -2682,7 +2685,7 @@ bool dl_replay_vector_clip_item(RdtVector* vec, const DisplayItem* item);
 // ===== display_list_replay_glyph.hpp =====
 void dl_replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* glyph);
 void dl_replay_draw_glyph_at_offset(ImageSurface* surface, const DlDrawGlyph* glyph,
-                                    float offset_x, float offset_y);
+                                    float offset_x, float offset_y, ScratchArena* scratch = nullptr);
 
 // ===== display_list_replay_raster.hpp =====
 void dl_replay_fill_surface_rect(ImageSurface* surface,
@@ -3473,10 +3476,11 @@ static inline void paint_record_draw_glyph(PaintRecordTarget* target, const char
                                            GlyphBitmap* bitmap, int x, int y,
                                            Color color, bool is_color_emoji,
                                            const Bound* clip, const RdtMatrix* transform,
-                                           uint64_t resource_generation) {
+                                           uint64_t resource_generation,
+                                           ClipShape** clip_shapes, int clip_depth) {
     if (!paint_record_begin_primitive(target, op)) return;
     dl_draw_glyph(target->display_list, bitmap, x, y, color, is_color_emoji,
-                     clip, transform, resource_generation);
+                     clip, transform, resource_generation, clip_shapes, clip_depth);
 }
 
 static inline void paint_record_draw_picture(PaintRecordTarget* target, const char* op,

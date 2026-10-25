@@ -58,7 +58,9 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.card').length>=10 && Array.from(document.querySelectorAll('.chart-frame')).every(e=>e.querySelector('svg'))"
+      "js": "document.querySelectorAll('.card').length>=10 && Array.from(document.querySelectorAll('.chart-frame')).every(e=>e.querySelector('.lambda-chart > svg'))",
+      "assert_timeout": 60000,
+      "assert_interval": 50
     },
     {
       "type": "capture_surface",

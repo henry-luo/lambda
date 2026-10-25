@@ -1,0 +1,11 @@
+{
+  "name": "Box-shadow under a scaled transform shows past the card's right edge though its local box is wider than the window",
+  "html": "test/ui/shadow_scaled_transform.html",
+  "viewport": {"width": 1200, "height": 700},
+  "device_scale": 2,
+  "events": [
+    {"type": "assert_pixel", "target": {"selector": "#card", "offset_x": 315, "offset_y": 250}, "max_r": 236},
+    {"type": "assert_pixel", "target": {"selector": "#card", "offset_x": 330, "offset_y": 250}, "max_r": 244},
+    {"type": "assert_pixel", "target": {"selector": "#card", "offset_x": 150, "offset_y": 335}, "max_r": 236}
+  ]
+}
