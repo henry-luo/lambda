@@ -32,6 +32,11 @@
       "tags": ["baseline"]
     },
     {
+      "name": "marble-drop",
+      "globs": ["test/ui/marble_drop/*.json"],
+      "tags": ["games"]
+    },
+    {
       "name": "dtna",
       "worker_mb": 1024,
       "globs": ["test/ui/dtna/*.json"],

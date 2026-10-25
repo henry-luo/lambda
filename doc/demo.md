@@ -14,6 +14,7 @@ its name:
 
 ```bash
 ./lambda demo tetris
+./lambda demo marble-drop
 ./lambda demo superlambda
 ./lambda demo doom
 ./lambda demo photo

@@ -1,0 +1,127 @@
+{
+  "name": "Marble Drop narrow layout and second inlet",
+  "html": "test/demo/marble-drop/marble-drop.ls",
+  "viewport": {
+    "width": 390,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sound"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-3"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "x": 14,
+      "width": 362,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".notebook"
+      },
+      "element_b": {
+        "selector": ".machine-panel"
+      },
+      "relation": "below"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".inlet"
+      },
+      "count": 2
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "B"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "U"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-moves",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#color-0"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inlet-B"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/compact.png"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

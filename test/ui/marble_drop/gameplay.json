@@ -1,0 +1,250 @@
+{
+  "name": "Marble Drop controls, routing, pause, undo, victory and navigation",
+  "html": "test/demo/marble-drop/marble-drop.ls",
+  "viewport": {
+    "width": 1200,
+    "height": 1100
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sound"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".level"
+      },
+      "count": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/initial.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hint"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#hint-text"
+      },
+      "equals": "Try red in inlet A."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inlet-A"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 240,
+      "steps": 6
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-active",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-paused",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pause"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 320,
+      "steps": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "Space"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#moves"
+      },
+      "equals": "2 / 2"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/solved.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#drop"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#next"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-4"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 800,
+      "steps": 20
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Steel caught"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "R"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-moves",
+      "equals": "0"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

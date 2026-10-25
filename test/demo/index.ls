@@ -18,6 +18,8 @@ let DEMOS = [
      blurb: "3,000 years of Chengdu in one live 3D film."},
     {name: "tetris", title: "Tetris", tag: "GAME · CLASSIC",
      blurb: "The falling-block classic, with Auto Play."},
+    {name: "marble-drop", title: "Marble Drop", tag: "GAME · MECHANICAL PUZZLES",
+     blurb: "Eight brass machines. Every color has a way home."},
     {name: "superlambda", title: "Superlambda", tag: "GAME · PLATFORMER",
      blurb: "Run, jump and stomp to the flag in a red λ cap."},
     {name: "doom", title: "DOOM", tag: "GAME · 3D SHOOTER",
@@ -77,9 +79,9 @@ fn hero() => <header class:"hero",
         <h1 <span "Pure functions.">; <span class:"ink", 'aria-label':"Living pixels.", (living()); " pixels";
             // the full stop is one live pixel that hops and lands
             <span class:"pixel", 'aria-hidden':"true">>>
-        <p class:"lead", "Twenty apps, from games and editors to 3D worlds and documents, written in Lambda and painted by Radiant. No browser. No framework. One language, start to finish.">
+        <p class:"lead", string(len(DEMOS)) ++ " apps, from games and editors to 3D worlds and documents, written in Lambda and painted by Radiant. No browser. No framework. One language, start to finish.">
         <div class:"stats",
-            <span class:"stat", <b "20">; " apps">
+            <span class:"stat", <b string(len(DEMOS))>; " apps">
             <span class:"stat", <b "1">; " language">
             <span class:"stat", <b "0">; " browsers">>
         <p class:"hint", "Click a tile to open it in its own window.">>;
