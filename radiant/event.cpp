@@ -14632,7 +14632,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 state->input_method.popup_target);
             if (row >= -1 && popup_target) {
                 state->input_method.pointer_down = true;
-                if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT)
+                if (btn_event->button == RDT_MOUSE_BUTTON_LEFT)
                     radiant_dispatch_input_method_action(&evcon, popup_target, row);
                 evcon.need_repaint = true;
                 break;

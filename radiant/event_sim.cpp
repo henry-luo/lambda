@@ -4707,8 +4707,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             float x = rect.x + rect.width / 2.0f, y = rect.y + rect.height / 2.0f;
             sim_mouse_move(uicon, x, y);
-            sim_mouse_button(uicon, x, y, GLFW_MOUSE_BUTTON_LEFT, 0, true);
-            sim_mouse_button(uicon, x, y, GLFW_MOUSE_BUTTON_LEFT, 0, false);
+            sim_mouse_button(uicon, x, y, RDT_MOUSE_BUTTON_LEFT, 0, true);
+            sim_mouse_button(uicon, x, y, RDT_MOUSE_BUTTON_LEFT, 0, false);
             break;
         }
         case SIM_EVENT_ASSERT_IME_POPUP: {
