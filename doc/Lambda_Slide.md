@@ -186,7 +186,11 @@ opacity is in [0,1]. Built-in layouts are `'blank'`, `'title'`, `'title-body'`,
 and `'footer'`. In image layouts, unassigned images occupy the image side and
 `'body'` uses the opposite side. Named layouts can define additional roles. Explicit
 bounds override layout defaults. Flow content uses normal Radiant layout inside
-its box. CSS/SVG feature support remains Radiant's support matrix.
+its box. A `content` object containing a single SVG root fits that SVG's viewport
+to the object box by default. Supply a `viewBox` to scale its geometry; authored
+`preserveAspectRatio` still controls fitting. SVGs nested in ordinary HTML keep
+their own layout sizing. This is a rendering projection; the authored SVG subtree
+is preserved (S1.4). CSS/SVG feature support remains Radiant's support matrix.
 
 ### Themes, layouts and masters
 

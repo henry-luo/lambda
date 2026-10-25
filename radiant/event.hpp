@@ -1654,6 +1654,9 @@ bool dom_selection_resolve_layout(DomSelection* selection);
 // performed in (i.e. the absolute logical coordinates produced by the view
 // geometry helpers, NOT physical/device pixels).
 DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float vy);
+// clamp blank space to a text row within one editing surface, using its painted coordinate plane.
+bool dom_range_find_text_edge_at(View* root_view, float vx, float vy,
+    ViewGeometryTextPointResolver resolve_point, ViewGeometryTextHit* out_hit);
 
 // ---------------------------------------------------------------------------
 // Multi-rect rendering helper

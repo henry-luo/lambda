@@ -3822,6 +3822,8 @@ void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* 
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
 void render_painter_fill_context_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color);
+void render_painter_fill_transformed_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color,
+                                         const RdtMatrix* transform);
 bool render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,

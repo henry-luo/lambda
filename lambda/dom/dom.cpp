@@ -14503,6 +14503,8 @@ static Item dom_boundary_from_point(DomElement* elem,
             hit.dom.node) {
             return dom_make_boundary_object(hit.dom);
         }
+        // an editor-scoped query must never return a different surface's text.
+        return ItemNull;
     }
 
     DomBoundary boundary = dom_hit_test_to_boundary(
