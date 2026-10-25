@@ -792,6 +792,15 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
                                    attribute_name, presentation_property);
     }
     dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
+    // native-only renderers have no realm in which to allocate a callback receiver.
+    if (dom_realm_active() && kind == DOM_JS_MUTATION_ATTRIBUTE && target &&
+            target->is_element() && attribute_name) {
+        DomElement* element = target->as_element();
+        const char* value = element->has_attribute(attribute_name)
+            ? element->get_attribute(attribute_name) : nullptr;
+        dom_realm_custom_element_attribute(dom_wrap_element(element), attribute_name,
+            old_value, value ? value : element->has_attribute(attribute_name) ? "" : nullptr);
+    }
 
     DocState* st = doc->state;
     if (st) {
@@ -816,6 +825,7 @@ extern "C" void dom_custom_elements_registry_changed(void) {
     if (_js_current_document && _js_current_document->root) {
         dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN,
             static_cast<DomNode*>(_js_current_document->root));
+        dom_custom_element_tree_changed(_js_current_document->root, true);
     }
 }
 
@@ -1226,6 +1236,7 @@ static bool dom_node_is_connected(DomNode* node) {
 
 static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
                                   bool release_external = true) {
+    if (child && dom_node_is_connected(child)) dom_custom_element_tree_changed(child, false);
     DocState* st = dom_state_for_nodes(child, child ? child->parent : nullptr);
     if (st && child) {
         dom_mutation_pre_remove(st, child);
@@ -1295,8 +1306,31 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
     if (record_mutation) {
         dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
     }
+    if (node && dom_node_is_connected(node)) dom_custom_element_tree_changed(node, true);
 }
 
+extern "C" void dom_custom_element_tree_changed(void* node_ptr, bool connected) {
+    DomNode* node = (DomNode*)node_ptr;
+    if (!dom_realm_active() || !node || !node->is_element()) return;
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, dom_wrap_element(node));
+    Rooted<Item> child_owner(roots, ItemNull);
+    Rooted<Item> next_owner(roots, ItemNull);
+    DomElement* element = node->as_element();
+    if (element->tag_name && strchr(element->tag_name, '-'))
+        dom_realm_custom_element_connection(owner.get(), connected);
+    // template contents are inert; importing/inserting them upgrades their nodes.
+    if (element->tag_name && !strcmp(element->tag_name, "template")) return;
+    // anonymous layout boxes have no DOM identity and cannot own reactions.
+    for (DomNode* child = dom_source_child(element, true); child;) {
+        DomNode* next = dom_source_sibling(child, true);
+        child_owner.set(dom_wrap_element(child));
+        // constructors may detach siblings and collect before traversal resumes.
+        next_owner.set(next ? dom_wrap_element(next) : ItemNull);
+        dom_custom_element_tree_changed(child, connected);
+        child = next;
+    }
+}
 
 extern "C" void* dom_visible_child(void* element, bool first) {
     return dom_source_child((DomElement*)element, first);
@@ -1657,7 +1691,11 @@ static bool expando_map_has_key(Item exp_map, Item key) {
     if (!s) return false;
     // Deleted expando entries leave shape tombstones behind; presence checks
     // must use the JS own-slot kernel, not raw shape lookup.
-    return js_ordinary_has_own(exp_map, s->chars, (int)s->len);
+    // private names retain their identity; byte lookup cannot find a stamped
+    // native subclass field even when its spelling matches the stored slot.
+    JsShapeSlotStatus status = js_own_shape_slot_status_key(exp_map,
+        key, nullptr, nullptr);
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
 static bool expando_get_property(DomNode* node, Item key, Item* out) {
@@ -2100,6 +2138,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_install_window_dialog_globals();
         dom_install_window_computed_style_global();
         dom_install_window_font_global();
+        dom_install_window_scroll_globals();
         dom_install_custom_elements_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
@@ -2270,6 +2309,7 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"area", "HTMLAreaElement"},
     {"audio", "HTMLAudioElement"},
     {"base", "HTMLBaseElement"},
+    {"body", "HTMLBodyElement"},
     {"button", "HTMLButtonElement"},
     {"canvas", "HTMLCanvasElement"},
     {"embed", "HTMLEmbedElement"},
@@ -2286,6 +2326,7 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"script", "HTMLScriptElement"},
     {"source", "HTMLSourceElement"},
     {"style", "HTMLStyleElement"},
+    {"template", "HTMLTemplateElement"},
     {"textarea", "HTMLTextAreaElement"},
     {"track", "HTMLTrackElement"},
     {"video", "HTMLVideoElement"},
@@ -3954,14 +3995,28 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
         return dom_raise_type_error("Unsupported DOMParser MIME type");
     }
 
-    Item parsed = js_create_foreign_html_doc("");
-    if (parsed.item == ITEM_NULL) return ItemNull;
-    Item body = dom_realm_get_cstr(parsed, "body");
-    if (body.item == ITEM_NULL || is_js_undefined(body)) return parsed;
-    // Reuse the element innerHTML path so detached parsed documents preserve
-    // the same node ownership and wrapper identity invariants as live DOM.
-    dom_realm_set_cstr(body, "innerHTML", source_item);
-    return parsed;
+    Input* parent = _js_current_document ? _js_current_document->input : nullptr;
+    if (!parent) return ItemNull;
+    Input* input = Input::create(parent->pool, nullptr, parent);
+    if (!input) return ItemNull;
+    // HTML DOM construction requires the parser's embedded node storage.
+    input->ui_mode = true;
+    Html5ParseOptions options = {.track_source_lines = false, .scripting_disabled = true};
+    // DOMParser parses a document: a body-fragment parse relocates head metadata
+    // into body and prevents navigation consumers from merging titles/assets.
+    Element* parsed = html5_parse_ex(input, source, &options);
+    if (!parsed) return ItemNull;
+    input->root = (Item){.element = parsed};
+    Element* html = get_html_root_element(input);
+    if (!html) return ItemNull;
+    DomDocument* document = dom_document_create(input);
+    if (!document) return ItemNull;
+    document->page_kind = DOM_PAGE_KIND_HTML;
+    document->scripting_disabled = true;
+    DomElement* root = build_dom_tree_from_element(html, document, nullptr);
+    if (!root) { free_document(document); return ItemNull; }
+    document->root = lam::up(root);
+    return wrap_foreign_doc(document);
 }
 
 
@@ -6051,7 +6106,7 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
     dom_queue_selectionchange(state->dom_selection);
 }
 
-static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
+
 
 // Parse `html_str` as a fragment in `elem`'s document and append the resulting
 // nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
@@ -9539,6 +9594,11 @@ typedef enum JsDomReflectKind {
     X("httpEquiv", "http-equiv", STR, 0, DOM_TAG_META) \
     X("content", "content", STR, 0, DOM_TAG_META) \
     X("acceptCharset", "accept-charset", STR, 0, DOM_TAG_FORM) \
+    X("action", "action", WRITE, 0, DOM_TAG_FORM) \
+    X("method", "method", WRITE, 0, DOM_TAG_FORM) \
+    X("enctype", "enctype", WRITE, 0, DOM_TAG_FORM) \
+    X("encoding", "enctype", WRITE, 0, DOM_TAG_FORM) \
+    X("target", "target", WRITE, 0, DOM_TAG_FORM) \
     X("htmlFor", "for", STR, 0, DOM_TAG_LABEL | DOM_TAG_OUTPUT) \
     X("formTarget", "formtarget", STR, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
     X("inputMode", "inputmode", WRITE, 0, DOM_TAG_ANY) \
@@ -9700,14 +9760,17 @@ extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
 extern "C" int radiant_dom_m4b_src_get(Item receiver, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
-static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
+
 
 static Item dom_template_content(DomElement* template_elem) {
     if (!template_elem || !template_elem->doc) return ItemNull;
 
-    Item content_key = js_string_key("__lambda_template_content");
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, dom_wrap_element(template_elem));
+    Rooted<Item> content_key(roots, js_string_key("__lambda_template_content"));
+    Rooted<Item> fragment_item(roots, ItemNull);
     Item cached = ItemNull;
-    if (expando_get_property((DomNode*)template_elem, content_key, &cached)) {
+    if (expando_get_property((DomNode*)template_elem, content_key.get(), &cached)) {
         return cached;
     }
 
@@ -9728,9 +9791,10 @@ static Item dom_template_content(DomElement* template_elem) {
         child = next;
     }
 
-    Item fragment_item = dom_wrap_element(fragment);
-    expando_set_property((DomNode*)template_elem, content_key, fragment_item);
-    return fragment_item;
+    // publishing the cache can allocate before either the key or wrapper has an owner.
+    fragment_item.set(dom_wrap_element(fragment));
+    expando_set_property((DomNode*)template_elem, content_key.get(), fragment_item.get());
+    return fragment_item.get();
 }
 
 static bool dom_get_textlike_property(DomNode* node, Item elem_item,
@@ -14548,11 +14612,13 @@ static Item dom_text_control_boundary_from_point(DomElement* elem,
     uint32_t offset_u16 = tc_utf8_to_utf16_offset(value ? value : "",
         value_len, hit.offset);
 
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "node", dom_wrap_element(elem));
-    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
-    dom_realm_set_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
-    return out;
+    // the geometry read is shared by Lambda and JS, with IDL UTF-16 offsets.
+    RootFrame roots(1);
+    Rooted<Item> node(roots, dom_wrap_element(elem));
+    static const char* const keys[] = { "node", "offset", "byteOffset" };
+    Item values[] = { node.get(), (Item){.item = i2it((int64_t)offset_u16)},
+        (Item){.item = i2it((int64_t)hit.offset)} };
+    return dom_result_map(elem->doc, keys, values, 3);
 }
 JS_FORWARD_ITEM(dom_text_control_caret_bounds_bridge, (void* elem), dom_text_control_caret_bounds, ((DomElement*)elem))
 JS_FORWARD_ITEM(dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))
@@ -14730,7 +14796,7 @@ static int64_t dom_backed_node_index(DomElement* parent, DomNode* child) {
     return -1;
 }
 
-static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
+
 
 static bool dom_remove_backed_element_item(DomElement* parent,
                                                DomElement* child,
@@ -15096,7 +15162,7 @@ static bool dom_insert_text_before_child(DomElement* parent, Item text_item,
 }
 
 
-static bool dom_remove_backed_child(DomElement* parent, DomNode* child) {
+extern "C" bool dom_remove_backed_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return false;
     parent = dom_prepare_children_for_mutation(parent, child);
     if (!parent || child->parent != parent) return false;
@@ -15635,7 +15701,7 @@ extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_de
     DomElement* elem = (DomElement*)elem_ptr;
     DomElement* clone = elem ? dom_clone_element_into_document(elem, elem->doc,
         has_deep && js_is_truthy(deep_arg)) : nullptr;
-    return clone ? dom_wrap_element(clone) : ItemNull;
+    return clone ? dom_realm_custom_element_upgrade(dom_wrap_element(clone)) : ItemNull;
 }
 
 extern "C" Item dom_import_node_bridge(void* doc_ptr, void* elem_ptr, bool deep) {
@@ -15644,7 +15710,7 @@ extern "C" Item dom_import_node_bridge(void* doc_ptr, void* elem_ptr, bool deep)
     // Import creates destination-owned backing storage; adoption of a source
     // clone would leave its Mark attributes tied to the foreign document pool.
     DomElement* clone = dom_clone_element_into_document(source, destination, deep);
-    return clone ? dom_wrap_element(clone) : ItemNull;
+    return clone ? dom_realm_custom_element_upgrade(dom_wrap_element(clone)) : ItemNull;
 }
 
 extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {

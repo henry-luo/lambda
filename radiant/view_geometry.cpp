@@ -303,10 +303,12 @@ RdtLogicalPoint view_geometry_document_viewport_offset(
 bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
                                 RdtLogicalPoint origin,
                                 bool include_trailing_edges,
-                                ViewGeometryTextHit* out_hit) {
+                                ViewGeometryTextHit* out_hit,
+                                ViewGeometryTextPointResolver resolve_point) {
     if (out_hit) *out_hit = {};
     if (!view) return false;
     if (view->is_text()) {
+        if (resolve_point && !resolve_point(view, point, origin, &point)) return false;
         DomText* text = lam::dom_require_text(view);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             float width = view_geometry_text_rect_width(text, rect);
@@ -338,7 +340,7 @@ bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
         View* child_view = static_cast<View*>(child);
         if (!child_view->view_type) continue;
         if (view_geometry_find_text_at(child_view, point, child_origin,
-                                       include_trailing_edges, out_hit)) {
+                                       include_trailing_edges, out_hit, resolve_point)) {
             return true;
         }
     }

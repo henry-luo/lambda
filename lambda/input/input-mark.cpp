@@ -7,6 +7,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
 #include "../core/lambda-decimal.hpp"
+#include "../core/mark_name.hpp"
 
 #include <string.h>
 
@@ -161,17 +162,6 @@ static String* parse_string(InputContext& ctx, const char **mark) {
 
 static String* parse_symbol(InputContext& ctx, const char **mark) {
     return parse_mark_quoted_string(ctx, mark, '\'', true, MARK_QUOTED_ESCAPE_SYMBOL);
-}
-
-// an unquoted name starts with an ASCII alpha, '_' or a UTF-8 byte and
-// continues with those, digits and '-'
-static bool mark_is_name_start(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
-        (unsigned char)c >= 0x80;
-}
-
-static bool mark_is_name_char(char c) {
-    return mark_is_name_start(c) || (c >= '0' && c <= '9') || c == '-';
 }
 
 // a bare keyword (`true`, `null`, `nan`, …) ends at a name boundary, so

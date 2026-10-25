@@ -1,0 +1,561 @@
+{
+  "name": "Slides Animations: gallery, pane, timing, triggers, painter, preview and persistence",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1800,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Animations]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-tile"
+      },
+      "equals": 10
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s0-o1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animate-blinds-in"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#animate-blinds-in"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#animation-duration"
+      },
+      "text": "0.6",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-options"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#animation-duration"
+      },
+      "equals": "0.6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-add"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-option-animation-add-spin"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-up"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "attribute": "data-animation",
+      "equals": "animation-2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-down"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#animation-start"
+      },
+      "value": "after-previous"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#animation-delay"
+      },
+      "text": "0.2",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-options"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#animation-delay"
+      },
+      "equals": "0.2"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#animation-start"
+      },
+      "equals": "after-previous"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-trigger"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-option-animation-trigger-accent"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#animation-trigger-label"
+      },
+      "contains": "accent"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#animation-start"
+      },
+      "equals": "click"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "script",
+      "js": "window.previewUndo = document.getElementById('slides-editor').getAttribute('data-undo')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-preview"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "present"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "cue"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1200,
+      "steps": 12
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "edit"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Animation preview complete."
+    },
+    {
+      "type": "assert_script",
+      "js": "window.previewUndo === document.getElementById('slides-editor').getAttribute('data-undo')"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-painter"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-animation-painter",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-place-s0-o2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-animation-painter",
+      "equals": "false"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/animations-edited.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear-animations"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/animations-edited.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s0-o0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-add"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-option-animation-add-line-color"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-option-animation-add-line-color').hasAttribute('disabled')"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s0-o1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-motion"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-option-animation-choose-motion"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#animation-path-preset"
+      },
+      "value": "arc"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-exit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-option-animation-choose-fade-out"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#animation-list"
+      },
+      "contains": "Fade Out"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-remove"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 3
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-row"
+      },
+      "equals": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#animation-painter"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-animation-painter",
+      "equals": "false"
+    }
+  ]
+}

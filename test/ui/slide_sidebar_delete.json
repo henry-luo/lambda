@@ -1,0 +1,454 @@
+{
+  "name": "Slides: navigation Delete and Backspace, focused slide, repeated deletion, history and last-slide safeguard",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "window.slideIds=()=>Array.from(document.querySelectorAll('#thumbnails [data-slide-id]')).map(e=>e.getAttribute('data-slide-id'));window.originalIds=slideIds()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"2\"]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "17"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(slideIds())===JSON.stringify(originalIds.filter((x,i)=>i!==2))"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide-id=chapter-4]"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "18"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(slideIds())===JSON.stringify(originalIds)"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide-id=chapter-3]"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "17"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide-id=chapter-4]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "16"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide-id=chapter-5]"
+      }
+    },
+    {
+      "type": "script",
+      "js": "window.lastId=slideIds()[slideIds().length-1]"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"15\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "15"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "14"
+    },
+    {
+      "type": "assert_script",
+      "js": "!slideIds().includes(lastId)"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide=\"14\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#deck-title"
+      },
+      "text": "Delete stays in text fieldsx",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#deck-title"
+      },
+      "equals": "Delete stays in text fields"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#speaker-notes"
+      },
+      "text": "Notesx",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#speaker-notes"
+      },
+      "equals": "Notes"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=title]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render [data-slide-object=title]"
+      },
+      "equals": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render [data-slide-object=title]"
+      },
+      "equals": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('[data-slide=\"1\"]').focus()"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(slideIds())===JSON.stringify([\"opening\"])"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "script",
+      "js": "window.lastSlideUndo=document.getElementById('slides-editor').getAttribute('data-undo')"
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('slides-editor').getAttribute('data-undo')===lastSlideUndo"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Keep at least one slide"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('slides-editor').getAttribute('data-undo')===lastSlideUndo"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('slide-up').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.stringify(slideIds())===JSON.stringify([\"opening\"])"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

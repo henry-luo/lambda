@@ -5404,6 +5404,8 @@
               "mbedcrypto"
             ],
             "additional_sources": [
+              "test/test_hotwire_gtest.cpp",
+              "lib/shell.c",
               "lambda/serve/serve_types.cpp",
               "lambda/serve/serve_utils.cpp",
               "lambda/serve/router.cpp",

@@ -39,22 +39,13 @@ import shape_format: .mod_shape_format
 import equation_ui: .mod_equation_ui
 import home: .mod_home
 import home_ui: .mod_home_ui
+import text_format: ~~.mod_text_format
+import ribbon: ~~.mod_ribbon
 
 pub let icon = icons.icon
-// retain an imported document's requested family even when it is not installed here.
-pub fn font_options(families,current) => [for (family in sort(unique([*(families or []),current]),(name)=>lower(name)))
-    {value:family,label:family}]
+pub fn font_options(families,current) => text_format.font_options(families,current)
 let text_colors = take(home.font_colors,4)
 
-// choose one word boundary; intrinsic button width keeps both lines fully visible.
-fn ribbon_label(label) {
-    let words = split(label," ")
-    let lines = if (len(words)<2) [label] else {
-        let at = sort(1 to (len(words)-1),(i)=>abs(len(join(slice(words,0,i)," "))-len(join(slice(words,i)," "))))[0];
-        [join(slice(words,0,at)," "),join(slice(words,at)," ")]
-    };
-    [for (line in lines) <span class:"ribbon-label-line",line>]
-}
 view <word_button> {
     let graphic = if (~.icon is string) ribbon_icons.icon(~.icon,16) else ~.icon;
     <button id:~.id, type:"button", class:"tool " ++ (~.class or ""), title:~.title or ~.label,
@@ -67,7 +58,7 @@ view <word_button> {
         if (~.preview!=null) ~.preview else null;
         if (graphic != null) <span class:"tool-icon",["aria-hidden"]:"true",graphic> else null;
         <span class:"tool-label", *if (~.content!=null) [~.content] else if (contains(~.class or "","ribbon-large") or contains(~.class or "","table-large-tool"))
-            ribbon_label(~.label) else [~.label]>;
+            ribbon.label_lines(~.label) else [~.label]>;
         if (~.menu!=null) <span class:"menu-chevron",["aria-hidden"]:"true",icon("down",10)> else null;
         if (~.shortcut!=null) <span class:"context-key",~.shortcut> else null>
 }
@@ -382,8 +373,7 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
 }
 fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
     edit_mark_active(editor,model.spec(id).mark),false,"icon-only")
-fn group(label,items) => <div class:"ribbon-group group-" ++ replace(lower(label)," ","-"),role:"group",["aria-label"]:label,
-    <div class:"group-tools", *items> <div class:"group-label", label>>
+fn group(label,items) => ribbon.group(label,items)
 fn large(id,action,label,graphic,params={},pressed=false,disabled=false,title=null) =>
     button(id,action,label,graphic,params,pressed,disabled,"ribbon-large",title)
 fn selector(id,command,values,current,css="",param="value",disabled=false) =>

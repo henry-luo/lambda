@@ -942,6 +942,37 @@ TEST_F(RadiantTextQuery, SharedPublicationRegeneratesTableListAndPseudoStructure
     EXPECT_EQ(find("item-a")->pseudo->marker->parent, find("item-a"));
 }
 
+TEST_F(RadiantTextQuery, HiddenPositionedPopupDoesNotPaintRetainedDecoration) {
+    DomElement* result = load("test/html/layout_hidden_popup.html", true);
+    ASSERT_NE(result, nullptr);
+    DomElement* popup = dom_find_element_by_id(result, "popup");
+    ASSERT_NE(popup, nullptr);
+    ui.window_width = 320.0f;
+    ui.window_height = 200.0f;
+    ui.create_surface(ui.window_width, ui.window_height);
+    auto publish_style = [&](const char* style) {
+        ASSERT_TRUE(popup->set_attribute("style", style));
+        dom_notify_mutation(DOM_JS_MUTATION_INLINE_STYLE, popup, popup->parent);
+        ASSERT_TRUE(layout_update_document(&ui, document));
+        render_html_doc(&ui, document->view_tree, nullptr);
+        ASSERT_FALSE(ui.render_failed);
+    };
+    for (const char* style : {"z-index:3", "z-index:0", "z-index:-3"}) {
+        SCOPED_TRACE(style);
+        publish_style(style);
+        ASSERT_NE(popup->view_type, RDT_VIEW_NONE);
+        test_radiant_expect_surface_pixel(ui.surface, 30, 65, 255, 255, 255);
+        char hidden_style[64];
+        snprintf(hidden_style, sizeof(hidden_style), "%s;display:none", style);
+        publish_style(hidden_style);
+        EXPECT_EQ(popup->view_type, RDT_VIEW_NONE);
+        // hidden boxes retain DOM/style storage, but no stacking paint may reach that storage.
+        test_radiant_expect_surface_pixel(ui.surface, 30, 65, 34, 51, 68);
+        test_radiant_expect_surface_pixel(ui.surface, 20, 65, 34, 51, 68);
+        test_radiant_expect_surface_pixel(ui.surface, 15, 80, 34, 51, 68);
+    }
+}
+
 TEST_F(RadiantTextQuery, SharedPublicationInvalidatesNewFontResources) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
@@ -2149,6 +2180,81 @@ TEST_F(RadiantTextQuery, TableBackgroundsUseSourcePositioningAndCellCoverage) {
                 ASSERT_NE(row, nullptr);
                 EXPECT_FLOAT_EQ(row->height, 0.0f);
             }
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine) {
+    ASSERT_NE(load_script_source(R"HTML(<style>
+        body{margin:0;background:white}.scaled{position:absolute;left:40px;top:30px;
+        transform-origin:0 0;transform:scale(.6) rotate(8deg)}
+        input,textarea{display:block;box-sizing:border-box;width:240px;height:100px;
+        border:0;padding:0;font:20px Arial;caret-color:#ff00ff;background:white;color:black}
+        input{height:40px}
+        </style><div id="result"></div><div class="scaled"><input id="input" value="first line">
+        <textarea id="area">first line&#10;second line</textarea>
+        <div id="rich" contenteditable="true" style="font:20px/28px Arial;width:240px">
+        <div id="first-row">first line</div><div id="second-row">second line</div></div></div>)HTML"), nullptr);
+    DocState* state = radiant_document_ensure_state(document, "transformed-control-caret-test");
+    ASSERT_NE(state, nullptr);
+    for (float scale : {1.0f, 2.0f}) {
+        SCOPED_TRACE(scale);
+        ui_context_set_device_scale(&ui, scale, scale);
+        ui.window_width = 320 * scale; ui.window_height = 200 * scale;
+        ui.create_surface(ui.window_width, ui.window_height);
+        layout_html_doc(&ui, document, false);
+        for (const char* id : {"input", "area"}) {
+            SCOPED_TRACE(id);
+            DomElement* control = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(control, nullptr);
+            focus_set_programmatic(state, control);
+            tc_ensure_init(control);
+            RdtMatrix matrix;
+            ASSERT_TRUE(view_get_client_matrix(control, &matrix));
+            for (uint32_t offset : {2u, 13u}) {
+                if (offset > 10 && strcmp(id, "input") == 0) continue;
+                tc_set_selection_range(control, offset, offset, 0);
+                EditingCaretRect caret;
+                ASSERT_TRUE(editing_geometry_text_control_caret_rect(&ui, control, offset, &caret));
+                float local_x = caret.x - control->x;
+                float local_y = caret.y - control->y;
+                float hit_x = 0.0f, hit_y = 0.0f;
+                ASSERT_TRUE(rdt_matrix_project_point(&matrix, local_x, local_y + caret.height * .5f,
+                    &hit_x, &hit_y));
+                uint32_t hit = 0;
+                ASSERT_TRUE(editing_geometry_text_control_offset_for_point(&ui, control, hit_x, hit_y, &hit));
+                EXPECT_EQ(hit, offset);
+                render_html_doc(&ui, document->view_tree, nullptr);
+                ASSERT_FALSE(ui.render_failed);
+                // sample inside the projected caret, separately from its logical hit boundary.
+                float pixel_x = 0.0f, pixel_y = 0.0f;
+                ASSERT_TRUE(rdt_matrix_project_point(&matrix, local_x + 1.0f, local_y + caret.height * .5f,
+                    &pixel_x, &pixel_y));
+                test_radiant_expect_surface_pixel(ui.surface,
+                    (unsigned)floorf(pixel_x * scale), (unsigned)floorf(pixel_y * scale),
+                    255, 0, 255, 80);
+            }
+        }
+        DomElement* rich = dom_find_element_by_id(document->root->as_element(), "rich");
+        EditingSurface surface;
+        ASSERT_TRUE(editing_surface_from_target(rich, &surface));
+        for (const char* id : {"first-row", "second-row"}) {
+            SCOPED_TRACE(id);
+            DomElement* row = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(row, nullptr);
+            DomText* text = lam::dom_require_text(row->first_child);
+            ASSERT_NE(text->rect, nullptr);
+            RdtMatrix matrix;
+            ASSERT_TRUE(view_get_client_matrix(text, &matrix));
+            float x = dom_range_glyph_x_for_byte_offset(&ui, text, text->rect, 2) - text->x;
+            float y = text->rect->y - text->y + text->rect->height * .5f;
+            float hit_x = 0.0f, hit_y = 0.0f;
+            ASSERT_TRUE(rdt_matrix_project_point(&matrix, x, y, &hit_x, &hit_y));
+            EditingBoundary hit;
+            ASSERT_TRUE(editing_geometry_hit_test_boundary(&ui, document->view_tree->root,
+                &surface, hit_x, hit_y, EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit));
+            EXPECT_EQ(hit.dom.node, static_cast<DomNode*>(text));
+            EXPECT_EQ(hit.dom.offset, 2u);
         }
     }
 }

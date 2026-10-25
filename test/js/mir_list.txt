@@ -22,4 +22,5 @@ typed_arrays
 type_infer_ip6
 url_search_params_constructor
 regression_mir_native_return_completion
+dom_custom_element_lifecycle
 jsi35_eval_mir_caller

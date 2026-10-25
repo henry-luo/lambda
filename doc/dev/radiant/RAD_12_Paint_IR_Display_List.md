@@ -4,6 +4,7 @@
 > **Scoped source refresh:** 2026-10-19 — whole-subtree marker/cache eligibility during split paint phases (§6); 2026-10-21 — paint layers (§6).
 > **Scoped source refresh:** 2026-10-23 — outer-shadow replay clipping and scratch lifetime (§5).
 > **Scoped source refresh:** 2026-10-25 — glyph items carry the clip-shape stack (§8).
+> **Scoped source refresh:** 2026-10-25 — minified glyph coverage integrates source pixel footprints (§8).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two retained rendering intermediate representations that sit between the layout/view tree and the pixel/vector backends: the target-neutral, semantic **PaintIR** and its raster-only lowering, the **DisplayList**. It describes why Radiant records draw commands into an immutable buffer and replays them separately (single-threaded, tiled-parallel, or via retained fragments), the record→replay data flow through the `rc_*` painter gateway, the `RenderBackend` vtable that SVG/PDF plug into by consuming PaintIR directly, and the supporting clip/transform/tile/retained-cache machinery. The per-feature painters (backgrounds, borders, glyphs), the raster surface, and PDF/SVG page assembly are [RAD_13](RAD_13_Render_Walk_Painters.md)'s and [RAD_14](RAD_14_SVG_Vector_Graph.md)'s subjects and are only cross-referenced here.
 >
@@ -146,6 +147,15 @@ The two seams coexist deliberately. The **raster** backend uses full-node overri
 
 **Clip and transform** state threads through both IR levels as payload fields, not as ambient global state. `ClipShape` (`view.hpp`) is a tagged union over polygon/circle/ellipse/inset/rounded-rect, capped at `RDT_MAX_CLIP_SHAPES` = 8 (`view.hpp`); the header is header-only and carries the point-in-shape, rect-inside, and scanline-bounds helpers (`view.hpp`) that replay and tiling use to mask direct-pixel ops, plus `clip_shape_to_params`/`clip_shape_from_params` (`view.hpp`/`307`) for the serialised `float[8]` form stored in `DlClipShapeStack` (`render.hpp`). Direct-pixel items — surface fills, scaled blits and glyphs — record that stack at record time and narrow each destination row by it (`clip_shapes_pixel_box_inside`, `clip_shapes_scanline_bounds`), because the vector clip stack (`DL_PUSH_CLIP`) reaches only vector-backend ops; without it, text inside a `clip-path` ignored the shape. Transforms are combined once by `radiant::compute_transform_matrix` (`view.hpp`), which folds a CSS `TransformFunction` chain — 2D affine plus a perspective/`matrix3d` quad-mapping branch (`view.hpp`) — into a single `RdtMatrix` that paint ops carry alongside a `has_transform` flag.
 
+Glyph replay (`glyph_sampling.hpp`) integrates source coverage over each destination
+pixel's footprint when an axis-aligned transform shrinks text. Bilinear point
+sampling alone can miss thin stems at slide-thumbnail scales. The shared
+`raster_sampling.hpp` visitor computes pixel-cell intersections for both image
+area filtering and glyph masks; glyph normalization includes transparent space
+outside the bitmap. Full-surface and tile-offset replay use the same page-space
+footprint. Magnified, rotated and projective glyphs retain bilinear sampling.
+Retained bitmap ownership remains **D4.1.4v5**.
+
 ---
 
 ## 9. Known Issues & Future Improvements
@@ -173,6 +183,7 @@ The two seams coexist deliberately. The **raster** backend uses full-node overri
 | `radiant/render.hpp` / `display_list.cpp` | `DisplayOp`/`DisplayItem`/`DisplayList`, per-op payload structs, element markers, lifecycle. |
 | `radiant/display_list_record_*.cpp` | Vector / raster / effect recording APIs (`dl_*` builders) that lowering targets. |
 | `radiant/render.hpp` / `display_list_replay*.cpp` | `dl_replay` control flow + the backdrop/shadow/effects/glyph/raster/state replay families and dirty-clip skip. |
+| `radiant/glyph_sampling.hpp` / `raster_sampling.hpp` | Glyph coverage replay and shared pixel-footprint integration for minified masks/images. |
 | `radiant/render.hpp` / `display_list_storage.cpp` | Deep-copy of stops/dashes/paths/clip-shapes into the DisplayList `ScratchArena`. |
 | `radiant/render.hpp` / `retained_display_list.cpp` | `RetainedDisplayListCache`/`Fragment`, capture, resource-generation-gated reuse, stats. |
 | `radiant/render.hpp` / `tile_pool.cpp` | `TileGrid`/`RenderPool`/`TileJob`, `dl_replay_tile`, page-absolute → tile-local translation. |

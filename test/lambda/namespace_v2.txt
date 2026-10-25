@@ -1,17 +1,17 @@
 "1. namespaced elements"
-<svg.rect>
-<svg.circle cx: 50, cy: 50, r: 25>
+<'svg.rect'>
+<'svg.circle' cx: 50, cy: 50, r: 25>
 "2. single ns attr desugar"
 <div xlink: {
     href: "url"
   }>
 "3. multiple ns attrs merge into one sub-map"
-<svg.a xlink: {
+<'svg.a' xlink: {
     href: "https://example.com",
     title: "Example"
   }>
 "4. mixed regular and ns attrs"
-<svg.a class: "link", xlink: {
+<'svg.a' class: "link", xlink: {
     href: "url"
   }, id: "a1">
 "5. access ns attr via sub-map"
@@ -42,4 +42,4 @@
 true
 false
 "11. element name preserved"
-["<svg.rect>"]
+["<'svg.rect'>"]

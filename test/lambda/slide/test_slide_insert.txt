@@ -1,0 +1,14 @@
+{
+  graphics: [true, true, true, true, true],
+  table: [true, true, true, true, true, true, true, true],
+  drawing: [true],
+  pictures: [true, true],
+  navigation: [true, true, true, true, true, true, true],
+  comments: [true, true, true, true, true],
+  fields: [true, true, true, true],
+  content: [true, true, true, true, true],
+  media: [true, true],
+  svg_ids: [true, true],
+  roundtrip: [true, true, true],
+  invalid: [true, true, true, true, true, true, true]
+}

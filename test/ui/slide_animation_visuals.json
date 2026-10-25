@@ -1,0 +1,660 @@
+{
+  "name": "Animation mask, emphasis and independent trigger pixels",
+  "html": "test/ui/slide_animation_visuals.ls",
+  "viewport": {
+    "width": 680,
+    "height": 400
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-blinds-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-checkerboard-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-dissolve-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-blinds-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-checkerboard-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-dissolve-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-line-color').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-transparency').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-grow').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-motion').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": 0, \"time_ms\": 500}}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-blinds-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 22
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-blinds-in .slide-stage",
+        "offset_x": 30,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-checkerboard-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-checkerboard-in .slide-stage",
+        "offset_x": 38,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-dissolve-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-dissolve-in .slide-stage",
+        "offset_x": 38,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-line-color .slide-stage",
+        "offset_x": 18,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 125,
+      "max_r": 131,
+      "min_g": 125,
+      "max_g": 131,
+      "min_b": 125,
+      "max_b": 131
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-line-color .slide-stage",
+        "offset_x": 60,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-transparency .slide-stage",
+        "offset_x": 60,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 61,
+      "max_g": 67,
+      "min_b": 61,
+      "max_b": 67
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-grow .slide-stage",
+        "offset_x": 2,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-motion .slide-stage",
+        "offset_x": 22,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-motion .slide-stage",
+        "offset_x": 70,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fx-trigger [data-slide-object=button]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"pause\"}}))"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fx-trigger"
+      },
+      "attribute": "data-slide-cue",
+      "equals": "-1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 250,
+      "max_r": 255,
+      "min_g": 123,
+      "max_g": 133,
+      "min_b": 123,
+      "max_b": 133
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 250,
+      "max_r": 255,
+      "min_g": 123,
+      "max_g": 133,
+      "min_b": 123,
+      "max_b": 133
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"resume\"}}))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fx-trigger"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "waiting"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fx-trigger [data-slide-object=button]"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"stop\"}}))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1500,
+      "steps": 10
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"restart-slide\"}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-blinds-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": \"final\"}}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-blinds-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-blinds-in .slide-stage",
+        "offset_x": 38,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-blinds-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"restart-slide\"}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-blinds-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-checkerboard-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": \"final\"}}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-checkerboard-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-checkerboard-in .slide-stage",
+        "offset_x": 38,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-checkerboard-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"restart-slide\"}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-checkerboard-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-dissolve-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"seek\", \"address\": {\"cue\": \"final\"}}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-dissolve-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-dissolve-in .slide-stage",
+        "offset_x": 38,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-dissolve-in').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"restart-slide\"}}))"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-dissolve-in .slide-stage",
+        "offset_x": 22,
+        "offset_y": 15
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 252,
+      "max_g": 255,
+      "min_b": 252,
+      "max_b": 255
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"trigger\", \"target\": \"hotspot\"}}))"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"next\"}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"next\"}}))"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('fx-trigger').dispatchEvent(new CustomEvent('slide_command',{bubbles:false,detail:{\"command\": \"next\"}}))"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fx-trigger"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "transition"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 252,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 3,
+      "min_b": 0,
+      "max_b": 3
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 10
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fx-trigger .slide-stage",
+        "offset_x": 50,
+        "offset_y": 50
+      },
+      "force_render": true,
+      "min_r": 123,
+      "max_r": 133,
+      "min_g": 0,
+      "max_g": 5,
+      "min_b": 123,
+      "max_b": 133
+    }
+  ]
+}

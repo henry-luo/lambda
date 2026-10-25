@@ -28,6 +28,7 @@ These supersede the earlier text where they conflict (notably §5.2 and §10.1).
 | SLD5 | Existing `.ls` decks are converted to `.slides` (Northstar, the introduction and the package-content demo). |
 | SLD6 | Detached DOM held only by script wrappers is reclaimed by one collection at an idle point once enough of it is stranded, not by charging GC allocation thresholds. |
 | SLD7 | Add a presenter console with notes/next-slide preview/timer; overview, slide picker, toolbar hiding, blackout and pointer; reusable themes/layouts and master slides. These are source-package features under D7.2.4/D7.5.3 and S12.1.3; SLD3/SLD4 still govern rendering. |
+| SLD8 | The 2026-10-25 editor request adds the transition gallery, effect variants, sound and per-slide advance settings, preview and Apply to All. Package sampling uses supported CSS clips and existing native byte audio; no new host waist is added (D7.2.5, D7.5.3, S12.1.1v2/S12.1.3). `start_slide`, host `activate` and `stop` let embedded hosts initialize and dispose playback without briefly starting another slide's sound/timer. See the implementation report and public API for behavior and verification. |
 
 Earlier designs replaced the canvas with freshly parsed `[outgoing, incoming]`
 layer markup on every slide change (§10.1). That reparsed published Mark data

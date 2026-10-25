@@ -236,28 +236,28 @@ CSV with tab separator:"
 "
 CSV without headers (should be array of arrays):"
 [{
-    John Doe: "Jane Smith",
-    30: "25",
-    New York: "San Francisco",
-    50000.50: "75000",
+    "John Doe": "Jane Smith",
+    "30": "25",
+    "New York": "San Francisco",
+    "50000.50": "75000",
     true: "false"
   }, {
-    John Doe: "Bob Johnson",
-    30: "35",
-    New York: "Boston",
-    50000.50: "60000.75",
+    "John Doe": "Bob Johnson",
+    "30": "35",
+    "New York": "Boston",
+    "50000.50": "60000.75",
     true: "true"
   }, {
-    John Doe: "Alice Brown",
-    30: "28",
-    New York: "Los Angeles",
-    50000.50: "45000",
+    "John Doe": "Alice Brown",
+    "30": "28",
+    "New York": "Los Angeles",
+    "50000.50": "45000",
     true: "true"
   }, {
-    John Doe: "Charlie Wilson",
-    30: "40",
-    New York: "Chicago",
-    50000.50: "80000",
+    "John Doe": "Charlie Wilson",
+    "30": "40",
+    "New York": "Chicago",
+    "50000.50": "80000",
     true: "false"
   }]
 "
