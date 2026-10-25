@@ -1,0 +1,13 @@
+{
+  font: [true, true, true, true, true, true, true, true],
+  paragraphs: [true, true, true, true, true, true, true, true, true, true],
+  painter: [true, true, true],
+  clear: [true, true, true],
+  drawing: [true, true, true, true, true],
+  layout: [true, true, true],
+  persistence: [true, true],
+  highlight: [true, true, true, true, true, true],
+  plain_paste: [true, true, true],
+  circle: true,
+  invalid: [true, true]
+}

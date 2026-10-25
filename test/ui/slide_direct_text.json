@@ -1,0 +1,514 @@
+{
+  "name": "Slides: direct plain and rich text editing, formatting, history and save/open",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "window.originalHeadline=document.querySelector('#slide-render [data-slide-object=headline]')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render [data-slide-object=headline]')===originalHeadline"
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "Draft to cancel",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "contains": "A clearer path"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "A clearer direction",
+      "clear": true
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "contains": "A clearer direction"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "contains": "A clearer path"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#canvas-rich-text').getAttribute('contenteditable')==='true'"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "contains": "Focus the market"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Focus the market\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "text": "Choose the right customers",
+      "clear": false
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "contains": "Choose the right customers"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "text": "!"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).some(x=>x.textContent==='Choose the right customers!')"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).some(x=>x.textContent==='Choose the right customers')"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/inline-rich-editing.png"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "equals": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Choose the right customers"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "01 / WIN THE RIGHT CUSTOMER"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Prioritize operations teams"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const d=document.querySelector('#slide-render [data-slide-object=focus]');const title=Array.from(d.querySelectorAll('div')).find(x=>x.textContent==='Choose the right customers');return getComputedStyle(title).fontSize==='30px'&&d.getBoundingClientRect().width>200})()"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('rich-text-host').parentElement.id==='inline-parking'"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Choose the right customers\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "text": "Cancel this card",
+      "clear": false
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Choose the right customers"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Focus the market"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-redo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Choose the right customers"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Choose the right customers\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "text": "Saved from the slide",
+      "clear": false
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": "save"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/direct-text.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/slides/direct-text.slides",
+      "contains": "Saved from the slide"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/direct-text.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Saved from the slide"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Prioritize operations teams"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const runs=document.querySelectorAll('#canvas-rich-text .slide-text-run');const e=Array.from(runs).find(x=>x.textContent===\"Saved from the slide\");const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "text": "Committed by clicking outside",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Committed by clicking outside"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/inline-rich-committed.png"
+    }
+  ]
+}

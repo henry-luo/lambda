@@ -3150,7 +3150,8 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     if (is_text_type_id(type)) {
         return fn_substring(vec, start_item, end_item);
     }
-    VECTOR_TEXT_ITEMS(vec, fn_slice(vec, start_item, end_item));  // bytes
+    // binary already has a storage-sharing slice below; text lifting would
+    // materialize every source byte and bypass that path for each small slice.
 
     int64_t len = type == LMD_TYPE_BINARY ? fn_len(vec) : vector_length(vec);
     if (len < 0) return ItemError;

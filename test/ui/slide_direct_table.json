@@ -1,0 +1,228 @@
+{
+  "name": "Slides: direct table cell editing and inline emphasis preserve table layout",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"13\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "window.originalRows=document.querySelectorAll('#slide-render table tr').length"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render table tbody tr td:nth-child(2)"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const e=Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).find(x=>x.textContent==='$18m');const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": "$20m"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const e=Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).find(x=>x.textContent==='$20m');const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "key_combo",
+      "key": "i",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas-rich-text em"
+      },
+      "equals": "$20m"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render #canvas-rich-text"
+      },
+      "equals": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render table tbody tr td:nth-child(2)"
+      },
+      "equals": "$20m"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render table tbody tr td:nth-child(2) em"
+      },
+      "equals": "$20m"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#slide-render table tr').length===originalRows&&document.querySelectorAll('#slide-render table th').length===4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render table tbody tr td:nth-child(2)"
+      },
+      "equals": "$18m"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Insert]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-table"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-confirm"
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render .slides-insert-table td"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const e=Array.from(document.querySelectorAll('#canvas-rich-text .slide-text-run')).find(x=>x.textContent==='Design');const n=e.firstChild;window.getSelection().setBaseAndExtent(n,0,n,n.textContent.length)})()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": "Studio"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render .slides-insert-table"
+      },
+      "contains": "Studio"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-inserted"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-field-data"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#insert-field-data"
+      },
+      "equals": "Team\tQ1\tQ2\nStudio\t12\t18\nBuild\t9\t15"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-cancel"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render .slides-insert-table"
+      },
+      "contains": "Design"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/inline-table.png"
+    }
+  ]
+}

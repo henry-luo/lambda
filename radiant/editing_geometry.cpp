@@ -295,7 +295,6 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
                                                     float vx,
                                                     float vy,
                                                     uint32_t* out_offset) {
-    (void)vy;
     if (!elem || !tc_is_text_control(elem) || !out_offset) return false;
     tc_ensure_init(elem);
     if (!elem->form) return false;
@@ -309,25 +308,25 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
             : (uint32_t)strlen(value))
         : 0;
 
-    RdtLogicalPoint absolute = view_geometry_node_viewport_origin(
-        static_cast<View*>(block), scroll_state_resolve_view_geometry);
     RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
         uicon ? uicon->document : nullptr, elem->doc,
         scroll_state_resolve_view_geometry);
-    float abs_x = absolute.x + document_offset.x;
-    float abs_y = absolute.y + document_offset.y;
+    float local_x = 0.0f, local_y = 0.0f;
+    // clicks must enter the same CSS plane that paints the control's glyphs.
+    if (!view_client_to_local(block, vx - document_offset.x, vy - document_offset.y,
+            &local_x, &local_y)) return false;
 
     EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
     float border = metrics.border;
     float padding = metrics.padding;
     float content_w = metrics.content_width;
-    float rel_x = vx - abs_x - border - padding + elem->form->scroll_x;
+    float rel_x = local_x - border - padding + elem->form->scroll_x;
     if (rel_x < 0.0f) rel_x = 0.0f;
 
     if (form_control_is_textarea(elem->form)) {
         float font_size = block->font ? block->fontp()->font_size : 13.333f;
         float line_height = font_size * 1.4f;
-        float rel_y = vy - abs_y - border - padding + elem->form->scroll_y;
+        float rel_y = local_y - border - padding + elem->form->scroll_y;
         if (rel_y < 0.0f) rel_y = 0.0f;
         uint32_t line_start = 0, line_len = 0;
         editing_geometry_textarea_line_for_y(value, value_len, rel_y, line_height,
@@ -477,6 +476,15 @@ static bool editing_mac_padding_boundary_for_point(const EditingSurface* surface
     return false;
 }
 
+static bool editing_geometry_text_point(View* view, RdtLogicalPoint point,
+                                         RdtLogicalPoint origin, RdtLogicalPoint* out) {
+    float x = 0.0f, y = 0.0f;
+    if (!view_client_to_local(view, point.x, point.y, &x, &y)) return false;
+    // text rectangles use their containing block's coordinates, rather than the text view's origin.
+    *out = {origin.x + view->x + x, origin.y + view->y + y};
+    return true;
+}
+
 bool editing_geometry_hit_test_boundary(UiContext* uicon,
                                         View* root_view,
                                         const EditingSurface* surface,
@@ -495,7 +503,27 @@ bool editing_geometry_hit_test_boundary(UiContext* uicon,
     }
 
     if (!editing_surface_is_rich(surface) || !root_view) return false;
-    DomBoundary hit = dom_hit_test_to_boundary(root_view, vx, vy);
+    // scope the transformed glyph query to this editor; thumbnail text can overlap in layout space.
+    ViewGeometryTextHit text_hit = {};
+    DomBoundary hit = {nullptr, 0};
+    if (view_geometry_find_text_at(surface->owner, {vx, vy}, {}, true, &text_hit,
+            editing_geometry_text_point) &&
+        editing_geometry_dom_text_boundary_from_point(uicon, text_hit.text, text_hit.rect,
+            vx, vy, out) && editing_geometry_surface_contains_boundary(surface, out)) {
+        hit = out->dom;
+    } else {
+        hit = dom_hit_test_to_boundary(root_view, vx, vy);
+        // keep explicit atom/empty-element boundaries; clamp other blank hits inside this editor.
+        bool element_hit = hit.node && hit.node->is_element() &&
+            view_geometry_dom_is_descendant(hit.node, surface->owner);
+        if (!element_hit && dom_range_find_text_edge_at(surface->owner, vx, vy,
+                editing_geometry_text_point, &text_hit) &&
+            editing_geometry_dom_text_boundary_from_point(uicon, text_hit.text, text_hit.rect,
+                vx, vy, out) && editing_geometry_surface_contains_boundary(surface, out)) {
+            hit = out->dom;
+        }
+    }
+    editing_boundary_clear(out);
     if (behavior == EDITING_POINT_BEHAVIOR_MAC && hit.node &&
         hit.node->is_text()) {
         DomBoundary mac_hit = { nullptr, 0 };
@@ -691,16 +719,14 @@ bool editing_geometry_dom_text_boundary_from_point(UiContext* uicon,
                                                    float vx,
                                                    float vy,
                                                    EditingBoundary* out) {
-    (void)vy;
     if (!out) return false;
     editing_boundary_clear(out);
     if (!uicon || !text || !rect) return false;
 
     ViewText* view_text = static_cast<ViewText*>(text);
-    RdtLogicalPoint block_origin = view_geometry_local_to_block_viewport(
-        static_cast<View*>(view_text), {0.0f, 0.0f},
-        scroll_state_resolve_view_geometry);
-    float local_x = vx - block_origin.x;
+    RdtLogicalPoint local;
+    if (!editing_geometry_text_point(view_text, {vx, vy}, {}, &local)) return false;
+    float local_x = local.x;
     int byte_offset = dom_range_byte_offset_for_x(uicon, view_text, rect, local_x);
     if (byte_offset < 0) byte_offset = 0;
     return editing_geometry_dom_text_boundary_from_byte_offset(text,

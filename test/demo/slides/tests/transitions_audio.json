@@ -1,0 +1,79 @@
+{
+  "name": "Transition sound native output: audible Chime, playback and cleanup",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"Transitions\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-fade"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#transition-duration"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "value": "chime"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-preview"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-sound-error",
+      "exists": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "edit"
+    }
+  ]
+}

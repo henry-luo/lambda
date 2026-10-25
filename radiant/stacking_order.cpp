@@ -138,6 +138,8 @@ View* radiant_stack_path_child(View* ancestor, View* descendant) {
 
 static void radiant_stack_collect_z_into(View* view, ArrayList* out, bool negative) {
     for (View* child = view; child; child = child->next()) {
+        // hidden DOM records retain styles; neither they nor their descendants own paint layers.
+        if (child->view_type == RDT_VIEW_NONE) continue;
         if (negative ? radiant_stack_is_negative_z_block(child) : radiant_stack_is_positive_z_positioned(child)) {
             if (!arraylist_append(out, child)) {
                 log_warn("[RAD_STACK_LAYERS] failed to grow context paint list");
@@ -224,7 +226,7 @@ ArrayList* radiant_stack_collect_positioned_children(ViewBlock* block, const cha
 
     ViewBlock* child = block->positionp()->first_abs_child;
     while (child) {
-        if (!radiant_stack_is_negative_z_block(child) &&
+        if (child->view_type != RDT_VIEW_NONE && !radiant_stack_is_negative_z_block(child) &&
             (!radiant_stack_is_positive_z_positioned(child) || block->custom_layout_paint_prop()) &&
             !arraylist_append(views, child)) {
             log_warn("%s failed to grow positioned list", log_prefix);

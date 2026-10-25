@@ -1,6 +1,7 @@
 // adopted resource §4.3; prefix counts are code points (S2.5.8), seeks use bytes (S17.4.1).
 import search: lambda.doc.diff.common
 import utf8: lambda.io.utf8
+import lines: lambda.io.line_index
 
 fn failure(message) error => error({code:7821,message:"spelling front coding: " ++ message})
 fn require(ok,message) bool^ => if (ok) true else raise failure(message)
@@ -46,13 +47,6 @@ fn inspect_line(raw: binary, at: int, limit: int, previous: string = "",
     else inspect_line(raw,end + 1,limit,word,raw[end] == 59,count + 1,initial,oracle,base)^
 }
 
-fn line_end(vocabulary, line: int) int =>
-    if (line + 1 < len(vocabulary.offsets)) int(vocabulary.offsets[line + 1]) - 1
-    else len(vocabulary.bytes) - 1
-
-fn line_bytes(vocabulary, line: int) binary^ =>
-    slice(vocabulary.bytes,int(vocabulary.offsets[line]),line_end(vocabulary,line))^
-
 // compare restart keys in place, without allocating strings or scanning UTF-8 prefixes.
 fn first_compare(raw: binary, at: int, key: binary, i: int = 0) int {
     let b = raw[at + i]
@@ -65,11 +59,8 @@ fn first_compare(raw: binary, at: int, key: binary, i: int = 0) int {
 
 // prepared resources need only a byte buffer and restart index; count is trusted metadata.
 pub fn from_bytes(source, expected_count = null) map^ {
-    let valid = require(source is binary and len(source) > 0 and len(source) <= 4294967295,
-        "expected nonempty bytes within the u32 offset range")^
-    let terminated = require(source[len(source) - 1] == 10,"missing final LF")^
-    let offsets: u32[] = [0u32,*[for (i,b in source where b == 10 and i + 1 < len(source)) u32(i + 1)]];
-    {format_version:1,bytes:source,offsets:offsets,count:expected_count}
+    let indexed = lines.from_bytes(source) ^ { raise failure(^.message) };
+    {*:indexed,format_version:1,count:expected_count}
 }
 
 // explicit preparation operation; reconstruct and check the complete vocabulary once.
@@ -80,7 +71,7 @@ pub fn validate(source, expected_count = null) map^ {
         "reserved control byte or BOM")^
     let offsets = indexed.offsets
     let summaries = [for (i,at in offsets) {
-        let raw = line_bytes(indexed,i)^;
+        let raw = lines.line_bytes(indexed,i)^;
         inspect_line(raw,0,len(raw))^
     }]
     let ordered = require(all([for (i,row in summaries)
@@ -155,7 +146,7 @@ pub fn lookup(vocabulary: map, word: string) int?^ {
     else {
         let line = at - 1
         let start = int(vocabulary.offsets[line]);
-        compare_word(raw,bytes,line_end(vocabulary,line),start,0,line * 64)
+        compare_word(raw,bytes,lines.line_end(vocabulary,line),start,0,line * 64)
     }
 }
 
@@ -168,7 +159,7 @@ pub pn read(path, expected_count = null) map^ {
 pub fn verify(vocabulary: map, words: array) bool^ {
     let valid = require(len(words) == vocabulary.count,"reference count mismatch")^
     let checked = [for (i,offset in vocabulary.offsets) {
-        let raw = line_bytes(vocabulary,i)^;
+        let raw = lines.line_bytes(vocabulary,i)^;
         inspect_line(raw,0,len(raw),"",false,0,null,words,i * 64)^.count
     }];
     sum(checked) == len(words)

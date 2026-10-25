@@ -1,0 +1,4 @@
+form submission attributes: true
+form method normalization: true
+form encoding aliases enctype: true
+invalid form method defaults to get: true

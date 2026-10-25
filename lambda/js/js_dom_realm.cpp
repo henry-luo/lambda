@@ -40,6 +40,8 @@
 #include "../dom/dom_ops.h"
 #include "../input/css/css_style.hpp"
 #include "js_runtime_state.hpp"
+#include "js_event_loop.h"
+#include "../input/css/dom_element.hpp"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 
@@ -83,12 +85,16 @@ static Item _custom_element_class_name(Item constructor, Item name = make_js_und
     return value.get();
 }
 
+static Item custom_element_state(Item element, bool create);
+
 static Item _html_element_constructor(void) {
-    RootFrame roots(5);
+    RootFrame roots(7);
     Rooted<Item> target_root(roots, js_get_new_target());
     Rooted<Item> name_root(roots, ItemNull);
     Rooted<Item> instance_root(roots, ItemNull);
     Rooted<Item> prototype_root(roots, ItemNull);
+    Rooted<Item> frame(roots, js_runtime_state.dom.custom_element_construction);
+    Rooted<Item> state(roots, ItemNull);
     if (get_type_id(target_root.get()) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Illegal constructor");
     }
@@ -100,8 +106,19 @@ static Item _html_element_constructor(void) {
     String* name = it2s(name_root.get());
     void* document = dom_get_document();
     if (!name || !document) return js_throw_type_error("Illegal constructor");
-    void* element = dom_create_backed_element_bridge(document, name->chars);
-    instance_root.set(element ? dom_wrap_element(element) : ItemNull);
+    if (get_type_id(frame.get()) == LMD_TYPE_ARRAY &&
+            js_elements_get_int(frame.get(), 1).item == target_root.get().item) {
+        // upgrade constructors must initialize the existing node, preserving identity.
+        instance_root.set(js_elements_get_int(frame.get(), 2));
+        if (instance_root.get().item == ItemNull.item)
+            return js_throw_type_error("Custom element super() called twice");
+        js_elements_set_int(frame.get(), 2, ItemNull);
+    } else {
+        void* element = dom_create_backed_element_bridge(document, name->chars);
+        instance_root.set(element ? dom_wrap_element(element) : ItemNull);
+        state.set(custom_element_state(instance_root.get(), true));
+        js_set_key_cstr(state.get(), "custom", (Item){.item = ITEM_TRUE});
+    }
     if (!js_is_object_value(instance_root.get())) return ItemError;
     prototype_root.set(js_get_key_cstr(target_root.get(), "prototype"));
     if (get_type_id(prototype_root.get()) == LMD_TYPE_MAP) {
@@ -409,12 +426,170 @@ static Item _custom_elements_record(Item registry, Item name, bool create) {
     return item_is_error(stored) ? stored : record_root.get();
 }
 
+static Item custom_element_definition(Item element) {
+    DomElement* node = (DomElement*)dom_unwrap_element(element);
+    if (!node || !node->is_element() || !node->tag_name || !strchr(node->tag_name, '-'))
+        return make_js_undefined();
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, element);
+    Rooted<Item> registry(roots, js_get_key_cstr(js_get_global_this(), "customElements"));
+    if (get_type_id(registry.get()) != LMD_TYPE_MAP) return make_js_undefined();
+    return _custom_elements_record(registry.get(), js_name_item(node->tag_name), false);
+}
+
+static Item custom_element_state(Item element, bool create) {
+    if (!js_root_vector_ensure_registered(&js_runtime_state.dom)) return ItemError;
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, element), state(roots, ItemNull), definition(roots, ItemNull);
+    Item& states = js_runtime_state.dom.custom_element_states;
+    if (get_type_id(states) != LMD_TYPE_MAP) {
+        if (!create) return make_js_undefined();
+        states = js_weakmap_new();
+    }
+    state.set(js_collection_method(states, 1, owner.get(), ItemNull));
+    if (get_type_id(state.get()) == LMD_TYPE_MAP || !create) return state.get();
+    definition.set(custom_element_definition(owner.get()));
+    if (get_type_id(definition.get()) != LMD_TYPE_MAP) return make_js_undefined();
+    state.set(js_new_object());
+    js_set_key_cstr(state.get(), "definition", definition.get());
+    js_set_key_cstr(state.get(), "custom", (Item){.item = ITEM_FALSE});
+    js_set_key_cstr(state.get(), "connected", (Item){.item = ITEM_FALSE});
+    js_collection_method(states, 0, owner.get(), state.get());
+    return state.get();
+}
+
+static void custom_element_call(Item callback, Item receiver, Item* args, int argc) {
+    Item result = js_call_function(callback, receiver, args, argc);
+    if (item_is_error(result)) {
+        char message[256];
+        js_error_lane_format(result, message, sizeof(message));
+        log_error("custom-element reaction: %s", message);
+    }
+}
+
+static Item custom_element_flush_reactions(void) {
+    RootFrame roots(5);
+    Rooted<Item> queue(roots, js_runtime_state.dom.custom_element_reactions);
+    Rooted<Item> reaction(roots, ItemNull), callback(roots, ItemNull);
+    Rooted<Item> receiver(roots, ItemNull), arguments(roots, ItemNull);
+    js_runtime_state.dom.custom_element_reactions = ItemNull;
+    int64_t count = js_array_length(queue.get());
+    for (int64_t index = 0; index < count; index++) {
+        reaction.set(js_elements_get_int(queue.get(), index));
+        callback.set(js_elements_get_int(reaction.get(), 0));
+        receiver.set(js_elements_get_int(reaction.get(), 1));
+        arguments.set(js_elements_get_int(reaction.get(), 2));
+        Item args[3] = {};
+        int argc = (int)js_array_length(arguments.get());
+        for (int arg = 0; arg < argc; arg++) args[arg] = js_elements_get_int(arguments.get(), arg);
+        custom_element_call(callback.get(), receiver.get(), args, argc);
+    }
+    return make_js_undefined();
+}
+
+static void custom_element_enqueue(Item element, Item definition,
+        const char* name, Item* args = nullptr, int argc = 0, bool immediate = false) {
+    RootFrame roots(6);
+    Rooted<Item> owner(roots, element), record(roots, definition);
+    Rooted<Item> callback(roots, js_get_key_cstr(record.get(), name));
+    Rooted<Item> arguments(roots, ItemNull), reaction(roots, ItemNull), task(roots, ItemNull);
+    if (!js_is_callable(callback.get())) return;
+    if (immediate) {
+        // attribute setters are CEReactions boundaries; deferring their callbacks
+        // loses the caller's reentrancy guard and can restart a completed load.
+        custom_element_call(callback.get(), owner.get(), args, argc);
+        return;
+    }
+    arguments.set(js_array_new(0));
+    for (int index = 0; index < argc; index++) js_array_push(arguments.get(), args[index]);
+    reaction.set(js_array_new(0));
+    js_array_push(reaction.get(), callback.get());
+    js_array_push(reaction.get(), owner.get());
+    js_array_push(reaction.get(), arguments.get());
+    Item& queue = js_runtime_state.dom.custom_element_reactions;
+    bool schedule = get_type_id(queue) != LMD_TYPE_ARRAY;
+    if (schedule) queue = js_array_new(0);
+    js_array_push(queue, reaction.get());
+    if (schedule) {
+        task.set(js_new_native_function(custom_element_flush_reactions));
+        // backup reactions retain receivers/arguments until the microtask checkpoint.
+        js_microtask_enqueue(task.get());
+    }
+}
+
+extern "C" void dom_realm_custom_element_attribute(Item element, const char* name,
+        const char* old_value, const char* value) {
+    if (!dom_realm_active() || !name) return;
+    RootFrame roots(7);
+    Rooted<Item> owner(roots, element), state(roots, custom_element_state(element, false));
+    if (get_type_id(state.get()) != LMD_TYPE_MAP ||
+            js_get_key_cstr(state.get(), "custom").item != ITEM_TRUE) return;
+    Rooted<Item> definition(roots, js_get_key_cstr(state.get(), "definition"));
+    Rooted<Item> observed(roots, js_get_key_cstr(definition.get(), "observedAttributes"));
+    Rooted<Item> key(roots, js_name_item(name));
+    Rooted<Item> old(roots, old_value ? js_make_string(old_value) : ItemNull);
+    Rooted<Item> current(roots, value ? js_make_string(value) : ItemNull);
+    for (int64_t index = 0; index < js_array_length(observed.get()); index++) {
+        if (js_strict_equal(js_elements_get_int(observed.get(), index), key.get()).item != ITEM_TRUE) continue;
+        Item args[] = {key.get(), old.get(), current.get()};
+        custom_element_enqueue(owner.get(), definition.get(), "attributeChangedCallback", args, 3, true);
+        return;
+    }
+}
+
+extern "C" Item dom_realm_custom_element_upgrade(Item element) {
+    if (!dom_realm_active()) return element;
+    RootFrame roots(7);
+    Rooted<Item> owner(roots, element), definition(roots, custom_element_definition(element));
+    if (get_type_id(definition.get()) != LMD_TYPE_MAP) return owner.get();
+    Rooted<Item> state(roots, custom_element_state(owner.get(), false));
+    if (get_type_id(state.get()) == LMD_TYPE_MAP) return owner.get();
+    state.set(custom_element_state(owner.get(), true));
+    Rooted<Item> constructor(roots, js_get_key_cstr(definition.get(), "constructor"));
+    Rooted<Item> previous(roots, js_runtime_state.dom.custom_element_construction);
+    Rooted<Item> frame(roots, js_array_new(0)), result(roots, ItemNull);
+    js_array_push(frame.get(), previous.get());
+    js_array_push(frame.get(), constructor.get());
+    js_array_push(frame.get(), owner.get());
+    js_runtime_state.dom.custom_element_construction = frame.get();
+    result.set(js_construct_value(constructor.get(), nullptr, 0, constructor.get(), nullptr, false));
+    js_runtime_state.dom.custom_element_construction = previous.get();
+    if (item_is_error(result.get())) return result.get();
+    if (result.get().item != owner.get().item)
+        return js_throw_type_error("Custom element constructor returned a different object");
+    js_set_key_cstr(state.get(), "custom", (Item){.item = ITEM_TRUE});
+    DomElement* node = (DomElement*)dom_unwrap_element(owner.get());
+    DomAttributeIterator iterator = dom_element_attribute_iterator(node);
+    DomAttributeView attribute;
+    while (dom_element_next_attribute(&iterator, &attribute)) {
+        dom_realm_custom_element_attribute(owner.get(), attribute.local_name, nullptr,
+            attribute.value ? attribute.value : "");
+    }
+    return owner.get();
+}
+
+extern "C" void dom_realm_custom_element_connection(Item element, bool connected) {
+    if (!dom_realm_active()) return;
+    RootFrame roots(3);
+    Rooted<Item> owner(roots, connected ? dom_realm_custom_element_upgrade(element) : element);
+    if (item_is_error(owner.get())) { log_error("custom-element upgrade: constructor failed"); return; }
+    Rooted<Item> state(roots, custom_element_state(owner.get(), false));
+    if (get_type_id(state.get()) != LMD_TYPE_MAP ||
+            js_get_key_cstr(state.get(), "custom").item != ITEM_TRUE) return;
+    Item value = {.item = connected ? ITEM_TRUE : ITEM_FALSE};
+    if (js_get_key_cstr(state.get(), "connected").item == value.item) return;
+    js_set_key_cstr(state.get(), "connected", value);
+    Rooted<Item> definition(roots, js_get_key_cstr(state.get(), "definition"));
+    custom_element_enqueue(owner.get(), definition.get(),
+        connected ? "connectedCallback" : "disconnectedCallback");
+}
+
 static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
         int argc, uint64_t* /*result_home*/) {
     if (!_custom_elements_is_registry(registry)) {
         return js_throw_type_error("CustomElementRegistry.define called on incompatible receiver");
     }
-    RootFrame roots(6);
+    RootFrame roots(7);
     Rooted<Item> name_root(roots, argc > 0 && args ? js_to_string(args[0]) :
         make_js_undefined());
     Rooted<Item> constructor_root(roots, argc > 1 && args ? args[1] :
@@ -423,6 +598,7 @@ static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
     Rooted<Item> waiters_root(roots, ItemNull);
     Rooted<Item> promise_root(roots, ItemNull);
     Rooted<Item> stored_root(roots, ItemNull);
+    Rooted<Item> prototype(roots, ItemNull);
     if (item_is_error(name_root.get())) return name_root.get();
     if (!_custom_element_name_is_valid(name_root.get())) {
         return _custom_elements_dom_exception("SyntaxError", "Invalid custom element name");
@@ -452,6 +628,22 @@ static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
         return _custom_elements_dom_exception("NotSupportedError",
             "Custom element constructor is already registered");
     }
+    prototype.set(js_get_key_cstr(constructor_root.get(), "prototype"));
+    if (!js_is_object_value(prototype.get())) return js_throw_type_error("Custom element prototype is not an object");
+    static const char* callbacks[] = {"connectedCallback", "disconnectedCallback", "attributeChangedCallback"};
+    for (const char* callback : callbacks) {
+        stored_root.set(js_get_key_cstr(prototype.get(), callback));
+        if (item_is_error(stored_root.get())) return stored_root.get();
+        if (get_type_id(stored_root.get()) != LMD_TYPE_UNDEFINED && !js_is_callable(stored_root.get()))
+            return js_throw_type_error("Custom element lifecycle callback is not callable");
+        js_set_key_cstr(record_root.get(), callback, stored_root.get());
+    }
+    stored_root.set(js_get_key_cstr(constructor_root.get(), "observedAttributes"));
+    if (item_is_error(stored_root.get())) return stored_root.get();
+    if (get_type_id(stored_root.get()) == LMD_TYPE_UNDEFINED) stored_root.set(js_array_new(0));
+    else stored_root.set(js_iterable_to_array(stored_root.get()));
+    if (item_is_error(stored_root.get())) return stored_root.get();
+    js_set_key_cstr(record_root.get(), "observedAttributes", stored_root.get());
     // HTMLElement's native super() reads this private association by ABI.
     stored_root.set(_custom_element_class_name(constructor_root.get(), name_root.get()));
     if (item_is_error(stored_root.get())) return stored_root.get();
@@ -1146,6 +1338,54 @@ extern "C" void dom_install_image_constructor(void) {
 // ---------------------------------------------------------------------------
 // Window-level publications
 // ---------------------------------------------------------------------------
+
+static Item js_window_scroll_operation(Item x, Item y, JubeDomElementOperation operation) {
+    JS_ROOTS(roots, first, x, second, y, document, js_get_document_object_value(),
+        target, dom_realm_get_cstr(document.get(), "scrollingElement"));
+    if (js_is_nullish(target.get())) return make_js_undefined();
+    Item args[] = {first.get(), second.get()};
+    // CLI and rendered documents use the same viewport state and scroll events.
+    return dom_element_operation_impl(target.get(), operation, args, 2);
+}
+
+static Item js_window_scroll_to(Item x, Item y) {
+    return js_window_scroll_operation(x, y, JUBE_DOM_SCROLL_TO);
+}
+
+static Item js_window_scroll_by(Item x, Item y) {
+    return js_window_scroll_operation(x, y, JUBE_DOM_SCROLL_BY);
+}
+
+static Item js_window_scroll_position(const char* axis) {
+    JS_ROOTS(roots, document, js_get_document_object_value(),
+        target, dom_realm_get_cstr(document.get(), "scrollingElement"));
+    return js_is_nullish(target.get()) ? (Item){.item = i2it(0)}
+        : dom_realm_get_cstr(target.get(), axis);
+}
+
+static Item js_window_scroll_x(void) { return js_window_scroll_position("scrollLeft"); }
+static Item js_window_scroll_y(void) { return js_window_scroll_position("scrollTop"); }
+
+extern "C" void dom_install_window_scroll_globals(void) {
+    JS_ROOTS(roots, global, js_get_global_this(), window, js_get_key_cstr(global.get(), "window"),
+        to, js_new_native_function(js_window_scroll_to), by, js_new_native_function(js_window_scroll_by),
+        x, js_new_native_function(js_window_scroll_x), y, js_new_native_function(js_window_scroll_y));
+    js_set_function_name(to.get(), js_name_item("scrollTo"));
+    js_set_function_name(by.get(), js_name_item("scrollBy"));
+    Item targets[] = {global.get(), window.get()};
+    for (Item target : targets) {
+        if (!js_is_object_value(target)) continue;
+        js_set_key_cstr(target, "scrollTo", to.get());
+        js_set_key_cstr(target, "scroll", to.get());
+        js_set_key_cstr(target, "scrollBy", by.get());
+        const char* names[] = {"scrollX", "pageXOffset", "scrollY", "pageYOffset"};
+        for (int index = 0; index < 4; index++) {
+            js_define_accessor_partial(target, js_name_item(names[index]),
+                index < 2 ? x.get() : y.get(), 0, 0);
+        }
+        if (global.get().item == window.get().item) break;
+    }
+}
 
 static Item js_window_query_local_fonts(Item options) {
     // WebIDL conversion and Promise shape stay in the realm; native discovery is shared with Lambda.

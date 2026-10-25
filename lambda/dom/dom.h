@@ -210,6 +210,7 @@ bool dom_is_html_canvas_element(Item item);
 // Lambda Element stay in lockstep (D5.3.3).
 Item dom_append_child_bridge(void* parent, Item child);
 Item dom_remove_child_bridge(void* parent, Item child);
+bool dom_remove_backed_child(struct DomElement* parent, struct DomNode* child);
 Item dom_insert_before_bridge(void* parent, Item new_child, Item reference_child);
 
 // Create a detached element with a real Mark backing. Editing and bridge
@@ -545,6 +546,11 @@ Item dom_realm_constructor_prototype(const char* ctor_name);
 
 /** A registered autonomous custom element's prototype, or ItemNull. */
 Item dom_realm_custom_element_prototype(const char* local_name);
+Item dom_realm_custom_element_upgrade(Item element);
+void dom_realm_custom_element_connection(Item element, bool connected);
+void dom_realm_custom_element_attribute(Item element, const char* name,
+    const char* old_value, const char* value);
+void dom_custom_element_tree_changed(void* node, bool connected);
 void dom_custom_elements_registry_changed(void);
 void* dom_form_first_submitter(void* form, bool skip_disabled);
 bool dom_css_element_is_default(void* element);

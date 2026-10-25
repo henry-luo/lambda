@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render.hpp"
+#include "raster_sampling.hpp"
 
 #include <math.h>
 
@@ -138,6 +139,10 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
 
     RdtMatrix inverse = {};
     if (!rdt_matrix_inverse(transform, &inverse)) return;
+    bool minifying = rdt_matrix_is_scale_translation(transform) &&
+        (fabsf(inverse.e11) > 1.0f || fabsf(inverse.e22) > 1.0f);
+    float footprint_x = fmaxf(1.0f, fabsf(inverse.e11));
+    float footprint_y = fmaxf(1.0f, fabsf(inverse.e22));
     bool shaped = !clip_shapes_pixel_box_inside(clip_shapes, clip_depth, left, top, right, bottom);
 
     // sample destination coverage so full-page and tiled replay rasterize transforms identically.
@@ -157,7 +162,19 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
             }
             float local_src_x = src_abs_x - (float)x - 0.5f;
             float local_src_y = src_abs_y - (float)y - 0.5f;
-            uint32_t intensity = glyph_sample_coverage_bilinear(bitmap, local_src_y, local_src_x);
+            uint32_t intensity;
+            if (minifying) {
+                // a destination pixel covers the whole source footprint, including transparent edges.
+                float coverage = 0.0f;
+                float center_x = src_abs_x - (float)x, center_y = src_abs_y - (float)y;
+                raster_visit_sample_area(bitmap->width, bitmap->height,
+                    center_x - footprint_x * 0.5f, center_y - footprint_y * 0.5f,
+                    center_x + footprint_x * 0.5f, center_y + footprint_y * 0.5f,
+                    [&](int row, int column, float weight) {
+                        coverage += (float)glyph_sample_coverage_pixel(bitmap, row, column) * weight;
+                    });
+                intensity = (uint32_t)(coverage / (footprint_x * footprint_y) + 0.5f);
+            } else intensity = glyph_sample_coverage_bilinear(bitmap, local_src_y, local_src_x);
             if (intensity == 0) continue;
 
             int local_x = (int)((float)dst_x - surface_origin_x);

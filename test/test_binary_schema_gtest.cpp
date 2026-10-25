@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "test_eval_fixture.hpp"
 #include "../lambda/runtime/binary_schema.hpp"
+#include "../lambda/core/binary.h"
 #include "../lambda/io/mark_output_builder.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/heap_api.h"
@@ -115,6 +116,33 @@ protected:
         return bound;
     }
 };
+
+TEST_F(EvalContextTest, BinarySliceBuiltinRetainsStorageWithoutMaterializingBytes) {
+    const char bytes[] = {'a', 'b', '\0', 'c', 'd', 'e'};
+    RootFrame roots(3);
+    Rooted<Item> source(roots, {.item = x2it(heap_binary_from_bytes(bytes, sizeof(bytes)))});
+    ASSERT_EQ(get_type_id(source.get()), LMD_TYPE_BINARY);
+    ByteSpan original = binary_span(source.get().get_binary());
+    int64_t allocations = byte_storage_allocation_count();
+    int64_t copies = binary_payload_copy_count();
+    Rooted<Item> view(roots, fn_slice(source.get(), {.item = i2it(1)}, {.item = i2it(5)}));
+    ASSERT_EQ(get_type_id(view.get()), LMD_TYPE_BINARY);
+    Rooted<Item> nested(roots, fn_slice(view.get(), {.item = i2it(1)}, {.item = i2it(3)}));
+    ASSERT_EQ(get_type_id(nested.get()), LMD_TYPE_BINARY);
+    // the public builtin must reach the storage-sharing path, including nested views.
+    EXPECT_EQ(binary_span(view.get().get_binary()).storage, original.storage);
+    EXPECT_EQ(binary_span(nested.get().get_binary()).storage, original.storage);
+    EXPECT_EQ(binary_span(nested.get().get_binary()).offset, original.offset + 2);
+    EXPECT_EQ(binary_length(nested.get().get_binary()), 2u);
+    EXPECT_EQ(memcmp(binary_data(nested.get().get_binary()), "\0c", 2), 0);
+    EXPECT_EQ(byte_storage_allocation_count(), allocations);
+    EXPECT_EQ(binary_payload_copy_count(), copies);
+    source.set(ItemNull);
+    view.set(ItemNull);
+    heap_gc_collect();
+    EXPECT_EQ(binary_span(nested.get().get_binary()).storage, original.storage);
+    EXPECT_EQ(memcmp(binary_data(nested.get().get_binary()), "\0c", 2), 0);
+}
 
 TEST_F(BinarySchemaTest, CompiledRecordSpansAreLazyAndTraceItemsAfterTheirParentIsGone) {
     BinarySchemaOwner* owner = binary_schema_owner_create();

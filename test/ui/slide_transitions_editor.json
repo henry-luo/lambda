@@ -1,0 +1,790 @@
+{
+  "name": "Slides Transitions: gallery, preview, timing, sounds, Apply to All and persistence",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"Transitions\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".transition-tile"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-none"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('transition-options').hasAttribute('disabled')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-wipe"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-wipe"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#transition-duration"
+      },
+      "text": "1.2",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#transition-duration"
+      },
+      "equals": "1.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"transition-direction:top\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-slide-background"
+      },
+      "text": "#0000ff",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-slide-background"
+      },
+      "text": "#ff0000",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-preview"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 4
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "present"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "transition"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#editor-show .slide-stage",
+        "offset_x": 200,
+        "offset_y": 825
+      },
+      "force_render": true,
+      "min_b": 245,
+      "max_r": 10,
+      "max_g": 10
+    },
+    {
+      "type": "advance_time",
+      "ms": 1300,
+      "steps": 13
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "edit"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "6"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#transition-preview"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-fade"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-fade"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-push"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-push"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-split"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-split"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"transition-variant:in\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-reveal"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-reveal"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-cut"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-cut"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-random-bars"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-random-bars"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-shape"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"transition-variant:diamond\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-uncover"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-uncover"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-cover"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-cover"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-morph"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-morph"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-cut"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"transition-variant:through-black\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('transition-duration').hasAttribute('disabled')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-shape"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"transition-variant:box\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#transition-duration"
+      },
+      "text": "0.6",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "value": "chime"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-click"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-automatic"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#transition-after"
+      },
+      "text": "0.8",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('transition-after').hasAttribute('disabled')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-apply-all"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-shape"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#transition-duration"
+      },
+      "equals": "0.6"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#transition-after"
+      },
+      "equals": "0.8"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "equals": "chime"
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('transition-click').checked"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "value": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-apply-all"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show-s0"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 700,
+      "steps": 7
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "transition"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-sound",
+      "equals": "silent"
+    },
+    {
+      "type": "advance_time",
+      "ms": 650,
+      "steps": 7
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "waiting"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#editor-show"
+      },
+      "attribute": "data-slide-sound",
+      "equals": "silent"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "value": "chime"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-apply-all"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/transitions.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/transitions.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=\"Transitions\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#transition-shape"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "equals": "chime"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#transition-after"
+      },
+      "equals": "0.8"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s0-o1"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#transition-sound"
+      },
+      "value": "custom"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#transition-sound-path"
+      },
+      "visible": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#transition-sound-path"
+      },
+      "text": "../../media/test_audio.m4a",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#transition-sound-path"
+      },
+      "text": "missing-transition-cue.wav",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#transition-preview"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 750,
+      "steps": 15
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-mode",
+      "equals": "edit"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "missing-transition-cue.wav"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/transitions-ribbon.png"
+    }
+  ]
+}

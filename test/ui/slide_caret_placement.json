@@ -1,0 +1,463 @@
+{
+  "name": "Slides: click entry and native caret pixels follow multiline text at canvas scales",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]",
+        "offset_x": 80,
+        "offset_y": 20
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]",
+        "offset_x": 80,
+        "offset_y": 20
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#canvas-text').selectionStart>0&&document.querySelector('#canvas-text').selectionStart<15"
+    },
+    {
+      "type": "script",
+      "js": "window.control=document.querySelector('#canvas-text');window.entryOffset=control.selectionStart;control.style.caretColor='#ff00ff'"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        296,
+        333,
+        508,
+        60
+      ],
+      "rgba": [
+        [
+          160,
+          255
+        ],
+        [
+          0,
+          55
+        ],
+        [
+          160,
+          255
+        ]
+      ],
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        296,
+        400,
+        508,
+        60
+      ],
+      "rgba": [
+        [
+          160,
+          255
+        ],
+        [
+          0,
+          55
+        ],
+        [
+          160,
+          255
+        ]
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "X"
+    },
+    {
+      "type": "assert_script",
+      "js": "control.selectionStart===entryOffset+1"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "contains": "to durable growth."
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        296,
+        333,
+        508,
+        60
+      ],
+      "rgba": [
+        [
+          160,
+          255
+        ],
+        [
+          0,
+          55
+        ],
+        [
+          160,
+          255
+        ]
+      ],
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        296,
+        400,
+        508,
+        60
+      ],
+      "rgba": [
+        [
+          160,
+          255
+        ],
+        [
+          0,
+          55
+        ],
+        [
+          160,
+          255
+        ]
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas-text",
+        "offset_x": 80,
+        "offset_y": 90
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "control.selectionStart>=16&&control.selectionStart<control.value.length"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        296,
+        333,
+        508,
+        60
+      ],
+      "rgba": [
+        [
+          160,
+          255
+        ],
+        [
+          0,
+          55
+        ],
+        [
+          160,
+          255
+        ]
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        296,
+        400,
+        508,
+        60
+      ],
+      "rgba": [
+        [
+          160,
+          255
+        ],
+        [
+          0,
+          55
+        ],
+        [
+          160,
+          255
+        ]
+      ],
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "Y"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "equals": "A clearer path\nto durable growth."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]",
+        "offset_x": 40,
+        "offset_y": 90
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]",
+        "offset_x": 40,
+        "offset_y": 90
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#canvas-text').selectionStart>=15"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#canvas-text').selectionStart===33"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#canvas-text').value='\\uD83D\\uDE00 first\\nsecond'"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#stage').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#canvas-text').selectionStart===15"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]",
+        "offset_x": 45,
+        "offset_y": 12
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]",
+        "offset_x": 45,
+        "offset_y": 12
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#canvas-text').selectionStart>0&&document.querySelector('#canvas-text').selectionStart<15"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]",
+        "offset_x": 36,
+        "offset_y": 26
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().anchorNode.nodeType===3&&getSelection().anchorNode.textContent==='01 / WIN THE RIGHT CUSTOMER'"
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().anchorOffset<12"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": "Z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "contains": "Focus the market"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "Z"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=focus]"
+      },
+      "contains": "01 / WIN THE RIGHT CUSTOMER"
+    }
+  ]
+}

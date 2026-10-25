@@ -1,0 +1,826 @@
+{
+  "name": "Slides Home ribbon: shared typography, menus, paragraphs, clipboard, format painter and drawing",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".home-ribbon .ribbon-group"
+      },
+      "equals": 6
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('bold').hasAttribute('disabled')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s1-o1"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#home-font-family"
+      },
+      "value": "Arial, sans-serif"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#home-font-size"
+      },
+      "text": "28",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#home-font-size"
+      },
+      "equals": "28"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grow-font"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#home-font-size"
+      },
+      "equals": "36"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shrink-font"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#home-font-size"
+      },
+      "equals": "28"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bold"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#bold"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#italic"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#italic"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#underline"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#strike"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#underline"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#strike"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change-case"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#home-option-case-sentence"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#home-option-case-lower"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#change-case"
+      },
+      "attribute": "aria-expanded",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change-case"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"case:upper\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s1-o1"
+      },
+      "contains": "START WITH THE OPPORTUNITY"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font-color"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"text-color:#7030a0\"]"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-s1-o1 .slide-text"
+      },
+      "property": "color",
+      "equals": "rgb(112, 48, 160)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#text-highlight"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"highlight:#f9e896\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-s1-o1 .slide-text-highlight"
+      },
+      "equals": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bullets"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#bullets"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-s1-o1 li"
+      },
+      "equals": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#list-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"numbering:lower-roman\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-s1-o1 ol"
+      },
+      "equals": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-text"
+      },
+      "text": "One\nTwo\nThree",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#apply-text"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-s1-o1 li"
+      },
+      "equals": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#line-spacing"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"spacing:1.5\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#indent"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#outdent"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#align-center"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#align-center"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#vertical-align"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"vertical:middle\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const a=document.getElementById('edit-s1-o1').getBoundingClientRect(),b=document.querySelector('#edit-s1-o1 li').getBoundingClientRect();return b.y>a.y+20})()"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/home-text.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#format-painter"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-painter",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"0\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-s0-o1"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-painter",
+      "equals": "false"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#home-font-size"
+      },
+      "equals": "28"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-x",
+      "equals": "80"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "equals": "Your next big idea"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#copy"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cut"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paste"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear-format"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#bold"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#underline"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-shapes"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"insert-rect\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#quick-styles"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"shape-style:violet\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-fill"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"fill:#3478cc\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-paint-s0-o3"
+      },
+      "attribute": "fill",
+      "equals": "#3478cc"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#quick-styles"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"shape-style:violet\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-paint-s0-o3"
+      },
+      "attribute": "fill",
+      "equals": "#805bc5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#edit-s0-o3"
+      },
+      "min_r": 100,
+      "max_r": 160,
+      "min_g": 60,
+      "max_g": 120,
+      "min_b": 160,
+      "search_radius": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-outline"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"outline:#94a0b2\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#shape-outline"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"weight:3\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-paint-s0-o3"
+      },
+      "attribute": "stroke-width",
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#arrange"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"object-align:right\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-x",
+      "equals": "980"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#arrange"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"rotate:90\"]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-rotation"
+      },
+      "equals": "90"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#arrange"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"selection-pane\"]"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#object-list"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/home-drawing.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s1-o1"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-x"
+      },
+      "text": "200",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset-layout"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-x"
+      },
+      "equals": "80"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-layout"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=\"layout:two-column\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-text-box"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/home-ribbon.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/home-ribbon.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render .slide-object"
+      },
+      "equals": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-s1-o1 li"
+      },
+      "equals": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor-show [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#editor-show li"
+      },
+      "equals": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 "1. namespaced element tags"
-<svg.rect>
-<svg.circle>
+<'svg.rect'>
+<'svg.circle'>
 "1a. namespaced element tag is greedy across whitespace"
-<svg.rect>
+<'svg.rect'>
 "1b. explicit content boundary admits relative path child"
 <svg
   \.rect>
 "2. namespaced attributes (desugared to sub-maps)"
-<svg.rect svg: {
+<'svg.rect' svg: {
     width: 100,
     height: 50
   }>
@@ -15,7 +15,7 @@
     href: "#id"
   }>
 "3. mixed namespaced and regular"
-<svg.rect id: "myRect", svg: {
+<'svg.rect' id: "myRect", svg: {
     width: 100
   }>
 "4. symbol literals"

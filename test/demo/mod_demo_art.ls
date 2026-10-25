@@ -84,6 +84,25 @@ fn tetris(t) => canvas("tetris", t, <g
     <g (shift("0 0;0 -4;0 0", "1.2s"));
         (cell(236, 56, t.soft)); (cell(252, 56, t.soft)); (cell(268, 56, t.soft)); (cell(268, 72, t.soft))>>)
 
+fn marble_drop(t) => canvas("marble-drop", t, <g
+    <path d:"M160 24 V58 C160 90 86 90 86 133 M160 58 C160 90 234 90 234 133",
+        fill:"none", stroke:t.soft, 'stroke-width':8, 'stroke-linecap':"round">;
+    <path d:"M160 24 V58 C160 90 86 90 86 133 M160 58 C160 90 234 90 234 133",
+        fill:"none", stroke:t.pale, 'stroke-width':3>;
+    <path d:"M139 17 h42 l-17 22 h-8 Z", fill:t.base, stroke:t.deep>;
+    <circle cx:160, cy:61, r:13, fill:t.pale, stroke:t.base, 'stroke-width':3>;
+    <path d:"M160 51 l-8 17", stroke:t.deep, 'stroke-width':3,
+        (anim("d","M160 51 l-8 17;M160 51 l8 17;M160 51 l-8 17","4s",{calcMode:"discrete"}))>;
+    for (c in [[86,TONES.rose.base],[234,TONES.blue.base]]) <g
+        <rect x:c[0]-20, y:132, width:40, height:26, rx:8, fill:c[1], opacity:".75">;
+        <ellipse cx:c[0], cy:133, rx:20, ry:6, fill:c[1]>>;
+    <circle r:7, fill:TONES.rose.base, stroke:PAPER, 'stroke-width':1.5,
+        (anim("cx","160;160;150;120;86;86","4s",{keyTimes:"0;.2;.35;.5;.7;1"}));
+        (anim("cy","23;58;80;98;130;130","4s",{keyTimes:"0;.2;.35;.5;.7;1"}));
+        (anim("opacity","1;1;0;0","4s",{keyTimes:"0;.7;.75;1"}))>;
+    (text(26,40,10,MID,"fig. λ",{'font-style':"italic"}));
+    (text(160,174,8,MID,"THINK ONE MARBLE AHEAD",{'text-anchor':"middle",'letter-spacing':1.5}))>)
+
 fn word_card(t: any, x: any, w: any, caption: any, from: any, begin: any) => <g (shift(from ++ ";0 0;0 0;" ++ from, "4.5s",
         {keyTimes:"0;.3;.85;1", calcMode:"spline", keySplines:".3 .9 .4 1;0 0 1 1;.6 0 .8 .4", begin:begin}));
     <rect x:x, y:96, width:w, height:36, rx:8, fill:PAPER, stroke:t.soft, 'stroke-width':"1.5">;
@@ -577,12 +596,12 @@ pub fn emblem() => <svg class:"emblem", viewBox:"0 0 320 320", 'aria-hidden':"tr
         for (o in ATOM) comet(orbit(160, 160, 138, 40, o[0], 64), o[1], o[2])>
     for (s in SPARKS) spark(s[0], s[1], s[2])>
 
-let ARTS = {tetris: tetris, 'sentence-game': sentence_game, superlambda: superlambda, doom: doom,
+let ARTS = {tetris: tetris, 'marble-drop': marble_drop, 'sentence-game': sentence_game, superlambda: superlambda, doom: doom,
     scene3d: scene3d, cityscape: cityscape, 'photo-album': photo_album, photo: photo, photos: photos,
     draw: draw, word: word, note: note, slides: slides, chart: chart,
     finder: finder, mail: mail, music: music, archive: archive, readability: readability, greetings: greetings}
 
-let TONE_OF = {tetris: "violet", 'sentence-game': "teal", superlambda: "sky", doom: "clay",
+let TONE_OF = {tetris: "violet", 'marble-drop': "amber", 'sentence-game': "teal", superlambda: "sky", doom: "clay",
     scene3d: "blue", cityscape: "gold", 'photo-album': "rose", photo: "amber", photos: "cyan",
     draw: "sage", word: "blue", note: "gold", slides: "teal", chart: "indigo",
     finder: "slate", mail: "cyan", music: "rose", archive: "amber", readability: "sage", greetings: "rose"}

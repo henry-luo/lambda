@@ -2922,7 +2922,7 @@ static Item radiant_dom_create_element_item(DomDocument* doc, const char* tag,
     DomElement* elem = (DomElement*)(qualified
         ? dom_create_backed_element_ns_bridge(doc, tag, namespace_uri)
         : dom_create_backed_element_bridge(doc, tag));
-    return radiant_dom_node_item((DomNode*)elem);
+    return dom_realm_custom_element_upgrade(radiant_dom_node_item((DomNode*)elem));
 }
 
 static Item radiant_dom_create_mark_element_item(DomDocument* doc, const char* backing_tag,

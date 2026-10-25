@@ -47,6 +47,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
 | `image` | `lambda.image`, `lambda.image.edit` | Initial native `u8` profile | Raster Velmts, layered composition, animation, PSD/GIF I/O and snapshot editing/history; see [Image Package](Lambda_Image.md) | `input(path, 'psd')` and automatic PSD detection |
+| `ime.chinese` | `lambda.ime.chinese` | M1 candidate engine | Pure pinyin segmentation, bounded candidates, initials, fuzzy pairs and ranking over an explicitly loaded local pack; see [Chinese IME](Lambda_IME_Chinese.md). Namespace: D7.2.4v4. Session and Radiant integration remain M2/M3. | None; import from a Lambda script |
 | `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
 | `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
 | `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |

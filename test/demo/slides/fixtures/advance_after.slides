@@ -1,0 +1,5 @@
+<presentation title:"Authored automatic advance",width:320.0,height:180.0,
+    <slide id:"start",advance_after:200.0,advance_on_click:false,
+        <text id:"title","Start"><cue start:'entry',<effect target:"title",kind:'fade-in',duration:100.0>>>
+    <slide id:"middle",advance_after:0.0,transition:'none',<text "Middle">>
+    <slide id:"end",<text "End">>>

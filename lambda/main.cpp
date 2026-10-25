@@ -2479,6 +2479,7 @@ static const char* LAMBDA_DEMO_INDEX = "test/demo/index.ls";
 // one catalog drives both command lookup and the list of launchable demos.
 static const LambdaDemo LAMBDA_DEMOS[] = {
     {"tetris", "test/demo/tetris/tetris.ls"},
+    {"marble-drop", "test/demo/marble-drop/marble-drop.ls"},
     {"sentence-game", "test/demo/sentence-game/sentence-game.ls"},
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},

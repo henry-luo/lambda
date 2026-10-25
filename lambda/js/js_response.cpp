@@ -53,7 +53,7 @@ static Item response_create(Item body, Item headers, int status, Item status_tex
 }
 
 Item js_response_from_bytes(const void* bytes, int length, Item headers,
-        int status, Item status_text, Item url) {
+        int status, Item status_text, Item url, bool redirected) {
     RootFrame roots(5);
     Rooted<Item> header_root(roots, headers), text(roots, status_text), url_root(roots, url);
     Rooted<Item> body(roots, js_arraybuffer_from_bytes(bytes, length));
@@ -61,10 +61,10 @@ Item js_response_from_bytes(const void* bytes, int length, Item headers,
     JS_RETURN_IF_ERROR(body.get());
     bool has_body = status != 101 && status != 103 && status != 204 && status != 205 && status != 304;
     return response_create(body.get(), header_root.get(), status, text.get(),
-        url_root.get(), type.get(), has_body);
+        url_root.get(), type.get(), has_body, redirected);
 }
 
-static Item response_body_bytes(Item body, Rooted<Item>& out_type) {
+Item js_fetch_body_bytes(Item body, Rooted<Item>& out_type) {
     RootFrame roots(1);
     Rooted<Item> source(roots, body);
     bool string_body = false;
@@ -78,9 +78,11 @@ static Item response_body_bytes(Item body, Rooted<Item>& out_type) {
         JS_RETURN_IF_ERROR(source.get());
     } else if (!js_is_arraybuffer(source.get()) && !js_is_typed_array(source.get()) &&
             !js_is_dataview(source.get())) {
+        bool params = js_object_has_class(source.get(), JS_CLASS_URL_SEARCH_PARAMS);
         source.set(js_to_string(source.get()));
         JS_RETURN_IF_ERROR(source.get());
-        out_type.set(js_name_item("text/plain;charset=UTF-8"));
+        out_type.set(js_name_item(params ? "application/x-www-form-urlencoded;charset=UTF-8"
+            : "text/plain;charset=UTF-8"));
         string_body = true;
     }
     if (js_is_sharedarraybuffer(source.get()))
@@ -167,7 +169,7 @@ static Item response_constructor(Item callee, Item, Item* args, int argc, uint64
     if (has_body && (status == 204 || status == 205 || status == 304))
         return js_throw_type_error("Response status does not permit a body");
     if (has_body) {
-        bytes.set(response_body_bytes(body.get(), type));
+        bytes.set(js_fetch_body_bytes(body.get(), type));
         JS_RETURN_IF_ERROR(bytes.get());
         JS_RETURN_IF_ERROR(response_set_content_type(headers.get(), type.get()));
     } else {
@@ -470,7 +472,7 @@ static Item request_constructor(Item, Item, Item* args, int argc, uint64_t*) {
         value.set(response_state(result.get()));
         bytes.set(js_elements_get_int(value.get(), RESPONSE_BYTES));
     } else if (has_body) {
-        bytes.set(response_body_bytes(body.get(), type));
+        bytes.set(js_fetch_body_bytes(body.get(), type));
     } else bytes.set(js_arraybuffer_new(0));
     JS_RETURN_IF_ERROR(bytes.get());
     if (has_body && (!strcmp(it2s(method.get())->chars, "GET") || !strcmp(it2s(method.get())->chars, "HEAD")))

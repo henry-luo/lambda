@@ -64,6 +64,26 @@ checkbox updates through an HTML script. This milestone qualifies the tested
 bundled browser path; remaining React/browser scope is listed in the
 [implementation record](../../../vibe/impl/Lambda_Impl_React.md).
 
+**Hotwire compatibility (2026-10-25).** Pinned Stimulus 3.2.2 and Turbo 8.0.23
+fixtures cover controllers, Streams, Frames, Drive, and HTTP forms against
+Lambda's native server. Realm-owned custom-element definitions and weak state
+preserve native wrapper identity during construction/upgrades; private fields
+use the native property hooks in AST and MIR (**D3.4.7, D7.4.4**). Attribute
+callbacks run at setter boundaries; connection callbacks use the backup
+microtask queue. Construction frames, queued reactions, and template caches
+have precise roots (**D5.3.3**). Complete custom-element reaction stacks remain
+outside this milestone. `DOMParser` uses the inert full HTML document parser,
+preserving head metadata. Range removal updates both the native links and Mark
+children. Window scrolling delegates to the existing document scroll root in
+CLI and rendered documents; the headless event loop gives fetched-content
+continuations a rendering opportunity before waiting on later timers.
+Fetch transport shares BodyInit serialization with Request/Response, including
+URLSearchParams MIME inference. Redirect responses expose the final URL and
+redirected flag, discard intermediate bodies, and let libcurl rewrite POST on
+303. The fixture guide and exact validation evidence are in
+[Hotwire tests](../../../test/js/hotwire/README.md) and the
+[implementation record](../../../vibe/impl/Lambda_Impl_Hotwire.md).
+
 **Geometry observer checkpoints (verified 2026-10-21).** Forced layout requests
 one deferred geometry sample per observer realm. Resize/Intersection observers
 compare the settled box after the current script's writes; temporary hide/read/

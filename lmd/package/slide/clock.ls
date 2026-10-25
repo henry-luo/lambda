@@ -2,17 +2,18 @@
 // Autoplay runs each slide as [transition] entry cues, then a dwell before every click cue
 // and before the next slide (player.ls); the last slide ends with its final cue.
 import c: .common
+import transitions: .transitions
 
 // segments of one slide in autoplay order: {kind: 'transition' | 'cue' | 'dwell', cue, ms};
 // `cue` is the cue a segment plays, or for a dwell the cue completed before it
 fn segments(plan, index, reduced, dwell_ms) {
     let scene = plan.slides[index]
-    let transition = if (index == 0 or reduced or scene.transition == 'cut' or scene.transition_duration == 0.0) []
+    let transition = if (index == 0 or reduced or not transitions.animated(scene)) []
         else [{kind: 'transition', cue: -1, ms: scene.transition_duration}]
     let cues = [for (j, cue in scene.cues) for (seg in [
         *(if (cue.start == 'click') [{kind: 'dwell', cue: j - 1, ms: dwell_ms}] else []),
         {kind: 'cue', cue: j, ms: if (reduced) 0.0 else cue.duration_ms}]) seg]
-    let hold = if (index + 1 < len(plan.slides)) [{kind: 'dwell', cue: len(scene.cues) - 1, ms: dwell_ms}] else [];
+    let hold = if (index + 1 < len(plan.slides)) [{kind: 'dwell', cue: len(scene.cues) - 1, ms: c.value(scene.advance_after,dwell_ms)}] else [];
     [*transition, *cues, *hold]
 }
 
@@ -47,7 +48,7 @@ pub fn position(plan, ps) float {
     let transition = [for (s in segs where s.kind == 'transition') s];
     if (ps.phase == 'transition') start + ps.time_ms
     else if (ps.phase == 'cue') [for (s in segs where s.kind == 'cue' and s.cue == ps.cue) s.start_ms][0] + ps.time_ms
-    else if (ps.autoplay and len(dwell) > 0) dwell[0].start_ms + ps.wait_ms
+    else if ((ps.autoplay or ps.timed) and len(dwell) > 0) dwell[0].start_ms + ps.wait_ms
     else if (len(cue_end) > 0) cue_end[0]
     // parked before any cue: after the incoming transition
     else start + (if (len(transition) > 0) transition[0].ms else 0.0)
@@ -68,10 +69,14 @@ pub fn seek(plan, ps, position_ms, now_ms) map^ {
     let offset = at - seg.start_ms
     let done_ms = if (seg.cue >= 0) cues[seg.cue].duration_ms else 0.0
     let finished = len(found) == 0 and index == final_slide
-    let base = {*: ps, slide: index, outgoing: -1, generation: ps.generation + 1, anchor_ms: float(now_ms),
-        autoplay: ps.autoplay and not finished};
+    let base = {*: ps, slide: index, outgoing: -1, triggered:[],outgoing_triggered:[], generation: ps.generation + 1, anchor_ms: float(now_ms),
+        autoplay: ps.autoplay and not finished,timed:false,after_ms:null};
     if (seg.kind == 'transition') {*: base, cue: -1, phase: 'transition', outgoing: index - 1, time_ms: offset, anchor_time: offset}
     else if (seg.kind == 'cue') {*: base, cue: seg.cue, phase: 'cue', time_ms: offset, anchor_time: offset}
-    else {*: base, cue: seg.cue, phase: 'waiting', time_ms: done_ms, wait_ms: offset,
-        anchor_time: if (base.autoplay) offset else done_ms}
+    else {
+        let delay = plan.slides[index].advance_after
+        let timed = delay != null and seg.cue == len(cues)-1 and index < final_slide;
+        {*:base,cue:seg.cue,phase:'waiting',time_ms:done_ms,wait_ms:offset,timed:timed,after_ms:delay,
+            anchor_time:if (base.autoplay or timed) offset else done_ms}
+    }
 }

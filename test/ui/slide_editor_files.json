@@ -11,6 +11,12 @@
       "ms": 100
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
       "type": "dblclick",
       "target": {
         "selector": "#edit-s0-o1"
@@ -111,7 +117,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#undo"
+        "selector": "#home-undo"
       }
     },
     {
@@ -124,7 +130,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#save"
+        "selector": "#home-save"
       }
     },
     {
@@ -334,7 +340,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#save"
+        "selector": "#home-save"
       }
     },
     {
@@ -494,7 +500,13 @@
     {
       "type": "click",
       "target": {
-        "selector": "#animate-fade-in"
+        "selector": "#animation-entrance"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-option-animation-choose-fade-in"
       }
     },
     {

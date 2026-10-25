@@ -4,8 +4,10 @@
 > user's ruling that fuzzy pinyin is configurable (IME13, §5.7), and with the
 > dictionary pack format specified in full as version 1 and adopted by the user
 > (§6). M0's offline preparation and data validation are implemented and
-> qualified as of 2026-10-25; its release-runtime measurements and held-out
-> coverage gate remain open. M1–M3 are not implemented. IME-O1, IME-O2 and
+> qualified as of 2026-10-25. M1's engine and its frozen evaluation baseline are
+> implemented; qualification is recorded in the implementation record. M2/M3
+> are not implemented. M0 retained-heap attribution and the provisional
+> performance targets remain open. IME-O1, IME-O2 and
 > IME-O4 are resolved and IME-O7 is deferred (data stays uncommitted).
 > Evidence and remaining gates: [implementation record](impl/Lambda_Impl_IME_Chinese.md).
 > **Package:** `lambda.ime.chinese`.
@@ -616,8 +618,8 @@ condition to repair, following Spelling §4.3.4's loading policy.
 - Offsets are byte positions inside the file; the text a candidate reports is
   an ordinary string, measured in code points (S2.5.8).
 
-The line-index builder is shared with the spelling package by promoting it to
-a common module when this package needs it, never by copying it (AGENTS.md
+The line-index builder is shared with spelling in
+`lmd/package/io/line_index.ls`; neither package keeps its own copy (AGENTS.md
 rule 13).
 
 ### 6.5 Manifest
@@ -691,7 +693,7 @@ maps are checked (S17.8.1).
 | Function | Contract |
 |---|---|
 | `pn load(profile = "zh-Hans", options = null)` | Read an installed pack and return an engine; an unknown profile is an error listing the installed ones |
-| `fn candidates(engine, input, options = null)` | The core query: `{segments, items, truncated}` for a raw pinyin string; each item is `{text, reading, consumed, match, weight}` |
+| `fn candidates(engine, input, options = null)` | The core query: `{segments, items, truncated, scanned}` for a raw pinyin string; each item is `{text, reading, consumed, coverage, match, weight}`. `consumed` is the raw code-point offset through the selected prefix (including an immediately following separator); `coverage` is its syllable count, per S2.5.8/S17.4.1. Implemented M1 options are documented in `doc/Lambda_IME_Chinese.md` |
 | `fn session(engine, settings = null)` | A new idle session in Chinese mode with an empty user overlay; `settings` as in §5.7 |
 | `fn key(engine, session, evt)` | The reducer of IME3: `{session, actions}` |
 | `fn configure(engine, session, settings)` | Replace the session's settings: `{session, actions}`, refreshing an open composition's candidates (§5.7) |
@@ -712,7 +714,7 @@ Actions:
 | `pass` | — | the key was not consumed; default handling continues |
 
 ```lambda no-run
-// no-run: proposed package; the implementation does not exist yet.
+// no-run: M1 load/candidates exist; this example's session reducer requires M2.
 import ime: lambda.ime.chinese
 
 pn main() {

@@ -1,0 +1,6 @@
+head metadata stays in head: true
+document title: true
+document root attributes: true
+body structure: true
+parsed node ownership: true
+parser document stays inert: true

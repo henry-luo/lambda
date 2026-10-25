@@ -109,7 +109,7 @@ Server* server_create_with_loop(const ServerConfig *config, uv_loop_t *loop);
 // destroy outside a running loop callback; drain connections/work before release
 void server_destroy(Server *server);
 
-// start listening on HTTP (and optionally HTTPS) port
+// start HTTP; zero selects an OS-assigned port, stored in server->config.port
 int server_start(Server *server, int port);
 
 // start HTTPS listener on a separate port

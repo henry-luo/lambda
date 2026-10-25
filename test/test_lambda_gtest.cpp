@@ -55,6 +55,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/archive/tests",
     "test/demo/mail/tests",
     "test/demo/greetings/tests",
+    "test/demo/marble-drop/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -133,6 +134,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
     "test/lambda/archive",
+    "test/lambda/ime",
     "test/lambda/docbook/proc",
     "test/demo/word/tests/proc",
     "test/demo/photo/tests/proc",
