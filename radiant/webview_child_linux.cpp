@@ -9,9 +9,6 @@
 
 #if defined(__linux__)
 
-#define GLFW_EXPOSE_NATIVE_X11
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 
 #include <webkit2/webkit2.h>
 #include <gtk/gtk.h>
@@ -21,6 +18,7 @@
 
 #define Rect RadiantRect
 #include "radiant.hpp"
+#include "platform.hpp"
 #undef Rect
 #include "webview_handle_linux.h"
 
@@ -182,7 +180,7 @@ static void apply_child_window_bounds(WebViewHandle* handle,
                                       float x, float y, float width, float height,
                                       float device_scale) {
     int window_x = 0, window_y = 0;
-    glfwGetWindowPos(handle->glfw_window, &window_x, &window_y);
+    radiant_platform_get_window_pos(handle->host_window, &window_x, &window_y);
     RdtHostRect host = rdt_logical_to_host_rect(
         {x, y, width, height}, {1.0f, 1.0f, 0.0f, RDT_HOST_Y_DOWN});
     int absolute_x = (int)(window_x + host.x);  // INT_CAST_OK: GTK screen coordinate
@@ -198,7 +196,7 @@ static void apply_child_window_bounds(WebViewHandle* handle,
     handle->device_scale = device_scale;
 }
 
-WebViewHandle* webview_platform_create(GLFWwindow* window,
+WebViewHandle* webview_platform_create(RadiantWindow* window,
                                        float x, float y, float w, float h,
                                        float device_scale) {
     ensure_gtk_initialized();
@@ -206,7 +204,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
 
     WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_platform_destroy.
     handle->mode        = WEBVIEW_MODE_WINDOW;
-    handle->glfw_window = window;
+    handle->host_window = window;
     handle->width       = w;
     handle->height      = h;
     handle->device_scale = device_scale;
@@ -266,7 +264,7 @@ void webview_platform_eval_js(WebViewHandle* handle, const char* js) {
 void webview_platform_set_bounds(WebViewHandle* handle,
                                  float x, float y, float w, float h,
                                  float device_scale) {
-    if (!handle || !handle->gtk_window || !handle->glfw_window) return;
+    if (!handle || !handle->gtk_window || !handle->host_window) return;
     apply_child_window_bounds(handle, x, y, w, h, device_scale);
 
     // pump pending GTK events to apply the move/resize

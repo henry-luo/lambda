@@ -1,14 +1,11 @@
 // webview_child_mac.mm — macOS WKWebView child window backend
 //
-// Creates a WKWebView as a subview of the GLFW window's NSView content view.
+// Creates a WKWebView as a subview of the host window's NSView content view.
 // The web view is positioned at the layout-computed coordinates and sized to match.
 // macOS uses a flipped coordinate system (origin at bottom-left), so Y is inverted.
 
 #ifdef __APPLE__
 
-#define GLFW_EXPOSE_NATIVE_COCOA
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
@@ -16,6 +13,7 @@
 
 #define Rect RadiantRect
 #include "radiant.hpp"
+#include "platform.hpp"
 #undef Rect
 #include "webview_handle_mac.h"
 
@@ -154,13 +152,13 @@ extern "C" {
 // Platform API implementation
 // ---------------------------------------------------------------------------
 
-WebViewHandle* webview_platform_create(GLFWwindow* window,
+WebViewHandle* webview_platform_create(RadiantWindow* window,
                                        float x, float y, float w, float h,
                                        float device_scale) {
     @autoreleasepool {
-        NSWindow* ns_window = glfwGetCocoaWindow(window);
+        NSWindow* ns_window = (__bridge NSWindow*)radiant_platform_native_window(window);
         if (!ns_window) {
-            log_error("webview_platform_create: failed to get NSWindow from GLFW");
+            log_error("webview_platform_create: failed to get NSWindow from the platform backend");
             return nullptr;
         }
 

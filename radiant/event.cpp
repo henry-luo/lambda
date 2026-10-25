@@ -1757,9 +1757,9 @@ static const char* key_code_to_name(int key) {
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
         "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "F25"
     };
-    if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F25) return function_keys[key - GLFW_KEY_F1];
+    if (key >= RDT_KEY_F1 && key <= RDT_KEY_F25) return function_keys[key - RDT_KEY_F1];
     switch (key) {
-        case GLFW_KEY_MENU: return "ContextMenu";
+        case RDT_KEY_MENU: return "ContextMenu";
         case RDT_KEY_BACKSPACE: return "Backspace";
         case RDT_KEY_DELETE:    return "Delete";
         case RDT_KEY_ENTER:     return "Enter";
@@ -13876,7 +13876,7 @@ static int native_cursor_hotspot(float coordinate, int extent) {
     return (int)lroundf(coordinate); // INT_CAST_OK: bounded native cursor pixel index.
 }
 
-static GLFWcursor* create_native_image_cursor(UiContext* uicon,
+static RadiantCursor* create_native_image_cursor(UiContext* uicon,
                                               const CursorImageSpec* specification) {
     if (!uicon || !specification || !specification->url) return nullptr;
     ImageSurfaceReadScope scope;
@@ -13890,7 +13890,7 @@ static GLFWcursor* create_native_image_cursor(UiContext* uicon,
     } else {
         image_surface_ensure_decoded(surface, width, height);
     }
-    // A decoder may return a scaled buffer; GLFW must receive its actual extent.
+    // A decoder may return a scaled buffer; the backend must receive its actual extent.
     if (surface->decoded_width > 0) width = surface->decoded_width;
     if (surface->decoded_height > 0) height = surface->decoded_height;
     if (width <= 0 || height <= 0 || width > INT_MAX / 4 ||
@@ -13899,7 +13899,7 @@ static GLFWcursor* create_native_image_cursor(UiContext* uicon,
     size_t bytes = (size_t)width * (size_t)height * 4u;
     uint8_t* rgba = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
     if (!rgba) return nullptr;
-    // GLFW consumes straight RGBA; SVG paint surfaces are premultiplied ABGR words.
+    // Cursors take straight RGBA; SVG paint surfaces are premultiplied ABGR words.
     for (int row = 0; row < height; row++) {
         const uint32_t* source = (const uint32_t*)((const uint8_t*)surface->pixels +
                                                     (size_t)row * surface->pitch);
@@ -13913,12 +13913,12 @@ static GLFWcursor* create_native_image_cursor(UiContext* uicon,
             target[column * 4 + 3] = (uint8_t)(pixel >> 24);
         }
     }
-    GLFWimage image = {width, height, rgba};
+    RadiantIconImage image = {width, height, rgba};
     int hotspot_x = specification->has_hotspot
         ? native_cursor_hotspot(specification->hotspot_x, width) : 0;
     int hotspot_y = specification->has_hotspot
         ? native_cursor_hotspot(specification->hotspot_y, height) : 0;
-    GLFWcursor* cursor = glfwCreateCursor(&image, hotspot_x, hotspot_y);
+    RadiantCursor* cursor = radiant_platform_create_image_cursor(&image, hotspot_x, hotspot_y);
     mem_free(rgba);
     if (cursor) log_debug("[CURSOR_IMAGE] native cursor %s (%dx%d hotspot %d,%d)",
                           specification->url, width, height, hotspot_x, hotspot_y);
@@ -13935,41 +13935,38 @@ static void update_native_cursor(UiContext* uicon, CssEnum keyword,
     CssEnum previous = (CssEnum)state->cursor;
     state->cursor = keyword;
     state->cursor_image_hash = image_hash;
-    GLFWcursor* cursor = nullptr;
+    RadiantCursor* cursor = nullptr;
     for (const CursorImageSpec* image = images; image && !cursor; image = image->next)
         cursor = create_native_image_cursor(uicon, image);
     // Network images may become ready after the first hover; retain the fallback until then.
     if (unchanged && !cursor) return;
     state->cursor_image_ready = cursor != nullptr && images != nullptr;
     if (!cursor && keyword != CSS_VALUE_NONE) {
-        int shape = GLFW_ARROW_CURSOR;
+        RadiantCursorShape shape = RADIANT_CURSOR_ARROW;
         switch (keyword) {
-            case CSS_VALUE_TEXT: shape = GLFW_IBEAM_CURSOR; break;
-            case CSS_VALUE_POINTER: shape = GLFW_HAND_CURSOR; break;
-            case CSS_VALUE_COL_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
-            case CSS_VALUE_EW_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
-            case CSS_VALUE_ROW_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
-            case CSS_VALUE_NS_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
-#ifdef GLFW_RESIZE_NWSE_CURSOR
-            case CSS_VALUE_NWSE_RESIZE: shape = GLFW_RESIZE_NWSE_CURSOR; break;
-            case CSS_VALUE_NESW_RESIZE: shape = GLFW_RESIZE_NESW_CURSOR; break;
-            case CSS_VALUE_MOVE: shape = GLFW_RESIZE_ALL_CURSOR; break;
-#endif
+            case CSS_VALUE_TEXT: shape = RADIANT_CURSOR_IBEAM; break;
+            case CSS_VALUE_POINTER: shape = RADIANT_CURSOR_HAND; break;
+            case CSS_VALUE_COL_RESIZE: shape = RADIANT_CURSOR_EW_RESIZE; break;
+            case CSS_VALUE_EW_RESIZE: shape = RADIANT_CURSOR_EW_RESIZE; break;
+            case CSS_VALUE_ROW_RESIZE: shape = RADIANT_CURSOR_NS_RESIZE; break;
+            case CSS_VALUE_NS_RESIZE: shape = RADIANT_CURSOR_NS_RESIZE; break;
+            case CSS_VALUE_NWSE_RESIZE: shape = RADIANT_CURSOR_NWSE_RESIZE; break;
+            case CSS_VALUE_NESW_RESIZE: shape = RADIANT_CURSOR_NESW_RESIZE; break;
+            case CSS_VALUE_MOVE: shape = RADIANT_CURSOR_ALL_RESIZE; break;
             case CSS_VALUE_GRAB:
-            case CSS_VALUE_GRABBING: shape = GLFW_HAND_CURSOR; break;
-            case CSS_VALUE_CROSSHAIR: shape = GLFW_CROSSHAIR_CURSOR; break;
+            case CSS_VALUE_GRABBING: shape = RADIANT_CURSOR_HAND; break;
+            case CSS_VALUE_CROSSHAIR: shape = RADIANT_CURSOR_CROSSHAIR; break;
             default: break;
         }
-        cursor = glfwCreateStandardCursor(shape);
+        cursor = radiant_platform_create_standard_cursor(shape);
     }
     // An image overrides a `none` fallback; hide only when no image was usable.
     if ((previous == CSS_VALUE_NONE || keyword == CSS_VALUE_NONE) &&
         !radiant_relative_mouse_target(uicon))
-        glfwSetInputMode(uicon->window, GLFW_CURSOR,
-            cursor || keyword != CSS_VALUE_NONE ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+        radiant_platform_set_cursor_hidden(uicon->window, !cursor && keyword == CSS_VALUE_NONE);
     if (cursor) {
-        glfwSetCursor(uicon->window, cursor);
-        if (state->sys_cursor) glfwDestroyCursor(state->sys_cursor);
+        radiant_platform_set_cursor(uicon->window, cursor);
+        if (state->sys_cursor) radiant_platform_destroy_cursor(state->sys_cursor);
         state->sys_cursor = cursor;
     }
 }
@@ -14581,13 +14578,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         DocState* state = event_context_target_state(&evcon);
 
-        if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
             uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
         }
 
         // scrollbar release is captured even outside the popup and cannot commit a row.
         if (state && state->dropdown_scrollbar_pressed && event->type == RDT_EVENT_MOUSE_UP &&
-            btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+            btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
             doc_state_set_dropdown_scrollbar_press(state, false, false, mouse_y);
             break;
         }
@@ -14599,7 +14596,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             ScrollbarPressPart part = select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y);
             if (part != SCROLLBAR_PRESS_NONE) {
                 evcon.target = state->open_dropdown;
-                if (event->type == RDT_EVENT_MOUSE_DOWN && btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                if (event->type == RDT_EVENT_MOUSE_DOWN && btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
                     bool prevented = radiant_dispatch_button_pointer_event(&evcon, evcon.target,
                         "pointerdown", mouse_x, mouse_y, btn_event, 1);
                     prevented |= radiant_dispatch_button_mouse_event(&evcon, evcon.target,
@@ -14620,7 +14617,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 break;
             }
             if (event->type == RDT_EVENT_MOUSE_UP &&
-                btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
                 handle_dropdown_option_click(&evcon, mouse_x, mouse_y);
             }
             break;
@@ -14633,7 +14630,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             float mxp = (float)btn_event->x;
             float myp = (float)btn_event->y;
             if (context_menu_contains(state, mxp, myp)) {
-                if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                if (btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
                     InputIntent intent;
                     intent.context_menu_item = context_menu_item_at(state, mxp, myp);
                     if (intent.context_menu_item >= 0) {
@@ -14651,7 +14648,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // an author can install a custom menu. Only an unclaimed default reaches
         // the behavior template, which computes the native popup's item policy.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
-            btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
+            btn_event->button == RDT_MOUSE_BUTTON_RIGHT &&
             state && evcon.target) {
             // text hits use the mouse dispatcher's existing nearest-element promotion.
             bool prevented = radiant_dispatch_button_mouse_event(
@@ -14691,14 +14688,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
-            if (!evcon.default_prevented && btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+            if (!evcon.default_prevented && btn_event->button == RDT_MOUSE_BUTTON_LEFT &&
                 native_resize_begin(&evcon, evcon.target, mouse_x, mouse_y)) break;
 
             // A scrollbar hit has its own package-selected default. It never
             // enters mousepress: clicking browser chrome must not clear focus
             // or begin a document selection behind the scrollbar.
             ViewBlock* scrollbar_press_block = nullptr;
-            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT && evcon.target &&
+            if (btn_event->button == RDT_MOUSE_BUTTON_LEFT && evcon.target &&
                 evcon.target->is_block()) {
                 ViewBlock* target_block = lam::view_require_block(evcon.target);
                 if (scrollpane_press_part(&evcon, target_block) !=
@@ -14822,7 +14819,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // reach word/line selection, and a shift-click must still extend.
             bool text_drag_armed = false;
             if (event->type == RDT_EVENT_MOUSE_DOWN &&
-                btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                btn_event->button == RDT_MOUSE_BUTTON_LEFT &&
                 event->mouse_button.clicks == 1 &&
                 !(event->mouse_button.mods & RDT_MOD_SHIFT) &&
                 state && evcon.target && !evcon.default_prevented) {
@@ -14885,7 +14882,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 if (mouse_down_in_selection) {
                     DomSelection* drag_selection = state->dom_selection;
-                    if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                    if (btn_event->button == RDT_MOUSE_BUTTON_LEFT &&
                         btn_event->clicks == 1 &&
                         !(btn_event->mods & RDT_MOD_SHIFT) &&
                         drag_selection && drag_selection->range_count == 1 &&
@@ -15461,7 +15458,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // A secondary-button release emits mouseup/contextmenu, not the
             // primary click activation that can toggle controls or submit forms.
-            bool primary_activation = btn_event->button == GLFW_MOUSE_BUTTON_LEFT;
+            bool primary_activation = btn_event->button == RDT_MOUSE_BUTTON_LEFT;
             // Only process other click handlers if dropdown wasn't involved and not a drag
             if (primary_activation && !dropdown_handled && !drag_handled &&
                 !text_selection_drag_handled) {

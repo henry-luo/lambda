@@ -1156,9 +1156,11 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
             }
         }
     }
+#ifndef LAMBDA_NO_MIR
     // The MIR code is shared, but apply() resolves through a fresh
     // EvalContext-owned template registry (D8.5.1v7).
     if (instance->cache_mir_artifact) lambda_register_mir_view_templates(instance);
+#endif
     return instance;
 }
 
@@ -1349,7 +1351,8 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
     }
 }
 
-#ifndef LAMBDA_NO_MIR
+// The source/AST cache key is backend-neutral: every profile with the
+// resource cache loads through it, including a T0-only build (D8.5.1v4).
 static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         const char* path, const char* source, bool inline_source,
         bool is_import) {
@@ -1381,6 +1384,7 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
     return request;
 }
 
+#ifndef LAMBDA_NO_MIR
 // A T0 shell can be demoted after its AST owner was cached. Keep the AST pool
 // with that source entry and publish the new code as a separate MIR owner.
 static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script) {
@@ -1564,7 +1568,8 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
     return true;
 }
 
-#ifndef LAMBDA_NO_MIR
+// Activates a cached AST template in T0. Only the AUTO fallback tail lowers
+// MIR; a T0-only build refuses there like explicit interp (D8.1.1v15).
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
     if (!runtime || !script) return false;
@@ -1598,6 +1603,9 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         return true;
     }
     if (interp_reject_forced_fallback(&transpiler, script->reference)) return false;
+#ifdef LAMBDA_NO_MIR
+    return false;
+#else
     log_info("module-ast-prebuild: execution MIR fallback path=%s reason=node:%s",
         script->reference ? script->reference : "<unknown>",
         interp_node_kind_name(transpiler.interp_reject_kind));
@@ -1609,9 +1617,8 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         NULL, NULL, NULL, NULL, NULL, NULL);
     if (script->jit_context) (void)lambda_cache_promote_ast_shell_mir(runtime, script);
     return script->jit_context != NULL;
-}
-
 #endif
+}
 
 typedef struct LambdaDirectFrontendPassContext {
     Transpiler* tp;
@@ -1949,7 +1956,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
 // ============================================================================
 
-#ifndef LAMBDA_NO_JS
+// JS reaches Lambda exports through MIR-compiled entries only; a T0-only build
+// has none to register (vibe/Lambda_Design_Mobile.md MB5).
+#if !defined(LAMBDA_NO_JS) && !defined(LAMBDA_NO_MIR)
 static void register_lambda_script_namespace(Runtime* runtime, Script* script) {
     if (!script || script->is_main || !script->jit_context || !context || !context->heap ||
             !js_runtime_state_thread_matches(context) || !js_input) return;
@@ -2381,7 +2390,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     runtime->script_load_compiles++;
 
-#ifndef LAMBDA_NO_JS
+#if !defined(LAMBDA_NO_JS) && !defined(LAMBDA_NO_MIR)
     // Register in unified module registry for cross-language imports.
     // A Lambda behavior package can compile inside an initialized evaluator
     // without a JS realm. Its exports need no JS callable wrappers, whose
@@ -2991,11 +3000,6 @@ void runner_setup_context(Runner* runner) {
 // packed bytes as raw Items was the cause of the old map-walk crash.
 extern "C" Item path_resolve_for_iteration(Path* path);
 
-// Module-state instantiation from mir.c. It runs before execution and owns
-// the one-time slab allocation/root publication for a sealed module.
-extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
-                                              void* type_list);
-
 void resolve_sys_paths_recursive(Item item);
 
 static void resolve_sys_paths_in_shape(TypeMap* map_type, void* map_data) {
@@ -3040,7 +3044,8 @@ void resolve_sys_paths_recursive(Item item) {
 
 // Common helper function to execute a compiled script and wrap the result in an Input*
 // The GC heap is retained on the Runtime — caller calls runtime_cleanup() when done.
-
+// It runs a native main, so it exists only with MIR.
+#ifndef LAMBDA_NO_MIR
 Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!runner->script || !runner->script->main_func) {
         log_error("Error: Failed to compile the function.");
@@ -3147,6 +3152,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     log_debug("Script execution completed, returning output Input");
     return output;
 }
+#endif // LAMBDA_NO_MIR
 
 // Installs runtime_cleanup into the DOM layer's hook so dom_document_destroy()
 // can clean up a document's reactive lambda_runtime without dom_element.cpp
@@ -3328,6 +3334,8 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         script->interp_mir_exports = NULL;
     }
 #ifndef LAMBDA_NO_RESOURCE_CACHE
+#ifndef LAMBDA_NO_MIR
+    // satellite images are MIR code; a T0-only build never creates one
     if (script->interp_satellite_images) {
         for (int index = 0; index < script->interp_satellite_images->length; index++) {
             interp_satellite_image_destroy((InterpSatelliteImage*)
@@ -3336,6 +3344,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         arraylist_free(script->interp_satellite_images);
         script->interp_satellite_images = NULL;
     }
+#endif
     if (script->cache_owned_template) {
         // D8.5.1v2: the cache entry retains its template lease until eviction.
         // Closing it here would evict the image and recursively destroy this
@@ -3829,4 +3838,37 @@ void runtime_cleanup(Runtime* runtime) {
     runtime_close_js_module_mir_scopes(runtime);
 #endif
     runtime_free_all_scripts(runtime);
+}
+
+// ============================================================================
+// Import cone: the post-order every tier initializes modules in.
+// ============================================================================
+
+void script_import_cone_postorder(Script* script, ArrayList* cone, ArrayList* visited) {
+    if (!script || script_ptr_list_contains(visited, script)) return;
+    arraylist_append(visited, script);
+
+    if (script->direct_imports) {
+        for (int i = 0; i < script->direct_imports->length; i++) {
+            Script* dep = (Script*)script->direct_imports->data[i];
+            script_import_cone_postorder(dep, cone, visited);
+        }
+    }
+
+    arraylist_append(cone, script);
+}
+
+ArrayList* collect_import_cone(Script* main_script) {
+    ArrayList* cone_with_main = arraylist_new(8);
+    ArrayList* visited = arraylist_new(8);
+    script_import_cone_postorder(main_script, cone_with_main, visited);
+    arraylist_free(visited);
+
+    ArrayList* cone = arraylist_new(cone_with_main->length > 1 ? cone_with_main->length - 1 : 1);
+    for (int i = 0; i < cone_with_main->length; i++) {
+        Script* script = (Script*)cone_with_main->data[i];
+        if (script != main_script) arraylist_append(cone, script);
+    }
+    arraylist_free(cone_with_main);
+    return cone;
 }

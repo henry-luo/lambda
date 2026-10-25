@@ -540,6 +540,13 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         uint64_t* result_home, volatile long* harness_us, bool mvp_lmd,
         const char* harness_source, size_t harness_length) {
     if (mvp_lmd) {
+#ifdef LAMBDA_NO_MIR
+        // the MVP batch compiles each test with MIR, which this build excludes
+        (void)source; (void)source_len; (void)filename; (void)inline_module_source;
+        (void)harness_source; (void)harness_length;
+        fputs("MVP_FAILURE admission -\nMVP batch is excluded from this build (no MIR)\n", stdout);
+        return ItemError;
+#else
         if (has_preamble || ast_harness || test262_native_harness) {
             fputs("MVP_FAILURE admission -\nMVP batch requires a complete source\n", stdout);
             return ItemError;
@@ -561,6 +568,7 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         bool failed = diagnostic != NULL;
         mvp_lmd_destroy(execution);
         return failed ? ItemError : ItemNull;
+#endif
     }
     if (ast_harness) {
         if (ast_harness->prepare_failed || !ast_harness->script) {
@@ -1027,8 +1035,10 @@ extern void event_sim_set_result_path(const char* result_path);
 extern int lambda_repl_init(InterpReplSession* session);
 extern void lambda_repl_cleanup();
 
+#ifndef LAMBDA_NO_MIR
 // MIR interpreter mode (from mir.c)
 extern "C" int g_mir_interp_mode;
+#endif
 #ifndef LAMBDA_HEADLESS
 // Legacy document policy used by Lambda Direct; LambdaJS ignores it under
 // D8.1.3v11 and always links selected MIR natively.
@@ -1312,10 +1322,12 @@ int run_repl(Runtime *runtime, bool procedural) {
 
     // The session is always T0; the tier only governs satellite promotion,
     // and `jit` promotes at the first call instead of compiling a module.
+#ifndef LAMBDA_NO_MIR
     if (lambda_tier_selected() == LAMBDA_TIER_JIT) {
         lambda_tier_set(LAMBDA_TIER_AUTO);
         interp_set_func_jit_threshold_default(1);
     }
+#endif
     InterpReplSession session = {};
     if (!interp_repl_session_init(&session, runtime, procedural)) {
         fprintf(stderr, "error: REPL unavailable: could not create the interpreter session\n");
@@ -1972,6 +1984,8 @@ static __thread volatile sig_atomic_t batch_timeout_owner_thread = 0;
 // MIR error recovery for batch mode: longjmp instead of exit(1)
 static __thread jmp_buf mir_error_jmp;
 static __thread volatile sig_atomic_t mir_error_active = 0;
+#ifndef LAMBDA_NO_MIR
+// a T0-only build has no MIR context to report errors, so only the jump target stays
 static __thread char mir_error_msg[256];
 
 static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t error_type, const char *format, ...) {
@@ -1987,6 +2001,7 @@ static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t e
     // fallback: if not in protected region, exit
     exit(1);
 }
+#endif // LAMBDA_NO_MIR
 
 // SIGSEGV/SIGBUS recovery for batch mode: catch runtime crashes in JIT code
 static __thread sigjmp_buf batch_crash_jmp;
@@ -2432,7 +2447,11 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
         return true;
     }
     if (strcmp(arg, "--mir-interp") == 0) {
+#ifdef LAMBDA_NO_MIR
+        log_error("cli: --mir-interp is excluded from this build (no MIR)");
+#else
         g_mir_interp_mode = 1;
+#endif
         return true;
     }
     if (strcmp(arg, "--no-drain") == 0) {
@@ -4636,7 +4655,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 batch_timeout = atoi(argv[i] + 10);
                 if (batch_timeout <= 0) batch_timeout = 60;
             } else if (strcmp(argv[i], "--mir-interp") == 0) {
+#ifdef LAMBDA_NO_MIR
+                log_error("cli: --mir-interp is excluded from this build (no MIR)");
+#else
                 g_mir_interp_mode = 1;
+#endif
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0 ||
                        strncmp(argv[i], "--optimize=", 11) == 0) {
                 const char* value = strchr(argv[i], '=');
@@ -4887,8 +4910,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef _WIN32
         // Install signal handlers ONCE for the entire batch loop.
         // Catches SIGSEGV, SIGBUS, SIGABRT, and SIGTRAP.
+#ifndef LAMBDA_NO_MIR
         extern MIR_error_func_t g_batch_mir_error_handler;
         g_batch_mir_error_handler = batch_mir_error_handler;
+#endif
         struct sigaction crash_sa, old_segv_sa, old_bus_sa, old_abrt_sa, old_trap_sa;
         crash_sa.sa_handler = batch_crash_handler;
         sigemptyset(&crash_sa.sa_mask);

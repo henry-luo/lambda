@@ -35,7 +35,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lib/image.h"
-#include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -426,60 +425,60 @@ static SimEvent* event_sim_alloc_event(EventSimContext* ctx) {
     return (SimEvent*)arena_calloc(ctx->event_arena, sizeof(SimEvent));
 }
 
-// Map key name string to GLFW key code
+// Map key name string to a Radiant key code (GLFW numbering)
 static int sim_physical_key_for_codepoint(uint32_t codepoint, int* out_mods);
 
-static int key_name_to_glfw(const char* name) {
-    if (!name) return GLFW_KEY_UNKNOWN;
+static int key_name_to_key_code(const char* name) {
+    if (!name) return RDT_KEY_UNRECOGNIZED;
 
     size_t name_len = strlen(name);
 
     // Single character keys
     if (name_len == 1) {
         char c = name[0];
-        if (c >= 'a' && c <= 'z') return GLFW_KEY_A + (c - 'a');
-        if (c >= 'A' && c <= 'Z') return GLFW_KEY_A + (c - 'A');
-        if (c >= '0' && c <= '9') return GLFW_KEY_0 + (c - '0');
+        if (c >= 'a' && c <= 'z') return RDT_KEY_A + (c - 'a');
+        if (c >= 'A' && c <= 'Z') return RDT_KEY_A + (c - 'A');
+        if (c >= '0' && c <= '9') return RDT_KEY_0 + (c - '0');
         // punctuation ("/" in a key_combo): the key that types it; the
         // fixture's mods_str supplies any modifier
         int punct = sim_physical_key_for_codepoint((uint32_t)(unsigned char)c, nullptr);
-        if (punct != GLFW_KEY_UNKNOWN) return punct;
+        if (punct != RDT_KEY_UNRECOGNIZED) return punct;
     }
 
     // Special keys
-    if (str_ieq_const(name, name_len, "space")) return GLFW_KEY_SPACE;
-    if (str_ieq_const(name, name_len, "enter") || str_ieq_const(name, name_len, "return")) return GLFW_KEY_ENTER;
-    if (str_ieq_const(name, name_len, "tab")) return GLFW_KEY_TAB;
-    if (str_ieq_const(name, name_len, "backspace")) return GLFW_KEY_BACKSPACE;
-    if (str_ieq_const(name, name_len, "delete")) return GLFW_KEY_DELETE;
-    if (str_ieq_const(name, name_len, "escape") || str_ieq_const(name, name_len, "esc")) return GLFW_KEY_ESCAPE;
+    if (str_ieq_const(name, name_len, "space")) return RDT_KEY_SPACE;
+    if (str_ieq_const(name, name_len, "enter") || str_ieq_const(name, name_len, "return")) return RDT_KEY_ENTER;
+    if (str_ieq_const(name, name_len, "tab")) return RDT_KEY_TAB;
+    if (str_ieq_const(name, name_len, "backspace")) return RDT_KEY_BACKSPACE;
+    if (str_ieq_const(name, name_len, "delete")) return RDT_KEY_DELETE;
+    if (str_ieq_const(name, name_len, "escape") || str_ieq_const(name, name_len, "esc")) return RDT_KEY_ESCAPE;
     // Accept both the short names and the DOM KeyboardEvent.key names
     // ("ArrowLeft" etc.) so fixtures can use the same key strings the JS-side
     // vitest tests do.
     if (str_ieq_const(name, name_len, "left") ||
-        str_ieq_const(name, name_len, "arrowleft")) return GLFW_KEY_LEFT;
+        str_ieq_const(name, name_len, "arrowleft")) return RDT_KEY_LEFT;
     if (str_ieq_const(name, name_len, "right") ||
-        str_ieq_const(name, name_len, "arrowright")) return GLFW_KEY_RIGHT;
+        str_ieq_const(name, name_len, "arrowright")) return RDT_KEY_RIGHT;
     if (str_ieq_const(name, name_len, "up") ||
-        str_ieq_const(name, name_len, "arrowup")) return GLFW_KEY_UP;
+        str_ieq_const(name, name_len, "arrowup")) return RDT_KEY_UP;
     if (str_ieq_const(name, name_len, "down") ||
-        str_ieq_const(name, name_len, "arrowdown")) return GLFW_KEY_DOWN;
-    if (str_ieq_const(name, name_len, "home")) return GLFW_KEY_HOME;
-    if (str_ieq_const(name, name_len, "end")) return GLFW_KEY_END;
-    if (str_ieq_const(name, name_len, "pageup")) return GLFW_KEY_PAGE_UP;
-    if (str_ieq_const(name, name_len, "pagedown")) return GLFW_KEY_PAGE_DOWN;
-    if (str_ieq_const(name, name_len, "control") || str_ieq_const(name, name_len, "ctrl")) return GLFW_KEY_LEFT_CONTROL;
-    if (str_ieq_const(name, name_len, "shift")) return GLFW_KEY_LEFT_SHIFT;
-    if (str_ieq_const(name, name_len, "alt")) return GLFW_KEY_LEFT_ALT;
-    if (str_ieq_const(name, name_len, "super") || str_ieq_const(name, name_len, "cmd") || str_ieq_const(name, name_len, "meta")) return GLFW_KEY_LEFT_SUPER;
+        str_ieq_const(name, name_len, "arrowdown")) return RDT_KEY_DOWN;
+    if (str_ieq_const(name, name_len, "home")) return RDT_KEY_HOME;
+    if (str_ieq_const(name, name_len, "end")) return RDT_KEY_END;
+    if (str_ieq_const(name, name_len, "pageup")) return RDT_KEY_PAGE_UP;
+    if (str_ieq_const(name, name_len, "pagedown")) return RDT_KEY_PAGE_DOWN;
+    if (str_ieq_const(name, name_len, "control") || str_ieq_const(name, name_len, "ctrl")) return RDT_KEY_LEFT_CONTROL;
+    if (str_ieq_const(name, name_len, "shift")) return RDT_KEY_LEFT_SHIFT;
+    if (str_ieq_const(name, name_len, "alt")) return RDT_KEY_LEFT_ALT;
+    if (str_ieq_const(name, name_len, "super") || str_ieq_const(name, name_len, "cmd") || str_ieq_const(name, name_len, "meta")) return RDT_KEY_LEFT_SUPER;
 
     // Function keys
     if (name[0] == 'f' || name[0] == 'F') {
         int num = (int)str_to_int64_default(name + 1, strlen(name + 1), 0);
-        if (num >= 1 && num <= 12) return GLFW_KEY_F1 + (num - 1);
+        if (num >= 1 && num <= 12) return RDT_KEY_F1 + (num - 1);
     }
 
-    return GLFW_KEY_UNKNOWN;
+    return RDT_KEY_UNRECOGNIZED;
 }
 
 // Parse modifier string to RDT_MOD_* flags
@@ -1428,22 +1427,22 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "key_press") == 0) {
         ev->type = SIM_EVENT_KEY_PRESS;
         const char* key_str = reader.get("key").cstring();
-        ev->key = key_name_to_glfw(key_str);
+        ev->key = key_name_to_key_code(key_str);
     }
     else if (strcmp(type_str, "key_down") == 0) {
         ev->type = SIM_EVENT_KEY_DOWN;
         const char* key_str = reader.get("key").cstring();
-        ev->key = key_name_to_glfw(key_str);
+        ev->key = key_name_to_key_code(key_str);
     }
     else if (strcmp(type_str, "key_up") == 0) {
         ev->type = SIM_EVENT_KEY_UP;
         const char* key_str = reader.get("key").cstring();
-        ev->key = key_name_to_glfw(key_str);
+        ev->key = key_name_to_key_code(key_str);
     }
     else if (strcmp(type_str, "key_combo") == 0) {
         ev->type = SIM_EVENT_KEY_COMBO;
         const char* key_str = reader.get("key").cstring();
-        ev->key = key_name_to_glfw(key_str);
+        ev->key = key_name_to_key_code(key_str);
     }
     else if (strcmp(type_str, "scroll") == 0) {
         ev->type = SIM_EVENT_SCROLL;
@@ -3668,13 +3667,13 @@ static void event_sim_fuzz_schema(EventSimContext* ctx, UiContext* uicon, SimEve
             }
             case 3:
                 log_info("event_sim: fuzz_schema[%d] key_tab", step);
-                sim_key(uicon, GLFW_KEY_TAB, 0, true);
-                sim_key(uicon, GLFW_KEY_TAB, 0, false);
+                sim_key(uicon, RDT_KEY_TAB, 0, true);
+                sim_key(uicon, RDT_KEY_TAB, 0, false);
                 break;
             case 4:
                 log_info("event_sim: fuzz_schema[%d] key_right", step);
-                sim_key(uicon, GLFW_KEY_RIGHT, 0, true);
-                sim_key(uicon, GLFW_KEY_RIGHT, 0, false);
+                sim_key(uicon, RDT_KEY_RIGHT, 0, true);
+                sim_key(uicon, RDT_KEY_RIGHT, 0, false);
                 break;
             case 5:
                 log_info("event_sim: fuzz_schema[%d] text_input", step);
@@ -3682,8 +3681,8 @@ static void event_sim_fuzz_schema(EventSimContext* ctx, UiContext* uicon, SimEve
                 break;
             default:
                 log_info("event_sim: fuzz_schema[%d] key_backspace", step);
-                sim_key(uicon, GLFW_KEY_BACKSPACE, 0, true);
-                sim_key(uicon, GLFW_KEY_BACKSPACE, 0, false);
+                sim_key(uicon, RDT_KEY_BACKSPACE, 0, true);
+                sim_key(uicon, RDT_KEY_BACKSPACE, 0, false);
                 break;
         }
 
@@ -3741,51 +3740,51 @@ static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
 static int sim_physical_key_for_codepoint(uint32_t codepoint, int* out_mods) {
     if (out_mods) *out_mods = 0;
     if (codepoint >= 'a' && codepoint <= 'z') {
-        return GLFW_KEY_A + (int)(codepoint - 'a'); // INT_CAST_OK: GLFW key codes are int.
+        return RDT_KEY_A + (int)(codepoint - 'a'); // INT_CAST_OK: key codes are int.
     }
     if (codepoint >= 'A' && codepoint <= 'Z') {
         if (out_mods) *out_mods = RDT_MOD_SHIFT;
-        return GLFW_KEY_A + (int)(codepoint - 'A'); // INT_CAST_OK: GLFW key codes are int.
+        return RDT_KEY_A + (int)(codepoint - 'A'); // INT_CAST_OK: key codes are int.
     }
     if (codepoint >= '0' && codepoint <= '9') {
-        return GLFW_KEY_0 + (int)(codepoint - '0'); // INT_CAST_OK: GLFW key codes are int.
+        return RDT_KEY_0 + (int)(codepoint - '0'); // INT_CAST_OK: key codes are int.
     }
-    if (codepoint == ' ') return GLFW_KEY_SPACE;
+    if (codepoint == ' ') return RDT_KEY_SPACE;
 
     switch (codepoint) {
-    case '!': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_1;
-    case '@': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_2;
-    case '#': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_3;
-    case '$': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_4;
-    case '%': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_5;
-    case '^': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_6;
-    case '&': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_7;
-    case '*': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_8;
-    case '(': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_9;
-    case ')': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_0;
-    case '-': return GLFW_KEY_MINUS;
-    case '_': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_MINUS;
-    case '=': return GLFW_KEY_EQUAL;
-    case '+': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_EQUAL;
-    case '[': return GLFW_KEY_LEFT_BRACKET;
-    case '{': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_LEFT_BRACKET;
-    case ']': return GLFW_KEY_RIGHT_BRACKET;
-    case '}': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_RIGHT_BRACKET;
-    case '\\': return GLFW_KEY_BACKSLASH;
-    case '|': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_BACKSLASH;
-    case ';': return GLFW_KEY_SEMICOLON;
-    case ':': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_SEMICOLON;
-    case '\'': return GLFW_KEY_APOSTROPHE;
-    case '"': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_APOSTROPHE;
-    case ',': return GLFW_KEY_COMMA;
-    case '<': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_COMMA;
-    case '.': return GLFW_KEY_PERIOD;
-    case '>': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_PERIOD;
-    case '/': return GLFW_KEY_SLASH;
-    case '?': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_SLASH;
-    case '`': return GLFW_KEY_GRAVE_ACCENT;
-    case '~': if (out_mods) *out_mods = RDT_MOD_SHIFT; return GLFW_KEY_GRAVE_ACCENT;
-    default: return GLFW_KEY_UNKNOWN;
+    case '!': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_1;
+    case '@': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_2;
+    case '#': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_3;
+    case '$': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_4;
+    case '%': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_5;
+    case '^': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_6;
+    case '&': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_7;
+    case '*': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_8;
+    case '(': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_9;
+    case ')': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_0;
+    case '-': return RDT_KEY_MINUS;
+    case '_': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_MINUS;
+    case '=': return RDT_KEY_EQUAL;
+    case '+': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_EQUAL;
+    case '[': return RDT_KEY_LEFT_BRACKET;
+    case '{': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_LEFT_BRACKET;
+    case ']': return RDT_KEY_RIGHT_BRACKET;
+    case '}': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_RIGHT_BRACKET;
+    case '\\': return RDT_KEY_BACKSLASH;
+    case '|': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_BACKSLASH;
+    case ';': return RDT_KEY_SEMICOLON;
+    case ':': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_SEMICOLON;
+    case '\'': return RDT_KEY_APOSTROPHE;
+    case '"': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_APOSTROPHE;
+    case ',': return RDT_KEY_COMMA;
+    case '<': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_COMMA;
+    case '.': return RDT_KEY_PERIOD;
+    case '>': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_PERIOD;
+    case '/': return RDT_KEY_SLASH;
+    case '?': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_SLASH;
+    case '`': return RDT_KEY_GRAVE_ACCENT;
+    case '~': if (out_mods) *out_mods = RDT_MOD_SHIFT; return RDT_KEY_GRAVE_ACCENT;
+    default: return RDT_KEY_UNRECOGNIZED;
     }
 }
 
@@ -3823,7 +3822,7 @@ static void sim_type_legacy_text(UiContext* uicon, const char* text) {
 }
 
 // Process a single simulated event
-static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
+static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, RadiantWindow* window) {
     switch (ev->type) {
         case SIM_EVENT_ASSERT_RENDER:
         case SIM_EVENT_RENDER_COMMAND: {
@@ -4171,14 +4170,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // If clear_first, send Cmd+A then Delete
             if (ev->clear_first) {
                 #ifdef __APPLE__
-                sim_key(uicon, GLFW_KEY_A, RDT_MOD_SUPER, true);
-                sim_key(uicon, GLFW_KEY_A, RDT_MOD_SUPER, false);
+                sim_key(uicon, RDT_KEY_A, RDT_MOD_SUPER, true);
+                sim_key(uicon, RDT_KEY_A, RDT_MOD_SUPER, false);
                 #else
-                sim_key(uicon, GLFW_KEY_A, RDT_MOD_CTRL, true);
-                sim_key(uicon, GLFW_KEY_A, RDT_MOD_CTRL, false);
+                sim_key(uicon, RDT_KEY_A, RDT_MOD_CTRL, true);
+                sim_key(uicon, RDT_KEY_A, RDT_MOD_CTRL, false);
                 #endif
-                sim_key(uicon, GLFW_KEY_DELETE, 0, true);
-                sim_key(uicon, GLFW_KEY_DELETE, 0, false);
+                sim_key(uicon, RDT_KEY_DELETE, 0, true);
+                sim_key(uicon, RDT_KEY_DELETE, 0, false);
             }
             // `type` remains the legacy text-input shorthand; physical typing
             // is opt-in so existing fixtures do not acquire keyboard events.
@@ -4338,7 +4337,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             int new_css_h = (int)lroundf(ev->y); // INT_CAST_OK: viewport API is discrete CSS pixels
             // Keep the real window and the synthetic viewport in agreement;
             // its next framebuffer callback must not restore the old size.
-            if (window) glfwSetWindowSize(window, new_css_w, new_css_h);
+            if (window) radiant_platform_set_window_size(window, new_css_w, new_css_h);
             float pr = uicon->device_scale > 0 ? uicon->device_scale : 1.0f;
             int new_phys_w = (int)lroundf(new_css_w * pr); // INT_CAST_OK: physical surface width
             int new_phys_h = (int)lroundf(new_css_h * pr); // INT_CAST_OK: physical surface height
@@ -4429,11 +4428,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 clipboard_copy_text(text);
             }
             #ifdef __APPLE__
-            sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, true);
-            sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, false);
+            sim_key(uicon, RDT_KEY_V, RDT_MOD_SUPER, true);
+            sim_key(uicon, RDT_KEY_V, RDT_MOD_SUPER, false);
             #else
-            sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, true);
-            sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, false);
+            sim_key(uicon, RDT_KEY_V, RDT_MOD_CTRL, true);
+            sim_key(uicon, RDT_KEY_V, RDT_MOD_CTRL, false);
             #endif
             break;
         }
@@ -5767,7 +5766,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // can assert the saved file and the decision afterwards.
             bool closing = radiant_window_platform_close(uicon);
             log_info("event_sim: window_close -> %s", closing ? "approved" : "deferred to document");
-            if (closing && window) glfwSetWindowShouldClose(window, GLFW_TRUE);
+            if (closing && window) radiant_platform_set_window_should_close(window, true);
             break;
         }
 
@@ -5866,7 +5865,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 // Auto-waiting wrapper: attempt an assertion once per host-loop turn. Blocking
 // here used to prevent JS timers and microtasks from running between attempts,
 // forcing fixtures to add fixed sleeps before otherwise auto-waiting assertions.
-static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
+static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, RadiantWindow* window) {
     // Non-assertion events execute directly
     if (!sim_event_is_assertion(ev->type)) {
         process_sim_event(ctx, ev, uicon, window);
@@ -6038,7 +6037,7 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
     }
 }
 
-bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window, double current_time) {
+bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* window, double current_time) {
     UiContext* uicon = (UiContext*)uicon_ptr;
     if (!ctx || !ctx->is_running) return false;
     ctx->current_time = current_time;

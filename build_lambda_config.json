@@ -1250,7 +1250,7 @@
       ]
     },
     "lambda-headless": {
-      "description": "Headless full build: Lambda + Radiant + JS linked against the null windowing backend (radiant/headless.cpp); no GLFW, OpenGL or native GUI toolkits, no view/edit commands",
+      "description": "Headless full build: Lambda + Radiant + JS linked against the null platform backend (radiant/platform_null.cpp); no GLFW, OpenGL or native GUI toolkits, no view/edit commands",
       "output": "lambda-headless.exe",
       "extra_exclude_source_files": [
         "radiant/clipboard_mac.mm",
@@ -1364,6 +1364,24 @@
       "linker_flags": [],
       "build_dir": "build_cli",
       "debug": false
+    },
+    "lambda-nomir": {
+      "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
+      "output": "lambda-nomir.exe",
+      "extra_exclude_source_files": [
+        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mir.c",
+        "lambda/runtime/mir_dump.cpp",
+        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp"
+      ],
+      "exclude_libraries": [
+        "mir"
+      ],
+      "defines": [
+        "LAMBDA_NO_MIR"
+      ],
+      "build_dir": "build_nomir",
+      "debug": true
     },
     "windows": {
       "output": "lambda.exe",

@@ -78,7 +78,7 @@ typedef enum RadiantJsLoopAction {
 
 static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction action,
                                           int wait_ms, double delta_ms, int frame_steps) {
-    // Headless hosts have no GLFW poll to service the native media event queue.
+    // Headless hosts have no platform event poll to service the native media event queue.
     rdt_video_pump_events();
     DomDocument* doc = uicon ? uicon->document : nullptr;
     // CSS/SVG timing jobs use the document evaluator even without page JS.
@@ -197,20 +197,20 @@ bool radiant_advance_js_event_loop(UiContext* uicon, double delta_ms, int frame_
                                          -1, delta_ms, frame_steps);
 }
 
-void render(GLFWwindow* window);
+void render(RadiantWindow* window);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 bool radiant_editing_animation_active(DocState* state);
 bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
 
-static void view_wake_glfw(void* user_data) {
+static void view_wake_platform(void* user_data) {
     (void)user_data;
-    glfwPostEmptyEvent();
+    radiant_platform_post_empty_event();
 }
 
-static void network_wake_glfw(void* user_data) {
-    view_wake_glfw(user_data);
+static void network_wake_platform(void* user_data) {
+    view_wake_platform(user_data);
 }
 
 static void view_cleanup_js_batch_state(void) {
@@ -475,10 +475,10 @@ static void view_attach_event_log(DomDocument* doc, const char* doc_name) {
     }
 }
 
-// update the GLFW window title (safe to call from event handlers)
+// update the window title (safe to call from event handlers)
 void update_window_title(const char* title) {
     if (!ui_context.window || !title) return;
-    glfwSetWindowTitle(ui_context.window, title);
+    radiant_platform_set_window_title(ui_context.window, title);
 }
 
 DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height) {
@@ -582,83 +582,21 @@ static void window_release_relative_mouse(UiContext* uicon) {
     bool was_active = uicon->relative_mouse_owner.address != nullptr;
     uicon->relative_mouse_owner = {};
     uicon->mouse_state.has_position = false;
-    if (was_active && uicon->window) {
-        if (glfwRawMouseMotionSupported()) glfwSetInputMode(uicon->window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
-        glfwSetInputMode(uicon->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    }
+    if (was_active && uicon->window) radiant_platform_set_relative_pointer(uicon->window, false);
 }
 
 
 static bool window_fullscreen_read(void* context, RadiantWindowPlacement* placement) {
     UiContext* uicon = static_cast<UiContext*>(context);
     if (!uicon || uicon->headless || !uicon->window) return false;
-    int count = 0;
-    glfwGetMonitors(&count);
-    if (!count) return false;
-    int x, y, width, height;
-    glfwGetWindowPos(uicon->window, &x, &y);
-    glfwGetWindowSize(uicon->window, &width, &height);
-    placement->bounds = {(float)x, (float)y, (float)width, (float)height};
-    placement->maximized = glfwGetWindowAttrib(uicon->window, GLFW_MAXIMIZED) != 0;
-    placement->fullscreen = glfwGetWindowMonitor(uicon->window) != nullptr;
-    return true;
-}
-
-static GLFWmonitor* window_fullscreen_monitor(RadiantWindowBounds bounds, float* overlap) {
-    int count = 0;
-    GLFWmonitor** monitors = glfwGetMonitors(&count);
-    GLFWmonitor* selected = glfwGetPrimaryMonitor();
-    *overlap = 0;
-    for (int i = 0; i < count; i++) {
-        const GLFWvidmode* mode = glfwGetVideoMode(monitors[i]);
-        if (!mode) continue;
-        int x, y;
-        glfwGetMonitorPos(monitors[i], &x, &y);
-        float area = radiant_fullscreen_overlap(bounds,
-            {(float)x, (float)y, (float)mode->width, (float)mode->height});
-        if (area > *overlap) { *overlap = area; selected = monitors[i]; }
-    }
-    return selected;
+    return radiant_platform_read_placement(uicon->window, placement);
 }
 
 static bool window_fullscreen_apply(void* context, bool enabled,
                                     const RadiantWindowPlacement* restore) {
     UiContext* uicon = static_cast<UiContext*>(context);
-    RadiantWindowPlacement current = {};
-    if (!window_fullscreen_read(context, &current)) return false;
-    float overlap;
-    GLFWmonitor* monitor = window_fullscreen_monitor(
-        enabled ? current.bounds : restore->bounds, &overlap);
-    if (!monitor) return false;
-    glfwGetError(nullptr);
-    if (enabled) {
-        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-        if (!mode) return false;
-        glfwSetWindowMonitor(uicon->window, monitor, 0, 0,
-                             mode->width, mode->height, mode->refreshRate);
-    } else {
-        RadiantWindowBounds bounds = restore->bounds;
-        // a disconnected display must not leave the restored window unreachable.
-        if (overlap <= 0) {
-            int x, y, width, height;
-            glfwGetMonitorWorkarea(monitor, &x, &y, &width, &height);
-            bounds = radiant_fullscreen_fit(bounds,
-                {(float)x, (float)y, (float)width, (float)height});
-        }
-        int x = (int)lroundf(bounds.x); // INT_CAST_OK: GLFW screen-coordinate boundary
-        int y = (int)lroundf(bounds.y); // INT_CAST_OK: GLFW screen-coordinate boundary
-        int width = (int)lroundf(bounds.width); // INT_CAST_OK: GLFW window-size boundary
-        int height = (int)lroundf(bounds.height); // INT_CAST_OK: GLFW window-size boundary
-        glfwSetWindowMonitor(uicon->window, nullptr, x, y, width, height, GLFW_DONT_CARE);
-        if (restore->maximized) glfwMaximizeWindow(uicon->window);
-    }
-    const char* message = nullptr;
-    if (glfwGetError(&message) != GLFW_NO_ERROR) {
-        log_error("fullscreen: platform transition failed: %s", message ? message : "unknown error");
-        return false;
-    }
-    log_info("fullscreen: platform requested %s", enabled ? "fullscreen" : "windowed");
-    return true;
+    if (!uicon || uicon->headless || !uicon->window) return false;
+    return radiant_platform_apply_fullscreen(uicon->window, enabled, restore);
 }
 
 static const RadiantFullscreenBackend window_fullscreen_backend = {
@@ -670,20 +608,18 @@ static void window_fullscreen_update(UiContext* uicon, bool commit) {
         do_redraw = true;
 }
 
-static void window_bounds_callback(GLFWwindow*, int, int) {
+void radiant_host_bounds_changed(RadiantWindow*) {
     // capture a normal move/resize before a later maximize event in the same poll.
     window_fullscreen_update(&ui_context, false);
     do_redraw = true;
 }
-static void window_maximized_callback(GLFWwindow*, int) { do_redraw = true; }
-static void window_monitor_callback(GLFWmonitor*, int) { do_redraw = true; }
 
 bool radiant_window_fullscreen_key(UiContext* uicon, const RdtEvent* event) {
     if (!uicon || !event ||
         (event->type != RDT_EVENT_KEY_DOWN && event->type != RDT_EVENT_KEY_UP)) return false;
     RadiantFullscreenState* state = &uicon->fullscreen;
     bool down = event->type == RDT_EVENT_KEY_DOWN;
-    if (event->key.key == GLFW_KEY_F11) {
+    if (event->key.key == RDT_KEY_F11) {
         bool consumed = state->toggle_key_down;
         if (!down) { state->toggle_key_down = false; return consumed; }
         if (!state->available || event->key.mods) return false;
@@ -691,7 +627,7 @@ bool radiant_window_fullscreen_key(UiContext* uicon, const RdtEvent* event) {
         state->toggle_key_down = true;
         return true;
     }
-    if (event->key.key == GLFW_KEY_ESCAPE) {
+    if (event->key.key == RDT_KEY_ESCAPE) {
         if (!down) {
             bool consumed = state->escape_key_down;
             state->escape_key_down = false;
@@ -760,10 +696,9 @@ bool radiant_window_set_relative_mouse(DomElement* owner, bool enabled) {
     ui_context.relative_mouse_owner = dom_node_ref(owner);
     ui_context.mouse_state.has_position = false;
     if (ui_context.window) {
-        glfwSetInputMode(ui_context.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        if (glfwRawMouseMotionSupported()) glfwSetInputMode(ui_context.window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        radiant_platform_set_relative_pointer(ui_context.window, true);
         double x = 0, y = 0;
-        glfwGetCursorPos(ui_context.window, &x, &y);
+        radiant_platform_get_cursor_pos(ui_context.window, &x, &y);
         ui_context.mouse_state.last_x = (float)x;
         ui_context.mouse_state.last_y = (float)y;
         ui_context.mouse_state.has_position = true;
@@ -786,15 +721,15 @@ void radiant_window_focus_changed(UiContext* uicon, bool focused) {
     do_redraw = 1;
 }
 
-static void window_focus_callback(GLFWwindow*, int focused) {
+void radiant_host_focus_changed(RadiantWindow*, bool focused) {
     window_flush_pointer_motion();
-    radiant_window_focus_changed(&ui_context, focused != 0);
+    radiant_window_focus_changed(&ui_context, focused);
 }
 
-static void window_request_close(GLFWwindow* window) {
+static void window_request_close(RadiantWindow* window) {
     window_release_relative_mouse(&ui_context);
     window_request_document_satellite_cancel();
-    glfwSetWindowShouldClose(window, GLFW_TRUE);
+    radiant_platform_set_window_should_close(window, true);
 }
 
 // Only the presented top-level document may arm the close guard, approve a
@@ -836,7 +771,7 @@ bool radiant_window_set_fullscreen(DomNode* node, bool enabled) {
     if (!window_hosts_fullscreen_node(node) ||
         !radiant_fullscreen_request(&ui_context.fullscreen, enabled)) return false;
     do_redraw = true;
-    if (ui_context.window) glfwPostEmptyEvent();
+    if (ui_context.window) radiant_platform_post_empty_event();
     return true;
 }
 
@@ -861,7 +796,7 @@ bool radiant_window_platform_close(UiContext* uicon) {
     RdtEvent event;
     memset(&event, 0, sizeof(event));
     event.type = RDT_EVENT_CLOSE_REQUEST;
-    event.timestamp = glfwGetTime();
+    event.timestamp = radiant_platform_time();
     handle_event(uicon, uicon->document, &event);
     do_redraw = 1;
     return uicon->close_approved;
@@ -873,33 +808,35 @@ extern "C" bool dom_engine_window_is_closed(void* context_ptr) {
     return !uicon || uicon->close_approved;
 }
 
-static void window_close_callback(GLFWwindow* window) {
+void radiant_host_close_requested(RadiantWindow* window) {
     window_flush_pointer_motion();
-    // GLFW invokes this at the user's close click (and application quit),
+    // The platform reports the user's close click (and application quit)
     // before document cleanup. A guarded edit session keeps the window open
     // until it approves; runtime cancellation waits for that decision.
     if (!radiant_window_platform_close(&ui_context)) {
-        glfwSetWindowShouldClose(window, GLFW_FALSE);
+        radiant_platform_set_window_should_close(window, false);
         return;
     }
     window_request_document_satellite_cancel();
 }
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+static void window_on_key(RadiantWindow* window, RdtEvent* event) {
     window_flush_pointer_motion();
+    int key = event->key.key;
+    bool pressed = event->type == RDT_EVENT_KEY_DOWN && !event->key.repeat;
 
     // Alt+Left = browser back, Alt+Right = browser forward
-    if (!ui_context.paged_options && action == GLFW_PRESS && (mods & GLFW_MOD_ALT)) {
+    if (!ui_context.paged_options && pressed && (event->key.mods & RDT_MOD_ALT)) {
         BrowsingSession* session = ui_context.browsing_session;
         if (session && ui_context.document) {
             int css_vw = ui_context.viewport_width;
             int css_vh = ui_context.viewport_height;
             DomDocument* new_doc = nullptr;
-            if (key == GLFW_KEY_LEFT && session_can_go_back(session)) {
+            if (key == RDT_KEY_LEFT && session_can_go_back(session)) {
                 log_info("browse_nav: keyboard back");
                 window_save_document_scroll(session, ui_context.document);
                 new_doc = session_go_back(session, &ui_context, css_vw, css_vh);
-            } else if (key == GLFW_KEY_RIGHT && session_can_go_forward(session)) {
+            } else if (key == RDT_KEY_RIGHT && session_can_go_forward(session)) {
                 log_info("browse_nav: keyboard forward");
                 window_save_document_scroll(session, ui_context.document);
                 new_doc = session_go_forward(session, &ui_context, css_vw, css_vh);
@@ -929,20 +866,9 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         }
     }
 
-    // Build keyboard event
-    RdtEvent event;
-    int rdt_mods = 0;
-    if (mods & GLFW_MOD_SHIFT) rdt_mods |= RDT_MOD_SHIFT;
-    if (mods & GLFW_MOD_CONTROL) rdt_mods |= RDT_MOD_CTRL;
-    if (mods & GLFW_MOD_ALT) rdt_mods |= RDT_MOD_ALT;
-    if (mods & GLFW_MOD_SUPER) rdt_mods |= RDT_MOD_SUPER;
-    rdt_event_set_key(&event,
-        (action == GLFW_PRESS || action == GLFW_REPEAT) ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP,
-        key, rdt_mods, scancode, glfwGetTime());
-
     // Handle key events
-    window_submit_input(&event);
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+    window_submit_input(event);
+    if (key == RDT_KEY_ESCAPE && pressed) {
         // The viewer closes on an Escape the document declined (dispatch is synchronous)
         // and that did not just leave fullscreen; the edit application gives Escape to
         // the active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
@@ -963,183 +889,137 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     do_redraw = 1;
 }
 
-void character_callback(GLFWwindow* window, unsigned int codepoint) {
-    // Build text input event
-    RdtEvent event;
-    rdt_event_set_text_input(&event, codepoint, glfwGetTime());
-
+static void window_on_text_input(RdtEvent* event) {
+    uint32_t codepoint = event->text_input.codepoint;
     if (codepoint > 127) {
         log_debug("Unicode character entered: U+%04X", codepoint);
     } else {
         log_debug("Character entered: %u '%c'", codepoint, codepoint);
     }
-
-    window_submit_input(&event);
+    window_submit_input(event);
     // Repaint so the typed character appears without waiting for the
     // next mouse move / animation tick.
     do_redraw = 1;
 }
 
-static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+// Host-originated pointer motion (unfocused polling, leave) in window coordinates.
+static void window_submit_pointer_move(double x, double y) {
     RdtEvent event;
-    log_debug("Cursor position: (%.1f, %.1f)", xpos, ypos);
-    // GLFW reports logical window coordinates, so the platform scale is 1:1.
-    RdtLogicalPoint logical = rdt_platform_to_logical_point(
-        (float)xpos, (float)ypos, 1.0f, 1.0f);
+    RdtLogicalPoint logical = rdt_platform_to_logical_point((float)x, (float)y, 1.0f, 1.0f);
     rdt_event_set_mouse_position(&event, RDT_EVENT_MOUSE_MOVE,
-                                 logical.x, logical.y, glfwGetTime());
+                                 logical.x, logical.y, radiant_platform_time());
     window_submit_input(&event);
 }
 
 // A move to a point outside the document hit-tests no target, which clears
 // hover and dispatches the mouseout/mouseleave boundary events.
-static void window_submit_pointer_leave(GLFWwindow* window) {
-    cursor_position_callback(window, -1.0, -1.0);
-}
-
-static void cursor_enter_callback(GLFWwindow* window, int entered) {
-    if (!entered) window_submit_pointer_leave(window);
+void radiant_host_pointer_left(RadiantWindow*) {
+    window_submit_pointer_move(-1.0, -1.0);
 }
 
 // macOS sends motion and enter/leave only to the key window, so a window that
 // lost focus (e.g. to an app it launched) would keep its last hover forever.
-// While unfocused, poll the pointer; GLFW_HOVERED excludes windows on top.
-static bool window_poll_unfocused_pointer(GLFWwindow* window) {
+// While unfocused, poll the pointer; hover excludes windows on top.
+static bool window_poll_unfocused_pointer(RadiantWindow* window) {
     static bool pointer_over = false;
-    if (glfwGetWindowAttrib(window, GLFW_FOCUSED)) {
+    if (radiant_platform_window_focused(window)) {
         pointer_over = false;
         return false;
     }
-    if (!glfwGetWindowAttrib(window, GLFW_HOVERED)) {
-        if (pointer_over) window_submit_pointer_leave(window);
+    if (!radiant_platform_window_hovered(window)) {
+        if (pointer_over) radiant_host_pointer_left(window);
         pointer_over = false;
         return true;
     }
     double x, y;
-    glfwGetCursorPos(window, &x, &y);
+    radiant_platform_get_cursor_pos(window, &x, &y);
     const MouseState* mouse = &ui_context.mouse_state;
     if (!pointer_over || !mouse->has_position ||
         mouse->last_x != (float)x || mouse->last_y != (float)y) {
-        cursor_position_callback(window, x, y);
+        window_submit_pointer_move(x, y);
     }
     pointer_over = true;
     return true;
 }
 
-static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+static void window_on_mouse_button(RdtEvent* event) {
     // flush before button bookkeeping changes the state observed by the last motion.
     window_flush_pointer_motion();
-    log_info("MOUSE_BUTTON_CALLBACK: button=%d action=%d mods=%d", button, action, mods);
-    RdtEvent event;
-    double event_timestamp = glfwGetTime();
-    int rdt_mods = 0;
-    if (mods & GLFW_MOD_SHIFT) rdt_mods |= RDT_MOD_SHIFT;
-    if (mods & GLFW_MOD_CONTROL) rdt_mods |= RDT_MOD_CTRL;
-    if (mods & GLFW_MOD_ALT) rdt_mods |= RDT_MOD_ALT;
-    if (mods & GLFW_MOD_SUPER) rdt_mods |= RDT_MOD_SUPER;
-
-    // Get cursor position for all mouse button events
-    double xpos, ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
-    RdtLogicalPoint logical = rdt_platform_to_logical_point(
-        (float)xpos, (float)ypos, 1.0f, 1.0f);
-    rdt_event_set_mouse_button(&event,
-        action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP,
-        logical.x, logical.y, button, 1, rdt_mods, event_timestamp);
+    MouseButtonEvent* button_event = &event->mouse_button;
+    int button = button_event->button;
+    bool pressed = event->type == RDT_EVENT_MOUSE_DOWN;
+    log_info("MOUSE_BUTTON: button=%d pressed=%d mods=%d", button, pressed, button_event->mods);
 
     UiContext* ui = &ui_context;
-    if (action == GLFW_PRESS) {
-        double dx = logical.x - ui->last_click_x;
-        double dy = logical.y - ui->last_click_y;
+    if (pressed) {
+        double dx = button_event->x - ui->last_click_x;
+        double dy = button_event->y - ui->last_click_y;
         bool same_click_series = ui->last_click_time >= 0.0 &&
             button == ui->last_click_button &&
-            event.mouse_button.timestamp - ui->last_click_time <= 0.5 &&
+            button_event->timestamp - ui->last_click_time <= 0.5 &&
             dx * dx + dy * dy <= 16.0;
         ui->click_count = same_click_series ? (uint8_t)(ui->click_count + 1) : 1;
         if (ui->click_count > 3) ui->click_count = 3;
-        ui->last_click_time = event.mouse_button.timestamp;
-        ui->last_click_x = logical.x;
-        ui->last_click_y = logical.y;
+        ui->last_click_time = button_event->timestamp;
+        ui->last_click_x = button_event->x;
+        ui->last_click_y = button_event->y;
         ui->last_click_button = button;
         ui->active_click_count = ui->click_count;
     } else {
         ui->click_count = ui->active_click_count;
     }
-    event.mouse_button.clicks = ui->click_count;
+    button_event->clicks = ui->click_count;
 
-    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-        log_debug("Right mouse button pressed");
-    }
-    else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
-        log_debug("Right mouse button released");
-    }
-    else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        log_debug("Left mouse button pressed at (%.2f, %.2f)", xpos, ypos);
+    if (button == RDT_MOUSE_BUTTON_LEFT && pressed) {
+        log_debug("Left mouse button pressed at (%.2f, %.2f)", button_event->x, button_event->y);
+        // the platform reports logical (CSS) pixels, matching the layout coordinate system
         ui_context.mouse_state.is_mouse_down = 1;
-        // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
-        ui_context.mouse_state.down_x = logical.x;
-        ui_context.mouse_state.down_y = logical.y;
+        ui_context.mouse_state.down_x = button_event->x;
+        ui_context.mouse_state.down_y = button_event->y;
     }
-    else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
-        log_debug("Left mouse button released");
 
     // Forward both LEFT and RIGHT mouse buttons. RIGHT is required for
     // the native context menu (event.cpp opens it on RDT_EVENT_MOUSE_DOWN
-    // when btn_event->button == GLFW_MOUSE_BUTTON_RIGHT). MIDDLE is
+    // when btn_event->button == RDT_MOUSE_BUTTON_RIGHT). MIDDLE is
     // unused so we skip it.
-    if (button == GLFW_MOUSE_BUTTON_LEFT ||
-        button == GLFW_MOUSE_BUTTON_RIGHT) {
-        window_submit_input(&event);
+    if (button == RDT_MOUSE_BUTTON_LEFT || button == RDT_MOUSE_BUTTON_RIGHT) {
+        window_submit_input(event);
         do_redraw = 1;  // trigger repaint after mouse click
     }
 }
 
-// handles mouse/touchpad scroll input
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-    RdtEvent event;
-    log_debug("Scroll_callback");
-    log_enter();
-    double event_timestamp = glfwGetTime();
-    // Scroll offset can stay as-is (relative motion)
-    log_debug("Scroll offset: (%.1f, %.1f)", xoffset, yoffset);
-    assert(xoffset != 0 || yoffset != 0);
-    double xpos, ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
-    log_debug("Mouse position: (%.1f, %.1f)", xpos, ypos);
-    RdtLogicalPoint logical = rdt_platform_to_logical_point(
-        (float)xpos, (float)ypos, 1.0f, 1.0f);
-    rdt_event_set_scroll(&event, logical.x, logical.y,
-                         xoffset, yoffset, event_timestamp);
-    window_submit_input(&event);
-    do_redraw = 1;
-    log_leave();
+// The backend's single input entry: translated events, routed by kind.
+void radiant_host_input(RadiantWindow* window, RdtEvent* event) {
+    switch (event->type) {
+        case RDT_EVENT_KEY_DOWN:
+        case RDT_EVENT_KEY_UP:
+            window_on_key(window, event);
+            break;
+        case RDT_EVENT_TEXT_INPUT:
+            window_on_text_input(event);
+            break;
+        case RDT_EVENT_MOUSE_DOWN:
+        case RDT_EVENT_MOUSE_UP:
+            window_on_mouse_button(event);
+            break;
+        case RDT_EVENT_SCROLL:
+            log_debug("Scroll offset: (%.1f, %.1f)", event->scroll.xoffset, event->scroll.yoffset);
+            window_submit_input(event);
+            do_redraw = 1;
+            break;
+        default:
+            window_submit_input(event);
+            break;
+    }
 }
 
-static void window_register_input_callbacks(GLFWwindow* window) {
-    glfwSetKeyCallback(window, key_callback);
-    glfwSetCharCallback(window, character_callback);
-    glfwSetCursorPosCallback(window, cursor_position_callback);
-    glfwSetCursorEnterCallback(window, cursor_enter_callback);
-    glfwSetMouseButtonCallback(window, mouse_button_callback);
-    log_info("Mouse button callback registered: %p", mouse_button_callback);
-    glfwSetScrollCallback(window, scroll_callback);
-}
-
-// Callback function to handle window resize
-void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    log_debug("Window resized to: %d x %d", width, height);
+// framebuffer size, content scale, maximize and display changes: the render
+// turn queries both window and framebuffer sizes and publishes them once.
+void radiant_host_metrics_changed(RadiantWindow*) {
     do_redraw = 1;
 }
 
-void window_content_scale_callback(GLFWwindow* window, float scale_x, float scale_y) {
-    (void)window;
-    // Framebuffer and content-scale callbacks may arrive separately. The render
-    // turn queries both window and framebuffer sizes and publishes them once.
-    log_debug("Window content scale changed to: %.3f x %.3f", scale_x, scale_y);
-    do_redraw = 1;
-}
-
-void window_refresh_callback(GLFWwindow *window) {
+void radiant_host_refresh(RadiantWindow* window) {
     window_flush_pointer_motion();
     render(window);
     do_redraw = 0;
@@ -1150,97 +1030,18 @@ void to_repaint() {
     do_redraw = 1;
 }
 
-void repaint_window() {
-    if (!ui_context.surface || !ui_context.surface->pixels) {
-        log_error("repaint_window: surface or pixels is NULL");
-        return;
-    }
-
-    int framebuffer_width = 0;
-    int framebuffer_height = 0;
-    if (ui_context.window) {
-        glfwGetFramebufferSize(ui_context.window, &framebuffer_width, &framebuffer_height);
-    }
-    bool exact_framebuffer_present =
-        framebuffer_width == ui_context.surface->width &&
-        framebuffer_height == ui_context.surface->height;
-
-    // One texture persists across presents (Radiant_Design_Animation_Repaint §3 A3): a frame
-    // that wrote only a damage rect uploads just those rows and columns.
-    static GLuint texture = 0;
-    static int texture_width = 0, texture_height = 0;
-    ImageSurface* surface = ui_context.surface.get();
-    bool reuse = texture && glIsTexture(texture) && texture_width == surface->width &&
-        texture_height == surface->height;
-    if (!reuse) {
-        if (texture && glIsTexture(texture)) glDeleteTextures(1, &texture);
-        glGenTextures(1, &texture);
-        texture_width = surface->width;
-        texture_height = surface->height;
-    }
-    glBindTexture(GL_TEXTURE_2D, texture);
-    const Bound& damage = ui_context.present_rect;
-    if (!reuse || !ui_context.present_partial) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, surface->width, surface->height, 0,
-            GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, surface->pixels);
-    } else if (damage.right > damage.left && damage.bottom > damage.top) {
-        int x0 = (int)fmaxf(0.0f, floorf(damage.left)); // INT_CAST_OK: texel column
-        int y0 = (int)fmaxf(0.0f, floorf(damage.top)); // INT_CAST_OK: texel row
-        int x1 = (int)fminf((float)surface->width, ceilf(damage.right)); // INT_CAST_OK: texel column
-        int y1 = (int)fminf((float)surface->height, ceilf(damage.bottom)); // INT_CAST_OK: texel row
-        if (x1 > x0 && y1 > y0) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, surface->pitch / 4);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, x0, y0, x1 - x0, y1 - y0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
-                (const uint8_t*)surface->pixels + (size_t)y0 * surface->pitch + (size_t)x0 * 4);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        }
-    }
-    // until the next render writes, the texture already holds the surface
-    ui_context.present_partial = true;
-    ui_context.present_rect = {};
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    GLint present_filter = exact_framebuffer_present ? GL_NEAREST : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, present_filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, present_filter);
-
-    // render the texture as a quad
-    log_debug("rendering texture");
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 1.0f); glVertex2f(-1, -1);
-    glTexCoord2f(1.0f, 1.0f); glVertex2f(1, -1);
-    glTexCoord2f(1.0f, 0.0f); glVertex2f(1, 1);
-    glTexCoord2f(0.0f, 0.0f); glVertex2f(-1, 1);
-    glEnd();
-    glDisable(GL_TEXTURE_2D);
-
-}
-
-void render(GLFWwindow* window) {
-    // a GLFW transition may synchronously request a refresh in the middle of a mode switch.
+void render(RadiantWindow* window) {
+    // a platform transition may synchronously request a refresh in the middle of a mode switch.
     if (ui_context.fullscreen.applying) return;
     window_fullscreen_update(&ui_context, false);
     // Query both domains in one turn so independently delivered platform
     // notifications cannot expose half-updated metrics to layout or paint.
     int width, height;
     int logical_width, logical_height;
-    glfwGetFramebufferSize(window, &width, &height);
-    glfwGetWindowSize(window, &logical_width, &logical_height);
+    radiant_platform_get_framebuffer_size(window, &width, &height);
+    radiant_platform_get_window_size(window, &logical_width, &logical_height);
 
     if (width <= 0 || height <= 0 || logical_width <= 0 || logical_height <= 0) return;
-
-    // set up OpenGL viewport and projection for 2D rendering
-    glViewport(0, 0, width, height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-1, 1, -1, 1, -1, 1);  // normalized device coordinates for quad rendering
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    // clear the framebuffer
-    glClear(GL_COLOR_BUFFER_BIT);
 
     // NETWORK INTEGRATION: Process network callbacks (MAIN THREAD ONLY)
     // This handles resource completions and triggers reflows/repaints for loaded resources
@@ -1269,7 +1070,7 @@ void render(GLFWwindow* window) {
                     const char* doc_href = url_get_href(ui_context.document->url);
                     snprintf(title, sizeof(title), "Lambda - %s", doc_href ? doc_href : "");
                 }
-                glfwSetWindowTitle(window, title);
+                radiant_platform_set_window_title(window, title);
             }
         } else if (!ui_context.document->fully_loaded) {
             // Check for page load timeout — show partial content instead of waiting forever
@@ -1289,14 +1090,14 @@ void render(GLFWwindow* window) {
                         const char* doc_href = url_get_href(ui_context.document->url);
                         snprintf(title, sizeof(title), "Lambda - %s (partial)", doc_href ? doc_href : "");
                     }
-                    glfwSetWindowTitle(window, title);
+                    radiant_platform_set_window_title(window, title);
                 }
             } else {
                 // show loading progress in window title
                 float progress = resource_manager_get_load_progress(ui_context.document->resource_manager);
                 char title[512];
                 snprintf(title, sizeof(title), "Loading... %.0f%%", progress * 100.0f);
-                glfwSetWindowTitle(window, title);
+                radiant_platform_set_window_title(window, title);
             }
         }
     }
@@ -1323,7 +1124,7 @@ void render(GLFWwindow* window) {
     if (viewport_changed) {
         log_debug("render: logical viewport changed to %dx%d, reflowing",
                   logical_width, logical_height);
-        double start_time = glfwGetTime();
+        double start_time = radiant_platform_time();
         ui_context.viewport_width = logical_width;
         ui_context.viewport_height = logical_height;
         log_debug("render: updated viewport to %dx%d CSS pixels",
@@ -1339,7 +1140,7 @@ void render(GLFWwindow* window) {
         if (ui_context.document && ui_context.document->state) {
             doc_state_mark_dirty(ui_context.document->state);
         }
-        log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
+        log_debug("Reflow time: %.2f ms", (radiant_platform_time() - start_time) * 1000);
     } else if (scale_changed) {
         log_debug("render: device scale changed; repainting without reflow");
     }
@@ -1357,13 +1158,13 @@ void render(GLFWwindow* window) {
     DocState* state = ui_context.document ? ui_context.document->state : nullptr;
     if (state && state->needs_reflow) {
         log_debug("render: incremental reflow triggered by state change");
-        double start_time = glfwGetTime();
+        double start_time = radiant_platform_time();
         // Reflow the document (styles will be recalculated for marked elements)
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
         }
         doc_state_clear_reflow(state);
-        log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
+        log_debug("Incremental reflow time: %.2f ms", (radiant_platform_time() - start_time) * 1000);
     } else if (ui_context.document && ui_context.document->pending_scroll_into_view_target.address) {
         // scroll-only requests still reach the checkpoint when no flow invalidation is pending.
         layout_update_document(&ui_context, ui_context.document);
@@ -1401,12 +1202,16 @@ void render(GLFWwindow* window) {
         }
     }
 
-    // repaint to screen
-    repaint_window();
-
-    // Swap front and back buffers
-    glfwSwapBuffers(window);
-    glFinish(); // important, this waits until rendering result is actually visible, thus making resizing less ugly
+    // present the surface; until the next render writes, the backend already
+    // holds it, so the following present is partial
+    if (!ui_context.surface || !ui_context.surface->pixels) {
+        log_error("render: surface or pixels is NULL");
+        return;
+    }
+    radiant_platform_present(window, ui_context.surface.get(), &ui_context.present_rect,
+                             ui_context.present_partial);
+    ui_context.present_partial = true;
+    ui_context.present_rect = {};
 }
 
 void log_init_wrapper() {
@@ -1520,6 +1325,155 @@ static void window_write_memory_profile(DomDocument* doc, const char* input_file
     if (!view_memory_profile_write(doc, input_file, output_path)) {
         log_error("view memory profile: failed to write %s", output_path);
     }
+}
+
+static const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
+
+// One turn of the windowed viewer (vibe/Lambda_Design_Mobile.md MB8): pump
+// platform events, JS timers and animation frames, replay simulated input,
+// tick animations, render when dirty, and reclaim retired storage. Returns how
+// long the host may wait for events before the next turn (0 = run again now).
+// The desktop loop below waits on the platform; a display-link host calls this
+// from its own run loop instead.
+double radiant_window_tick(RadiantWindowLoop* loop) {
+    double currentTime = radiant_frame_clock_now(loop->frame_clock);
+    bool frame_driven = false;
+
+    // poll for new events
+    radiant_platform_poll_events();
+    // simulated input owns the pointer; the real cursor must not leak into a replay.
+    bool polling_pointer = !loop->sim_ctx && window_poll_unfocused_pointer(loop->window);
+    // one latest motion per input batch lets layout and paint run while the mouse keeps moving.
+    window_flush_pointer_motion();
+    uv_loop_t* uv_loop = lambda_uv_loop();
+    if (uv_loop) {
+        // Document timers run after script loading restored its transient context;
+        // enter the retained document runtime before libuv invokes their callbacks.
+        radiant_pump_js_event_loop(&ui_context, -1);
+    }
+
+    if (js_animation_frame_has_pending()) {
+        int callbacks = js_animation_frame_flush(currentTime * 1000.0);
+        if (callbacks > 0) {
+            do_redraw = 1;
+        }
+        frame_driven = js_animation_frame_has_pending() != 0;
+    }
+    // Drain network completions on the UI thread before deciding whether
+    // this tick needs a reflow/repaint.
+    if (ui_context.document && ui_context.document->resource_manager) {
+        resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+    }
+
+    // Process simulated events if simulation is active
+    if (loop->sim_ctx && loop->sim_ctx->is_running && currentTime >= loop->sim_start_time) {
+        bool sim_running = event_sim_update(loop->sim_ctx, &ui_context, loop->window, currentTime);
+        if (!sim_running && loop->sim_ctx->auto_close) {
+            // Simulation complete, auto-close window
+            log_info("Simulation complete, auto-closing window");
+            window_request_close(loop->window);
+        } else if (!sim_running) {
+            // a bootstrap replay can leave the window open for ordinary user input.
+            radiant_platform_set_input_enabled(loop->window, true);
+        }
+        do_redraw = 1;  // redraw after each simulated event
+    }
+
+    DocState* state = ui_context.document ? ui_context.document->state : nullptr;
+    bool caret_visible = caret_has_projection(state);
+    bool editing_animation_active = radiant_editing_animation_active(state);
+    if (editing_animation_active) {
+        if (radiant_editing_animation_tick(&ui_context, currentTime)) {
+            do_redraw = 1;
+        }
+        caret_visible = caret_has_projection(state);
+        editing_animation_active = radiant_editing_animation_active(state);
+    }
+
+    // Tick the visible browsing-context tree, including iframe schedulers.
+    if (state) {
+        // set viewport bounds so off-screen animations don't inflate dirty region
+        float scroll_y = 0;
+        if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
+            ViewBlock* root = lam::view_require_block(ui_context.document->view_tree->root);
+            if (root->scroller && root->scroll_mut()->pane) {
+                scroll_state_get_position_for_view(state, static_cast<View*>(root), root->scroll()->pane,
+                    NULL, &scroll_y, NULL, NULL);
+            }
+        }
+        state->dirty_tracker.viewport_y = scroll_y;
+        state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;
+
+        bool still_active = radiant_tick_document_animations(ui_context.document,
+                                                              currentTime, true, true);
+        frame_driven = frame_driven || still_active;
+        if (state->needs_repaint) do_redraw = 1;
+    }
+
+    // Video playback wakes through RdtVideoCallbacks::on_frame_ready.
+    // Only redraw when a frame is pending; paused and low-FPS videos no
+    // longer force a full display-refresh loop.
+    if (state && state->has_active_video && state->video_frame_pending) {
+        do_redraw = 1;
+    }
+
+    // Pick up repaint requests from paths that don't go through a platform
+    // event callback (e.g. macOS IME setMarkedText / insertText, async
+    // resource loaders that flip needs_repaint directly). Combined with
+    // a posted empty event these unblock the wait-for-event loop.
+    if (state && (state->needs_repaint || state->needs_reflow || state->is_dirty)) {
+        do_redraw = 1;
+    }
+
+    // Webview layer mode: poll dirty webviews, re-snapshot and redraw
+    if (ui_context.webview_mgr && ui_context.document && ui_context.document->view_tree) {
+        if (webview_manager_poll_dirty(&ui_context, ui_context.document->view_tree)) {
+            do_redraw = 1;
+            // mark document dirty so render_html_doc rebuilds the DL
+            // (the post-composite blit needs fresh DL_WEBVIEW_LAYER_PLACEHOLDER items)
+            if (ui_context.document->state) {
+                doc_state_mark_dirty(ui_context.document->state);
+            }
+        }
+    }
+
+    // commit queued commands after scripts/input return, before publishing new metrics.
+    window_fullscreen_update(&ui_context, true);
+
+    // only redraw if we need to
+    if (do_redraw) {
+        radiant_host_refresh(loop->window);
+        radiant_frame_clock_mark_presented(loop->frame_clock, currentTime);
+    }
+
+    DomDocument* layer_doc = ui_context.document;
+    bool idle_layer_frame = false;
+    if (frame_driven || do_redraw) loop->idle_layer_time = 0.0;
+    else if (loop->idle_layer_time > 0.0 && currentTime >= loop->idle_layer_time) {
+        loop->idle_layer_time = 0.0;
+        render_paint_layers_idle_frame(layer_doc);
+        idle_layer_frame = true;
+    } else if (loop->idle_layer_time == 0.0 && layer_doc && render_paint_layers_pending(layer_doc)) {
+        loop->idle_layer_time = currentTime + 0.12;
+    }
+    double wait_timeout = view_next_wait_timeout(loop->frame_clock, currentTime,
+                                                 frame_driven, caret_visible,
+                                                 state ? state->editing_caret_blink_elapsed : 0.0,
+                                                 CARET_BLINK_INTERVAL,
+                                                 editing_animation_active,
+                                                 loop->sim_ctx, loop->sim_start_time,
+                                                 uv_loop);
+    // Reclaim retired storage after painting, between input batches.
+    // Pending work wakes again promptly without running a busy idle loop.
+    if (radiant_drain_document_destruction() && wait_timeout > 0.001) wait_timeout = 0.001;
+    if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
+        wait_timeout > 0.001) wait_timeout = 0.001;
+    if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
+    if (idle_layer_frame) wait_timeout = 0.0;
+    else if (loop->idle_layer_time > 0.0) wait_timeout = fmin(wait_timeout, fmax(0.0, loop->idle_layer_time - currentTime));
+    // an unfocused window receives no motion events to wake it, so it samples the pointer.
+    if (polling_pointer) wait_timeout = fmin(wait_timeout, 1.0 / 30.0);
+    return wait_timeout;
 }
 
 static void window_write_phase_timing(const ViewPhaseTiming* timing, int exit_code) {
@@ -1674,7 +1628,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     }
     log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, device_scale=%.2f",
               ui_context.window_width, ui_context.window_height, ui_context.device_scale);
-    GLFWwindow* window = ui_context.window;
+    RadiantWindow* window = ui_context.window;
     if (!headless && !window) {
         if (sim_ctx) event_sim_free(sim_ctx);
         ui_context_cleanup(&ui_context);
@@ -1687,29 +1641,15 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     int width, height;
 
     if (!headless) {
-        glfwMakeContextCurrent(window);
-        glfwSwapInterval(1);  // enable vsync
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
-
-        glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);  // receive the state of the Caps Lock and Num Lock keys
+        radiant_platform_present_init(window);
+        radiant_platform_attach_window(window);
         // replay supplies input; real cursor events can reset popup hover between replayed keys.
-        if (!sim_ctx) window_register_input_callbacks(window);
-        glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-        glfwSetWindowContentScaleCallback(window, window_content_scale_callback);
-        glfwSetWindowRefreshCallback(window, window_refresh_callback);
-        glfwSetWindowCloseCallback(window, window_close_callback);
-        glfwSetWindowFocusCallback(window, window_focus_callback);
-        glfwSetWindowPosCallback(window, window_bounds_callback);
-        glfwSetWindowSizeCallback(window, window_bounds_callback);
-        glfwSetWindowMaximizeCallback(window, window_maximized_callback);
-        glfwSetMonitorCallback(window_monitor_callback);
-
-        glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
+        if (!sim_ctx) radiant_platform_set_input_enabled(window, true);
 
         int logical_width = 0, logical_height = 0;
-        glfwGetFramebufferSize(window, &width, &height);
-        glfwGetWindowSize(window, &logical_width, &logical_height);
-        framebuffer_size_callback(window, width, height);
+        radiant_platform_get_framebuffer_size(window, &width, &height);
+        radiant_platform_get_window_size(window, &logical_width, &logical_height);
+        radiant_host_metrics_changed(window);
 
         // CRITICAL: Update ui_context dimensions to match actual framebuffer size
         // This ensures the initial layout uses the correct viewport dimensions
@@ -1913,7 +1853,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 resource_manager_set_ui_context(doc->resource_manager, &ui_context);
                 if (!headless && doc->resource_manager) {
                     resource_manager_set_wake_callback(doc->resource_manager,
-                                                       network_wake_glfw, NULL);
+                                                       network_wake_platform, NULL);
                 }
                 log_notice("view: shared network support ready for HTTP document");
             }
@@ -1948,10 +1888,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
             // Wait only for render-blocking CSS (up to 5 seconds); images,
             // fonts, and scripts continue asynchronously after first paint.
-            double wait_start = glfwGetTime();
+            double wait_start = radiant_platform_time();
             const double CSS_TIMEOUT = 5.0;
             while (!resource_manager_are_render_blocking_resources_loaded(doc->resource_manager)) {
-                double elapsed = glfwGetTime() - wait_start;
+                double elapsed = radiant_platform_time() - wait_start;
                 if (elapsed >= CSS_TIMEOUT) {
                     log_warn("view: CSS load timeout after %.1fs, proceeding with layout", elapsed);
                     break;
@@ -1959,9 +1899,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 // Process any completed resources (CSS parsed → stylesheets added)
                 resource_manager_flush_layout_updates(doc->resource_manager);
                 // Brief sleep to avoid busy-waiting
-                glfwWaitEventsTimeout(0.05);  // 50ms poll
+                radiant_platform_wait_events(0.05);  // 50ms poll
             }
-            double wait_time = glfwGetTime() - wait_start;
+            double wait_time = radiant_platform_time() - wait_start;
             phase_timing.render_blocking_wait_ms = wait_time * 1000.0;
             if (wait_time > 0.01) {
                 log_info("view: waited %.2fs for render-blocking stylesheets before layout", wait_time);
@@ -2029,7 +1969,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 const char* format_name = get_format_name(file_to_load);
                 snprintf(title, sizeof(title), "Lambda %s Viewer - %s", format_name, file_to_load);
             }
-            glfwSetWindowTitle(window, title);
+            radiant_platform_set_window_title(window, title);
             // store initial title in session if available
             if (ui_context.browsing_session && page_title) {
                 session_set_current_title(ui_context.browsing_session, page_title);
@@ -2128,162 +2068,21 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     if (!radiant_frame_clock_init(&frame_clock, 60.0)) {
         log_warn("view_frame_clock: failed to initialize frame clock, using monotonic fallback");
     }
-    radiant_frame_clock_set_wake_callback(&frame_clock, view_wake_glfw, NULL);
-    radiant_video_set_wake_callback(view_wake_glfw, NULL);
+    radiant_frame_clock_set_wake_callback(&frame_clock, view_wake_platform, NULL);
+    radiant_video_set_wake_callback(view_wake_platform, NULL);
     if (!radiant_frame_clock_start(&frame_clock)) {
         log_warn("view_frame_clock: native clock start failed, using timed fallback");
     }
     log_info("view_frame_clock: using %s clock", radiant_frame_clock_mode_name(&frame_clock));
 
-    const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
-
     // Give the window a moment to render before starting simulation
     double sim_start_delay = sim_ctx ? 0.5 : 0.0;  // 500ms delay before starting simulation
     double sim_start_time = radiant_frame_clock_now(&frame_clock) + sim_start_delay;
-    // paint layers left waiting for a capture get an idle frame shortly after interaction stops
-    double idle_layer_time = 0.0;
 
-    while (!glfwWindowShouldClose(window) && !ui_context.render_failed) {
-        double currentTime = radiant_frame_clock_now(&frame_clock);
-        bool frame_driven = false;
-
-        // poll for new events
-        glfwPollEvents();
-        // simulated input owns the pointer; the real cursor must not leak into a replay.
-        bool polling_pointer = !sim_ctx && window_poll_unfocused_pointer(window);
-        // one latest motion per input batch lets layout and paint run while the mouse keeps moving.
-        window_flush_pointer_motion();
-        uv_loop_t* uv_loop = lambda_uv_loop();
-        if (uv_loop) {
-            // Document timers run after script loading restored its transient context;
-            // enter the retained document runtime before libuv invokes their callbacks.
-            radiant_pump_js_event_loop(&ui_context, -1);
-        }
-
-        if (js_animation_frame_has_pending()) {
-            int callbacks = js_animation_frame_flush(currentTime * 1000.0);
-            if (callbacks > 0) {
-                do_redraw = 1;
-            }
-            frame_driven = js_animation_frame_has_pending() != 0;
-        }
-        // Drain network completions on the UI thread before deciding whether
-        // this tick needs a reflow/repaint.
-        if (ui_context.document && ui_context.document->resource_manager) {
-            resource_manager_flush_layout_updates(ui_context.document->resource_manager);
-        }
-
-        // Process simulated events if simulation is active
-        if (sim_ctx && sim_ctx->is_running && currentTime >= sim_start_time) {
-            bool sim_running = event_sim_update(sim_ctx, &ui_context, window, currentTime);
-            if (!sim_running && sim_ctx->auto_close) {
-                // Simulation complete, auto-close window
-                log_info("Simulation complete, auto-closing window");
-                window_request_close(window);
-            } else if (!sim_running) {
-                // a bootstrap replay can leave the window open for ordinary user input.
-                window_register_input_callbacks(window);
-            }
-            do_redraw = 1;  // redraw after each simulated event
-        }
-
-        DocState* state = ui_context.document ? ui_context.document->state : nullptr;
-        bool caret_visible = caret_has_projection(state);
-        bool editing_animation_active = radiant_editing_animation_active(state);
-        if (editing_animation_active) {
-            if (radiant_editing_animation_tick(&ui_context, currentTime)) {
-                do_redraw = 1;
-            }
-            caret_visible = caret_has_projection(state);
-            editing_animation_active = radiant_editing_animation_active(state);
-        }
-
-        // Tick the visible browsing-context tree, including iframe schedulers.
-        if (state) {
-            // set viewport bounds so off-screen animations don't inflate dirty region
-            float scroll_y = 0;
-            if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
-                ViewBlock* root = lam::view_require_block(ui_context.document->view_tree->root);
-                if (root->scroller && root->scroll_mut()->pane) {
-                    scroll_state_get_position_for_view(state, static_cast<View*>(root), root->scroll()->pane,
-                        NULL, &scroll_y, NULL, NULL);
-                }
-            }
-            state->dirty_tracker.viewport_y = scroll_y;
-            state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;
-
-            bool still_active = radiant_tick_document_animations(ui_context.document,
-                                                                  currentTime, true, true);
-            frame_driven = frame_driven || still_active;
-            if (state->needs_repaint) do_redraw = 1;
-        }
-
-        // Video playback wakes through RdtVideoCallbacks::on_frame_ready.
-        // Only redraw when a frame is pending; paused and low-FPS videos no
-        // longer force a full display-refresh loop.
-        if (state && state->has_active_video && state->video_frame_pending) {
-            do_redraw = 1;
-        }
-
-        // Pick up repaint requests from paths that don't go through a GLFW
-        // event callback (e.g. macOS IME setMarkedText / insertText, async
-        // resource loaders that flip needs_repaint directly). Combined with
-        // a glfwPostEmptyEvent these unblock the wait-for-event loop.
-        if (state && (state->needs_repaint || state->needs_reflow || state->is_dirty)) {
-            do_redraw = 1;
-        }
-
-        // Webview layer mode: poll dirty webviews, re-snapshot and redraw
-        if (ui_context.webview_mgr && ui_context.document && ui_context.document->view_tree) {
-            if (webview_manager_poll_dirty(&ui_context, ui_context.document->view_tree)) {
-                do_redraw = 1;
-                // mark document dirty so render_html_doc rebuilds the DL
-                // (the post-composite blit needs fresh DL_WEBVIEW_LAYER_PLACEHOLDER items)
-                if (ui_context.document->state) {
-                    doc_state_mark_dirty(ui_context.document->state);
-                }
-            }
-        }
-
-        // commit queued commands after scripts/input return, before publishing new metrics.
-        window_fullscreen_update(&ui_context, true);
-
-        // only redraw if we need to
-        if (do_redraw) {
-            window_refresh_callback(window);
-            radiant_frame_clock_mark_presented(&frame_clock, currentTime);
-        }
-
-        DomDocument* layer_doc = ui_context.document;
-        bool idle_layer_frame = false;
-        if (frame_driven || do_redraw) idle_layer_time = 0.0;
-        else if (idle_layer_time > 0.0 && currentTime >= idle_layer_time) {
-            idle_layer_time = 0.0;
-            render_paint_layers_idle_frame(layer_doc);
-            idle_layer_frame = true;
-        } else if (idle_layer_time == 0.0 && layer_doc && render_paint_layers_pending(layer_doc)) {
-            idle_layer_time = currentTime + 0.12;
-        }
-        double wait_timeout = view_next_wait_timeout(&frame_clock, currentTime,
-                                                     frame_driven, caret_visible,
-                                                     state ? state->editing_caret_blink_elapsed : 0.0,
-                                                     CARET_BLINK_INTERVAL,
-                                                     editing_animation_active,
-                                                     sim_ctx, sim_start_time,
-                                                     uv_loop);
-        // Reclaim retired storage after painting, between input batches.
-        // Pending work wakes again promptly without running a busy idle loop.
-        if (radiant_drain_document_destruction() && wait_timeout > 0.001) wait_timeout = 0.001;
-        if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
-            wait_timeout > 0.001) wait_timeout = 0.001;
-        if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
-        if (idle_layer_frame) wait_timeout = 0.0;
-        else if (idle_layer_time > 0.0) wait_timeout = fmin(wait_timeout, fmax(0.0, idle_layer_time - currentTime));
-        // an unfocused window receives no motion events to wake it, so it samples the pointer.
-        if (polling_pointer) wait_timeout = fmin(wait_timeout, 1.0 / 30.0);
-        if (wait_timeout > 0.0) {
-            glfwWaitEventsTimeout(wait_timeout);
-        }
+    RadiantWindowLoop loop = {window, &frame_clock, sim_ctx, sim_start_time, 0.0};
+    while (!radiant_platform_window_should_close(window) && !ui_context.render_failed) {
+        double wait_timeout = radiant_window_tick(&loop);
+        if (wait_timeout > 0.0) radiant_platform_wait_events(wait_timeout);
     }
 
     radiant_video_set_wake_callback(NULL, NULL);

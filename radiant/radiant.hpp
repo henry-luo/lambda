@@ -228,7 +228,7 @@ struct ScriptRunnerHostLayoutScope {
 
 // ===== webview =====
 
-struct GLFWwindow;
+struct RadiantWindow;
 struct ImageSurface;
 struct ViewTree;
 
@@ -267,7 +267,7 @@ typedef struct WebViewProp {
 
 typedef struct WebViewManager WebViewManager;
 
-WebViewManager* webview_manager_create(struct GLFWwindow* window);
+WebViewManager* webview_manager_create(struct RadiantWindow* window);
 void webview_manager_destroy(WebViewManager* mgr);
 WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, float device_scale);
 void webview_handle_destroy(WebViewManager* mgr, WebViewHandle* handle);
@@ -281,7 +281,7 @@ void webview_manager_sync_layout(struct UiContext* uicon, struct ViewTree* tree)
 bool webview_manager_poll_dirty(struct UiContext* uicon, struct ViewTree* tree);
 void webview_manager_clear(WebViewManager* mgr);
 
-WebViewHandle* webview_platform_create(struct GLFWwindow* window,
+WebViewHandle* webview_platform_create(struct RadiantWindow* window,
                                        float x, float y, float w, float h,
                                        float device_scale);
 void webview_platform_destroy(WebViewHandle* handle);
@@ -325,12 +325,25 @@ inline void radiant_retain_webview_srcdoc(WebViewProp* webview, lam::PoolPtr<con
 
 // ===== window / surface / UI context =====
 
-void render(struct GLFWwindow* window);
+void render(struct RadiantWindow* window);
+
+// Loop-carried state of the windowed viewer. The platform owns the loop and
+// calls radiant_window_tick once per turn (vibe/Lambda_Design_Mobile.md MB8).
+struct RadiantFrameClock;
+struct EventSimContext;
+typedef struct RadiantWindowLoop {
+    struct RadiantWindow* window;
+    struct RadiantFrameClock* frame_clock;
+    struct EventSimContext* sim_ctx;  // replayed input, or NULL
+    double sim_start_time;
+    double idle_layer_time;           // when waiting paint layers get an idle frame; 0 = none
+} RadiantWindowLoop;
+// One turn; returns the seconds the host may wait for events (0 = run again now).
+double radiant_window_tick(RadiantWindowLoop* loop);
 DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height);
 DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url);
 void reflow_html_doc(DomDocument* doc);
 void update_window_title(const char* title);
-void repaint_window(void);
 int view_lambda_document_transform_with_events(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,

@@ -37,9 +37,11 @@
 #include "js_runtime_internal.hpp"
 #include "../../lib/time_util.h"
 
+#ifndef LAMBDA_NO_MIR
 // Global MIR error handler override for batch mode.
 // If non-NULL, installed after each jit_init() to prevent exit(1) on MIR errors.
 MIR_error_func_t g_batch_mir_error_handler = NULL;
+#endif
 
 // Global MIR optimization level for JS compilation (default: 2).
 // Set from CLI (e.g., --opt-level=0), including reusable preamble images.
@@ -470,10 +472,12 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
                                                  uint64_t* result_home,
                                                  bool typescript_profile,
                                                  bool test262_native_harness, bool module = false) {
+#ifndef LAMBDA_NO_MIR
     if (!js_ast_interpreter_requested() && !js_execution_auto_requested()) {
         return mvp_lmd_execute_in_runtime(runtime, js_source, js_source_len, filename, result_home,
             module, NULL, typescript_profile, test262_native_harness);
     }
+#endif
     // Recovery ownership begins before parsing. The first entry may initialize
     // an idle eval thread, but compilation cannot borrow and restore another
     // live context.
@@ -698,8 +702,16 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     bool execute_module = module || tp->is_module || js_ast_is_es_module(js_ast);
     js_clear_active_compile(tp, owned_source);
     js_transpiler_destroy(tp);
+#ifdef LAMBDA_NO_MIR
+    // unreachable: a T0-only build forces the AST executor above (MB4)
+    (void)execute_module;
+    log_error("js-exec: %s needs the MVP tier, which this build excludes",
+        filename ? filename : "<string>");
+    Item result = ItemError;
+#else
     Item result = mvp_lmd_execute_in_runtime(runtime, owned_source, js_source_len,
         filename, result_home, execute_module, NULL, typescript_profile, test262_native_harness);
+#endif
     mem_free(owned_source);
     return result;
 }
@@ -756,11 +768,25 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* source, size
     }
     return result;
 }
+#ifdef LAMBDA_NO_MIR
+// Preamble images are MVP machine code. A T0-only build never produces one
+// (mvp_code stays NULL), so building or running one fails explicitly.
+static Item js_preamble_image_excluded(const char* filename) {
+    log_error("js-preamble: compiled preamble images need MIR, which this build excludes (%s)",
+        filename ? filename : "<string>");
+    return ItemError;
+}
+#endif
+
 Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                  const char* filename, JsPreambleState* out_state) {
+#ifdef LAMBDA_NO_MIR
+    return js_preamble_image_excluded(filename);
+#else
     // open Scripts resolve declarations through the receiving realm; cached
     // machine code never borrows a document's live binding cells.
     return mvp_lmd_compile_script_image(js_source, js_source_len, filename, out_state);
+#endif
 }
 
 Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
@@ -768,32 +794,48 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
                                       const JsPreambleState* preamble,
                                       JsPreambleState* out_state) {
     if (!preamble) return ItemError;
+#ifdef LAMBDA_NO_MIR
+    return js_preamble_image_excluded(filename);
+#else
     return mvp_lmd_compile_script_image(js_source, js_source_len, filename, out_state);
+#endif
 }
 
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
         const JsPreambleState* base, const JsPreambleState* compiled, bool retain_unit_state) {
     (void)retain_unit_state;
     if (!base || !base->mvp_realm || !compiled || !compiled->mvp_code) return ItemError;
+#ifdef LAMBDA_NO_MIR
+    return js_preamble_image_excluded(NULL);
+#else
     return mvp_lmd_execute_script_image(runtime, compiled->mvp_code);
+#endif
 }
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* source, size_t length,
         const char* filename, const JsPreambleState* preamble, uint64_t* result_home) {
+#ifndef LAMBDA_NO_MIR
     if (preamble && preamble->mvp_realm)
         return mvp_lmd_execute_in_runtime(runtime, source, length, filename, result_home);
+#endif
     return transpile_js_to_mir_core_len(runtime, source, length, filename, result_home);
 }
 bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* output) {
     if (!source || !source->mvp_code || !output) return false;
     *output = *source;
+#ifndef LAMBDA_NO_MIR
     mvp_lmd_code_retain(output->mvp_code);
+#endif
     output->module_state_id = UINT32_MAX;
     return true;
 }
 Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         JsPreambleState* output) {
     if (!runtime || !clone_js_preamble_state(cached, output)) return ItemError;
+#ifdef LAMBDA_NO_MIR
+    Item result = js_preamble_image_excluded(NULL);
+#else
     Item result = mvp_lmd_execute_script_image(runtime, cached->mvp_code);
+#endif
     if (item_is_error(result)) preamble_state_destroy(output);
     return result;
 }
@@ -805,8 +847,10 @@ bool preamble_state_update_from_compiled(JsPreambleState* state, const JsPreambl
 }
 void preamble_state_destroy(JsPreambleState* state) {
     if (!state) return;
+#ifndef LAMBDA_NO_MIR
     if (state->mvp_code) mvp_lmd_code_release(state->mvp_code);
     else if (state->owns_compiled_state && state->mir_ctx) MIR_finish((MIR_context_t)state->mir_ctx);
+#endif
     memset(state, 0, sizeof(*state));
     state->module_state_id = UINT32_MAX;
 }
