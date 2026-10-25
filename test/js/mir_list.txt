@@ -10,6 +10,7 @@ lib_fast_diff
 nested_reused_scope_env
 number_methods
 opt_p5_modvar
+promise_expando
 sparse_basic
 sparse_density_conversion
 stack_api_scalar_homes

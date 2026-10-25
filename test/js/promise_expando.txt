@@ -1,0 +1,10 @@
+extensible true
+inherited setter 5 true
+null prototype 9 true
+settled fulfilled 42
+descriptor fulfilled true true true
+accessor fulfilled:42
+symbol 7 4
+delete true true
+sealed true false
+PROMISE_EXPANDO_DONE
