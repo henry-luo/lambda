@@ -1513,6 +1513,8 @@ Item bigint_from_uint64(uint64_t val) {
 Item bigint_from_double(double val) {
     // must be an exact integer
     if (val != val) return ItemError;  // NaN
+    // integer zero has no sign; formatting binary64 -0 must not retain mpdecimal's sign bit.
+    if (val == 0) return bigint_from_int64(0);
     mpd_context_t* ctx = bigint_context();
     mpd_t* dec_val = mpd_new(ctx);
     if (!dec_val) return ItemError;

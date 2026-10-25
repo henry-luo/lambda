@@ -1,0 +1,12 @@
+React Redux 9.3.0
+Provider and store hooks: pass
+nested Provider isolation: pass
+dispatch hook and DOM update: pass
+selector equality skips unrelated updates: pass
+batched store notifications: pass
+connect state and bound actions: pass
+independent store updates: pass
+Provider store replacement: pass
+old store unsubscribed: pass
+unmount subscription cleanup: pass
+REACT_REDUX_DONE

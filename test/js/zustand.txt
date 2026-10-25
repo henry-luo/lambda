@@ -1,0 +1,15 @@
+Zustand 5.0.16
+vanilla store merge and actions: pass
+subscriptions and identical-state bailout: pass
+replace and unsubscribe: pass
+selector middleware and immediate subscription: pass
+selector middleware custom equality: pass
+persist serialization and hydration: pass
+persist explicit rehydration: pass
+persist storage cleanup: pass
+React bound and vanilla hooks: pass
+React event and store rerender: pass
+React selectors and shallow equality: pass
+batched external store updates: pass
+React unmount cleanup: pass
+ZUSTAND_DONE

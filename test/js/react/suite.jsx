@@ -2,21 +2,9 @@ import React, {Component, Suspense, createContext, lazy, startTransition,
   useContext, useEffect, useLayoutEffect, useState} from 'react';
 import {createRoot, hydrateRoot} from 'react-dom/client';
 import {createPortal, flushSync} from 'react-dom';
+import {assertions, fixture, collect} from './support';
 
-function check(name, condition) {
-  if (!condition) throw new Error('React compatibility: ' + name);
-  console.log(name + ': pass');
-}
-
-function fixture() {
-  const element = document.createElement('div');
-  document.body.appendChild(element);
-  return element;
-}
-
-function collect() {
-  if (typeof gc === 'function') gc();
-}
+const check = assertions('React');
 
 async function client() {
   const container = fixture();

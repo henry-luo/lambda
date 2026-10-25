@@ -14,6 +14,14 @@
 #include "log.h"
 #include "str.h"
 
+static UrlError url_refresh_origin(Url* url) {
+    String* origin = url_serialize_origin(url);
+    if (!origin) return URL_ERROR_MEMORY_ALLOCATION;
+    url_free_string(url->origin);
+    url->origin = origin;
+    return URL_OK;
+}
+
 // ============================================================================
 // Punycode encoder (RFC 3492) for IDNA domain name encoding
 // ============================================================================
@@ -636,11 +644,8 @@ UrlError url_parse_into(const char* input, Url* url) {
             url->host = url_create_string(host_buf);
         }
     }
-    String* serialized_origin = url_serialize_origin(url);
-    if (serialized_origin) {
-        url_free_string(url->origin);
-        url->origin = serialized_origin;
-    }
+    UrlError origin_status = url_refresh_origin(url);
+    if (origin_status != URL_OK) return origin_status;
 
     // Mark as valid if we got this far
     url->is_valid = true;
@@ -1239,6 +1244,8 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
     trimmed_input[input_len] = '\0';
     UrlError err = url_resolve_trimmed_into(trimmed_input, base_url, result);
     mem_free(trimmed_input);
+    // relative handlers construct components directly, so their derived origin must be refreshed too.
+    if (err == URL_OK) err = url_refresh_origin(result);
     return err;
 }
 

@@ -1,0 +1,16 @@
+Redux Toolkit 2.13.0
+store and generated actions: pass
+Immer nested updates and structural sharing: pass
+Immer frozen snapshots: pass
+prepared actions and array drafts: pass
+subscriptions and middleware ordering: pass
+memoized selectors: pass
+thunk middleware: pass
+entity adapter sorting and updates: pass
+entity adapter removal: pass
+async thunk pending: pass
+async thunk fulfillment and unwrap: pass
+async thunk rejected values: pass
+async thunk cancellation: pass
+listener middleware and removal: pass
+REDUX_TOOLKIT_DONE

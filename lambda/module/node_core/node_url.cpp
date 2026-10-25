@@ -1505,71 +1505,46 @@ extern "C" Item js_usp_size(void) {
 // new URLSearchParams([init])
 extern "C" Item js_url_search_params_new(Item init) {
     if (!node_url_ensure_host()) return ItemNull;
-    Item obj = node_url_host->script->new_object_with_class(
-        JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS);
-    JubeRootFrame frame = {};
-    if (!node_url_roots_begin(&frame, 3)) return obj;
-    uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* entries_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
-    if (!object_root || !entries_root || !key_root) {
-        node_url_host->node->roots->root_frame_end(&frame);
-        return obj;
-    }
-    *object_root = obj.item;
-
-    Item entries;
+    JubeScopedRoots roots(node_url_host, 4);
+    uint64_t* init_root = roots.slot(init);
+    uint64_t* object_root = roots.slot(node_url_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS));
+    uint64_t* entries_root = roots.slot(js_array_new(0));
+    uint64_t* key_root = roots.slot(ItemNull);
+    if (!init_root || !object_root || !entries_root || !key_root) return ItemError;
     int init_type = get_type_id(init);
-
-    if (init_type == LMD_TYPE_STRING) {
+    if (init_type == LMD_TYPE_MAP || init_type == LMD_TYPE_ARRAY || init_type == JUBE_VALUE_FUNCTION) {
+        // Shared WebIDL conversion selects iterables before records and preserves duplicates.
+        *entries_root = node_url_host->script->string_pairs_from_init(init, false).item;
+        if (item_is_error(jube_root_item(entries_root))) return jube_root_item(entries_root);
+        for (int64_t i = 0, count = js_array_length(jube_root_item(entries_root)); i < count; i++) {
+            if (js_array_length(js_elements_get_int(jube_root_item(entries_root), i)) != 2)
+                return node_url_throw_type_error("URLSearchParams pair must contain two entries");
+        }
+    } else if (init_type != LMD_TYPE_UNDEFINED) {
+        *init_root = js_to_string(init).item;
+        if (item_is_error(jube_root_item(init_root))) return jube_root_item(init_root);
         // a 4096-byte stack buffer here made `new URLSearchParams(longQuery)`
         // fail construction outright, so `new` handed back a bare object
         size_t query_len = 0;
-        char* query = node_url_string_dup(init, &query_len);
+        char* query = node_url_string_dup(jube_root_item(init_root), &query_len);
         if (!query || query_len > (size_t)INT_MAX) {
             if (query) mem_free(query);
-            node_url_host->node->roots->root_frame_end(&frame);
             return ItemNull;
         }
         const char* qs = query;
         int qs_len = (int)query_len;
         if (qs_len > 0 && qs[0] == '?') { qs++; qs_len--; }
-        entries = parse_query_entries(qs, qs_len);
-        *entries_root = entries.item;
+        *entries_root = parse_query_entries(qs, qs_len).item;
         mem_free(query);
-    } else if (init_type == LMD_TYPE_MAP) {
-        entries = js_array_new(0);
-        *entries_root = entries.item;
-        Item keys = js_object_keys(init);
-        int64_t klen = js_array_length(keys);
-        for (int64_t i = 0; i < klen; i++) {
-            Item key = js_elements_get_int(keys, i);
-            Item val = js_get_key_default(init, key);
-            Item entry = js_array_new(0);
-            js_array_push(entry, js_to_string(key));
-            js_array_push(entry, js_to_string(val));
-            js_array_push(entries, entry);
-        }
-    } else if (init_type == LMD_TYPE_ARRAY) {
-        entries = js_array_new(0);
-        *entries_root = entries.item;
-        int64_t len = js_array_length(init);
-        for (int64_t i = 0; i < len; i++) {
-            Item pair = js_elements_get_int(init, i);
-            Item entry = js_array_new(0);
-            js_array_push(entry, js_to_string(js_elements_get_int(pair, 0)));
-            js_array_push(entry, js_to_string(js_elements_get_int(pair, 1)));
-            js_array_push(entries, entry);
-        }
-    } else {
-        entries = js_array_new(0);
-        *entries_root = entries.item;
     }
 
     // A property key stays live only while rooted: js_set_key_default() can
     // allocate shape storage, and a GC there frees an unrooted key and leaves a
     // poisoned name in the instance shape.
     *key_root = make_string_item("__entries__").item;
+    Item obj = jube_root_item(object_root);
+    Item entries = jube_root_item(entries_root);
     js_set_key_default(obj, node_url_root_value(key_root), entries);
     // URLSearchParams entries are an internal list; exposing the backing array
     // as enumerable makes assert deep-equality compare implementation storage.
@@ -1586,7 +1561,6 @@ extern "C" Item js_url_search_params_new(Item init) {
     // size is observable as state, but it is not an enumerable data field.
     js_mark_non_enumerable(obj, node_url_root_value(key_root));
 
-    node_url_host->node->roots->root_frame_end(&frame);
     return obj;
 }
 
@@ -1735,6 +1709,7 @@ int node_url_init(const JubeHostAPI* host) {
             !host->script->make_number || !host->script->object_create ||
             !host->script->type_of || !host->script->well_known_symbol ||
             !host->script->iterator_prototype || !host->script->set_prototype ||
+            !host->script->string_pairs_from_init ||
             !host->script->function_set_prototype) return -1;
     node_url_host = host;
     return 0;

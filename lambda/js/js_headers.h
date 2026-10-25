@@ -12,3 +12,5 @@ Item js_headers_create(Item init, bool immutable = false);
 Item js_headers_clone(Item headers);
 // Shared Fetch/WebIDL conversion; validates UTF-16 code units before byte use.
 Item js_fetch_byte_string(Item value);
+// Shared WebIDL conversion before Headers/URLSearchParams validate their pairs.
+Item js_webidl_string_pairs_from_init(Item init, bool byte_strings);

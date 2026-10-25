@@ -26,6 +26,7 @@
 #include "../js/js_fs_service.h"
 #include "jube_node_zlib_codec.hpp"
 #include "../js/js_runtime.h"
+#include "../js/js_headers.h"
 #include "../module/node_core/node_events.hpp"
 #include "../module/node_core/node_trace_events.hpp"
 #include "../module/node_core/node_runtime_state.hpp"
@@ -1069,6 +1070,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     bigint_to_int64_exact,
     jube_host_well_known_symbol,
     js_get_iterator_proto,
+    js_webidl_string_pairs_from_init,
 };
 
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);

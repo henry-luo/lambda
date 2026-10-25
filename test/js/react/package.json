@@ -2,11 +2,19 @@
   "name": "lambda-react-compatibility-tests",
   "private": true,
   "version": "1.0.0",
-  "scripts": { "build": "node build.cjs" },
+  "scripts": {
+    "build": "node build.cjs"
+  },
   "dependencies": {
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "scheduler": "0.28.0"
+    "scheduler": "0.28.0",
+    "@reduxjs/toolkit": "2.13.0",
+    "react-redux": "9.3.0",
+    "zustand": "5.0.16",
+    "react-router": "8.5.0"
   },
-  "devDependencies": { "esbuild": "0.28.1" }
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
 }

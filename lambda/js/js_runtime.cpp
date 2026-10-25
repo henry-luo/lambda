@@ -1771,14 +1771,19 @@ static Item js_proxy_missing_own_key_error(Item key) {
 }
 
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
+    RootFrame roots(4);
+    Rooted<Item> owner(roots, proxy), trap_root(roots, ItemNull);
+    Rooted<Item> keys_root(roots, ItemNull), target_keys_root(roots, ItemNull);
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return js_array_new(0);
     JS_ASSIGN_OR_RETURN(trap, js_proxy_get_trap(pd, "ownKeys", 7));
+    trap_root.set(trap);
     if (trap.item == ItemNull.item) {
         return js_reflect_own_keys(PD_TARGET(pd));
     }
     Item args[1] = { PD_TARGET(pd) };
     JS_ASSIGN_OR_RETURN(trap_result, js_call_function(trap, PD_HANDLER(pd), args, 1));
+    keys_root.set(trap_result);
 
     Item key_list = trap_result;
     if (get_type_id(key_list) != LMD_TYPE_ARRAY) {
@@ -1788,6 +1793,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
             result_type != LMD_TYPE_FLOAT && result_type != LMD_TYPE_BOOL &&
             result_type != LMD_TYPE_STRING && !js_key_is_symbol(key_list)) {
             JS_ASSIGN_OR_RETURN_INTO(key_list, js_array_like_to_array(key_list));
+            keys_root.set(key_list);
         }
     }
 
@@ -1822,6 +1828,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     Item target = PD_TARGET(pd);
     if (!js_is_extensible(target)) {
         Item target_keys = js_reflect_own_keys(target);
+        target_keys_root.set(target_keys);
         int target_len = js_array_length(target_keys);
         // Every target key must be in trap result
         for (int i = 0; i < target_len; i++) {
@@ -1841,6 +1848,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     } else {
         // Must include all non-configurable keys
         Item target_keys = js_reflect_own_keys(target);
+        target_keys_root.set(target_keys);
         int target_len = js_array_length(target_keys);
         for (int i = 0; i < target_len; i++) {
             Item tk = js_elements_get_int(target_keys, i);
@@ -1861,6 +1869,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     }
 
     Item result = js_array_new(0);
+    target_keys_root.set(result);
     for (int i = 0; i < len; i++) {
         js_array_push(result, js_elements_get_int(key_list, i));
     }
@@ -4353,7 +4362,7 @@ static JsPropertyOpResult js_meta_property_own_keys(Item target, uint64_t lane,
         return js_property_op_result(true, js_proxy_trap_own_keys(target));
     }
     Item completion = ItemNull;
-    return js_property_op_result(js_property_ops_own_property_names(
+    return js_property_op_result(js_property_ops_own_keys(
         target, &completion), completion);
 }
 
@@ -12610,7 +12619,9 @@ JS_COLLECTION_SIZE_BODY(js_intrinsic_set_size_body, JS_COLLECTION_SIZE_SET)
 
 Item js_intrinsic_collection_iterator_next_body(Item callee,
         Item this_value, Item* args, int argc, uint64_t* result_home) {
-    Item this_val = this_value;
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, this_value), value(roots, ItemNull);
+    Item this_val = owner.get();
         // Collection iterator .next()
         if (get_type_id(this_val) != LMD_TYPE_MAP) {
             return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
@@ -12654,10 +12665,10 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
             return js_make_iter_result(make_js_undefined(), true);
         }
         // get value based on mode
-        Item val;
         if (mode == 2) {
             // entries: [key, value] for Map; [value, value] for Set
-            Item pair = js_array_new(2);
+            value.set(js_array_new(2));
+            Item pair = value.get();
             Item key = js_collection_node_read_item(node,
                 JS_COLLECTION_NODE_KEY);
             if (coll_type == JS_COLLECTION_SET) {
@@ -12668,18 +12679,17 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
                 js_elements_set_int(pair, 1, js_collection_node_read_item(node,
                     JS_COLLECTION_NODE_VALUE));
             }
-            val = pair;
         } else if (mode == 1) {
-            val = js_collection_node_read_item(node, JS_COLLECTION_NODE_KEY);
+            value.set(js_collection_node_read_item(node, JS_COLLECTION_NODE_KEY));
         } else {
             // values: for Set, key IS the value; for Map, node's value
-            val = js_collection_node_read_item(node, coll_type == JS_COLLECTION_SET
-                ? JS_COLLECTION_NODE_KEY : JS_COLLECTION_NODE_VALUE);
+            value.set(js_collection_node_read_item(node, coll_type == JS_COLLECTION_SET
+                ? JS_COLLECTION_NODE_KEY : JS_COLLECTION_NODE_VALUE));
         }
-        // advance to next node
+        // advancing allocates property keys before the yielded value reaches its result owner.
         js_set_key_cstr(this_val, "__last_node__", (Item){.item = i2it((int64_t)(uintptr_t)node)});
         js_set_key_cstr(this_val, "__node_ptr__", (Item){.item = i2it((int64_t)(uintptr_t)node->next)});
-        return js_make_iter_result(val, false);
+        return js_make_iter_result(value.get(), false);
 
 }
 
@@ -28122,13 +28132,13 @@ static Item js_get_iterator_record(Item iterable, bool asynchronous);
 
 // Helper: create {value, done} iterator result object
 extern "C" Item js_make_iter_result(Item value, bool done) {
-    JS_ROOTS(roots, value_root, js_retain_scalar(value), result_root, js_promise_public_object());
-    String* val_key = heap_create_name("value", 5);
-    String* done_key = heap_create_name("done", 4);
+    JS_ROOTS(roots, value_root, js_retain_scalar(value), result_root, js_promise_public_object(),
+        value_key, js_name_item("value", 5), done_key, js_name_item("done", 4));
     // Property insertion may collect; retain both the fresh result map and a
     // scalar payload still owned by the generator state-result container.
-    JS_ASSIGN_OR_RETURN(value_result, js_promise_create_data_property(result_root.get(), (Item){.item = s2it(val_key)}, value_root.get()));
-    JS_ASSIGN_OR_RETURN(done_result, js_promise_create_data_property(result_root.get(), (Item){.item = s2it(done_key)},
+    // both keys remain live while either property insertion can collect.
+    JS_ASSIGN_OR_RETURN(value_result, js_promise_create_data_property(result_root.get(), value_key.get(), value_root.get()));
+    JS_ASSIGN_OR_RETURN(done_result, js_promise_create_data_property(result_root.get(), done_key.get(),
         (Item){.item = b2it(done)}));
     return result_root.get();
 }

@@ -151,6 +151,7 @@ enum JsClass : uint8_t {
     JS_CLASS_PERFORMANCE_ENTRY,
     JS_CLASS_PERFORMANCE_MARK,
     JS_CLASS_PERFORMANCE_MEASURE,
+    JS_CLASS_REQUEST,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -199,6 +200,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Duplex", 6)) return JS_CLASS_DUPLEX;
             break;
         case 7:
+            if (!strncmp(nm, "Request", 7)) return JS_CLASS_REQUEST;
             if (!strncmp(nm, "Headers", 7)) return JS_CLASS_HEADERS;
             if (!strncmp(nm, "Boolean", 7)) return JS_CLASS_BOOLEAN;
             if (!strncmp(nm, "Promise", 7)) return JS_CLASS_PROMISE;
@@ -410,6 +412,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_HEADERS: return "Headers";
         case JS_CLASS_HEADERS_ITERATOR: return "Headers Iterator";
         case JS_CLASS_RESPONSE: return "Response";
+        case JS_CLASS_REQUEST: return "Request";
         case JS_CLASS_NAVIGATOR: return "Navigator";
         case JS_CLASS_MESSAGE_EVENT: return "MessageEvent";
         case JS_CLASS_SECURITY_POLICY_VIOLATION_EVENT: return "SecurityPolicyViolationEvent";

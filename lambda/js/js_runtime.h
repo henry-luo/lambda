@@ -1326,6 +1326,7 @@ Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 // URL constructor
 Item js_url_construct(Item input);
+Item js_url_get_component(Item receiver, const char* name);
 Item js_url_construct_with_base(Item input, Item base);
 Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);

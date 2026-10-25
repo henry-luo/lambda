@@ -88,7 +88,7 @@ Item js_typed_array_base_construct_body(Item callee, Item* args, int argc,
 bool js_property_ops_has_property(Item object, Item key, TypeId type,
                                 Item* out_result);
 bool js_property_ops_delete_property(Item object, Item key, Item* out_result);
-bool js_property_ops_own_property_names(Item object, Item* out_result);
+bool js_property_ops_own_keys(Item object, Item* out_result);
 bool js_property_ops_own_property_descriptor(Item object, Item name,
     String* name_str, TypeId type, Item* out_result);
 bool js_ta_define_own_numeric_index(Item object, Item key, Item desc,
@@ -175,6 +175,7 @@ enum JsNumericPrototypeOp {
 Item js_numeric_prototype_algorithm(Item number, JsNumericPrototypeOp operation,
     Item* args, int arg_count);
 Item js_iterator_prototype_for_object(Item object);
+Item js_abort_signal_follow(Item source);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_has_own_property(Item obj, Item key);
