@@ -17,7 +17,8 @@ let hidden = changes[1];
     html.effect_properties(base, base) == {},
     html.effect_properties(changes[0], base) == {opacity: "0.5"},
     html.effect_properties(hidden, base) == {opacity: "0", visibility: "hidden", ["pointer-events"]: "none"},
-    html.effect_properties(base, hidden) == {opacity: "1", visibility: "visible", ["pointer-events"]: "auto"},
+    // a shown object inherits, so a hidden group still hides it.
+    html.effect_properties(base, hidden) == {opacity: "1", visibility: "inherit", ["pointer-events"]: "inherit"},
     html.effect_properties({*: hidden, visible: 0.0}, hidden) == {},
     html.effect_properties(clipped, base) == {["clip-path"]: "inset(0 0 0 25%)"},
     html.effect_properties(base, clipped) == {["clip-path"]: "none"},

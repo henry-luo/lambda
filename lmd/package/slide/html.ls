@@ -86,9 +86,11 @@ pub fn effect_properties(v, previous = null) {
             else if (v.clip_direction == 'right') "0 " ++ amount ++ " 0 0"
             else if (v.clip_direction == 'top') amount ++ " 0 0 0" else "0 0 " ++ amount ++ " 0") ++ ")"
     }
+    // a shown object inherits instead of forcing visible/auto: an explicit value on a child
+    // overrides a hidden ancestor, so a group hidden by visibility alone (appear, wipe) showed its objects
     {*: if (previous == null or v.opacity != previous.opacity) {opacity: c.fmt(v.opacity)} else {},
-        *: if (visibility_changed) {visibility: if (invisible) "hidden" else "visible",
-            ["pointer-events"]: if (invisible) "none" else "auto"} else {},
+        *: if (visibility_changed) {visibility: if (invisible) "hidden" else "inherit",
+            ["pointer-events"]: if (invisible) "none" else "inherit"} else {},
         *: if (previous == null or v.tx != previous.tx or v.ty != previous.ty or
             v.rotation != previous.rotation or v.sx != previous.sx or v.sy != previous.sy)
             {transform: "translate(" ++ c.px(v.tx) ++ "," ++ c.px(v.ty) ++ ") rotate(" ++
