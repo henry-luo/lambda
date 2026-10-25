@@ -18,7 +18,7 @@
       "target": {
         "selector": ".level"
       },
-      "count": 8
+      "count": 16
     },
     {
       "type": "assert_attribute",

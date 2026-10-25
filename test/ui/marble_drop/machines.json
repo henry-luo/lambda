@@ -1,9 +1,9 @@
 {
-  "name": "Marble Drop all eight machines through the animation clock",
+  "name": "Marble Drop all sixteen machines through the animation clock",
   "html": "test/demo/marble-drop/marble-drop.ls",
   "viewport": {
     "width": 1100,
-    "height": 1100
+    "height": 1200
   },
   "input_turn_ms": 0,
   "events": [
@@ -537,9 +537,542 @@
       "equals": "17"
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#level-9"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "9"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-9.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2800,
+      "steps": 70
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-10"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "10"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-10.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 4800,
+      "steps": 120
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-11"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "11"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-11.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 3600,
+      "steps": 90
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-12"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "12"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-12.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 3600,
+      "steps": 90
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-13"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "13"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-13.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2800,
+      "steps": 70
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-14"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "14"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-14.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 6400,
+      "steps": 160
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-15"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "15"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-15.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 6000,
+      "steps": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-16"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "16"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/machine-16.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#auto-play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 15200,
+      "steps": 380
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-losses",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-autoplay",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-moves",
+      "equals": "9"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".level.completed"
+      },
+      "count": 16
+    },
+    {
       "type": "capture_surface",
       "source": "page",
       "file": "temp/marble-drop/finale.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#next"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-level",
+      "equals": "1"
     },
     {
       "type": "window_close"

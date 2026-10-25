@@ -117,6 +117,44 @@
       "file": "temp/marble-drop/compact.png"
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#level-16"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".device-guide span"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".device-guide"
+      },
+      "element_b": {
+        "selector": ".drawing"
+      },
+      "relation": "below"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".notebook"
+      },
+      "element_b": {
+        "selector": ".machine-panel"
+      },
+      "relation": "below"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/compact-grand-tour.png"
+    },
+    {
       "type": "window_close"
     },
     {

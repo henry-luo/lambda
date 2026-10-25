@@ -1,12 +1,16 @@
-// A machine is a downward graph; routing is independent of marble color.
+// A machine is an acyclic graph; selectors can inspect the passing marble.
 pub let COLORS = ["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Steel", "Black"]
 pub let INKS = ["#c95143", "#dc8a38", "#d8b647", "#638c68", "#4e81a5", "#9270a1", "#879298", "#34373b"]
 fn part(kind, x, y, exits, label, link = -1) =>
-    {kind:kind, x:x, y:y, exits:exits, label:label, link:link, color:-1, need:0}
+    {kind:kind, x:x, y:y, exits:exits, label:label, link:link, color:-1, need:0, threshold:1, match:-1}
 fn inlet(x, next, label = "A") => part("funnel", x, 64, [next], label)
 fn fork(x, y, a, b, label) => part("switch", x, y, [a,b], label)
 fn catch(x, y, next) => part("gate", x, y, [next], "CATCH")
 fn relay(x, y, next, link) => part("relay", x, y, [next], "LINK", link)
+fn rotor(x,y,exits,label) => part("rotor",x,y,exits,label)
+fn counter(x,y,next) => {*:part("counter",x,y,[next],"WEIGHT"),threshold:2}
+fn selector(kind,x,y,a,b,color) => {*:part(kind,x,y,[a,b],if (kind == "magnet") "MAGNET" else "LENS"),match:color}
+fn spring(x,y,next) => part("spring",x,y,[next],"SPRING")
 fn bin(x, color, need = 1) => {*:part("bin", x, 430, [], COLORS[color]), color:color, need:need}
 fn puzzle(title, note, nodes, funnels, par, initial = []) =>
     {title:title, note:note, nodes:nodes, funnels:funnels, par:par, initial:initial}
@@ -51,5 +55,36 @@ pub let LEVELS = [
         fork(164,316,7,8,"II"), fork(504,277,5,6,"III"),
         fork(396,350,9,10,"IV"), fork(612,350,11,12,"V"),
         bin(70,0,2), bin(186,1,2), bin(302,2,2), bin(418,3,2), bin(534,4,2), bin(650,5,2)
-    ], [0], 17)
+    ], [0], 17),
+    puzzle("The rule of three", "The distributor advances one notch after every marble: left, middle, right. Three colors, one revolving tongue.", [
+        inlet(360,1), rotor(360,218,[2,3,4],"I"), bin(160,0), bin(360,3), bin(560,4)
+    ], [0], 3),
+    puzzle("The counterweight", "Two marbles must weigh down the catch before its door opens. Feed it steel, then save the colored marbles for their pockets.", [
+        inlet(360,1), counter(360,170,2), fork(360,290,3,4,"I"), bin(200,1), bin(520,5)
+    ], [0], 4),
+    puzzle("The lodestone", "The magnet pulls steel to the left. Glass rolls to the right. This time the steel pocket needs a marble of its own.", [
+        inlet(360,1), selector("magnet",360,180,2,3,6), bin(110,6),
+        fork(500,288,4,5,"I"), bin(350,0), bin(650,4)
+    ], [0], 3),
+    puzzle("A curious spectrum", "The blue lens sends blue to the left and every other color to the right. Black adopts a color only after reaching a pocket.", [
+        inlet(360,1), selector("filter",360,205,2,3,4), bin(150,4),
+        fork(510,300,4,5,"I"), bin(430,0), bin(650,2)
+    ], [0], 3),
+    puzzle("Upward thinking", "A wound spring launches each marble up to the high diversion. Follow its flight before choosing the next color.", [
+        inlet(180,1), spring(180,300,2), fork(500,170,3,4,"I"), bin(350,0), bin(650,4)
+    ], [0], 2),
+    puzzle("Iron pays its way", "The magnet sorts the iron into a counterweight. Two balls open it; a third fills the steel pocket. Glass takes the distributor.", [
+        inlet(360,1), selector("magnet",360,160,2,3,6), counter(170,260,4),
+        rotor(510,280,[5,6,7],"I"), bin(110,6), bin(330,0), bin(490,4), bin(650,5)
+    ], [0], 6),
+    puzzle("A conversation in thirds", "Inlet A moves the remote three-way distributor before meeting a red lens. Inlet B enters that distributor directly.", [
+        inlet(204,2,"A"), inlet(516,3,"B"), relay(204,164,4,3),
+        rotor(516,240,[7,8,9],"I"), selector("filter",204,280,5,6,0),
+        bin(90,0), bin(240,1), bin(382,2), bin(516,4), bin(650,5)
+    ], [0,1], 5),
+    puzzle("The inventor’s grand tour", "Steel loads the counterweight; glass rides the spring. The distributor visits a fork, a double yellow pocket and a blue lens, in that order.", [
+        inlet(180,1), selector("magnet",180,150,2,3,6), counter(90,300,8), spring(250,300,4),
+        rotor(500,180,[5,7,6],"I"), fork(350,300,9,10,"II"), selector("filter",570,300,11,12,4),
+        bin(418,2,2), bin(70,6), bin(186,0), bin(302,1), bin(534,4), bin(650,3)
+    ], [0], 9)
 ]

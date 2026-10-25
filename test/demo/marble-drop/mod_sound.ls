@@ -15,10 +15,12 @@ pub fn cue(before, after, command) {
     else {
         let node = model.level(before).nodes[before.active.to]
         if (after.active != null) {
-            if (after.active.from != before.active.from and contains(["switch","relay"],node.kind)) "switch" else ""
+            if (after.active.from == before.active.from) ""
+            else if (node.kind == "spring") "steel"
+            else if (model.indexed(node) or model.selective(node) or node.kind == "relay") "switch" else ""
         }
         else if (after.mode == "won") "win"
-        else if (node.kind == "gate" and before.bits[before.active.to] == 0) "catch"
+        else if (model.catching(node) and before.bits[before.active.to] < node.threshold) "catch"
         else if (after.losses > before.losses) "miss"
         else if (model.collected(after) > model.collected(before)) "pocket"
         else if (before.active.color == 6) "steel"

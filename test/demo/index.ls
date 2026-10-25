@@ -19,7 +19,7 @@ let DEMOS = [
     {name: "tetris", title: "Tetris", tag: "GAME · CLASSIC",
      blurb: "The falling-block classic, with Auto Play."},
     {name: "marble-drop", title: "Marble Drop", tag: "GAME · MECHANICAL PUZZLES",
-     blurb: "Eight brass machines. Every color has a way home."},
+     blurb: "Sixteen brass machines, curious devices, and a way home."},
     {name: "superlambda", title: "Superlambda", tag: "GAME · PLATFORMER",
      blurb: "Run, jump and stomp to the flag in a red λ cap."},
     {name: "doom", title: "DOOM", tag: "GAME · 3D SHOOTER",
