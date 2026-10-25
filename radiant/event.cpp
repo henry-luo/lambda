@@ -4835,6 +4835,18 @@ extern "C" bool radiant_dispatch_behavior_text_input_fallback(
 // ES34: overlay geometry resolves only a menu row. Mapping that row to a
 // command and closing the popup are document policy, routed through the same
 // generic command waist keyboard shortcuts already use.
+void radiant_input_method_setting_changed(DomElement* owner) {
+    DomElement* body = owner && owner->doc ? radiant_document_body_element(owner->doc) : nullptr;
+    if (body) dispatch_behavior_handler(nullptr, body, "imewindowchange", nullptr, nullptr);
+}
+
+bool radiant_dispatch_input_method_action(EventContext* evcon, View* target, int index) {
+    InputIntent intent;
+    if (index >= 0) intent.option_index = index;
+    else intent.command = index == -1 ? "toggle" : "cancel";
+    return dispatch_behavior_document_policy(evcon, target, "imecandidate", &intent);
+}
+
 extern "C" bool radiant_dispatch_behavior_context_menu_action(
     EventContext* evcon, View* target, const InputIntent* intent) {
     return dispatch_behavior_document_policy(evcon, target,
@@ -6602,6 +6614,11 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
                 caret_utf8, &rect)) {
             return false;
         }
+        // shared caret metrics are block-local; platform IME and popups need viewport coordinates.
+        RdtLogicalPoint point = view_geometry_local_to_block_viewport(surface.owner,
+            {rect.x, rect.y}, scroll_state_resolve_view_geometry);
+        rect.x = point.x;
+        rect.y = point.y - surface.owner->form->scroll_y;
     } else {
         View* caret_view = nullptr;
         int caret_offset = 0;
@@ -6615,6 +6632,10 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
                 lam::dom_require_text(caret_view), offset, &rect)) {
             return false;
         }
+        RdtLogicalPoint point = view_geometry_local_to_block_viewport(caret_view,
+            {rect.x, rect.y}, scroll_state_resolve_view_geometry);
+        rect.x = point.x;
+        rect.y = point.y;
     }
 
     if (!rect.valid) return false;
@@ -9721,6 +9742,8 @@ static Item build_keyboard_event_item(void* userdata) {
         args->ctrl, args->shift, args->alt, args->meta, args->repeat);
 }
 
+static bool editing_key_may_emit_text(const KeyEvent* key_event);
+
 static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
                                             const char* type, int key_code,
                                             int mods, bool repeat)
@@ -9740,8 +9763,16 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
     // Editable libraries inspect `key`/`code` before legacy keyCode. Preserve
     // the physical key identity here so ordinary typing does not look like an
     // empty-key shortcut to script-owned editors.
-    return radiant_dispatch_built_event(evcon, target, build_keyboard_event_item,
+    bool prevented = radiant_dispatch_built_event(evcon, target, build_keyboard_event_item,
         &args, true, nullptr, true, type);
+    // text controls and rich surfaces share the delayed character-callback decision.
+    DocState* state = event_context_target_state(evcon);
+    if (state && strcmp(type, "keydown") == 0 && editing_key_may_emit_text(&evcon->event.key)) {
+        state->editing.pending_text_input = true;
+        state->editing.pending_text_input_prevented = prevented;
+        state->editing.pending_text_input_key = key_code;
+    }
+    return prevented;
 }
 
 static View* live_keyboard_event_target(DocState* state, DomDocument* doc,
@@ -13974,7 +14005,8 @@ static void update_native_cursor(UiContext* uicon, CssEnum keyword,
     }
 }
 
-void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
+static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* event,
+                              DomDocument** completed_doc) {
     // host presentation keys use the same gate for native input and event replay.
     if (radiant_window_fullscreen_key(uicon, event)) {
         event_log_raw_input(uicon->event_log, 0, event);
@@ -14590,6 +14622,24 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
             doc_state_set_dropdown_scrollbar_press(state, false, false, mouse_y);
             break;
+        }
+
+        // IME-E2: popup presses keep editing focus and never click the underlying DOM.
+        if (state && event->type == RDT_EVENT_MOUSE_UP && state->input_method.pointer_down) {
+            state->input_method.pointer_down = false;
+            break;
+        }
+        if (state && event->type == RDT_EVENT_MOUSE_DOWN && state->input_method.visible) {
+            int row = input_method_popup_hit(uicon, state, mouse_x, mouse_y);
+            DomNode* popup_target = dom_node_ref_validate(event_context_target_document(&evcon),
+                state->input_method.popup_target);
+            if (row >= -1 && popup_target) {
+                state->input_method.pointer_down = true;
+                if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT)
+                    radiant_dispatch_input_method_action(&evcon, popup_target, row);
+                evcon.need_repaint = true;
+                break;
+            }
         }
 
         // Popup rows receive the press and release before the underlying DOM.
@@ -15766,11 +15816,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool prevented = keydown_target && radiant_dispatch_keyboard_event(
                 &evcon, keydown_target,
                 "keydown", key_event->key, key_event->mods, false);
-            if (editing_key_may_emit_text(key_event)) {
-                state->editing.pending_text_input = true;
-                state->editing.pending_text_input_prevented = prevented;
-                state->editing.pending_text_input_key = key_event->key;
-            }
             if (prevented) {
                 evcon.default_prevented = true;
                 break;
@@ -16296,6 +16341,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     log_debug("end of event %d", event->type);
 
+    *completed_doc = event_context_target_document(&evcon);
     state_end_event_cascade(cascade_state, cascade_log, cascade_id);
     event_context_cleanup(&evcon);
+}
+
+// IME-E1: finish and unwind the key's entire dispatch before delivering queued composition.
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
+    if (!uicon) return;
+    uicon->input_dispatch_depth++;
+    DomDocument* completed = nullptr;
+    // an OS start takes priority; cancel the package's provisional range before replacing it.
+    if (doc && doc->state && event->type == RDT_EVENT_COMPOSITION_START &&
+        !event->composition.scripted && doc->state->editing.composition.active &&
+        doc->state->editing.composition.scripted) {
+        RdtEvent cancel = {};
+        cancel.composition.type = RDT_EVENT_COMPOSITION_END;
+        cancel.composition.text = "";
+        cancel.composition.scripted = true;
+        handle_event_impl(uicon, doc, &cancel, &completed);
+    }
+    handle_event_impl(uicon, doc, event, &completed);
+    uicon->input_dispatch_depth--;
+    if (uicon->input_dispatch_depth == 0 && completed) input_method_drain(uicon, completed);
 }

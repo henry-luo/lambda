@@ -15,7 +15,7 @@ pub fn options(value) map^ {
         group_leaders:c.bounded(c.get(opts,"group_leaders",rank.defaults.group_leaders),1,128,"group_leaders")^}
 }
 
-fn query(path) map {
+pub fn query(path) map {
     let tokens = path.tokens
     let initials = any([for (token in tokens) token.kind == "initial"])
     let incomplete = any([for (token in tokens) token.kind == "prefix"])
@@ -40,6 +40,13 @@ fn fits(posting,query) bool {
             else token.value == (if (head == "") reading[0] else head)
         }])
     }
+}
+
+// learned entries share the pack's token filter, including orthographic initials.
+pub fn matches(reading,query) bool {
+    let key = string(len(split(reading,"'"))) ++ ":" ++ reading;
+    if (query.abbreviation) fits({reading:reading},query)
+    else if (query.prefix) starts_with(key,query.key) else key == query.key
 }
 
 fn collect(table,line,at,query,budget,limit,ordinal = 0,items = []) map^ {

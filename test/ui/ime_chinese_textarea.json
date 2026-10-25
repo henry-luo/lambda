@@ -1,0 +1,93 @@
+{
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 800,
+    "height": 700
+  },
+  "name": "ime_chinese_textarea",
+  "events": [
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "2"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "背景"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "背景"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing1",
+      "clear": true
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "背景"
+    }
+  ]
+}

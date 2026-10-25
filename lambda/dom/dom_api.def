@@ -205,6 +205,7 @@ DOM_OP(CORE, edit_release_delta, editing, 2, "pn(host: any, delta: int) -> bool"
 DOM_OP(CORE, clear_editing_focus, editing, 1, "pn(host: any) -> bool", dom_engine_clear_editing_focus, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Opaque per-document behavior-package state. The engine roots this Item but
 // has no visibility into its session schema or editing policy (D7.2.5).
+DOM_OP(CORE, edit_sync_selection, editing, 2, "pn(host: any, invocation: int) -> bool", dom_engine_edit_sync_selection, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, edit_session, editing, 1, "fn(host: any) -> any", dom_engine_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, set_edit_session, editing, 2, "pn(host: any, session: any) -> any", dom_engine_set_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // A model surface gets a document-local logical handle; toolbar edits finish
@@ -245,6 +246,14 @@ DOM_OP(CORE, edit_selection_html, editing, 2, "fn(host: any, invocation: int) ->
 DOM_OP(CORE, edit_clipboard_write, editing, 4, "pn(host: any, invocation: int, html: string|null, text: string) -> bool", dom_engine_edit_clipboard_write, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, open_context_menu, input, 2, "pn(n: any, enabled_mask: int) -> bool",          dom_engine_open_context_menu, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, context_menu_target, input, 1, "fn(n: any) -> any",                            dom_engine_context_menu_target, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
+// IME-E1/E2: transport and opaque package state, with no input-method policy.
+DOM_OP(CORE, compose, input, 4, "pn(n: any, phase: string, text: string, caret: int) -> bool", dom_engine_compose, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, ime_status, input, 1, "fn(n: any) -> any", dom_engine_ime_status, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, ime_session, input, 1, "fn(n: any) -> any", dom_engine_ime_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, set_ime_session, input, 2, "pn(n: any, session: any) -> any", dom_engine_set_ime_session, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, ime_popup, input, 3, "pn(n: any, frame: any, mode: string) -> bool", dom_engine_ime_popup, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, set_chinese_ime, window, 2, "pn(n: any, enabled: bool) -> bool", dom_engine_set_chinese_ime, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 // ---------------------------------------------------------------------------
 // CORE — ranges and selection (boundary storage is mechanism)

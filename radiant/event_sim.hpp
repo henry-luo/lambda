@@ -125,6 +125,8 @@ enum SimEventType {
     SIM_EVENT_SET_PROMPT,      // seed the next window.prompt() response (or Cancel)
     // F7: IME composition
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
+    SIM_EVENT_IME_POPUP_CLICK, // physical click at a native popup row (-1: mode indicator)
+    SIM_EVENT_ASSERT_IME_POPUP,
     SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets
     SIM_EVENT_SET_EDITING_VALUE, // set live editing value for deterministic setup
     SIM_EVENT_SNAPSHOT_STATE_STORE, // capture DOM/ViewState binding for later comparison
@@ -201,6 +203,10 @@ struct SimEvent {
     int wait_ms;                 // wait duration in milliseconds
     int expected_view_type;      // for assertions
     int expected_char_offset;    // for assertions
+    int ime_popup_row;
+    int expected_ime_count;
+    int expected_ime_page;
+    int expected_ime_highlight;
     int expected_selection_end;  // for assert_form_selection
     bool expected_is_collapsed;  // for assertions
     bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)

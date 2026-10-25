@@ -255,8 +255,9 @@ pub pn execute(host, evt, intent, value) {
         // published only after this plan changed one eligible text node.
         let history_snapshot = history.capture(host, edit_context, descriptor);
         let applied = apply_plan(host, edit_context, descriptor, edit_plan, evt);
-        let history_recorded = if (applied.changed)
-            history.record(host, history_snapshot)
+        let history_recorded = if (applied.changed or descriptor.history_class == "composition")
+            history.record(host, history_snapshot,
+                if (evt.input_type == null) descriptor.input_type else evt.input_type,edit_context)
         else false;
         let completed = result.applied(true, true, applied.changed,
                                        applied.selection_changed,

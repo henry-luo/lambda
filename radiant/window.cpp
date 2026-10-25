@@ -154,6 +154,8 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     if (uicon) radiant_reconcile_dom_mutations(uicon, doc);
     state_end_batch(state);
     input_context = saved_input_ctx;
+    // scripted transport from timers/load callbacks shares the same unwound task boundary.
+    if (uicon && uicon->input_dispatch_depth == 0) input_method_drain(uicon, doc);
     bool navigated = false;
     if (doc->pending_navigation_url) {
         // D5.4.1: location.assign() can load a new isolate only after the

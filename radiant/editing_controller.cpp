@@ -140,6 +140,7 @@ bool editing_controller_handle_composition(EventContext* evcon,
                                               &anchor_view, &anchor_offset);
         editing_interaction_begin_composition(state, &surface,
                                               anchor_view, anchor_offset);
+        state->editing.composition.scripted = comp_event->scripted;
     } else if (intent.type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
         editing_interaction_update_composition(state, &surface,
             editing_controller_text_len(intent.data),

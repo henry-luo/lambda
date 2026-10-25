@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "profile": "zh-Hant",
+  "fixture_sha256": "4382e19e435e0e83ce923a66c8f9b49ad59d451d905c952140ab600d3a28917a",
+  "provenance": "First profile report before profile-specific tuning; engine ranking defaults unchanged",
+  "scope": "repository-authored frozen query set; baseline, not a representative quality claim",
+  "minimum": {
+    "full": {
+      "found": 64,
+      "top_1": 52,
+      "top_3": 63,
+      "top_9": 64
+    },
+    "initials": {
+      "found": 64,
+      "top_1": 22,
+      "top_3": 35,
+      "top_9": 50
+    },
+    "fuzzy": {
+      "found": 64,
+      "top_1": 51,
+      "top_3": 61,
+      "top_9": 64
+    }
+  }
+}

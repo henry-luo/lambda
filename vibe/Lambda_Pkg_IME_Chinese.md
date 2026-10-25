@@ -5,9 +5,15 @@
 > dictionary pack format specified in full as version 1 and adopted by the user
 > (§6). M0's offline preparation and data validation are implemented and
 > qualified as of 2026-10-25. M1's engine and its frozen evaluation baseline are
-> implemented; qualification is recorded in the implementation record. M2/M3
-> are not implemented. M0 retained-heap attribution and the provisional
-> performance targets remain open. IME-O1, IME-O2 and
+> implemented. M2's pure session reducer and explicit overlay persistence are
+> implemented as of 2026-10-26; qualification is recorded in the implementation
+> record. M3 Radiant transport, popup and body adapter are implemented and
+> focused-qualified as of 2026-10-26; the aggregate gates retain two failures
+> reproduced on the preserved pre-M3 host. M4 Traditional conversion, the
+> `zh-Hant` pack and profile selection are implemented and qualified by conversion
+> fixtures, reproducibility and the frozen quality report; the same two aggregate
+> failures remain. M0 retained-heap attribution and the
+> provisional performance targets remain open. IME-O1, IME-O2 and
 > IME-O4 are resolved and IME-O7 is deferred (data stays uncommitted).
 > Evidence and remaining gates: [implementation record](impl/Lambda_Impl_IME_Chinese.md).
 > **Package:** `lambda.ime.chinese`.
@@ -217,9 +223,10 @@ terminal UI or a test harness is another host of the same engine.
 
 **IME2 — The dictionary is loaded explicitly.** `pn load(profile)` reads a
 pack and returns an immutable engine value. Importing the package loads no
-data: package bindings are immutable and instantiated once per process
-(D7.2.1, D7.2.3), and a multi-megabyte read is an effect that belongs to the
-caller's `pn`. A host loads once and reuses the value.
+data: package bindings are immutable (D7.2.1, D7.2.3), and a multi-megabyte
+read is an effect that belongs to the caller's `pn`. A host loads once per
+owning document runtime and reuses the value across its controls; GC values
+do not cross runtime heaps (D5.4.1).
 
 **IME3 — The session is a value; the key reducer is pure.**
 `fn key(engine, session, evt)` returns `{session, actions}`. It is a `fn`
@@ -386,13 +393,24 @@ and English mode; in English mode every key passes. In Chinese mode
 punctuation maps to full-width forms (`,`→`，`, `.`→`。`, `?`→`？`, `\`→`、`,
 paired quotes alternate “ ”), committed directly when idle and after the
 current composition when composing. The table is small and self-authored.
+Switching to English with an active composition commits its existing preedit
+before subsequent English keys pass through. Shift chords and key repeats do
+not toggle modes. Paired quotes retain their next opening/closing side across
+compositions in the session.
 
 ### 5.6 Traditional profile
 
 `zh-Hant` (M4) converts every word at preparation with OpenCC's phrase table,
-falling back to its character table; a word with several Traditional forms
+falling back to its character table. The implementation applies the longest
+phrase at each source position before character fallback; outputs are not
+converted a second time. A word with several Traditional forms
 that the phrase table does not resolve (`发` → `發` / `髮`) yields one entry per
-form, each keeping the source weight. Taiwan and Hong Kong vocabulary variants
+form, each keeping the source reading and weight. Identical converted
+word/reading pairs merge by maximum source weight, and abbreviations derive
+again from the converted lexicon. The manifest records the source lexicon
+hash, conversion policy, expansion/merge counts and exact OpenCC pins. The
+source character set is converted with phrase-exception glyphs included;
+pack format remains version 1. Taiwan and Hong Kong vocabulary variants
 use OpenCC's regional tables and are IME-O8.
 
 ### 5.7 Fuzzy pinyin settings
@@ -661,6 +679,13 @@ survive a pack rebuild; an entry whose pair is not in the pack is a word the
 user added. Recency is a selection counter (`last_seq`, `next_seq`), not a
 clock time, which keeps the reducer a deterministic `fn` (S12.1.1v3). The
 settings map of §5.7 is not stored here: the host saves it separately.
+M2 keeps selected words pending until composition commits: cancellation and
+undo never train the overlay. Loading/attaching validates NFC Han words of
+1–9 code points, syllable count/membership, unique word/reading pairs and
+integer counters with `last_seq < next_seq`. Counters are bounded by the
+compact-int maximum 9007199254740991; exhaustion is an error. Saving validates
+first and atomically replaces only the explicitly supplied path, without its
+in-memory query index or any settings.
 
 ### 6.7 Alternatives and measurements
 
@@ -714,14 +739,14 @@ Actions:
 | `pass` | — | the key was not consumed; default handling continues |
 
 ```lambda no-run
-// no-run: M1 load/candidates exist; this example's session reducer requires M2.
+// no-run: requires the locally prepared zh-Hans dictionary.
 import ime: lambda.ime.chinese
 
 pn main() {
     let engine = ime.load("zh-Hans")^
     let found = ime.candidates(engine, "beijingdaxue")^
     print(found.items[0].text)          // 北京大学
-    var s = ime.session(engine)
+    var s = ime.session(engine)^
     for (k in ["b", "j", " "]) {
         let step = ime.key(engine, s, {type: "keydown", key: k})^
         s = step.session
@@ -758,7 +783,12 @@ rest of today's chain unchanged. The engine and session live in the body
 view's state, beside `ime_composing`: the same document-scoped cardinality
 argument ES18 made for the composition session (`lmd/package/dom/ime.ls`
 header). How `lambda.dom` reaches the engine, by direct import or through a
-registered input method, is IME-O1.
+registered input method, is IME-O1 (resolved: direct import). The implementation
+is in `lambda.dom.ime`; its opaque engine/session value is rooted in the
+owning document runtime (D5.3.3/D5.4.1). `<body data-ime="chinese">` enables a
+document, `off` overrides a window enable, and a missing attribute inherits
+`radiant.set_chinese_ime(owner, enabled)` (IME-O2). The host API and live
+settings operations are documented in `doc/Lambda_IME_Chinese.md`.
 
 ### 8.3 Native enablers
 
@@ -818,7 +848,7 @@ Golden-driven `.ls` fixtures live under `test/lambda/ime/`, each with its
 | **M1 Engine** | `ime/chinese.ls` with `syllables`, `lattice`, `pack`, `lookup`, `rank` modules; `load` and `candidates`; fuzzy-pair expansion and `fuzzy_pairs` | Segmentation and fuzzy-settings gates; candidate-quality baseline recorded |
 | **M2 Session** | The reducer, punctuation, mode toggle, paging, settings with `configure` and `settings`, user overlay and its persistence | Session goldens in both execution tiers |
 | **M3 Radiant** | IME-E1–IME-E3; the body-level adapter in `lambda.dom` | Radiant gate; `make test-radiant-baseline`; **first release** |
-| **M4 Traditional** | The `zh-Hant` pack from OpenCC | Conversion fixtures; quality report for `zh-Hant` |
+| **M4 Traditional** | The `zh-Hant` pack from OpenCC; implemented 2026-10-26 | 32 conversion fixtures; [frozen quality report](../test/ime/quality_zh_hant.md) |
 | **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, preedit caret movement, popup accessibility | One at a time, each with its own gate |
 | **Future** | Whole-sentence conversion (§11.3) | A separate proposal |
 
@@ -852,7 +882,9 @@ document checks only.
   keystroke; hot paths should promote to MIR JIT under D8.1.1v18's tiering.
   Measure both tiers; the release gate is the JIT tier on a release build.
 - **Load cost.** Indexing a few megabytes in Lambda is a measurable startup
-  cost; it happens once per process, on first enable, never at import (IME2).
+  cost; the adapter loads in its owning document runtime on first eligible
+  enable/focus and explicit profile/directory changes, never at import
+  (IME2, D5.4.1).
 - **Re-entrant dispatch.** IME-E1 must queue its events (§8.3); a nested
   dispatch from inside `keydown` is the failure mode to test for.
 - **Two input methods at once.** Covered by IME10 and §8.4, and tested.

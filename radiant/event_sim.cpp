@@ -1617,6 +1617,19 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     //   {"type":"ime_compose","phase":"commit","commit":"日本"}
     //   {"type":"ime_compose","phase":"cancel"}
     // Optional `target` selects/focuses an input first.
+    else if (strcmp(type_str, "ime_popup_click") == 0) {
+        ev->type = SIM_EVENT_IME_POPUP_CLICK;
+        ev->ime_popup_row = reader.get("row").asInt32();
+    }
+    else if (strcmp(type_str, "assert_ime_popup") == 0) {
+        ev->type = SIM_EVENT_ASSERT_IME_POPUP;
+        ev->expected_visible = reader.has("visible") ? reader.get("visible").asBool() : true;
+        ev->expected_ime_count = reader.has("count") ? reader.get("count").asInt32() : -1;
+        ev->expected_ime_page = reader.has("page") ? reader.get("page").asInt32() : -1;
+        ev->expected_ime_highlight = reader.has("highlight") ? reader.get("highlight").asInt32() : -1;
+        const char* mode = reader.get("mode").cstring();
+        if (mode) ev->assert_equals = mem_strdup(mode, MEM_CAT_LAYOUT);
+    }
     else if (strcmp(type_str, "ime_compose") == 0) {
         ev->type = SIM_EVENT_IME_COMPOSE;
         const char* phase = reader.get("phase").cstring();
@@ -4685,6 +4698,34 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_IME_POPUP_CLICK: {
+            DocState* state = uicon->document ? uicon->document->state : nullptr;
+            Rect rect = {};
+            if (!input_method_popup_row_rect(uicon, state, ev->ime_popup_row, &rect)) {
+                log_error("event_sim: ime_popup_click row %d is unavailable", ev->ime_popup_row);
+                ctx->fail_count++;
+                break;
+            }
+            float x = rect.x + rect.width / 2.0f, y = rect.y + rect.height / 2.0f;
+            sim_mouse_move(uicon, x, y);
+            sim_mouse_button(uicon, x, y, GLFW_MOUSE_BUTTON_LEFT, 0, true);
+            sim_mouse_button(uicon, x, y, GLFW_MOUSE_BUTTON_LEFT, 0, false);
+            break;
+        }
+        case SIM_EVENT_ASSERT_IME_POPUP: {
+            DocState* state = uicon->document ? uicon->document->state : nullptr;
+            const InputMethodTransport* popup = state ? &state->input_method : nullptr;
+            bool passed = popup && popup->visible == ev->expected_visible &&
+                (ev->expected_ime_count < 0 || popup->count == ev->expected_ime_count) &&
+                (ev->expected_ime_page < 0 || popup->page == ev->expected_ime_page) &&
+                (ev->expected_ime_highlight < 0 || popup->highlight == ev->expected_ime_highlight) &&
+                (!ev->assert_equals || popup->chinese == (strcmp(ev->assert_equals, "chinese") == 0));
+            if (!passed) log_error("event_sim: assert_ime_popup FAIL visible=%d count=%d page=%d highlight=%d chinese=%d",
+                popup && popup->visible, popup ? popup->count : -1, popup ? popup->page : -1,
+                popup ? popup->highlight : -1, popup && popup->chinese);
+            sim_record_assertion(ctx, passed);
+            break;
+        }
         case SIM_EVENT_ASSERT_PREEDIT: {
             View* elem = resolve_assert_element(ctx, uicon, ev, "assert_preedit");
             if (!elem) break;

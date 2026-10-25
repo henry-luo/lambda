@@ -240,6 +240,7 @@ typedef struct TextInputEvent : Event {
 typedef struct CompositionEvent : Event {
     const char* text;          // null-terminated UTF-8 preedit/commit text; may be null
     uint32_t preedit_caret;    // codepoint offset inside preedit text
+    bool scripted;            // false for OS input; queued package transport sets this
 } CompositionEvent;
 
 // Focus change event
@@ -1076,6 +1077,7 @@ bool dom_edit_insert_paragraph(DomEditInvocation* invocation,
                                DomElement* source, const char* tag);
 bool dom_edit_insert_line_break(DomEditInvocation* invocation);
 bool dom_edit_select_host(DomEditInvocation* invocation);
+bool dom_edit_sync_selection(DomEditInvocation* invocation);
 bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent);
 bool radiant_dispatch_behavior_edit_query(View* target,
                                           const InputIntent* intent,
@@ -2517,6 +2519,7 @@ typedef struct EditingScrollState {
 
 typedef struct EditingCompositionState {
     bool active;
+    bool scripted;
     EditingSurface surface;
     View* anchor_view;
     int anchor_offset;
@@ -2534,6 +2537,44 @@ typedef struct EditingCompositionState {
     bool committed;
     bool canceled;
 } EditingCompositionState;
+
+// IME-E1/E2: native transport owns copied requests and popup labels, never engine policy.
+struct ScriptCompositionRequest {
+    ScriptCompositionRequest* next;
+    DomNodeRef target;
+    EventType type;
+    char* text;
+    uint32_t caret;
+};
+typedef struct InputMethodTransport {
+    ScriptCompositionRequest* head;
+    ScriptCompositionRequest* tail;
+    bool draining;
+    uint64_t session_root;
+    bool session_rooted;
+    DomNodeRef popup_target;
+    char* labels[9];
+    int count;
+    int page;
+    int pages;
+    int highlight;
+    bool visible;
+    bool chinese;
+    bool pointer_down;
+    float x, y, width, height;
+} InputMethodTransport;
+
+bool input_method_queue(DomElement* target, const char* phase, const char* text, uint32_t caret);
+DomElement* input_method_target(DocState* state);
+void input_method_drain(UiContext* ui, DomDocument* doc);
+void input_method_cleanup(DocState* state);
+void input_method_clear_labels(InputMethodTransport* transport);
+bool input_method_popup(UiContext* ui, DomElement* target, Item frame, const char* mode);
+int input_method_popup_hit(UiContext* ui, DocState* state, float x, float y);
+bool input_method_popup_row_rect(UiContext* ui, DocState* state, int row, Rect* out);
+void input_method_popup_render(RasterRenderContext* rdcon, DocState* state);
+bool radiant_dispatch_input_method_action(EventContext* evcon, View* target, int index);
+void radiant_input_method_setting_changed(DomElement* owner);
 
 typedef struct ModelEditSurfaceBinding {
     uint64_t handle_id;
@@ -2659,6 +2700,7 @@ typedef struct DocState {
     double editing_tick_last_time;        // shared editing animation clock
     double editing_caret_blink_elapsed;   // caret blink time on shared tick
     EditingInteractionState editing;      // shared editing controller projection
+    InputMethodTransport input_method;
 
     // ------------------------------------------------------------------
     // DOM-spec Selection / Range (additive — new code path; legacy

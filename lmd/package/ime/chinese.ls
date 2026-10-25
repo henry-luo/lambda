@@ -2,8 +2,9 @@
 import c: .chinese.common
 import syllables: .chinese.syllables
 import pack: .chinese.pack
-import lattice: .chinese.lattice
-import lookup: .chinese.lookup
+import query: .chinese.query
+import reducer: .chinese.session
+import learned: .chinese.user
 
 pub let fuzzy_pairs = syllables.fuzzy_pairs
 
@@ -17,7 +18,7 @@ pub pn load(profile = "zh-Hans",options = null) map^ {
     let opts = c.options(options,["directory"])^
     let home = sys.lambda.home#
     let root = home ++ "/package/ime/chinese/data/"
-    let installed = [for (name in ["zh-Hans"] where exists(root ++ name ++ "/manifest.json")) name]
+    let installed = [for (name in ["zh-Hans","zh-Hant"] where exists(root ++ name ++ "/manifest.json")) name]
     let valid = c.require(profile is string and (opts.directory != null or profile in installed),
         "unknown or unprepared profile: " ++ string(profile) ++ "; installed: " ++ join(installed,", "))^
     let directory = c.get(opts,"directory",root ++ profile)
@@ -30,10 +31,23 @@ pub pn load(profile = "zh-Hans",options = null) map^ {
 }
 
 pub fn candidates(engine,raw,options = null) map^ {
-    let opts = lookup.options(options)^
-    let graph = lattice.build(engine.syllables,raw,opts.fuzzy)^
-    let paths = lattice.paths(graph,opts.max_paths)
-    let result = lookup.candidates(engine,paths.paths,opts)^;
-    {segments:[for (edges in graph.edges,edge in edges) edge],items:result.items,
-        truncated:paths.truncated or result.truncated,scanned:result.scanned}
+    query.candidates(engine,raw,options)^
+}
+
+pub fn session(engine,settings = null) map^ => reducer.create(engine,settings)^
+pub fn key(engine,session,evt) map^ => reducer.key(engine,session,evt)^
+pub fn configure(engine,session,settings) map^ => reducer.configure(engine,session,settings)^
+pub fn settings(session) map^ => reducer.settings(session)^
+pub fn with_user(session,user) map^ => reducer.with_user(session,user)^
+
+pub pn load_user(path) map^ {
+    let saved = input(path,"json")^
+    let text = input(sys.lambda.home# ++ "/package/ime/chinese/syllables.txt","text")^;
+    return learned.validate(saved,syllables.inventory(text))^
+}
+
+pub pn save_user(user,path) any^ {
+    let text = input(sys.lambda.home# ++ "/package/ime/chinese/syllables.txt","text")^
+    let checked = learned.validate(user,syllables.inventory(text))^;
+    return output(learned.data(checked),path,{format:"json",atomic:true})^
 }

@@ -4533,6 +4533,8 @@ typedef enum UiAppMode {
 typedef struct UiContext {
     GLFWwindow *window;    // current window
     RadiantFullscreenState fullscreen; // window-owned; survives document navigation
+    bool chinese_ime_enabled; // opt-in window setting (IME-O2), preserved across navigation
+    uint32_t input_dispatch_depth;
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)

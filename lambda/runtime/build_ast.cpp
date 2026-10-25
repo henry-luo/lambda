@@ -3916,6 +3916,128 @@ static bool lambda_const_pool_intern_string(Transpiler* tp, String* str,
     return true;
 }
 
+// literal values and quoted NameKeys decode the same characters (S8.2.2v6).
+static String* decode_quoted_content(Transpiler* tp, SourceSpan span,
+        const char* content_start, int content_len) {
+    StringBuf *str_buf = stringbuf_new(tp->pool);
+
+    for (int i = 0; i < content_len; i++) {
+        if (content_start[i] == '\\' && i + 1 < content_len) {
+            char escape_char = content_start[i + 1];
+            switch (escape_char) {
+            case '"':
+                stringbuf_append_char(str_buf, '"');
+                i++;
+                break;
+            case '\'':
+                stringbuf_append_char(str_buf, '\'');
+                i++;
+                break;
+            case '\\':
+                stringbuf_append_char(str_buf, '\\');
+                i++;
+                break;
+            case '/':
+                stringbuf_append_char(str_buf, '/');
+                i++;
+                break;
+            case 'b':
+                stringbuf_append_char(str_buf, '\b');
+                i++;
+                break;
+            case 'f':
+                stringbuf_append_char(str_buf, '\f');
+                i++;
+                break;
+            case 'n':
+                stringbuf_append_char(str_buf, '\n');
+                i++;
+                break;
+            case 'r':
+                stringbuf_append_char(str_buf, '\r');
+                i++;
+                break;
+            case 't':
+                stringbuf_append_char(str_buf, '\t');
+                i++;
+                break;
+            case 'u':
+                // Handle Unicode escape sequences: \uXXXX or \u{...}
+                if (i + 5 < content_len && content_start[i + 2] != '{') {
+                    uint32_t code_point = 0;
+                    size_t consumed = 0;
+                    if (escape_decode_utf16_escape(content_start + i + 2,
+                            (size_t)content_len - (size_t)i - 2, true,
+                            &code_point, &consumed)) {
+                        stringbuf_append_utf8(str_buf, code_point);
+                        i += (int)consumed + 1;  // skip \uXXXX and optional low surrogate
+                    } else {
+                        log_error("Invalid Unicode escape sequence");
+                        stringbuf_append_char(str_buf, '\\');
+                        stringbuf_append_char(str_buf, 'u');
+                        i++;
+                    }
+                }
+                else if (i + 3 < content_len && content_start[i + 2] == '{') {
+                    // \u{...} format (variable length hex digits)
+                    const char* hex_start = content_start + i + 3;
+                    const char* hex_end = NULL;
+                    for (const char* p = hex_start; p < content_start + content_len; p++) {
+                        if (*p == '}') {
+                            hex_end = p;
+                            break;
+                        }
+                    }
+                    if (hex_end && hex_end > hex_start) {
+                        StrView hex_source = {hex_start,
+                            (size_t)(hex_end - hex_start)};
+                        char* hex_str = ast_copy_source_text(tp, hex_source, span);
+                        if (!hex_str) return nullptr;
+                        char* endptr;
+                        uint32_t code_point = strtoul(hex_str, &endptr, 16);
+                        if (endptr == hex_str + hex_source.length && code_point <= 0x10FFFF) {
+                            stringbuf_append_utf8(str_buf, code_point);
+                            i = (hex_end - content_start);  // position at '}'
+                        } else {
+                            log_error("Invalid Unicode escape: \\u{%s}", hex_str);
+                            stringbuf_append_char(str_buf, '\\');
+                            stringbuf_append_char(str_buf, 'u');
+                            i++;
+                        }
+                        mem_free(hex_str);
+                    } else {
+                        log_error("Malformed Unicode escape sequence");
+                        stringbuf_append_char(str_buf, '\\');
+                        stringbuf_append_char(str_buf, 'u');
+                        i++;
+                    }
+                } else {
+                    log_error("Invalid Unicode escape sequence length");
+                    stringbuf_append_char(str_buf, '\\');
+                    stringbuf_append_char(str_buf, 'u');
+                    i++;
+                }
+                break;
+            default:
+                // Unknown escape sequence, keep as-is
+                log_warn("Unknown escape sequence: \\%c", escape_char);
+                stringbuf_append_char(str_buf, '\\');
+                stringbuf_append_char(str_buf, escape_char);
+                i++;
+                break;
+            }
+        } else {
+            stringbuf_append_char(str_buf, content_start[i]);
+        }
+    }
+
+    // Convert StringBuf to String
+    String* str = stringbuf_to_string(str_buf);
+    str->flags = 0;
+    str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
+    return str;
+}
+
 static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind) {
     // Phase 3: empty strings are values; empty symbol/binary values remain absent.
@@ -4015,123 +4137,8 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         str_type->string = str;
     }
     else {
-        // Has escape sequences - process them
-        StringBuf *str_buf = stringbuf_new(tp->pool);
-
-        for (int i = 0; i < content_len; i++) {
-            if (content_start[i] == '\\' && i + 1 < content_len) {
-                char escape_char = content_start[i + 1];
-                switch (escape_char) {
-                case '"':
-                    stringbuf_append_char(str_buf, '"');
-                    i++;
-                    break;
-                case '\'':
-                    stringbuf_append_char(str_buf, '\'');
-                    i++;
-                    break;
-                case '\\':
-                    stringbuf_append_char(str_buf, '\\');
-                    i++;
-                    break;
-                case '/':
-                    stringbuf_append_char(str_buf, '/');
-                    i++;
-                    break;
-                case 'b':
-                    stringbuf_append_char(str_buf, '\b');
-                    i++;
-                    break;
-                case 'f':
-                    stringbuf_append_char(str_buf, '\f');
-                    i++;
-                    break;
-                case 'n':
-                    stringbuf_append_char(str_buf, '\n');
-                    i++;
-                    break;
-                case 'r':
-                    stringbuf_append_char(str_buf, '\r');
-                    i++;
-                    break;
-                case 't':
-                    stringbuf_append_char(str_buf, '\t');
-                    i++;
-                    break;
-                case 'u':
-                    // Handle Unicode escape sequences: \uXXXX or \u{...}
-                    if (i + 5 < content_len && content_start[i + 2] != '{') {
-                        uint32_t code_point = 0;
-                        size_t consumed = 0;
-                        if (escape_decode_utf16_escape(content_start + i + 2,
-                                (size_t)content_len - (size_t)i - 2, true,
-                                &code_point, &consumed)) {
-                            stringbuf_append_utf8(str_buf, code_point);
-                            i += (int)consumed + 1;  // skip \uXXXX and optional low surrogate
-                        } else {
-                            log_error("Invalid Unicode escape sequence");
-                            stringbuf_append_char(str_buf, '\\');
-                            stringbuf_append_char(str_buf, 'u');
-                            i++;
-                        }
-                    }
-                    else if (i + 3 < content_len && content_start[i + 2] == '{') {
-                        // \u{...} format (variable length hex digits)
-                        const char* hex_start = content_start + i + 3;
-                        const char* hex_end = NULL;
-                        for (const char* p = hex_start; p < content_start + content_len; p++) {
-                            if (*p == '}') {
-                                hex_end = p;
-                                break;
-                            }
-                        }
-                        if (hex_end && hex_end > hex_start) {
-                            StrView hex_source = {hex_start,
-                                (size_t)(hex_end - hex_start)};
-                            char* hex_str = ast_copy_source_text(tp, hex_source, span);
-                            if (!hex_str) return &TYPE_ERROR;
-                            char* endptr;
-                            uint32_t code_point = strtoul(hex_str, &endptr, 16);
-                            if (endptr == hex_str + hex_source.length && code_point <= 0x10FFFF) {
-                                stringbuf_append_utf8(str_buf, code_point);
-                                i = (hex_end - content_start);  // position at '}'
-                            } else {
-                                log_error("Invalid Unicode escape: \\u{%s}", hex_str);
-                                stringbuf_append_char(str_buf, '\\');
-                                stringbuf_append_char(str_buf, 'u');
-                                i++;
-                            }
-                            mem_free(hex_str);
-                        } else {
-                            log_error("Malformed Unicode escape sequence");
-                            stringbuf_append_char(str_buf, '\\');
-                            stringbuf_append_char(str_buf, 'u');
-                            i++;
-                        }
-                    } else {
-                        log_error("Invalid Unicode escape sequence length");
-                        stringbuf_append_char(str_buf, '\\');
-                        stringbuf_append_char(str_buf, 'u');
-                        i++;
-                    }
-                    break;
-                default:
-                    // Unknown escape sequence, keep as-is
-                    log_warn("Unknown escape sequence: \\%c", escape_char);
-                    stringbuf_append_char(str_buf, '\\');
-                    stringbuf_append_char(str_buf, escape_char);
-                    i++;
-                    break;
-                }
-            } else {
-                stringbuf_append_char(str_buf, content_start[i]);
-            }
-        }
-
-        // Convert StringBuf to String
-        str = stringbuf_to_string(str_buf);
-        str->flags = 0;
-        str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
+        str = decode_quoted_content(tp, span, content_start, content_len);
+        if (!str) return &TYPE_ERROR;
 
         // Escapes can only produce empty solid values through generated/stale parsers.
         if (str->len == 0 && is_symbol) {
@@ -14119,6 +14126,14 @@ static StrView direct_key_text(Transpiler* tp, LambdaToken token) {
             name.str[0] == '\'' && name.str[name.length - 1] == '\'') {
         name.str++;
         name.length -= 2;
+        // shapes and path steps must intern decoded spelling, just like symbol values.
+        if (memchr(name.str, '\\', name.length)) {
+            String* decoded = decode_quoted_content(tp, token.span, name.str, (int)name.length);
+            if (decoded) return strview_init(decoded->chars, decoded->len);
+            record_semantic_error_span(tp, token.span, ERR_SEMANTIC_ERROR,
+                "unable to decode quoted name");
+            return strview_init("", 0);
+        }
     }
     return name;
 }

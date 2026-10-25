@@ -1096,21 +1096,27 @@ static void nl_compact(NodeListeners* nl) {
 // representation varies, so keeping conversion outside this helper avoids
 // five copies of the same property write and its allocation ordering.
 static void event_set_value(Item event, const char* key, Item value) {
+    // D5.3.3: interning the property name can collect either argument.
+    RootFrame roots(3);
+    Rooted<Item> event_root(roots,event), value_root(roots,value);
+    Rooted<Item> key_root(roots,js_name_item(key));
     // A live event's fields belong to its record, so write them through the
     // module's member protocol directly. Going through OrdinarySet made every
     // field write realm-dependent -- js_set_key_default reaches for the realm's
     // map_put before it consults the host -- which is why a Lambda script with
     // no realm could not dispatch at all (ESO110).
-    if (dom_event_host_is(event)) {
+    if (dom_event_host_is(event_root.get())) {
         Item out = ItemNull;
-        if (dom_event_host_named_set(event, js_name_item(key), value, &out)) return;
+        if (dom_event_host_named_set(event_root.get(),key_root.get(),value_root.get(),&out)) return;
     }
-    dom_realm_set_name(event, key, value);
+    dom_realm_set_name(event_root.get(),key,value_root.get());
 }
 
 #define EVENT_SET_VALUE(name, type, expression) \
     static void name(Item event, const char* key, type value) { \
-        event_set_value(event, key, expression); \
+        RootFrame roots(1); \
+        Rooted<Item> event_root(roots,event); \
+        event_set_value(event_root.get(), key, expression); \
     }
 EVENT_SET_VALUE(event_set_str, const char*, value ? js_name_item(value) : ItemNull)
 EVENT_SET_VALUE(event_set_bool, bool, (Item){.item = b2it(value ? 1 : 0)})
@@ -1573,28 +1579,34 @@ extern "C" Item js_ctor_wheel_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "KeyboardEvent"));
-    stamp_modifiers(ev, init_arg);
-    event_set_str(ev, "key",  init_str(init_arg, "key", ""));
-    event_set_str(ev, "code", init_str(init_arg, "code", ""));
-    event_set_int(ev, "location",     init_int(init_arg, "location", 0));
-    event_set_bool(ev, "repeat",      init_bool(init_arg, "repeat", false));
-    event_set_bool(ev, "isComposing", init_bool(init_arg, "isComposing", false));
-    event_set_int(ev, "charCode",     init_int(init_arg, "charCode", 0));
-    event_set_int(ev, "keyCode",      init_int(init_arg, "keyCode", 0));
-    event_set_int(ev, "which",        init_int(init_arg, "which", 0));
-    event_set_int(ev, "DOM_KEY_LOCATION_STANDARD", 0);
-    event_set_int(ev, "DOM_KEY_LOCATION_LEFT", 1);
-    event_set_int(ev, "DOM_KEY_LOCATION_RIGHT", 2);
-    event_set_int(ev, "DOM_KEY_LOCATION_NUMPAD", 3);
-    dom_realm_set_name(ev, "getModifierState", dom_realm_new_function(js_event_get_modifier_state));
-    return ev;
+    RootFrame roots(3);
+    Rooted<Item> type_root(roots,type_arg), init_root(roots,init_arg);
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_root.get()),init_root.get(),"KeyboardEvent"));
+    Rooted<Item> event_root(roots,ev);
+    stamp_modifiers(event_root.get(), init_root.get());
+    event_set_str(event_root.get(), "key",  init_str(init_root.get(), "key", ""));
+    event_set_str(event_root.get(), "code", init_str(init_root.get(), "code", ""));
+    event_set_int(event_root.get(), "location",     init_int(init_root.get(), "location", 0));
+    event_set_bool(event_root.get(), "repeat",      init_bool(init_root.get(), "repeat", false));
+    event_set_bool(event_root.get(), "isComposing", init_bool(init_root.get(), "isComposing", false));
+    event_set_int(event_root.get(), "charCode",     init_int(init_root.get(), "charCode", 0));
+    event_set_int(event_root.get(), "keyCode",      init_int(init_root.get(), "keyCode", 0));
+    event_set_int(event_root.get(), "which",        init_int(init_root.get(), "which", 0));
+    event_set_int(event_root.get(), "DOM_KEY_LOCATION_STANDARD", 0);
+    event_set_int(event_root.get(), "DOM_KEY_LOCATION_LEFT", 1);
+    event_set_int(event_root.get(), "DOM_KEY_LOCATION_RIGHT", 2);
+    event_set_int(event_root.get(), "DOM_KEY_LOCATION_NUMPAD", 3);
+    dom_realm_set_name(event_root.get(), "getModifierState", dom_realm_new_function(js_event_get_modifier_state));
+    return event_root.get();
 }
 
 extern "C" Item js_ctor_composition_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "CompositionEvent"));
-    event_set_str(ev, "data", init_str(init_arg, "data", ""));
-    return ev;
+    RootFrame roots(3);
+    Rooted<Item> type_root(roots,type_arg), init_root(roots,init_arg);
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_root.get()),init_root.get(),"CompositionEvent"));
+    Rooted<Item> event_root(roots,ev);
+    event_set_str(event_root.get(), "data", init_str(init_root.get(), "data", ""));
+    return event_root.get();
 }
 
 static Item js_create_native_event_init(bool bubbles, bool cancelable,
@@ -1605,9 +1617,10 @@ static Item js_create_trusted_native_event(const char* type, Item init,
 extern "C" Item js_create_native_composition_event(const char* type,
     const char* data)
 {
-    Item init = js_create_native_event_init(true, false, true);
-    event_set_str(init, "data", data ? data : "");
-    return js_create_trusted_native_event(type ? type : "compositionupdate", init,
+    RootFrame roots(1);
+    Rooted<Item> init_root(roots, js_create_native_event_init(true, false, true));
+    event_set_str(init_root.get(), "data", data ? data : "");
+    return js_create_trusted_native_event(type ? type : "compositionupdate", init_root.get(),
                                           js_ctor_composition_event_fn);
 }
 
@@ -2273,14 +2286,15 @@ extern "C" Item js_create_native_keyboard_event(const char* type,
     bool ctrl, bool shift, bool alt, bool meta,
     bool repeat)
 {
-    Item init = js_create_native_event_init(true, true, true);
-    if (key) event_set_str(init, "key", key);
-    if (code) event_set_str(init, "code", code);
-    event_set_int(init, "keyCode", legacy_key_code);
-    event_set_int(init, "which", legacy_key_code);
-    event_set_bool(init, "repeat", repeat);
-    stamp_modifier_init(init, ctrl, shift, alt, meta);
-    return js_create_trusted_native_event(type, init, js_ctor_keyboard_event_fn);
+    RootFrame roots(1);
+    Rooted<Item> init_root(roots, js_create_native_event_init(true, true, true));
+    if (key) event_set_str(init_root.get(), "key", key);
+    if (code) event_set_str(init_root.get(), "code", code);
+    event_set_int(init_root.get(), "keyCode", legacy_key_code);
+    event_set_int(init_root.get(), "which", legacy_key_code);
+    event_set_bool(init_root.get(), "repeat", repeat);
+    stamp_modifier_init(init_root.get(), ctrl, shift, alt, meta);
+    return js_create_trusted_native_event(type, init_root.get(), js_ctor_keyboard_event_fn);
 }
 
 extern "C" Item js_create_native_focus_event(const char* type, Item related_target) {
@@ -2346,22 +2360,24 @@ extern "C" Item js_create_native_input_event(const char* type,
     // Per Input Events Level 2 §3.2: `beforeinput` is cancelable, `input`
     // is not. Both bubble and are composed.
     bool is_beforeinput = (type && strcmp(type, "beforeinput") == 0);
-    Item init = js_create_native_event_init(true, is_beforeinput, true);
-    if (data) event_set_str(init, "data", data);
-    else event_set_item(init, "data", ItemNull);
-    event_set_str(init, "inputType", input_type ? input_type : "");
-    event_set_bool(init, "isComposing", is_composing);
-    if (data_transfer.item != 0) {
-        event_set_item(init, "dataTransfer", data_transfer);
+    RootFrame roots(4);
+    Rooted<Item> transfer_root(roots,data_transfer), ranges_root(roots,target_ranges);
+    Rooted<Item> init_root(roots,js_create_native_event_init(true,is_beforeinput,true));
+    if (data) event_set_str(init_root.get(), "data", data);
+    else event_set_item(init_root.get(), "data", ItemNull);
+    event_set_str(init_root.get(), "inputType", input_type ? input_type : "");
+    event_set_bool(init_root.get(), "isComposing", is_composing);
+    if (transfer_root.get().item != 0) {
+        event_set_item(init_root.get(), "dataTransfer", transfer_root.get());
     }
-    Item ev = js_create_trusted_native_event(type ? type : "beforeinput", init,
-                                              js_ctor_input_event_fn);
+    Rooted<Item> event_root(roots,js_create_trusted_native_event(type ? type : "beforeinput",init_root.get(),
+                                              js_ctor_input_event_fn));
     // Stash the StaticRange[] snapshot so getTargetRanges() can return it.
     // If caller passed ItemNull, store an empty array — the WPT
     // `input-events-get-target-ranges*` tests expect the method to always
     // return an array (possibly empty), never null.
-    js_input_event_install_target_ranges(ev, target_ranges);
-    return ev;
+    js_input_event_install_target_ranges(event_root.get(),ranges_root.get());
+    return event_root.get();
 }
 
 extern "C" Item js_create_native_wheel_event(const char* type,

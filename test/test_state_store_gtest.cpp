@@ -7,6 +7,7 @@ extern "C" {
 #include "../lib/test_utils.h"
 #include "../lib/arraylist.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/mem.h"
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -75,6 +76,36 @@ protected:
         return doc.state;
     }
 };
+
+TEST_F(StateStoreDomMutationTest, InputMethodTransportReleasesPendingRequestsAndPopupLabels) {
+    MemtrackCategoryStats before = {}, after = {};
+    memtrack_get_category_stats(MEM_CAT_DOM, &before);
+    InputMethodTransport* transport = &state()->input_method;
+    transport->labels[0] = mem_strdup("北京", MEM_CAT_DOM);
+    transport->labels[1] = mem_strdup("背景", MEM_CAT_DOM);
+    transport->count = 2;
+    transport->visible = true;
+    transport->popup_target = dom_node_ref(live);
+    for (int i = 0; i < 2; i++) {
+        auto* request = (ScriptCompositionRequest*)mem_calloc(1, sizeof(ScriptCompositionRequest), MEM_CAT_DOM);
+        ASSERT_NE(request, nullptr);
+        request->text = mem_strdup("beijing", MEM_CAT_DOM);
+        if (transport->tail) transport->tail->next = request;
+        else transport->head = request;
+        transport->tail = request;
+    }
+    input_method_cleanup(state());
+    EXPECT_EQ(transport->head, nullptr);
+    EXPECT_EQ(transport->tail, nullptr);
+    EXPECT_EQ(transport->labels[0], nullptr);
+    EXPECT_EQ(transport->labels[1], nullptr);
+    EXPECT_EQ(transport->count, 0);
+    EXPECT_FALSE(transport->visible);
+    EXPECT_EQ(transport->popup_target.address, nullptr);
+    memtrack_get_category_stats(MEM_CAT_DOM, &after);
+    EXPECT_EQ(after.current_bytes, before.current_bytes);
+    EXPECT_EQ(after.current_count, before.current_count);
+}
 
 TEST_F(StateStoreDomMutationTest, DirtyCoalescingKeepsOnlyUnambiguousSourceHints) {
     DirtyTracker* tracker = &state()->dirty_tracker;

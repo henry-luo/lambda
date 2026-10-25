@@ -1,0 +1,229 @@
+{
+  "name": "ime_chinese_traditional",
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 800,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-profile','zh-Hant'); document.body.setAttribute('data-ime-directory','test/ime/fixture_hant');"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "zhongguo"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "zhongguo"
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": true,
+      "mode": "chinese"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "中國"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#rich"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "fazhan"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "發展"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "toufa"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "頭髮"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "fa"
+    },
+    {
+      "type": "assert_ime_popup",
+      "count": 2
+    },
+    {
+      "type": "ime_popup_click",
+      "row": 1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "髮"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "zhongguo"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "zhongguo"
+    },
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-profile','zh-Hans'); document.body.setAttribute('data-ime-directory','test/ime/fixture');"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "zhongguo"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "中国"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    }
+  ]
+}

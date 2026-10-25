@@ -90,9 +90,35 @@ static void state_store_destroy_model_edit_surface_bindings(DocState* state) {
     state->editing.next_model_edit_surface_id = 0;
 }
 
+void input_method_clear_labels(InputMethodTransport* transport) {
+    for (char*& label : transport->labels) { mem_free(label); label = nullptr; }
+    transport->count = 0;
+}
+
+void input_method_cleanup(DocState* state) {
+    if (!state) return;
+    InputMethodTransport* transport = &state->input_method;
+    while (transport->head) {
+        ScriptCompositionRequest* request = transport->head;
+        transport->head = request->next;
+        mem_free(request->text);
+        mem_free(request);
+    }
+    transport->tail = nullptr;
+    input_method_clear_labels(transport);
+    transport->visible = false;
+    transport->popup_target = {};
+}
+
 static void state_store_release_script_values(DocState* state, Context* owner) {
     dom_edit_discard_retained_deltas(state);
     state_store_destroy_model_edit_surface_bindings(state);
+    if (state->input_method.session_rooted) {
+        heap_unregister_gc_root_for(owner, &state->input_method.session_root);
+        state->input_method.session_rooted = false;
+        state->input_method.session_root = ItemNull.item;
+    }
+    input_method_cleanup(state);
     if (state->editing.dom_edit_session_rooted) {
         heap_unregister_gc_root_for(owner, &state->editing.dom_edit_session_root);
         state->editing.dom_edit_session_rooted = false;
@@ -1882,6 +1908,8 @@ extern "C" void selection_refresh_presentation(DocState* state) {
 }
 
 void DocState::destroy() {
+    // a document may close during preedit, before any compositionend can release its bytes.
+    editing_composition_clear_preedit(this);
     // The package can retain opaque generic DOM delta ids. Release their
     // document-owned snapshots before this state's DOM/storage dependencies
     // begin teardown (D5.3.3).
@@ -2864,6 +2892,9 @@ static void doc_state_detach_transient_owner(DocState* state, View* view) {
         state->dropdown_height = 0.0f;
         dropdown_reset_scroll(state);
     }
+    if (state->input_method.popup_target.address == view) {
+        input_method_cleanup(state);
+    }
     if (state->context_menu_target == view) {
         doc_state_log_context_menu_target_transition(state, state->context_menu_target, NULL);
         if (state->context_menu_hover != -1) {
@@ -3201,6 +3232,12 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         state->dropdown_width = 0.0f;
         state->dropdown_height = 0.0f;
         dropdown_reset_scroll(state);
+        changed++;
+    }
+    if (state->input_method.popup_target.address &&
+        !view_tree_contains_view(root, state->input_method.popup_target.address)) {
+        // DOM removal can bypass explicit subtree retirement; prune copied popup state too.
+        input_method_cleanup(state);
         changed++;
     }
     if (state->context_menu_target && !view_tree_contains_view(root, state->context_menu_target)) {

@@ -229,6 +229,7 @@ void render_ui_overlays(RasterRenderContext* rdcon, DocState* state) {
     }
 
     context_menu_render(rdcon, state);
+    input_method_popup_render(rdcon, state);
 
     if (state->drag_drop && state->drag_drop->active) {
         DragDropState* dd = state->drag_drop;
