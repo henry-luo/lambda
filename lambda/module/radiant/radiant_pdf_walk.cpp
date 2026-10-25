@@ -319,7 +319,12 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
         PdfPaintBatch batch(ctx, {x + rect->x, y + rect->y, rect->width, rect->height});
         bool background = parent && render_paint_text_background(batch.paint, ctx->ui_context, parent, &run,
             {x, y, parent->width, parent->height});
-        bool direct = !decorated && !background && !ctx->effect.active;
+        // an inline element's own background and border, one box per fragment (as raster paints it)
+        int before_inline_box = paint_list_count(batch.paint);
+        if (parent && !render_paint_text_inline_box(batch.paint, ctx->ui_context, parent, rect, x + rect->x, y + rect->y))
+            pdf_walk_fail(ctx, "cannot record inline box");
+        bool inline_box = paint_list_count(batch.paint) != before_inline_box;
+        bool direct = !decorated && !background && !inline_box && !ctx->effect.active;
         if (direct) {
             paint_glyph_run(batch.paint, &run);
             RootFrame roots(1);

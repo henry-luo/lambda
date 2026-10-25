@@ -16844,6 +16844,23 @@ TEST_F(SecondaryViewTest, PagedFlowRetainsRichBoundaryAndInlinePaintAfterWorkspa
     EXPECT_TRUE(render_secondary_view_to_pdf(retained, "temp/paged-retirement/rich-paint.pdf"));
 }
 
+TEST_F(SecondaryViewTest, PagedFlowPublishesRoundedBackgroundWithoutABorder) {
+    init_vector_engine();
+    stylesheet("@page{size:100px 60px;margin:0}div{margin:0}");
+    // border-radius alone keeps a zero-width border whose sides have no style; such a side paints
+    // nothing and must not fail the box's publication (a slide card: radius, fill and shadow).
+    DomElement* card = block(nullptr, "width:60px;height:30px;border-radius:8px;background:rgb(200,40,40);"
+        "box-shadow:0 4px 8px rgba(0,0,0,0.3)", "div");
+    ASSERT_NE(card, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default();
+    PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ImageSurface* snapshot = render_secondary_page_snapshot(tree, 1, 1.0f); ASSERT_NE(snapshot, nullptr);
+    Color fill = {snapshot_pixel(snapshot, 30, 30)};
+    EXPECT_GT(fill.r, 180); EXPECT_LT(fill.g, 80); EXPECT_LT(fill.b, 80);
+    image_surface_destroy(snapshot);
+}
+
 TEST_F(SecondaryViewTest, PagedFlowSliceBackgroundsKeepTheirPositioningArea) {
     init_vector_engine();
     stylesheet("@page{size:100px 60px;margin:0}p,div{margin:0;font:10px/12px Arial;orphans:1;widows:1}");

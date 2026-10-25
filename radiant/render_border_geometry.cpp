@@ -98,8 +98,10 @@ bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, b
     if (!border || side >= 4 || !emit) return false;
     CssEnum style = border->styles[side]; Color color = border->colors[side];
     float width = border->width.values[side];
-    if (!render_border_style_supported(style)) return false;
+    // a side that paints nothing needs no style support: a box with only a border-radius keeps a
+    // zero-width side whose style was never set, and rejecting it failed the whole boundary.
     if (width <= 0.0f || !color.a || style == CSS_VALUE_NONE || style == CSS_VALUE_HIDDEN) return true;
+    if (!render_border_style_supported(style)) return false;
     float before = border->width.values[side == 0 || side == 2 ? 3 : 0];
     float after = border->width.values[side == 0 || side == 2 ? 1 : 2];
     if ((style == CSS_VALUE_DOUBLE && width >= 3.0f) || style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {

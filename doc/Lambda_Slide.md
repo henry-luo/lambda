@@ -435,6 +435,26 @@ Use `snapshot` or `handout` with existing HTML/SVG/PDF/PNG paths where supported
 handout page-break hints are not a promise of new PDF pagination behavior.
 Resolve assets relative to the source document or provide `base_uri` explicitly.
 
+### Exporting a PDF
+
+`lambda.slide.export_pdf.export_pdf(deck_path)^` writes the deck as one PDF, a page per
+slide at its final build and at the deck's own size, next to the deck (`talks/deck.slides`
+becomes `talks/deck.pdf`), and returns that path. Every build is shown, so a slide whose
+later clicks add or cover content exports with all of it. `lambda run` takes no script
+arguments, so call it from another script or the REPL:
+
+```lambda no-run
+import export: lambda.slide.export_pdf
+
+pn main() { print(export.export_pdf("talks/deck.slides")^, "\n") }
+```
+
+It lays each slide out as a static page, renders the page with `lambda render` (the running
+executable), and joins the pages with `pdfunite` (poppler), as Lambda has no PDF merge of its
+own; without `pdfunite` it stops with an error and keeps the per-slide PDFs in
+`temp/slide_export/<deck name>/`. A paged `lambda render --paged` of the whole deck is not
+used: its paged flow does not yet paint transformed subtrees or inline SVG.
+
 Each live player parks when waiting for manual input, paused, or finished.
 Autoplay dwell requests frames but keeps the completed cue's visual time fixed.
 DOM handles and frame requests
