@@ -38,6 +38,10 @@ String* format_org_string(Pool* pool, Item root_item);
 String* format_textile_string(Pool* pool, Item root_item);
 String* format_text_string(Pool* pool, Item root_item);
 String* format_mark(Pool* pool, Item root_item);
+// glTF 2.0 export of a scene3d element tree: JSON with an embedded data-URI buffer,
+// or GLB bytes when `binary`; on failure `error` names the unsupported construct.
+String* format_gltf(Pool* pool, Item root_item);
+bool format_gltf_bytes(Item root_item, bool binary, struct StrBuf* out, const char** error);
 
 // StringBuf variants (internal — prefer String* versions above)
 void format_json_to_strbuf(StringBuf* sb, Item root_item);

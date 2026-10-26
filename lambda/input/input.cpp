@@ -2021,6 +2021,8 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"text/x-3d-model", "a3d"},
     {"model/x-bvh", "bvh"},
     {"model/x-fbx", "fbx"},
+    {"model/stl", "stl"},
+    {"model/x-ply", "ply"},
     {"application/json", "json"},
     {"text/csv", "csv"},
     {"text/tab-separated-values", "tsv"},
@@ -2386,6 +2388,7 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
 #endif
         else if (input_parse_model(input, source, source_len, effective_type)) {}
+        else if (input_parse_mesh(input, source, source_len, effective_type)) {}
         else if (input_parse_source_exact(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {

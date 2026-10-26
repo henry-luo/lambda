@@ -64,10 +64,26 @@ inline ItemReader asset_at(ItemReader item, size_t index) { return item.asArray(
 inline double asset_component(ItemReader item, size_t index, double fallback = NAN) {
     return asset_number(asset_at(item,index),fallback);
 }
+// decodes one EXT_meshopt_compression view (count elements of stride bytes) into out;
+// returns null on success or the reason the stream is invalid.
+const char* meshopt_decode(uint8_t* out, size_t count, size_t stride, const uint8_t* data, size_t length,
+    const char* mode, const char* filter);
 Item asset_color(SceneAsset& asset, const double* color);
+// one per-vertex geometry stream (positions first) of a static mesh under construction
+static constexpr unsigned ASSET_COLUMN_COUNT = 6;
+struct AssetColumn { const char* name = nullptr; unsigned width = 0; lam::ArrayList<double> values; };
+// writes each named column, optionally gathering only the listed source vertices
+void asset_geometry_columns(SceneAsset& asset, Item geometry, AssetColumn* columns, const lam::ArrayList<unsigned>* vertices = nullptr);
+bool asset_face_normal(const lam::ArrayList<double>& points, unsigned p, unsigned q, unsigned r, double* normal);
+// splits a static triangle list into native-sized meshes under parent; `flat` gives each
+// triangle its own corners and face normal
+void asset_static_chunks(SceneAsset& asset, Item parent, Item material, AssetColumn* columns,
+    const lam::ArrayList<double>& triangles, size_t vertex_count, bool flat);
 bool asset_triangulate(SceneAsset& asset, const double* positions, size_t count, lam::ArrayList<unsigned>& triangles, double* normal = nullptr);
 bool asset_import_gltf(SceneAsset& asset, Item source, const uint8_t* binary = nullptr, size_t binary_length = 0);
 bool asset_import_glb(SceneAsset& asset, const char* source, size_t length);
 bool asset_import_wavefront(SceneAsset& asset, Item source);
 bool asset_import_a3d(SceneAsset& asset, Item source);
+bool asset_import_stl(SceneAsset& asset, const char* source, size_t length);
+bool asset_import_ply(SceneAsset& asset, const char* source, size_t length);
 }

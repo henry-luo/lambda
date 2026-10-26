@@ -149,3 +149,73 @@ frame 2000
 
 End
 ''')
+# Binary STL: a tetrahedron whose stored facet normals are stale zeros; the winding is outward.
+tetra = [(0,0,0),(1,0,0),(0,1,0),(0,0,1)]
+facets = [(0,2,1),(0,1,3),(0,3,2),(1,2,3)]
+stl = b'CC0 Lambda tetrahedron'.ljust(80, b'\0') + struct.pack('<I', len(facets))
+for f in facets: stl += struct.pack('<3f', 0, 0, 0) + b''.join(struct.pack('<3f', *tetra[i]) for i in f) + b'\0\0'
+(root / 'tetra.stl').write_bytes(stl)
+# Binary PLY: a pyramid with a quad base and per-vertex uchar colors.
+pyramid = [(-.5,0,-.5,255,80,80),(.5,0,-.5,80,255,80),(.5,0,.5,80,80,255),(-.5,0,.5,255,255,80),(0,.8,0,255,255,255)]
+sides = [(0,1,2,3),(1,0,4),(2,1,4),(3,2,4),(0,3,4)]
+header = ('ply\nformat binary_little_endian 1.0\ncomment CC0 Lambda pyramid\nelement vertex 5\nproperty float x\nproperty float y\n'
+    'property float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face 5\n'
+    'property list uchar int vertex_indices\nend_header\n')
+body = b''.join(struct.pack('<3f3B', *v) for v in pyramid) + b''.join(struct.pack('<B%di' % len(f), len(f), *f) for f in sides)
+(root / 'pyramid.ply').write_bytes(header.encode() + body)
+# EXT_meshopt_compression with raw (mode 3) attribute groups and a delta index sequence,
+# plus KHR_texture_transform, KHR_materials_emissive_strength and KHR_lights_punctual.
+def meshopt_attributes(data, count, stride):
+    out = bytearray([0xa0]); block = min((8192 // stride) & ~15, 256); last = [0] * stride
+    for offset in range(0, count, block):
+        n = min(block, count - offset); groups = (n + 15) // 16
+        for k in range(stride):
+            out += b'\xff' * ((groups + 3) // 4); previous = last[k]
+            for i in range(groups * 16):
+                delta = 0
+                if i < n: value = data[(offset + i) * stride + k]; delta = (value - previous) & 255; previous = value
+                out.append(((delta << 1) ^ (255 if delta & 128 else 0)) & 255)
+            last[k] = previous
+    return bytes(out + bytes(max(32, stride)))
+def meshopt_indices(values):
+    out = bytearray([0xd1]); last = 0
+    for value in values:
+        delta = value - last; last = value; v = ((delta << 1) ^ (delta >> 31)) << 1
+        while v >= 128: out.append((v & 127) | 128); v >>= 7
+        out.append(v)
+    return bytes(out + bytes(4))
+quad = struct.pack('<12f', -.5,-.5,0, .5,-.5,0, .5,.5,0, -.5,.5,0)
+quad_uv = struct.pack('<8f', 0,1, 1,1, 1,0, 0,0)
+quad_index = [0,1,2,0,2,3]
+streams = [meshopt_attributes(quad, 4, 12), meshopt_attributes(quad_uv, 4, 8), meshopt_indices(quad_index)]
+packed, offsets = bytearray(), []
+for s in streams:
+    while len(packed) % 4: packed.append(0)
+    offsets.append(len(packed)); packed += s
+def compressed(fallback_offset, length, stride, count, mode, index):
+    view = {'buffer': 1, 'byteOffset': fallback_offset, 'byteLength': length,
+        'extensions': {'EXT_meshopt_compression': {'buffer': 0, 'byteOffset': offsets[index], 'byteLength': len(streams[index]),
+        'byteStride': stride, 'count': count, 'mode': mode}}}
+    if mode == 'ATTRIBUTES': view['byteStride'] = stride
+    return view
+lit = {'asset': {'version': '2.0', 'generator': 'Lambda fixture generator'},
+    'extensionsUsed': ['EXT_meshopt_compression', 'KHR_texture_transform', 'KHR_materials_emissive_strength', 'KHR_lights_punctual'],
+    'extensionsRequired': ['EXT_meshopt_compression'],
+    'extensions': {'KHR_lights_punctual': {'lights': [
+        {'type': 'spot', 'name': 'key', 'color': [1, .9, .7], 'intensity': 6, 'range': 8, 'spot': {'innerConeAngle': .3, 'outerConeAngle': .6}},
+        {'type': 'point', 'name': 'fill', 'intensity': 2}]}},
+    'buffers': [{'byteLength': len(packed), 'uri': 'data:application/octet-stream;base64,' + base64.b64encode(bytes(packed)).decode()},
+        {'byteLength': 92, 'extensions': {'EXT_meshopt_compression': {'fallback': True}}}],
+    'bufferViews': [compressed(0, 48, 12, 4, 'ATTRIBUTES', 0), compressed(48, 32, 8, 4, 'ATTRIBUTES', 1), compressed(80, 12, 2, 6, 'INDICES', 2)],
+    'accessors': [{'bufferView': 0, 'componentType': 5126, 'count': 4, 'type': 'VEC3', 'min': [-.5,-.5,0], 'max': [.5,.5,0]},
+        {'bufferView': 1, 'componentType': 5126, 'count': 4, 'type': 'VEC2'},
+        {'bufferView': 2, 'componentType': 5123, 'count': 6, 'type': 'SCALAR'}],
+    'images': [{'uri': 'textures/checker.png'}], 'textures': [{'source': 0}],
+    'materials': [{'name': 'glow', 'pbrMetallicRoughness': {'baseColorTexture': {'index': 0,
+        'extensions': {'KHR_texture_transform': {'scale': [2, 2]}}}}, 'emissiveFactor': [.2, .1, 0],
+        'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 2}}}],
+    'meshes': [{'primitives': [{'attributes': {'POSITION': 0, 'TEXCOORD_0': 1}, 'indices': 2, 'material': 0}]}],
+    'nodes': [{'mesh': 0, 'name': 'panel'},
+        {'name': 'key light', 'translation': [0, 0, 2], 'extensions': {'KHR_lights_punctual': {'light': 0}}},
+        {'name': 'fill light', 'translation': [1, 1, 1], 'extensions': {'KHR_lights_punctual': {'light': 1}}}]}
+(root / 'lit.gltf').write_text(json.dumps(lit, indent=2) + '\n')

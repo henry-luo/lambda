@@ -1,0 +1,110 @@
+{
+  "name": "PointSpotAndEmissiveLightsShadeLambertSurfaces",
+  "viewport": {
+    "width": 320,
+    "height": 560
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#point",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          128,
+          128,
+          128,
+          255,
+          4
+        ],
+        [
+          80,
+          64,
+          78,
+          78,
+          78,
+          255,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cutoff",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          68,
+          68,
+          68,
+          255,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#spot",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          128,
+          128,
+          128,
+          255,
+          4
+        ],
+        [
+          80,
+          64,
+          0,
+          0,
+          0,
+          255,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#emissive",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          48,
+          64,
+          255,
+          0,
+          0,
+          255,
+          4
+        ],
+        [
+          80,
+          64,
+          188,
+          188,
+          188,
+          255,
+          4
+        ]
+      ]
+    }
+  ]
+}

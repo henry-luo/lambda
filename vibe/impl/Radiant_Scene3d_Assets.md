@@ -175,3 +175,25 @@ no Blade source or golden was changed here. Evidence is in
 `temp/cellview-quarter-blade-before.txt`.
 Build-time upstream sources and preparation tools stay under ignored `temp/`;
 the shipped assets and preparation instructions are self-contained.
+
+## STL, PLY, meshopt, glTF extensions and export (2026-10-26)
+
+Implemented against [WebGL design §4, §14 and §15](../radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), including its new "glTF and GLB export" subsection. **D4.1.3**, **D7.1.1** and **D7.2.4** apply; no formal ruling changed.
+
+- **`EXT_meshopt_compression`** (`lambda/input/input-meshopt.cpp`): the attribute (version 0), triangle and index-sequence (version 1) codecs and the octahedral, quaternion and exponential filters, every read bounded by the declared compressed length. Compressed views decode once into loader scratch before any accessor; fallback buffers are placeholders and are never read.
+- **`KHR_texture_transform`** on the base-color texture is baked into the primitive's UVs. **`emissiveFactor`** with **`KHR_materials_emissive_strength`** becomes material `emissive` / `emissive-intensity`, omitted with a warning when an emissive texture would modulate it. **`KHR_lights_punctual`** lights become `<light>` children of their nodes; `lambda.scene3d.load(..., {lights: false})` drops them.
+- **Renderer** (`radiant/scene3d.cpp`): `point` and `spot` lights (inverse-square falloff with a smooth `distance` cutoff; spot `angle`/`penumbra` cones, Three.js semantics) share the eight-light quota with directional lights; materials add `emissive` and `emissive-intensity`. The box/plane generator and the smooth-normal accumulation moved to `lib/mesh_primitive.h` so export reproduces rendered geometry.
+- **STL and PLY** (`lambda/input/input-mesh.cpp`): one native parse feeds both the raw typed-array mapping and the scene conversion; binary STL is recognized by its size, PLY reads all three encodings.
+- **Export** (`lambda/format/format-gltf.cpp`): `format(x, 'gltf')` (embedded buffer) and `format(x, 'glb')` (binary value), and `lambda convert … -t gltf|glb`, which loads the source as a scene asset. Skeletons, morphs, animation clips and depth-only materials are refused with a named error.
+
+Verification on macOS, debug build:
+
+- `test_input_model_gtest`: **47/47**, including 13 new cases. Meshopt streams were built by hand from the specification, with expected outputs worked out independently of the decoder (every group mode and escape, block-to-block baselines, FIFO/codeaux/free-index triangle paths, two-baseline index sequences, and all three filters). No reference-encoder fixture was available locally, so the decoder is not yet cross-checked against `meshoptimizer`'s own encoder.
+- Round trips: PLY → GLB, binary STL → glTF and OBJ/MTL → GLB re-imported through the glTF loader with matching geometry and textures; an exported extension fixture re-imports its emission, lights and transformed UVs.
+- `Scene3dTest.*`: **68/68**, with the new `PointSpotAndEmissiveLightsShadeLambertSurfaces`, whose expected pixels were computed from the shading model (point centre 128 and 78 one unit out, cutoff 68, spot 128 inside / 0 outside, emission 255,0,0 and 188); a deliberately wrong expectation fails. `test_scene3d_unit_gtest`: **28/28**.
+- Package goldens `AutoDiscovered/*scene3d_*`: **14/14**, with the new `test/lambda/scene3d/formats.ls`.
+- `make test-lambda-baseline`: **8,271/8,272** (input 2,112/2,112, runtime 6,159/6,160). The one failure, `Tiers/HotwireHttpTest.ClientAndServer/1`, stopped mid-script under full-suite load and passed on two isolated reruns; this work does not touch that path.
+- `make test-radiant-baseline` passed with no failures: 6,217 passed, 141 partial (the suites' recorded partial-pass counts), 2 skipped; Radiant View 217/218 with one skip, render visual baseline 207/212 with its 4 expected failures and 1 skip.
+- `make lint` (`no-int-cast-radiant`) and `git diff --check` are clean. `make check-doc-code` reports 19 failures, all in code fences these doc edits did not touch.
+
+Remaining limits: Draco, Basis/KTX2 and USD are not supported; exported texture URIs are written as resolved (absolute `file:` URLs for loaded models) and GLB does not embed images; binary STL colour conventions are not interpreted.

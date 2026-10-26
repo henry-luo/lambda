@@ -1754,7 +1754,12 @@ int exec_convert(int argc, char* argv[]) {
     // Create type string (handle "type:flavor" format)
     String* type_string = NULL;
     String* flavor_string = NULL;
-    if (from_format) {
+    // glTF export reads models as scene3d assets; -f names the source model format.
+    bool gltf_output = !strcmp(to_format, "gltf") || !strcmp(to_format, "glb");
+    if (gltf_output) {
+        type_string = create_string(temp_pool, "scene3d-asset");
+        flavor_string = create_string(temp_pool, from_format ? from_format : "auto");
+    } else if (from_format) {
         // Check for colon-separated format (e.g., "graph:mermaid")
         const char* colon = strchr(from_format, ':');
         if (colon) {
@@ -1825,7 +1830,20 @@ int exec_convert(int argc, char* argv[]) {
 
         // Use the existing format functions based on target format
         bool is_yaml_input = from_format && (strcmp(from_format, "yaml") == 0 || strcmp(from_format, "yml") == 0);
-        if (strcmp(to_format, "svg") == 0 && is_eps_input) {
+        if (gltf_output) {
+            StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
+            bool binary = !strcmp(to_format, "glb");
+            if (!format_gltf_bytes(input->root, binary, bytes, &reason)) {
+                printf("Error: glTF export: %s\n", reason);
+                strbuf_free(bytes); mem_pool_destroy(temp_pool); return 1;
+            }
+            printf("Writing output to: %s\n", output_file);
+            int written = write_binary_file(output_file, bytes->str, bytes->length);
+            strbuf_free(bytes);
+            if (written != 0) { printf("Error: Failed to write %s\n", output_file); mem_pool_destroy(temp_pool); return 1; }
+            printf("Conversion completed successfully!\n");
+            mem_pool_destroy(temp_pool); return 0;
+        } else if (strcmp(to_format, "svg") == 0 && is_eps_input) {
             full_doc_output = run_document_transform_markup(input_file,
                 lambda_document_transform_for_input_type("eps"), nullptr, 0, true);
         } else if (strcmp(to_format, "json") == 0) {

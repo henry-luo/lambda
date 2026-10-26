@@ -299,6 +299,7 @@ MimeGlob glob_patterns[] = {
 
     // 3D
     {"*.stl", "model/stl"},
+    {"*.ply", "model/x-ply"},
     {"*.obj", "model/obj"},
     {"*.mtl", "model/mtl"},
     {"*.gltf", "model/gltf+json"},

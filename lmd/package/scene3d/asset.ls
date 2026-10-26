@@ -6,7 +6,8 @@ pub fn rewrite(n, prefix, options) element {
     let attrs = map([for (k, v in n where k is string or k is symbol)
         (string(k), if (contains(["id", "geometry", "material", "texture", "skeleton"], string(k))) prefixed(v, prefix)
             else if (kind == 'keyframe-track' and string(k) == "path") prefixed(v, prefix) else v)])
-    let children = [for (child in content(n)) rewrite(child, prefix, options)]
+    // `lights: false` drops imported punctual lights so the caller's scene lighting stands alone.
+    let children = [for (child in content(n) where options.lights != false or name(child) != 'light') rewrite(child, prefix, options)]
     // Lambda tags are static; share attribute/reference traversal across tag constructors.
     if (kind == 'group') <group *: attrs, *children>
     else if (kind == 'mesh') <mesh *: attrs, *children>
@@ -16,6 +17,7 @@ pub fn rewrite(n, prefix, options) element {
     else if (kind == 'texture') <texture *: attrs>
     else if (kind == 'skeleton') <skeleton *: attrs, *children>
     else if (kind == 'bone') <bone *: attrs, *children>
+    else if (kind == 'light') <light *: attrs>
     else if (kind == 'animation-clip') <'animation-clip' *: attrs,
         autoplay: options.autoplay == true and n.id == options.clip_id, *children>
     else <'keyframe-track' *: attrs>

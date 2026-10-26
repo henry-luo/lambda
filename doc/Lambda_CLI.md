@@ -188,7 +188,9 @@ lambda convert <input> [-f <from>] -t <to> -o <output> [options]
 
 **Supported output formats:**
 
-`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`
+`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`, `gltf`, `glb`
+
+For `gltf` and `glb` the input is loaded as a 3D scene asset (OBJ/MTL, glTF/GLB, A3D, STL or PLY); `-f` then names the source model format instead of a data format. `glb` is written as binary. See the [glTF export mapping](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export).
 
 The input format flag `-f` supports colon-separated `type:flavor` syntax (e.g., `graph:mermaid`).
 
@@ -217,6 +219,7 @@ lambda convert notes.txt -f wiki:zimwiki -t wiki:creole --loss allow -o notes.cr
 lambda convert guide.md -t asciidoc -o guide.adoc
 lambda convert guide.md -t typst -o guide.typ
 lambda convert contacts.vcf -f vcf -t vcf -o exported.vcf
+lambda convert scan.ply -t glb -o scan.glb
 ```
 
 ---
