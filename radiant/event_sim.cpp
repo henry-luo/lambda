@@ -1499,6 +1499,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "assert_preedit") == 0) {
         ev->type = SIM_EVENT_ASSERT_PREEDIT;
         parse_assertion_strings(reader, ev, true);
+        ev->expected_char_offset = reader.has("caret") ? reader.get("caret").asInt32() : -1;
     }
     else if (strcmp(type_str, "assert_password_reveal") == 0) {
         ev->type = SIM_EVENT_ASSERT_PASSWORD_REVEAL;
@@ -1626,6 +1627,12 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->expected_ime_count = reader.has("count") ? reader.get("count").asInt32() : -1;
         ev->expected_ime_page = reader.has("page") ? reader.get("page").asInt32() : -1;
         ev->expected_ime_highlight = reader.has("highlight") ? reader.get("highlight").asInt32() : -1;
+        ev->expected_ime_expanded = reader.has("expanded") ? reader.get("expanded").asBool() : -1;
+        ev->expected_ime_columns = reader.has("columns") ? reader.get("columns").asInt32() : -1;
+        ev->expected_ime_scrolled = reader.has("scrolled") ? reader.get("scrolled").asBool() : -1;
+        ev->expected_ime_font_size = reader.has("font_size") ? sim_number_as_float(reader.get("font_size")) : -1.0f;
+        ev->expected_ime_horizontal = reader.get("horizontal").asBool();
+        ev->expected_ime_contained = reader.get("within_viewport").asBool();
         const char* mode = reader.get("mode").cstring();
         if (mode) ev->assert_equals = mem_strdup(mode, MEM_CAT_LAYOUT);
     }
@@ -4726,10 +4733,32 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 (ev->expected_ime_count < 0 || popup->count == ev->expected_ime_count) &&
                 (ev->expected_ime_page < 0 || popup->page == ev->expected_ime_page) &&
                 (ev->expected_ime_highlight < 0 || popup->highlight == ev->expected_ime_highlight) &&
+                (ev->expected_ime_expanded < 0 || popup->expanded == (ev->expected_ime_expanded != 0)) &&
+                (ev->expected_ime_columns < 0 || popup->columns == ev->expected_ime_columns) &&
+                (ev->expected_ime_scrolled < 0 || (popup->scroll_y > 0.01f) == (ev->expected_ime_scrolled != 0)) &&
+                (ev->expected_ime_font_size < 0.0f || fabsf(popup->font.font_size - ev->expected_ime_font_size) < 0.01f) &&
                 (!ev->assert_equals || popup->chinese == (strcmp(ev->assert_equals, "chinese") == 0));
+            Rect previous = {};
+            for (int i = 0; passed && popup && ev->expected_ime_horizontal && i < popup->count; i++) {
+                Rect cell = {};
+                passed = input_method_popup_row_rect(uicon, state, i, &cell);
+                if (ev->expected_ime_horizontal && i > 0)
+                    passed = passed && fabsf(cell.y - previous.y) < 0.01f &&
+                        cell.x + 0.01f >= previous.x + previous.width;
+                if (!passed) log_error("event_sim: IME cell mismatch index=%d x=%.6f preceding_end=%.6f y=%.6f preceding_y=%.6f",
+                    i, cell.x, previous.x + previous.width, cell.y, previous.y);
+                previous = cell;
+            }
+            if (ev->expected_ime_contained && popup)
+                passed = passed && popup->x >= 0.0f && popup->y >= 0.0f &&
+                    popup->x + popup->width <= uicon->viewport_width &&
+                    popup->y + popup->height <= uicon->viewport_height;
             if (!passed) log_error("event_sim: assert_ime_popup FAIL visible=%d count=%d page=%d highlight=%d chinese=%d",
                 popup && popup->visible, popup ? popup->count : -1, popup ? popup->page : -1,
                 popup ? popup->highlight : -1, popup && popup->chinese);
+            if (!passed && popup) log_error("event_sim: IME expected expanded=%d columns=%d size=%.3f; actual expanded=%d columns=%d size=%.3f scroll=%.3f",
+                ev->expected_ime_expanded, ev->expected_ime_columns, ev->expected_ime_font_size,
+                popup->expanded, popup->columns, popup->font.font_size, popup->scroll_y);
             sim_record_assertion(ctx, passed);
             break;
         }
@@ -4737,19 +4766,28 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             View* elem = resolve_assert_element(ctx, uicon, ev, "assert_preedit");
             if (!elem) break;
             DomElement* dom_elem = lam::dom_require_element(elem);
-            if (!tc_is_text_control(dom_elem)) {
-                log_error("event_sim: assert_preedit - target is not a text control");
+            EditingSurface surface = {};
+            if (!editing_surface_from_target(elem, &surface) ||
+                (!editing_surface_is_text_control(&surface) && !editing_surface_is_rich(&surface))) {
+                log_error("event_sim: assert_preedit - target is not an editing surface");
                 ctx->fail_count++;
                 break;
             }
-            tc_ensure_init(dom_elem);
+            if (editing_surface_is_text_control(&surface)) tc_ensure_init(dom_elem);
             DocState* pre_state = dom_elem->doc ? (DocState*)dom_elem->doc->state : nullptr;
+            uint32_t caret = 0;
             const char* pre = editing_composition_preedit(
-                pre_state, static_cast<View*>(dom_elem), nullptr, nullptr);
+                pre_state, static_cast<View*>(dom_elem), nullptr, &caret);
             const char* actual = pre ? pre : "";
             bool passed = sim_text_matches("assert_preedit", actual, ev);
+            // the composition caret is a code-point offset on every editing surface.
+            if (ev->expected_char_offset >= 0 && caret != static_cast<uint32_t>(ev->expected_char_offset)) {
+                log_error("event_sim: assert_preedit caret FAIL actual=%u expected=%d",
+                    caret, ev->expected_char_offset);
+                passed = false;
+            }
             if (passed) {
-                log_info("event_sim: assert_preedit PASS (preedit='%s')", actual);
+                log_info("event_sim: assert_preedit PASS (preedit='%s' caret=%u)", actual, caret);
             }
             sim_record_assertion(ctx, passed);
             break;

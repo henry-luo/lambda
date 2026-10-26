@@ -678,3 +678,448 @@ M4's Traditional pack and runtime selection are implemented. Regional variants
 conversion remain deferred. M0 retained-heap attribution, compressed-only
 loading, explicit Lambda validation and performance targets remain open.
 Prepared full packs stay locally generated and gitignored per IME-O7.
+
+
+## 8. Horizontal candidates and seven-option default
+
+**Scope (USER, 2026-10-26):** replace the vertical popup with a horizontal
+strip, default to seven candidates, retain explicit page sizes 1–9, and let
+the demo inherit the default. IME-E2 owns native presentation/hit testing;
+IME13 / S17.8.1 keep settings in the Lambda package.
+
+Acceptance: seven numbered options share a line at desktop widths; measured
+label widths and shared bounds keep painting/clicks aligned; narrow windows
+wrap without losing selectable options. Paging, highlight, mode switching and
+editing focus remain functional. Verify the user-visible before/after output,
+a focused default/paging golden in both tiers, IME UI neighbors, pointer
+selection after resize, Radiant integer-cast lint and the Radiant aggregate.
+The native strip now measures labels through the shared font-layout helper,
+records per-option viewport rectangles, and uses those rectangles for both
+painting and hit testing. A rounded blue highlight marks the selected option;
+the mode/page button follows the candidates. Whole options wrap on narrow
+viewports, and popup padding consumes clicks without moving editing focus.
+The reducer owns the default of seven; the DOM adapter omits an absent page
+size so it inherits that value. The demo removes its forced size of two and
+preserves explicit page-size settings when toggling fuzzy matching. The older
+controls fixture explicitly requests two to retain its paging coverage.
+
+Focused verification passes **18/18 package goldens and 92/92 UI assertions
+in each tier**. The new fixture covers option seven, paging to the eighth
+option, an explicit size-nine override, desktop alignment, 2x raster scaling,
+narrow wrapping and pointer selection after resize. The full installed-pack
+demo shows seven options for `xuexi` and commits 学习. Both the desktop and
+narrow screenshots were inspected. Radiant integer-cast lint and API document
+blocks pass.
+
+The Radiant baseline exits **1** with **6,213 passed, 141 accepted partial,
+2 skipped and 1 failed**. All **713/713 UI cases pass**. The sole failing
+case is `CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`, the CSS
+memory-budget debt already recorded in §6.2. A fresh M3-host control in the
+same workspace reproduces all six assertions with identical actual/budget
+values. No baseline or threshold changed.
+
+At the horizontal-strip checkpoint, the root `./lambda.exe` was rebuilt with
+the qualified private host's SHA-256,
+`cda5230d8bd7b939dd79e14b1c57548aa62a3685f8712fc0f3707941edcad8f0`.
+Its full-pack demo passes **2/2 assertions** for seven horizontal candidates
+and committing 学习. Run `./lambda.exe view test/demo/ime/chinese.ls`; historical
+M3/M4 artifacts retain their original native presentation. The local
+[validation manifest](../../temp/ime_chinese/horizontal/validation.json)
+records the focused and aggregate results. Visual evidence includes
+[desktop](../../temp/ime_chinese/horizontal/after.png) and
+[narrow 2x](../../temp/ime_chinese/horizontal/fixture-narrow.png) captures.
+
+### 8.1 Page-font follow-up
+
+**Scope (USER, 2026-10-26):** candidate labels must match the page's sans-serif
+text. The popup previously measured and painted with `UiContext::default_font`,
+which selected the default serif face despite the editor's computed font.
+Popup placement now borrows the active editor's selected-tree font for both
+measurement and painting (D4.5.1v4), including its used size. It resolves the
+font on each placement instead of retaining a pointer across reflows.
+
+Acceptance is the supplied `da` textarea case with sans-serif numerals and
+Chinese glyphs, matching geometry and pointer selection after narrow resize.
+Verification covers before/after screenshots, all IME UI neighbors, integer-cast
+lint and the required Radiant baseline after rebuilding affected native tests.
+
+The `da` capture now shows sans-serif numerals and Chinese glyphs matching the
+editor. All **92/92 focused IME UI assertions pass**, including 2x raster scale,
+narrow wrapping and pointer selection after resize. The rebuilt root executable
+matches the private host and passes **3/3** full-pack layout, click-selection
+and focus assertions. Integer-cast lint, API document blocks and diff checks pass.
+The fresh Radiant baseline records **6,213 passed, 141 accepted partial,
+2 skipped and 1 failed**, with **713/713 UI cases passing**. The sole failure
+remains `CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`.
+
+Run `./lambda.exe view test/demo/ime/chinese.ls`. The local
+[validation manifest](../../temp/ime_chinese/sans/validation.json) records this
+font follow-up separately from the earlier horizontal-strip checkpoint;
+[before](../../temp/ime_chinese/sans/before.png),
+[after](../../temp/ime_chinese/sans/after.png) and
+[narrow 2x](../../temp/ime_chinese/sans/fixture-narrow.png) captures were inspected.
+
+### 8.2 Pinyin caret editing
+
+**Scope (USER, 2026-10-26):** Left/Right move within the remaining pinyin,
+while Up/Down retain candidate navigation. Typing, Backspace and Delete use
+that cursor; candidate selection maps it past the consumed prefix. Positions
+remain code points (S2.5.8/S17.4.1), and policy stays in Lambda (D7.2.5).
+Acceptance covers both bounds, insertion/deletion in the middle, separators,
+selected Chinese prefixes, selection/undo and all three editing surfaces.
+
+The reducer adds a raw-input caret and emits a compose-only action when it
+moves. One splice helper handles insertion and both deletion directions,
+including empty separators. The existing restore-last-selection behavior
+remains available after raw input becomes empty. UI assertions now verify the
+composition's code-point caret as well as its text. This exposed a rich-text
+transport defect: the native composition event supplied its payload with a
+zero caret despite applying the edit at the correct position. Passing the
+caret directly through the shared composition dispatcher fixes that loss and
+removes the form-only temporary hint.
+
+The new reducer golden and native UI assertion both failed before the repair.
+Focused qualification passes **19/19 goldens and 139/139 IME UI assertions in
+each tier**, including the new golden's **36 checks** and the native caret
+fixture's **47 assertions**. The full-pack demo passes **9/9 assertions** with
+existing Chinese text before the pinyin, an insertion/deletion in the middle,
+raw commit and one-step undo preserving that Chinese prefix. Its
+[caret capture](../../temp/ime_chinese/caret/demo-caret.png) was inspected.
+
+The fresh Radiant baseline exits **1** with **6,214 passed, 141 accepted partial,
+2 skipped and 1 failed**, including **714/714 UI cases passing**. The sole
+failure remains `CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`.
+Integer-cast lint, API document blocks and diff checks pass. The rebuilt root
+`./lambda.exe` matches the qualified private host; run
+`./lambda.exe view test/demo/ime/chinese.ls`. The local
+[validation manifest](../../temp/ime_chinese/caret/validation.json) retains
+the source and host identities, before-failure evidence and qualification logs.
+
+### 8.3 Compact typography, syllable steps and expanded candidates
+
+**Scope (USER, 2026-10-26):** reduce candidate typography, move Left to the
+previous syllable boundary while Right advances one letter, and use Down to
+open a complete candidate grid where all four arrows navigate options.
+Syllable boundaries reuse the engine's ordered segmentation lattice; positions
+remain code points (S2.5.8/S17.4.1). Lambda owns expansion and selection policy
+(D7.2.5), while native layout reports responsive grid columns.
+
+Acceptance covers ambiguous/explicit syllables, incomplete input, compact
+versus expanded arrow behavior, all returned candidates beyond the old native
+nine-option limit, row navigation, scrolling, pointer selection, Escape back
+to the strip, and editing/commit after selection. Candidate text keeps the
+editor's family with a reduced size capped at 16 CSS pixels before zoom.
+Verification uses reducer goldens in both tiers, native UI cases, full-pack
+desktop/narrow captures, ownership cleanup, lint and the Radiant baseline.
+
+The engine now exposes cached `caret_stops` from the same ordered viable
+lattice used for lookup. Expanded frames carry the complete returned option
+set and an absolute highlight; native layout reports the actual columns to
+Lambda, which applies row/column navigation. Escape collapses before canceling,
+and pointer actions carry an index instead of encoding it as a digit key.
+The body adapter explicitly reads getter-backed keyboard fields before adding
+geometry; spreading the native event had dropped its key payload.
+
+Native frames own dynamically sized labels/cells and a reduced-font cache
+alias. The shared font-release helper is inline beside `font_prop_copy`, so
+state-only owners use the real cleanup without linking the layout font setup.
+Painting and hit testing share the same grid, clipping and scroll position;
+keyboard selection scrolls into view and wheel input stays inside the menu.
+Fractional-font alignment assertions use the same 0.01 CSS-pixel tolerance on
+both axes; the observed discrepancy was 0.000008 pixels after viewport offset.
+
+Focused verification passes **20/20 goldens and 163/163 IME UI assertions in
+each tier**. The new menu fixture has **22 passing assertions**, covering all
+64 synthetic options, selection of option 50, 2x rendering, three-column
+navigation after resize, wheel scrolling, collapse and caret editing. The
+state-store ownership test passes, as do integer-cast lint, API document blocks
+and diff checks. The installed-pack `dajia` demo passes **6/6 assertions** and
+shows all **128 returned candidates** in its scrollable grid; compact, expanded,
+selected and narrow captures were inspected.
+
+The fresh Radiant baseline exits **1**, recording **6,215 passed, 141 accepted
+partial, 2 skipped and 1 failed**. All **715/715 UI cases pass**. The sole
+failure remains `CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`;
+no budget or baseline was changed. The rebuilt root `./lambda.exe` matches the
+qualified private host. Run `./lambda.exe view test/demo/ime/chinese.ls`.
+The local [validation manifest](../../temp/ime_chinese/menu/validation.json)
+retains source/host identities and focused/aggregate evidence, with
+[compact](../../temp/ime_chinese/menu/compact.png),
+[expanded](../../temp/ime_chinese/menu/expanded.png) and
+[narrow 2x](../../temp/ime_chinese/menu/interp/grid-narrow.png) captures.
+
+### 8.4 Demo button behavior and feedback
+
+**Scope (USER, 2026-10-26):** make the demo's settings controls work visibly,
+including before a field has focus. The reproducer confirms spelling/profile
+changes, but Window off leaves composition enabled under the initial document
+override. IME-O2 still gives document overrides priority; the demo now selects
+window scope when a window button is chosen. Use window setting must inherit
+the existing value instead of forcing it on. Button pressed states and a live
+status report effective scope, profile and spelling. Cold configuration must
+not send a null target to the native popup.
+
+Acceptance covers every button, cold spelling/profile changes, switching both
+character profiles, window on/off and document overrides, returning to an off
+window default, and preserving editing focus. Verify real typing/results as
+well as the visible feedback in both tiers, then run the Radiant baseline.
+
+The before-repair cold-click reproducer records **8 passed, 1 failed**: Window
+off did not stop the document-forced input method. It also logged invalid
+popup-target calls during cold spelling configuration. The demo now clears
+its override when choosing window scope, while Use window setting preserves
+the existing window value. Pressed states and a live status initialize on load
+and update after every command. Handler errors are surfaced in the status;
+the spelling options use an explicit empty map value in procedure context
+(S16.4.2v2). The adapter retains settings but skips native popup presentation
+until an editor target exists.
+
+The new button fixture verifies all nine controls, cold configuration and both
+profiles, actual fuzzy/exact conversion behavior, direct window on/off,
+document overrides, inheriting an off window default and retained focus.
+Existing controls coverage explicitly enables the window before testing its
+live disable action, rather than relying on the old inherit-forces-on behavior.
+
+Focused qualification passes **18/18 IME goldens and 218/218 IME UI assertions in
+each tier**. The new button fixture passes **53 assertions**; the original
+cold-click reproducer now passes **9/9** without invalid popup-target errors.
+The [Traditional selection](../../temp/ime_chinese/buttons/traditional-selected.png)
+and [window-off status](../../temp/ime_chinese/buttons/window-off.png) captures
+were inspected. API document blocks and diff checks pass. The unchanged native
+host was pinned for the fresh Radiant baseline, which exits **1** with
+**6,216 passed, 141 accepted partial, 2 skipped and 1 failed**. All **716/716 UI
+cases pass**. The sole failure remains
+`CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`; no budget or baseline
+was changed. The local
+[validation manifest](../../temp/ime_chinese/buttons/validation.json) retains
+source and executable identities, the reproducer and qualification evidence.
+Restart with `./lambda.exe view test/demo/ime/chinese.ls` to load the updated
+Lambda demo and adapter; the native executable is unchanged from §8.3.
+
+### 8.5 Fuzzy master toggle and pair configuration
+
+**Scope (USER, 2026-10-26):** replace the single z/zh action with a fuzzy
+pinyin on/off toggle and adjacent `v` configuration button. The panel lists
+the engine's supported pairs (IME13), remembers selections while off, and
+applies checkbox changes immediately while on without disturbing preedit.
+All pairs start selected in the panel; the master remains off initially.
+An empty selection switches matching off and disables the master until a
+pair is selected. Engine defaults and explicit settings contracts remain
+unchanged (S17.8.1).
+
+Acceptance includes every pair, toggle off/on retention, editing options while
+off, live s/sh and z/zh word matches, page-size preservation, focus/preedit
+retention, Escape/outside dismissal and a bounded narrow-viewport panel.
+Reuse the native popover and checkbox operations, derive options from public
+metadata, and verify the UI in both tiers, visually and in the Radiant baseline.
+
+The demo now uses a split control: **Fuzzy pinyin on/off** plus `v`. Native
+popover element methods and checkbox state supply the panel mechanics;
+`chinese.fuzzy_pairs` supplies every name and example. The remembered selection
+is separate from the active engine settings. Commands preserve an explicit
+page size and editing focus, and changing a pair while on refreshes the live
+composition. Done and Escape retain preedit; outside dismissal follows the
+ordinary pointer/focus policy. The panel is viewport-bounded and scrollable.
+
+Focused qualification passes **18/18 IME package goldens and 268/268 UI
+assertions in each tier**. The new fixture passes **52 assertions**, including
+all 11 choices, all/none, on/off retention, s/sh and z/zh word conversion,
+preedit/focus and page-size preservation, dismissal and narrow 2x scrolling.
+The [desktop panel](../../temp/ime_chinese/fuzzy_options/interp/pairs.png),
+[active composition](../../temp/ime_chinese/fuzzy_options/interp/composing.png),
+and [scrolled narrow panel](../../temp/ime_chinese/fuzzy_options/interp/narrow-scrolled.png)
+were inspected. The installed full pack also returns 是非 for `sifei`: rank
+17 with all pairs, rank 10 with only s/sh. API document blocks and diff checks
+pass.
+
+The unchanged native host was pinned for the fresh Radiant baseline:
+**6,217 passed, 141 accepted partial, 2 skipped, 1 failed**, including
+**717/717 UI cases passing**. The sole failure is the previously reproduced
+`CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`; no budget was
+changed. `make run-radiant-baseline` exits 2 for the runner's exit 1. The
+[validation manifest](../../temp/ime_chinese/fuzzy_options/validation.json)
+records the executable identity, focused and aggregate results, source hashes,
+and local artifacts. Restart `./lambda.exe view test/demo/ime/chinese.ls` to
+load these demo changes; no native rebuild is needed.
+
+### 8.6 Complete-reading ranking before frequency
+
+**Scope (USER, 2026-10-26):** improve the ranking after `sifei` put 是非 behind
+是否. The fresh installed-pack reproducer reports 是非 at rank 17: its full
+fuzzy reading consumes five letters, but its weight 2581 is below the 2703
+floor. 是否 at rank 2 consumes only `sif`, leaving `ei`. The old coverage
+bucket demotes the better reading before comparing its match quality.
+
+IME7v2 now groups complete exact readings, complete fuzzy readings, then the
+remaining routes. The old coverage/frequency algorithm runs within each group,
+and deduplication retains the best route after grouping. Query passes the
+actual normalized raw length rather than inferring completeness from a bounded
+path search. Learned selections keep IME8 priority; budgets, dictionary weights
+and frequency defaults stay unchanged. No sentence-context model is added.
+
+The authored regression uses a weight-1 是非 against weight-60000 是否 and
+weight-65000 时候, proving the behavior does not depend on a word-specific
+boost or adjusting the threshold. It fails against the old implementation and
+passes after the change. The expected order for complete `beijingdaxue` now
+keeps both complete homophones before partial 北京; the separate synthetic
+coverage test still checks rare-word demotion within a group.
+
+Fresh before/after qualification uses the same pinned release host, pack
+manifests and unchanged frozen query fixtures. All four after reports pass
+their existing acceptance floors. The two tiers agree on all **192/192**
+rank/leading-word/weight/truncation/scan-count results per profile. No row's
+rank regresses: Simplified improves 10 full-input and 11 all-fuzzy rows;
+Traditional improves 11 and 12 respectively. All initials rows are unchanged.
+
+| Profile | Mode | Before top 1 / 3 / 9 | After top 1 / 3 / 9 | Found |
+|---|---|---|---|---|
+| zh-Hans | full pinyin | 54 / 63 / 64 | 63 / 64 / 64 | 64 / 64 |
+| zh-Hans | initials | 23 / 35 / 50 | 23 / 35 / 50 | 64 / 64 |
+| zh-Hans | all fuzzy | 53 / 61 / 64 | 63 / 64 / 64 | 64 / 64 |
+| zh-Hant | full pinyin | 52 / 63 / 64 | 61 / 64 / 64 | 64 / 64 |
+| zh-Hant | initials | 22 / 35 / 50 | 22 / 35 / 50 | 64 / 64 |
+| zh-Hant | all fuzzy | 51 / 61 / 64 | 61 / 64 / 64 | 64 / 64 |
+
+These are the repository-authored regression corpora, not a representative
+external quality estimate. Scan counts are unchanged; the work/path/candidate
+limits and truncation behavior remain bounded. No performance improvement is
+claimed. The installed-pack `sifei` result now leads with 私费, 是非, 施肥,
+试飞, 时候, 是否: 是非 moves from rank 17 to 2, and 是否 from 2 to 6.
+The local [row comparison](../../temp/ime_chinese/ranking/comparison.json)
+retains every improved/unchanged/regressed outcome.
+
+Focused verification runs **19/19 scoped IME golden cases** (18 existing plus
+the new completeness regression) in both tiers. The earlier §8.4/8.5 scoped
+counts have been corrected against their retained GTest logs; the broad
+`*ime_*` name filter had also selected unrelated runtime cases.
+
+All **268/268 IME UI assertions in each tier** pass across the 15 fixtures,
+including selecting the weight-1 full fuzzy candidate while settings change
+live. The installed-pack replay passes **5/5** assertions and commits
+`大家好是非` by clicking the second candidate. The
+[strip](../../temp/ime_chinese/ranking/full-pack-strip.png) and
+[expanded grid](../../temp/ime_chinese/ranking/full-pack-grid.png) were
+inspected. API document blocks and diff checks pass.
+
+`make test-lambda-baseline` completes with **6,160 passed, 1 failed**, exit 2.
+The sole failure is `JavaScriptTests/JsFileTest.Run/dom_media_playback`: its
+`media.paused && media.currentTime > 0` assertion after a 100 ms wait fails
+intermittently. Three isolated runs record **one failure and two passes**.
+The unchanged executable is byte-identical to the pinned pre-change host;
+no media code, timer, test expectation or baseline was altered. This aggregate
+gate is reported as failed, separately from the passing ranking qualification.
+No native Radiant code changed for this ranking update.
+
+The [validation manifest](../../temp/ime_chinese/ranking/validation.json)
+retains the before/after source and executable identities, frozen-profile
+reports, row comparison, focused UI checks and aggregate failure evidence.
+Restart `./lambda.exe view test/demo/ime/chinese.ls` to load the package changes.
+
+### 8.7 Fuzzy enabled at demo startup
+
+**Scope (USER, 2026-10-26):** make fuzzy pinyin on by default in the demo.
+The root body selects `data-ime-fuzzy="all"`, so acquisition uses all supported
+pairs before any toolbar action. The initial button label and selected state
+report on; the existing toggle and pair configuration retain their behavior
+(IME13). This is an explicit demo policy, leaving the engine's omitted query
+settings contract unchanged (S17.8.1).
+
+The existing fuzzy UI fixture now converts `sifei` to 是非 immediately on first
+focus, before clicking any toolbar button. Button coverage checks the initial
+selected state and cold off/on transitions; live-configuration coverage starts
+from an explicitly selected off state.
+
+Focused verification passes **272/272 UI assertions in each tier** across all
+15 IME fixtures. First-use conversion, the selected button, all pair options,
+cold toggling and active-composition configuration pass. The startup-on
+[panel capture](../../temp/ime_chinese/fuzzy_default/interp/pairs.png) was
+inspected. API document blocks and diff checks pass. The native host is
+unchanged; this demo default requires no engine build or broad engine rerun.
+The local [validation manifest](../../temp/ime_chinese/fuzzy_default/validation.json)
+retains the host/source identities and all focused UI results. Restart
+`./lambda.exe view test/demo/ime/chinese.ls` to apply the startup default.
+
+### 8.8 Up from the first candidate row collapses the grid
+
+**Scope (USER, 2026-10-26):** Up from the first logical row of the expanded
+candidate menu returns to the compact strip. The old navigation path clamped
+Up to candidate zero and kept the grid open. The reducer now uses the existing
+rendered-column count to detect that boundary, keeps the absolute selection,
+and emits only the collapsed candidate frame. Preedit and its code-point caret
+are unchanged (S2.5.8/S17.4.1); policy remains in Lambda (D7.2.5, IME-E2).
+Up from lower rows continues row navigation, repeated Up in the strip is a
+no-op, and Down reopens at the retained candidate.
+
+The existing session-menu golden now covers first/other columns, the three-
+column boundary, reopening, repeated Up and selection after collapse. Its
+new assertions fail with the previous reducer. Native UI coverage exercises
+wide and narrow 2x layouts, scrolling back to the first row, preserved pinyin
+and caret, the selected column and reopening. No native code changes are needed.
+
+Focused qualification passes **19/19 IME golden cases and 281/281 UI
+assertions in each tier**. The menu fixture has **31 passing assertions**;
+its [wide collapse](../../temp/ime_chinese/up_collapse/interp/collapsed-wide.png)
+and [narrow 2x collapse](../../temp/ime_chinese/up_collapse/interp/collapsed-narrow.png)
+captures were inspected. They retain the highlighted candidate and pinyin
+caret, and Down reopens at that selection. API document blocks and diff checks
+pass. Query/ranking source identities match the previous frozen-corpus
+qualification; no new dictionary or ranking change is involved.
+
+`make test-lambda-baseline` completes with **6,160 passed, 1 failed**, exit 2.
+Its sole failure is the same `dom_media_playback` assertion at the 100 ms
+playback wait seen in §8.6, with the identical output mismatch. No media code,
+test expectation or baseline was changed. The native executable remains
+byte-identical to the pinned host; the aggregate failure is retained separately
+from the passing focused checks.
+
+The [validation manifest](../../temp/ime_chinese/up_collapse/validation.json)
+records source/host identities, the failing pre-change regression and current
+focused/aggregate results. Restart `./lambda.exe view test/demo/ime/chinese.ls`
+to load the reducer and updated keyboard help.
+
+### 8.9 Suspend the native overlay during fuzzy configuration
+
+**Scope (USER, 2026-10-26):** the native 中 indicator must not paint above the
+fuzzy-options dropdown. The popover deliberately preserves editor focus, so
+the adapter's idle indicator remains active; native overlays paint separately
+from the author DOM (IME-E2). The focused pre-change reproducer records
+**4 passed, 1 failed**, with the indicator still visible while options are open.
+
+The DOM adapter now exposes `suspend_popup(body, suspended)`. Every normal
+presentation path honors the document's transient flag. Resuming snapshots the
+existing reducer frame rather than reconfiguring or requerying it, retaining
+mode, selection, expansion, preedit and caret (D7.2.5, S2.5.8/S17.4.1). The
+reducer's existing frame helper is shared with the adapter instead of copying
+its slicing/highlight rules. Resume checks focused-target eligibility and OS
+composition priority (IME10). No native painting or global popup order changes.
+
+The demo routes open, Done, arrow-toggle, Escape and outside dismissal through
+one helper. Settings changes while the panel is open update the engine while
+keeping its overlay hidden. Tests cover the idle indicator, active preedit,
+restoring an expanded menu at a nonzero highlight and all existing dismissal
+paths. No composition cancellation or mode switching is used to hide the UI.
+
+The idle reproducer now passes **5/5** assertions. An extended replay passes
+**14/14**, covering cold open/close without an editor, programmatic focus while
+the panel is already open, a caret anchor beneath the panel, and English-mode
+restoration. The focused-editor check uses `element.focus()` plus an explicit
+focus assertion: the event harness's ordinary focus action clicks the target,
+which instead hits an overlying popover.
+
+All **19/19 IME golden cases and 290/290 UI assertions in each tier** pass;
+the fuzzy panel fixture has **64 passing assertions**. The
+[idle indicator](../../temp/ime_chinese/popup_pause/idle.png) and
+[active preedit](../../temp/ime_chinese/popup_pause/interp/composing.png)
+captures were inspected: no native indicator or candidates cover the options.
+API document blocks and diff checks pass. The unchanged native executable is
+byte-identical to the pinned host; no native rebuild is needed.
+
+`make test-lambda-baseline` completes with **6,160 passed, 1 failed**, exit 2.
+The only failure remains `JavaScriptTests/JsFileTest.Run/dom_media_playback`,
+the same intermittent 100 ms playback assertion recorded in §8.6/8.8. No media
+code, expectation or baseline was changed; this failed aggregate gate remains
+separate from the passing focused checks. The
+[validation manifest](../../temp/ime_chinese/popup_pause/validation.json)
+retains pre-change sources, the reproducer, host identities and focused and
+aggregate evidence. Restart `./lambda.exe view test/demo/ime/chinese.ls` to
+load the adapter and demo policy changes.

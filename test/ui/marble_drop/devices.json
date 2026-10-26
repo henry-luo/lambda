@@ -40,8 +40,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -61,8 +61,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -82,8 +82,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -129,8 +129,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -170,8 +170,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "key_press",
@@ -179,8 +179,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -200,8 +200,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -251,8 +251,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -272,8 +272,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -293,8 +293,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -344,8 +344,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -365,8 +365,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -386,8 +386,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -409,8 +409,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 440,
-      "steps": 11
+      "ms": 1320,
+      "steps": 33
     },
     {
       "type": "assert_count",
@@ -426,8 +426,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -447,8 +447,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -470,8 +470,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -491,8 +491,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 960,
-      "steps": 24
+      "ms": 2880,
+      "steps": 72
     },
     {
       "type": "assert_attribute",
@@ -512,8 +512,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",

@@ -22,13 +22,15 @@ h1 span { color: #ad754a; }
 .machine-panel { flex: 1; min-width: 0; border: 1px solid #c7bda9; border-radius: 8px; background: #f5f0e3; box-shadow: 0 6px 20px #51452912; padding: 14px; }
 .machine-top { display: flex; justify-content: space-between; padding: 3px 4px 13px; font-size: 8px; letter-spacing: 1.8px; color: #887b64; }
 .drawing { position: relative; width: 100%; border-radius: 6px; overflow: hidden; background: linear-gradient(135deg, #f8f0d8, #e9dab7); }
-.sketch-underlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: .3; pointer-events: none; z-index: 0; }
+.sketch-underlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+.notebook-sketch { position: absolute; overflow: hidden; transform-origin: 50% 50%; }
+.notebook-sketch img { position: absolute; max-width: none; pointer-events: none; }
 .machine-svg { position: relative; z-index: 1; }
 .rolling-marble { z-index: 3; }
 .inlet { z-index: 4; }
 .pause-label { z-index: 5; }
 .machine-svg { display: block; width: 100%; height: auto; border-radius: 6px; }
-.rolling-marble { position: absolute; width: 2.778%; height: 3.861%; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 1px 2px 2px #4c3f2a55; pointer-events: none; }
+.rolling-marble { position: absolute; left: 0; top: 0; width: 2.7777777778%; height: 3.861003861%; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 1px 2px 2px #4c3f2a55; pointer-events: none; }
 .rolling-marble.airborne { box-shadow: 3px 5px 5px #4c3f2a44; }
 .inlet { position: absolute; top: 0; transform: translateX(-50%); padding: 6px 11px; border: 1px solid #92784c; border-radius: 3px; background: #f9efcf; font-size: 9px; letter-spacing: 1px; white-space: nowrap; box-shadow: 0 2px 2px #67523222; }
 .inlet:hover { background: #edcf8a; }
@@ -78,8 +80,7 @@ h2 { margin: 15px 0 18px; font: 30px Georgia, serif; line-height: 1.12; letter-s
 .stars { color: #b18b45; font-size: 25px; letter-spacing: 5px; margin-bottom: 12px; }
 .pause-label { position: absolute; top: 40%; left: 35%; width: 30%; padding: 20px 0; text-align: center; background: #f8f0d8; border: 1px solid #b8a16e; color: #796647; font: 20px Georgia, serif; letter-spacing: 3px; }
 footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; color: #a19b8d; font-size: 8px; letter-spacing: .5px; line-height: 1.5; }
-@keyframes marble-frame { from { opacity: .99; } to { opacity: 1; } }
-#marble-clock { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; animation: marble-frame 40ms linear infinite; }
+#marble-clock { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 @media (max-width: 850px) {
     .page { width: calc(100% - 28px); margin-top: 20px; }
     .workbench { flex-direction: column; gap: 12px; }

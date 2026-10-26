@@ -81,6 +81,8 @@ TEST_F(StateStoreDomMutationTest, InputMethodTransportReleasesPendingRequestsAnd
     MemtrackCategoryStats before = {}, after = {};
     memtrack_get_category_stats(MEM_CAT_DOM, &before);
     InputMethodTransport* transport = &state()->input_method;
+    transport->labels = (char**)mem_calloc(2, sizeof(char*), MEM_CAT_DOM);
+    transport->cells = (Rect*)mem_calloc(3, sizeof(Rect), MEM_CAT_DOM);
     transport->labels[0] = mem_strdup("北京", MEM_CAT_DOM);
     transport->labels[1] = mem_strdup("背景", MEM_CAT_DOM);
     transport->count = 2;
@@ -97,8 +99,8 @@ TEST_F(StateStoreDomMutationTest, InputMethodTransportReleasesPendingRequestsAnd
     input_method_cleanup(state());
     EXPECT_EQ(transport->head, nullptr);
     EXPECT_EQ(transport->tail, nullptr);
-    EXPECT_EQ(transport->labels[0], nullptr);
-    EXPECT_EQ(transport->labels[1], nullptr);
+    EXPECT_EQ(transport->labels, nullptr);
+    EXPECT_EQ(transport->cells, nullptr);
     EXPECT_EQ(transport->count, 0);
     EXPECT_FALSE(transport->visible);
     EXPECT_EQ(transport->popup_target.address, nullptr);

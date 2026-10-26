@@ -6,7 +6,8 @@ pn main() {
     let engine = f.engine()^
     let initial = ime.session(engine,{page_size:2})^
     let word = k.typed(engine,initial,"zhang")^
-    let down = k.press(engine,word,"ArrowDown")^
+    let opened = k.press(engine,word,"ArrowDown")^
+    let down = k.press(engine,opened.session,"ArrowRight")^
     let across = k.press(engine,down.session,"ArrowRight")^
     let back = k.press(engine,across.session,"ArrowLeft")^
     let next_page = k.press(engine,word,"=")^

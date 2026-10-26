@@ -609,9 +609,6 @@ on textinputfallback(evt) { caret.text_input_fallback(~, evt) }
 on keyintent(evt) { keymap.resolve(~, evt) }
 // ESO48: runs only after keydown, caret, and activation have all declined.
 on scrollkey(evt) { scroll.navigate(~, evt) }
-// ES33: native reports only the scrollbar hit part; scroll.ls selects paging
-// or a thumb drag without bringing layout geometry into the package.
-on scrollbarpress(evt) { scroll.scrollbar_press(evt) }
 // ES30: Tab order belongs to the package; native sends focus events and applies
 // the scroll request after this policy handler chooses the target.
 on focuskey(evt) { focus.navigate(~, evt) }
@@ -630,7 +627,8 @@ on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }
 
-// ES33: wheel defaults follow the hit target after public cancellation; XML
-// documents have no body ancestor to carry this handler.
+// ES33: scroll defaults follow the hit target after public cancellation; the
+// viewport scrollbar targets html above body, and XML documents have no body.
 view any {}
 on scrollwheel(evt) { scroll.wheel(evt) }
+on scrollbarpress(evt) { scroll.scrollbar_press(evt) }

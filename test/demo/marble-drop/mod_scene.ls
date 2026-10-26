@@ -1,6 +1,7 @@
 import model: .mod_model
 import media: lambda.doc.media
 import sound: .mod_sound
+import sketches: .mod_sketches
 
 fn label(x, y, size, words, ink = "#7e705b", more = {}) => <text x:x, y:y,
     'font-family':"Georgia, serif", 'font-size':size, fill:ink, *:more, words>
@@ -11,6 +12,8 @@ fn ball(x,y,color,r = 10) => <g
     <circle cx:x, cy:y, r:r, fill:"url(#marble-" ++ string(color) ++ ")", stroke:model.INKS[color], 'stroke-width':1>;
     <ellipse cx:x-r*.3, cy:y-r*.4, rx:r*.25, ry:r*.15, fill:"#fff", opacity:".75">>
 fn definitions() => <defs
+    <pattern id:"paper-dots", patternUnits:"userSpaceOnUse", width:30, height:30,
+        <circle cx:15, cy:15, r:.7, fill:"#ae9c76", opacity:".35">>;
     <linearGradient id:"brass", x1:0, y1:0, x2:1, y2:1,
         <stop offset:0, 'stop-color':"#f2d99e">; <stop offset:".5", 'stop-color':"#b49455">;
         <stop offset:1, 'stop-color':"#dfc58b">>
@@ -130,7 +133,7 @@ fn drawing(game) {
     <svg xmlns:"http://www.w3.org/2000/svg", viewBox:"0 0 720 518", width:720, height:518, role:"img",
         'aria-label':"Marble machine: brass rails, automatic switches and colored collection pockets",
         (definitions());
-        for (x in 0 to 23, y in 0 to 16) <circle cx:15+x*30, cy:15+y*30, r:.7, fill:"#ae9c76", opacity:".35">;
+        <rect width:720, height:510, fill:"url(#paper-dots)">;
         <rect x:10, y:10, width:700, height:498, rx:4, fill:"none", stroke:"#cbb991">;
         (screw(20,20)); (screw(700,20)); (screw(20,498)); (screw(700,498));
         (label(36,59,11,"fig. " ++ string(game.stage+1),"#9b8966",{'font-style':"italic"}));
@@ -158,13 +161,16 @@ pub fn apparatus(game) => media.data_uri(binary(format(drawing(game),'xml')^),"i
 fn route_color(game) => if (game.active == null) game.selected else game.active.color
 pub fn apparatus_key(game) => {stage:game.stage,bits:game.bits,filled:game.filled,
     route_color:if (any([for (node in model.level(game).nodes) model.selective(node)])) route_color(game) else -1}
+pub fn rolling_transform(game) {
+    let pos = model.ball_position(game)
+    // transform percentages use the marble's own 20 by 20 logical-pixel box
+    "translate(" ++ string((pos.x-10)*5) ++ "%," ++ string((pos.y-10)*5) ++ "%)"
+}
 fn rolling(game) {
-    let active = game.active
-    let nodes = model.level(game).nodes
-    let pos = model.point(nodes[active.from],nodes[active.to],active.tick/model.EDGE_TICKS);
-    <div class:"rolling-marble" ++ (if (nodes[active.from].kind == "spring") " airborne" else ""),
-        'aria-hidden':"true", style:"left:" ++ string(pos.x/720*100) ++
-        "%;top:" ++ string(pos.y/518*100) ++ "%;background:radial-gradient(circle at 30% 25%,#fff," ++
+    let active = game.active;
+    <div id:"rolling-marble", class:"rolling-marble" ++ (if (model.level(game).nodes[active.from].kind == "spring") " airborne" else ""),
+        'aria-hidden':"true", style:"transform:" ++ rolling_transform(game) ++
+        ";background:radial-gradient(circle at 30% 25%,#fff," ++
         model.INKS[active.color] ++ " 42%,#353139 100%)">
 }
 fn button(id, command, caption, blocked = false, value = 0) => <button id:id, type:"button",
@@ -215,7 +221,7 @@ fn notebook(game) => <aside class:"notebook",
     (if (game.hint != "") <p id:"hint-text", class:"hint-text", game.hint>);
     <p class:"margin-note", "Think one marble ahead.">>
 
-pub fn page(game, apparatus, audio) => <main id:"marble-drop", class:"page", 'data-mode':game.mode,
+pub fn page(game, apparatus, audio, composition) => <main id:"marble-drop", class:"page", 'data-mode':game.mode,
     'data-level':string(game.stage+1), 'data-active':string(game.active != null),
     'data-paused':string(game.paused), 'data-autoplay':string(game.autoplay),
     'data-collected':string(model.collected(game)), 'data-moves':string(game.moves), 'data-losses':string(game.losses),
@@ -237,7 +243,7 @@ pub fn page(game, apparatus, audio) => <main id:"marble-drop", class:"page", 'da
     <div class:"workbench",
         <section class:"machine-panel",
             <div class:"machine-top", <span "THE APPARATUS"> <span "BRASS · GLASS · A LITTLE GRAVITY">>;
-            <div class:"drawing", <img class:"sketch-underlay", src:"assets/sketches/engineering-studies.png", alt:"", 'aria-hidden':"true">;
+            <div class:"drawing", (sketches.underlay(game.stage,composition));
                 <img class:"machine-svg", src:apparatus,
                 alt:"Marble machine with brass rails, automatic switches and colored collection pockets", width:720, height:518>;
                 (if (game.active != null) rolling(game));

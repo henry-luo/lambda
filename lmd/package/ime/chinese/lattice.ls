@@ -53,6 +53,19 @@ fn reachable(graph,at,suffix) array {
     }
 }
 
+fn viable_edges(graph,viable,position) array =>
+    [for (item in graph.edges[position] where viable[item.end]) item]
+
+fn caret_route(graph,viable,position) array => if (position == len(graph.input)) [position]
+    else [position,*caret_route(graph,viable,viable_edges(graph,viable,position)[0].end)]
+
+pub fn caret_stops(graph) array {
+    let viable = reachable(graph,len(graph.input) - 1,[true]);
+    // use the same longest-exact-first viable route as lookup; invalid tails stay editable.
+    if (viable[0]) caret_route(graph,viable,0)
+    else [for (position in 0 to len(graph.input)) position]
+}
+
 fn walk(graph,viable,pending,result,limit) map {
     if (len(pending) == 0) {paths:result,truncated:false}
     else if (len(result) >= limit) {paths:result,truncated:true}
@@ -60,7 +73,7 @@ fn walk(graph,viable,pending,result,limit) map {
         let current = pending[0]
         let children = if (current.end < len(graph.input) and len(current.tokens) < 9 and
             current.tokens[len(current.tokens) - 1].kind != "prefix")
-            [for (item in graph.edges[current.end] where viable[item.end])
+            [for (item in viable_edges(graph,viable,current.end))
                 {tokens:[*current.tokens,item],end:item.end}] else [];
         walk(graph,viable,[*children,*drop(pending,1)],[*result,current],limit)
     }
@@ -70,6 +83,6 @@ pub fn paths(graph,limit) map =>
     if (len(graph.input) == 0) {paths:[],truncated:false}
     else {
         let viable = reachable(graph,len(graph.input) - 1,[true]);
-        walk(graph,viable,[for (item in graph.edges[0] where viable[item.end])
+        walk(graph,viable,[for (item in viable_edges(graph,viable,0))
             {tokens:[item],end:item.end}],[],limit)
     }

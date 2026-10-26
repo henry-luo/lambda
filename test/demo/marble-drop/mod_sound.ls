@@ -10,8 +10,7 @@ pub fn status(sound) => if (sound.failed) "unavailable" else if (sound.enabled) 
 pub fn cue(before, after, command) {
     if (contains(["undo","restart","level","next"],command) or before.stage != after.stage) ""
     else if (before.active == null and after.active != null and after.moves == before.moves+1) "drop"
-    else if (command != "tick" or before.active == null or before.paused or
-        before.active.tick+1 < model.EDGE_TICKS) ""
+    else if (command != "tick" or before.active == null or before.paused) ""
     else {
         let node = model.level(before).nodes[before.active.to]
         if (after.active != null) {

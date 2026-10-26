@@ -92,7 +92,11 @@ static void state_store_destroy_model_edit_surface_bindings(DocState* state) {
 }
 
 void input_method_clear_labels(InputMethodTransport* transport) {
-    for (char*& label : transport->labels) { mem_free(label); label = nullptr; }
+    for (int i = 0; i < transport->count; i++) mem_free(transport->labels[i]);
+    mem_free(transport->labels);
+    mem_free(transport->cells);
+    transport->labels = nullptr;
+    transport->cells = nullptr;
     transport->count = 0;
 }
 
@@ -107,6 +111,10 @@ void input_method_cleanup(DocState* state) {
     }
     transport->tail = nullptr;
     input_method_clear_labels(transport);
+    font_prop_release_handle(&transport->font);
+    memset(&transport->font, 0, sizeof(transport->font));
+    transport->expanded = false;
+    transport->scroll_y = transport->scroll_max = 0.0f;
     transport->visible = false;
     transport->popup_target = {};
 }

@@ -4,6 +4,12 @@ import sound: ~~.mod_sound
 fn advance(st, count = 100) => reduce([st,*[for (i in 1 to count) i]],(s,unused)=>game.tick(s))
 fn send(st, inlet, color) => advance(game.drop(st,inlet,color))
 fn run_plan(st, plan) => reduce([st,*plan],(s,m)=>send(s,m.funnel,m.color))
+fn before_arrival(st, node, budget = 200) {
+    let next = game.tick(st)
+    if (budget == 0 or (st.active.to == node and
+        (next.active == null or next.active.from != st.active.from))) st
+    else before_arrival(next,node,budget-1)
+}
 fn acyclic(machine,index,ancestors:array) bool | error => not contains(ancestors,index) and
     all([for (next in machine.nodes[index].exits) acyclic(machine,next,[*ancestors,index])])
 let initial = game.new_game()
@@ -83,13 +89,13 @@ solutions
     stage_clamps:game.new_game(99).stage == len(game.LEVELS)-1 and game.new_game(-1).stage == 0
 }
 
-let at_switch = advance(moving,game.EDGE_TICKS-1)
-let at_pocket = advance(moving,game.EDGE_TICKS*2-1)
-let at_win = advance(game.drop(red,0,4),game.EDGE_TICKS*2-1)
-let at_catch = advance(game.drop(gate,0,6),game.EDGE_TICKS-1)
-let at_miss = advance(game.drop(initial,0,4),game.EDGE_TICKS*2-1)
-let at_steel = advance(game.drop(initial,0,6),game.EDGE_TICKS*2-1)
-let at_link = advance(game.drop(link,0,1),game.EDGE_TICKS-1)
+let at_switch = before_arrival(moving,1)
+let at_pocket = before_arrival(moving,2)
+let at_win = before_arrival(game.drop(red,0,4),3)
+let at_catch = before_arrival(game.drop(gate,0,6),1)
+let at_miss = before_arrival(game.drop(initial,0,4),2)
+let at_steel = before_arrival(game.drop(initial,0,6),2)
+let at_link = before_arrival(game.drop(link,0,1),2)
 {
     sound_default:sound.status(sound.initial()) == "on" and sound.initial().played == 0,
     drop_cue:sound.cue(initial,moving,"drop") == "drop",
@@ -125,7 +131,7 @@ let magnet = game.new_game(10)
 let steel_pocket = send(magnet,0,6)
 let lens = game.new_game(11)
 let spring = game.new_game(12)
-let at_spring = advance(game.drop(spring,0,0),game.EDGE_TICKS-1)
+let at_spring = before_arrival(game.drop(spring,0,0),1)
 let launched = game.tick(at_spring)
 let spring_nodes = game.level(spring).nodes
 let third_link = game.new_game(14)
@@ -155,5 +161,5 @@ let remote_two = send(remote_one,0,1)
     remote_rotor:remote_one.bits[3] == 1 and remote_two.bits[3] == 2,
     remote_wrap:game.visit(game.level(remote_two),remote_two.bits,2,0).bits[3] == 0,
     remote_preview:game.level(remote_two).nodes[game.preview(remote_two,1,5).node].color == 5,
-    new_autoplay:advance(game.action(game.new_game(15),"auto"),400).mode == "won"
+    new_autoplay:advance(game.action(game.new_game(15),"auto"),1000).mode == "won"
 }

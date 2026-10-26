@@ -3653,6 +3653,8 @@ RADIANT_C_API Item fn_radiant_ime_status(Item node_item) {
     if (!state) return ItemNull;
     UiContext* ui = static_cast<UiContext*>(element->doc->js.host_ui_context);
     DomElement* target = input_method_target(state);
+    Rect popup_cell = {};
+    if (ui && state->input_method.visible) input_method_popup_row_rect(ui, state, -1, &popup_cell);
     RootFrame roots(2);
     Rooted<Item> result(roots, radiant_obj_new());
     Rooted<Item> target_value(roots, target ? radiant_dom_wrap_node(target) : ItemNull);
@@ -3660,6 +3662,7 @@ RADIANT_C_API Item fn_radiant_ime_status(Item node_item) {
     radiant_rooted_obj_set(result, "active", radiant_bool_item(state->editing.composition.active));
     radiant_rooted_obj_set(result, "scripted", radiant_bool_item(state->editing.composition.scripted));
     radiant_rooted_obj_set(result, "enabled", radiant_bool_item(ui && ui->chinese_ime_enabled));
+    radiant_rooted_obj_set(result, "candidate_columns", radiant_int_item(state->input_method.columns));
     return result.get();
 }
 

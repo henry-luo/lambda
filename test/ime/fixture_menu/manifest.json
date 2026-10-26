@@ -1,0 +1,18 @@
+{
+  "format": "lambda.ime.chinese.pack",
+  "format_version": 1,
+  "profile": "zh-Hans",
+  "fixture": "Repository-authored grid fixture with synthetic readings (MIT)",
+  "files": {
+    "lexicon": {
+      "bytes": 602,
+      "lines": 2,
+      "postings": 65
+    },
+    "abbrev": {
+      "bytes": 24,
+      "lines": 1,
+      "postings": 1
+    }
+  }
+}

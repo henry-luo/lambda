@@ -1,0 +1,3 @@
+2:s'f	是否 shi'fou 60000	是非 shi'fei 1
+2:s'h	时候 shi'hou 65000
+2:z'g	中国 zhong'guo 7000

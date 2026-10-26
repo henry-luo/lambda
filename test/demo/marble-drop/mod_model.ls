@@ -1,10 +1,10 @@
 // Pure transitions, with mutable ownership confined to the view (S1.4, S12.1.3).
 import levels: .mod_levels
+import motion: .mod_motion
 pub let LEVELS = levels.LEVELS
 pub let COLORS = levels.COLORS
 pub let INKS = levels.INKS
-// Each rail takes 280 ms on the shared 40 ms clock.
-pub let EDGE_TICKS = 7
+pub let STEP_MS = motion.STEP_MS
 pub fn level(game) => LEVELS[game.stage]
 fn replace_at(values, index, value) => [for (i,v in values) if (i == index) value else v]
 pub fn targets(game) => [for (i,n in level(game).nodes where n.kind == "bin") i]
@@ -85,7 +85,9 @@ pub fn drop(game, funnel, color) {
         let step = visit(level(game),game.bits,from,color)
         {*:game, bits:step.bits, stock:replace_at(game.stock,color,game.stock[color]-1),
             selected:color, funnel:funnel, moves:game.moves+1, hint:"", message:"Follow the marble…",
-            active:{from:from, to:step.next, tick:0, color:color}, history:[*game.history,snapshot(game)]}
+            active:{from:from, to:step.next, tick:0, color:color,
+                motion:motion.start(level(game).nodes[from],level(game).nodes[step.next])},
+            history:[*game.history,snapshot(game)]}
     }
 }
 // A planner move runs the same devices and pocket rules without animation/history.
@@ -138,11 +140,15 @@ pub fn tick(game) {
         else {*:drop(game,game.plan[0].funnel,game.plan[0].color), plan:slice(game.plan,1,len(game.plan))}
     } else {
         let ball = game.active
-        if (ball.tick+1 < EDGE_TICKS) {*:game,active:{*:ball,tick:ball.tick+1}}
+        let elapsed = (ball.tick+1)*STEP_MS
+        if (elapsed < ball.motion.duration) {*:game,active:{*:ball,tick:ball.tick+1}}
         else {
             let step = visit(level(game),game.bits,ball.to,ball.color)
             if (step.next == -1) finish(game,step,ball.color)
-            else {*:game,bits:step.bits,active:{*:ball,from:ball.to,to:step.next,tick:0}}
+            else {*:game,bits:step.bits,active:{*:ball,from:ball.to,to:step.next,
+                tick:(elapsed-ball.motion.duration)/STEP_MS,
+                // junctions dissipate energy; a spring supplies its own launch impulse
+                motion:motion.start(level(game).nodes[ball.to],level(game).nodes[step.next],ball.motion.speed*.86)}}
         }
     }
 }
@@ -174,18 +180,6 @@ pub fn action(game, command, value = 0) {
     else game
 }
 
-// A spring's airborne arc and ordinary guided rails share rendering/motion geometry.
-fn controls(a,b) => if (a.kind == "spring")
-    {x1:a.x+(b.x-a.x)*.25,y1:min(a.y,b.y)-100,x2:b.x,y2:b.y-80}
-    else {x1:a.x,y1:(a.y+b.y)/2,x2:b.x,y2:(a.y+b.y)/2}
-pub fn point(a, b, t) {
-    let u = 1-t
-    let c = controls(a,b)
-    {x:u*u*u*a.x+3*u*u*t*c.x1+3*u*t*t*c.x2+t*t*t*b.x,
-     y:u*u*u*a.y+3*u*u*t*c.y1+3*u*t*t*c.y2+t*t*t*b.y}
-}
-pub fn rail(a,b) {
-    let c = controls(a,b)
-    "M" ++ string(a.x) ++ " " ++ string(a.y) ++ " C" ++ string(c.x1) ++ " " ++ string(c.y1) ++ " " ++
-        string(c.x2) ++ " " ++ string(c.y2) ++ " " ++ string(b.x) ++ " " ++ string(b.y)
-}
+pub fn point(a,b,t) => motion.point(a,b,t)
+pub fn rail(a,b) => motion.rail(a,b)
+pub fn ball_position(game) => motion.position(game.active.motion,game.active.tick*STEP_MS)

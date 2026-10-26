@@ -1,0 +1,594 @@
+{
+  "name": "ime_chinese_buttons",
+  "html": "test/demo/ime/chinese.ls",
+  "viewport": {
+    "width": 1200,
+    "height": 850
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture')"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hans"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#document-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "on · document override"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "z=zh,c=ch,s=sh,n=l,f=h,r=l,an=ang,en=eng,in=ing,ian=iang,uan=uang"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "Fuzzy pinyin on"
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture_hant')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hant"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-profile",
+      "equals": "zh-Hant"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hant"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hans"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "繁體"
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/buttons/traditional-selected.png"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "zhongguo"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國"
+    },
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hans"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hans"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hant"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "zhongguo"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "zongguo"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "zongguo"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "zongguo"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "bei"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#window-off"
+      }
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime",
+      "present": false
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#window-off"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherit"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#document-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "off · window setting"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "x"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国x"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#window-on"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#window-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "on · window setting"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国x北京"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#document-off"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#document-off"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#window-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "off · document override"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "y"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国x北京y"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherit"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#document-off"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#window-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "on · window setting"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国x北京y北京"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#window-off"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#document-on"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#document-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "on · document override"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国x北京y北京北京"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#window-off"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "off · window setting"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "z"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "中國中国中国x北京y北京北京z"
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/buttons/window-off.png"
+    }
+  ]
+}

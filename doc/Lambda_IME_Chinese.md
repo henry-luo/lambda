@@ -105,13 +105,22 @@ ime.candidates(engine,"beij",{fuzzy:"all",max_candidates:9})^
 | `coverage_floor` | 2703 | Integer 0–65535; 0 disables rare-word demotion |
 | `group_leaders` | 1 | Integer 1–128 |
 
-Ranking favors coverage, match quality, frequency and stable pack order.
-Words below `coverage_floor` follow the first `group_leaders` entries of the
-next available shorter group, skipping empty coverage groups. Text reached by
-multiple routes appears once at its best position. The defaults come from
-the frozen M1 evaluation baseline, recorded in the
-[implementation evidence](../vibe/impl/Lambda_Impl_IME_Chinese.md); they are
-not a general candidate-quality guarantee.
+Ranking first separates complete exact readings, complete fuzzy readings,
+and partial/prefix/abbreviation routes (IME7v2). A complete reading consumes
+all raw pinyin with every syllable specified in full. Explicit learned choices
+retain their existing priority. Within each group, coverage, match quality,
+frequency and stable pack order decide the result. Words below `coverage_floor`
+follow the first `group_leaders` entries of the next available shorter coverage
+group; this demotion cannot cross the match-evidence boundary. Setting the
+floor to zero disables that demotion, while preserving evidence priority.
+
+For `sifei`, 是非 (`shi'fei`, full fuzzy match) precedes 是否 (`shi'fou`,
+abbreviation of the leading `sif`). 私费 (`si'fei`, exact) precedes both. Text
+reached by multiple routes appears once at its best position. Sentence context
+is not modeled. The frequency defaults come from the frozen M1 evaluation;
+ranking changes are checked against both profile baselines, not treated as a
+general candidate-quality guarantee. See the
+[implementation evidence](../vibe/impl/Lambda_Impl_IME_Chinese.md).
 
 `test/ime/baseline.json` freezes the initial corpus coverage/rank floors;
 the full-pack evaluation runner fails if any of them regress or the fixture
@@ -122,6 +131,10 @@ each line decodes at most `max_candidates` matching postings. Consequently
 budgets cap both work and temporary candidate storage, while dictionary
 postings remain lazy.
 
+The result's `caret_stops` lists code-point offsets along the preferred viable
+segmentation route, including both endpoints (S2.5.8/S17.4.1). Explicit
+apostrophes force boundaries; unsegmentable input retains character stops.
+
 ## Session and actions
 
 ```lambda
@@ -129,7 +142,7 @@ import ime: lambda.ime.chinese
 
 pn main() {
     let engine = ime.load("zh-Hans")^
-    var session = ime.session(engine,{page_size:9})^
+    var session = ime.session(engine)^
     for (key in ["b","e","i","j","i","n","g"," "]) {
         let step = ime.key(engine,session,{type:"keydown",key:key})^
         session = step.session
@@ -149,28 +162,41 @@ pn main() {
 
 These operations are fallible (`T^`, S11.4.2). Settings accept only `fuzzy`
 (the query's pair names, `"none"`, or `"all"`) and `page_size` (integer 1–9,
-default 9). Reverse pair names normalize to canonical names; unknown names or
+default 7). Reverse pair names normalize to canonical names; unknown names or
 keys are errors (S17.8.1). `configure` replaces the settings map, so omitted
 fields take their defaults. A settings change emits candidates without
 changing the preedit. It never changes learned entries (IME13).
 
 The event map uses DOM names `type`, `key`, `shiftKey`, `ctrlKey`, `altKey`,
-`metaKey`; other fields are ignored. Missing `type` means `keydown`. Keyup
+`metaKey`. The native adapter also supplies measured `candidate_columns` for
+grid navigation and uses `key:"Candidate"` with a zero-based `candidate_index`
+for pointer selection in the displayed frame. Other fields are ignored. Missing `type` means `keydown`. Keyup
 passes through, except a Shift release completing a tap. The reducer handles
 these keys:
 
-- Lowercase letters start composition; letters and apostrophes extend it.
+- Lowercase letters start composition; letters and apostrophes insert at its caret.
   Idle shifted/uppercase Latin letters pass through. Composition accepts at
   most 32 letters, with no repeated or leading separator.
 - Space selects the highlighted candidate; `1`–`9` select within the current
   page. Selection consumes the candidate's exact raw prefix. Remaining input
   stays in composition; with no remaining input, the full text commits.
-- Arrows move the highlight across page boundaries. `-`/`=`, PageUp/PageDown
+- In the compact strip, Left jumps to the previous syllable boundary and
+  Right advances one letter within the remaining pinyin, clamping at its ends.
+  They preserve the candidate highlight. Typing inserts at that position;
+  Backspace deletes before it and Delete removes the next character.
+- Down opens an expanded grid of all returned candidates. In that menu,
+  Left/Right move between candidates and Up/Down move between grid rows,
+  scrolling the selection into view. Up on the first grid row collapses to
+  the compact strip, preserving the selected candidate and pinyin caret.
+  Space or Enter selects the highlight. Escape also returns to the strip;
+  Escape in the strip cancels composition.
+- `-`/`=`, PageUp/PageDown
   move between pages and clamp at the ends. Invalid selections consume the key
   and leave the composition in place.
-- Backspace deletes raw input. Once raw input is empty, another Backspace
-  restores the last chosen word's exact original prefix. Escape cancels.
-  Enter commits chosen words followed by the raw remainder.
+- Backspace at the start of nonempty pinyin leaves it unchanged. Deleting a
+  syllable's only letter removes its empty separator. Once raw input is empty, another Backspace
+  restores the last chosen word's exact original prefix. In the compact strip,
+  Escape cancels and Enter commits chosen words followed by the raw remainder.
 - A Shift tap toggles Chinese/English mode. Switching to English commits any
   existing preedit; English keys pass through. Shift chords and repeats do
   not toggle modes. Ctrl/Alt/Meta combinations pass through with composition
@@ -251,12 +277,12 @@ Optional body attributes configure the initial session:
 | Attribute | Values |
 |---|---|
 | `data-ime-fuzzy` | `none`, `all`, or comma-separated supported pair names |
-| `data-ime-page-size` | Integer 1–9; default 9 |
+| `data-ime-page-size` | Integer 1–9; default 7 |
 | `data-ime-profile` | `zh-Hans` (default) or `zh-Hant` |
 | `data-ime-directory` | Explicit prepared-pack directory; omitted uses the selected installed profile |
 
-The adapter imports the engine directly (IME-O1) and loads only on first enable
-for an eligible focused surface. It keeps the engine and session in the owning
+The adapter imports the engine directly (IME-O1) and loads on first enable
+for an eligible focused surface, or on explicit host configuration. It keeps the engine and session in the owning
 document runtime (D5.4.1), then reuses them across that document's controls.
 Changing profile/directory loads the requested engine and starts a fresh session;
 any previous provisional range is canceled first. Existing committed document
@@ -265,24 +291,48 @@ should be kept; overlays are profile-specific and never converted implicitly.
 Readonly/disabled controls pass through. Ordinary pointer/focus changes cancel
 preedit; a toolbar may prevent its mousedown default to keep composition open.
 
+The demo highlights its selected buttons and reports the effective setting,
+scope, character profile and spelling mode. Its Window on/off buttons select
+window scope, clearing the demo's document override; Use window setting keeps
+the existing window value. Document on/off selects an explicit override.
+Spelling and profile controls can be used before focusing an editor. The
+**Fuzzy pinyin on/off** button enables the selected pairs; its adjacent `v`
+opens the pair configuration panel. The demo starts with all 11 pairs enabled
+(`data-ime-fuzzy="all"`). Changes apply immediately while on; switching off retains
+the selections. All/None select or clear the pairs. An empty selection keeps
+matching off until a pair is selected. Done and Escape close the panel while
+preserving composition. Clicking outside also closes it; ordinary editor
+pointer/focus rules still apply. The panel scrolls on short screens. While it
+is open, the adapter suspends its native mode indicator and candidate popup;
+closing it restores the current frame without resetting the session.
+These demo defaults do not change the engine default of `fuzzy: "none"`
+(IME13, S17.8.1).
+
 `lambda.dom.ime` exposes host operations:
 
 | Export | Effect |
 |---|---|
 | `pn enable(body, enabled)` | Set the document override and update the visible input method. |
-| `pn configure(body, settings)` | Validate/replace settings and refresh candidates immediately, preserving preedit. |
+| `pn configure(body, settings)` | Validate/replace settings, including before focus. Refresh a focused editor's candidates immediately, preserving preedit. |
+| `pn suspend_popup(body, suspended)` | Hide or restore the native indicator/candidates without changing focus, mode, preedit, page or highlight. Resume only for an eligible focused editor; respect active OS composition. |
 | `fn session(body)` | Read the current engine session, or null before first enable. |
 | `pn with_user(body, user)` | Validate and replace its learned overlay. |
 
-These host procedures propagate errors (`^`). Call `configure` for immediate
+`enable`, `configure` and `with_user` propagate errors (`^`). Call `configure` for immediate
 changes; direct attribute changes take effect at the next eligible key/focus
 turn. Save `session(body).user` with the engine's explicit `save_user`, and
 save `ime.settings(session(body))` separately. No preference files are written
 by the adapter.
 
-The popup is native UI: numbered rows, a highlighted candidate and a page
-indicator. A row click selects it without moving editing focus. Clicking its
-Chinese/English header toggles mode. Author CSS and DOM queries never see the
+The popup is a native horizontal strip with seven candidates per page by
+default, a highlighted option and a trailing mode/page indicator. Long strips
+wrap at narrow viewport widths; each complete option retains its click area.
+Labels keep the editor's font family at 85% of its computed size, capped at
+16 CSS pixels before zoom. Down expands the strip into a responsive grid with
+wheel scrolling; the menu includes every candidate returned within the engine's
+query budgets. The native layout reports its column count to Lambda key policy.
+A row click selects it without moving editing focus. Clicking its
+Chinese/English indicator toggles mode. Author CSS and DOM queries never see the
 popup (IME-E2); accessibility integration remains future work.
 
 Native `dom.compose(target, phase, text, caret)` queues `begin`, `update`,

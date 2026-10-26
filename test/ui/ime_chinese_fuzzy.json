@@ -1,0 +1,689 @@
+{
+  "name": "ime_chinese_fuzzy",
+  "html": "test/demo/ime/chinese.ls",
+  "viewport": {
+    "width": 1200,
+    "height": 850
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture_fuzzy');document.body.setAttribute('data-ime-page-size','2')"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "equals": "Fuzzy pinyin on"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "all"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "sifei"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "是非"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "sifei"
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": true,
+      "expanded": true,
+      "highlight": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": false
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "sifei",
+      "caret": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-done"
+      }
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": true,
+      "expanded": true,
+      "highlight": 1
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "sifei",
+      "caret": 5
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "是非"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": false
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy-options"
+      },
+      "attribute": "aria-expanded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-z-zh"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-c-ch"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-s-sh"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-n-l"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-f-h"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-r-l"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-an-ang"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-en-eng"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-in-ing"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-ian-iang"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-uan-uang"
+      },
+      "checked": true
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/fuzzy_options/pairs.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-none"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy-count"
+      },
+      "contains": "0 selected"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "attribute": "disabled",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-pair-s-sh"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy-count"
+      },
+      "contains": "1 selected"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy-pairs",
+      "equals": "s=sh"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "equals": "Fuzzy pinyin off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-done"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "s=sh"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-page-size",
+      "equals": "2"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "sifei"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "sifei"
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": true,
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": false
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "sifei"
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/fuzzy_options/composing.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "sifei"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "是非"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy-pairs",
+      "equals": "s=sh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "s=sh"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "zongguo"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-pair-z-zh"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#fuzzy-pair-z-zh"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "z=zh,s=sh"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "zongguo"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-page-size",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-done"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "是非中国"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-none"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-ime-fuzzy",
+      "equals": "none"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "equals": "Fuzzy pinyin off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-all"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy-count"
+      },
+      "contains": "11 selected"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#fuzzy"
+      },
+      "equals": "Fuzzy pinyin off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "h1"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "resize",
+      "width": 400,
+      "height": 600
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": false
+    },
+    {
+      "type": "script",
+      "js": "var p=document.getElementById('fuzzy-panel'),r=p.getBoundingClientRect();document.body.setAttribute('data-fuzzy-bounded',String(r.x>=0&&r.y>=0&&r.right<=400&&r.bottom<=600))"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "body"
+      },
+      "attribute": "data-fuzzy-bounded",
+      "equals": "true"
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/fuzzy_options/narrow.png"
+    },
+    {
+      "type": "scroll",
+      "x": 200,
+      "y": 250,
+      "dy": -10
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/fuzzy_options/narrow-scrolled.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-done"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy-options"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#fuzzy-panel"
+      },
+      "visible": false
+    }
+  ]
+}

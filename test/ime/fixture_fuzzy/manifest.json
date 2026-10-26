@@ -1,0 +1,18 @@
+{
+  "format": "lambda.ime.chinese.pack",
+  "format_version": 1,
+  "profile": "zh-Hans",
+  "fixture": "Repository-authored fuzzy word UI fixture (MIT)",
+  "files": {
+    "lexicon": {
+      "bytes": 135,
+      "lines": 7,
+      "postings": 7
+    },
+    "abbrev": {
+      "bytes": 99,
+      "lines": 3,
+      "postings": 4
+    }
+  }
+}

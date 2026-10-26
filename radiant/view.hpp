@@ -927,12 +927,19 @@ inline void font_prop_resolve_spacing(FontProp* font) {
 
 TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source);
 
+// state-only font owners release the same cache alias without linking layout setup.
+inline void font_prop_release_handle(FontProp* font) {
+    if (!font) return;
+    font_cache_unpin_handle(font->font_handle);
+    font->font_handle = nullptr;
+}
+
 inline void font_prop_copy(FontProp* destination, const FontProp* source, Pool* pool) {
     if (!destination || !source || destination == source) return;
     // copied font props own their mutable shadows independently (D4.5.1v4).
     TextShadow* shadows = pool ? clone_text_shadows(pool, source->text_shadow) : nullptr;
     if (pool) lam::free_owned_list(pool, destination->text_shadow);
-    font_cache_unpin_handle(destination->font_handle);
+    font_prop_release_handle(destination);
     *destination = *source;
     destination->text_shadow = lam::own(shadows);
     font_cache_pin_handle(destination->font_handle);
@@ -4678,7 +4685,6 @@ void document_apply_js_host_config(struct DomDocument* doc,
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
-extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 bool document_dependency_admits(const DomDocument* document, const char* source);
 ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);

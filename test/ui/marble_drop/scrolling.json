@@ -1,0 +1,292 @@
+{
+  "name": "Marble Drop viewport thumb dragging, track paging and wheel scrolling at both densities",
+  "html": "test/demo/marble-drop/marble-drop.ls",
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "device_scale": 2,
+  "event_interval_ms": 0,
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "mouse_move",
+      "x": 1194,
+      "y": 40
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_hovered": true
+    },
+    {
+      "type": "mouse_down",
+      "x": 1194,
+      "y": 40
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": true,
+      "drag_active": true,
+      "drag_target": true
+    },
+    {
+      "type": "mouse_move",
+      "x": 1194,
+      "y": 150
+    },
+    {
+      "type": "assert_scroll",
+      "y": 100,
+      "tolerance": 99
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1194,
+      "y": 40,
+      "r": 246,
+      "g": 246,
+      "b": 246,
+      "tolerance": 4
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/scroll-drag-2x.png"
+    },
+    {
+      "type": "mouse_move",
+      "x": 600,
+      "y": 40
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "mouse_up",
+      "x": 600,
+      "y": 40
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false,
+      "drag_active": false,
+      "drag_target": false
+    },
+    {
+      "type": "mouse_down",
+      "x": 1194,
+      "y": 750
+    },
+    {
+      "type": "assert_scroll",
+      "y": 301.4,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false
+    },
+    {
+      "type": "mouse_up",
+      "x": 1194,
+      "y": 750
+    },
+    {
+      "type": "scroll",
+      "x": 700,
+      "y": 400,
+      "dy": 100
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "scroll",
+      "x": 700,
+      "y": 400,
+      "dy": -1
+    },
+    {
+      "type": "assert_scroll",
+      "y": 50,
+      "tolerance": 1
+    },
+    {
+      "type": "scroll",
+      "x": 700,
+      "y": 400,
+      "dy": 100
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "mouse_move",
+      "x": 1194,
+      "y": 40
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_hovered": true
+    },
+    {
+      "type": "mouse_down",
+      "x": 1194,
+      "y": 40
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": true,
+      "drag_active": true,
+      "drag_target": true
+    },
+    {
+      "type": "mouse_move",
+      "x": 1194,
+      "y": 150
+    },
+    {
+      "type": "assert_scroll",
+      "y": 100,
+      "tolerance": 99
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1194,
+      "y": 40,
+      "r": 246,
+      "g": 246,
+      "b": 246,
+      "tolerance": 4
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/scroll-drag-1x.png"
+    },
+    {
+      "type": "mouse_move",
+      "x": 600,
+      "y": 40
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "mouse_up",
+      "x": 600,
+      "y": 40
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false,
+      "drag_active": false,
+      "drag_target": false
+    },
+    {
+      "type": "mouse_down",
+      "x": 1194,
+      "y": 750
+    },
+    {
+      "type": "assert_scroll",
+      "y": 301.4,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false
+    },
+    {
+      "type": "mouse_up",
+      "x": 1194,
+      "y": 750
+    },
+    {
+      "type": "scroll",
+      "x": 700,
+      "y": 400,
+      "dy": 100
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "scroll",
+      "x": 700,
+      "y": 400,
+      "dy": -1
+    },
+    {
+      "type": "assert_scroll",
+      "y": 50,
+      "tolerance": 1
+    },
+    {
+      "type": "scroll",
+      "x": 700,
+      "y": 400,
+      "dy": 100
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

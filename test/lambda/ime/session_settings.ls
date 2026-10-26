@@ -31,6 +31,6 @@ pn main() {
         (ime.key(engine,initial,{type:"keydown",key:1}) ^ { ^.code }) == 7830,
         (ime.key({*:engine,profile:"other"},initial,{key:"a"}) ^ { ^.code }) == 7830,
         (ime.settings({}) ^ { ^.code }) == 7830,
-        typed.raw == "zongguo" and ime.settings(initial)^ == {fuzzy:[],page_size:9}
+        typed.raw == "zongguo" and ime.settings(initial)^ == {fuzzy:[],page_size:7}
     ]
 }
