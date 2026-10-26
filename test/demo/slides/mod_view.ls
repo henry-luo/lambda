@@ -7,9 +7,10 @@ import home: .mod_home_ui
 import insert_ui: .mod_insert_ui
 import transitions_ui: .mod_transitions_ui
 import animations_ui: .mod_animations_ui
+import spelling: lambda.edit.spelling
+import ribbon_ui: ~~.mod_ribbon
 
 pub fn button(action,label,cls="") => <button id:action,type:"button",class:cls,'data-action':action,label>
-fn group(label,children) => <div class:"ribbon-group",role:"group",'aria-label':label,<div class:"ribbon-tools",*children><span class:"group-label",label>>
 fn select(id,label,items,property="") => <label class:"field",<span label><select id:id,'data-property':property,
     for (value in items) <option value:string(value),string(value)>>>
 fn field(key,label,kind="text") => <label class:"field",<span label><input id:"prop-" ++ key,type:kind,'data-property':key>>
@@ -17,11 +18,11 @@ pub fn ribbon(tab,fonts=[]) {
     if (tab == "Home") [home.tree(fonts)]
     else if (tab == "Insert") [insert_ui.tree()]
     else if (tab == "Transitions") [transitions_ui.tree()]
-    else if (tab == "Design") [
-        group("THEMES",[for (theme in ["light","dark","corporate","midnight","paper"])
-            button("theme-" ++ theme,theme,"theme theme-" ++ theme)]),
-        group("SLIDE LAYOUT",[select("layout","Layout",['blank','title','title-body','two-column','three-column','section','quote','image-left','image-right'],"slide-layout")]),
-        group("CANVAS",[button("grid","Grid"),button("design-fit","Fit to window")])]
+    else if (tab == "Design") [<div class:"design-ribbon editor-ribbon",
+        ribbon_ui.group("Themes",[for (theme in ["light","dark","corporate","midnight","paper"])
+            button("theme-" ++ theme,theme,"theme theme-" ++ theme)]);
+        ribbon_ui.group("Slide Layout",[select("layout","Layout",['blank','title','title-body','two-column','three-column','section','quote','image-left','image-right'],"slide-layout")]);
+        ribbon_ui.group("Canvas",[button("grid","Grid"),button("design-fit","Fit to window")])>]
     else [animations_ui.tree()]
 }
 pub fn canvas(plan,index:int,key) element^ {
@@ -104,6 +105,7 @@ pub fn shell(show_view,inline_view=null) => <div id:"slides-editor",tabindex:"0"
                 <div class:"inspector-actions",button("apply-text","Apply text");button("remove-object","Delete object")>
                 <p class:"help","Arrow keys nudge · Shift for 10 units · Cmd/Ctrl+D duplicates · Delete removes">>>>
     <footer class:"statusbar",<span id:"status",'aria-live':"polite","Ready to create">;<span class:"spacer">;<span id:"position","Slide 1 of 2">;<span id:"canvas-size","1280 × 720">>
+    spelling.widget("slides-notes");spelling.widget("slides-text");spelling.widget("slides-canvas");
     <div id:"home-menu",class:"home-menu",role:"menu",'aria-label':"Home ribbon options">
     <div id:"insert-dialog",class:"modal insert-dialog",role:"dialog",'aria-modal':"true",'aria-labelledby':"insert-title">
     <div id:"file-dialog",class:"modal",role:"dialog",'aria-modal':"true",'aria-labelledby':"dialog-title",

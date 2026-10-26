@@ -1,0 +1,73 @@
+{
+  "name": "Slides displayed text spelling follows the canvas",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "This is teh speling",
+      "clear": true
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "contains": "This is teh speling"
+    },
+    {
+      "type": "wait",
+      "ms": 2200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-canvas\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "[\"teh\",\"speling\"].every(w=>document.querySelector(\"#spelling-slides-canvas .spelling-underline[data-spelling-word=\"+w+\"]\"))"
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-canvas .spelling-underline\")].filter(n=>[\"teh\",\"speling\"].includes(n.getAttribute(\"data-spelling-word\"))).every(n=>{let r=n.getBoundingClientRect(),h=document.querySelector(\"#slide-render [data-slide-object=headline]\").getBoundingClientRect();return r.width>5&&r.left>=h.left&&r.right<=h.right&&r.top>=h.top&&r.bottom<=h.bottom})"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-slides-canvas-inline.png"
+    }
+  ]
+}

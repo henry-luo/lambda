@@ -231,6 +231,10 @@
     },
     {
       "type": "assert_script",
+      "js": "document.activeElement.matches('.ribbon-group-trigger') && document.activeElement.closest('.group-advanced-animation')!=null"
+    },
+    {
+      "type": "assert_script",
       "js": "document.getElementById('stage').getBoundingClientRect().width>=250 && document.getElementById('slide-navigator').getBoundingClientRect().width>=160"
     },
     {

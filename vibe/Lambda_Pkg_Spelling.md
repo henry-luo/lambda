@@ -368,6 +368,25 @@ ASCII punctuation/lowercase policy; it is not the full prose tokenizer or case
 admission engine. Current timing records separate file reading, index building
 and checks against the loaded dictionary; preparation validation is excluded.
 
+The shipped `lambda.doc.spelling` now loads the prepared en-US level-60 resource
+and reports source-mapped Latin prose issues. `spelling/document.ls` joins inline
+leaves and excludes code, math, deleted text, `spellcheck=false` and non-English
+regions; its ranges follow **S2.5.8** and **S17.4.1**. Word and Slides use
+`lambda.edit.spelling` for non-document underlines. The initial check starts when
+the document loads; later checks wait for a typing pause before invoking the
+checker in an isolated process so dictionary loading and lookup
+do not run in the editing event loop (**S13.1.3v2**, **S13.3.1v2**). Edits cancel
+pending checks; a generation number rejects late results. The previous underlines
+remain visible during a pending check and are replaced by the latest accepted
+result. Source paths resolve
+to rendered text ranges, and native text controls resolve code-point offsets to
+their painted rectangles. Displayed slide text uses a snapshot of visible DOM
+text leaves with native range geometry, because the compiled slide canvas has no
+editor source map. It honors `spellcheck=false` and inherited language on those
+leaves. The resulting wavy overlays leave source data,
+formatting, selection and undo untouched (**D7.2.5**). Suggestions, broader language profiles and
+complete document-adapter coverage remain separate milestones.
+
 ### 4.4 Correction algorithm
 
 Use the symmetric-delete approach as a candidate-generation reference:

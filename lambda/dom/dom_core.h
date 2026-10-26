@@ -25,6 +25,7 @@ extern "C" {
 
 // geometry and selection results share the same realm-neutral map builder.
 Item dom_result_map(struct DomDocument* doc, const char* const* keys, const Item* vals, int count);
+Item dom_make_rect_data(struct DomDocument* doc, double x, double y, double width, double height);
 
 // Flags carried by every catalog row (see dom_api.def header).
 enum DomOpFlags {
@@ -284,6 +285,7 @@ Item dom_engine_dom_unwrap_range(Item a, Item b, Item c, Item d, Item e);
 Item dom_engine_set_close_guard(Item a, Item b);
 Item dom_engine_request_window_close(Item a);
 Item dom_engine_set_window_title(Item a, Item b);
+Item dom_engine_set_window_min_width(Item a, Item b);
 Item dom_engine_dom_wrap_range(Item a, Item b, Item c, Item d, Item e);
 Item dom_engine_dropdown_open(Item a);
 Item dom_engine_embedded_document_root(Item a);
@@ -366,6 +368,9 @@ Item dom_raise_type_error(const char* message);
 // so one body serves both doors (ES38) instead of a Lambda-only copy.
 Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
 Item dom_create_range_for(Item doc);
+Item dom_core_source_range_rects(Item host, Item start, Item end);
+Item dom_core_text_node_range_rects(Item host, Item text, Item start, Item end);
+Item dom_core_text_control_range_rects(Item n, Item start, Item end);
 // CSSOM rows published at ESO114.
 Item dom_cssom_rule_get_css_rules(Item);
 Item dom_cssom_rule_get_css_text(Item);

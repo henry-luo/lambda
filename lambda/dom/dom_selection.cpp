@@ -459,6 +459,11 @@ JS_DOM_SELF_ALIAS(js_range_to_string, dom_range_to_string_value)
 struct RangeClientRectCollector {
     Item array;
     LambdaMutableHandle<Item>* array_handle;
+    DomDocument* doc;
+    bool plain;
+    bool project;
+    RdtMatrix matrix;
+    RdtLogicalPoint origin;
     uint32_t count;
     float left;
     float top;
@@ -473,7 +478,17 @@ static void js_range_collect_rect(float x, float y, float w, float h,
     if (!collector) return;
     Item array = collector->array_handle
         ? collector->array_handle->get() : collector->array;
-    js_array_push(array, dom_make_rect(x, y, w, h));
+    if (collector->project) {
+        // range fragments are in the untransformed CSS plane; map them through the host's painted plane.
+        float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+        if (!rdt_matrix_project_rect_bounds(&collector->matrix,
+                x - collector->origin.x, y - collector->origin.y,
+                x + w - collector->origin.x, y + h - collector->origin.y,
+                &left, &top, &right, &bottom)) return;
+        x = left; y = top; w = right - left; h = bottom - top;
+    }
+    js_array_push(array, collector->plain
+        ? dom_make_rect_data(collector->doc, x, y, w, h) : dom_make_rect(x, y, w, h));
     if (collector->count == 0) {
         collector->left = x;
         collector->top = y;
@@ -488,7 +503,8 @@ static void js_range_collect_rect(float x, float y, float w, float h,
     collector->count++;
 }
 
-static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
+static RangeClientRectCollector js_range_collect_client_rects(
+        DomRange* r, bool plain = false, DomElement* host = nullptr) {
     RangeClientRectCollector collector;
     memset(&collector, 0, sizeof(collector));
     RootFrame roots(1);
@@ -502,7 +518,20 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
     }
     DomDocument* doc = node_owning_doc(r->start.node);
     if (!doc) doc = node_owning_doc(r->end.node);
-    if (!doc || dom_ensure_geometry_snapshot(doc)) {
+    bool geometry_ready = !doc || dom_ensure_geometry_snapshot(doc);
+    collector.doc = doc;
+    collector.plain = plain;
+    if (host && geometry_ready) {
+        View* view = static_cast<View*>(host);
+        if (!view_get_client_matrix(view, &collector.matrix)) {
+            collector.array = array_root.get();
+            collector.array_handle = nullptr;
+            return collector;
+        }
+        collector.project = true;
+        collector.origin = view_geometry_block_viewport_origin(view);
+    }
+    if (geometry_ready) {
         DomNode* selected = nullptr;
         if (r->start.node == r->end.node &&
             r->end.offset == r->start.offset + 1 && r->start.node &&
@@ -522,7 +551,10 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
             dom_engine_visual_bounds(static_cast<View*>(selected), &x, &y, &w, &h);
             js_range_collect_rect(x, y, w, h, &collector);
         }
-        dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
+        // Editor decorations need the same glyph resolver as the caret; the
+        // null-context fallback distributes offsets evenly across proportional text.
+        UiContext* ui = doc ? static_cast<UiContext*>(doc->js.host_ui_context) : nullptr;
+        dom_range_for_each_rect(r, ui, js_range_collect_rect, &collector);
     }
     collector.array = array_root.get();
     collector.array_handle = nullptr;
@@ -1083,6 +1115,63 @@ extern "C" Item dom_create_range_for(Item doc_item) {
     if (!r) return ItemNull;
     dom_range_link_into_state(state, r);
     return build_range_object(r);
+}
+
+static Item dom_transient_range_rects(Item host_item, DomBoundary first, DomBoundary last) {
+    DomNode* host = node_arg(host_item);
+    if (!host || !host->is_element() || !first.node || !last.node) return ItemNull;
+    DocState* state = state_for_document_item(dom_core_owner_document(host_item), "dom_selection");
+    if (!state) return ItemNull;
+    DomRange* range = dom_range_create(state);
+    if (!range) return ItemNull;
+    const char* exception = nullptr;
+    if (!dom_range_set_start(range, first.node, first.offset, &exception) ||
+        !dom_range_set_end(range, last.node, last.offset, &exception)) {
+        dom_range_release(range);
+        return ItemNull;
+    }
+    // Geometry only needs the current layout; do not retain a live Range per spelling check.
+    RootFrame roots(1);
+    RangeClientRectCollector collector =
+        js_range_collect_client_rects(range, true, host->as_element());
+    Rooted<Item> rects(roots, collector.array);
+    dom_range_release(range);
+    return rects.get();
+}
+
+extern "C" Item dom_core_source_range_rects(Item host_item, Item start_item, Item end_item) {
+    DomNode* host = node_arg(host_item);
+    if (!host || !host->is_element()) return ItemNull;
+    SourcePosC start = {}, end = {};
+    if (!source_pos_from_item(start_item, &start)) return ItemNull;
+    if (!source_pos_from_item(end_item, &end)) {
+        source_pos_free(&start);
+        return ItemNull;
+    }
+    DomBoundary first = {}, last = {};
+    // use the render map, so decorations follow the same source path as editor selection.
+    bool resolved = dom_boundary_from_source_pos(host, &start, &first) &&
+                    dom_boundary_from_source_pos(host, &end, &last);
+    source_pos_free(&start);
+    source_pos_free(&end);
+    if (!resolved) return ItemNull;
+    return dom_transient_range_rects(host_item, first, last);
+}
+
+extern "C" Item dom_core_text_node_range_rects(Item host_item, Item text_item,
+                                                  Item start_item, Item end_item) {
+    DomNode* host = node_arg(host_item);
+    DomNode* text = node_arg(text_item);
+    if (!host || !text || !host->is_element() || !text->is_text()) return ItemNull;
+    bool contained = false;
+    for (DomNode* parent = text; parent; parent = parent->parent) {
+        if (parent == host) { contained = true; break; }
+    }
+    int64_t start = it2i(start_item), end = it2i(end_item);
+    if (!contained || start < 0 || end < start || end > UINT32_MAX) return ItemNull;
+    DomBoundary first = {text, (uint32_t)start};
+    DomBoundary last = {text, (uint32_t)end};
+    return dom_transient_range_rects(host_item, first, last);
 }
 
 extern "C" Item dom_get_selection_for(Item doc_item) {

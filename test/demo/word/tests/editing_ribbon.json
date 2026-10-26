@@ -795,8 +795,16 @@
     },
     {
       "type": "resize",
-      "width": 700,
+      "width": 800,
       "height": 520
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {"selector": ".group-editing[data-compact=true] .ribbon-group-trigger"}
     },
     {
       "type": "click",
@@ -807,7 +815,7 @@
     },
     {
       "type": "assert_script",
-      "js": "var b=document.getElementById('word-context-menu').getBoundingClientRect();b.x>=0&&b.y>=0&&b.right<=700&&b.bottom<=520"
+      "js": "var b=document.getElementById('word-context-menu').getBoundingClientRect();b.x>=0&&b.y>=0&&b.right<=800&&b.bottom<=520"
     },
     {
       "type": "capture_surface",
@@ -817,6 +825,10 @@
     {
       "type": "key_press",
       "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {"selector": ".group-editing[data-compact=true] .ribbon-group-trigger"}
     },
     {
       "type": "click",

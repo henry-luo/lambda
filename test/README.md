@@ -163,6 +163,15 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
   After `python3 utils/spelling_vocab_poc.py`, run
   `./lambda.exe run test/lambda/spelling/_vocab_file.ls` for all four full-size
   English packs; generated inputs and size reports live under `temp/spelling_vocab_poc/`.
+- **Word and Slides spelling:** `./lambda.exe run test/lambda/proc/spelling_check.ls`
+  checks the installed en-US pack, Unicode tokens, exclusions, inline joins and
+  source ranges. `./lambda.exe view test/demo/word/word.ls --headless
+  --event-file test/demo/word/tests/spelling.json` checks in-document Word underlines;
+  the Word runner includes this replay. `./test/test_ui_automation_gtest.exe
+  --suite baseline --test 'slide_spelling*'` covers underlines in displayed slides,
+  notes, plain text and rich text editing. The unrelated card and menu pixel
+  fixtures set `spellcheck=false` on the slide canvas to keep their reference
+  snapshots focused on those controls.
 - **Front-coded spelling POC:** `python3 utils/spelling_front_poc.py` prepares
   the adopted English text/XZ resource and source oracle from the same pinned data.
   `./lambda.exe run test/lambda/proc/spelling_front_coded.ls` checks the reader;

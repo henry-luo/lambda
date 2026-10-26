@@ -28,6 +28,7 @@ void radiant_platform_set_window_should_close(RadiantWindow*, bool) {}
 void radiant_platform_set_window_title(RadiantWindow*, const char*) {}
 void radiant_platform_set_window_icon(RadiantWindow*, const RadiantIconImage*, int) {}
 void radiant_platform_set_window_size(RadiantWindow*, int, int) {}
+void radiant_platform_set_window_min_width(RadiantWindow*, int) {}
 static void zero_pair(int* a, int* b) { if (a) *a = 0; if (b) *b = 0; }
 void radiant_platform_get_window_size(RadiantWindow*, int* width, int* height) { zero_pair(width, height); }
 void radiant_platform_get_window_pos(RadiantWindow*, int* x, int* y) { zero_pair(x, y); }

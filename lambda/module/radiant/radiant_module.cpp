@@ -2717,6 +2717,14 @@ RADIANT_C_API Item fn_radiant_set_window_title(Item node_item, Item title_item) 
     return radiant_bool_item(doc && title && radiant_window_set_title(doc, title));
 }
 
+RADIANT_C_API Item fn_radiant_set_window_min_width(Item node_item, Item width_item) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "SET_WINDOW_MIN_WIDTH");
+    if (!doc || get_type_id(width_item) != LMD_TYPE_INT) return radiant_bool_item(false);
+    int64_t width = it2i(width_item);
+    if (width <= 0 || width > INT_MAX) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_window_set_min_width(doc, (int)width));
+}
+
 // The text node an editing dispatch resolved to, and its range. Three scalar
 // accessors rather than one map, matching selection_start/selection_end: the
 // module has no map-building idiom, and a template reads these once each.
@@ -5678,6 +5686,7 @@ RADIANT_PROVIDE_ENGINE_2(finish_model_edit, fn_radiant_finish_model_edit)
 RADIANT_PROVIDE_ENGINE_2(set_close_guard, fn_radiant_set_close_guard)
 RADIANT_PROVIDE_ENGINE_1(request_window_close, fn_radiant_request_window_close)
 RADIANT_PROVIDE_ENGINE_2(set_window_title, fn_radiant_set_window_title)
+RADIANT_PROVIDE_ENGINE_2(set_window_min_width, fn_radiant_set_window_min_width)
 
 // is_focusable has no radiant.* spelling to forward to: the engine keeps the
 // predicate internal and publishes only focus_candidates, the whole list. A

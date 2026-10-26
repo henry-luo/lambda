@@ -62,6 +62,7 @@ void radiant_platform_set_window_title(RadiantWindow* window, const char* title)
 void radiant_platform_set_window_icon(RadiantWindow* window, const RadiantIconImage* images,
                                       int count);
 void radiant_platform_set_window_size(RadiantWindow* window, int width, int height);
+void radiant_platform_set_window_min_width(RadiantWindow* window, int width);
 void radiant_platform_get_window_size(RadiantWindow* window, int* width, int* height);
 void radiant_platform_get_window_pos(RadiantWindow* window, int* x, int* y);
 void radiant_platform_get_framebuffer_size(RadiantWindow* window, int* width, int* height);
@@ -109,4 +110,5 @@ void radiant_host_close_requested(RadiantWindow* window);
 void radiant_host_refresh(RadiantWindow* window);
 void radiant_host_focus_changed(RadiantWindow* window, bool focused);
 void radiant_host_bounds_changed(RadiantWindow* window);
+void radiant_host_size_changed(RadiantWindow* window);
 void radiant_host_metrics_changed(RadiantWindow* window);  // framebuffer, scale, maximize, monitors

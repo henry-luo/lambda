@@ -1,0 +1,86 @@
+{
+  "name": "Slides rich-text spelling stays in the inline edit",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"3\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": " teh"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "contains": "teh"
+    },
+    {
+      "type": "wait",
+      "ms": 2200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-text\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-text .spelling-underline\")].some(n=>n.getAttribute(\"data-spelling-word\")===\"teh\")"
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-text .spelling-underline\")].filter(n=>n.getAttribute(\"data-spelling-word\")===\"teh\").every(n=>{let r=n.getBoundingClientRect(),h=document.getElementById(\"canvas-rich-text\").getBoundingClientRect();return r.width>5&&r.left>=h.left&&r.right<=h.right&&r.top>=h.top&&r.bottom<=h.bottom})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#canvas-rich-text\")!=null&&document.querySelector(\"#spelling-slides-text button\")==null"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-slides-rich-inline.png"
+    }
+  ]
+}

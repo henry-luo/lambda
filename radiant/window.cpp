@@ -617,6 +617,23 @@ void radiant_host_bounds_changed(RadiantWindow*) {
     do_redraw = true;
 }
 
+void radiant_host_size_changed(RadiantWindow* window) {
+    radiant_host_bounds_changed(window);
+    // A live drag can block the event loop; paint each size callback instead of waiting for the poll to finish.
+    static bool rendering_resize = false;
+    if (rendering_resize || ui_context.fullscreen.applying) return;
+    rendering_resize = true;
+    // Hot layout diagnostics can produce megabytes per drag frame in debug builds.
+    // An explicit log level still opts into those traces when diagnosing resize.
+    bool quiet_resize = !shell_getenv("LAMBDA_LOG_LEVEL");
+    int previous_log_level = quiet_resize ? log_set_transient_min_level(LOG_LEVEL_WARN) : 0;
+    // This callback publishes the frame now; retain only new redraws requested inside it.
+    do_redraw = false;
+    render(window);
+    if (quiet_resize) log_set_transient_min_level(previous_log_level);
+    rendering_resize = false;
+}
+
 bool radiant_window_fullscreen_key(UiContext* uicon, const RdtEvent* event) {
     if (!uicon || !event ||
         (event->type != RDT_EVENT_KEY_DOWN && event->type != RDT_EVENT_KEY_UP)) return false;
@@ -761,6 +778,19 @@ bool radiant_window_approve_close(DomDocument* doc) {
 bool radiant_window_set_title(DomDocument* doc, const char* title) {
     if (!window_hosts_document(doc) || !title) return false;
     update_window_title(title);
+    return true;
+}
+
+bool radiant_window_set_min_width(DomDocument* doc, int width) {
+    if (!window_hosts_document(doc) || width <= 0) return false;
+    // the document may render headlessly; only a native window needs resize limits.
+    if (ui_context.window) {
+        radiant_platform_set_window_min_width(ui_context.window, width);
+        int current_width = 0, current_height = 0;
+        radiant_platform_get_window_size(ui_context.window, &current_width, &current_height);
+        if (current_width < width)
+            radiant_platform_set_window_size(ui_context.window, width, current_height);
+    }
     return true;
 }
 
@@ -1022,10 +1052,13 @@ void radiant_host_metrics_changed(RadiantWindow*) {
     do_redraw = 1;
 }
 
+static bool rendering_frame = false;
+
 void radiant_host_refresh(RadiantWindow* window) {
+    if (rendering_frame) { do_redraw = true; return; }
+    do_redraw = 0;
     window_flush_pointer_motion();
     render(window);
-    do_redraw = 0;
 }
 
 void to_repaint() {
@@ -1034,6 +1067,11 @@ void to_repaint() {
 }
 
 void render(RadiantWindow* window) {
+    // Cocoa refresh notifications can nest inside a live resize presentation.
+    // Keep the current surface valid until one complete frame has been presented.
+    if (rendering_frame) { do_redraw = true; return; }
+    rendering_frame = true;
+    struct RenderGuard { ~RenderGuard() { rendering_frame = false; } } guard;
     // a platform transition may synchronously request a refresh in the middle of a mode switch.
     if (ui_context.fullscreen.applying) return;
     window_fullscreen_update(&ui_context, false);

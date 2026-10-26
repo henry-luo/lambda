@@ -287,7 +287,11 @@
     },
     {
       "type": "assert_script",
-      "js": "var r=document.querySelector(\".ribbon-groups\");r.clientWidth<=900 && r.scrollWidth>r.clientWidth"
+      "js": "var r=document.querySelector(\".ribbon-groups\");r.clientWidth<=900 && getComputedStyle(r).overflowX==='visible' && r.querySelectorAll('.ribbon-group[data-compact=true]').length>0 && r.lastElementChild.getBoundingClientRect().right<=r.getBoundingClientRect().right"
+    },
+    {
+      "type": "click",
+      "target": {"selector": ".group-symbols[data-compact=true] .ribbon-group-trigger"}
     },
     {
       "type": "click",
@@ -315,7 +319,7 @@
     },
     {
       "type": "assert_script",
-      "js": "var r=document.querySelector(\".ribbon-groups\"),s=document.getElementById(\"stage\");r.getBoundingClientRect().bottom<=s.getBoundingClientRect().top && r.scrollLeft>0"
+      "js": "var r=document.querySelector(\".ribbon-groups\"),s=document.getElementById(\"stage\");r.getBoundingClientRect().bottom<=s.getBoundingClientRect().top && getComputedStyle(r).overflowX==='visible' && r.lastElementChild.getBoundingClientRect().right<=r.getBoundingClientRect().right"
     },
     {
       "type": "assert_attribute",

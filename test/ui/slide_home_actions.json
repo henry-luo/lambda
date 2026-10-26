@@ -14,7 +14,7 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": ".group-undo svg"
+        "selector": ".group-undo .group-tools svg"
       },
       "equals": 4
     },

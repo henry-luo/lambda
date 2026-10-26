@@ -366,6 +366,7 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 bool radiant_window_set_close_guard(DomDocument* doc, bool armed);
 bool radiant_window_approve_close(DomDocument* doc);
 bool radiant_window_set_title(DomDocument* doc, const char* title);
+bool radiant_window_set_min_width(DomDocument* doc, int width);
 bool radiant_window_set_fullscreen(DomNode* node, bool enabled);
 bool radiant_window_fullscreen(DomNode* node);
 bool radiant_window_fullscreen_enabled(DomNode* node);

@@ -24,6 +24,7 @@ import animation_catalog: lambda.slide.animation
 import splitter: ~~.mod_splitter
 import exports: ~~.mod_export
 import inline_text: .mod_inline
+import spelling: lambda.edit.spelling
 import text_offsets: lambda.dom.edit_history
 import slide_drag: .mod_slide_drag
 
@@ -61,12 +62,12 @@ pub pn navigation_limits(owner,st) {
     // reserve the studio's CSS minimum and the divider's own width.
     return {min:160.0,max:max(160.0,min(480.0,width-inspector-animations-250.0-6.0))}
 }
-pub pn resize_navigation(owner,st,width) {
+pub pn resize_navigation(owner,st,width,defer_layout=true) {
     let limits = navigation_limits(owner,st)
     let size = round(max(limits.min,min(limits.max,width)))
     let changed = splitter.publish(node(owner,"slide-navigator"),node(owner,"navigator-divider"),size,limits)
     let next = {*:st,navigator_width:size};
-    return if (changed) request_layout(owner,next) else next
+    return if (changed and defer_layout) request_layout(owner,next) else next
 }
 pub pn finish_navigation_resize(owner,st,cancel=false) {
     if (st.navigator_drag == null) { return st }
@@ -77,9 +78,9 @@ pub pn finish_navigation_resize(owner,st,cancel=false) {
     splitter.release(node(owner,"navigator-divider"),gesture)
     return request_layout(owner,restored)
 }
-pub pn fit_layout(owner,st) {
+pub pn fit_layout(owner,st,defer_layout=true) {
     let width = c.value(st.navigator_width,dom.bounding_box(node(owner,"slide-navigator")).width)
-    let resized = resize_navigation(owner,st,width)
+    let resized = resize_navigation(owner,st,width,defer_layout)
     let papers = dom.query_selector_all(node(owner,"thumbnails"),".thumb-paper")
     let preview = if (len(papers)>0) dom.bounding_box(papers[0]).width else st.thumbnail_width
     for (paper in papers) {
@@ -108,11 +109,23 @@ pub pn selection(owner,st) {
         for (handle in dom.child_nodes(fragment)) dom.append_child(place,handle)
     }
 }
-pub pn publish(owner,st,canvas=true) {
+pub pn publish(owner,st,canvas=true,opened=false) {
+    // a slide switch replaces the notes and painted canvas, even when editing never began.
+    let previous_index = dom.get_attribute(owner,"data-index")
+    let replaced = opened or (previous_index!=null and previous_index!=string(st.index))
+    spelling.update(owner,"slides-notes",m.notes(st),st.show==true,null,replaced)
+    if (st.inline==null) spelling.update(owner,"slides-text",null)
+    spelling.reposition(owner,"slides-notes")
+    spelling.reposition(owner,"slides-text")
     let thumbnail_focus = canvas and any([for (item in dom.query_selector_all(node(owner,"thumbnails"),"[data-slide]")) dom.focused(item)])
     let obj = m.chosen(st)
     let editing = st.editing.target
-    u.markup(node(owner,"ribbon"),format(v.ribbon(st.tab,c.value(st.fonts,[])),'html'))
+    let ribbon = node(owner,"ribbon")
+    u.markup(ribbon,format(v.ribbon(st.tab,c.value(st.fonts,[])),'html'))
+    let group_row = dom.query_selector(ribbon,".editor-ribbon")
+    // Markup replacement discards group measurements; measure in the next layout frame.
+    if (group_row!=null and dom.get_attribute(group_row,"data-layout-key")==null)
+        dom.request_frame(owner,"slide_ribbon_ready")
     let menu_tree = if (st.menu=="slide-context") home_ui.slide_context(st)
         else if (starts_with(c.value(st.menu,""),"animation-")) animations_ui.menu_tree(st,st.menu) else if (st.menu == "transition-options") transitions_ui.menu_tree(st) else if (starts_with(c.value(st.menu,""),"insert-")) insert_ui.menu_tree(st.menu)
         else home_ui.menu_tree(c.value(st.menu,""));
@@ -130,6 +143,7 @@ pub pn publish(owner,st,canvas=true) {
     }
     u.markup(node(owner,"object-list"),join([for (option in v.object_options(st)) format(option,'xml')],""))
     selection(owner,st)
+    if (canvas) spelling.update_canvas(owner,if (st.inline==null) null else st.selected,st.show==true,replaced)
     u.attr(node(owner,"paper"),"class",if (st.grid) "grid" else "")
     for (key,val in {'data-index':st.index,'data-slides':len(st.plan.slides),'data-selected':st.selected,
         'data-insert-dialog':c.value(st.insert_form.kind,""),'data-dirty':st.doc != st.saved,'data-error':st.error,'data-dialog':st.dialog,'data-mode':if (st.show) "present" else "edit",'data-undo':len(st.undo),
@@ -460,7 +474,8 @@ pub pn open_slide_context(owner,st,index,point=null) {
 pub pn dispatch(owner,st,action,base) {
     var result = {*:st,editing:null}
     command(owner,result,action,base) ^ { result = {*:result,error:^.message,status:^.message} } ~ { result = ~ }
-    let published = publish(owner,if (starts_with(action,"menu-")) result else {*:result,menu:""});
+    let published = publish(owner,if (starts_with(action,"menu-")) result else {*:result,menu:""},true,
+        (action=="new" or (action=="file-confirm" and st.dialog=="open")) and result.doc!=st.doc);
     if (st.menu=="slide-context" and published.menu=="") restore_menu_focus(owner,published,st.menu)
     // both pointer and keyboard dismissal restore focus outside the hidden dialog.
     if (st.dialog != "" and published.dialog == "") {
@@ -566,6 +581,7 @@ pub pn begin_inline(owner,st,point=null) {
         let value = m.text(obj.source)
         let end = text_offsets.utf16_from_codepoint(value,len(value),0,0)
         dom.tc_set_selection(node(owner,"canvas-text"),end,end,"none")
+        spelling.update(owner,"slides-text",value)
     } else {
         let host = node(owner,"rich-text-host")
         dom.dispatch(host,{type:"slide_inline_begin",bubbles:false,detail:{object:obj,point:point}})

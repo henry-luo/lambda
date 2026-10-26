@@ -1,11 +1,8 @@
 /**
  * Phase 6 — DOM Range / Selection layout & input bridge.
  *
- * Pure layout/glyph-free implementation. Linear interpolation maps byte
- * offsets within a TextRect to x positions; this is approximate but
- * sufficient for the public bridge API (caret/selection rendering and
- * hit-testing). Pixel-perfect glyph-walk variants live in event.cpp and
- * can be substituted later by callers that already have an EventContext.
+ * Range layout uses the host glyph resolver when a UiContext is available;
+ * isolated layout tests retain linear interpolation as a fallback.
  *
  * Deliberately does NOT include state_store.hpp (which would drag GLFW +
  * the entire render stack into unit-test binaries). The legacy-mirror
@@ -101,7 +98,15 @@ static bool resolve_text_boundary(DomText* text, int byte_off,
     TextRect* r = view_geometry_text_rect_for_offset(text, byte_off);
     if (!r) return false;
 
-    float local_x = view_geometry_interpolate_text_x(text, r, byte_off, true);
+    // The selection presentation copies this boundary into the painted caret.
+    // A proportional-font estimate would shift the caret even when live range
+    // rectangles and text painting use exact glyph widths.
+    DomElement* parent = text->parent && text->parent->is_element()
+        ? text->parent->as_element() : nullptr;
+    UiContext* ui = parent && parent->doc
+        ? static_cast<UiContext*>(parent->doc->js.host_ui_context) : nullptr;
+    float local_x = dom_range_glyph_x_for_byte_offset(
+        ui, static_cast<ViewText*>(text), r, byte_off);
     RdtLogicalPoint point = view_geometry_local_to_block_viewport(
         static_cast<View*>(text), {local_x, r->y});
     if (out_view) *out_view = static_cast<View*>(text);
