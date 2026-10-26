@@ -39,8 +39,7 @@ pub pn ensure(viewport,base,id) {
         return dom.get_attribute(slot,"data-error")
     }
     // Only the selected imported model occupies this viewport; camera changes retain its buffers.
-    let previous_children = [for (child in dom.child_nodes(slot)) child]
-    for (child in previous_children) dom.remove_child(slot,child)
+    scene_dom.clear(slot)
     dom.set_attribute(slot,"data-model",id)
     var loaded = null
     var problem = ""
