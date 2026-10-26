@@ -1317,6 +1317,11 @@ static float table_row_baseline_in_order(LayoutContext* lycon, View* parent,
 
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh) {
     if (parent && parent->view_type == RDT_VIEW_TABLE) {
+        ViewTable* table = lam::view_require<RDT_VIEW_TABLE>(parent);
+        if (table_needs_vertical_geometry_publication(table) && table->blk &&
+            table->block()->first_line_baseline > 0.0f) {
+            return cumulative_y + table->block()->first_line_baseline;
+        }
         float row_baseline = table_row_baseline_in_order(lycon, parent, 0.0f, false);
         if (row_baseline >= 0.0f) return cumulative_y + row_baseline;
     }
@@ -1369,6 +1374,10 @@ static float table_last_baseline_for_vertical_writing(ViewTable* table) {
 
 static float table_last_baseline_for_writing(LayoutContext* lycon, ViewTable* table) {
     if (!table) return -1.0f;
+    if (table_needs_vertical_geometry_publication(table) && table->blk &&
+        table->block()->last_line_baseline > 0.0f) {
+        return table->block()->last_line_baseline;
+    }
     if (layout_block_inline_axis_is_vertical(table)) {
         return table_last_baseline_for_vertical_writing(table);
     }
@@ -5211,8 +5220,6 @@ static void table_publish_vertical_cell_content(LayoutContext* lycon,
         child_block->content_height = child_content_extent;
     }
     CssEnum direction = cell->blk ? cell->block()->direction : CSS_VALUE_LTR;
-    CssEnum dominant_baseline = cell->blk
-        ? cell->block()->dominant_baseline : CSS_VALUE_AUTO;
     bool reverse_inline =
         (layout_element_css_writing_mode(cell->as_element()) == CSS_VALUE_SIDEWAYS_LR &&
          direction == CSS_VALUE_LTR) ||
@@ -5222,11 +5229,9 @@ static void table_publish_vertical_cell_content(LayoutContext* lycon,
     // physical cell box, or forced vertical line breaks remain horizontal.
     layout_map_vertical_writing_text_geometry(
         static_cast<View*>(cell->first_child), mode, cell->width,
-        physical_inline_extent, lycon->block.line_height, 0.0f,
+        physical_inline_extent, lycon->block.line_height,
         surrogate_inline_origin, physical_inline_origin,
         surrogate_block_origin, physical_block_origin, false,
-        dominant_baseline == CSS_VALUE_AUTO ||
-            dominant_baseline == CSS_VALUE_CENTRAL,
         reverse_inline);
     if (cell->blk) {
         layout_publish_vertical_children(cell, mode, false,
@@ -5264,6 +5269,7 @@ static void table_publish_vertical_geometry(LayoutContext* lycon, ViewTable* tab
     bool vertical_rl = layout_block_writing_mode(table) == WM_VERTICAL_RL;
     float grid_origin = 0.0f;
     float grid_end = 0.0f;
+    float source_grid_origin = 0.0f;
     bool have_grid_bounds = false;
     table->each_direct_block( [&](ViewBlock* child) {
         if (table_view_is_caption(child)) {
@@ -5284,6 +5290,7 @@ static void table_publish_vertical_geometry(LayoutContext* lycon, ViewTable* tab
         }
         float logical_x = child->x;
         float logical_y = child->y;
+        if (!have_grid_bounds || logical_y < source_grid_origin) source_grid_origin = logical_y;
         float logical_child_width = child->width;
         float logical_child_height = child->height;
         layout_set_view_geometry(child, logical_y, logical_x,
@@ -5318,6 +5325,15 @@ static void table_publish_vertical_geometry(LayoutContext* lycon, ViewTable* tab
     });
     table->width = max(physical_width, 0.0f);
     table->height = max(physical_height, 0.0f);
+    if (have_grid_bounds && table->blk) {
+        // row baselines stay on the block axis while captions move the grid's origin.
+        float published_grid_origin = vertical_rl ? physical_width - grid_end : grid_origin;
+        float baseline_translation = published_grid_origin - source_grid_origin;
+        if (table->block()->first_line_baseline > 0.0f)
+            table->block_mut()->first_line_baseline += baseline_translation;
+        if (table->block()->last_line_baseline > 0.0f)
+            table->block_mut()->last_line_baseline += baseline_translation;
+    }
     table->content_width = table->width;
     table->content_height = table->height;
     layout_normalize_vertical_breaks(table);
@@ -6130,9 +6146,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     if (tcell->blk && tcell->block_mut()->text_align) {
         lycon->block.text_align = tcell->block()->text_align;
     }
-    if (tcell->blk && tcell->block_mut()->direction) {
-        lycon->block.direction = tcell->block()->direction;
-    }
+    // the first cell line needs the same paragraph direction as later lines.
+    layout_setup_inline_direction(lycon, tcell);
     if (tcell->blk) {
         if (!isnan(tcell->block()->text_indent_percent)) {
             lycon->block.text_indent = content_width * tcell->block()->text_indent_percent / 100.0f;
@@ -7940,9 +7955,21 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
         table->tb->computed_font_size = table_font_size;
     }
     detect_anonymous_boxes(table);
+    if (table->blk) {
+        // retained table layout must not read the preceding geometry's baseline set.
+        table->block_mut()->first_line_baseline = 0.0f;
+        table->block_mut()->last_line_baseline = 0.0f;
+    }
     table_auto_layout(lycon, table);
     // Auto table grids publish their logical tracks after sizing.
-    if (table_needs_vertical_geometry_publication(table)) {
+    bool publish_vertical = table_needs_vertical_geometry_publication(table);
+    if (publish_vertical) {
+        if (table->blk) {
+            table->block_mut()->first_line_baseline = table_row_baseline_in_order(
+                lycon, table, 0.0f, false);
+            table->block_mut()->last_line_baseline = table_row_baseline_in_order(
+                lycon, table, 0.0f, true);
+        }
         table_publish_vertical_geometry(lycon, table);
     }
     // CRITICAL: Set advance_y to table height so finalize_block_flow works correctly
@@ -7975,7 +8002,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     });
     // CSS Inline 3 baseline-source:first: block parents need the table's first
     // row baseline; otherwise an inline-block containing a table falls back to
-    if (table->blk) {
+    if (table->blk && !publish_vertical) {
         float first_baseline = find_first_baseline_recursive(
             lycon, static_cast<View*>(table), 0.0f, true);
         if (first_baseline >= 0.0f) {

@@ -3395,6 +3395,24 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     return resolve_length_value_mode(lycon, property, value, false);
 }
 
+static bool css_orthogonal_size_percentage_basis(LayoutContext* context,
+    CssPropertyCode property, float* basis) {
+    LayoutAxis axis;
+    switch (property) {
+        case CSS_PROPERTY_WIDTH: case CSS_PROPERTY_MIN_WIDTH: case CSS_PROPERTY_MAX_WIDTH:
+            axis = LAYOUT_AXIS_X; break;
+        case CSS_PROPERTY_HEIGHT: case CSS_PROPERTY_MIN_HEIGHT: case CSS_PROPERTY_MAX_HEIGHT:
+            axis = LAYOUT_AXIS_Y; break;
+        default: return false;
+    }
+    DomElement* owner = context->selected_style ? context->selected_style->source.get()
+        : context->view && context->view->is_element() ? context->view->as_element() : nullptr;
+    ViewBlock* block = owner ? lam::unsafe_view_block_element_storage(owner) : nullptr;
+    if (!layout_orthogonal_inline_percentage_applies(block, axis)) return false;
+    *basis = layout_orthogonal_inline_basis(context, block);
+    return true;
+}
+
 static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     const CssValue* value, bool computed_units) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
@@ -3477,8 +3495,16 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
         case CSS_UNIT_IC: {
             FontStyleDesc style = lycon->font.style ? font_style_desc_from_prop(lycon->font.style) : FontStyleDesc{};
             float font_size = lycon->font.style ? lycon->font.style->font_size : lycon->font.current_font_size;
-            bool upright = length_owner && length_vertical &&
-                layout_specified_keyword(length_owner, CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED) == CSS_VALUE_UPRIGHT;
+            bool upright = false;
+            if (length_owner && (unit == CSS_UNIT_CH || unit == CSS_UNIT_IC)) {
+                CssEnum mode = css_prop_compute_cascaded_keyword(length_owner,
+                    CSS_PROPERTY_WRITING_MODE, CSS_VALUE_HORIZONTAL_TB);
+                CssEnum orientation = css_prop_compute_cascaded_keyword(length_owner,
+                    CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED);
+                // sideways boxes have a vertical inline axis but use horizontal glyph metrics.
+                upright = (mode == CSS_VALUE_VERTICAL_RL || mode == CSS_VALUE_VERTICAL_LR) &&
+                    orientation == CSS_VALUE_UPRIGHT;
+            }
             float pixels = 0.0f;
             result = css_font_metric_unit_px(font_box_handle(&lycon->font), &style,
                 unit, font_size, upright, &pixels) ? num * pixels : NAN;
@@ -3514,7 +3540,11 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
     }
     case CSS_VALUE_TYPE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
-        if (effective_property == CSS_PROPERTY_TRANSFORM && lycon->transform_length_math) {
+        float orthogonal_basis = 0.0f;
+        if (css_orthogonal_size_percentage_basis(lycon,
+                (CssPropertyCode)effective_property, &orthogonal_basis)) {
+            result = percentage * orthogonal_basis / 100.0;
+        } else if (effective_property == CSS_PROPERTY_TRANSFORM && lycon->transform_length_math) {
             result = percentage * lycon->transform_percentage_base / 100.0;
         } else if (effective_property == CSS_PROPERTY_OPACITY) {
             result = percentage / 100.0;

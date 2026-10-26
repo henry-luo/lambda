@@ -1009,12 +1009,14 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 font_get_normal_lh_split(font->font_handle,
                     &normal_ascender, &normal_descender);
             }
+            if (normal_ascender + normal_descender <= 0.0f) {
+                normal_ascender = font_ascender;
+                normal_descender = font ? font->descender : 0.0f;
+            }
+            layout_apply_dominant_font_baseline(block, &normal_ascender, &normal_descender);
             // CSS Inline: a single-line text control exports its internal line
             // baseline, so Grid does not synthesize it from the border edge.
             float internal_baseline = border_top + pad_top + normal_ascender;
-            if (normal_ascender <= 0.0f) {
-                internal_baseline = border_top + pad_top + font_ascender;
-            }
             internal_baseline = min(internal_baseline, block->height);
             if (form_input_has_capability(form->input_type,
                     FORM_INPUT_CAP_TEXT_CONTROL)) {
@@ -1042,25 +1044,25 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 lycon, block, font, has_css_font);
             float font_descender = font && font->descender > 0.0f
                 ? font->descender : 0.0f;
+            // editable lines export the same dominant font baseline as ordinary inline lines.
+            layout_apply_dominant_font_baseline(block, &font_ascender, &font_descender);
             float content_height = font_ascender + font_descender;
-            // A vertical control's baseline axis is its logical block axis; the
-            // horizontal surrogate's ascent can exceed that extent when the
-            // specified font is taller than the control.
-            float baseline_ascender = layout_block_inline_axis_is_vertical(block)
-                ? min(font_ascender, block->content_width) : font_ascender;
-            float first_baseline = border_top + pad_top + baseline_ascender +
+            bool vertical = layout_block_inline_axis_is_vertical(block);
+            float block_extent = vertical ? block->width : block->height;
+            float inline_extent = vertical ? block->content_height : block->content_width;
+            float first_baseline = layout_block_start_content_offset(block) + font_ascender +
                 (line_height - content_height) * 0.5f;
             int visual_lines = textarea_visual_line_count(
                 lycon, font, form->current_value ? form->current_value : form->value,
-                block->content_width);
+                inline_extent);
             float last_baseline = first_baseline +
                 (float)(visual_lines - 1) * line_height;
             // CSS Box Alignment clamps a scroll container's line baseline to
             // its block-end border edge when editable content overflows.
             form->last_text_baseline_overflow = max(
-                last_baseline - block->height, 0.0f);
-            form->first_text_baseline = min(first_baseline, block->height);
-            form->last_text_baseline = min(last_baseline, block->height);
+                last_baseline - block_extent, 0.0f);
+            form->first_text_baseline = min(first_baseline, block_extent);
+            form->last_text_baseline = min(last_baseline, block_extent);
         }
     }
     // For select (and other form controls with option/optgroup children):
