@@ -2655,7 +2655,7 @@ typedef struct InputMethodTransport {
     uint64_t session_root;
     bool session_rooted;
     DomNodeRef popup_target;
-    char* labels[9];
+    char** labels;
     int count;
     int page;
     int pages;
@@ -2663,7 +2663,15 @@ typedef struct InputMethodTransport {
     bool visible;
     bool chinese;
     bool pointer_down;
+    bool expanded;
+    bool ensure_highlight;
+    int columns;
+    int preferred_columns;
+    int shortcut_start;
+    float scroll_y, scroll_max, body_height;
+    FontProp font;            // owned reduced-font handle; refreshed from the selected editor before use
     float x, y, width, height;
+    Rect* cells;              // mode button at 0; candidate i at i + 1, in viewport CSS pixels
 } InputMethodTransport;
 
 bool input_method_queue(DomElement* target, const char* phase, const char* text, uint32_t caret);
@@ -2673,6 +2681,7 @@ void input_method_cleanup(DocState* state);
 void input_method_clear_labels(InputMethodTransport* transport);
 bool input_method_popup(UiContext* ui, DomElement* target, Item frame, const char* mode);
 int input_method_popup_hit(UiContext* ui, DocState* state, float x, float y);
+bool input_method_popup_scroll(UiContext* ui, DocState* state, float x, float y, float delta);
 bool input_method_popup_row_rect(UiContext* ui, DocState* state, int row, Rect* out);
 void input_method_popup_render(RasterRenderContext* rdcon, DocState* state);
 bool radiant_dispatch_input_method_action(EventContext* evcon, View* target, int index);
@@ -4765,11 +4774,6 @@ typedef struct EventContext {
 
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
-    // Caret offset inside the current preedit, so the composition dispatch can
-    // hand it to the session template (ES18/F7). Set by the IME entrypoints
-    // around their compositionupdate dispatch.
-    uint32_t composition_caret_hint;
-
     // caret position override for synthetic/default-action event payloads.
     // the cut default action reports the selection start without collapsing
     // the live selection before user handlers observe it.

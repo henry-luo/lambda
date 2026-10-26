@@ -7,9 +7,9 @@ pub fn candidates(engine,raw,options = null,user = null) map^ {
     let opts = lookup.options(options)^
     let graph = lattice.build(engine.syllables,raw,opts.fuzzy)^
     let paths = lattice.paths(graph,opts.max_paths)
-    let base = lookup.candidates(engine,paths.paths,opts)^
+    let base = lookup.candidates(engine,paths.paths,opts,len(graph.input))^
     let result = if (user == null or len(user.entries) == 0) base
         else learned.promote(user,paths.paths,base,opts)^;
-    {segments:[for (edges in graph.edges,edge in edges) edge],items:result.items,
+    {segments:[for (edges in graph.edges,edge in edges) edge],caret_stops:lattice.caret_stops(graph),items:result.items,
         truncated:paths.truncated or result.truncated,scanned:result.scanned}
 }

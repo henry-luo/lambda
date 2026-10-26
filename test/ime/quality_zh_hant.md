@@ -1,5 +1,15 @@
 # zh-Hant candidate-quality baseline
 
+**Ranking update, 2026-10-26 (IME7v2):** complete exact/fuzzy readings now
+precede partial routes. A fresh qualification against the unchanged frozen
+fixture gives full-pinyin **61/64 top 1, 64/64 top 3 and top 9**; all-fuzzy
+results are identical. Initials remain **22/35/50** at top 1/3/9. All 64 words
+remain found, no individual rank regresses, and both tiers agree on all 192
+results. The original acceptance floors are unchanged. Before/after evidence:
+`temp/ime_chinese/ranking/{before-hant,after-hant-jit,after-hant-interp}.json`
+and `comparison.json`. The table and timing samples below retain the original
+M4 snapshot; no performance improvement is claimed.
+
 Recorded 2026-10-26 for M4 (IME11 / proposal §5.6). The fixture contains 64
 repository-authored MIT cases with explicitly authored Traditional spellings
 and the same readings as M1. It is a regression corpus; representative external
@@ -14,6 +24,10 @@ Traditional tuning. The [fixture](heldout_zh_hant.json) SHA-256 is
 | Full pinyin | 64/64 | 52/64 | 63/64 | 64/64 | 44/64 | 3.645 |
 | Orthographic initials | 64/64 | 22/64 | 35/64 | 50/64 | 64/64 | 1.837 |
 | Full pinyin, all fuzzy pairs | 64/64 | 51/64 | 61/64 | 64/64 | 53/64 | 3.645 |
+
+The frozen top-9 and keystroke model below retain the original nine-option
+query baseline. The popup/session now defaults to seven options; an explicit
+`page_size: 9` remains supported.
 
 Truncation reports the existing key/posting/path/candidate budgets, even when
 the expected word was found. Keystrokes mean typed input plus one selection

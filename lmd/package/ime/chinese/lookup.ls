@@ -88,9 +88,9 @@ fn search(engine,paths,opts,at,progress) map^ {
     }
 }
 
-pub fn candidates(engine,paths,opts) map^ {
+pub fn candidates(engine,paths,opts,input_length) map^ {
     let result = search(engine,paths,opts,0,{items:[],keys:0,postings:0,truncated:false})^
-    let ranked = rank.ranked(result.items,opts.coverage_floor,opts.group_leaders);
+    let ranked = rank.ranked(result.items,opts.coverage_floor,opts.group_leaders,input_length);
     {items:[for (item in take(ranked,opts.max_candidates)) {text:item.text,reading:item.reading,consumed:item.consumed,
         coverage:item.coverage,match:item.match,weight:item.weight}],truncated:result.truncated or len(ranked) > opts.max_candidates,
         scanned:{keys:result.keys,postings:result.postings}}

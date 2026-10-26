@@ -23,11 +23,17 @@ pn main() {
     let ties = rank.ranked([
         {text:"second",coverage:2,match:"exact",weight:100,line:2,posting:0},
         {text:"first",coverage:2,match:"exact",weight:100,line:1,posting:0}
-    ],0,1);
+    ],0,1)
+    let evidence = rank.ranked([
+        {text:"same",coverage:3,consumed:3,match:"abbreviation",weight:60000,line:1,posting:0},
+        {text:"same",coverage:2,consumed:5,match:"fuzzy",weight:1,line:2,posting:0},
+        {text:"exact",coverage:1,consumed:5,match:"exact",weight:1,line:3,posting:0},
+        {text:"prefix",coverage:4,consumed:5,match:"incomplete",weight:60000,line:4,posting:0}
+    ],2000,1,5);
     [
         full.items[0].text == "北京大学",
-        f.texts(full)[1] == "北京",
-        index_of(f.texts(full),"北境大雪") > index_of(f.texts(full),"北京"),
+        f.texts(full)[1] == "北境大雪",
+        index_of(f.texts(full),"北境大雪") < index_of(f.texts(full),"北京"),
         ordered[0].text == "common" and ordered[1].text == "rare" and ordered[2].text == "next",
         ordered[3].text == "fuzzy",
         len(ordered) == 5 and ordered[4].text == "same" and ordered[4].match == "exact",
@@ -41,6 +47,10 @@ pn main() {
         ime.candidates(engine,"beijingdaxue",{fuzzy:"all",max_keys:4,max_postings:8})^.scanned.keys <= 4,
         not ime.candidates(engine,"qq")^.truncated,
         not ime.candidates(engine,"")^.truncated,
-        ties[0].text == "first" and ties[1].text == "second"
+        ties[0].text == "first" and ties[1].text == "second",
+        evidence[0].text == "exact",
+        evidence[1].text == "same" and evidence[1].consumed == 5 and evidence[1].match == "fuzzy",
+        evidence[2].text == "prefix",
+        len(evidence) == 3
     ]
 }

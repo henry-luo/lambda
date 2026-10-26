@@ -8,7 +8,13 @@
   "events": [
     {
       "type": "script",
-      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture')"
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture'); document.body.setAttribute('data-ime-page-size','2')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fuzzy"
+      }
     },
     {
       "type": "focus",
@@ -40,7 +46,8 @@
     {
       "type": "assert_ime_popup",
       "page": 1,
-      "highlight": 0
+      "highlight": 2,
+      "expanded": true
     },
     {
       "type": "key_press",
@@ -54,6 +61,22 @@
     {
       "type": "key_press",
       "key": "escape"
+    },
+    {
+      "type": "assert_ime_popup",
+      "expanded": false,
+      "count": 2
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
     },
     {
       "type": "type_physical",
@@ -97,6 +120,27 @@
       "target": {
         "selector": "#inherit"
       }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#ime-status"
+      },
+      "contains": "off · window setting"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#window-on"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#window-on"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
     },
     {
       "type": "type_physical",

@@ -40,12 +40,6 @@ static float resolved_space_width(UiContext* uicon, FontHandle* handle, const Fo
     return 0.0f;
 }
 
-void font_prop_release_handle(FontProp* fprop) {
-    if (!fprop) return;
-    font_cache_unpin_handle(fprop->font_handle);
-    fprop->font_handle = NULL;
-}
-
 bool css_font_metric_unit_px(FontHandle* handle, const FontStyleDesc* style,
     CssUnit unit, float computed_size, bool upright, float* pixels) {
     if (!pixels || computed_size < 0.0f) return false;

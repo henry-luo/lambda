@@ -207,6 +207,12 @@ struct SimEvent {
     int expected_ime_count;
     int expected_ime_page;
     int expected_ime_highlight;
+    int expected_ime_expanded;
+    int expected_ime_columns;
+    int expected_ime_scrolled;
+    float expected_ime_font_size;
+    bool expected_ime_horizontal;
+    bool expected_ime_contained;
     int expected_selection_end;  // for assert_form_selection
     bool expected_is_collapsed;  // for assertions
     bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)

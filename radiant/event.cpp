@@ -5160,7 +5160,8 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
 static void radiant_dispatch_composition_event(EventContext* evcon,
                                                View* target,
                                                const char* type,
-                                               const char* data);
+                                               const char* data,
+                                               uint32_t caret_cp = 0);
 extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
                                                            EventType event_type,
                                                            const char* text,
@@ -6426,11 +6427,9 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     intent.composition_caret = caret_cp;
     intent.is_composing = true;
 
-    context.event.composition_caret_hint = caret_cp;
     radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionupdate",
-                                       preedit ? preedit : "");
-    context.event.composition_caret_hint = 0;
+                                       preedit ? preedit : "", caret_cp);
     bool prevented = false;
     dispatch_form_beforeinput(&context.event, &context.surface, &intent,
                               &prevented);
@@ -9013,7 +9012,9 @@ static bool dispatch_contenteditable_composition_event(
         phase = "cancel";
     }
 
-    radiant_dispatch_composition_event(evcon, target, event_name, intent->data);
+    // forward the same code-point caret to body policy as to the rich-text edit.
+    radiant_dispatch_composition_event(evcon, target, event_name, intent->data,
+                                       intent->composition_caret);
     DocState* state = event_context_target_state(evcon);
     event_log_editing_composition(state, surface, intent, phase, preedit_len,
                                   commit_len, intent->composition_caret);
@@ -9981,7 +9982,8 @@ static Item build_composition_event_item(void* userdata) {
 static void radiant_dispatch_composition_event(EventContext* evcon,
                                                View* target,
                                                const char* type,
-                                               const char* data)
+                                               const char* data,
+                                               uint32_t caret_cp)
 {
     if (!evcon || !target || !type) return;
     CompositionEventBuildArgs args = {type, data};
@@ -9989,7 +9991,7 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
     comp_intent.type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     comp_intent.data = data ? data : "";
     comp_intent.is_composing = true;
-    comp_intent.composition_caret = evcon->composition_caret_hint;
+    comp_intent.composition_caret = caret_cp;
     // F20: composition joins the same author-then-UA dispatch as every other
     // trusted input, preserving its editing payload for the behavior action.
     radiant_dispatch_built_event(evcon, target, build_composition_event_item,
@@ -14630,9 +14632,9 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
             int row = input_method_popup_hit(uicon, state, mouse_x, mouse_y);
             DomNode* popup_target = dom_node_ref_validate(event_context_target_document(&evcon),
                 state->input_method.popup_target);
-            if (row >= -1 && popup_target) {
+            if (row != -2 && popup_target) {
                 state->input_method.pointer_down = true;
-                if (btn_event->button == RDT_MOUSE_BUTTON_LEFT)
+                if (row >= -1 && btn_event->button == RDT_MOUSE_BUTTON_LEFT)
                     radiant_dispatch_input_method_action(&evcon, popup_target, row);
                 evcon.need_repaint = true;
                 break;
@@ -15688,6 +15690,11 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         DocState* popup_state = event_context_target_state(&evcon);
+        if (input_method_popup_scroll(uicon, popup_state, mouse_x, mouse_y,
+                -scroll->yoffset * RDT_WHEEL_PIXEL_STEP)) {
+            evcon.need_repaint = true;
+            break;
+        }
         bool popup_scroll = dropdown_point_inside(popup_state, mouse_x, mouse_y);
         if (popup_scroll) evcon.target = popup_state->open_dropdown;
 

@@ -15,6 +15,7 @@
 // typing (F6).
 import dom
 import chinese: lambda.ime.chinese
+import reducer: lambda.ime.chinese.session
 
 // A composition starting while another is still open means the previous one was
 // orphaned — the platform can drop a session without ending it. Begin from a
@@ -56,12 +57,31 @@ fn is_enabled(body,status) bool {
 fn accepts(body,status) bool => is_enabled(body,status) and status.target != null and
     not dom.get_state(status.target,"disabled") and not dom.get_state(status.target,"readonly")
 
+pn present_popup(body,target,frame,mode) {
+    // configuration popovers keep editor focus but temporarily own the overlay surface.
+    if (dom.has_attribute(body,"data-ime-popup-suspended")) dom.ime_popup(body,null,"off")
+    else if (target != null) dom.ime_popup(target,frame,mode)
+}
+
+pub pn suspend_popup(body,suspended:bool) {
+    if (suspended) dom.set_attribute(body,"data-ime-popup-suspended","")
+    else if (dom.has_attribute(body,"data-ime-popup-suspended"))
+        dom.remove_attribute(body,"data-ime-popup-suspended")
+    let status = dom.ime_status(body)
+    let current = dom.ime_session(body);
+    if (current != null and accepts(body,status) and dom.same_node(current.target,status.target) and
+        (not status.active or status.scripted)) {
+        // snapshot the existing frame; restoring presentation must not requery or reset selection.
+        present_popup(body,current.target,reducer.frame(current.session),current.session.mode)
+    } else dom.ime_popup(body,null,"off")
+}
+
 fn preferences(body) map^ {
     let fuzzy = dom.get_attribute(body,"data-ime-fuzzy")
     let size = dom.get_attribute(body,"data-ime-page-size");
     {fuzzy:if (fuzzy == null or fuzzy == "") "none"
         else if (fuzzy in ["none","all"]) fuzzy else split(fuzzy,","),
-        page_size:if (size == null) 9 else int(size)^}
+        *:(if (size == null) {} else {page_size:int(size)^})}
 }
 
 fn reset(current) map^ {
@@ -82,7 +102,8 @@ pn emit_step(body,current,step) map {
             if (active) { dom.compose(current.target,"cancel","",0) }
             active = false
         } else if (action.type == "candidates") {
-            dom.ime_popup(current.target,action,step.session.mode)
+            // settings may be changed before any editing surface has focus.
+            present_popup(body,current.target,action,step.session.mode)
         }
     }
     let next = {*:current,session:step.session,active:active};
@@ -131,7 +152,11 @@ pub pn key(body,evt) any^ {
         return 'pass'
     }
     let current = acquire(body,status)^
-    let step = chinese.key(current.engine,current.session,evt)^
+    // native event properties are getter-backed; a spread cannot copy their key payload.
+    let keyboard = {type:evt.type,key:evt.key,shiftKey:evt.shiftKey,ctrlKey:evt.ctrlKey,
+        altKey:evt.altKey,metaKey:evt.metaKey,candidate_index:evt.candidate_index,
+        candidate_columns:status.candidate_columns}
+    let step = chinese.key(current.engine,current.session,keyboard)^
     let next = emit_step(body,current,step);
     if (any([for (action in step.actions) action.type == "pass"])) 'pass' else 'prevent-default'
 }
@@ -141,7 +166,7 @@ pub pn focus_in(body) any^ {
     if (not accepts(body,status)) { return focus_out(body)^ }
     if (not status.active or status.scripted) {
         let current = acquire(body,status)^;
-        if (not current.active) { dom.ime_popup(current.target,null,current.session.mode) }
+        if (not current.active) { present_popup(body,current.target,null,current.session.mode) }
     }
     return 'pass'
 }
@@ -168,7 +193,7 @@ pub pn popup_action(body,evt) any^ {
         key(body,{type:"keydown",key:"Shift"})^
         return key(body,{type:"keyup",key:"Shift"})^
     }
-    return key(body,{type:"keydown",key:string(evt.option_index + 1)})^
+    return key(body,{type:"keydown",key:"Candidate",candidate_index:evt.option_index})^
 }
 
 pub pn enable(body,enabled:bool) any^ {

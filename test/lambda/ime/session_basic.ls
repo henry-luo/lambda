@@ -17,7 +17,7 @@ pn main() {
     let no_candidate = k.press(engine,unknown," ")^;
     [
         initial.mode == "chinese" and initial.raw == "" and initial.items == [],
-        ime.settings(initial)^ == {fuzzy:[],page_size:9},
+        ime.settings(initial)^ == {fuzzy:[],page_size:7},
         k.types(b.actions) == ["compose","candidates"],
         b.actions[0].text == "b" and b.actions[0].caret == 1,
         word.items[0].text == "北京",

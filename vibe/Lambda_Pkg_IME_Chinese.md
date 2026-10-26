@@ -257,8 +257,12 @@ Validation happens at preparation, not at every load. Python is development
 tooling only; loading and conversion never require it. The pack format is
 §6's version 1, adopted 2026-10-25 (USER).
 
-**IME7 — One deterministic ranking rule** (§5.3), tuned against a frozen
-evaluation set before any quality claim (§9).
+**IME7v2 — Match evidence precedes frequency** (§5.3; USER, 2026-10-26).
+After explicit learned selections, complete exact readings precede complete
+fuzzy readings, which precede partial/prefix/abbreviation routes. Frequency
+and rare-word demotion operate within those groups; they cannot demote a
+complete fuzzy reading behind an abbreviation. Qualify the deterministic rule
+against the frozen evaluation sets before any quality claim (§9).
 
 **IME8 — Learning is an overlay value.** The session carries the user's
 selections as an immutable overlay that boosts and adds entries. The engine
@@ -347,21 +351,32 @@ package and every pack reading is validated against it at preparation.
 
 ### 5.3 Ranking
 
-Candidates are ordered by these keys in turn:
+Candidates are ordered by these keys in turn (IME7v2):
 
-1. **User overlay**: words the user chose for this input, by recency and count.
-2. **Coverage**: words consuming more syllables first, so the longest word
-   for `beijingdaxue` (北京大学) leads and single characters of the first
-   syllable come last. A longer word is promoted over shorter ones only above
-   a weight floor; below it, it follows the first entries of the next group,
-   so a rare four-syllable word cannot bury a common two-syllable one.
-3. **Match quality**: exact > fuzzy > incomplete last syllable > abbreviation.
-4. **Weight** from the pack.
-5. **Stable tie-break** by pack order.
+1. **User overlay**: words the user chose, by recency and count (IME8).
+2. **Match evidence**: a complete exact reading, then a complete fuzzy
+   reading, then every partial, incomplete or abbreviated route. A complete
+   reading consumes the entire raw input and specifies every syllable in full;
+   consuming all letters as initials alone does not qualify. Use the actual
+   input length, even when the path search is truncated.
+3. **Coverage within each evidence group**: more syllables first. Below the
+   weight floor, a longer word follows the first `group_leaders` entries of
+   the next available shorter group. This demotion never crosses an evidence
+   boundary.
+4. **Match quality within a coverage group**: exact > fuzzy > incomplete last
+   syllable > abbreviation.
+5. **Weight** from the pack, then **stable pack order**.
 
-The same text reached by two paths appears once, at its best position. The
-weight floor and group limits are set from the evaluation set (§9), not
-guessed.
+Thus `sifei` with fuzzy s/sh enabled ranks a complete `shi'fei` (是非) before
+`shi'fou` (是否), which matches only `sif` and leaves `ei`. A low dictionary
+weight cannot reverse that preference. An exact `si'fei` (私费) still leads the
+fuzzy spelling. For `beijingdaxue`, both complete exact homophones precede a
+partial 北京; the common 北京大学 leads the rare 北境大雪 by weight.
+
+The same text reached by multiple paths appears once, at its best position;
+deduplication happens after evidence grouping. The original frozen weight
+floor and group limits remain unchanged. No sentence-context model or
+word-specific ranking overrides are introduced.
 
 ### 5.4 Session state machine
 
@@ -371,20 +386,36 @@ guessed.
 | idle | Shift + letter | `pass`: an uppercase Latin letter |
 | idle | mapped punctuation | `commit` its full-width form (§5.5) |
 | idle | anything else | `pass` |
-| composing | letter, `'` | extend the input; `compose` + `candidates` |
+| composing | letter, `'` | insert at the pinyin caret; `compose` + `candidates` |
 | composing | Space | take the highlighted candidate |
 | composing | `1`–`9` | take that candidate on the current page |
 | composing | `-` / `=`, PageUp / PageDown | previous / next page |
-| composing | arrows | move the highlight |
-| composing | Backspace | drop the last letter; with no letters left, undo the last selection; with nothing left, `cancel` |
-| composing | Enter | commit the preedit as typed (converted words plus raw letters) |
-| composing | Esc | `cancel` |
+| compact | Left / Right | previous pinyin syllable boundary / next letter (USER, 2026-10-26) |
+| compact | Down | open the expanded candidate grid |
+| expanded | Left / Right / Up / Down | previous / next candidate or previous / next grid row; Up on the first row returns to the strip (USER, 2026-10-26) |
+| composing | Backspace / Delete | remove the character before / after the pinyin caret; Backspace with no raw input restores the last selection |
+| compact | Enter | commit the preedit as typed (converted words plus raw letters) |
+| expanded | Enter / Space | select the highlighted candidate |
+| expanded | Esc | return to the compact strip, preserving composition |
+| compact | Esc | `cancel` |
 | any | modified key (Ctrl, Alt, Meta) | `pass`; while composing, commit nothing and keep the session |
 
 Taking a candidate consumes its syllables. If pinyin remains, the reducer
 emits `compose` with the new preedit and fresh `candidates`; otherwise it
-emits `commit` with the full text. Caret movement inside the preedit is a later
-refinement; in the first release the caret stays at the end.
+emits `commit` with the full text. The session keeps a zero-based caret in the
+remaining raw pinyin. A `compose` action offsets it by the converted prefix's
+code-point length (S2.5.8/S17.4.1). Compact Left/Right emit only `compose`;
+they do not re-query or move the candidate highlight. Left uses the preferred
+longest-exact-first viable lattice route, with character stops for invalid tails;
+Right advances one code point. The native expanded grid reports its responsive
+column count to the reducer. Up from its first logical row returns to the
+strip with the same candidate and pinyin caret; Up from lower rows continues
+normal row navigation. Repeated Up in the strip is a no-op. Other grid arrows
+change only the candidate selection; raw edits close the grid. Candidate consumption subtracts the
+consumed raw length from the caret and clamps it to the remaining pinyin.
+Backspace at the start of nonempty pinyin and Delete at its end are consumed
+without changing text. Deleting a syllable's only letter also removes an empty
+separator, preserving the query's no-leading/no-repeated-separator invariant.
 
 ### 5.5 Mode and punctuation
 
@@ -452,8 +483,10 @@ off by default.
 (the default), `"all"`, or a list of pair names:
 
 ```lambda expr
-{fuzzy: ["z=zh", "c=ch", "s=sh", "an=ang"], page_size: 9}
+{fuzzy: ["z=zh", "c=ch", "s=sh", "an=ang"], page_size: 7}
 ```
+
+`page_size` accepts 1–9 and defaults to **7** (USER, 2026-10-26).
 
 The package exports the supported pairs with their kinds and examples
 (`fuzzy_pairs`), so a host's settings screen lists them from the package and
@@ -804,14 +837,37 @@ editing controller and the DOM behavior package mid-handler.
 
 **IME-E2 — Candidate popup.** A native popup kind beside the context menu:
 document-scoped, anchored below the caret rectangle from
-`radiant_editing_focused_caret_rect`, laid out horizontally or vertically,
-showing numbered rows and a page indicator. Lambda supplies the rows; a click
+`radiant_editing_focused_caret_rect`, laid out as a horizontal strip,
+showing seven numbered options by default and a trailing mode/page indicator
+(USER, 2026-10-26). Labels retain the editor's family with a reduced size of
+85%, capped at 16 CSS pixels before zoom. Native font snapshots own their
+cached handles and refresh from the selected editor before use (D4.5.1v4).
+Measured strip widths wrap on narrow viewports. Down opens a scrollable grid
+of all returned candidates; Up on its first row collapses to the strip,
+preserving selection and preedit. Native layout reports its column count, while
+Lambda owns expansion, navigation and selection policy (D7.2.5). Lambda supplies the rows; a click
 reaches the behavior package as an index, the ES34 pattern. It is not a DOM
 subtree, so author CSS, `MutationObserver` and selectors never see it.
 Exposing it to assistive technology is a later step.
 
 **IME-E3 — Mode indicator and switch.** A visible Chinese/English indicator
 and the API that turns the input method on for a document or window (IME-O2).
+The demo's selected buttons and live status expose the effective scope,
+spelling and character profile. Choosing a window button clears its document
+override; choosing Use window setting preserves the current window default.
+The fuzzy master button toggles all selected sound pairs; an adjacent `v`
+opens a per-pair configuration panel derived from `fuzzy_pairs` (IME13). All
+11 pairs start enabled in the demo via `data-ime-fuzzy="all"` (USER,
+2026-10-26). Off retains the selections;
+checkbox changes while on refresh candidates and preserve preedit/page size.
+An empty selection switches the master off. Done, Escape and an outside click
+dismiss the bounded, scrollable panel. While it is open, `lambda.dom.ime`
+suspends the native indicator and candidates without canceling composition.
+All presentation paths honor that suspension, including live configuration
+and focus. Dismissal restores a reducer frame snapshot, preserving the current
+mode, page and highlight; an ineligible editor or active OS composition keeps
+it hidden (D7.2.5, IME10). These are demo controls; the IME-O2 API
+precedence and S17.8.1 settings contract remain unchanged.
 
 ### 8.4 Coexistence with OS input methods
 
@@ -849,7 +905,7 @@ Golden-driven `.ls` fixtures live under `test/lambda/ime/`, each with its
 | **M2 Session** | The reducer, punctuation, mode toggle, paging, settings with `configure` and `settings`, user overlay and its persistence | Session goldens in both execution tiers |
 | **M3 Radiant** | IME-E1–IME-E3; the body-level adapter in `lambda.dom` | Radiant gate; `make test-radiant-baseline`; **first release** |
 | **M4 Traditional** | The `zh-Hant` pack from OpenCC; implemented 2026-10-26 | 32 conversion fixtures; [frozen quality report](../test/ime/quality_zh_hant.md) |
-| **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, preedit caret movement, popup accessibility | One at a time, each with its own gate |
+| **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, popup accessibility | One at a time, each with its own gate |
 | **Future** | Whole-sentence conversion (§11.3) | A separate proposal |
 
 Package-only milestones run their focused fixtures in the interpreter and JIT

@@ -1,0 +1,7 @@
+1:shi	是 5000
+1:si	思 4000
+1:zhong	中 4500
+2:shi'fei	是非 1
+2:shi'fou	是否 60000
+2:shi'hou	时候 65000
+2:zhong'guo	中国 7000
