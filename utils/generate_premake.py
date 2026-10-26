@@ -3872,9 +3872,9 @@ class PremakeGenerator:
             else:
                 base_libs.append('libedit')
 
-            # Add these libraries if they're not already included and exist in external_libraries
+            # Link only libraries in this target's resolved dependency closure.
             for lib_name in base_libs:
-                if lib_name in self.external_libraries:
+                if lib_name in dependencies and lib_name in self.external_libraries:
                     lib_info = self.external_libraries[lib_name]
 
                     # Skip libraries with link type "none"

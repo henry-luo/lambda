@@ -1375,7 +1375,7 @@
       "build_dir": "build_ime_macos",
       "premake_location": "build_ime_macos/premake",
       "object_dir": "build_ime_macos/obj/%{prj.name}",
-      "remove_source_dirs": ["lambda", "lambda/input/css"],
+      "remove_source_dirs": ["lambda", "lambda/input/css", "lib/image"],
       "remove_source_files": ["lambda/js/js_well_known_names.c"],
       "extra_source_files": [
         "lambda/host/macos_ime/main.mm",
@@ -1384,6 +1384,8 @@
       ],
       "extra_exclude_source_files": ["lambda/runtime/devtools_scratch.cpp"],
       "exclude_source_globs": [
+        "lib/image*.c", "lib/image*.cpp", "lib/raster.cpp",
+        "lambda/runtime/image*.cpp", "lambda/io/image*.cpp",
         "lambda/runtime/image_artwork.cpp",
         "lambda/runtime/image_composite.cpp",
         "lambda/input/input-css*.cpp",
@@ -1406,7 +1408,7 @@
       "additional_libraries": [
         {"name": "InputMethodKit", "lib": "-framework InputMethodKit", "link": "dynamic"}
       ],
-      "exclude_libraries": [],
+      "exclude_libraries": ["image-codecs", "openjpeg"],
       "exclude_macos_libraries": ["WebKit", "AVFoundation", "CoreMedia"],
       "defines": [
         "LAMBDA_MACOS_IME", "LAMBDA_NO_NETWORK",
