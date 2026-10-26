@@ -4,7 +4,7 @@
 #include "../lib/utf.h"
 #include <limits.h>
 
-static CssEnum text_shaping_boundary_keyword(DomElement* element,
+CssEnum layout_inline_boundary_keyword(DomElement* element,
         CssPropertyCode property, CssEnum initial, CssEnum inherited) {
     for (DomElement* current = element; current; current = dom_parent_element(current)) {
         CssDeclaration* declaration = current->specified_style
@@ -43,12 +43,12 @@ static bool text_shaping_crosses_inline_edge(LayoutContext* lycon, DomElement* e
     if (display.outer == CSS_VALUE_CONTENTS) return true;
     if (display.outer != CSS_VALUE_INLINE ||
         layout_intrinsic_element_is_atomic_inline(element)) return false;
-    if (text_shaping_boundary_keyword(element, CSS_PROPERTY_VERTICAL_ALIGN,
+    if (layout_inline_boundary_keyword(element, CSS_PROPERTY_VERTICAL_ALIGN,
             CSS_VALUE_BASELINE, CSS_VALUE_BASELINE) != CSS_VALUE_BASELINE) return false;
-    CssEnum unicode_bidi = text_shaping_boundary_keyword(element, CSS_PROPERTY_UNICODE_BIDI,
+    CssEnum unicode_bidi = layout_inline_boundary_keyword(element, CSS_PROPERTY_UNICODE_BIDI,
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL);
-    if (unicode_bidi == CSS_VALUE_ISOLATE || unicode_bidi == CSS_VALUE_ISOLATE_OVERRIDE) return false;
-    CssEnum direction = text_shaping_boundary_keyword(element, CSS_PROPERTY_DIRECTION,
+    if (layout_unicode_bidi_isolate(unicode_bidi)) return false;
+    CssEnum direction = layout_inline_boundary_keyword(element, CSS_PROPERTY_DIRECTION,
         CSS_VALUE_LTR, lycon->block.direction);
     bool physical_left = inline_start != (direction == CSS_VALUE_RTL);
     LayoutIntrinsicMarginPair margins = layout_intrinsic_horizontal_margin_pair(lycon, element);

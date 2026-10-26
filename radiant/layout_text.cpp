@@ -2259,6 +2259,7 @@ void line_reset(LayoutContext* lycon) {
 }
 
 void line_init(LayoutContext* lycon, float left, float right) {
+    lycon->block.inline_block_start = lycon->block.advance_y;
     lycon->line.left = left;  lycon->line.right = right;
     lycon->line.align_left = left;  lycon->line.align_right = right;
     lycon->line.effective_left = left;
@@ -4383,8 +4384,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             line_break(lycon);
         }
     }
-    if (collapse_spaces && wrap_lines && !lycon->line.is_line_start &&
-        !break_all && had_leading_space) {
+    // an atomic edge is a soft opportunity even without a literal separator;
+    // reuse its shared glue/wrap-mode decision before committing the next word.
+    bool atomic_wrap_boundary = !had_leading_space && last_processed_cp == 0xfffc &&
+        lycon->line.wrap_opportunity_before_nowrap;
+    if (wrap_lines && !lycon->line.is_line_start && !break_all &&
+        ((collapse_spaces && had_leading_space) || atomic_wrap_boundary)) {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         float remaining = line_right - lycon->line.advance_x;

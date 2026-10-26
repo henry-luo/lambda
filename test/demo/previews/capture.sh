@@ -18,6 +18,7 @@ export LAMBDA_EBOOK_STATE_DIR="$PWD/$WORK/state"
 # above the info panel's "Where", which spell out the checkout's local path.
 SHOTS="chart 0 0 1000 537
 scene3d 0 0 980 526
+aquarium 0 0 1280 687
 marble-drop 0 40 1280 687
 sentence-game 0 0 1100 590
 photo 0 0 1280 687

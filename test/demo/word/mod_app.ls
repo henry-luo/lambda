@@ -37,6 +37,7 @@ import equation_catalog: .mod_equation_catalog
 import home: .mod_home
 import math_edit: .mod_math_edit
 import lookup: .mod_lookup
+import spelling: lambda.edit.spelling
 
 pub let default_settings = {show_ribbon_group_labels:false}
 pub fn initial(settings=default_settings) => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
@@ -104,6 +105,7 @@ pub pn selection_changed(st,evt) {
 }
 let replaced_editor = controller.replace
 pub pn finish(st,node,restore_selection=true) {
+    spelling.update(node,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)
     // Bind only once an editing action owns a selection. View-only changes
     // before the first caret placement have no model selection to publish.
     controller.restore(tables.native_editor(st.editor),restore_selection and not st.read_only and st.dialog==null)
@@ -120,9 +122,11 @@ pn continued(st,id,node) {
         return {*:st,pending:"",dialog:null}
     }
     let doc = if (id == "file.new") document.blank() else document.sample()
-    return {*:st,editor:replaced_editor(st.editor,model.open_editor(doc)),object_picks:[],pending:"",dialog:null,query:"",match_index:-1,
+    let next = {*:st,editor:replaced_editor(st.editor,model.open_editor(doc)),object_picks:[],pending:"",dialog:null,query:"",match_index:-1,
         status:"Ready to write",file_state:storage.new_session(doc,
             if (id == "file.new") "Untitled document" else "The Open Studio Handbook")}
+    spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
+    return next
 }
 pn saved(st,path,node,overwrite=false) {
     if (starts_with(path,"temp/word/")) { io.mkdir("temp/word") ^ { null } }
@@ -326,7 +330,9 @@ pn dialog_command(st,action,node) {
     if (kind == "open") {
         let opened = storage.read_document(path) ^ { return {*:st,status:^.message} }
         focus_document(node)
-        return {*:st,editor:replaced_editor(st.editor,opened.editor),object_picks:[],file_state:opened.session,status:opened.status,dialog:null,query:"",match_index:-1}
+        let next = {*:st,editor:replaced_editor(st.editor,opened.editor),object_picks:[],file_state:opened.session,status:opened.status,dialog:null,query:"",match_index:-1}
+        spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
+        return next
     }
     if (kind == "save") { return saved(st,path,node,action == "overwrite") }
     if (kind == "print") {

@@ -249,6 +249,7 @@ static void stable_sort_items_by_total_order(Item* items, int64_t len, bool desc
 // ArrayNum transforms used to fall back to generic Item arrays for the
 // representation-specific branches. Stage through Items for shared comparison
 // semantics, then restore the source lane type at the result boundary.
+#ifndef LAMBDA_NO_IMAGE_PROCESSING
 static inline Item item_from_array_num(ArrayNum* array_num) {
     // clang 14 rejects designated aggregate initialization when these results
     // are returned from function templates, so assign the union field directly.
@@ -256,6 +257,7 @@ static inline Item item_from_array_num(ArrayNum* array_num) {
     result.array_num = array_num;
     return result;
 }
+#endif
 
 // Selection and ordering transforms do not admit new elements, so an exact
 // source certificate remains valid on their fresh result (D3.3.3).
@@ -855,8 +857,8 @@ static int compute_broadcast_shape(
     return out_ndim;
 }
 
-// Read one numeric element from an ArrayNum at a flat-byte offset (in elements).
-// Handles all ELEM_* element kinds, converting to double for uniform processing.
+// Clamp an image channel with ties rounded to even; only the image writer uses it.
+#ifndef LAMBDA_NO_IMAGE_PROCESSING
 static inline uint8_t clamp_uint8_even(double value) {
     if (isnan(value) || value <= 0.0) return 0;
     if (value >= 255.0) return 255;
@@ -871,9 +873,11 @@ static inline uint8_t clamp_uint8_even(double value) {
     }
     return (uint8_t)rounded;
 }
+#endif
 
 // Write a double into element `off`, rounding + clamping to the elem type's range
 // (the counterpart to array_num_read_double).  Float types store the value raw.
+#ifndef LAMBDA_NO_IMAGE_PROCESSING
 static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double v) {
     switch (arr->get_elem_type()) {
         case ELEM_INT:
@@ -900,6 +904,7 @@ static inline void write_arr_elem_from_double(ArrayNum* arr, int64_t off, double
         default:          return;
     }
 }
+#endif
 
 // Returns true if elem_type stores integers (not floats).
 static inline bool elem_is_int(ArrayNumElemType e) {

@@ -112,6 +112,12 @@ float layout_stretch_fit_used_css_size(ViewBlock* block, float available_margin_
     return layout_apply_min_max_axis(block, css_size, horizontal, false);
 }
 
+float layout_stretch_fit_content_box_size(ViewBlock* block, float available_margin_box_size,
+                                          bool horizontal) {
+    return layout_content_size_if_border_box(block,
+        layout_stretch_fit_used_css_size(block, available_margin_box_size, horizontal), horizontal);
+}
+
 void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin_box_size,
                                         bool available_size_is_definite, bool horizontal) {
     if (!block || !block->blk) return;

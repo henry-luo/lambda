@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>org.lambda-script.ChineseIME</string>
+  <key>CFBundleExecutable</key><string>LambdaChineseIME</string>
+  <key>CFBundleName</key><string>Lambda Chinese</string>
+  <key>CFBundleDisplayName</key><string>Lambda Chinese</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleSignature</key><string>????</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>LSBackgroundOnly</key><true/>
+  <key>InputMethodConnectionName</key><string>LambdaChineseIME_Connection</string>
+  <key>InputMethodServerControllerClass</key><string>LambdaChineseController</string>
+  <key>TISIntendedLanguage</key><string>zh-Hans</string>
+  <key>tsInputMethodCharacterRepertoireKey</key><array><string>Hans</string><string>Hant</string></array>
+  <key>tsInputMethodIconFileKey</key><string>LambdaChineseIME.tiff</string>
+  <key>ComponentInputModeDict</key><dict>
+    <key>tsInputModeListKey</key><dict>
+      <key>org.lambda-script.ChineseIME.Simplified</key><dict>
+        <key>TISInputSourceID</key><string>org.lambda-script.ChineseIME.Simplified</string>
+        <key>TISIntendedLanguage</key><string>zh-Hans</string>
+        <key>tsInputModeDefaultStateKey</key><true/>
+        <key>tsInputModeIsVisibleKey</key><true/>
+        <key>tsInputModeScriptKey</key><string>smSimpChinese</string>
+        <key>tsInputModePrimaryInScriptKey</key><true/>
+        <key>tsInputModeMenuIconFileKey</key><string>LambdaChineseIME.tiff</string>
+      </dict>
+    </dict>
+    <key>tsVisibleInputModeOrderedArrayKey</key><array>
+      <string>org.lambda-script.ChineseIME.Simplified</string>
+    </array>
+  </dict>
+</dict></plist>

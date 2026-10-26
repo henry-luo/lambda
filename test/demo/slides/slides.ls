@@ -12,9 +12,12 @@ import insert_data: .mod_insert_data
 import splitter: ~~.mod_splitter
 import inline_text: .mod_inline
 import slide_drag: .mod_slide_drag
+import spelling: lambda.edit.spelling
+import ribbon_overflow: ~~.mod_ribbon_overflow
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let DEFAULT_DECK = input(url_resolve(BASE,"northstar.slides"),'slides')^
+let MIN_WINDOW_WIDTH = 600
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"slides-editor")
 
 view <editor_show> state shown:null {
@@ -84,10 +87,20 @@ on editor_preview_frame(evt) {
 }
 on editor_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
+    // install the host limit on the first document frame, before ribbon layout work.
+    if (dom.get_attribute(evt.target,"data-window-min")!="set" and
+        dom.set_window_min_width(evt.target,MIN_WINDOW_WIDTH))
+        dom.set_attribute(evt.target,"data-window-min","set")
     // window resize does not bubble to the editor's retained DOM owner.
     dom.watch_window(evt.target,"resize",true)
     let fonts = sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family) => lower(family))
     session = app.publish(evt.target,{*:session,fonts:fonts})
+    return 'handled'
+}
+on slide_ribbon_ready(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    let owner = evt.target
+    ribbon_overflow.update(dom.query_selector(owner,".editor-ribbon"),session.tab,"")
     return 'handled'
 }
 on insert_dialog_ready(evt) {
@@ -113,6 +126,11 @@ on click(evt) {
     if (evt.button!=null and evt.button!=0) { return 'pass' }
     let owner = owner_of(evt)
     if (session.slide_drag!=null) { return 'prevent-default' }
+    let group_trigger = dom.closest(evt.target,".ribbon-group-trigger")
+    if (group_trigger!=null and session.dialog=="" and session.insert_form==null and not session.show) {
+        ribbon_overflow.toggle(group_trigger)
+        return 'prevent-default'
+    }
     // the completed gesture owns selection; its following click can hit the new drop neighbor.
     if (session.slide_click==true and dom.closest(evt.target,"#thumbnails [data-slide]")!=null) {
         session = {*:session,slide_click:false}
@@ -136,12 +154,18 @@ on click(evt) {
     else if (at != null) { session = app.publish(owner,m.select_slide({*:session,editing:null},int(at))) }
     else if (action != null) { session = app.dispatch(owner,session,action,BASE) }
     else { return 'pass' }
+    if (action!=null and not starts_with(action,"menu-"))
+        ribbon_overflow.close(dom.query_selector(owner,".editor-ribbon"))
     if (session.dialog != "" and dialog == "") dom.focus_set(app.node(owner,"file-path"),false)
     if (menu != null and menu != "" and menu!="slide-context" and session.menu == "" and action != "selection-pane") dom.focus_set(app.node(owner,menu),false)
     if (insert_form != null and session.insert_form == null) dom.focus_set(app.node(owner,"stage"),false)
     return 'handled'
 }
 on input(evt) {
+    if (dom.get_attribute(evt.target,"id")=="canvas-text") {
+        spelling.update(evt.target,"slides-text",dom.get_state(evt.target,"value"),evt.isComposing==true)
+        return 'pass'
+    }
     let key = dom.get_attribute(evt.target,"data-property")
     if (key == null or session.insert_form != null or session.dialog != "" or session.show or dom.matches(evt.target,"select,input[type=checkbox]")) { return 'pass' }
     let target = dom.get_attribute(evt.target,"id")
@@ -158,6 +182,16 @@ on input(evt) {
     }
     session = app.publish(owner_of(evt),next)
     return 'handled'
+}
+on compositionstart(evt) {
+    if (dom.get_attribute(evt.target,"id")=="canvas-text")
+        spelling.update(evt.target,"slides-text",dom.get_state(evt.target,"value"),true)
+    return 'pass'
+}
+on compositionend(evt) {
+    if (dom.get_attribute(evt.target,"id")=="canvas-text")
+        spelling.update(evt.target,"slides-text",dom.get_state(evt.target,"value"))
+    return 'pass'
 }
 on change(evt) {
     let owner = owner_of(evt)
@@ -176,7 +210,7 @@ on change(evt) {
         if (sample == "") { return 'pass' }
         var next = session
         m.open_deck(session,input(url_resolve(BASE,sample),'slides')^,BASE) ^ { next = {*:session,error:^.message} } ~ { next = ~ }
-        session = app.publish(owner,next)
+        session = app.publish(owner,next,true,next.doc!=session.doc)
         app.value(owner,"samples","")
         return 'handled'
     }
@@ -212,6 +246,9 @@ on pointerdown(evt) {
     if (session.slide_click==true) { session = {*:session,slide_click:false} }
     if (dom.closest(evt.target,"#canvas-text,#canvas-rich-text") != null) { return 'pass' }
     let owner = owner_of(evt)
+    if (dom.closest(evt.target,".ribbon-group[data-open=true],.ribbon-group-trigger")==null and
+        (session.menu==null or session.menu=="" or dom.closest(evt.target,"#home-menu")==null))
+        ribbon_overflow.close(dom.query_selector(owner,".editor-ribbon"))
     let divider = dom.closest(evt.target,"#navigator-divider")
     if (divider != null) {
         if (session.show or session.dialog != "" or evt.button != 0 or session.drag != null or session.navigator_drag != null) { return 'pass' }
@@ -430,6 +467,15 @@ on keydown(evt) {
         }
         return 'pass'
     }
+    if (key=="escape") {
+        let opened = dom.query_selector(owner,".ribbon-group[data-open=true]")
+        if (opened!=null) {
+            let trigger = dom.query_selector(opened,".ribbon-group-trigger")
+            ribbon_overflow.close(dom.query_selector(owner,".editor-ribbon"))
+            dom.focus_set(trigger,false)
+            return 'prevent-default'
+        }
+    }
     if (modifier and key in ["s","o","p"]) {
         session = app.file_shortcut(owner,session,key,BASE)
         return 'prevent-default'
@@ -491,7 +537,24 @@ on keydown(evt) {
 on resize(evt) {
     let owner = owner_of(evt)
     if (session.slide_drag!=null) { session = app.finish_slide_drag(owner,session,true) }
-    session = app.request_layout(owner,app.finish_navigation_resize(owner,session))
+    session = app.finish_navigation_resize(owner,session)
+    // Native live resize can paint before another requested frame runs.
+    let ribbon = dom.query_selector(owner,".editor-ribbon")
+    let handoff = ribbon_overflow.begin_resize(ribbon,app.node(owner,"stage"))
+    ribbon_overflow.update(ribbon,session.tab,"")
+    ribbon_overflow.end_resize(handoff)
+    // Fit the canvas from this width before the native resize callback paints it.
+    if (session.layout_token>0) dom.cancel_frame(owner,session.layout_token)
+    session = app.fit_layout(owner,{*:session,layout_token:0},false)
+    spelling.reposition(owner,"slides-notes")
+    spelling.reposition(owner,"slides-text")
+    spelling.reposition(owner,"slides-canvas")
+    return 'pass'
+}
+on scroll(evt) {
+    spelling.reposition(evt.target,"slides-notes")
+    spelling.reposition(evt.target,"slides-text")
+    spelling.reposition(evt.target,"slides-canvas")
     return 'pass'
 }
 
@@ -502,6 +565,6 @@ on load(evt) {
     return 'handled'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><title "Slides — create and present">
-    <base href:BASE><style slide_html.css><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
+    <base href:BASE><style slide_html.css ++ spelling.css><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
     apply(<slides_document rendered:<body apply(<slide_editor rendered:v.shell(apply(<editor_show>),inline_text.widget())>)>>)
 >

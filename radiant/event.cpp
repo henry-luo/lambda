@@ -13390,15 +13390,17 @@ static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
     return run;
 }
 
-static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned char* end,
+static bool event_text_glyph_advance(UiContext* uicon, FontBox* font,
+                                     unsigned char* p, unsigned char* end,
                                      bool* has_space, int* out_bytes, float* out_advance) {
     *out_bytes = 1;
     *out_advance = 0.0f;
     if (is_space(*p)) {
         if (*has_space) return false;
         *has_space = true;
-        *out_advance = font->style->space_width;
-        return true;
+        *out_advance = font->style->space_width + font->style->word_spacing;
+        if (p + 1 < end) *out_advance += font->style->letter_spacing;
+        return *out_advance > 0.0f;
     }
 
     *has_space = false;
@@ -13408,13 +13410,16 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
         *out_bytes = 1;
         codepoint = *p;
     }
-    GlyphInfo glyph = font_get_glyph(font_box_handle(font), codepoint);
-    if (glyph.id == 0) return false;
-    *out_advance = glyph.advance_x;
+    // Layout and paint use CSS-pixel advances; raw glyph metrics are physical
+    // pixels on dense displays and shift the caret farther on every character.
+    *out_advance = layout_measure_font_glyph_advance(
+        font_box_handle(font), font->style, codepoint, ui_context_raster_scale(uicon));
+    if (*out_advance <= 0.0f) return false;
+    if (p + *out_bytes < end) *out_advance += font->style->letter_spacing;
     return true;
 }
 
-static float event_text_x_for_offset(FontBox* font, ViewText* text,
+static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* text,
                                      TextRect* rect, int byte_offset,
                                      EventTextRun run) {
     unsigned char* data = text->text_data();
@@ -13426,7 +13431,7 @@ static float event_text_x_for_offset(FontBox* font, ViewText* text,
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            font, current, run.end, &has_space, &bytes, &advance);
+            uicon, font, current, run.end, &has_space, &bytes, &advance);
         current += bytes;
         current_offset += bytes;
         if (has_advance) x += advance;
@@ -13470,47 +13475,22 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
         byte_offset++;
     }
 
-    float raster_scale = ui_context_raster_scale(uicon);
-    float letter_spacing = font->style->letter_spacing;
-    float word_spacing = font->style->word_spacing;
     bool has_space = false;
     while (current < run.end) {
         // A normal-flow newline collapses to a space within the same text rect;
         // preserved line breaks are already split into separate rects by layout.
         float advance = 0.0f;
         int bytes = 1;
-        if (is_space(*current)) {
-            if (has_space) {
-                current++;
-                byte_offset++;
-                continue;
-            }
-            has_space = true;
-            advance = font->style->space_width + word_spacing;
-        } else {
-            has_space = false;
-            uint32_t codepoint;
-            bytes = str_utf8_decode(
-                (const char*)current, (size_t)(run.end - current), &codepoint);
-            if (bytes <= 0) {
-                bytes = 1;
-                codepoint = *current;
-            }
-            advance = layout_measure_font_glyph_advance(
-                font_box_handle(font), font->style, codepoint, raster_scale);
-            if (advance <= 0.0f) {
-                current += bytes;
-                byte_offset += bytes;
-                continue;
-            }
-        }
-        unsigned char* next = current + bytes;
-        if (next < run.end) {
-            advance += letter_spacing;
+        bool has_advance = event_text_glyph_advance(
+            uicon, font, current, run.end, &has_space, &bytes, &advance);
+        if (!has_advance) {
+            current += bytes;
+            byte_offset += bytes;
+            continue;
         }
         if (target_x < x + advance / 2.0f) return byte_offset;
         x += advance;
-        current = next;
+        current += bytes;
         byte_offset += bytes;
     }
     return byte_offset;
@@ -13543,7 +13523,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
         font_box_handle(&evcon->font) ? (int)font_handle_get_physical_size_px(font_box_handle(&evcon->font)) : -1);
 
     float x = event_text_x_for_offset(
-        &evcon->font, text, rect, target_offset, run);
+        evcon->ui_context, &evcon->font, text, rect, target_offset, run);
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
     *out_x = x;
@@ -13592,7 +13572,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     if (text->font) setup_font(uicon, &fbox, text->font);
     if (!font_box_handle(&fbox) || !fbox.style) return rect->x;
 
-    return event_text_x_for_offset(&fbox, text, rect, byte_offset, run);
+    return event_text_x_for_offset(uicon, &fbox, text, rect, byte_offset, run);
 }
 
 // Static registration: hooks the resolver into dom_range_resolver.cpp at

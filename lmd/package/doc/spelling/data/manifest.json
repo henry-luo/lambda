@@ -1,0 +1,14 @@
+{
+  "language": "en-US",
+  "coverage_level": 60,
+  "source_revision": "71d7dd07676edb60ade43552e10b41314b7e9287",
+  "source_url": "https://raw.githubusercontent.com/en-wl/wordlist-diff/71d7dd07676edb60ade43552e10b41314b7e9287/en_US.txt",
+  "source_sha256": "4ff7e0b6d86763e1e042ffd746e94cdf4432618702deac303a1669e2a838db04",
+  "dictionary_sha256": "b3c5bdf47d9bed334e9da230b1547cc902be2cc9ccaf081a7bf13baf6f61866d",
+  "entries": 109902,
+  "bytes": 525993,
+  "format": "semicolon-prefix-text",
+  "block_words": 64,
+  "generator": "utils/spelling_front_poc.py",
+  "license": "Copyright"
+}

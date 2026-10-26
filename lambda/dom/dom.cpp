@@ -812,8 +812,9 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         // CLI document also needs a style-resolution turn for paint-only
         // mutations: CSS transitions are created by that turn, while the
         // long-lived renderer already owns its normal style/frame cadence.
+        // native CSSOM callers need no JS capsule; scheduling follows the document's host.
         if (kind != DOM_JS_MUTATION_STYLE_REPAINT ||
-            (_js_current_ui_context && !_js_host_driven_loop)) {
+            (doc->js.host_ui_context && !doc->js.host_driven_loop)) {
             doc_state_request_reflow(st);
         }
     }
@@ -3576,14 +3577,12 @@ static void reset_foreign_document_cache() {
     }
     s_doc_with_window_count = 0;
 }
-JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (DomDocumentResourceData* data), free_document, (static_cast<DomDocument*>(data)))
-
 static bool dom_retains_adopted_document(DomDocument* owner,
                                            DomDocument* target) {
     if (owner == target) return true;
     for (DomDocumentResource* resource = owner->resources; resource;
          resource = resource->next) {
-        if (resource->destroy == dom_destroy_adopted_document &&
+        if (resource->destroy == free_document_resource &&
             dom_retains_adopted_document((DomDocument*)resource->data, target)) {
             return true;
         }
@@ -3621,7 +3620,7 @@ static bool dom_transfer_document_storage(DomDocument* source,
     if (dom_retains_adopted_document(source, destination)) return true;
 
     if (!dom_document_add_resource(destination, source,
-                                   dom_destroy_adopted_document)) {
+                                   free_document_resource)) {
         log_error("dom_adopt: failed to retain source document storage");
         return false;
     }
@@ -12257,6 +12256,17 @@ static void dom_set_number_property(Item object, const char* name,
     dom_realm_set_name(object, name, push_d((double)value));
 }
 
+extern "C" Item dom_make_rect_data(DomDocument* doc, double x, double y, double width, double height) {
+    if (!doc || !doc->input) return ItemNull;
+    MarkBuilder builder(doc->input);
+    return builder.map()
+        .put("x", x).put("y", y)
+        .put("top", y).put("left", x)
+        .put("right", x + width).put("bottom", y + height)
+        .put("width", width).put("height", height)
+        .final();
+}
+
 Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double height) {
     // A rect is a *result*, and building results through the JS object model
     // costs a realm: the shape allocation runs out of js_input's pool, so a
@@ -12265,15 +12275,8 @@ Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double
     // the last three published operations still crashing). With no realm the
     // same fields are built as a plain Lambda map out of the document's own
     // Input; a JS caller still gets the JS-shaped object below.
-    if (!dom_realm_active() && doc && doc->input) {
-        MarkBuilder builder(doc->input);
-        return builder.map()
-            .put("x", x).put("y", y)
-            .put("top", y).put("left", x)
-            .put("right", x + width).put("bottom", y + height)
-            .put("width", width).put("height", height)
-            .final();
-    }
+    if (!dom_realm_active() && doc && doc->input)
+        return dom_make_rect_data(doc, x, y, width, height);
     Item rect = js_new_object();
     dom_realm_set_name(rect, "x", push_d(x));
     dom_realm_set_name(rect, "y", push_d(y));
@@ -14632,6 +14635,61 @@ static Item dom_text_control_boundary_from_point(DomElement* elem,
     Item values[] = { node.get(), (Item){.item = i2it((int64_t)offset_u16)},
         (Item){.item = i2it((int64_t)hit.offset)} };
     return dom_result_map(elem->doc, keys, values, 3);
+}
+
+static DomElement* dom_op_text_control(Item n);
+
+struct TextControlRangeRectContext {
+    DomDocument* doc;
+    Rooted<Item>* result;
+    float origin_x, origin_y, layout_x, layout_y, scale_x, scale_y;
+    float scroll_x, scroll_y, right, bottom;
+};
+
+static void dom_text_control_range_rect(float x, float y, float width, float height,
+                                        void* data) {
+    auto* ctx = (TextControlRangeRectContext*)data;
+    // selection rectangles are layout-space; project and clip them to the painted control.
+    float left = ctx->origin_x + (x - ctx->layout_x - ctx->scroll_x) * ctx->scale_x;
+    float top = ctx->origin_y + (y - ctx->layout_y - ctx->scroll_y) * ctx->scale_y;
+    float right = left + width * ctx->scale_x;
+    float bottom = top + height * ctx->scale_y;
+    left = fmaxf(left, ctx->origin_x);
+    top = fmaxf(top, ctx->origin_y);
+    right = fminf(right, ctx->right);
+    bottom = fminf(bottom, ctx->bottom);
+    if (right <= left || bottom <= top) return;
+    RootFrame roots(1);
+    Rooted<Item> rect(roots, dom_make_rect_data(ctx->doc, left, top, right - left, bottom - top));
+    js_array_push(ctx->result->get(), rect.get());
+}
+
+extern "C" Item dom_core_text_control_range_rects(Item n, Item start, Item end) {
+    DomElement* elem = dom_op_text_control(n);
+    if (!elem || !_js_current_ui_context || !elem->doc ||
+        !dom_ensure_geometry_snapshot(elem->doc)) return ItemNull;
+    tc_ensure_init(elem);
+    ViewBlock* block = lam::view_require_block(elem);
+    FormControlProp* form = elem->form;
+    if (!block || !form || block->width <= 0.0f || block->height <= 0.0f) return ItemNull;
+    const char* value = form->current_value ? form->current_value : form->value;
+    if (!value) value = "";
+    int64_t start_u16 = it2i(start);
+    int64_t end_u16 = it2i(end);
+    uint32_t first = tc_utf16_to_utf8_offset(value, form->current_value_len,
+        start_u16 < 0 ? 0 : start_u16 > UINT32_MAX ? UINT32_MAX : (uint32_t)start_u16);
+    uint32_t last = tc_utf16_to_utf8_offset(value, form->current_value_len,
+        end_u16 < 0 ? 0 : end_u16 > UINT32_MAX ? UINT32_MAX : (uint32_t)end_u16);
+    float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
+    dom_engine_visual_bounds(static_cast<View*>(elem), &x, &y, &width, &height);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, js_array_new(0));
+    TextControlRangeRectContext ctx = {elem->doc, &result, x, y, block->x, block->y,
+        width / block->width, height / block->height, form->scroll_x, form->scroll_y,
+        x + width, y + height};
+    if (!editing_geometry_text_control_for_each_selection_rect(_js_current_ui_context,
+            elem, first, last, dom_text_control_range_rect, &ctx)) return ItemNull;
+    return result.get();
 }
 JS_FORWARD_ITEM(dom_text_control_caret_bounds_bridge, (void* elem), dom_text_control_caret_bounds, ((DomElement*)elem))
 JS_FORWARD_ITEM(dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))

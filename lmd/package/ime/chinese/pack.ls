@@ -1,6 +1,6 @@
 import c: .common
 import index: lambda.io.line_index
-import search: lambda.doc.diff.common
+import search: lambda.io.search
 import utf8: lambda.io.utf8
 
 pub fn from_bytes(manifest,lexicon,abbrev,profile = "zh-Hans") map^ {

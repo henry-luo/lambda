@@ -4,8 +4,10 @@ import ComparisonPanel from './components/ComparisonPanel';
 import RenderComparisonPanel from './components/RenderComparisonPanel';
 import BottomPanel from './components/BottomPanel';
 import StructCensusPanel from './components/StructCensusPanel';
+import LiveInspector from './components/LiveInspector';
 
 function App() {
+  const [workspace, setWorkspace] = useState('tests');
   const [selectedTest, setSelectedTest] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -40,6 +42,7 @@ function App() {
 
   // Keyboard shortcuts
   useEffect(() => {
+    if (workspace !== 'tests') return;
     const handleKeyDown = (e) => {
       // Cmd+R or Ctrl+R: Run selected test
       if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
@@ -67,7 +70,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedTest, isRunning, showRecentTests]);
+  }, [workspace, selectedTest, isRunning, showRecentTests]);
 
   const handleTestSelect = (test) => {
     setSelectedTest(test);
@@ -304,6 +307,8 @@ function App() {
     <div className="app">
       <div className="menu-bar">
         <div className="menu-items">
+          <button className="btn" onClick={() => setWorkspace('tests')} aria-pressed={workspace === 'tests'}>Tests</button>
+          <button className="btn" onClick={() => setWorkspace('live')} aria-pressed={workspace === 'live'}>Live</button>
           <span className="menu-item">File</span>
           <span 
             className="menu-item" 
@@ -315,7 +320,7 @@ function App() {
           <span className="menu-item">View</span>
           <span className="menu-item">Help</span>
         </div>
-        <div className="toolbar">
+        <div className="toolbar" style={{ display: workspace === 'tests' ? 'flex' : 'none' }}>
           {(!selectedTest || selectedTest?.testType === 'layout') && !isToolPanel && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
             <label style={{ fontSize: '13px', color: '#ccc' }}>Viewport:</label>
@@ -403,7 +408,7 @@ function App() {
         </div>
       )}
 
-      <div className="main-content">
+      {workspace === 'live' ? <LiveInspector defaultPath={selectedTestPath} /> : <div className="main-content">
         <div className="left-sidebar" style={{ width: `${leftPanelWidth}px` }}>
           <TestTree
             onTestSelect={handleTestSelect}
@@ -437,7 +442,7 @@ function App() {
             />
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

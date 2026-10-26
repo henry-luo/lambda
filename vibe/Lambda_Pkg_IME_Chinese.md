@@ -15,6 +15,8 @@
 > failures remain. M0 retained-heap attribution and the
 > provisional performance targets remain open. IME-O1, IME-O2 and
 > IME-O4 are resolved and IME-O7 is deferred (data stays uncommitted).
+> M5, a macOS-wide InputMethodKit host with a Lambda-runtime-only build
+> profile, is designed in §8.5–§8.8 and has not been implemented or installed.
 > Evidence and remaining gates: [implementation record](impl/Lambda_Impl_IME_Chinese.md).
 > **Package:** `lambda.ime.chinese`.
 > **Scope:** a shipped, data-driven pinyin input method that converts typed
@@ -22,9 +24,11 @@
 > syllables, the rest stays in composition, and the text commits when every
 > syllable is consumed. It runs as a pure Lambda library anywhere Lambda runs,
 > and as an in-engine input method for Radiant's editable surfaces through the
-> existing composition pipeline. Simplified Chinese first, Traditional as a
-> converted profile. **Whole-sentence conversion is out of scope** and left to
-> a later proposal (§11.3).
+> existing composition pipeline. M5 adds a macOS input source usable by other
+> applications through InputMethodKit, calling the same engine and reducer.
+> Simplified Chinese first, Traditional as a converted profile.
+> **Whole-sentence conversion is out of scope** and left to a later proposal
+> (§11.3).
 > **Spec linkage:** D7.2.4v4 and D7.2.6 (the `lambda.ime.chinese` path and its
 > resolution); D7.2.1 and D7.2.3 (immutable package bindings, instantiated
 > once: the dictionary is loaded explicitly, never at import, IME2); S12.1.1v3
@@ -34,8 +38,9 @@
 > (Lambda reaches Radiant only through the `radiant-dom` module, IME-E1);
 > D7.1.2v2 (resource IO through `lambda-io`); S2.5.8 and S17.4.1 (code-point
 > positions for the preedit caret); S11.4.2 (`T^` results); S17.8.1 (option
-> names checked at the call). No formal ruling changes.
-> **Authority:** package design. Decisions IME1–IME13, native enablers
+> names checked at the call). D7.2.5 governs Radiant's DOM editing policy; the
+> macOS input source has no Radiant or DOM dependency. No formal ruling changes.
+> **Authority:** package design. Decisions IME1–IME16, native enablers
 > IME-E1–IME-E3, open items IME-O1–IME-O10. The `IME` series is new; it is
 > the home series for input-method packages.
 > **Related:** [Lambda_Pkg_Spelling.md](Lambda_Pkg_Spelling.md) (pack
@@ -74,18 +79,20 @@ filtering).
 4. **Usable everywhere.** The engine is pure Lambda and works in `lambda-cli`
    and `lambda-headless` builds. In Radiant it drives the same composition
    events as an OS input method, so `<input>`, `<textarea>`, `contenteditable`
-   and JavaScript pages need no changes.
+   and JavaScript pages need no changes. M5 also exposes it as a user-installed
+   macOS keyboard input source to other applications (IME14).
 5. **Clean distribution.** Only permissively licensed data is bundled with the
    MIT-licensed repository; every pack is reproducible from pinned sources and
    carries its manifest and notices (§3.3).
 
-**Non-goals (first release).** Whole-sentence conversion and any n-gram
+**Non-goals (first in-engine release).** Whole-sentence conversion and any n-gram
 language model (§11.3); cloud candidates; Zhuyin/Bopomofo, double pinyin
 (shuangpin), Wubi, Cangjie and other schemes (later milestones, which the
 protocol of IME3 accommodates); handwriting and voice; hanzi-to-pinyin
 annotation (the data could serve it later); emoji and symbol pickers beyond
-full-width punctuation; replacing an OS input method the user already runs
-(IME10); Japanese and Korean.
+full-width punctuation; automatically replacing another OS input source
+(IME10); Japanese and Korean. The macOS-wide input source is M5, separate
+from that in-engine release.
 
 ---
 
@@ -297,6 +304,27 @@ caret reported to Radiant is a code-point offset into the preedit text
 pair is a separate setting, off by default. Settings are part of the session
 value, validated when given, changeable while the input method runs, and saved
 by the host with its other settings, never by the package (§5.7).
+
+**IME14 — One reducer, two hosts** (USER, 2026-10-26). The macOS input source
+calls `lambda.ime.chinese` directly through a retained Lambda runtime. Its
+InputMethodKit adapter translates platform events and applies reducer actions;
+it does not reimplement segmentation, ranking, paging, learning, or key policy.
+The Radiant adapter remains the in-engine host under D7.2.5 and IME9/IME10.
+
+**IME15 — A dedicated macOS IME build profile** (USER, 2026-10-26). Derive
+`macos-ime` from the existing `cli` variant and keep only the Lambda runtime,
+package/resource IO needed by this engine, MIR, and the native InputMethodKit
+host. It contains no JavaScript engine, DOM, Radiant, Jube, HTTP server, or
+CLI command dispatcher (§8.6). The IME executable is placed in a macOS app
+bundle; neither `lambda.exe` nor a per-key child process is its entry point.
+
+**IME16 — Bundle resources and separate user data** (IME-O7, §8.7). Prepared
+pack bytes and Lambda package sources are immutable bundle resources, while
+learned choices, settings, and personal word edits live in the user's
+Application Support directory. Preparation and bundle staging read ignored
+local pack files without adding them to Git. The Sogou Bible packs remain
+optional local data; a distributable artifact omits them unless its
+redistribution rights are established.
 
 ---
 
@@ -877,6 +905,151 @@ in-engine session could start; the adapter checks it and passes every key
 documentation tells the user to switch the OS input source to a Latin layout
 to use the bundled one.
 
+### 8.5 macOS input-source host (M5)
+
+The existing `radiant/ime_mac.mm` implements the **client** side of macOS text
+input for Radiant. M5 adds the complementary, process-wide **input-source**
+side. A background `.app` creates an `IMKServer`; InputMethodKit creates an
+`IMKInputController` for each client input session. The native controller owns
+only platform transport and presentation. A retained Lambda runtime imports
+`lambda.ime.chinese` once, loads each selected profile explicitly (IME2,
+D7.2.4v4/D7.2.6), and invokes `session`, `key`, `configure`, and `with_user` on
+the existing engine (IME3/IME14, S12.1.1v3). The engine is cached per profile;
+each controller has its own precisely rooted session value (D5.3.3/D5.4.1).
+Callbacks are serialized through that runtime, and controller close releases
+its root. No Lambda evaluator or dictionary is created for each keystroke.
+
+The controller translates `NSEvent` text, special keys and modifiers into the
+event map of §7. It translates Shift modifier changes into the reducer's
+`keydown`/`keyup` tap contract, with the delivery behavior verified on the
+target macOS version. A selection in the candidate window feeds the reducer's
+`Candidate` event with its index; the native UI never applies a choice on its
+own. `activateServer`, `deactivateServer`, `commitComposition`, focus changes,
+and client loss finish or discard the per-client provisional text exactly
+once. If loading or evaluation fails before consuming a key, the host hides
+its UI and passes that key to the client rather than swallowing it.
+
+The host starts with the demo's user policy of seven candidates, all supported
+fuzzy pairs enabled and Simplified Chinese; persisted user settings take
+precedence (IME13, S17.8.1).
+
+| Reducer action (§7) | InputMethodKit host effect |
+|---|---|
+| `compose` | Set the client's marked text and selection inside it. Convert the Lambda code-point caret to a UTF-16 `NSRange`; chosen Han text may contain supplementary characters (S2.5.8/S17.4.1). |
+| `candidates` | Update or hide the native candidate view, retaining the reducer's page, highlight, expansion and order. |
+| `commit` | Replace the marked range with final text once, then clear the native presentation. |
+| `cancel` | Remove marked text without inserting the original raw pinyin. InputMethodKit's default `cancelComposition` restores the original string, so it cannot implement this action unchanged. |
+| `pass` | Return `NO` from the event handler and leave the client key path intact. |
+
+Apply an action batch after `ime.key` returns; a client callback must not
+re-enter a half-mutated Lambda session. The host neither reads surrounding
+document text for ranking nor sends keystrokes over a network. When this OS
+source is active in Radiant, the existing in-engine adapter stands down under
+IME10; it does not convert the same keys a second time.
+
+### 8.6 `macos-ime` build profile (M5)
+
+`build_lambda_config.json` gains `platforms.macos-ime`, **derived from**
+`platforms.cli`, with a separate `build_ime_macos/` object tree and a native
+InputMethodKit entry point. This is a build variant, not a Lambda execution
+tier: debug and release forms of the same variant must be possible. The
+planned `make build-ime-macos` target generates its own Premake file from the
+JSON config, builds the native executable, then stages the `.app`. Generated
+Lua and Makefiles are never edited by hand.
+
+The variant keeps the CLI profile's Lambda parser, evaluator, GC, MIR Direct,
+package resolver and `lambda-io` resource path (D7.1.2v2). It keeps only the
+JSON/binary/text input and JSON output support needed for pack and user-state
+files. It replaces `lambda/main.cpp` with `lambda/host/macos_ime/main.mm`, an
+InputMethodKit controller, and a narrow native-to-Lambda invocation bridge.
+Its platform links are Foundation, AppKit, InputMethodKit and the text input
+source APIs needed for registration. The bundle uses no Radiant rendering
+library or browser view for candidates.
+
+The required source/link closure excludes `lambda/js/`, `lambda/dom/`,
+`radiant/`, Jube/Node modules, the HTTP server, CLI command handlers, and
+unrelated CLI image, document, physics and network facilities. It also
+excludes their libraries, including GLFW, ThorVG, WebKit and curl. The CLI
+variant currently lists `lambda/js/js_well_known_names.c` and the generator
+adds some libraries without checking a variant's actual consumers. M5 must
+move any genuinely shared names to a runtime-neutral owner and make library
+selection follow the target's dependency graph; it may not retain a JS object
+or library merely to satisfy a link error. A build manifest plus symbol/link
+audit proves this boundary, rather than assuming a `LAMBDA_NO_JS` define is
+sufficient (IME15).
+
+`utils/generate_premake.py` currently applies one variant overlay; it cannot
+inherit `cli`, add host sources, restore the AppKit/Carbon links excluded by
+`cli`, or emit an extensionless macOS bundle executable as specified here.
+Extend that general overlay mechanism with a resolved parent variant and
+add/remove deltas for sources and libraries. The effective profile must be
+used by both library parsing and main-program generation. Keep one canonical
+CLI source list in `build_lambda_config.json`; copying it into `macos-ime`
+would make the exclusion contract drift. The new output is staged as
+`LambdaChineseIME.app/Contents/MacOS/LambdaChineseIME`.
+
+### 8.7 Resources, preferences and installation (M5)
+
+Stage `package/ime/chinese.ls`, its module sources and `syllables.txt`, plus
+validated `zh-Hans` and `zh-Hant` packs with their manifests and notices under
+`LambdaChineseIME.app/Contents/Resources/lmd/`. The host sets `HOST_PATH_HOME`
+to that read-only `lmd` directory before runtime import, so ordinary
+`ime.load(profile)` and relative package imports work independent of the
+current working directory (D7.2.4v4/D7.2.6). It sets cache, scratch and log
+paths to per-user locations before runtime startup. Learned choices, fuzzy
+settings and personal word edits are saved atomically under
+`~/Library/Application Support/<bundle-id>/`; they never modify signed
+bundle resources (IME8/IME16). A missing or invalid pack leaves the source
+inactive with an actionable local error, not an empty candidate list.
+
+The pure edit/browse/replay logic now used by the demo's
+`test/demo/ime/mod_dictionary.ls` moves into the shipped IME package and is
+imported by both hosts. Its DOM dialog stays in the demo. The macOS host
+supplies its own preferences UI and atomic persistence; this shares the
+word/reading validation and pack-update rules without bringing DOM or
+Radiant into `macos-ime` (IME14/IME16).
+
+The app has a stable unique bundle ID, `CFBundleExecutable`,
+`LSBackgroundOnly`, `InputMethodConnectionName`,
+`InputMethodServerControllerClass`, a Chinese repertoire and an input-source
+icon. A development install copies the built app to
+`~/Library/Input Methods/` and calls `TISRegisterInputSource`. The user adds
+it in macOS Keyboard → Text Input → Input Sources; selection remains under
+macOS control. The installer verifies discovery, records the installed bundle
+path and supplies a removal path. It does not write into `/System` or replace
+another input source.
+
+Prepared data remains gitignored under IME-O7. Local bundle staging consumes
+those ignored outputs and checks hashes/notices; a public release artifact is
+separately gated on redistribution rights for every included source. The two
+Sogou Bible dictionaries may be added by the local user as an optional pack,
+but are not part of the distributable default. For distribution outside the
+developer's Mac, sign the bundle and nested code with Developer ID, enable
+Hardened Runtime and notarize it. MIR JIT needs its macOS execution-memory
+path tested under that signature and the narrow JIT entitlement; interpreter
+fallback is tested separately, not assumed to meet the latency target.
+
+### 8.8 Candidate presentation and settings (M5)
+
+Start with InputMethodKit's candidate panel and seven selection keys. Verify
+the compact horizontal strip, page navigation and pointer choice against the
+same reducer frames as Radiant. If its layout cannot present the specified
+expanded grid and collapse behavior, use a native AppKit panel anchored to
+the client's insertion rectangle. That panel has accessible candidate labels,
+selection and page status, follows the active client and display, and hides on
+deactivation, cancel and secure input. A small input-source menu opens profile,
+fuzzy-pair and personal-dictionary settings; changes call `configure` or
+reload the edited engine while preserving the session contract (IME13/IME16).
+The test page remains a fixture, not the system settings UI.
+
+Apple's [IMKServer bundle contract](https://developer.apple.com/documentation/inputmethodkit/imkserver/init%28name%3Abundleidentifier%3A%29),
+[IMKInputController lifecycle](https://developer.apple.com/documentation/inputmethodkit/imkinputcontroller),
+[candidate API](https://developer.apple.com/documentation/inputmethodkit/imkcandidates),
+[input-source installation guidance](https://developer.apple.com/library/archive/qa/qa1810/_index.html),
+and [JIT entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.allow-jit)
+are the platform references for M5. The InputMethodKit interaction and
+registration behavior still require on-device qualification.
+
 ---
 
 ## 9. Evaluation and acceptance
@@ -889,6 +1062,9 @@ to use the bundled one.
 | Candidate quality | A frozen held-out list of words with their readings, from a corpus whose license permits committing the fixture; report the rank of the expected word for full pinyin and for initials: top-1, top-3 and first-page (top-9) rates, and simulated keystrokes per character. Thresholds are recorded from the first baseline before any tuning; no quality score is claimed here |
 | Session | Golden key sequences → action lists: paging, Backspace undoing a selection, Enter, Esc, Shift toggle, punctuation, user-overlay promotion |
 | Radiant | UI automation tests (`test/ui/ime_chinese_*.json`) on `<input>`, `<textarea>` and `contenteditable`: preedit shown, commit inserted, one undo step per commit, `maxlength`, cancel, OS-composition stand-down, popup click |
+| macOS build profile (M5) | Generate debug and release `macos-ime` from the CLI parent; cold-build the extensionless executable and app; inspect compiled-object manifest, link map and dependencies for zero JS, DOM, Radiant, Jube, server, CLI command or unrelated codec/network modules; load `lambda.ime.chinese` from bundled resources |
+| macOS input-source behavior (M5) | Install and select the source; replay reducer goldens through InputMethodKit in TextEdit, a browser field and Radiant; verify marked-text caret and UTF-16 conversion, candidate click, Shift tap, punctuation, focus transfer, client cancel, secure input and no duplicate commit; remove and reinstall cleanly |
+| macOS packaging (M5) | Bundle manifests/hashes and notices match staged packs; user overlay survives restart and bundle upgrade; code signature and Hardened Runtime JIT work in the installed app; notarization and a rights-cleared resource inventory gate public distribution |
 | Performance | Release build only (AGENTS.md rule 10), named host: pack load time, peak memory, per-key latency p50/p95. Provisional targets: load under 200 ms, per-key p95 under 5 ms; revised from evidence |
 
 Golden-driven `.ls` fixtures live under `test/lambda/ime/`, each with its
@@ -903,15 +1079,17 @@ Golden-driven `.ls` fixtures live under `test/lambda/ime/`, each with its
 | **M0 Data** | `utils/prepare_ime_chinese.py`; the `zh-Hans` pack in format v1 (§6), with manifest and notices, under `lmd/package/ime/chinese/data/zh-Hans/`; source choice settled (IME-O4) | Data gate of §9; the measurements of §6.7; coverage of the held-out list |
 | **M1 Engine** | `ime/chinese.ls` with `syllables`, `lattice`, `pack`, `lookup`, `rank` modules; `load` and `candidates`; fuzzy-pair expansion and `fuzzy_pairs` | Segmentation and fuzzy-settings gates; candidate-quality baseline recorded |
 | **M2 Session** | The reducer, punctuation, mode toggle, paging, settings with `configure` and `settings`, user overlay and its persistence | Session goldens in both execution tiers |
-| **M3 Radiant** | IME-E1–IME-E3; the body-level adapter in `lambda.dom` | Radiant gate; `make test-radiant-baseline`; **first release** |
+| **M3 Radiant** | IME-E1–IME-E3; the body-level adapter in `lambda.dom` | Radiant gate; `make test-radiant-baseline`; **first in-engine release** |
 | **M4 Traditional** | The `zh-Hant` pack from OpenCC; implemented 2026-10-26 | 32 conversion fixtures; [frozen quality report](../test/ime/quality_zh_hant.md) |
-| **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, popup accessibility | One at a time, each with its own gate |
+| **M5 macOS input source** | `macos-ime` CLI-derived runtime profile, retained Lambda bridge, InputMethodKit controller/candidates/settings, `.app` staging and per-user install/remove path (IME14–IME16) | All three M5 gates in §9, plus release-host end-to-end latency and memory report; local install works before public-signing/distribution is claimed |
+| **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, additional regional packs | One at a time, each with its own gate |
 | **Future** | Whole-sentence conversion (§11.3) | A separate proposal |
 
 Package-only milestones run their focused fixtures in the interpreter and JIT
 tiers. M3 changes Radiant and the DOM behavior package, so it also reads
-`radiant/README.md` and runs the Radiant baseline. This proposal itself needs
-document checks only.
+`radiant/README.md` and runs the Radiant baseline. M5 adds separate native
+cross-application and installed-bundle gates; passing M3's Radiant fixtures
+does not qualify it. This proposal itself needs document checks only.
 
 ---
 
@@ -944,6 +1122,20 @@ document checks only.
 - **Re-entrant dispatch.** IME-E1 must queue its events (§8.3); a nested
   dispatch from inside `keydown` is the failure mode to test for.
 - **Two input methods at once.** Covered by IME10 and §8.4, and tested.
+- **macOS range and lifecycle mismatch.** Lambda's caret is code-point based,
+  while marked text uses UTF-16 ranges; client deactivation may arrive during
+  composition. M5 owns one conversion helper and a per-client finalization
+  state, tested with supplementary Han and rapid focus changes (IME14,
+  S2.5.8/S17.4.1).
+- **Build leakage.** The CLI profile still names a JS source file and the
+  generator has unconditional link inputs. M5 moves shared code to a neutral
+  owner and makes the resolved source/link manifest a gate, rather than
+  trusting source-directory names or preprocessor defines (IME15).
+- **Bundle execution.** The package resolver currently defaults to a
+  working-directory `lmd`, and MIR JIT must run under a signed, hardened
+  background process. M5 sets explicit host paths and tests the installed
+  release artifact before claiming startup or latency targets (IME16,
+  D7.2.4v4/D8.1.1v18).
 
 ### 11.3 Whole-sentence conversion (future)
 
@@ -985,6 +1177,10 @@ kinds (IME4) and the reducer contract (IME3) are the extension points.
 | `ime/chinese/lookup.ls` | Full-key, prefix and abbreviation queries (§5.2) |
 | `ime/chinese/rank.ls` | The ranking rule (§5.3) |
 | `ime/chinese/session.ls` | The reducer, paging, punctuation, mode (§5.4–§5.5) |
+| `ime/chinese/dictionary.ls` (planned) | Promote the demo's pure personal edit/browse/replay model for both hosts (M5, IME16) |
 | `ime/chinese/data/zh-Hans/` | Prepared pack, manifest, NOTICE |
 | `utils/prepare_ime_chinese.py` | Offline preparation (development tooling only) |
 | `lmd/package/dom/ime.ls` | Extended with the key adapter (M3, IME-O1) |
+| `lambda/host/macos_ime/` (planned) | InputMethodKit entry, per-client controller, candidate UI and native-to-Lambda bridge (M5, IME14) |
+| `build_lambda_config.json` `platforms.macos-ime` (planned) | CLI-derived runtime-only source/link profile (M5, IME15) |
+| `utils/generate_premake.py` / `Makefile` (planned) | Resolve inherited variant deltas, build and stage the macOS app without editing generated Lua (M5, IME15) |

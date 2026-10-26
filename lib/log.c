@@ -24,6 +24,7 @@ LOG_STUB(int, clog_raw, (log_category_t* category, const char* message), LOG_OK)
 LOG_STUB(void, log_mem_stage, (const char* stage), )
 LOG_STUB(int, log_level_enabled, (log_category_t* category, const int level), 0)
 LOG_STUB(void, log_set_level, (log_category_t* category, int level), )
+LOG_STUB(int, log_set_transient_min_level, (int level), level)
 LOG_STUB(void, log_set_output, (log_category_t* category, FILE* output), )
 LOG_STUB(int, log_default_init, (const char* config, const char* category), LOG_OK)
 LOG_STUB(void, log_default_finish, (void), )
@@ -125,6 +126,7 @@ static int formats_count = 0;
 static int rules_count = 0;
 static int log_initialized = 0;
 static int log_disabled = 0;
+static THREAD_LOCAL int transient_min_level = LOG_LEVEL_TRACE;
 static int timestamps_enabled = 1;
 static int colors_enabled = 0;
 static int env_min_level = 0;
@@ -774,6 +776,7 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
 /* Core logging implementation */
 static int log_output(log_category_t *category, int level, const char *format, va_list args) {
     if (!category || !category->enabled) { return LOG_OK; }
+    if (level < transient_min_level) { return LOG_OK; }
     if (env_min_level_set && level < env_min_level) { return LOG_OK; }
     if (level < category->level &&
         !(level == LOG_LEVEL_TRACE && env_trace_requested)) {
@@ -958,7 +961,13 @@ log_category_t* log_get_category(const char *cname) {
 /* Level management */
 int log_level_enabled(log_category_t *category, const int level) {
     if (!category || !category->enabled) return 0;
-    return (level >= category->level);
+    return (level >= category->level && level >= transient_min_level);
+}
+
+int log_set_transient_min_level(int level) {
+    int previous = transient_min_level;
+    transient_min_level = level;
+    return previous;
 }
 
 void log_set_level(log_category_t *category, int level) {

@@ -14,7 +14,7 @@ The `<document>` element is a **virtual container** that:
 
 ## XHTML admission
 
-**Adopted 2026-10-15 — D2.10.1**, with name identity governed by
+**Adopted 2026-10-15; catalog revision 2026-10-26 — D2.10.1v2**, with name identity governed by
 **S8.2.2v6** and **D3.4.4v4**. The dedicated `xhtml` format reuses strict XML
 parsing and emits the HTML parser's tree representation for direct Radiant
 consumption. `.xhtml`/`.xht` and `application/xhtml+xml` select it; an explicit
@@ -35,8 +35,16 @@ declaration from document children. Text whitespace and decoded CDATA survive.
 It neither applies HTML tree repair nor serializes and reparses the tree.
 The root must be XHTML `html`; malformed XML, unbound prefixes, duplicate
 expanded attributes and embedded NUL bytes fail parsing. External doctype
-identifiers are retained without fetching their DTDs; internal subsets and
-unknown named entities remain errors.
+identifiers are retained without fetching their DTDs. In the XHTML profile,
+the recognized public identifiers in
+[HTML §14.2](https://html.spec.whatwg.org/multipage/xhtml.html#parsing-xhtml-documents)
+select the existing full HTML named-character-reference catalog. This includes
+multi-codepoint and supplementary-plane replacements in text and attributes;
+it is a public-ID catalog lookup, not DTD execution or source rewriting.
+Unknown public identifiers and documents without a matching public identifier
+keep XML's five predefined entities. Internal subsets, arbitrary declarations,
+unterminated references and unknown entity names remain errors. This extension
+does not broaden ordinary XML parsing profiles.
 
 Radiant selects this profile from the local extension or final HTTP response
 MIME and shares the existing HTML loader after parsing. XHTML stays in

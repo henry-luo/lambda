@@ -8,6 +8,10 @@
   "input_turn_ms": 0,
   "events": [
     {
+      "type": "script",
+      "js": "document.getElementById(\"slide-render\").setAttribute(\"spellcheck\",\"false\")"
+    },
+    {
       "type": "advance_time",
       "ms": 100,
       "steps": 3

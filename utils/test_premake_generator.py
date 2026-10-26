@@ -320,6 +320,33 @@ def expect_image_source_build(module) -> None:
         fail('Windows image target selects POSIX TIFF resource helpers')
 
 
+def expect_macos_ime_profile(module) -> None:
+    generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'linux',
+                                        variant='macos-ime',
+                                        linux_multiarch_triplet=TEST_MULTIARCH_TRIPLET,
+                                        linux_pkg_config_includes=[])
+    files = set(generator.config['source_files'])
+    if 'lambda/host/macos_ime/main.mm' not in files or \
+            'lambda/js/js_well_known_names.c' in files or \
+            'lambda' in generator.config['source_dirs']:
+        fail('macos-ime source inheritance leaked the CLI or JS entry point')
+    if generator.variant_config.get('target_extension') != '' or \
+            'AppKit' in set(generator.variant_config['exclude_macos_libraries']) - \
+            set(generator.variant_config['restore_macos_libraries']):
+        fail('macos-ime lost extensionless output or AppKit restore')
+    generator.use_linux_config = False
+    generator.use_macos_config = True
+    generator.premake_content = []
+    generator.generate_main_program()
+    emitted = '\n'.join(generator.premake_content)
+    if 'targetextension ""' not in emitted or \
+            '"lambda/host/macos_ime/main.mm"' not in emitted or \
+            '"lambda/js/js_well_known_names.c"' in emitted or \
+            '"lambda/main.cpp"' in emitted or \
+            '"-framework WebKit"' in emitted:
+        fail('macos-ime generated host contains CLI/JS/WebKit inputs')
+
+
 def main() -> int:
     module = load_generator_module()
     generator = linux_validation_generator(module)
@@ -328,6 +355,7 @@ def main() -> int:
         fail('source-built archive consumers lost their codec/charset link requirements')
     expect_re2_source_build(module)
     expect_image_source_build(module)
+    expect_macos_ime_profile(module)
     expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")

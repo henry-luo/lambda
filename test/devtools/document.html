@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Lambda DevTools fixture</title>
+<style>
+body { margin: 16px; font: 16px Arial, sans-serif; color: #18243b; background: white; }
+#card { width: 200px; height: 80px; margin: 8px; padding: 12px; border: 2px solid #2459a6; background: #d7e7ff; }
+#wrap { width: 180px; margin-top: 16px; }
+#scroller { width: 240px; height: 64px; overflow: auto; border: 1px solid #999; }
+#scroller > div { width: 400px; height: 160px; }
+#transformed { width: 90px; height: 30px; transform: translate(25.5px, 3.25px); background: #ffe6b3; }
+.flex, .grid { width: 260px; gap: 8px; margin-top: 12px; }
+.flex { display: flex; }.grid { display: grid; grid-template-columns: 1fr 1fr; }
+.flex > div, .grid > div { padding: 8px; background: #e1f4e9; }
+</style></head><body>
+<h1>Live document inspection</h1>
+<div id="card" data-note="symbols, elements &amp; Unicode: λ">Edit my width and background.</div>
+<p id="wrap">Wrapped <strong>inline text</strong> supplies multiple line fragments.</p>
+<div id="scroller"><div>Nested scrolling content</div></div>
+<div id="transformed">Transformed</div>
+<div class="flex"><div>Flex A</div><div>Flex B</div></div>
+<div class="grid"><div>Grid A</div><div>Grid B</div></div>
+</body></html>

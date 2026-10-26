@@ -1,0 +1,58 @@
+{
+  "name": "Proportional text range geometry matches layout at 1x and 2x",
+  "html": "test/ui/text_range_proportional_geometry.html",
+  "viewport": {
+    "width": 800,
+    "height": 300
+  },
+  "device_scale": 1.0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "(()=>{let t=document.getElementById('editor').firstChild,r=document.createRange();r.setStart(t,0);r.setEnd(t,4);let box=r.getBoundingClientRect(),ref=document.getElementById('prefix').getBoundingClientRect(),line=document.getElementById('editor').getBoundingClientRect();return Math.abs(box.left-line.left)<1&&Math.abs(box.width-ref.width)<1})()"
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2.0
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let t=document.getElementById('editor').firstChild,r=document.createRange();r.setStart(t,0);r.setEnd(t,4);let box=r.getBoundingClientRect(),ref=document.getElementById('prefix').getBoundingClientRect(),line=document.getElementById('editor').getBoundingClientRect();return Math.abs(box.left-line.left)<1&&Math.abs(box.width-ref.width)<1})()"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#editor"
+      },
+      "start": 4,
+      "end": 4
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#editor"
+      },
+      "char_offset": 4
+    },
+    {
+      "type": "script",
+      "js": "(()=>{let e=document.getElementById('editor'),a=e.getBoundingClientRect(),b=document.getElementById('prefix').getBoundingClientRect(),p=document.createElement('span');p.id='caret-probe';p.setAttribute('style','position:fixed;left:'+(a.left+b.width+1)+'px;top:'+(a.top+5)+'px;width:1px;height:1px;pointer-events:none');document.body.appendChild(p)})()"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#caret-probe",
+        "offset_x": 0,
+        "offset_y": 0
+      },
+      "max_r": 55,
+      "max_g": 55,
+      "max_b": 55,
+      "search_radius": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/text-range-proportional-2x.png"
+    }
+  ]
+}

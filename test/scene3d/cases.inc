@@ -67,3 +67,5 @@
 {"Scene3dCollectionNavigatesEveryTileAndBreadcrumb", "test/demo/scene3d/index.html", "test/scene3d/events/Scene3dCollectionNavigatesEveryTileAndBreadcrumb.json", 59},
 {"Scene3dCollectionMobileKeepsTilesAndBreadcrumbsReachable", "test/demo/scene3d/index.html", "test/scene3d/events/Scene3dCollectionMobileKeepsTilesAndBreadcrumbsReachable.json", 28},
 {"CrystalGardenPanTiltZoomRendersAndResetsCamera", "test/demo/scene3d/three-gallery.html", "test/scene3d/events/CrystalGardenPanTiltZoomRendersAndResetsCamera.json", 43},
+{"AquariumEditorBuildsEditsAnimatesAndSavesTank", "test/demo/aquarium/aquarium.ls", "test/demo/aquarium/tests/aquarium_editor.json", 61},
+{"AquariumMobileKeepsCanvasAndControlsReachable", "test/demo/aquarium/aquarium.ls", "test/demo/aquarium/tests/aquarium_mobile.json", 6},

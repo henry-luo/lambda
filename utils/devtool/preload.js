@@ -1,8 +1,32 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function inspectorBridge(channel) {
+  const subscribe = (event, callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on(`${channel}-${event}`, listener);
+    return () => ipcRenderer.removeListener(`${channel}-${event}`, listener);
+  };
+  return {
+    start: (document, headless) => ipcRenderer.invoke(`${channel}-start`, document, headless),
+    send: text => ipcRenderer.invoke(`${channel}-send`, text),
+    stop: () => ipcRenderer.invoke(`${channel}-stop`),
+    onMessage: callback => subscribe('message', callback),
+    onClose: callback => subscribe('closed', callback),
+    onOutput: callback => subscribe('output', callback)
+  };
+}
+const documentInspector = inspectorBridge('devtools');
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
+  devtoolsStart: documentInspector.start,
+  devtoolsSend: documentInspector.send,
+  devtoolsStop: documentInspector.stop,
+  onDevtoolsMessage: documentInspector.onMessage,
+  onDevtoolsClose: documentInspector.onClose,
+  onDevtoolsOutput: documentInspector.onOutput,
+  scratch: inspectorBridge('devtools-scratch'),
   // Test tree operations
   loadTestTree: () => ipcRenderer.invoke('load-test-tree'),
 

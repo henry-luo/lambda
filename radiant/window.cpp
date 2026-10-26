@@ -21,6 +21,7 @@
 #include "event_sim.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
+#include "devtools_adapter.hpp"
 #include "rdt_video.h"
 #include "speech.hpp"
 #include "../lambda/network/network_resource_manager.h"
@@ -617,6 +618,23 @@ void radiant_host_bounds_changed(RadiantWindow*) {
     do_redraw = true;
 }
 
+void radiant_host_size_changed(RadiantWindow* window) {
+    radiant_host_bounds_changed(window);
+    // A live drag can block the event loop; paint each size callback instead of waiting for the poll to finish.
+    static bool rendering_resize = false;
+    if (rendering_resize || ui_context.fullscreen.applying) return;
+    rendering_resize = true;
+    // Hot layout diagnostics can produce megabytes per drag frame in debug builds.
+    // An explicit log level still opts into those traces when diagnosing resize.
+    bool quiet_resize = !shell_getenv("LAMBDA_LOG_LEVEL");
+    int previous_log_level = quiet_resize ? log_set_transient_min_level(LOG_LEVEL_WARN) : 0;
+    // This callback publishes the frame now; retain only new redraws requested inside it.
+    do_redraw = false;
+    render(window);
+    if (quiet_resize) log_set_transient_min_level(previous_log_level);
+    rendering_resize = false;
+}
+
 bool radiant_window_fullscreen_key(UiContext* uicon, const RdtEvent* event) {
     if (!uicon || !event ||
         (event->type != RDT_EVENT_KEY_DOWN && event->type != RDT_EVENT_KEY_UP)) return false;
@@ -761,6 +779,19 @@ bool radiant_window_approve_close(DomDocument* doc) {
 bool radiant_window_set_title(DomDocument* doc, const char* title) {
     if (!window_hosts_document(doc) || !title) return false;
     update_window_title(title);
+    return true;
+}
+
+bool radiant_window_set_min_width(DomDocument* doc, int width) {
+    if (!window_hosts_document(doc) || width <= 0) return false;
+    // the document may render headlessly; only a native window needs resize limits.
+    if (ui_context.window) {
+        radiant_platform_set_window_min_width(ui_context.window, width);
+        int current_width = 0, current_height = 0;
+        radiant_platform_get_window_size(ui_context.window, &current_width, &current_height);
+        if (current_width < width)
+            radiant_platform_set_window_size(ui_context.window, width, current_height);
+    }
     return true;
 }
 
@@ -1022,10 +1053,13 @@ void radiant_host_metrics_changed(RadiantWindow*) {
     do_redraw = 1;
 }
 
+static bool rendering_frame = false;
+
 void radiant_host_refresh(RadiantWindow* window) {
+    if (rendering_frame) { do_redraw = true; return; }
+    do_redraw = 0;
     window_flush_pointer_motion();
     render(window);
-    do_redraw = 0;
 }
 
 void to_repaint() {
@@ -1034,6 +1068,11 @@ void to_repaint() {
 }
 
 void render(RadiantWindow* window) {
+    // Cocoa refresh notifications can nest inside a live resize presentation.
+    // Keep the current surface valid until one complete frame has been presented.
+    if (rendering_frame) { do_redraw = true; return; }
+    rendering_frame = true;
+    struct RenderGuard { ~RenderGuard() { rendering_frame = false; } } guard;
     // a platform transition may synchronously request a refresh in the middle of a mode switch.
     if (ui_context.fullscreen.applying) return;
     window_fullscreen_update(&ui_context, false);
@@ -1270,6 +1309,8 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
                                         EnhancedFileCache* file_cache,
                                         bool log_memory, ViewPhaseTiming* timing) {
     window_input_batch = {};
+    radiant_devtools_destroy(ui_context.devtools);
+    ui_context.devtools = nullptr;
     radiant_drain_async_document_loads(&ui_context);
     window_request_document_satellite_cancel();
     uint64_t phase_start = time_now_ns();
@@ -1350,6 +1391,7 @@ double radiant_window_tick(RadiantWindowLoop* loop) {
         // enter the retained document runtime before libuv invokes their callbacks.
         radiant_pump_js_event_loop(&ui_context, -1);
     }
+    if (ui_context.devtools) radiant_devtools_tick(ui_context.devtools);
 
     if (js_animation_frame_has_pending()) {
         int callbacks = js_animation_frame_flush(currentTime * 1000.0);
@@ -1464,7 +1506,6 @@ double radiant_window_tick(RadiantWindowLoop* loop) {
                                                  uv_loop);
     // Reclaim retired storage after painting, between input batches.
     // Pending work wakes again promptly without running a busy idle loop.
-    if (radiant_drain_document_destruction() && wait_timeout > 0.001) wait_timeout = 0.001;
     if (radiant_collect_stranded_dom(&ui_context, ui_context.document) &&
         wait_timeout > 0.001) wait_timeout = 0.001;
     if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
@@ -1572,7 +1613,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    bool enable_state_dump,
                                                    UiAppMode app_mode,
                                                    const RenderPagedOptions* paged_options = nullptr,
-                                                   bool fullscreen = false) {
+                                                   bool fullscreen = false,
+                                                   int inspector_fd = -1) {
     struct DeferredRetirement {
         bool previous = dom_retire_set_deferred(true);
         ~DeferredRetirement() { dom_retire_set_deferred(previous); }
@@ -1691,7 +1733,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     // the self-contained load-time drain — leaving host-driven false there avoids
     // stranding its timers. Cleared alongside the UiContext reset before each
     // ui_context_cleanup().
-    bool host_driven_loop = (!headless || sim_ctx != nullptr);
+    bool host_driven_loop = (!headless || sim_ctx != nullptr || inspector_fd >= 3);
     ui_context.async_script_navigation = host_driven_loop;
 
     // Network resources (owned by this function, shared across document lifetime)
@@ -1976,9 +2018,24 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         }
     }
 
+    if (inspector_fd >= 3) {
+        ui_context.devtools = radiant_devtools_open(&ui_context, inspector_fd, doc_file);
+        if (!ui_context.devtools) {
+            log_error("devtools: could not open the launcher pipe");
+            window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+            return 1;
+        }
+    }
+
     // --- Headless mode: run events synchronously without a window ---
     if (headless) {
         uint64_t event_loop_start = time_now_ns();
+        // the inspector owns this host session until its launcher closes the pipe.
+        while (ui_context.devtools && !ui_context.render_failed) {
+            radiant_pump_js_event_loop(&ui_context, -1);
+            if (!radiant_devtools_tick(ui_context.devtools)) break;
+            uv_sleep(8);
+        }
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running && !ui_context.render_failed) {
@@ -1997,7 +2054,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     continue;
                 }
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
-                radiant_drain_document_destruction();
                 dom_retire_idle(2000);
                 radiant_collect_stranded_dom(&ui_context, ui_context.document);
                 if (!running) break;
@@ -2140,4 +2196,9 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
     return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr, false);
+}
+
+int view_doc_with_devtools(const char* path, int fd, bool headless) {
+    return view_doc_in_window_with_events_internal(path, nullptr, nullptr, 0,
+        nullptr, headless, nullptr, 0, false, false, UI_APP_MODE_VIEW, nullptr, false, fd);
 }
