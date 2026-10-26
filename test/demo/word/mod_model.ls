@@ -386,6 +386,13 @@ fn table_navigate(editor,forward) map^ {
 }
 
 pub fn can_comment(editor) => editor.selection.kind=='text' and not pos_equal(editor.selection.anchor,editor.selection.head)
+fn segment_text(entries,sel) => join([for (entry in entries,let segment=leaf_segment(entry,sel)
+    where segment!=null and segment.to>segment.from) slice(entry.leaf.text,segment.from,segment.to)],"")
+// the selected characters, joined across text leaves; comments quote it.
+pub fn selected_text(editor) => segment_text(leaves(editor.doc),editor.selection)
+// one line per selected paragraph, so Review lookups never fuse words across blocks.
+pub fn selected_lines(editor) => join([for (b in selected_blocks(editor),let line=segment_text(leaves(b.node,b.path),editor.selection)
+    where line!="") line],"\n")
 pub fn cell_alignment(editor) {
     let ctx = table_context(editor)
     let css = attrs_get(node_at(editor.doc,ctx.cell_path).attrs,'style')
@@ -410,8 +417,7 @@ fn comment_transaction(editor,id,p) map^ {
         if (not can_comment(editor) or not (p.text is string) or trim(p.text)=="") raise error("Word: select text and enter a comment")
         else {
             let comment_id = review.next_id(editor.doc)
-            let quote = join([for (entry in leaves(editor.doc),let segment=leaf_segment(entry,editor.selection)
-                where segment!=null and segment.to>segment.from) slice(entry.leaf.text,segment.from,segment.to)],"")
+            let quote = selected_text(editor)
             review.add(char_transaction(editor,(marks)=>review.anchor(marks,comment_id)),editor.doc,
                 {id:comment_id,author:trim(p.author or "Me"),text:trim(p.text),quote:quote,resolved:false})^
         }

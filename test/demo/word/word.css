@@ -430,6 +430,29 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .comment-actions { display:flex; flex-wrap:wrap; gap:2px; border-top:1px solid var(--line); padding-top:7px; }
 .comment-actions .tool { padding:2px 5px; height:24px; }
 .comment-actions .tool-icon { font-size:10px; }
+.lookup-pane { width:300px; display:flex; flex-direction:column; gap:10px; }
+.lookup-pane .navigation-tabs { margin-top:0; }
+.lookup-pane #lookup-query,.lookup-source { width:100%; box-sizing:border-box; height:32px; padding:5px 9px; border:1px solid var(--line); border-radius:8px;
+  background:#fff; color:var(--ink); font-size:13px; }
+.lookup-source { height:auto; min-height:96px; resize:vertical; line-height:1.45; font-family:inherit; }
+.lookup-pane .shape-field { margin:0; }
+.lookup-go { align-self:flex-start; height:30px; padding:4px 12px; }
+.lookup-result { flex:1; min-height:0; }
+.lookup-error { color:#b42318; font-size:12px; line-height:1.5; margin:4px 0; }
+.lookup-entry { border:1px solid var(--line); background:#fff; border-radius:10px; padding:12px 13px; }
+.lookup-word { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font-family:var(--font); }
+.lookup-word strong { font-size:22px; color:var(--ink); }
+.lookup-phonetic { color:var(--muted); font-size:13px; }
+.lookup-meaning { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; }
+.lookup-part { color:var(--accent); font-size:12px; font-weight:600; }
+.lookup-definitions { margin:6px 0 0; padding-left:18px; font-size:12px; line-height:1.5; color:var(--ink); }
+.lookup-definitions li { margin-bottom:6px; }
+.lookup-example { display:block; color:var(--muted); font-style:italic; margin-top:2px; }
+.lookup-synonyms { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:4px; }
+.lookup-caption { color:var(--muted); font-size:10px; margin-right:2px; }
+.lookup-chip { height:22px; padding:1px 8px; border-radius:11px; font-size:11px; color:var(--accent); }
+.lookup-translation { font-size:14px; line-height:1.55; color:var(--ink); white-space:pre-wrap; margin:8px 0 10px; }
+.lookup-credit { color:var(--muted); font-size:9px; margin:0; }
 .edit-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .edit-dialog-btn { height:32px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); padding:0 13px; }
 .edit-dialog-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }

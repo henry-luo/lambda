@@ -36,13 +36,14 @@ import equation_edit: .mod_equation_edit
 import equation_catalog: .mod_equation_catalog
 import home: .mod_home
 import math_edit: .mod_math_edit
+import lookup: .mod_lookup
 
 pub let default_settings = {show_ribbon_group_labels:false}
 pub fn initial(settings=default_settings) => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
     show_ribbon_group_labels:settings.show_ribbon_group_labels==true,
     fonts:sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family)=>lower(family)),
     tab:"Home",math:null,home:{*:home.defaults,painter:null,marks:false},equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
-    zoom:1.0,nav:true,nav_tab:"headings",nav_target:null,ruler_focus:null,layout:"print",read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true}
+    zoom:1.0,nav:true,nav_tab:"headings",nav_target:null,ruler_focus:null,layout:"print",read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true,lookup:null}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
 pn page_values(node) { return {paper:field(node,"page-paper"),orientation:field(node,"page-orientation"),top:field(node,"page-top"),
@@ -355,10 +356,49 @@ pn dialog_command(st,action,node) {
     }
     return st
 }
+// each search bumps the pane's sequence; lookup.receive drops reports from older searches.
+pn lookup_search(st,pane,node) {
+    if (trim(pane.query)=="") {
+        dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_lookup_ready")
+        return {*:st,lookup:{*:pane,loading:false,result:null,error:null}}
+    }
+    let next = {*:pane,seq:pane.seq+1,loading:true,result:null,error:null}
+    start(lookup.run,[dom.root_node(node),lookup.request(next)],{owner:'document'})
+    return {*:st,lookup:next,status:if (pane.kind=="dictionary") "Looking up “" ++ trim(pane.query) ++ "”"
+        else "Translating to " ++ lookup.language_name(pane.target)}
+}
+// Review lookups read the document but never require editing, so they also serve Read Mode.
+pn lookup_command(st,id,params,node) {
+    let pane = st.lookup
+    if (id=="ui.dictionary" or id=="ui.translate") {
+        let kind = if (id=="ui.dictionary") "dictionary" else "translate"
+        let from = if (params.text is string) {text:lookup.query(kind,params.text),selection:pane.selection} else lookup.source(st.editor,kind)
+        // the lookup pane takes the right-hand slot from Comments and Changes.
+        return lookup_search({*:st,context:null,review:false,revisions:false},lookup.pane(kind,from.text,pane,from.selection,st.editor.model_revision),node)
+    }
+    if (pane==null) { return st }
+    if (id=="ui.lookupClose") { focus_document(node); return {*:st,lookup:null} }
+    if (id=="ui.lookupQuery") { return {*:st,lookup:{*:pane,query:params.value}} }
+    if (id=="ui.lookupTarget") { return lookup_search(st,{*:pane,target:params.value},node) }
+    if (id=="ui.lookupSearch") { return lookup_search(st,pane,node) }
+    if (id=="ui.lookupWord") { return lookup_search(st,{*:pane,query:params.text},node) }
+    if (not (pane.result.text is string)) { return st }
+    if (id=="ui.lookupCopy") {
+        dom.clipboard_write(pane.result.text)
+        return {*:st,status:"Translation copied"}
+    }
+    if (id!="ui.lookupInsert" or st.read_only) { return st }
+    // the source range is replaced only while the document is unchanged since it was read.
+    let target = if (pane.selection!=null and pane.revision==st.editor.model_revision) pane.selection else st.editor.selection
+    let next = model_command({*:st,editor:edit_set_selection(st.editor,target)},"edit.pasteText",{text:pane.result.text},node)
+    if (next.editor.model_revision==st.editor.model_revision) { return {*:next,lookup:pane} }
+    return {*:next,lookup:{*:pane,selection:null},status:"Translation inserted"}
+}
 pub pn command(st,id,params,node,retain_focus=false) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
+    if (id=="ui.dictionary" or id=="ui.translate" or starts_with(id,"ui.lookup")) { return lookup_command(st,id,params,node) }
     // auto-opened comments follow Review instead of staying latched across ribbon changes.
-    if (id == "ui.tab") { return {*:st,tab:params.tab,review:params.tab=="Review" and not st.revisions} }
+    if (id == "ui.tab") { return {*:st,tab:params.tab,review:params.tab=="Review" and not st.revisions and st.lookup==null} }
     if (starts_with(id,"ui.equation") and not contains(["ui.equation","ui.equationSettings","ui.equationPreset"],id)) {
         if (id=="ui.equationCancel" or (st.read_only and id=="ui.equationClose")) {
             if (not st.read_only) focus_document(node)
@@ -564,8 +604,8 @@ pub pn command(st,id,params,node,retain_focus=false) {
         if (target!=null) dom.scroll_into_view(target)
         return {*:st,dialog:null,editor:edit_set_selection(mounted(st.editor,node),selection),status:"Bookmark: " ++ name}
     }
-    if (id == "ui.comments") { return {*:st,review:not st.review,revisions:false} }
-    if (id=="ui.revisions") { return {*:st,revisions:not st.revisions,review:false} }
+    if (id == "ui.comments") { return {*:st,review:not st.review,revisions:false,lookup:null} }
+    if (id=="ui.revisions") { return {*:st,revisions:not st.revisions,review:false,lookup:null} }
     if (id=="ui.showChanges") { return {*:st,show_changes:not st.show_changes} }
     if (id=="ui.tracking") {
         if (st.read_only) { return st }

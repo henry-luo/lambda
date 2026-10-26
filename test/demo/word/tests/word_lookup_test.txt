@@ -1,0 +1,59 @@
+["https://api.dictionaryapi.dev/api/v2/entries/en/hello", "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=zh-CN&q=How%20are%20you%3F"]
+["Japanese", "xx"]
+["brave", "Hello", ""]
+{
+  text: "brave",
+  selection: null
+}
+"Hello brave world"
+true
+["world", "world\nSecond"]
+{
+  word: "hello",
+  phonetic: "/həˈləʊ/",
+  meanings: [{
+      part: "noun",
+      definitions: [{
+          text: "A greeting.",
+          example: null
+        }],
+      synonyms: ["greeting", "hi"]
+    }, {
+      part: "interjection",
+      definitions: [{
+          text: "Said on meeting.",
+          example: "Hello, everyone."
+        }],
+      synonyms: []
+    }]
+}
+{
+  kind: "dictionary",
+  seq: 0,
+  text: "qwzxv",
+  url: "https://api.dictionaryapi.dev/api/v2/entries/en/qwzxv"
+}
+{
+  error: "No definitions found for “qwzxv”."
+}
+{
+  error: "Dictionary service error (HTTP 503)."
+}
+"hello"
+{
+  text: "Hola Mundo. ¿Cómo estás?",
+  source: "en"
+}
+"https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=fr&q=Hello%20world.%20How%20are%20you%3F"
+{
+  result: {
+    text: "Hola Mundo. ¿Cómo estás?",
+    source: "en"
+  }
+}
+{
+  error: "The translation service sent an unreadable answer."
+}
+{
+  text: "Bonjour"
+}
