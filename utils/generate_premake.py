@@ -3925,6 +3925,13 @@ class PremakeGenerator:
                 '    ',
             ])
 
+        # Variant link diagnostics belong to the executable, never generated Lua edits.
+        if self.variant_config.get('linker_flags'):
+            self.premake_content.append('    linkoptions {')
+            for flag in self.variant_config['linker_flags']:
+                self.premake_content.append(f'        {json.dumps(flag)},')
+            self.premake_content.extend(['    }', '    '])
+
         # Add platform-specific linker options
         output = self.config.get('output', 'lambda.exe')
         if 'linux' in output.lower():

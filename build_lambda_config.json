@@ -1402,6 +1402,7 @@
         "lambda/runtime/postscript_runtime.cpp"
       ],
       "restore_macos_libraries": ["AppKit", "Carbon"],
+      "linker_flags": ["-Wl,-map,../../temp/ime_chinese/m5/LambdaChineseIME.map"],
       "additional_libraries": [
         {"name": "InputMethodKit", "lib": "-framework InputMethodKit", "link": "dynamic"}
       ],
