@@ -230,8 +230,9 @@ void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
         : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
     bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
     if (img->format == IMAGE_FORMAT_SVG) {
-        bool drew_svg = false;
-        if (img->pic) {
+        // reuse the bounded SVG layer cache instead of rebuilding an isolated document on every repaint
+        bool drew_svg = render_svg_image_layer(rdcon, view, img, &img_rect);
+        if (!drew_svg && img->pic) {
             RdtPicture* pic = rdt_picture_dup(img->pic);
             if (pic) {
                 render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,

@@ -27,6 +27,7 @@
     X(retained_dirty_subtree_searches) X(retained_dirty_ancestry_queries) \
     X(resource_command_checks) X(resource_summary_checks) X(resource_epoch_checks) \
     X(resource_surface_checks) X(resource_child_checks) X(resource_capture_commands) X(resource_capture_chunks) \
+    X(projected_image_pixels) X(shadow_image_builds) X(shadow_image_hits) \
     X(validation_command_checks) X(validation_chunk_checks) X(glyph_command_checks) X(media_command_checks)
 
 struct RenderPipelineMetrics {

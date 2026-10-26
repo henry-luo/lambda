@@ -1477,6 +1477,26 @@ static void apply_raster_image_placement(Tvg_Paint picture, int source_width, in
     apply_transform(picture, &placement);
 }
 
+static Rect vector_image_projection_viewport(const RdtVectorImpl* impl) {
+    Bound visible = {impl->tile_offset_x, impl->tile_offset_y,
+        impl->tile_offset_x + impl->width, impl->tile_offset_y + impl->height};
+    for (int index = 0; index < s_clip_depth; index++) {
+        const ClipEntry& clip = s_clip_stack[s_clip_base + index];
+        Bound bound;
+        if (!rdt_path_get_bounds(clip.path, &bound.left, &bound.top, &bound.right, &bound.bottom)) continue;
+        if (clip.has_transform && !rdt_matrix_project_rect_bounds(&clip.transform,
+            bound.left, bound.top, bound.right, bound.bottom,
+            &bound.left, &bound.top, &bound.right, &bound.bottom)) continue;
+        // keep an antialiasing fringe; the original path still clips the sampled image exactly
+        visible.left = fmaxf(visible.left, floorf(bound.left) - 1.0f);
+        visible.top = fmaxf(visible.top, floorf(bound.top) - 1.0f);
+        visible.right = fminf(visible.right, ceilf(bound.right) + 1.0f);
+        visible.bottom = fminf(visible.bottom, ceilf(bound.bottom) + 1.0f);
+    }
+    return {visible.left, visible.top, fmaxf(0.0f, visible.right - visible.left),
+        fmaxf(0.0f, visible.bottom - visible.top)};
+}
+
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
                     uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha,
@@ -1513,7 +1533,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         // native picture scaling otherwise disagrees with CPU image blits.
         uint32_t* projected = nullptr;
         Rect rect;
-        Rect viewport = {impl->tile_offset_x, impl->tile_offset_y, (float)impl->width, (float)impl->height};
+        Rect viewport = vector_image_projection_viewport(impl);
         if (!render_image_project_pixels(pixels, src_w, src_h, src_stride,
             {dst_x, dst_y, dst_w, dst_h}, transform, viewport, scale_mode, straight_alpha, &projected, &rect)) {
             log_error("[IMAGE_PROJECT] Cannot allocate or sample transformed image");
@@ -1521,6 +1541,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         }
         lam::Temp<uint32_t> owned_projection(projected);
         if (!projected) return;
+        RENDER_METRIC_ADD(projected_image_pixels, (size_t)rect.width * (size_t)rect.height);
         Bound clip;
         if (vector_raster_clip_rect(impl, rect.x, rect.y, rect.width, rect.height, &clip)) {
             // projected samples already own pixel coverage; use the common rounded source-over compositor.

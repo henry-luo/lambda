@@ -1,0 +1,30 @@
+{
+  "tool": "Built-in image_gen",
+  "purpose": "Individually placed sepia engineering studies for randomized per-level backgrounds",
+  "assets": [
+    {
+      "asset": "aerial-screw.png",
+      "prompt": "Use case: historical-scene.\nAsset type: one standalone transparent PNG illustration for the background of a Renaissance inventor's marble puzzle.\nPrimary request: an original Leonardo da Vinci-style engineering notebook study, rendered as convincing fine sepia quill pen ink with delicate uneven contour strokes, dense cross-hatching, accurate three-dimensional perspective, observed materials and small exploratory construction lines. Not a clean vector drawing or a modern 3D render.\nSubject: a Renaissance aerial screw flying machine. A broad spiral sail of thin linen, visible radial wooden ribs and convincing layered helical geometry around a central shaft, standing on a round timber platform with simple cranks, braces and rope lashings. Show the underside and overlapping folds clearly in three-quarter perspective. Subtle pen hatching describes linen tension and wood grain, delicate exploratory arcs describe rotation.\nComposition: a single coherent study centered on a square canvas, fully visible with generous transparent margin on all sides, no other detached studies. Ink has light and dark warm walnut-brown lines with open transparent space between strokes. No paper, no beige rectangle, no background, no exterior shadow, true alpha transparency. No lettering, no labels, no numbers, no signature or watermark. These are original imagined studies, not a copy of a particular historical notebook page.",
+      "transparent_background": true,
+      "width": 1254,
+      "height": 1254,
+      "sha256": "c28e46cc85e715e40c8eead1303cc56fafcc13339aa9db593b75a9e247bc549a"
+    },
+    {
+      "asset": "arched-bridge.png",
+      "prompt": "Use case: historical-scene.\nAsset type: one standalone transparent PNG illustration for the background of a Renaissance inventor's marble puzzle.\nPrimary request: an original Leonardo da Vinci-style engineering notebook study, rendered as convincing fine sepia quill pen ink with delicate uneven contour strokes, dense cross-hatching, accurate three-dimensional perspective, observed materials and small exploratory construction lines. Not a clean vector drawing or a modern 3D render.\nSubject: a Renaissance self-supporting arched timber bridge experiment, a graceful low span made from interlocking unfastened round wooden beams. Three-quarter perspective shows the entire bridge, how alternating beams interlock, transverse rungs, rounded beam ends and the rising arch, with convincing timber grain and cross-hatching under each joint. A few delicate compass construction arcs explain the arch. The bridge stands alone without scenery or terrain.\nComposition: a single coherent study centered on a square canvas, fully visible with generous transparent margin on all sides, no other detached studies. Ink has light and dark warm walnut-brown lines with open transparent space between strokes. No paper, no beige rectangle, no background, no exterior shadow, true alpha transparency. No lettering, no labels, no numbers, no signature or watermark. These are original imagined studies, not a copy of a particular historical notebook page.",
+      "transparent_background": true,
+      "width": 1254,
+      "height": 1254,
+      "sha256": "95dbba41025572dc397fcae17f07dbad534a69446563c61ce3277596a01f0508"
+    },
+    {
+      "asset": "water-lifter.png",
+      "prompt": "Use case: historical-scene.\nAsset type: one standalone transparent PNG illustration for the background of a Renaissance inventor's marble puzzle.\nPrimary request: an original Leonardo da Vinci-style engineering notebook study, rendered as convincing fine sepia quill pen ink with delicate uneven contour strokes, dense cross-hatching, accurate three-dimensional perspective, observed materials and small exploratory construction lines. Not a clean vector drawing or a modern 3D render.\nSubject: a Renaissance water-raising Archimedes screw experiment. A large inclined open spiral auger around a wooden shaft, one side of its long trough cut away to expose the beautiful helical blades, simple braced timber trestles, a hand crank at the upper end and a small bucket at the lower end. Precise three-quarter perspective, believable mechanical connections, fine cross-hatched wood grain and subtle fluid contour lines. No scenery.\nComposition: a single coherent study centered on a square canvas, fully visible with generous transparent margin on all sides, no other detached studies. Ink has light and dark warm walnut-brown lines with open transparent space between strokes. No paper, no beige rectangle, no background, no exterior shadow, true alpha transparency. No lettering, no labels, no numbers, no signature or watermark. These are original imagined studies, not a copy of a particular historical notebook page.",
+      "transparent_background": true,
+      "width": 1254,
+      "height": 1254,
+      "sha256": "8ce555ff2153e195600a608cc1030875c693aabef45cf5ec31d9c5f1a5388086"
+    }
+  ]
+}

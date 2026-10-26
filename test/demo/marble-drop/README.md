@@ -7,9 +7,13 @@
 Sixteen original mechanical puzzles inspired by
 [Marble Drop (Maxis, 1997)](https://en.wikipedia.org/wiki/Marble_Drop).
 Detailed da Vinci-style sepia ink studies show perspective gears, an articulated
-wing, a screw-and-pulley mechanism and an escapement. Cross-hatching gives the
-wood, metal and wing membrane depth. The transparent illustration sits behind
-the working apparatus; slanted notes and leaders explain each puzzle.
+wing, a screw-and-pulley mechanism, an escapement, an aerial screw, a timber
+bridge and a water-lifting screw. Each level chooses four distinct studies and
+randomizes their positions, sizes, rotations and ink strength within the board's
+margins. Level seeds keep each composition stable through drops, undo, restart
+and revisiting a puzzle. Cross-hatching gives the wood, metal and wing membrane
+depth. The transparent studies sit behind the working apparatus; slanted notes
+and leaders explain each puzzle.
 Choose a colored marble from the tray and click **Drop A** or **Drop B** above
 the machine. Fill every pocket with its matching color. The dots beneath a
 pocket show its quota. The brighter rail shows the current route. A switch
@@ -78,12 +82,21 @@ The model follows **S1.4** (instance-owned mutable state) and **S12.1.3**
 Animation and planning share the device visitor; the moving marble follows the
 same cubic geometry as the painted rail. The apparatus is cached as an SVG
 image between device or colored-route changes, with a separate rolling marble overlay.
-The detailed artwork is a static PNG layer, so moving a marble does not rebuild
-or embed the illustration. The sketch asset was made with the built-in imagegen
-tool; its exact prompt is recorded in
-[`assets/sketches/artwork.json`](assets/sketches/artwork.json).
-A shell-owned 40 ms clock survives game redraws and leaves an idle machine unchanged.
-Each rail segment takes 280 ms; both manual drops and Auto Play use this speed.
+`mod_sketches.ls` uses pure seeded `math.random` to choose studies without
+replacement and fit them into four margin regions. The session caches that
+composition until the level changes. CSS crops the original sheet into its four
+individual studies and places those alongside the three new transparent PNGs;
+moving a marble does not rebuild or embed the artwork. The sketches were made
+with the built-in imagegen tool; exact prompts are recorded in
+[`assets/sketches/artwork.json`](assets/sketches/artwork.json) and
+[`assets/sketches/additional-artwork.json`](assets/sketches/additional-artwork.json).
+A shell-owned frame callback keeps routing on 40 ms steps and interpolates the
+marble between them. Motion writes only the marble's presentation transform;
+semantic redraws preserve its current pose. Idle, paused and solved boards
+request no frames. Each rail segment takes 280 ms in both manual and Auto Play.
+Native SVG images and ordinary shadows reuse bounded renderer caches; the
+paper grid is one repeated SVG pattern. Debug profiling and validation are
+recorded in [`Marble_Drop_Debug_Performance.md`](../../../vibe/impl/Marble_Drop_Debug_Performance.md).
 `mod_sound.ls` selects cues from actual transitions and plays local WAV bytes
 through `dom.audio_open`/`dom.audio_play`, with at most eight overlapping voices.
 Bytes are cached after first use; playback handles open only for a cue and are
@@ -131,5 +144,6 @@ replays mute through the normal button; the audio replay exercises all seven
 effects, Auto Play, keyboard/button mute, pause, redraws and voice cleanup through native
 playback. It needs access to the macOS audio service; the MIDI bus's offline
 setting does not replace the native WAV backend.
-Run all five registered UI fixtures together with
+The motion fixture also checks Retina damage parity, a stable pause position and
+frame cancellation after undo. Run all six registered UI fixtures together with
 `./test/test_ui_automation_gtest.exe --suite marble-drop`.

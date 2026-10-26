@@ -2246,7 +2246,7 @@ TEST_F(RadiantTextQuery, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine
             ASSERT_NE(text->rect, nullptr);
             RdtMatrix matrix;
             ASSERT_TRUE(view_get_client_matrix(text, &matrix));
-            float x = dom_range_glyph_x_for_byte_offset(&ui, text, text->rect, 2) - text->x;
+            float x = dom_range_glyph_x_for_byte_offset(&ui, lam::view_require_text(text), text->rect, 2) - text->x;
             float y = text->rect->y - text->y + text->rect->height * .5f;
             float hit_x = 0.0f, hit_y = 0.0f;
             ASSERT_TRUE(rdt_matrix_project_point(&matrix, x, y, &hit_x, &hit_y));
