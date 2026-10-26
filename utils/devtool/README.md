@@ -12,8 +12,53 @@ Electron-based development tool for testing and debugging Lambda HTML/CSS layout
 - **Keyboard Shortcuts**: Efficient workflow with common shortcuts
 - **Test Results**: Detailed test execution results and analysis
 - **Clean Interface**: No auto-opening dev tools (available on demand)
+- **Live Inspector**: Launch a Radiant document, browse its DOM, inspect computed
+  styles/geometry, pick from rendered pixels, edit inline CSS and undo edits.
+
+## Live document inspection
+
+From the repository root, run `make devtool`, select **Live**, enter a document
+path (or use `test/devtools/document.html`), and press **Launch**. The preview
+shows pixels from a separate `lambda.exe` process. Expand Elements, select a
+node, change a CSS property/value and press **Apply**; **Undo** restores the
+previous inline value and priority. An empty value removes the declaration.
+**Pick element** selects through Radiant's hit testing. **Native window** also
+opens the target's own window; selection/highlights currently live in the
+DevTool preview. The comparison workspace remains under **Tests**.
+
+The Source tab shows an immutable local-file snapshot captured at attach. It
+does not yet provide source-generation tracking for imported scripts or a
+source-level debugger. Connection/process output is available at the bottom;
+structured runtime console events are a later milestone.
+
+A headless client uses the identical Mark protocol:
+
+```bash
+node utils/devtool/inspect.mjs test/devtools/document.html
+node utils/devtool/inspect.mjs test/devtools/document.html request.mark
+node --test test/devtools/protocol.test.mjs
+```
+
+The optional request file contains a map such as `{op: 'tree'}`. The client
+performs `hello`, assigns an ID and prints the reply in Mark. Native startup is
+`lambda devtools <document> --pipe <inherited-fd> [--headless]`; the launcher
+provides a dedicated duplex descriptor, separate from stdio. The backend reports
+its supported operations through `hello`; stepping/evaluation are not advertised.
+
+UI verification (after `npm run build` in this directory):
+
+```bash
+env -u ELECTRON_RUN_AS_NODE utils/devtool/node_modules/.bin/electron test/devtools/ui-check.cjs
+```
+
+Run that command from the repository root. It saves before/after screenshots
+under `temp/devtools/`. Design and implementation status are recorded in
+[`Lambda_Design_Devtools.md`](../../vibe/Lambda_Design_Devtools.md) and
+[`Lambda_Impl_Devtools.md`](../../vibe/impl/Lambda_Impl_Devtools.md).
 
 ## Keyboard Shortcuts
+
+The test shortcuts apply in the Tests workspace.
 
 - **`Cmd+R` / `Ctrl+R`**: Run the selected test
 - **`Cmd+L` / `Ctrl+L`**: Focus the log/terminal panel
@@ -60,14 +105,6 @@ npm run package
 5. **Compare**: Visually compare browser vs Lambda rendering
 6. **Quick Re-run**: Use Recent menu (`Cmd+Shift+R`) to access recently run tests
 
-## Enhanced Features
-
-See [ENHANCEMENTS.md](ENHANCEMENTS.md) for detailed information about:
-- Recent tests history
-- Viewport size presets
-- Keyboard shortcuts
-- Clean workspace (no auto-opening dev tools)
-
 ## Project Structure
 
 ```
@@ -100,17 +137,8 @@ layout-devtool/
 - Test data in `../../test/layout/data/`
 - Reference data in `../../test/layout/reference/`
 
-## Keyboard Shortcuts
-
-(Coming in Phase 5)
-
-- `Cmd/Ctrl+R` - Run selected test
-- `Cmd/Ctrl+.` - Stop running test
-- `Cmd/Ctrl+Up/Down` - Navigate tests
-
 ## Known Limitations
 
-- Lambda render command not yet implemented (shows placeholder)
 - File watching not yet implemented
 - Batch testing not yet available
 

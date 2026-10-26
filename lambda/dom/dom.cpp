@@ -812,8 +812,9 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         // CLI document also needs a style-resolution turn for paint-only
         // mutations: CSS transitions are created by that turn, while the
         // long-lived renderer already owns its normal style/frame cadence.
+        // native CSSOM callers need no JS capsule; scheduling follows the document's host.
         if (kind != DOM_JS_MUTATION_STYLE_REPAINT ||
-            (_js_current_ui_context && !_js_host_driven_loop)) {
+            (doc->js.host_ui_context && !doc->js.host_driven_loop)) {
             doc_state_request_reflow(st);
         }
     }

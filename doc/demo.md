@@ -19,6 +19,7 @@ its name:
 ./lambda demo doom
 ./lambda demo photo
 ./lambda demo scene3d
+./lambda demo aquarium
 ./lambda demo chart
 ./lambda demo slides
 ./lambda demo archive
@@ -35,6 +36,9 @@ Crystal garden, Observatory, and Shared Animation, with breadcrumbs back to
 the collection.
 The `chart` collection opens normal charts with animation and interaction,
 scientific plots, and graphs including word clouds, Mermaid, Graphviz, and TikZ.
+The [Aquarium builder](../test/demo/aquarium/README.md) lets you add, select,
+move, resize, rotate, duplicate, and remove procedural fish, plants, rocks, and
+driftwood in a living native 3D tank, with undo/redo and JSON save/load.
 
 ## Viewer features
 

@@ -47,6 +47,7 @@
     "lambda",
     "lambda/core",
     "lambda/io",
+    "lambda/devtools",
     "lambda/runtime",
     "lambda/runtime/gc",
     "lambda/runtime/grammar",
@@ -578,7 +579,8 @@
         "lambda/input/markup/inline/*.cpp",
         "lambda/input/markup/format/*.cpp",
         "lambda/format/format*.cpp",
-        "lambda/network/*.cpp"
+        "lambda/network/*.cpp",
+        "lambda/devtools/*.cpp"
       ],
       "exclude_patterns": [
         "lambda/format/format_latex_html.cpp",
@@ -6407,6 +6409,16 @@
       }
     ],
     "script_tests": [
+      {
+        "runner_name": "test_devtools_protocol",
+        "name": "Live DevTools Protocol",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/devtools/run.mjs",
+        "args": [],
+        "parallel": true,
+        "worker_slots": 1
+      },
       {
         "runner_name": "test_epub_reader_state",
         "name": "EPUB Reader Persistence",

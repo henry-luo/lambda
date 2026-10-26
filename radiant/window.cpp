@@ -21,6 +21,7 @@
 #include "event_sim.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
+#include "devtools_adapter.hpp"
 #include "rdt_video.h"
 #include "speech.hpp"
 #include "../lambda/network/network_resource_manager.h"
@@ -1308,6 +1309,8 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
                                         EnhancedFileCache* file_cache,
                                         bool log_memory, ViewPhaseTiming* timing) {
     window_input_batch = {};
+    radiant_devtools_destroy(ui_context.devtools);
+    ui_context.devtools = nullptr;
     radiant_drain_async_document_loads(&ui_context);
     window_request_document_satellite_cancel();
     uint64_t phase_start = time_now_ns();
@@ -1388,6 +1391,7 @@ double radiant_window_tick(RadiantWindowLoop* loop) {
         // enter the retained document runtime before libuv invokes their callbacks.
         radiant_pump_js_event_loop(&ui_context, -1);
     }
+    if (ui_context.devtools) radiant_devtools_tick(ui_context.devtools);
 
     if (js_animation_frame_has_pending()) {
         int callbacks = js_animation_frame_flush(currentTime * 1000.0);
@@ -1610,7 +1614,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    bool enable_state_dump,
                                                    UiAppMode app_mode,
                                                    const RenderPagedOptions* paged_options = nullptr,
-                                                   bool fullscreen = false) {
+                                                   bool fullscreen = false,
+                                                   int inspector_fd = -1) {
     struct DeferredRetirement {
         bool previous = dom_retire_set_deferred(true);
         ~DeferredRetirement() { dom_retire_set_deferred(previous); }
@@ -1729,7 +1734,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     // the self-contained load-time drain — leaving host-driven false there avoids
     // stranding its timers. Cleared alongside the UiContext reset before each
     // ui_context_cleanup().
-    bool host_driven_loop = (!headless || sim_ctx != nullptr);
+    bool host_driven_loop = (!headless || sim_ctx != nullptr || inspector_fd >= 3);
     ui_context.async_script_navigation = host_driven_loop;
 
     // Network resources (owned by this function, shared across document lifetime)
@@ -2014,9 +2019,24 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         }
     }
 
+    if (inspector_fd >= 3) {
+        ui_context.devtools = radiant_devtools_open(&ui_context, inspector_fd, doc_file);
+        if (!ui_context.devtools) {
+            log_error("devtools: could not open the launcher pipe");
+            window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+            return 1;
+        }
+    }
+
     // --- Headless mode: run events synchronously without a window ---
     if (headless) {
         uint64_t event_loop_start = time_now_ns();
+        // the inspector owns this host session until its launcher closes the pipe.
+        while (ui_context.devtools && !ui_context.render_failed) {
+            radiant_pump_js_event_loop(&ui_context, -1);
+            if (!radiant_devtools_tick(ui_context.devtools)) break;
+            uv_sleep(8);
+        }
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running && !ui_context.render_failed) {
@@ -2178,4 +2198,9 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
     return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr, false);
+}
+
+int view_doc_with_devtools(const char* path, int fd, bool headless) {
+    return view_doc_in_window_with_events_internal(path, nullptr, nullptr, 0,
+        nullptr, headless, nullptr, 0, false, false, UI_APP_MODE_VIEW, nullptr, false, fd);
 }

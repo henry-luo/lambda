@@ -246,6 +246,7 @@ void print_help() {
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
     printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
     printf("  lambda view [file.pdf|file.html]  - Open a document (default: bundled lambda.doc viewer)\n");
+    fputs("  lambda devtools <file> --pipe FD - Inspect a document through the DevTool launcher\n", stdout);
     printf("  lambda edit <file.md|file.html|file.svg>  - Open a document in the editing application\n");
     fputs("  lambda demo [name]            - Open a named demo, or the document viewer's startup splash\n"
           "  lambda demo --list            - List available demos\n", stdout);

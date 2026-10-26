@@ -16,6 +16,8 @@ let DEMOS = [
      blurb: "Dashboards, 3D surfaces and graphs, all live."},
     {name: "scene3d", title: "Scene3D", cat: "science", sub: "Interactive 3D",
      blurb: "Cells, dominoes, planets and robots in native 3D."},
+    {name: "aquarium", title: "Aquarium", cat: "design", sub: "Aquascape studio",
+     blurb: "Build a living tank with fish, plants, rocks and driftwood."},
     {name: "cityscape", title: "The Rings of a City", cat: "media", sub: "Live 3D film",
      blurb: "3,000 years of Chengdu in one live 3D film."},
     {name: "tetris", title: "Tetris", cat: "games", sub: "Arcade classic",

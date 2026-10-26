@@ -1123,3 +1123,182 @@ separate from the passing focused checks. The
 retains pre-change sources, the reproducer, host identities and focused and
 aggregate evidence. Restart `./lambda.exe view test/demo/ime/chinese.ls` to
 load the adapter and demo policy changes.
+
+### 8.10 Local Bible dictionary import
+
+**Scope (USER, 2026-10-26):** download Sogou dictionaries 35457 and 54542,
+combine them into Lambda's existing pack format, and keep every data file
+gitignored (IME6/IME-O7). `utils/prepare_ime_scel.py` provides pinned fetch,
+offline preparation and explicit validation. It shares serialization and
+table-contract validation with the base preparer. No runtime change is needed.
+The small source lock records URLs, sizes, hashes and provenance; dictionary
+bytes remain beneath ignored `temp/ime_sources/` and
+`lmd/package/ime/chinese/data/zh-Hans-bible/` directories.
+
+The downloads decode to **28,721 phrase records and 391 names/places**.
+The combined pack admits **21,332 unique word/readings**, retaining all 391
+names/places. The existing nine-character limit excludes **7,732** records;
+the supported character set excludes another **48**. Every omission appears
+in the pack's `rejected.jsonl`; original SCEL bytes remain available locally.
+The source extension prefixes are permutations of 1 through each dictionary's
+record count, so they are not assumed to be corpus frequencies. Imported
+weights are zero without documented frequency evidence. Original syllable
+sequences are preserved and canonicalized without guessing polyphonic readings.
+
+Validation passes **38 base-pack contracts and 8 authored SCEL contracts**,
+including malformed binary rejection, deduplication, loss accounting and source
+identity checks. All eight generated files rebuild byte-for-byte. Full imported-
+pack and existing Simplified-pack validation pass. Eleven real exact, initials,
+mixed and fuzzy queries find their targets in both interpreter and JIT, with
+identical results; three long-phrase queries also report normal budget
+truncation while retaining the expected first candidate. Git verifies every
+downloaded/generated file is ignored and none is tracked. Evidence is in
+`temp/ime_chinese/bible/validation.json`. API document blocks and diff checks
+pass. No runtime build or broad engine gate is required for preparation tooling.
+
+### 8.11 Default demo uses standard and Bible dictionaries together
+
+**Scope (USER, 2026-10-26):** the interactive test page must load both
+dictionaries by default. Preparation now accepts `--with-base` and `--profile`.
+It reuses the standard source assembly, merges word/readings by maximum weight,
+then rebuilds both lookup tables from the union (IME6). OpenCC conversion
+precedes merging for Traditional, retaining unresolved alternatives (IME11).
+All source notices, calibrated frequency scales and merge counts accompany
+the ignored local packs. The runtime query/session code is unchanged.
+
+The Simplified union contains **234,335 postings**, adding **21,305** Bible
+word/readings after 27 overlaps. Traditional contains **261,794 postings**,
+adding **27,395** converted Bible word/readings after 27 overlaps. Independent
+comparison against the installed standard packs verifies that every original
+posting and its exact weight survive. All generated files are ignored and none
+is tracked. Both preparations pass full source/table validation.
+
+The demo's initial directory selects `zh-Hans-bible-combined`. Profile buttons
+switch to the corresponding `zh-Hant-bible-combined` or Simplified directory,
+while retaining explicit fixture/host directory overrides. Acquisition still
+occurs on enable/focus (D7.2.4v4/S12.1.1v3). The previous page fails the focused
+Bible conversion reproducer; the updated page converts both standard words
+and Bible names/phrases on input, textarea and contenteditable surfaces.
+
+All **38 standard and 10 SCEL preparation contracts** pass. The 15 existing
+UI fixtures pass **295 assertions per tier**, including five new cold-start
+directory/profile checks. A local full-pack replay adds **21 passing assertions
+per tier** for both dictionaries and both script profiles: **316 total per
+tier**. Its Simplified and Traditional captures were inspected. The initial
+replay used the input-only `set_editing_value` action on contenteditable;
+removing that invalid test action gives a clean replay without a product change.
+Standard 诺亚 correctly retains its frequency-based priority over unweighted
+挪亚; imported terms receive no word-specific ranking boosts.
+
+Evidence is in `temp/ime_chinese/combined_default/validation.json` and
+`pack-audit.json`. API document blocks and diff checks pass. Only preparation
+tooling, demo policy, focused tests and documentation changed; no engine build
+or broad engine gate is required.
+
+### 8.12 Demo dictionary customization dialog
+
+**Scope (USER, 2026-10-26):** browse, add and delete words from the test page's
+active combined dictionary. The page now owns a native modal with a paged word/
+reading list, indexed pinyin-prefix search, add form, row deletion, validation
+feedback, Close/Escape and restored toolbar focus. It scrolls on narrow/short
+windows. Pinyin search stays literal; Chinese additions use pasted text or an OS
+input method. The native IME overlay is suspended while the modal owns focus.
+
+`test/demo/ime/mod_dictionary.ls` reuses the pack's binary search/posting
+decoder, line index and existing user-word validation. It creates new lexicon
+and abbreviation byte/index values without modifying installed resources
+(IME6/IME8, D7.2.4v4/S12.1.1v3). Browsing decodes one page, not the whole pack.
+Explicit edits reindex both affected tables; this is a small personal edit
+list, not a bulk dictionary preparation path. New pairs carry zero weight;
+re-added built-in pairs retain their original weight. Deletion also removes the
+matching learned promotion. Other learned choices retain their normal priority.
+
+`mod_dictionary_ui.ls` saves final pair edits as versioned JSON, atomically,
+before publishing the new engine value. The default paths are gitignored
+`temp/ime_chinese/custom-zh-Hans.json` and `custom-zh-Hant.json`. Each profile
+restores edits on acquisition and toolbar profile changes, including when an
+editor keeps focus. The original engine value is retained so live edits and
+restart replay use the same base weights. Explicit host/fixture dictionary
+directories default to document-only edits unless `data-ime-custom-file` is
+supplied. Malformed local files open the dialog with a visible error; a failed
+save preserves the live dictionary and existing files. Temp cleanup removes
+these local preferences. No pack format, runtime API or native engine changed.
+
+**Verification:** both interpreter and JIT pass **21 procedural IME goldens**,
+including the new 30-check model and nine-check persistence fixtures. The new
+registered UI fixture passes **25 assertions per tier**, covering real modal
+focus, literal pinyin typing, paging, deletion after learning, validation,
+immediate full-pinyin conversion, re-addition, Escape and inherited/explicit
+policy restoration. The 15 existing UI fixtures retain **295 passing assertions
+per tier**, and the unchanged full-pack replay adds 21. Fresh process pairs
+verify addition/deletion persistence against both real combined packs in both
+tiers; additional cases check profile changes without refocusing, malformed
+files and failed-save rollback. Full and narrow screenshots were inspected.
+Original lexicon/abbreviation hashes still match all four prepared manifest
+entries; all data and custom files are ignored and untracked.
+
+Evidence: `temp/ime_chinese/dictionary_dialog/validation.json`, `focused-ui.json`,
+`focused.json`, `final-ui.json`, `persistence.json` and `pack-integrity.json`.
+Document-block and diff checks pass. Demo/model-only changes require no native
+rebuild or new broad runtime/Radiant baseline qualification.
+
+### 8.13 Two input-scope toggles
+
+**USER, 2026-10-26:** replace the four Window/Document on/off buttons with
+one toggle per scope. Window flips the window setting and clears the document
+override; Document flips the effective document setting and sets an override.
+Use window setting retains its existing inheritance action. Both toggle labels
+and `aria-pressed` reflect current on/off values, including when the window is
+on beneath a document-off override. Policy remains in the page (D7.2.5).
+The updated buttons/controls and dictionary-modal fixtures pass **111 assertions
+per tier** in interpreter and JIT. Cold toggling, focused composition cancellation,
+actual conversion, inheritance and modal restoration are covered. The native
+capture was inspected; document-block and diff checks pass. Evidence:
+`temp/ime_chinese/toggles/results.json`. No engine or build changes were needed.
+
+### 8.14 Clear stale results after a rejected dictionary search
+
+The reported `da` → `大` sequence rejected non-pinyin input before updating
+the table, leaving the previous rows, cursor/history and paging buttons active.
+Search now publishes an empty first page on validation failure and displays
+the pinyin-only prompt (S17.8.1). Valid searches replace that page and clear
+earlier messages, including when no words match. Add/delete error handling is
+unchanged. The shared page presenter serves successful and rejected searches.
+
+The new authored `ime_chinese_dictionary_search.json` reproduces **eight failed
+assertions before the fix** and passes **22/22 after it** in both interpreter
+and JIT. It covers invalid Chinese/punctuation after paging, disabled paging,
+Enter recovery, valid misses and empty-query recovery. Existing dictionary
+editing adds 25 passing assertions per tier; the exact reported sequence on the
+real combined pack adds three, for **50/50 per tier**. The empty-result capture
+was inspected. Evidence: `temp/ime_chinese/search_reset/before.json` and
+`results.json`. Document-block and diff checks pass; this page-only fix requires
+no native rebuild or new broad engine qualification.
+
+### 8.15 Search dictionary entries by Chinese word or pinyin
+
+**USER, 2026-10-26:** the dialog now accepts either Chinese word substrings
+(`北京`, `京`) or the existing toneless pinyin prefixes (`bei jing`). The
+label and placeholder describe both. Word matches retain distinct readings,
+use the active script's actual entries, and participate in the same pagination,
+add/delete and rejected-search reset behavior. Mixed Chinese/pinyin or other
+unsupported input still reports a validation error (S17.8.1).
+
+The demo model scans native-decoded lines for a new word query, then reuses the
+shared posting/page walker to filter only matching words. Its cursor retains
+matching line positions for later pages; pinyin keeps indexed key lookup.
+Search reads the current in-memory bytes, so edits are visible immediately.
+Acquisition and pack formats are unchanged (IME6, D7.2.4v4/S12.1.1v3).
+
+Both interpreter and JIT pass **21 IME goldens**, including the expanded
+45-check dictionary model: whole-word/substrings, multiple readings, pagination,
+missing words, current edits, Traditional and supplementary-plane Han. The
+registered search fixture passes 29 UI assertions and the existing editing
+fixture passes 25. A full-pack replay adds 40 assertions for word/pinyin
+switching, `da` → `大`, page navigation and substring-only results in both
+scripts: **94/94 UI assertions per tier**. Native captures were inspected.
+A single release-host smoke pass measured 48–116 ms for initial word searches
+and 0.17–3.47 ms for subsequent nonempty pages; these are diagnostic samples,
+not repeated benchmark qualification. Evidence:
+`temp/ime_chinese/word_search/validation.json`, `results.json` and `timing.json`.
+Document-block and diff checks pass. No runtime/native source or build changed.

@@ -1,0 +1,324 @@
+{
+  "name": "Aquarium edits, native pixels, animation, history and disk round trip",
+  "viewport": {
+    "width": 1440,
+    "height": 1060
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#tank-objects > group').length===14 && document.querySelectorAll('script').length===0"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#tank-scene",
+      "width": 450,
+      "height": 305,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 5000
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.fishPose=document.getElementById('item-10').getAttribute('position');globalThis.fishMesh=document.getElementById('item-10').firstElementChild"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('item-10').getAttribute('position')!==fishPose && document.getElementById('item-10').firstElementChild===fishMesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.fishPose=document.getElementById('item-10').getAttribute('position')"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('item-10').getAttribute('position')===fishPose && document.getElementById('aquarium').getAttribute('data-playing')==='false'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-goldfish"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('aquarium').getAttribute('data-count')==='15' && document.getElementById('aquarium').getAttribute('data-selected')==='item-15'"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.newMesh=document.getElementById('item-15').firstElementChild"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const p=document.getElementById('prop-x');p.value='2.5';p.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const p=document.getElementById('prop-y');p.value='4.5';p.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const p=document.getElementById('prop-z');p.value='1.4';p.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const p=document.getElementById('prop-size');p.value='1.4';p.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const p=document.getElementById('prop-yaw');p.value='90';p.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.getElementById('item-15').getAttribute('data-anchor')).join(',')==='2.5,4.5,1.4' && document.getElementById('item-15').getAttribute('data-size')==='1.4' && document.getElementById('item-15').firstElementChild===newMesh"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/aquarium-desktop.png"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('tank-file').value='temp/aquarium-replay.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('save-state').textContent==='ALL SAVED'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#duplicate"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('aquarium').getAttribute('data-count')==='16'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('aquarium').getAttribute('data-count')==='15'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('aquarium').getAttribute('data-count')==='16'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('aquarium').getAttribute('data-count')==='15'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#tank-objects > group').length===0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#tank-objects > group').length===15 && document.getElementById('item-15').getAttribute('data-size')==='1.4' && JSON.parse(document.getElementById('item-15').getAttribute('data-anchor')).join(',')==='2.5,4.5,1.4'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-plant"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-fern"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-rock"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-pebble"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-decor"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-wood"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#tank-objects > group').length===18 && document.getElementById('item-16').getAttribute('data-kind')==='fern' && document.getElementById('item-17').getAttribute('data-kind')==='pebble' && document.getElementById('item-18').getAttribute('data-kind')==='wood'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#front"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.cameraPose=document.getElementById('tank-camera').getAttribute('position')"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#tank-scene",
+        "offset_x": 40,
+        "offset_y": 40
+      },
+      "dx": 60,
+      "dy": 20,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('tank-camera').getAttribute('position')!==cameraPose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#front"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-fish"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#add-goldfish"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.beforeDrag=document.querySelector('#tank-objects > group').getAttribute('data-anchor');globalThis.stillCamera=document.getElementById('tank-camera').getAttribute('position')"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#tank-scene"
+      },
+      "dx": 65,
+      "dy": -20,
+      "steps": 4
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#tank-objects > group').getAttribute('data-anchor')!==beforeDrag && document.getElementById('tank-camera').getAttribute('position')===stillCamera"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#tank-objects > group').getAttribute('data-anchor')===beforeDrag"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#object-list button').click();document.getElementById('prop-size').focus()"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#tank-objects > group').getAttribute('data-size')==='1.8'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#tank-scene",
+      "width": 640,
+      "height": 440,
+      "file": "temp/aquarium-edited.png"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}
