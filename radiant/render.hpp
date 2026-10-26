@@ -3734,6 +3734,13 @@ bool render_paint_text_background_glyph(RasterRenderContext* context, DomElement
 // shared positioning and paint boxes keep text clipping in the background owner's coordinates.
 bool render_paint_text_background(PaintList* paint, UiContext* ui, DomElement* parent,
     const PaintGlyphRun* run, Rect border);
+// An inline element paints one box per text fragment: the fragment grown by the element's padding,
+// and by its border for the border box. Raster paints it while painting the text; SVG and PDF
+// record it with render_paint_text_inline_box (x, y: the fragment origin, in `scale` units).
+Rect render_text_inline_padding_box(const DomElement* parent, const TextRect* text_rect, float x, float y, float scale);
+Rect render_text_inline_border_box(Rect padding_box, const BorderProp* border, float scale);
+bool render_paint_text_inline_box(PaintList* paint, UiContext* ui, DomElement* parent,
+    const TextRect* text_rect, float x, float y);
 void render_background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* background,
     Rect rect, float scale, Rect* position_rect, Rect* paint_rect);
 PaintRecordTarget rc_record_target(RasterRenderContext* rdcon);
@@ -3822,6 +3829,8 @@ void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* 
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
 void render_painter_fill_context_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color);
+void render_painter_fill_transformed_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color,
+                                         const RdtMatrix* transform);
 bool render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,

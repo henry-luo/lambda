@@ -7,6 +7,69 @@
 > pure transformations and procedural event handlers; S2.6.3 element splicing;
 > D4.5.1v4/D5.3.3 ownership and precise roots; D7.2.2 boxed import entries; D2.1.3 tagged string leaves.
 
+## Editing cards and preserving unchanged content
+
+The editor temporarily hides the original object while projecting its draft.
+Closing an unchanged or canceled draft now restores the saved visibility before
+publication: the minimal-write publisher deliberately reuses identical markup,
+so it cannot undo that temporary mutation by itself. This preserves both the
+authored document and the existing card DOM (S1.4/S12.1.3).
+
+Each rich-text entry binds the newly loaded model generation, then places its
+caret from the entry gesture. It no longer stages a bookmark restore in that
+same callback: native completion applies that restore after the callback and
+would overwrite the user's pointer position with the new model's default
+selection. That invalid container selection disabled later edits.
+
+Blank-space hit testing reuses the existing text-edge search inside the active
+surface, with the same inverse client transform as direct glyph hits. Explicit
+empty/atomic boundaries retain precedence; an editor-scoped DOM query cannot
+fall through to another surface's text. Native caret painting uses the painted
+client matrix and the shared transformed-rectangle painter, keeping its scale,
+rotation and overflow clips aligned with its text (D7.2.5/D4.5.1v4).
+
+Acceptance covers both Northstar market cards, clicks beside their short number
+lines, caret pixels, no-op/canceled edits with pixel parity and retained DOM
+identity, plain-text teardown, actual typing and formatting, repeated entry,
+undo/redo and save/open. `slide_card_editing.json` passes 64 checks in default
+and JIT modes; nine focused UI replays pass 383/383 assertions. Native regression
+coverage includes leading/trailing blank space and rich caret pixels at two
+device scales under scale and rotation; both defects fail before their repairs.
+The focused DOM range suite passes 79/79. Required gates are the Radiant and
+Lambda baselines; artifacts are under `temp/slides/cards/`.
+
+Qualification: the Radiant baseline passes with 6,201 passing cases, 141 known
+partial cases and two skips, including all 699 UI fixtures. The Lambda/Input
+baseline passes 8,257/8,257 with local HTTP access enabled. Integer-cast lint
+and `git diff --check` pass.
+
+## Resizing standalone SVG graphics
+
+The Northstar hero's placement box resized during a drag while its authored SVG
+kept a fixed 380-by-430 viewport. The shared slide renderer now identifies a
+`content` object with one SVG root and makes that viewport fill its existing
+definite content wrapper. This reuses the percentage-sized SVG layout used by
+the drawing demo and inserted graphics. The original `viewBox`, aspect-ratio
+policy and source subtree stay intact (S1.4/D7.5.3). SVGs embedded in ordinary
+HTML flow keep their own dimensions.
+
+Acceptance covers shrinking during pointer capture, retained SVG identity and
+paint inside the resized outline, cancellation, commit/undo/redo, inspector
+dimensions, a different editor zoom, thumbnails, save/open and presentation.
+The original live-resize replay fails before the change: the outline shrinks,
+but the SVG viewport and pixels remain at the original size. The repair belongs
+to the package projection and requires no native engine change (D7.2.5).
+Verification uses `slide_graphic_resize.json` in default and JIT modes, nearby
+editor/ribbon/inline/preview replays, and the required Lambda package baseline.
+Artifacts are under `temp/slides/resize/`.
+
+Verification: all 41 resize checks pass in default and JIT modes, including an
+inline SVG that retains its own dimensions. Eight UI replays pass 385/385
+assertions. The package baseline passes 8,253/8,257 checks in the sandbox; its
+only four failures are local HTTP socket denials. Rerunning that entire HTTP
+group with loopback access passes 152/152, covering all four denied cases.
+`git diff --check` passes. No native engine files changed.
+
 ## Caret placement in scaled slide text
 
 Acceptance covers pointer entry and subsequent clicks on both headline lines,

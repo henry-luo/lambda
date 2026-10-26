@@ -27,8 +27,10 @@ ROOT = Path(__file__).resolve().parent.parent
 LOCK_PATH = ROOT / "utils/ime_chinese_sources.json"
 SYLLABLE_PATH = ROOT / "lmd/package/ime/chinese/syllables.txt"
 FORMAT = "lambda.ime.chinese.pack"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 MODES = ("aosp", "phrase", "hanlp", "both")
+PROFILES = {"zh-Hans": ("Hans", "kTGHZ2013"),
+            "zh-Hant": ("Hant", "OpenCC STCharacters/STPhrases of kTGHZ2013")}
 
 
 def load_syllables(path=SYLLABLE_PATH):
@@ -40,9 +42,15 @@ def load_syllables(path=SYLLABLE_PATH):
     return frozenset(words)
 
 
-def read_sources(directory, lock):
+def input_source_names(lock, profile):
+    return [name for name in lock["sources"] if name != "opencc" or profile == "zh-Hant"]
+
+
+def read_sources(directory, lock, names=None):
     sources = {}
     for name, source in lock["sources"].items():
+        if names is not None and name not in names:
+            continue
         sources[name] = {}
         for filename, entry in source["files"].items():
             raw = (directory / name / filename).read_bytes()
@@ -52,8 +60,10 @@ def read_sources(directory, lock):
     return sources
 
 
-def fetch_sources(directory, lock):
+def fetch_sources(directory, lock, names=None):
     for name, source in lock["sources"].items():
+        if names is not None and name not in names:
+            continue
         for filename, entry in source["files"].items():
             path = directory / name / filename
             if path.exists():
@@ -103,6 +113,107 @@ class HanScript:
         code = ord(char)
         at = bisect_right(self.starts, code) - 1
         return at >= 0 and code <= self.ranges[at][1]
+
+
+class TraditionalConverter:
+    """IME11: longest phrase first, then every unresolved character alternative."""
+
+    def __init__(self, source):
+        self.characters = self.read_table(source["STCharacters.txt"], "STCharacters", single=True)
+        self.phrases = self.read_table(source["STPhrases.txt"], "STPhrases")
+        self.trie = {}
+        for phrase, forms in self.phrases.items():
+            node = self.trie
+            for char in phrase:
+                node = node.setdefault(char, {})
+            node[None] = forms
+
+    @staticmethod
+    def read_table(raw, label, single=False):
+        table, seen = {}, set()
+        for number, line in enumerate(raw.decode("utf-8").splitlines(), 1):
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) != 2 or not fields[0] or fields[0] in seen or any(c.isspace() for c in fields[0]):
+                raise ValueError(f"{label}:{number}: invalid or duplicate OpenCC key")
+            seen.add(fields[0])
+            key = unicodedata.normalize("NFC", fields[0])
+            forms = fields[1].split(" ")
+            if any(not form or any(c.isspace() for c in form) for form in forms):
+                raise ValueError(f"{label}:{number}: invalid OpenCC forms")
+            forms = {unicodedata.normalize("NFC", form) for form in forms}
+            if single and (len(key) != 1 or any(len(form) != 1 for form in forms)):
+                raise ValueError(f"{label}:{number}: character mapping must preserve one code point")
+            # Compatibility keys can become identical after NFC; retain their union.
+            table[key] = tuple(sorted(set(table.get(key, ())) | forms, key=lambda value: value.encode()))
+        if not table:
+            raise ValueError(f"{label}: empty OpenCC dictionary")
+        return table
+
+    @lru_cache(maxsize=4096)
+    def forms(self, word):
+        at, results = 0, {""}
+        while at < len(word):
+            node, end, matched = self.trie, at, None
+            for cursor in range(at, len(word)):
+                node = node.get(word[cursor])
+                if node is None:
+                    break
+                if None in node:
+                    end, matched = cursor + 1, node[None]
+            if matched is None:
+                end, matched = at + 1, self.characters.get(word[at], (word[at],))
+            results = {prefix + form for prefix in results for form in matched}
+            at = end
+        return tuple(sorted(results, key=lambda value: value.encode()))
+
+    def character_set(self, base_chars, han):
+        chars = {form for char in base_chars for form in self.forms(char)}
+        # Phrase exceptions may introduce glyphs absent from a character's fallback.
+        for key, forms in self.phrases.items():
+            if len(key) <= 9 and all(char in base_chars for char in key):
+                chars.update(char for form in forms if len(form) == len(key)
+                             for char in form if han.contains(char))
+        if any(len(char) != 1 or not han.contains(char) for char in chars):
+            raise ValueError("OpenCC character conversion produced a non-Han character")
+        return chars
+
+
+def traditional_entries(entries, converter, syllables, chars, han):
+    converted, dropped, stats = {}, Counter(), Counter()
+    max_forms = 0
+    for (word, reading), frequency in entries.items():
+        forms = converter.forms(word)
+        max_forms = max(max_forms, len(forms))
+        stats["ambiguous_source_postings"] += len(forms) > 1
+        stats["changed_source_postings"] += forms != (word,)
+        for form in forms:
+            reason = invalid_pair(form, reading, syllables, chars, han)
+            if reason:
+                dropped[reason] += 1
+                continue
+            stats["emitted_postings_before_merge"] += 1
+            pair = (form, reading)
+            stats["merged_postings"] += pair in converted
+            # Several Simplified spellings can converge; readings stay separate.
+            converted[pair] = max(converted.get(pair, 0), frequency)
+    return converted, {
+        "source_profile": "zh-Hans", "method": "longest STPhrases match, then STCharacters; retain every alternative",
+        "source_lexicon_sha256": digest(table_bytes(table_rows(entries, 1)[0])),
+        "source_postings": len(entries), "postings": len(converted), "max_forms_per_source": max_forms,
+        "collision_weight": "maximum source weight for identical word/reading",
+        "dropped": dict(sorted(dropped.items())), **dict(stats)}
+
+
+def assemble_profile(data, mode, syllables, base_chars, han, scales, converter=None):
+    entries, dropped, accepted = assemble(data, mode, syllables, base_chars, han, scales)
+    chars, conversion = base_chars, None
+    if converter is not None:
+        chars = converter.character_set(base_chars, han)
+        entries, conversion = traditional_entries(entries, converter, syllables, chars, han)
+        dropped = {**dropped, **{"opencc:" + key: value for key, value in conversion["dropped"].items()}}
+    return entries, dropped, accepted, chars, conversion
 
 
 def read_unihan(raw):
@@ -363,24 +474,36 @@ def inspect_table(raw, abbreviation, syllables, chars, han, label, errors):
     return rows
 
 
-def validate_pack(directory, syllables, chars, han, lock=None):
-    """Full preparation check; deliberately separate from future runtime loading."""
+def pack_source_names(mode, profile):
+    names = ["aosp", "pinyin_data", "unihan"]
+    if mode in ("phrase", "both"):
+        names += ["phrase_pinyin_data", "jieba"]
+    if mode in ("hanlp", "both"):
+        names += ["hanlp"]
+    if profile == "zh-Hant":
+        names += ["opencc"]
+    return names
+
+
+def character_set_identity(profile, chars):
+    return {"rule": PROFILES[profile][1], "size": len(chars),
+            "sha256": digest("".join(sorted(chars)).encode())}
+
+
+def validate_pack(directory, syllables, chars, han, lock=None, expected_entries=None, expected_conversion=None):
+    """Full preparation check; deliberately separate from normal runtime loading."""
     errors = []
     try:
         manifest = json.loads((directory / "manifest.json").read_bytes())
-        if manifest["format"] != FORMAT or type(manifest["format_version"]) is not int or manifest["format_version"] != 1 or manifest["profile"] != "zh-Hans" or manifest["script"] != "Hans":
+        profile = manifest["profile"]
+        if manifest["format"] != FORMAT or type(manifest["format_version"]) is not int or manifest["format_version"] != 1 or profile not in PROFILES or manifest["script"] != PROFILES[profile][0]:
             errors.append("manifest: unsupported format, version or profile")
-        char_text = "".join(sorted(chars))
-        if manifest["char_set"] != {"rule": "kTGHZ2013", "size": len(chars), "sha256": digest(char_text.encode())}:
+        if manifest["char_set"] != character_set_identity(profile, chars):
             errors.append("manifest: character-set identity mismatch")
         if manifest["syllable_table"] != digest(SYLLABLE_PATH.read_bytes()):
             errors.append("manifest: syllable-table hash mismatch")
         mode = manifest["generator"]["options"]["extension"]
-        expected_sources = {"aosp", "pinyin_data", "unihan"}
-        if mode in ("phrase", "both"):
-            expected_sources.update(("phrase_pinyin_data", "jieba"))
-        if mode in ("hanlp", "both"):
-            expected_sources.add("hanlp")
+        expected_sources = set(pack_source_names(mode, profile))
         if mode not in MODES or set(manifest["sources"]) != expected_sources or (
                 lock is not None and (manifest["unicode_version"] != lock["unicode_version"] or any(
                     source != lock["sources"].get(name) for name, source in manifest["sources"].items()))):
@@ -412,6 +535,12 @@ def validate_pack(directory, syllables, chars, han, lock=None):
                 errors.append(f"{label}: manifest counts mismatch")
         entries = {(word, tuple(key[2:].split("'"))): frequency
                    for key, posts in tables["lexicon"].items() for word, frequency in posts}
+        if profile == "zh-Hant" and (expected_entries is None or expected_conversion is None):
+            errors.append("manifest: Traditional source conversion must be validated explicitly")
+        if expected_entries is not None and entries != expected_entries:
+            errors.append("lexicon: differs from source conversion (forms, readings or weights)")
+        if manifest.get("conversion") != expected_conversion:
+            errors.append("manifest: conversion provenance mismatch")
         _, expected = table_rows(entries, limit)
         # Re-derivation checks exact top-K membership as well as the four invariants.
         if tables["abbrev"] != expected:
@@ -428,17 +557,17 @@ def validate_pack(directory, syllables, chars, han, lock=None):
     return {"ok": not errors, "errors": errors}
 
 
-def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars, sources, lock):
+def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars, sources, lock,
+               profile="zh-Hans", conversion=None):
     directory.mkdir(parents=True, exist_ok=True)
     lexicon, abbrev = table_rows(entries, limit)
-    selected = ["aosp", "pinyin_data", "unihan"]
-    if mode in ("phrase", "both"):
-        selected += ["phrase_pinyin_data", "jieba"]
-    if mode in ("hanlp", "both"):
-        selected += ["hanlp"]
-    notice = ["Lambda Chinese IME zh-Hans pack, format version 1\n",
+    selected = pack_source_names(mode, profile)
+    notice = [f"Lambda Chinese IME {profile} pack, format version 1\n",
               "Prepared from modified upstream data: normalized readings, filtered entries,\n"
               "rescaled frequencies and derived abbreviation postings. No sentence model.\n"]
+    if conversion is not None:
+        notice.append("OpenCC phrase-then-character conversion; every unresolved form retains\n"
+                      "its source reading and weight; identical word/readings merge by maximum weight.\n")
     for name in selected:
         source = lock["sources"][name]
         notice.append(f"\n--- {name} ({source['license']}, {source['revision']}) ---\n")
@@ -450,9 +579,9 @@ def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars
     (directory / "NOTICE.txt").write_bytes(raw_notice)
     weights = list(entries.values())
     manifest = {
-        "format": FORMAT, "format_version": 1, "profile": "zh-Hans", "script": "Hans",
+        "format": FORMAT, "format_version": 1, "profile": profile, "script": PROFILES[profile][0],
         "unicode_version": lock["unicode_version"],
-        "char_set": {"rule": "kTGHZ2013", "size": len(chars), "sha256": digest("".join(sorted(chars)).encode())},
+        "char_set": character_set_identity(profile, chars),
         "syllable_table": digest(SYLLABLE_PATH.read_bytes()),
         "files": {"lexicon": emit_table(directory, "lexicon.txt", lexicon), "abbrev": emit_table(directory, "abbrev.txt", abbrev)},
         "notice": {"path": "NOTICE.txt", "bytes": len(raw_notice), "sha256": digest(raw_notice)},
@@ -464,8 +593,10 @@ def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars
         "sources": {name: lock["sources"][name] for name in selected},
         "generator": {"tool": "utils/prepare_ime_chinese.py", "version": VERSION,
                       "sha256": digest(Path(__file__).read_bytes()),
-                      "options": {"extension": mode, "abbrev_limit": limit}},
+                      "options": {"extension": mode, "abbrev_limit": limit, "profile": profile}},
     }
+    if conversion is not None:
+        manifest["conversion"] = conversion
     (directory / "manifest.json").write_bytes(encoded(manifest))
     return manifest
 
@@ -513,7 +644,9 @@ def size_controls(entries, limit):
 
 
 def coverage(entries, fixture):
-    cases = json.loads(fixture.read_bytes())["cases"]
+    authored = json.loads(fixture.read_bytes())["cases"]
+    cases = [{"word":word,"reading":case["reading"]} for case in authored
+             for word in (case["forms"] if "forms" in case else [case["word"]])]
     missing = [case for case in cases if (case["word"], tuple(case["reading"].split("'"))) not in entries]
     return {"fixture_sha256": digest(fixture.read_bytes()), "total": len(cases),
             "covered": len(cases) - len(missing), "missing": missing,
@@ -523,7 +656,8 @@ def coverage(entries, fixture):
 def prepare(args, lock):
     if args.output_dir.resolve().is_relative_to(args.source_dir.resolve()):
         raise ValueError("output-dir must not be inside source-dir")
-    sources = read_sources(args.source_dir, lock)
+    sources = read_sources(args.source_dir, lock, input_source_names(lock, args.profile))
+    converter = TraditionalConverter(sources["opencc"]) if args.profile == "zh-Hant" else None
     syllables = load_syllables()
     chars, unihan_readings, pinlu = read_unihan(sources["unihan"]["Unihan.zip"])
     han = HanScript(sources["unihan"]["Scripts.txt"])
@@ -532,7 +666,8 @@ def prepare(args, lock):
     comparisons = {}
     chosen = None
     for mode in MODES if args.compare else (args.extension,):
-        entries, dropped, accepted = assemble(data, mode, syllables, chars, han, scales)
+        entries, dropped, accepted, profile_chars, conversion = assemble_profile(
+            data, mode, syllables, chars, han, scales, converter)
         lexicon, abbrev = table_rows(entries, args.abbrev_limit)
         tables = {"lexicon": lexicon, "abbrev": abbrev}
         comparisons[mode] = {
@@ -545,11 +680,12 @@ def prepare(args, lock):
             "dropped": dropped, "coverage": coverage(entries, args.coverage),
         }
         if mode == args.extension:
-            chosen = entries, dropped, accepted
-    entries, dropped, accepted = chosen
+            chosen = entries, dropped, accepted, profile_chars, conversion
+    entries, dropped, accepted, profile_chars, conversion = chosen
     manifest = write_pack(args.output_dir, entries, dropped, accepted, args.extension,
-                          args.abbrev_limit, scales, chars, sources, lock)
-    validation = validate_pack(args.output_dir, syllables, chars, han, lock)
+                          args.abbrev_limit, scales, profile_chars, sources, lock, args.profile, conversion)
+    validation = validate_pack(args.output_dir, syllables, profile_chars, han, lock,
+        entries if converter else None, conversion)
     if not validation["ok"]:
         raise ValueError("; ".join(validation["errors"]))
     crosscheck = [(char, reading[0]) for char, reading in entries if len(char) == 1
@@ -560,7 +696,8 @@ def prepare(args, lock):
                   if (char, (syllable,)) in entries and entries[(char, (syllable,))] > 0]
         if len(ranked) > 1 and max(ranked)[1] != max(ranked, key=lambda p: (p[2], p[1]))[1]:
             pinlu_disagreements.append(char)
-    report = {"format_version": 1, "selected_extension": args.extension, "comparisons": comparisons,
+    report = {"format_version": 1, "profile": args.profile, "selected_extension": args.extension,
+              "conversion": conversion, "comparisons": comparisons,
               "controls": size_controls(entries, args.abbrev_limit), "validation": validation,
               "aosp_review": {"gbk_flags": data["gbk_flags"], "gbk_filter_applied": False,
                               "frequency_60_cutoff_applied": False,
@@ -570,11 +707,20 @@ def prepare(args, lock):
                                     "pinlu_ranking_disagreements": pinlu_disagreements,
                                     "policy": "curated readings retained; measured frequency sources may disagree"},
               "manifest_sha256": digest(encoded(manifest)),
-              "runtime_measurements": {"status": "pending M1 Lambda loader on a release host",
+              "runtime_measurements": {"status": "separate release qualification: test/ime/run_engine.py",
                                        "index_payload_bytes": sum(info["bytes"] + 4 * info["lines"] for info in manifest["files"].values()),
                                        "note": "payload accounting excludes allocator/container overhead; no load or per-key timing claimed"}}
+    if converter is not None:
+        cases = [case for case in json.loads(args.coverage.read_bytes())["cases"] if "forms" in case]
+        mismatches = [{"source":case["source"],"expected":case["forms"],
+                       "actual":list(converter.forms(case["source"]))} for case in cases
+                      if set(converter.forms(case["source"])) != set(case["forms"])]
+        report["conversion_fixtures"] = {"ok":not mismatches,"total":len(cases),"passed":len(cases)-len(mismatches),
+                                         "mismatches":mismatches}
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_bytes(encoded(report))
+    if converter is not None and not report["conversion_fixtures"]["ok"]:
+        raise ValueError(f"Traditional conversion fixtures failed; see {args.report}")
     return report
 
 
@@ -582,28 +728,46 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("fetch", "prepare", "validate"))
     parser.add_argument("--source-dir", type=Path, default=ROOT / "temp/ime_sources")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "lmd/package/ime/chinese/data/zh-Hans")
+    parser.add_argument("--profile", choices=PROFILES, default="zh-Hans")
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--extension", choices=MODES, default="both")
     parser.add_argument("--abbrev-limit", type=int, default=64)
     parser.add_argument("--compare", action="store_true", help="measure all four extension combinations")
-    parser.add_argument("--coverage", type=Path, default=ROOT / "test/ime/chinese_coverage.json")
-    parser.add_argument("--report", type=Path, default=ROOT / "temp/ime_chinese/prepare-report.json")
+    parser.add_argument("--coverage", type=Path)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    args.output_dir = args.output_dir or ROOT / "lmd/package/ime/chinese/data" / args.profile
+    args.coverage = args.coverage or ROOT / "test/ime" / (
+        "chinese_traditional_coverage.json" if args.profile == "zh-Hant" else "chinese_coverage.json")
+    args.report = args.report or ROOT / "temp/ime_chinese" / (
+        "zh-Hant-prepare-report.json" if args.profile == "zh-Hant" else "prepare-report.json")
     if args.abbrev_limit < 1:
         parser.error("abbrev-limit must be positive")
     lock = json.loads(LOCK_PATH.read_bytes())
+    source_names = input_source_names(lock, args.profile)
     try:
         if args.command == "fetch":
-            fetch_sources(args.source_dir, lock)
-            result = {"ok": True, "sources": len(lock["sources"])}
+            fetch_sources(args.source_dir, lock, source_names)
+            result = {"ok": True, "sources": len(lock["sources"]) if source_names is None else len(source_names)}
         elif args.command == "prepare":
             report = prepare(args, lock)
             result = {"ok": True, "report": str(args.report), "output_dir": str(args.output_dir),
                       "files": report["comparisons"][args.extension]["files"]}
         else:
-            sources = read_sources(args.source_dir, lock)
+            sources = read_sources(args.source_dir, lock, source_names)
             chars, _, _ = read_unihan(sources["unihan"]["Unihan.zip"])
-            result = validate_pack(args.output_dir, load_syllables(), chars, HanScript(sources["unihan"]["Scripts.txt"]), lock)
+            syllables, han = load_syllables(), HanScript(sources["unihan"]["Scripts.txt"])
+            entries, conversion = None, None
+            if args.profile == "zh-Hant":
+                mode = json.loads((args.output_dir / "manifest.json").read_bytes())["generator"]["options"]["extension"]
+                data = records(sources)
+                scales = frequency_scales(data, syllables, chars, han)
+                entries, _, _, chars, conversion = assemble_profile(data, mode, syllables, chars, han, scales,
+                    TraditionalConverter(sources["opencc"]))
+            result = validate_pack(args.output_dir, syllables, chars, han, lock, entries, conversion)
+            if json.loads((args.output_dir / "manifest.json").read_bytes())["profile"] != args.profile:
+                result["errors"].append("manifest: profile differs from requested profile")
+                result["ok"] = False
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         parser.exit(1, f"ime preparation: {error}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -2193,7 +2193,7 @@ TEST_F(RadiantTextQuery, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine
         input{height:40px}
         </style><div id="result"></div><div class="scaled"><input id="input" value="first line">
         <textarea id="area">first line&#10;second line</textarea>
-        <div id="rich" contenteditable="true" style="font:20px/28px Arial;width:240px">
+        <div id="rich" contenteditable="true" style="font:20px/28px Arial;width:240px;caret-color:#ff00ff">
         <div id="first-row">first line</div><div id="second-row">second line</div></div></div>)HTML"), nullptr);
     DocState* state = radiant_document_ensure_state(document, "transformed-control-caret-test");
     ASSERT_NE(state, nullptr);
@@ -2255,6 +2255,25 @@ TEST_F(RadiantTextQuery, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine
                 &surface, hit_x, hit_y, EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit));
             EXPECT_EQ(hit.dom.node, static_cast<DomNode*>(text));
             EXPECT_EQ(hit.dom.offset, 2u);
+            focus_set_programmatic(state, rich);
+            state_store_caret_collapse_to_view_offset(state, static_cast<View*>(text), 2);
+            update_caret_visual_position(&ui, state);
+            render_html_doc(&ui, document->view_tree, nullptr);
+            ASSERT_FALSE(ui.render_failed);
+            float caret_x = 0.0f, caret_y = 0.0f;
+            ASSERT_TRUE(rdt_matrix_project_point(&matrix, x + 1.5f, y, &caret_x, &caret_y));
+            test_radiant_expect_surface_pixel(ui.surface,
+                (unsigned)floorf(caret_x * scale), (unsigned)floorf(caret_y * scale),
+                255, 0, 255, 80);
+            // trailing and leading blank space belong to this row, including under a CSS transform.
+            for (float local_x : {text->rect->x - text->x - 20.0f,
+                    text->rect->x - text->x + text->rect->width + 40.0f}) {
+                ASSERT_TRUE(rdt_matrix_project_point(&matrix, local_x, y, &hit_x, &hit_y));
+                ASSERT_TRUE(editing_geometry_hit_test_boundary(&ui, document->view_tree->root,
+                    &surface, hit_x, hit_y, EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit));
+                EXPECT_EQ(hit.dom.node, static_cast<DomNode*>(text));
+                EXPECT_EQ(hit.dom.offset, local_x < x ? 0u : dom_text_utf16_length(text));
+            }
         }
     }
 }

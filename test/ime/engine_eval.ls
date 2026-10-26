@@ -22,11 +22,12 @@ pn query(engine,text,word,fuzzy,options) map^ {
 }
 
 pn main() {
-    let fixture = input("test/ime/heldout.json","json")^
-    let options = if (exists("temp/ime_chinese/m1/eval-options.json"))
-        input("temp/ime_chinese/m1/eval-options.json","json")^ else {}
+    let config = if (exists("temp/ime_chinese/m1/eval-config.json"))
+        input("temp/ime_chinese/m1/eval-config.json","json")^ else {}
+    let fixture = input(if (config.fixture == null) "test/ime/heldout.json" else config.fixture,"json")^
+    let options = if (config.options == null) {} else config.options
     let started = clock()
-    let engine = ime.load("zh-Hans")^
+    let engine = ime.load(if (config.profile == null) "zh-Hans" else config.profile)^
     let loaded = clock()
     output({phase:"loaded",load_ms:(loaded - started) * 1000.0},
         "temp/ime_chinese/m1/progress.json",{format:"json"})^

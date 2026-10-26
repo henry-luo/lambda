@@ -580,10 +580,18 @@ view <body> state ime_composing, context_menu_open {}
 // The ordinary mousedown has already settled author cancellation and any
 // element-local press behavior (such as range capture). This hook chooses the
 // remaining document-wide focus and selection default action.
-on mousepress(evt) { mouse.press(~, evt) }
+on mousepress(evt) { ime.pointer_press(~)^; mouse.press(~, evt) }
 // S12.1.3: clipboard/select-all key policy is a cancelable package default;
 // the native waist owns only event, selection/edit, and clipboard mechanism.
-on keydown(evt) { keymap.run_shortcut(~, evt) }
+on keydown(evt) {
+    let result = ime.key(~,evt)^;
+    if (result == 'pass') keymap.run_shortcut(~,evt) else result
+}
+on keyup(evt) { ime.key(~,evt)^ }
+on focusin(evt) { ime.focus_in(~)^ }
+on focusout(evt) { ime.focus_out(~)^ }
+on imecandidate(evt) { ime.popup_action(~,evt)^ }
+on imewindowchange(evt) { ime.focus_in(~)^ }
 // F10: the context menu is document-scoped state, the same cardinality argument
 // ES18 made for the IME session — one menu per document, not one per control.
 on contextmenu(evt) { menu.open_for(~) }

@@ -1,0 +1,11 @@
+2:b'j	北京 bei'jing 5000	背景 bei'jing 4900
+2:f'z	發展 fa'zhan 4700
+2:g'b	乾杯 gan'bei 4300
+2:h'h	皇后 huang'hou 4200
+2:h't	後臺 hou'tai 4400
+2:l'f	理髮 li'fa 4200
+2:m't	麪條 mian'tiao 4600
+2:r'j	軟件 ruan'jian 4600
+2:t'f	頭髮 tou'fa 4500
+2:z'g	中國 zhong'guo 5100
+3:g'x'b	幹細胞 gan'xi'bao 4800

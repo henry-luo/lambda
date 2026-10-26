@@ -106,7 +106,9 @@ pub fn capture(host, edit_context, descriptor) {
 }
 
 pn release_entry(host, entry) {
-    if (entry == null or entry.delta_id == null) true
+    if (entry == null) true
+    else if (entry.steps != null) release_entries(host,entry.steps,0)
+    else if (entry.delta_id == null) true
     else dom.edit_release_delta(host, entry.delta_id)
 }
 
@@ -167,44 +169,32 @@ fn record_stack(history, entry) {
 // Capture is before package mutation, record is after it. Generic native
 // retention preserves structural identity; the package still chooses its
 // history class, coalescing boundary, and stack ownership (D7.2.5).
-pub pn record(host, snapshot) {
-    if (snapshot == null) false
-    else {
-        let current = session.read(host);
-        let typing_after = if (current == null) null else current.typing_state;
-        let retained_id = if (snapshot.retained == true)
-            dom.edit_retain_delta(host, snapshot.token)
-        else null;
-        let entry = if (snapshot.retained == true) {
-            if (retained_id == null) null else {
-                delta_id: retained_id,
-                history_class: snapshot.history_class,
-                typing_before: snapshot.typing_before,
-                typing_after: typing_after
-            }
-        }
-        else {
-            let after = dom.node_value(snapshot.node);
-            if (after == null) null else delta(snapshot.node, snapshot.before,
-                after, snapshot.selection_before, snapshot.history_class,
-                snapshot.typing_before, typing_after)
-        };
-        let same_parent = snapshot.retained == true or
-                          (snapshot.parent != null and
-                           dom.parent_node(snapshot.node) != null and
-                           dom.same_node(snapshot.parent,
-                                         dom.parent_node(snapshot.node)));
-        let stacked = if (entry == null or current == null or not same_parent)
-            null
-        else record_stack(current.history, entry);
-        let updated = if (stacked == null) null
-            else session.set_history(host, stacked.history);
-        if (updated == null) {
-            release_entry(host, entry);
-            false
-        }
-        else release_entries(host, stacked.released, 0)
+pub pn record(host, snapshot, phase = null, edit_context = null) {
+    if (snapshot == null) { return false }
+    let current = session.read(host);
+    let typing_after = if (current == null) null else current.typing_state;
+    let retained_id = if (snapshot.retained == true)
+        dom.edit_retain_delta(host, snapshot.token) else null;
+    let entry = if (snapshot.retained == true) {
+        if (retained_id == null) null else {delta_id:retained_id,
+            history_class:snapshot.history_class,typing_before:snapshot.typing_before,
+            typing_after:typing_after}
+    } else {
+        let after = dom.node_value(snapshot.node);
+        if (after == null) null else delta(snapshot.node,snapshot.before,after,
+            snapshot.selection_before,snapshot.history_class,snapshot.typing_before,typing_after)
+    };
+    let same_parent = snapshot.retained == true or
+        (snapshot.parent != null and dom.parent_node(snapshot.node) != null and
+         dom.same_node(snapshot.parent,dom.parent_node(snapshot.node)));
+    if (snapshot.history_class == "composition" and same_parent and current != null) {
+        return record_composition(host,current,entry,phase,edit_context)
     }
+    let stacked = if (entry == null or current == null or not same_parent) null
+        else record_stack(current.history,entry);
+    let updated = if (stacked == null) null else session.set_history(host,stacked.history);
+    if (updated == null) { release_entry(host,entry); return false }
+    return release_entries(host,stacked.released,0)
 }
 
 pub fn can_undo(host) {
@@ -261,55 +251,76 @@ pn clear_history(host, current) {
     else release_entries(host, [*current.history.undo, *current.history.redo], 0)
 }
 
-pn replay_retained(host, edit_context, current, entry, is_undo) {
-    if (not dom.edit_replay_delta(host, edit_context.token, entry.delta_id,
-                                  is_undo)) {
-        clear_history(host, current);
+// Composite entries preserve native structural deltas and text deltas in one order.
+pn replay_step(host, edit_context, entry, is_undo) {
+    let restored = if (entry.steps != null) {
+        var valid = true;
+        for (part in (if (is_undo) reverse(entry.steps) else entry.steps)) {
+            if (valid) { valid = replay_step(host,edit_context,part,is_undo) }
+        }
+        valid
+    } else if (entry.delta_id != null) {
+        dom.edit_replay_delta(host,edit_context.token,entry.delta_id,is_undo)
+    } else {
+        let value = dom.node_value(entry.node);
+        let replayed = if (value == null) null else value_after_replay(value,entry,is_undo);
+        if (replayed == null) false
+        else {
+            dom.set_node_value(entry.node,replayed)
+            restore_selection(host,entry,is_undo)
+        }
+    };
+    restored and dom.edit_sync_selection(host,edit_context.token)
+}
+
+// Provisional updates never become standalone undo entries (D7.2.5, IME9).
+pn record_composition(host,current,entry,phase,edit_context) {
+    let previous = if (current.composition == null) [] else current.composition.steps
+    let steps = if (entry == null) previous else [*previous,entry];
+    if (phase == "compositionStart") {
+        session.set_composition(host,{steps:[]})
+        release_entries(host,previous,0)
         false
-    }
-    else {
-        let restored_typing = if (is_undo) entry.typing_before
-                              else entry.typing_after;
-        let updated = session.set_history_and_typing(host,
-            move_entry(current.history, entry, is_undo), restored_typing);
-        if (updated == null) { dom.edit_abort_transaction(host, edit_context.token); false }
-        else true
+    } else if (phase == "insertCompositionText") {
+        session.set_composition(host,{steps:steps})
+        false
+    } else {
+        let group = if (len(steps) == 0) null else {steps:steps,history_class:"composition",
+            typing_before:steps[0].typing_before,typing_after:steps[len(steps) - 1].typing_after};
+        if (phase == "deleteCompositionText") {
+            let restored = group == null or
+                (dom.edit_begin_transaction(host,edit_context.token) and replay_step(host,edit_context,group,true));
+            if (not restored) { dom.edit_abort_transaction(host,edit_context.token); false }
+            else {
+                session.set_composition(host,null)
+                release_entry(host,group)
+                false
+            }
+        } else if (group == null) { session.set_composition(host,null); false }
+        else {
+            let stacked = record_stack(current.history,group);
+            session.set_history_and_composition(host,stacked.history,null)
+            release_entries(host,stacked.released,0)
+        }
     }
 }
 
-// Undo/redo itself is a generic transaction. Divergent authored changes clear
-// retained state rather than applying an inverse over a different DOM tree.
+// One generic transaction covers either a text delta, a structural delta, or a group.
 pn replay(host, edit_context, is_undo) {
     let current = session.read(host);
-    let entries = if (current == null) [] else if (is_undo) current.history.undo
-                  else current.history.redo;
+    let entries = if (current == null) [] else if (is_undo) current.history.undo else current.history.redo;
     if (current == null or edit_context.token == null or len(entries) == 0) false
+    else if (not dom.edit_begin_transaction(host,edit_context.token)) false
     else {
         let entry = entries[len(entries) - 1];
-        if (entry.delta_id != null)
-            replay_retained(host, edit_context, current, entry, is_undo)
-        else {
-            let value = dom.node_value(entry.node);
-            let replayed = if (value == null) null
-                           else value_after_replay(value, entry, is_undo);
-            if (replayed == null) {
-                clear_history(host, current);
-                false
-            }
-            else if (not dom.edit_begin_transaction(host, edit_context.token)) false
-            else {
-                dom.set_node_value(entry.node, replayed);
-                let restored = restore_selection(host, entry, is_undo);
-                let restored_typing = if (is_undo) entry.typing_before
-                                      else entry.typing_after;
-                let updated = if (restored)
-                    session.set_history_and_typing(host,
-                        move_entry(current.history, entry, is_undo),
-                        restored_typing)
-                else null;
-                if (updated == null) { dom.edit_abort_transaction(host, edit_context.token); false }
-                else true
-            }
+        if (not replay_step(host,edit_context,entry,is_undo)) {
+            dom.edit_abort_transaction(host,edit_context.token)
+            clear_history(host,current)
+            false
+        } else {
+            let restored_typing = if (is_undo) entry.typing_before else entry.typing_after;
+            let updated = session.set_history_and_typing(host,move_entry(current.history,entry,is_undo),restored_typing);
+            if (updated == null) { dom.edit_abort_transaction(host,edit_context.token); false } else true
         }
     }
 }

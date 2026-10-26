@@ -56,7 +56,10 @@ static size_t js_module_mir_cache_artifact_bytes(const void* value) {
     const JsPreambleState* image = artifact ? &artifact->image : nullptr;
     if (!image) return 0;
     size_t bytes = sizeof(JsModuleMirArtifact);
+#ifndef LAMBDA_NO_MIR
+    // without MIR an artifact never carries MVP code
     bytes += mvp_lmd_code_bytes(image->mvp_code);
+#endif
     bytes += (size_t)(artifact->static_dependency_count > 0
         ? artifact->static_dependency_count : 0) * sizeof(char*);
     for (int i = 0; i < artifact->static_dependency_count; i++) {

@@ -5,6 +5,7 @@
  */
 
 #include "event.hpp"
+#include "../lib/host_paths.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/escape.h"
@@ -220,14 +221,8 @@ static uint64_t g_event_log_dropped = 0;
 /* ------------------------------ utils ------------------------------ */
 
 static void make_temp_dir(void) {
-    /* best-effort mkdir; ignore EEXIST. */
-#if defined(_WIN32) && !defined(__MINGW32__)
-    _mkdir("temp");
-#elif defined(_WIN32)
-    mkdir("temp");
-#else
-    mkdir("temp", 0755);
-#endif
+    /* best-effort: event logs live in the host's temp directory (MB13). */
+    host_path_ensure(HOST_PATH_TEMP);
 }
 
 /* Sanitize a doc_name into a filesystem-safe slug.
@@ -319,7 +314,7 @@ bool EventStateLog::init(const char* doc_name, const char* doc_url) {
     event_state_log_sanitize_doc_name(doc_name, slug, sizeof(slug));
 
     snprintf(path, sizeof(path),
-             "./temp/events_%d_%s.jsonl", pid, slug);
+             "%s/events_%d_%s.jsonl", host_path(HOST_PATH_TEMP), pid, slug);
 
     /* truncate on open: each session/document starts fresh. */
     out = fopen(path, "w");

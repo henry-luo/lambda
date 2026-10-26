@@ -1,0 +1,441 @@
+{
+  "name": "Slides: live SVG graphic resize, cancellation, pixels, history, inspector, thumbnails and saved presentation",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "window.vectorFits=s=>{const e=document.querySelector(s),a=e.querySelector('svg').getBoundingClientRect(),b=e.getBoundingClientRect();return Math.abs(a.width-b.width)<1&&Math.abs(a.height-b.height)<1&&Math.abs(a.x-b.x)<1&&Math.abs(a.y-b.y)<1};window.outlineFits=()=>vectorFits('#edit-s0-o5');"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=hero]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "script",
+      "js": "window.originalGraphic=document.querySelector('#edit-s0-o5 svg');window.originalGraphicWidth=originalGraphic.getBoundingClientRect().width;window.originalWidth=380;window.originalHeight=430"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".editor-handle"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".editor-handle",
+        "offset_x": -90,
+        "offset_y": -90
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "parseFloat(document.querySelector('#edit-place-s0-o5').style.width)<300"
+    },
+    {
+      "type": "assert_script",
+      "js": "originalGraphic===document.querySelector('#edit-s0-o5 svg')&&originalGraphic.getBoundingClientRect().width<originalGraphicWidth-50"
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        1005,
+        330,
+        95,
+        260
+      ],
+      "rgba": [
+        [
+          80,
+          145
+        ],
+        [
+          175,
+          235
+        ],
+        [
+          140,
+          205
+        ]
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        820,
+        320,
+        170,
+        200
+      ],
+      "rgba": [
+        [
+          80,
+          145
+        ],
+        [
+          175,
+          235
+        ],
+        [
+          140,
+          205
+        ]
+      ],
+      "count": {
+        "min": 30
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": ".editor-handle"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(document.querySelector('#edit-s0-o5 svg').getBoundingClientRect().width-originalGraphicWidth)<1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": ".editor-handle"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".editor-handle",
+        "offset_x": -90,
+        "offset_y": -90
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": ".editor-handle"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "true"
+    },
+    {
+      "type": "script",
+      "js": "window.resizedWidth=document.querySelector('#prop-width').value;window.resizedHeight=document.querySelector('#prop-height').value"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(resizedWidth)<300&&Number(resizedHeight)<350"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-s0-o5 svg').getAttribute('viewBox')==='0 0 380 430'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "equals": "380"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-redo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#prop-width').value===resizedWidth&&document.querySelector('#prop-height').value===resizedHeight"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "text": "190",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-kind"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-height"
+      },
+      "text": "215",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#object-kind"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "equals": "190"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-height"
+      },
+      "equals": "215"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#edit-s0-o5 svg').getAttribute('width')==='380'&&document.querySelector('#edit-s0-o5 svg').getAttribute('height')==='430'"
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"[data-slide-id=opening] [data-slide-object=hero]\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fit"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/graphic-resize.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/graphic-resize.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=hero]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-width"
+      },
+      "equals": "190"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#prop-height"
+      },
+      "equals": "215"
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"[data-slide-id=opening] [data-slide-object=hero]\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#present"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000,
+      "steps": 10
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#editor-show [data-slide-object=hero]\")"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#end-show"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "vectorFits(\"#slide-render [data-slide-object=hero]\")"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render [data-slide-object=focus]').textContent.indexOf('Focus the market')>=0"
+    },
+    {
+      "type": "script",
+      "js": "(()=>{const card=document.querySelector('#slide-render [data-slide-object=focus] > div > div');const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.id='inline-resize-icon';icon.setAttribute('width','24');icon.setAttribute('height','16');icon.setAttribute('viewBox','0 0 24 16');card.appendChild(icon);})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const icon=document.querySelector('#inline-resize-icon').getBoundingClientRect(),scale=document.querySelector('#paper').getBoundingClientRect().width/1280;return Math.abs(icon.width-24*scale)<1&&Math.abs(icon.height-16*scale)<1})()"
+    }
+  ]
+}

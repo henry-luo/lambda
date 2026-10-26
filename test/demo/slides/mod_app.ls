@@ -543,10 +543,13 @@ pub pn finish_inline(owner,st,accept=true) {
         // keep the retained editor owner alive when the procedural slide canvas is replaced.
         dom.dispatch(host,{type:"slide_inline_end",bubbles:false})
         dom.append_child(node(owner,"inline-parking"),host)
-        return publish(owner,next)
     }
-    if (accept) m.set_text(next,field(owner,"canvas-text")) ^ { next = {*:next,error:^.message} } ~ { next = ~ }
-    if (control!=null) dom.remove(control)
+    if (st.inline.kind!="rich") {
+        if (accept) m.set_text(next,field(owner,"canvas-text")) ^ { next = {*:next,error:^.message} } ~ { next = ~ }
+        if (control!=null) dom.remove(control)
+    }
+    // unchanged markup is cached, so closing a draft must undo its temporary visibility change.
+    u.style(node(owner,"edit-" ++ st.inline.selected),"visibility",st.inline.visibility)
     return publish(owner,next)
 }
 pub pn begin_inline(owner,st,point=null) {
@@ -554,6 +557,7 @@ pub pn begin_inline(owner,st,point=null) {
     if (st.inline!=null or not inline_text.can_edit(obj)) { return st }
     let place = node(owner,"edit-place-" ++ st.selected)
     let plain = obj.tag=='text' and all([for (child in content(obj.source)) child is string]);
+    let visibility = dom.style_get_property(node(owner,"edit-" ++ st.selected),"visibility")
     u.style(node(owner,"edit-" ++ st.selected),"visibility","hidden")
     if (plain) {
         let fragment = dom.parse_fragment(place,format(v.inline_editor(obj,"transparent"),'xml'))
@@ -568,7 +572,7 @@ pub pn begin_inline(owner,st,point=null) {
         dom.append_child(place,host)
     }
     // the newly inserted control needs committed layout before the entry click can be resolved.
-    return {*:st,editing:null,inline:{selected:st.selected,kind:if (plain) "plain" else "rich",point:point,
+    return {*:st,editing:null,inline:{selected:st.selected,kind:if (plain) "plain" else "rich",point:point,visibility:visibility,
         ready:if (plain and point!=null) dom.request_frame(owner,"slide_plain_ready") else 0}}
 }
 pub pn plain_ready(owner,st,token) {

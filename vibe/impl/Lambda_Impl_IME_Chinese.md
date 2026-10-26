@@ -1,14 +1,18 @@
 # Chinese IME implementation
 
-> **Status (2026-10-25):** M1 engine implemented; focused and full-pack
-> qualification recorded below. M0 tooling and authored held-out coverage are
-> qualified; retained-heap accounting and compressed-only loading remain open.
-> M2/M3 are not implemented. The first release is not complete.
+> **Status (2026-10-26):** M1 engine and M2 session reducer implemented;
+> qualification recorded below. M4 Traditional preparation/profile selection
+> and its conversion/quality gates are implemented (§7). M3 transport, native
+> popup and body adapter are
+> implemented and focused-qualified; the aggregate gates retain two failures
+> reproduced on the preserved pre-M3 host. M0 tooling and authored
+> held-out coverage are qualified; retained-heap accounting and compressed-only loading remain open.
+> The first release remains unqualified against the provisional performance targets.
 > **Design:** [Lambda_Pkg_IME_Chinese.md](../Lambda_Pkg_IME_Chinese.md).
 > **Spec linkage:** D7.2.4v4 places the package under
 > `lmd/package/ime/chinese/`; D7.1.2v2 governs resource IO when the runtime
-> loader is added. The engine/IO split will follow S12.1.1v3 and explicit
-> dictionary loading will follow D7.2.1/D7.2.3. Sorting uses S6.2.2v3's byte
+> loader is added. The engine/IO split follows S12.1.1v3 and explicit
+> dictionary loading follows D7.2.1/D7.2.3. Sorting uses S6.2.2v3's byte
 > order, and word lengths use S2.5.8's code points. No formal rulings changed.
 
 ## 1. Implemented scope
@@ -295,7 +299,95 @@ artifact directory. `slice-after.json` retains the successful native case and
 its binary/source identities. The two-leader controls are retained as
 `qualification-{jit,interp}-leaders2.json`; they are not the accepted defaults.
 
-## 4. Remaining work
+## 4. M2 session and learning
+
+`session.ls` implements the pure key reducer, settings replacement and overlay
+attachment. `user.ls` validates, indexes, matches and learns user words;
+`query.ls` is the shared M1/M2 query path. The public entry exports `session`,
+`key`, `configure`, `settings`, `with_user`, `load_user` and `save_user`.
+Effects remain explicit procedures (S12.1.1v3, D7.1.2v2); importing the package
+does not read a dictionary or user file (D7.2.1/D7.2.3).
+
+The reducer handles partial selection, exact-prefix undo, digits/Space,
+paging and highlight movement, punctuation and paired quotes, Shift-tap mode
+switching, modifier pass-through, cancellation and the 32-letter bound.
+Preedit carets count code points (S2.5.8/S17.4.1). Switching to English flushes
+an existing preedit; Shift chords/repeats do not toggle. `configure` validates
+only `fuzzy` and `page_size` (S17.8.1), refreshes an open composition without
+changing chosen/raw text and leaves the learned overlay intact (IME13).
+
+Selections stay pending until the composition commits; undo/cancel never
+trains the overlay (IME8). Learning uses deterministic selection counters,
+then ranks matching user words by recency and count before base candidates.
+It can add a word absent from the pack. Both paths reuse the same syllable
+lattice, orthographic-initial filter and text deduplication. The overlay builds
+first-letter/syllable-count buckets on attachment or commit; scanning uses
+the existing posting budget and reports truncation. It never rebuilds the
+base dictionary or scans every learned entry on each keystroke.
+
+The version-1 JSON user file contains only format/version/profile, next_seq
+and `[word, reading, count, last_seq]` entries. Validation checks unique pairs,
+NFC Han words of 1–9 code points, syllable membership/count and compact-int
+counter bounds/order. An exhausted counter returns an error. Saving validates
+before atomic replacement and does not serialize its private index or host
+preferences. `utils/generate_ime_han.py` verifies/generates the Han matcher
+from M0's SHA-pinned Unicode 18 Scripts.txt and embeds its complete license.
+Python remains development tooling; user-file handling runs entirely in Lambda.
+
+### 4.1 Quoted-name compiler prerequisite
+
+The backslash punctuation case exposed a name-decoding defect. Symbol values
+already decoded escapes, but `direct_key_text` only stripped quotes. Thus
+`{'\\':1}["\\"]` returned null. This violates S8.2.2v6, which identifies names
+after escape decoding. `build_ast.cpp` now shares its existing quoted-literal
+decoder with quoted name construction, including Unicode escapes and
+surrogate pairs. The regression failed before this fix and passes afterward
+for both map and element keys. No parser/vendor code or formal ruling changed.
+
+### 4.2 Verification and artifacts
+
+The focused harness passes **16/16 in each execution tier**, including the M1
+fixtures, spelling compatibility, eight M2 behavior fixtures, the inert
+session-helper module and the quoted-name regression. Exact action-list
+goldens cover compose/candidates/commit/cancel ordering. Two successive word
+selections commit together and train both entries; overlay scans also exercise
+the posting cap. Persistence covers an
+explicit round trip, invalid-save preservation, malformed/missing files,
+independently saved settings and cleanup. Overlay validation checks 26 invalid
+shapes/words/readings/counters, astral Han and counter exhaustion.
+
+The partial-selection, learning, persistence and quoted-key fixtures pass
+**4/4** on JIT with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+Preparation contracts pass **26/26** and the generated Han matcher verifies
+all **25** pinned ranges. The full-pack runner passes the frozen rank floors
+in both tiers, with identical ranks/leading words/weights/truncation/scan counts
+on **192/192** queries and the same counts as the qualified M1 defaults.
+These timing samples overlapped other validation and do not qualify a
+performance change; the provisional load/p95 targets remain open.
+
+Validation used private debug/release executables under `temp/ime_chinese/m2/`
+to preserve another task's shared Radiant executable. Their SHA-256 identities:
+
+- debug: `e85a5e36264422cc3ae427e498c8f8d4d55e8020b3ec558f038f2ffa53124e1f`.
+- release: `a22c0c8427d03494e24121d07785147d7ee54123f77e857fc727bbdf9d19dc6b`.
+
+Both used the generated build flags, recompiled `build_ast.cpp` and linked the
+existing objects into private targets. Native baseline test executables and
+their runtime archives were rebuilt separately. Input/Lambda execution uses
+the same baseline recipes in an isolated workspace with the private debug
+host; Test262 uses `LAMBDA_TEST262_EXE` to pin the private release host.
+
+Local evidence: `focused-{interp,jit}.log`, `gc-stress.log`,
+`qualification-{interp,jit}.json`, `tier-parity.json`, `prepare-tests.log`,
+`input-baseline.log`, `lambda-baseline.log`, `test262-baseline.log` and build
+logs under `temp/ime_chinese/m2/`. Test262 passes **40,261/40,261**, with no
+regressions or unstable batches. The Input/Lambda aggregate passes
+**8,248/8,248** (Input **2,112/2,112**, Lambda **6,136/6,136**), with final
+process exits of zero. The full-pack all-fuzzy session smoke also commits
+北京, learns its selection and promotes it on the next composition. The API
+document's two runnable blocks compile with no marker violations.
+
+## 5. Remaining work
 
 M1's functional engine and frozen baseline are implemented. The provisional
 performance targets remain open; this is not the M3 first release. M0 still
@@ -304,8 +396,285 @@ microbenchmarks distinct from the measured whole queries. A compressed-only
 resource loader and the proposed explicit Lambda `validate` API also remain
 open; full preparation validation is available in Python now.
 
-M2 adds session reduction, partial selection, paging, punctuation, Shift-tap
-mode switching, settings and the explicit user overlay. M3 adds queued
-composition transport, the native candidate popup, settings and the DOM
-adapter, then the Radiant UI and aggregate gates. OS-composition stand-down
-remains required.
+M2's session reducer, settings and explicit user overlay are implemented.
+M3 implements queued composition transport, the native candidate popup, settings
+and the DOM adapter, including OS-composition stand-down. M4 adds the
+Traditional profile and document selection; its evidence follows in §7.
+
+
+## 6. M3 Radiant integration
+
+**Scope and acceptance (2026-10-26):** IME-E1 deferred composition through the
+existing controller, IME-E2 native numbered popup/page indicator with click
+selection, and IME-E3 Chinese/English indicator plus window opt-in and document
+override (IME-O1/IME-O2). Input policy stays in `lambda.dom.ime` (D7.2.5),
+with a document-owned exact root for the opaque adapter value (D5.3.3).
+
+### 6.1 Implementation
+
+`lambda.dom.form` routes keydown/keyup, focus and native popup actions through
+`lambda.dom.ime`. The adapter loads the dictionary on first eligible focus,
+reuses it across the document's controls, applies live fuzzy/page preferences,
+and retains mode and learning across focus changes. The engine value belongs
+to its document runtime; it does not cross GC heaps (D5.4.1). Document
+`data-ime="chinese"` / `"off"` overrides the opt-in window setting exposed by
+`radiant.set_chinese_ime`. Native window state survives navigation; document
+sessions are released with their owning script runtime.
+
+`radiant/input_method.cpp` queues copied UTF-8 composition requests with
+validated `DomNodeRef` targets. Delivery begins after the requesting handler
+unwinds, with a bounded queue boundary for listener-enqueued work. Native
+code owns popup geometry, at most nine copied labels and hit testing; Lambda
+owns candidate selection, settings, mode and learning. Popup presses keep
+editing focus. An unprevented outside press cancels preedit, while an author
+toolbar can preserve focus through ordinary `mousedown.preventDefault()`.
+Target removal and document teardown release pending native requests/labels.
+An OS composition cancels any scripted provisional range before taking over;
+package keys pass through until that OS composition ends (IME10).
+
+The shared caret rectangle now converts block-local metrics to viewport
+coordinates for both native IME and popup placement. Shared keyboard dispatch
+retains printable keydown cancellation for the later character callback on
+text controls as well as rich surfaces, preventing duplicate Latin input.
+
+Rich composition exposed an existing undo defect: provisional updates became
+individual history entries. The package history now groups text/retained
+structural deltas, commits one undo entry, and replays cancellation to restore
+the original selection/content. The generic `dom.edit_sync_selection` waist
+copies an explicitly restored DOM Selection into the live edit capability so
+cached mutation coordinates cannot overwrite it. History policy remains in
+Lambda (D7.2.5); native code only replays opaque deltas and selection state.
+
+Forced GC then exposed a separate native event-construction defect: allocating
+a property name could collect the event/value or initialization record, so
+the first keyboard event sometimes had an empty type. A native regression
+failed before the fix. Event property writes and keyboard/composition/input
+construction now use precise roots across allocations (D5.3.3), and that
+regression passes alongside the existing focus/mouse lifetime regressions.
+No conservative stack scanning or vendor changes were introduced.
+
+### 6.2 Verification
+
+The verification budget uses focused causal UI fixtures and neighboring
+editing cases during implementation, then the Radiant baseline plus the
+Lambda/Input and Test262 gates for changed native DOM APIs. Private debug and
+release executables under `temp/ime_chinese/m3/` preserve the shared host used
+by concurrent work. The runner workspace points at that pinned debug host;
+native test archives/runners are rebuilt independently.
+
+The nine UI fixtures pass **65/65 assertions in each of interpreter and JIT**. They cover physical
+input/textarea/contenteditable typing, provisional text, commit, one-step
+undo/redo, selected-text cancellation, maxlength, OS stand-down and takeover,
+numbered popup selection, English/Chinese mode, live fuzzy/page settings,
+window/document precedence, focus changes and detached-target cleanup.
+Seven neighboring editing/IME UI fixtures pass. Popup, rich history and
+lifetime fixtures pass **21/21 assertions** with forced GC and freed-memory
+poisoning. The pure engine/session harness passes **16/16 in each tier**.
+The rendered preedit popup was inspected below the caret with numbered rows,
+a highlight and page indicator. The installed-pack demo is
+`./lambda.exe view test/demo/ime/chinese.ls`.
+
+The Radiant aggregate exits **1**: **6,188 passed, 141 partial, 2 skipped,
+1 failed**, from 6,332 results. All **692/692 UI cases** pass. The failure is
+`CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline`: jqueryui retains
+382,866 CSS-role bytes against a 373,940-byte budget; linuxmint retains
+668,675 against 667,901. The preserved pre-M3 M2 host reproduces the same
+initial/recascade counts with the same current harness. No baseline or
+threshold changed. Layout reports 3,157 full passes and 137 accepted partial
+results, with zero failures; visual rendering has four expected failures.
+The first sandboxed attempt was stopped after macOS application-service denial
+stalled native graphics; the recorded complete run used permitted host access.
+
+The static-module source inventory passes its scaffold checks. The legacy
+`check_dom_editable_architecture.py` audit still searches the retired
+`lambda/dom/edit_registry.ls` path instead of `lmd/package/dom/edit_registry.ls`
+and reports no owner. This unrelated checker was not changed; no five-DSO
+linker qualification is claimed.
+
+Input passes **2,112/2,112**. Lambda exits **1** with **6,136 passed,
+1 failed** (6,137 total), so their combined result is **8,248 passed,
+1 failed**. The failure is `JavaScriptTests/JsFileTest.Run/dom_media_playback`:
+the assertion `media.paused && media.currentTime > 0` after a 100 ms timer
+intermittently returns false. An alternating isolated run reproduces the same
+assertion on the preserved pre-M3 host. These are reported aggregate failures;
+later passing isolated runs do not replace the failed qualification. The
+native event regression passes as part of the **251/251** JS script tests.
+
+Test262 passes **40,261/40,261**, with no regressions or unstable batches,
+and exits zero. Alternating media controls pass 10/12 and fail 2/12 on each
+host; the aggregate remains reported as failed. The native transport-lifetime
+regression and the three native event-GC cases pass. Lint for Radiant integer
+casts and `git diff --check` pass. API document blocks have zero violations.
+The installed-pack demo passes its five preedit/commit/undo assertions; its
+rendered popup was inspected separately from the synthetic fixture.
+
+The complete local [validation manifest](../../temp/ime_chinese/m3/validation.json)
+records source/artifact hashes, executable identities, exact focused/aggregate
+counts, existing failures and excluded environment/early-link attempts. Logs,
+`focused-ui-final.json`, `gc-ui-final.json`, `radiant-summary.json`,
+`lambda-summary.json`, `media-paired.json`, `demo-preedit.png` and
+`preedit-final.png` are alongside it. The pinned debug executable SHA-256 is
+`9a8f9e27eae86ec6ee090b24cc710eff6ba39dc04f80fc80290c47d2d8bd0960`;
+release is `11e528e8bdc6d7dfd358b0a2a8b865921924abe1fa5823251cea937684a07d1f`.
+
+Run the currently qualified private host from the repository root:
+
+```sh
+./temp/ime_chinese/m3/lambda.exe view test/demo/ime/chinese.ls
+```
+
+M3's functional implementation is delivered. Its required aggregate gates are
+not fully green because of the two control-reproduced failures above; no
+whole-release or performance qualification is claimed.
+
+### 6.3 Remaining limits
+
+M3's native popup is qualified for top-level documents on macOS. Nested-frame
+popup placement, Windows/Linux platform runs and assistive-technology exposure
+are unqualified. Dictionary preparation remains explicit. Loading is reused
+per document runtime, so separate documents load their own GC-owned value.
+M0 retained-heap/compressed-only loading work, the provisional performance
+targets and future sentence conversion remain open. M4 Traditional is delivered
+in §7. M3 functional
+delivery does not establish completion of those broader release gates.
+
+
+## 7. M4 Traditional profile
+
+**Scope (2026-10-26):** IME11 / proposal §5.6. M4 adds a preparation-time
+Traditional profile to the existing pure engine and M3 adapter; no native
+engine code, pack-format version or formal ruling changes. Effects remain
+explicit procedures (S12.1.1v3, D7.1.2v2), word lengths remain code points
+(S2.5.8), and deterministic posting order uses S6.2.2v3.
+
+### 7.1 Conversion and installation
+
+The source lock pins OpenCC ver.1.4.2 at commit
+`025f371dc76b598d77384fbdab90c937471844d8`, with SHA-256 identities for
+STCharacters, STPhrases and its complete Apache-2.0 license. Only explicit
+`fetch --profile zh-Hant` acquires inputs. Preparation and validation are
+offline; the default Hans commands do not require OpenCC inputs.
+
+`TraditionalConverter` normalizes the tables to NFC, applies the longest
+phrase at each position, then uses every unresolved character alternative.
+Outputs are not converted recursively. Reading/weight pairs are inherited
+from the admitted Hans source; identical converted word/readings merge by
+maximum source weight. It never chooses a new pronunciation. Traditional
+character membership includes converted base characters and phrase-exception
+glyphs. Existing table writing, abbreviation top-K derivation, byte ordering,
+compression and full validation are shared by both profiles.
+
+The v1 manifest records conversion policy, source lexicon identity, expansion,
+merges, drops and exact OpenCC provenance. Full Traditional validation
+reconstructs the source conversion and checks exact forms/readings/weights,
+in addition to the existing syntax, counts, hashes and abbreviation invariants.
+A rehashed lexicon cannot silently lose an alternative or alter its reading or
+weight. This is Python preparation validation; the proposed explicit Lambda
+`pn validate(profile)` remains separate unfinished work. Normal loading still
+reads bytes/builds indexes without full validation.
+
+The installed pack has **234,399** lexicon postings: **11,351** character
+readings and **223,048** word readings. Conversion expands **17,164** ambiguous
+source postings, emits **234,585** postings before merging **186** collisions,
+and drops **zero** converted forms. Maximum expansion is **48** forms for one
+source posting. The profile character set contains **8,363** Han characters.
+The two table payloads total **10,151,251** bytes; XZ totals **3,026,368**.
+Bytes plus u32 offsets total **10,939,259**, excluding runtime/allocator overhead.
+
+`ime.load("zh-Hant")` discovers the installed profile alongside Hans. A host
+can choose `<body data-ime="chinese" data-ime-profile="zh-Hant">`; the demo
+has 简体/繁體 buttons. Changing profile/directory first loads the requested
+engine, cancels any old provisional range, then creates a fresh session.
+Committed document text stays as authored. Learned overlays remain explicitly
+saved, profile-specific values; switching never implicitly converts them.
+The native root remains opaque (D7.2.5 / D5.3.3).
+
+### 7.2 Quality report
+
+The checked-in [Traditional report](../../test/ime/quality_zh_hant.md) contains
+all 64 authored expected spellings/readings, per-case ranks, scope, source and
+pack identities, timings and reproducible commands. The first untuned profile
+run freezes `test/ime/baseline_zh_hant.json`; `--record-baseline` refuses an
+existing file. No profile-specific ranking parameters were changed.
+
+| Mode | Found | Top 1 | Top 3 | Top 9 | Truncated |
+|---|---:|---:|---:|---:|---:|
+| Full pinyin | 64/64 | 52/64 | 63/64 | 64/64 | 44/64 |
+| Orthographic initials | 64/64 | 22/64 | 35/64 | 50/64 | 64/64 |
+| All fuzzy pairs | 64/64 | 51/64 | 61/64 | 64/64 | 53/64 |
+
+Interpreter and JIT agree on **192/192** ranks, first words, weights,
+truncation and scan counts. The fresh Hans control agrees with the M2 reference
+on **192/192** corresponding results. Truncation is reported when a resource
+budget discards work, even when the expected word is present. These authored
+fixtures establish regression floors, not representative corpus quality.
+
+The pinned release host from M3 is unchanged. Its current samples are
+**343.37 ms** JIT load and **19.67 / 13.15 / 34.29 ms** query p95 for
+full/initials/all-fuzzy; interpreter load is **688.14 ms**. Process peak RSS
+is **209,616,896 / 172,343,296 bytes** for JIT/interpreter. These are query
+samples, not end-to-end key latency or retained-heap attribution. The
+provisional performance targets remain unmet; no cross-run improvement is claimed.
+
+### 7.3 Verification
+
+The finite verification budget covers offline conversion/provenance rejection,
+full-pack validation/rebuild, frozen ranks in both tiers, package/session
+goldens, Traditional UI/profile changes and M3 neighbors. Native code is
+unchanged; M3's pinned debug/release hosts and current native test runners are
+reused. Aggregate recipes run in the existing private workspace, preserving
+the shared root executable and unrelated dirty work.
+
+- **38/38** offline contracts pass; the original 26 remain covered once each.
+- The **32/32** independent authored conversion cases match, and **38/38**
+  expected target word/readings are present in the full pack.
+- Explicit full validation passes for both profiles. Independent Traditional
+  preparation is **6/6 byte-identical**. Hans tables remain **4/4 unchanged**;
+  its NOTICE also remains unchanged.
+- The focused package harness passes **17/17 in each tier**. New synthetic
+  Traditional goldens check exact/prefix/initials candidates, both 發/髮,
+  commit/learning and profile mismatch rejection without an installed full pack.
+- All ten IME UI fixtures pass **83/83 assertions per tier**, including
+  input/textarea/contenteditable, candidate clicks, undo and a profile change
+  while composing. Traditional UI passes **18/18** with forced GC plus freed
+  memory poisoning; the Traditional package golden also passes that mode.
+- The full installed-pack demo passes **8/8** profile-switch/preedit/commit/undo
+  assertions. Its Traditional popup rendering was inspected.
+- API document blocks and `git diff --check` pass.
+
+Fresh aggregate execution finishes with:
+
+| Gate | Passed | Partial | Skipped | Failed | Exit |
+|---|---:|---:|---:|---:|---:|
+| Radiant | 6,189 | 141 | 2 | 1 | 1 |
+| Input | 2,112 | 0 | 0 | 0 | 0 |
+| Lambda | 6,137 | 0 | 0 | 1 | 1 |
+
+Radiant passes all **693/693 UI cases**. The failures are the same CSS-memory
+budget and intermittent `dom_media_playback` 100 ms clock assertion recorded
+in §6.2, with the same actual/expected values. The pre-M3 control evidence is
+retained there; no test, baseline or threshold was changed to hide them.
+Input/Lambda combined records **8,249 passed, 1 failed**. Native host hashes
+remain exactly those qualified in M3; Test262's **40,261/40,261** evidence
+belongs to that unchanged native host and was not rerun for package/data work.
+
+The local [M4 validation manifest](../../temp/ime_chinese/m4/validation.json)
+records source/artifact/executable identities, all focused/aggregate counts,
+pack hashes, reproducibility and remaining limits. Detailed artifacts include
+`prepare-report.json`, `reproducibility.json`, `qualification-hant-jit-final.json`,
+`qualification-hant-interp.json`, `tier-parity.json`, `focused-ui.json`,
+`gc-ui.json`, aggregate summaries/logs and `traditional-demo.png`.
+
+The full installed pack is ready locally. Run
+`./temp/ime_chinese/m3/lambda.exe view test/demo/ime/chinese.ls` and select 繁體;
+no native rebuild is needed for this package/data milestone. M4's specified
+conversion fixtures and quality report are delivered; the broader release
+qualification remains limited by the aggregate failures and performance work.
+
+### 7.4 Remaining scope
+
+M4's Traditional pack and runtime selection are implemented. Regional variants
+(IME-O8), optional domain/scheme extensions, popup accessibility and sentence
+conversion remain deferred. M0 retained-heap attribution, compressed-only
+loading, explicit Lambda validation and performance targets remain open.
+Prepared full packs stay locally generated and gitignored per IME-O7.

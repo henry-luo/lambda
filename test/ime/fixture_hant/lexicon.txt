@@ -1,0 +1,16 @@
+1:fa	發 3000	髮 3000
+1:gan	乾 3000	幹 3000
+1:guo	國 3000
+1:tou	頭 3000
+1:zhong	中 3000
+2:bei'jing	北京 5000	背景 4900
+2:fa'zhan	發展 4700
+2:gan'bei	乾杯 4300
+2:hou'tai	後臺 4400
+2:huang'hou	皇后 4200
+2:li'fa	理髮 4200
+2:mian'tiao	麪條 4600
+2:ruan'jian	軟件 4600
+2:tou'fa	頭髮 4500
+2:zhong'guo	中國 5100
+3:gan'xi'bao	幹細胞 4800

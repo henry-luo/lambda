@@ -42,10 +42,19 @@ Item js_load_lambda_module(Runtime* runtime, const char* path) {
     js_event_loop_attach_lambda_scheduler();
     if (!module_register_loading_with_namespace_ops_for_runtime(runtime, filename, "lambda", NULL))
         return ItemError;
+#ifdef LAMBDA_NO_MIR
+    // the JS membrane calls Lambda exports through MIR-compiled entries; a
+    // T0-only build has no export path yet (vibe/Lambda_Design_Mobile.md MB5)
+    log_error("js-source-module: importing Lambda module %s needs MIR, which this build excludes",
+        filename);
+    return js_throw_reference_error(js_make_string(
+        "Importing a Lambda module from JavaScript is excluded from this build"));
+#else
     Script* script = load_script_mir_direct(runtime, filename, NULL, true);
     ModuleDescriptor* module = script ? module_get_for_runtime(runtime, script->reference) : NULL;
     return module && module->initialized ? module->namespace_obj
         : js_throw_reference_error(js_make_string("Cannot load Lambda module"));
+#endif
 }
 
 bool js_module_set_source_ops(const JsSourceModuleOps* ops, void* owner) {

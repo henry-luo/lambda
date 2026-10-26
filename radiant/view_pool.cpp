@@ -1,4 +1,5 @@
 #include "scene3d.hpp"
+#include "../lib/host_paths.h"
 #include "geomap.hpp"
 #include "layout.hpp"
 #include "css_resolved_style.hpp"
@@ -4009,7 +4010,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
     }
 #ifndef NDEBUG
     else {
-        write_string_to_file("./temp/view_tree.json", json_buf->str);
+        write_string_to_file(host_path_dir(HOST_PATH_TEMP, "view_tree.json"), json_buf->str);
     }
 #endif
     strbuf_free(json_buf);

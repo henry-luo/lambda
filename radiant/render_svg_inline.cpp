@@ -1,4 +1,5 @@
 #include "rdt_path_internal.hpp"
+#include "../lib/host_paths.h"
 #include "render_metrics.hpp"
 /**
  * render_svg_inline.cpp - Inline SVG Rendering via PaintIR/DisplayList
@@ -4176,7 +4177,7 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         uint64_t h = hash_fnv1a_64_cstr(comma + 1);
 
         char temp_path[512];
-        snprintf(temp_path, sizeof(temp_path), "./temp/lambda_font_%016llx.%s",
+        snprintf(temp_path, sizeof(temp_path), "%s/lambda_font_%016llx.%s", host_path(HOST_PATH_TEMP),
                  (unsigned long long)h, ext);
 
         // if file already exists (cached), use it directly

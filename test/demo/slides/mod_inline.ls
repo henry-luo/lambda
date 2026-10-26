@@ -54,7 +54,8 @@ on slide_inline_begin(evt) {
 on slide_inline_ready(evt) {
     if (evt.event_phase!=2 or draft==null or evt.detail!=draft.ready) { return 'pass' }
     let host = dom.get_element_by_id(evt.target,"canvas-rich-text")
-    controller.restore(editor)
+    // a staged bookmark restore would overwrite the entry click after this handler returns.
+    editor = edit_mount(editor,host,"html5_subset")
     dom.focus_set(host,false)
     if (draft.point!=null) place_caret(host,draft.point)
     else {

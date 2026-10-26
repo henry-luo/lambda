@@ -39,14 +39,18 @@ These edits participate in undo/redo and the existing `.slides` save/present pat
 
 - Select objects on the canvas or in the Format selection list, including
   objects inside groups. Drag to move; drag the corner handle to resize.
+  Standalone SVG graphics resize with their box during the drag, keeping their
+  `viewBox` and aspect-ratio settings. Thumbnails and presentation use the same sizing.
   The inspector edits position, size, rotation, opacity, colors and typography.
 - Double-click text, click an already selected text box again, or press F2/Enter
   with the canvas focused to edit in place. This also edits rich text, HTML cards
   and table cells while keeping their styles. Pointer entry places the caret at
-  the clicked text; F2/Enter starts at the end. Click outside, press Tab or
-  Ctrl/Cmd+Enter to finish; Escape cancels. Save/Open/Print shortcuts finish the
-  current edit first. Completed edits participate in Undo/Redo. The inspector
-  also exposes text and **Content (Mark)** for source editing.
+  the clicked text, including empty space beside a text row; F2/Enter starts at
+  the end. Finishing an unchanged edit or canceling restores the original card.
+  Click outside, press Tab or Ctrl/Cmd+Enter to finish; Escape cancels.
+  Save/Open/Print shortcuts finish the current edit first. Completed edits
+  participate in Undo/Redo. The inspector also exposes text and **Content (Mark)**
+  for source editing.
 - Right-click a thumbnail, or press Shift+F10 with it focused, for New Slide,
   Duplicate Slide, Delete Slide, Move Up/Down and Present from Here. Unavailable
   actions are disabled. Escape closes the menu and returns focus to the slide.

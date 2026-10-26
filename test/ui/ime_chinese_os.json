@@ -1,0 +1,114 @@
+{
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 800,
+    "height": 700
+  },
+  "name": "ime_chinese_os",
+  "events": [
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "ime_compose",
+      "phase": "begin"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "update",
+      "preedit": "にほ",
+      "caret": 2
+    },
+    {
+      "type": "key_press",
+      "key": "b"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "にほ"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "commit",
+      "commit": "日本"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "日本"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "日本"
+    },
+    {
+      "type": "key_press",
+      "key": "shift"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "x"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "日本x"
+    },
+    {
+      "type": "key_press",
+      "key": "shift"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "日本x北京"
+    }
+  ]
+}

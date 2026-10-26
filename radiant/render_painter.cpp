@@ -357,7 +357,11 @@ void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* 
 }
 
 void render_painter_fill_context_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color) {
-    const RdtMatrix* transform = render_state_current_transform(rdcon);
+    render_painter_fill_transformed_rect(rdcon, rect, color, render_state_current_transform(rdcon));
+}
+
+void render_painter_fill_transformed_rect(RasterRenderContext* rdcon, Rect* rect, uint32_t color,
+                                         const RdtMatrix* transform) {
     if (!transform) {
         render_painter_fill_surface_rect(rdcon, rdcon->ui_context->surface, rect, color,
             &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);

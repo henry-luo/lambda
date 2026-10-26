@@ -11,7 +11,7 @@ extern "C" {
 #include "../lib/log.h"
 }
 
-WebViewHandle* webview_platform_create(GLFWwindow* window,
+WebViewHandle* webview_platform_create(RadiantWindow* window,
                                        float x, float y, float w, float h,
                                        float device_scale) {
     (void)window; (void)x; (void)y; (void)w; (void)h; (void)device_scale;

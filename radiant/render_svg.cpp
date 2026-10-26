@@ -194,6 +194,13 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
             parent_elem, &run, {ctx->block.x, ctx->block.y, parent_elem->width, parent_elem->height})) {
         svg_lower_paint_list(ctx);
     }
+    // an inline element's own background and border, one box per fragment (as raster paints it)
+    if (parent_elem && !render_paint_text_inline_box(svg_active_paint_list(ctx), ctx->ui_context, parent_elem,
+            text_rect, ctx->block.x + text_rect->x, ctx->block.y + text_rect->y)) {
+        ctx->paint_svg_stats.unsupported_count++;
+        log_error("[SVG_INLINE_BOX] cannot record inline element box geometry");
+    }
+    svg_lower_paint_list(ctx);
     RenderTextDecorationSource decoration = {str, text_rect, ctx->block.x, ctx->block.y};
     if (has_text_shadow) {
         if (!render_paint_text_shadows(svg_active_paint_list(ctx), ctx->ui_context,

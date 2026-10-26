@@ -137,26 +137,18 @@ pub pn clear_typing_format(host) {
 
 // History is an opaque package value to native code. This single write keeps
 // every retained-delta update document-owned and transaction-reversible.
-pub pn set_history(host, history) {
+// Session fields share one immutable publication and generation increment.
+pn update_fields(host, fields) {
     let current = ensure(host);
     if (current == null) null
-    else dom.set_edit_session(host, {
-        *: current,
-        history: history,
-        generation: current.generation + 1
-    })
+    else dom.set_edit_session(host, {*:current,*:fields,generation:current.generation + 1})
 }
 
-// Replaying history restores the package-visible typing state alongside the
-// opaque stack move. Native code roots this whole value but never reads it
-// (D7.2.5, D5.3.3).
+pub pn set_history(host, history) { update_fields(host,{history:history}) }
 pub pn set_history_and_typing(host, history, typing_state) {
-    let current = ensure(host);
-    if (current == null) null
-    else dom.set_edit_session(host, {
-        *: current,
-        history: history,
-        typing_state: typing_state,
-        generation: current.generation + 1
-    })
+    update_fields(host,{history:history,typing_state:typing_state})
+}
+pub pn set_composition(host, composition) { update_fields(host,{composition:composition}) }
+pub pn set_history_and_composition(host, history, composition) {
+    update_fields(host,{history:history,composition:composition})
 }

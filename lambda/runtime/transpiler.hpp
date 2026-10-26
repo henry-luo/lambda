@@ -189,9 +189,9 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 
 // Lambda home: directory containing runtime assets (the package tree).
 // Default "./lmd" in both dev and release; override with LAMBDA_HOME env var.
-extern const char* g_lambda_home;
-void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)
-char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<rel>"; caller frees
+// the package tree is HOST_PATH_HOME: host_path_join(HOST_PATH_HOME, rel)
+#include "../../lib/host_paths.h"
+void lambda_home_init(void);    // call once at startup: host-path env overrides, TeX resources
 
 void* alloc_const(Transpiler* tp, size_t size);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
@@ -264,6 +264,9 @@ void jit_cleanup(MIR_context_t ctx);
 void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
+// Module-state instantiation from mir.c. It runs before execution and owns
+// the one-time slab allocation/root publication for a sealed module.
+bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list);
 }
 #endif
 
@@ -390,11 +393,18 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
+// Post-order walk of a script's import graph, root last; `visited` dedupes.
+void script_import_cone_postorder(Script* script, ArrayList* cone, ArrayList* visited);
+// The post-order import cone without its root: the order every tier
+// initializes modules in, so each initializer observes its dependencies.
+ArrayList* collect_import_cone(Script* main_script);
 void preserve_context_last_error(Item result);
 // The one writer of EvalContext::last_error: frees a replaced malloc-owned
 // error and keeps Heap::last_error_root naming a GC-heap one (LR10-10).
 void eval_context_set_last_error(EvalContext* ctx, LambdaError* error);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
+// Rewrites sys:// paths inside a script result to their resolved form.
+void resolve_sys_paths_recursive(Item item);
 void runtime_init(Runtime* runtime);
 void runtime_set_ui_result_input(Runtime* runtime, Input* input);
 // A runtime that outlives the documents it builds (a window's loader runtime)

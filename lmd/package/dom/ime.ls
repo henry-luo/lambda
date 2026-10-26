@@ -14,11 +14,14 @@
 // `insertFromComposition` and obeys the same newline and maxlength rules as
 // typing (F6).
 import dom
+import chinese: lambda.ime.chinese
 
 // A composition starting while another is still open means the previous one was
 // orphaned — the platform can drop a session without ending it. Begin from a
 // clean slate rather than appending to a stale preedit.
 pub pn begin(body) {
+    // an OS composition supersedes package key policy (IME10).
+    if (not dom.ime_status(body).scripted) { forget_preedit(body) }
     dom.clear_ime_preedit(body)
 }
 
@@ -41,4 +44,153 @@ pub pn update(body, evt, target) {
 // preedit stops being drawn. A commit's text lands through the applier.
 pub pn end(body) {
     dom.clear_ime_preedit(body)
+}
+
+
+// D7.2.5/IME-O1: the body adapter owns all key, settings and learning policy.
+fn is_enabled(body,status) bool {
+    let override = dom.get_attribute(body,"data-ime");
+    if (override == "off") false else if (override == "chinese") true else status.enabled
+}
+
+fn accepts(body,status) bool => is_enabled(body,status) and status.target != null and
+    not dom.get_state(status.target,"disabled") and not dom.get_state(status.target,"readonly")
+
+fn preferences(body) map^ {
+    let fuzzy = dom.get_attribute(body,"data-ime-fuzzy")
+    let size = dom.get_attribute(body,"data-ime-page-size");
+    {fuzzy:if (fuzzy == null or fuzzy == "") "none"
+        else if (fuzzy in ["none","all"]) fuzzy else split(fuzzy,","),
+        page_size:if (size == null) 9 else int(size)^}
+}
+
+fn reset(current) map^ {
+    let canceled = chinese.key(current.engine,current.session,{type:"keydown",key:"Escape"})^;
+    // focus changes cancel text, while mode, quote pairing, settings and learning stay document-owned.
+    {*:current,session:{*:canceled.session,shift_held:false,shift_tap:false},active:false}
+}
+
+pn emit_step(body,current,step) map {
+    var active = current.active;
+    for (action in step.actions) {
+        if (action.type == "compose" or action.type == "commit") {
+            if (not active) { dom.compose(current.target,"begin","",0) }
+            dom.compose(current.target,if (action.type == "compose") "update" else "commit",
+                action.text,if (action.type == "compose") action.caret else 0)
+            active = action.type == "compose"
+        } else if (action.type == "cancel") {
+            if (active) { dom.compose(current.target,"cancel","",0) }
+            active = false
+        } else if (action.type == "candidates") {
+            dom.ime_popup(current.target,action,step.session.mode)
+        }
+    }
+    let next = {*:current,session:step.session,active:active};
+    dom.set_ime_session(body,next)
+    next
+}
+
+pub pn forget_preedit(body) any^ {
+    let current = dom.ime_session(body);
+    if (current != null) { dom.set_ime_session(body,reset(current)^) }
+    dom.ime_popup(body,null,"off")
+}
+
+pn acquire(body,status) map^ {
+    let current = dom.ime_session(body)
+    let options = preferences(body)^
+    let directory = dom.get_attribute(body,"data-ime-directory")
+    let requested = dom.get_attribute(body,"data-ime-profile")
+    let profile = if (requested == null) "zh-Hans" else requested
+    let fresh = current == null or current.directory != directory or current.profile != profile
+    let engine = if (not fresh) current.engine
+        else chinese.load(profile,if (directory == null) null else {directory:directory})^;
+    // finish the old provisional range before a new profile can begin composing.
+    if (fresh and current != null) { focus_out(body)^ }
+    let session = if (fresh) chinese.session(engine,options)^ else current.session
+    let initial = if (fresh) {engine:engine,session:session,target:status.target,
+        active:false,directory:directory,profile:profile,options:options} else current
+    let moved = not dom.same_node(initial.target,status.target)
+    let next = if (moved) {*:reset(initial)^,target:status.target} else initial;
+    if (not fresh and options != next.options) {
+        let changed = chinese.configure(engine,next.session,options)^;
+        return emit_step(body,{*:next,options:options},changed)
+    }
+    dom.set_ime_session(body,next)
+    return next
+}
+
+pub pn key(body,evt) any^ {
+    let status = dom.ime_status(body);
+    if (not accepts(body,status)) {
+        focus_out(body)^
+        return 'pass'
+    }
+    if (status.active and not status.scripted) {
+        forget_preedit(body)^
+        return 'pass'
+    }
+    let current = acquire(body,status)^
+    let step = chinese.key(current.engine,current.session,evt)^
+    let next = emit_step(body,current,step);
+    if (any([for (action in step.actions) action.type == "pass"])) 'pass' else 'prevent-default'
+}
+
+pub pn focus_in(body) any^ {
+    let status = dom.ime_status(body);
+    if (not accepts(body,status)) { return focus_out(body)^ }
+    if (not status.active or status.scripted) {
+        let current = acquire(body,status)^;
+        if (not current.active) { dom.ime_popup(current.target,null,current.session.mode) }
+    }
+    return 'pass'
+}
+
+// Only the unprevented pointer default cancels; toolbar mousedown can preserve preedit.
+pub pn pointer_press(body) any^ {
+    let current = dom.ime_session(body);
+    if (current != null and current.active) { focus_out(body)^ }
+}
+
+pub pn focus_out(body) any^ {
+    let current = dom.ime_session(body);
+    if (current != null and (current.active or current.target != null)) {
+        if (current.active) { dom.compose(current.target,"cancel","",0) }
+        dom.set_ime_session(body,{*:reset(current)^,target:null})
+    }
+    dom.ime_popup(body,null,"off")
+    return 'pass'
+}
+
+pub pn popup_action(body,evt) any^ {
+    if (evt.command == "cancel") { return focus_out(body)^ }
+    if (evt.command == "toggle") {
+        key(body,{type:"keydown",key:"Shift"})^
+        return key(body,{type:"keyup",key:"Shift"})^
+    }
+    return key(body,{type:"keydown",key:string(evt.option_index + 1)})^
+}
+
+pub pn enable(body,enabled:bool) any^ {
+    dom.set_attribute(body,"data-ime",if (enabled) "chinese" else "off")
+    if (enabled) { return focus_in(body)^ }
+    return focus_out(body)^
+}
+
+pub pn configure(body,settings) any^ {
+    let status = dom.ime_status(body)
+    let current = acquire(body,status)^
+    let step = chinese.configure(current.engine,current.session,settings)^
+    let checked = chinese.settings(step.session)^
+    dom.set_attribute(body,"data-ime-fuzzy",if (len(checked.fuzzy) == 0) "none" else join(checked.fuzzy,","))
+    dom.set_attribute(body,"data-ime-page-size",string(checked.page_size))
+    return emit_step(body,{*:current,options:preferences(body)^},step)
+}
+
+pub fn session(body) => dom.ime_session(body).session
+
+pub pn with_user(body,user) any^ {
+    let current = acquire(body,dom.ime_status(body))^
+    let next = {*:current,session:chinese.with_user(current.session,user)^};
+    return dom.set_ime_session(body,next)
 }

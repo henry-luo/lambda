@@ -513,6 +513,15 @@ bool editing_geometry_hit_test_boundary(UiContext* uicon,
         hit = out->dom;
     } else {
         hit = dom_hit_test_to_boundary(root_view, vx, vy);
+        // keep explicit atom/empty-element boundaries; clamp other blank hits inside this editor.
+        bool element_hit = hit.node && hit.node->is_element() &&
+            view_geometry_dom_is_descendant(hit.node, surface->owner);
+        if (!element_hit && dom_range_find_text_edge_at(surface->owner, vx, vy,
+                editing_geometry_text_point, &text_hit) &&
+            editing_geometry_dom_text_boundary_from_point(uicon, text_hit.text, text_hit.rect,
+                vx, vy, out) && editing_geometry_surface_contains_boundary(surface, out)) {
+            hit = out->dom;
+        }
     }
     editing_boundary_clear(out);
     if (behavior == EDITING_POINT_BEHAVIOR_MAC && hit.node &&

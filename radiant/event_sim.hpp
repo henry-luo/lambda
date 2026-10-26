@@ -84,7 +84,7 @@
 #include "../lambda/input/css/css_environment.hpp"
 
 // Forward declarations
-struct GLFWwindow;
+struct RadiantWindow;
 struct Pool;
 struct Arena;
 struct EventSimRenderCommand;
@@ -125,6 +125,8 @@ enum SimEventType {
     SIM_EVENT_SET_PROMPT,      // seed the next window.prompt() response (or Cancel)
     // F7: IME composition
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
+    SIM_EVENT_IME_POPUP_CLICK, // physical click at a native popup row (-1: mode indicator)
+    SIM_EVENT_ASSERT_IME_POPUP,
     SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets
     SIM_EVENT_SET_EDITING_VALUE, // set live editing value for deterministic setup
     SIM_EVENT_SNAPSHOT_STATE_STORE, // capture DOM/ViewState binding for later comparison
@@ -197,10 +199,14 @@ struct SimEvent {
     int button;                  // mouse button (0=left, 1=right, 2=middle)
     int mods;                    // modifier keys (RDT_MOD_*)
     bool window_focused;         // native window_focus event state
-    int key;                     // GLFW key code
+    int key;                     // RdtKeyCode (GLFW numbering)
     int wait_ms;                 // wait duration in milliseconds
     int expected_view_type;      // for assertions
     int expected_char_offset;    // for assertions
+    int ime_popup_row;
+    int expected_ime_count;
+    int expected_ime_page;
+    int expected_ime_highlight;
     int expected_selection_end;  // for assert_form_selection
     bool expected_is_collapsed;  // for assertions
     bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)
@@ -505,7 +511,7 @@ void event_sim_free(EventSimContext* ctx);
 // Process next event if ready
 // Returns true if simulation is still running
 // uicon is cast to UiContext* internally
-bool event_sim_update(EventSimContext* ctx, void* uicon, GLFWwindow* window, double current_time);
+bool event_sim_update(EventSimContext* ctx, void* uicon, struct RadiantWindow* window, double current_time);
 
 // Headless hosts use these to wait on the JS loop until the next assertion
 // attempt, while waking early when an actual timer or task becomes ready.

@@ -602,26 +602,9 @@ static inline RdtMatrix rdt_matrix_translate(float tx, float ty) {
     return m;
 }
 
-#ifndef LAMBDA_HEADLESS
-// On macOS, explicitly include OpenGL headers before GLFW
-#ifdef __APPLE__
-#include <OpenGL/gl.h>
-#endif
-
-#include <GLFW/glfw3.h>
-
-// Windows OpenGL headers may not define these constants (they're from OpenGL 1.2+)
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
-#ifndef GL_CLAMP_TO_BORDER
-#define GL_CLAMP_TO_BORDER 0x812D
-#endif
-#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
-#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
-#endif
-
-#endif // LAMBDA_HEADLESS
+// The windowing library and GL stay inside the platform backend (MB7);
+// Radiant sources see only the seam's opaque handles.
+#include "platform.hpp"
 
 // Keep Radiant's historical unqualified helpers, but delegate the math to lib
 // so layout/render code does not carry a second implementation of these rules.
@@ -4520,7 +4503,7 @@ typedef struct {
     int cursor;  // current cursor style (CssEnum value)
     uint64_t cursor_image_hash;  // stable across relayout; never retains a style pointer
     bool cursor_image_ready;  // retry deferred image resources without rebuilding the fallback
-    GLFWcursor* sys_cursor;
+    RadiantCursor* sys_cursor;
 } MouseState;
 
 // Which application hosts the window. The edit application routes Escape to
@@ -4534,8 +4517,10 @@ typedef enum UiAppMode {
 #include "window_fullscreen.hpp"
 
 typedef struct UiContext {
-    GLFWwindow *window;    // current window
+    RadiantWindow *window;  // current window (platform.hpp)
     RadiantFullscreenState fullscreen; // window-owned; survives document navigation
+    bool chinese_ime_enabled; // opt-in window setting (IME-O2), preserved across navigation
+    uint32_t input_dispatch_depth;
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)

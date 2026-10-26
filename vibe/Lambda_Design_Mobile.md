@@ -1,6 +1,6 @@
 # Lambda and Radiant on iOS — Design Proposal
 
-**Date:** 2026-10-25 (rev 2)
+**Date:** 2026-10-26 (rev 6: host paths (MB13) done; the rest of P1.2 awaits Xcode)
 **Status:** **PROPOSAL — not ratified.** Nothing here revises an `S#`/`D#` ruling yet. §10 lists the spec changes this design would need; each needs a user ruling before it lands.
 **User direction (2026-10-25):** Phase 1 is a **developer-build MVP**: several simple demos running on the user's own iPhone, installed from Xcode. App Store distribution is out of phase 1. External Jube modules are deferred to a later phase. Phase 1 is specified in **§1** and overrides the full-port sections where they differ.
 **Design authority:** `doc/Lambda_Formal_Design.md` — D1.1, D1.3v3, D7.1.1, D7.1.4v2 (headless profile C), D7.1.6 (`lambda-cli`), **D7.1.7v6 (`lambda-wasm`, the no-JIT precedent)**, D8.1.1v18 (T0/AUTO tiering), D8.1.3v42 (LambdaJS AST interpreter), D8.5 (MIR cache), D4.5 (Radiant seam).
@@ -65,15 +65,15 @@ Every phase-1 demo already runs entirely in T0. Phase 1 therefore needs **no new
 
 ### 1.2 Scope cuts that make phase 1 small
 
-- **No JS (MB19).** None of the MB20 demos uses JS, and LambdaJS cannot build without MIR yet (§3.4). Phase 1 builds Radiant with `LAMBDA_NO_JS` and keeps MB4/MB5 for phase 2. This is a **new combination**: today `LAMBDA_NO_JS` is used only by the headless `cli` and `lambda-wasm` profiles, never with Radiant. Ten Radiant TUs include `lambda/js/` headers (`cmd_layout`, `event`, `event_sim`, `event_sim_render`, `layout_block`, `scene3d_physics`, `speech`, `script_runner`, `ui_context`, `window`), and Radiant/DOM have no `LAMBDA_NO_JS` guards. The cut follows the D7.1.6 pattern: page scripts and JS entry points fail with an explicit "excluded from this build" diagnostic, through `no_js_stubs.cpp` extended for Radiant's calls. Nothing is silently skipped.
-- **No external Jube modules.** This is the user's deferral. The **built-in static modules stay**: `import radiant` resolves to the static `radiant` Jube module (`radiant_jube_register_static`, `jube_registry.cpp:2249`; there is no `lmd/package/radiant`), and `dom` registers the same way. Only the dylib loader and the `modules/*` set are out. Today `LAMBDA_NO_JUBE` is used only by headless profiles. Phase 1 must check that it removes the dynamic loader without removing static registration. If it does not, the flag is split rather than the registry being stubbed.
+- **JS runtime stays; only its MIR code generation goes (MB22).** The first P1.0 build tried `LAMBDA_NO_JS` (MB19, now superseded, see Appendix S). The link showed why that cannot work: `lambda/dom` builds DOM objects (events, arrays, prototypes, typed arrays, private fields, error lanes) on the LambdaJS object-model kernels, so Lambda's own `import dom` needs the JS runtime even when no page script runs. Stubbing those ~146 kernels would break the Lambda demos. So the phase-1 build keeps the LambdaJS runtime and its AST interpreter and excludes only MIR, which pulls MB4 (§3.4) into phase 1. Page scripts are still not a phase-1 goal.
+- **No external Jube modules.** This is the user's deferral. The **built-in static modules stay**: `import radiant` resolves to the static `radiant` Jube module (`radiant_jube_register_static`, `jube_registry.cpp:2249`; there is no `lmd/package/radiant`), and `dom` registers the same way. Only the `modules/*` set is out. The Jube registry itself must stay: `lambda/dom` resolves interface types through it (`jube_type_has_interface`, `jube_iface_type_slot`). The dynamic loader can stay compiled as well, because `dlopen` exists on iOS and only refuses unsigned code, so a load failure is the ordinary explicit "module unavailable" path. Phase 1 therefore needs no Jube flag at all.
 - **No network.** The MB20 demos read only bundled files. If the wasm profile's `LAMBDA_NO_NETWORK` composes with Radiant, phase 1 drops curl, nghttp2 and mbedTLS from the iOS dependency build. If it does not compose cheaply, curl is linked and the TLS hook (§5.4, MB18) lands in phase 1 instead.
 - **No GPU content.** WebGL, canvas-GL and scene3d are excluded with diagnostics (§4.4 option 1).
 - **No App Store concerns.** §7 does not apply to phase 1. C2 still matters: a build launched from the home screen cannot JIT even though one under the Xcode debugger can. MB1's compile-time exclusion keeps both launches identical.
 
 ### 1.3 What phase 1 must build
 
-1. **The `lambda-nomir` desktop twin** (MB2), defined with `LAMBDA_NO_MIR` + `LAMBDA_NO_JS` + the dynamic-Jube cut. It is the cheapest place to shake out link errors in the new flag combination.
+1. **The `lambda-nomir` desktop twin** (MB2, MB22): exactly `lambda.exe` minus MIR. `make lambda-nomir` builds it from the `lambda-nomir` variant in `build_lambda_config.json`: `LAMBDA_NO_MIR`, no `libmir`, and the four MIR translation units excluded (`transpile-mir.cpp`, `runtime/mir.c`, `mir_dump.cpp`, `js/mvp-lmd/mvp_lmd_mir.cpp`). Progress is recorded in §1.7.
 2. **The platform seam** (MB7) and **tick inversion** (MB8), done on desktop first with no behavior change.
 3. **The iOS cross-build** (MB16) of only the libraries the phase-1 closure links: mpdecimal, utf8proc, fribidi, libuv, ThorVG (+ patches), Brotli, and the in-tree image codecs and miniaudio. zlib, bzip2 and iconv come from the SDK.
 4. **A minimal UIKit shell:**
@@ -102,14 +102,166 @@ The demos are designed for a desktop window (the UI tests use 900×1000 CSS px).
 
 | M | Deliverable | Acceptance |
 |---|---|---|
-| P1.0 | `lambda-nomir` desktop profile (MB2, MB19, the Jube cut) with GLFW Radiant | It links. The §1.1 UI scripts pass on it. `test-lambda-baseline` under T0 recorded (failures listed, not fixed, unless a phase-1 demo hits them). |
+| P1.0 | `lambda-nomir` desktop profile (MB2, MB22) with GLFW Radiant | It links. The §1.1 UI scripts pass on it. `test-lambda-baseline` under T0 recorded (failures listed, not fixed, unless a phase-1 demo hits them). |
 | P1.1 | Radiant platform seam + tick loop on desktop (MB7, MB8) | `test-radiant-baseline` 100%. The §1.1 UI scripts still pass. |
 | P1.2 | iOS cross-build + `Lambda.xcframework` + host paths (MB13, MB16) | `xcrun simctl spawn` runs a Lambda script and `test-lambda-baseline` in the simulator |
 | P1.3 | UIKit shell: present, display-link tick, touch, MB21 viewport, lifecycle | tetris plays by touch in the simulator. Background and return keeps the game. |
 | P1.4 | Fonts, `UIKeyInput`, safe area, demo picker | sentence-game and greetings run in the simulator. Switching demos 10× shows no growth in resident memory. |
 | P1.5 | Release dev build on the user's iPhone | The three core demos play smoothly on the device. Peak memory recorded against jetsam. The stretch demos are attempted, with their status recorded. |
 
-P1.0 and P1.1 need no iOS SDK. Phase 2 continues with the full-port milestones in §8, starting from JS (MB4, MB5) and the T0 gap closure (MB3).
+P1.0 and P1.1 need no iOS SDK.
+
+### 1.7 P1.0 result (2026-10-25 – 2026-10-26)
+
+**Lambda engine: links without MIR.** `LAMBDA_NO_MIR` had only ever been compiled by `lambda-wasm`, which also drops the resource cache, tasks and file IO. Keeping those exposed code that had drifted into MIR-only regions. Fixes, each at the boundary and not by stubbing:
+
+- `interp_poll_interrupt` (D8.1.1v17) was inside the `#ifndef LAMBDA_NO_MIR` region of `interp.cpp`, although T0 polls it in every profile. Moved out.
+- `lambda_script_cache_request` (the backend-neutral source/AST cache key, D8.5.1v4) and `lambda_finalize_ast_template_for_execution` (T0 activation of a cached AST template) were MIR-guarded in `runner.cpp`. Now only the AUTO fallback tail of the latter is guarded; a T0-only build refuses there like explicit `interp` (D8.1.1v15).
+- **The script run entry points lived in `transpile-mir.cpp`.** `run_script_mir`, its large-stack worker, `run_lambda_package_module` and the document-transform table and entries now sit in a new `lambda/runtime/script_run.cpp`; only their whole-module MIR branch is guarded. The wasm manifest does not list the new file, so that profile compiles exactly what it did before.
+- Two copies of the post-order import-cone walk and collector (`transpile-mir.cpp`, and `interp.cpp`, whose comment said it existed only because the original was static to the MIR file) became one shared `script_import_cone_postorder` / `collect_import_cone` in `runner.cpp` (AGENTS rule 13). Four hand-copied declarations of `prepare_context_module_state` became one in `transpiler.hpp`, beside the other `mir.c` exports.
+- MIR-only call sites are guarded with an explicit diagnostic where a user can reach them:
+  - `--mir-interp` logs "excluded from this build";
+  - JS importing a Lambda module throws "excluded from this build" (MB5);
+  - Lambda namespace registration for JS, satellite-image teardown, `execute_script_and_create_output` and the batch MIR error handler are compiled out with MIR.
+
+**LambdaJS: `mvp_lmd_mir.cpp` split (MB23).** That file was not only the MVP code generator. It also held MIR-free JS runtime used by the AST interpreter and the DOM: private internal names (RegExp iterators, URL records, PerformanceObserver), template-object ops, realm-library ambient state and its activation hook, `MvpLmdRealmScope`, and program/callable accessors. The split, by user ruling 2026-10-26:
+
+- `mvp-lmd/mvp_lmd_internal.h` holds the types both halves share: the include block, the `LmdKind`/`LmdIntrinsic` enums, the compiler-plan structs `MvpLmdProgram` embeds, `MvpLmdCode`/`Program`/`Execution`/`Realm`, and the intrinsic tables. MIR names appear there only as field types; a no-MIR build includes the in-tree MIR headers for those types and never links `libmir`.
+- `mvp-lmd/mvp_lmd_program.cpp` (≈450 lines) holds the MIR-free runtime: unit creation, reset, program/realm accessors, template-object ops, `object_create`, the realm-library thread-locals and ambient hook, internal names, `MvpLmdRealmScope`, function source/name, the realm-intrinsic predicates, and the dynamic-global entries.
+- `mvp_lmd_function_prepare` split along its own ABI gate. The shared half returns interpreter functions unchanged and rejects non-MVP ABIs, as before. MVP-callable materialization moved to `mvp_lmd_function_materialize` in the generator file.
+- Four entries that compile or plan through the generator stay in `mvp_lmd_mir.cpp`: `create_realm`, `prepare_module_realm`, `dynamic_import` and `dynamic_class`. They are reachable only from an MVP program, which a no-MIR build never creates (MVP library state is owned by a program, and only MIR instantiation creates one). In that build one guarded block in `mvp_lmd_program.cpp` defines them as explicit "MIR code generation is excluded" failures.
+- The JS selector forces `ast` and disables AUTO at compile time under `LAMBDA_NO_MIR` (`js_interp.hpp`, MB4). The MVP fallbacks and preamble images in `js_execution.cpp` and the MVP batch in `main.cpp` fail explicitly. The P2 promotion region of `js_interp.cpp` (admission scan, satellites, loop handoff) compiles to "never promotes" definitions, the JS counterpart of `INTERP_DISABLED_MIR_HOOK`.
+
+**Result.** `make lambda-nomir` links `lambda-nomir.exe` (27 MB debug) with **zero MIR symbols and no `pthread_jit_write_protect_np` reference**; `lambda.exe` has 143 MIR symbols. Every phase-1 demo script passes on it, headless, with `interp: fallback=0 excluded=0`:
+
+| Demo | Script | Result | Peak RSS |
+|---|---|---|---|
+| tetris | `test/ui/tetris_autoplay.json` | 12/12 | 148 MB |
+| superlambda | `test/ui/superlambda_autoplay.json` | 12/12 | 408 MB |
+| greetings | `test/ui/greetings/studio.json` | 34/34 | 206 MB |
+| draw | `test/ui/draw/smoke.json`, `gestures.json` | 3/3, 19/19 | 113 MB, 139 MB |
+| sentence-game | boot + 1.5 s + render | pass | 78 MB |
+
+Super Lambda's autoplay peak is the first input to the iOS memory budget (MB15).
+
+**Build gotcha found on the way.** Make does not track preprocessor defines. Changing a variant's `defines` in `build_lambda_config.json` leaves objects in `build/obj/<variant>` compiled under the old ones, and the link mixes them silently. Here `name_pool.cpp` kept its JS name catalog compiled out from an early `LAMBDA_NO_JS` attempt, so JS symbol keys failed to resolve at run time ("invalid virtual accessor descriptor") in a binary that linked cleanly. After editing a variant's defines, delete `build/obj/<variant>` before building.
+
+**Normal build unaffected.** `make build` passes. `make test-lambda-baseline` passes 8231/8232. The one miss, `JsFileTest.Run/dom_media_playback`, is the tracked `test/media` link not resolving inside a worktree; it passes with the link retargeted. A smoke run of the 40 import-using `test/lambda` goldens on `interp`, `auto` and `jit` gives 105/117 matches. The 12 misses are environmental (`binary_js_bridge`: no `node-core` dylib in the worktree) or the known T0 image-package gap (`lmd/package/image.ls` `INDEX_EXPR`; `image_paint`, `image_stroke_step` and `image_raster_equality` are missing from `interp_excluded.txt`). The `lambda-wasm` profile was not rebuilt (no Emscripten on this machine). After the JS split, `make test-lambda-baseline` again passes 8231/8232 with the same environmental miss, including the 847 JS MVP tests. The full Test262 corpus was not rerun.
+
+**T0 parity.** All 1694 `test/lambda` scripts with a golden were run on `lambda-nomir.exe` and on `lambda.exe` with `LAMBDA_EXEC_BACKEND=interp` (`temp/ios_mvp/parity.py`). **Every output is identical between the two (0 differences)**, so removing MIR changes no T0 behavior. Both binaries match the golden on the same 1001 scripts. The rest are this simple sweep's limits, not defects of either binary: procedural scripts need `run` mode, `.mac.txt` overrides are not applied, and the known T0 refusals (§3.3) apply.
+
+**Next.** P1.1 (the Radiant platform seam and tick loop on desktop) needs no iOS SDK. Phase 2 continues with the full-port milestones in §8, starting from the JS→Lambda T0 export path (MB5) and the T0 gap closure (MB3).
+
+
+### 1.8 P1.1 result (2026-10-26)
+
+**The platform seam (MB7) is `radiant/platform.hpp`.** Radiant sources name only `radiant_platform_*` functions and the opaque `RadiantWindow`/`RadiantCursor` handles. The groups are:
+
+- library lifetime, event pump and clock;
+- windows (create, show, focus, title, icon, sizes, content scale, focus/hover, native handle);
+- the `RadiantFullscreenBackend` operations;
+- host attachment, with input gated separately so a replayed event file owns the pointer;
+- pointer and cursors;
+- the plain-text clipboard;
+- presentation of the CPU surface.
+
+The backend reports translated `RdtEvent`s and window notifications through seven `radiant_host_*` functions defined by `window.cpp`. Host policy stays there: history keys, Escape-to-close, the close guard, click series, redraw.
+
+**One backend per build, chosen at link time.** No vtable is needed, because a desktop binary in headless mode is still the desktop backend: it opens a hidden window for webview/native-graphics tests.
+
+- `platform_glfw.cpp` is the desktop backend: GLFW windows and callbacks, the legacy-GL texture-blit present path (moved verbatim from `repaint_window`), GLFW cursors and clipboard, and the GLFW fullscreen read/apply.
+- `platform_null.cpp` replaces `headless.cpp` for `LAMBDA_NO_GUI`. It has the same "uninitialized library" contract, now behind Radiant's own API instead of stub definitions of GLFW and GL symbols.
+- A UIKit backend implements the same header in P1.3.
+
+**What changed outside the backend.**
+
+- **Key codes.** They are Radiant's own: `RdtKeyCode` (now the full key set, GLFW numbering) and `RdtMouseButton`. `static_assert`s in the GLFW backend keep translation the identity. `RDT_KEY_UNKNOWN = 0` stays Radiant's "no key" value; GLFW's `-1` is `RDT_KEY_UNRECOGNIZED`. `KeyEvent` gained `repeat`, so press-only host policy (Escape, history keys) no longer needs GLFW's action codes.
+- **Headers and state.** `view.hpp` no longer includes OpenGL or GLFW. `UiContext::window` and `MouseState::sys_cursor` use the seam's handles.
+- **Desktop natives.** The macOS/Windows IME shims, the child webviews and the app icon reach the native window through `radiant_ui_get_native_window` / `radiant_platform_native_window`.
+- **Clipboard.** `state_store.cpp`'s four copies of the non-Apple OS clipboard mirror became one helper pair on the seam.
+- **GLFW users left.** Outside `platform_glfw.cpp` there are three: `gl_core.cpp` (the self-contained desktop GPU-content backend, already off in no-GUI builds; MB-O2), the never-enabled `RADIANT_CLIPBOARD_GLFW` block in `clipboard.cpp`, and one scene3d unit test that observes `gl_core`'s context.
+
+**The tick (MB8).** The windowed viewer's loop body is now `radiant_window_tick(RadiantWindowLoop*)`, declared in `radiant.hpp`. Each turn it pumps platform events, JS timers and animation frames, replays simulated input, ticks animations, renders when dirty and reclaims retired storage, then returns how long the host may wait. The desktop loop is now "tick, then wait on the platform". A display-link host calls the same function. Splitting the viewer's setup and teardown into open/close entries an iOS shell can call is left to P1.3, where its first consumer arrives.
+
+**Pitfalls met.**
+
+- `glfw3native.h` pulls the Carbon/Win32 SDK headers into a `view.hpp` unit (Carbon's `Rect` collides with Radiant's). The backend declares GLFW's three native-access functions by their pointer-sized ABI instead.
+- `gl_core.cpp` had used `GL_ALIASED_POINT_SIZE_RANGE` from the legacy `gl.h` that `view.hpp` used to include; it now defines the constant itself.
+- The old `headless.cpp` also stubbed two macOS native companions (`radiant_ime_mac_attach`, `radiant_app_icon_mac_set`); they now sit in the null backend's native-companion block.
+
+**Verification.**
+
+| Check | Result |
+|---|---|
+| `make build` (desktop, GLFW backend) | links |
+| `make build-headless` (null backend) | links; **zero GLFW and OpenGL symbols** in `lambda-headless.exe`. It renders `tetris.ls` to a PNG byte-identical to `lambda.exe`'s. |
+| `make lambda-nomir` | links |
+| Phase-1 demo scripts, headless | all pass, as before |
+| Phase-1 demo scripts in a real window (event simulation drives the windowed loop) | identical to the pre-change baseline taken in the same worktree: Greetings 34/34, Tetris and Super Lambda exit 0, Draw gestures 17/19. The same two Draw assertions fail before and after: a range value 460 for 450 and a zoom label 75% for 83%, apparently real-window sizing differences. Recorded, not part of P1.1. |
+| `make test-radiant-baseline` | 6177 passed, 1 failed: `CssCascadeMemory.PageLoadAndRecascadeStayWithinBaseline` (CSS live bytes 383,690 against a 373,940 budget). An A/B in this worktree, with the P1 changes set aside and the test rebuilt at the base commit (origin/master 5658e5d55), fails with **the same byte counts**. It is pre-existing on origin/master: the baseline file was last updated 2026-10-22, before later CSS-touching commits. |
+| `make lint ARGS='--rule ^no-int-cast-radiant$'` | no violations |
+
+Not verified: the Linux and Windows builds. The X11/Win32 native-window branches and the webview/IME edits for those platforms are written but uncompiled here.
+
+
+### 1.9 P1.2, SDK-independent part: host paths (2026-10-26)
+
+P1.2's cross-build needs Xcode, which this machine does not have yet. The host-paths half of P1.2 (MB13) needs no SDK and is done.
+
+**`lib/host_paths.h`** holds five base directories:
+
+| Kind | Default (desktop, unchanged) | Override | Holds |
+|---|---|---|---|
+| `HOST_PATH_HOME` | `./lmd` | `LAMBDA_HOME` | the read-only package tree |
+| `HOST_PATH_CACHE` | `./temp` | `LAMBDA_CACHE_DIR` | `cache/` (HTTP and Radiant state), `radiant_cache/` |
+| `HOST_PATH_TEMP` | `./temp` | `LAMBDA_TEMP_DIR` | `io` temp files and directories, downloads, developer dumps (MIR dump, profiles, event/state logs, `--mem-dump`) |
+| `HOST_PATH_LOG` | `.` | `LAMBDA_LOG_DIR` | `log.conf` and its relative outputs (`log.txt`) |
+| `HOST_PATH_DOCUMENTS` | `.` | `LAMBDA_DOCUMENTS_DIR` | user documents (first consumer: the iOS demo picker, P1.4) |
+
+The API has five calls:
+
+- `host_paths_set` is for an embedding host, called before start-up;
+- `host_path` returns a base;
+- `host_path_join` returns a caller-owned `<base>/<rel>`;
+- `host_path_dir` returns a stable `<base>/<rel>` for long-lived directory strings;
+- `host_path_ensure` creates a base.
+
+What changed around it:
+
+- **Package home.** It replaces `g_lambda_home`/`lambda_home_path` outright: `lambda_home_init` now just applies the environment overrides.
+- **Logging.** `lib/log.c` gained `log_set_output_dir`, which resolves relative config outputs against the log directory, and `log_reload_config_in_dir`. The latter replaces two copied "empty `log.txt`, parse `log.conf`" blocks in Radiant. `log.c` itself takes no new dependency: the 19 test targets that hand-list it are untouched.
+- **Call sites.** About 35 sites moved: cache roots (14), temp files and developer dumps, and the log configuration.
+- **Left alone on purpose:**
+  - `sys.home`/`sys.temp`, which report the OS directories (iOS maps both into the sandbox);
+  - the `temp:` path scheme and other `"temp"` names;
+  - the event-file harness's rule that fixtures write only under the repo's `temp/`;
+  - `test_output/` dumps;
+  - the npm installer's project-local `.lambda/` (deferred with Jube);
+  - the unbuilt `font_config.c`.
+- **Wasm.** The manifest gained `lib/host_paths.c`, with environment lookups and directory creation guarded by `LAMBDA_NO_AMBIENT_PROVIDERS` / `LAMBDA_NO_FILE_IO`, following the existing convention. It was not rebuilt; there is no Emscripten here.
+
+**Pitfall found by the gates: process-lifetime strings must not use the tracked heap.** The first version kept the bases and memoized `host_path_dir` strings in `mem_*` allocations. Two things went wrong:
+
+- At exit they showed up as live bytes, failing every `[MEMTRACK_LIVE] bytes=0` check (the GC-stress sweep and the Radiant view tests).
+- Freeing them in a teardown hook crashed (SIGTRAP in `free`). `memtrack` keys tracking on a thread-local flag, so a string first allocated on an untracked network thread is a raw `malloc` without a header. Freed on the tracked main thread, `mem_free` reads a header that isn't there.
+
+The fix is static storage for the bases and the memo table: there is no heap, no teardown, and it is the same whichever thread asks first. Only `host_path_join` allocates, and its caller frees on the same thread.
+
+**Verification.**
+
+- **From an empty foreign working directory with all five bases redirected:**
+  - three package-importing goldens match;
+  - the Tetris UI script passes 12/12;
+  - **nothing is written to the working directory**;
+  - `log.txt`, the MIR dump, the phase profile, the memory snapshot and Radiant's state database land in the redirected directories.
+- **The pre-change binary, same setup:** it writes `temp/` (MIR dump, cache database, profile, snapshot) into the working directory and never finds the log configuration.
+- **Gates.** `make test-lambda-baseline` passes 8232/8232. `make test-radiant-baseline` passes 6177; its one failure is the pre-existing `CssCascadeMemory` budget, with byte counts identical to the base commit.
+
+**Next.** The rest of P1.2 needs Xcode and an iOS simulator runtime:
+
+- cross-built dependencies;
+- the iOS platform block and `Lambda.xcframework`;
+- `simctl spawn` of the Lambda baseline.
 
 ## 2. iOS platform constraints
 
@@ -495,7 +647,9 @@ M0–M3 need no iOS SDK and can proceed in parallel with dependency cross-buildi
 | MB16 | An iOS platform block in `build_lambda_config.json` emits a `Lambda.xcframework`; a thin Xcode shell lives in `platform/ios/` | 6.1 |
 | MB17 | Radiant renders app-owned documents; arbitrary web navigation goes to WebKit | 7.2 |
 | MB18 | TLS on iOS: the OS evaluates each presented chain (`SecTrustEvaluateWithError`) behind the existing `curl_trust_ssl_ctx` hook; no bundled CA set | 5.4 |
-| MB19 | Phase 1 builds Radiant with `LAMBDA_NO_JS`; JS calls fail with an explicit exclusion diagnostic | 1.2 |
+| ~~MB19~~ | ~~Phase 1 builds Radiant with `LAMBDA_NO_JS`~~ — superseded by MB22 (Appendix S) | 1.2 |
+| MB23 | `mvp_lmd_mir.cpp` is split: shared types in `mvp_lmd_internal.h`, MIR-free program/realm runtime in `mvp_lmd_program.cpp`; the no-MIR build drops the generator file whole (user ruling 2026-10-26) | 1.7 |
+| MB22 | The phase-1 build is `lambda.exe` minus MIR: the LambdaJS runtime and AST interpreter stay, because the DOM is built on the JS object model; only MIR code generation is excluded | 1.2 |
 | MB20 | Phase-1 demo set: tetris, sentence-game, greetings (core); draw, superlambda (stretch) | 1.1 |
 | MB21 | A document without a `viewport` meta lays out at a 1024 CSS px layout viewport scaled to fit, with pinch-zoom | 1.4 |
 
@@ -518,6 +672,10 @@ If this design is accepted, these formal-spec changes would follow. **None is ma
 - **D7.1.4v2.** Generalize "null windowing backend in place of GLFW" to "a windowing backend" (MB7), with the null backend one implementation among GLFW and UIKit.
 - **D8.1.1 and D8.1.3.** Note that under a no-MIR profile, AUTO's fallback paths do not exist and refusal is the only outcome (already true for Lambda per D8.1.1v15; new for JS via MB4). Record MB5's T0 export path for JS→Lambda imports.
 - **D4.5 (Radiant seam).** If MB8's tick inversion changes ownership of the event loop between rt and radiant, D4.5 records it.
+
+## Appendix S — Superseded rulings
+
+- ~~**MB19** (rev 2, 2026-10-25): phase 1 builds Radiant with `LAMBDA_NO_JS`, stubbing JS entry points through an extended `no_js_stubs.cpp`.~~ Superseded the same day by **MB22**. The first P1.0 link showed `lambda/dom` is built on the LambdaJS object model, so the JS runtime cannot leave a build that keeps the DOM (§1.2, §1.7).
 
 ## Appendix A — Rejected alternatives
 

@@ -1,6 +1,5 @@
 #if defined(__linux__)
 
-#include <GLFW/glfw3.h>
 #include "webview_handle_linux.h"
 
 #include <stdlib.h>

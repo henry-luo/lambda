@@ -1,0 +1,992 @@
+{
+  "name": "Slides: editable market cards, blank-space caret, no-op/cancel visibility, pixels, repeated sessions and save/open",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"3\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "script",
+      "js": "window.totalSource=document.querySelector('#slide-render [data-slide-object=market-total]');window.focusSource=document.querySelector('#slide-render [data-slide-object=market-focus]');window.caretInCard=()=>{const h=document.querySelector('#canvas-rich-text'),s=getSelection();return s.anchorNode&&h.contains(s.anchorNode)&&s.focusNode&&h.contains(s.focusNode)}"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "original-cards"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "caretInCard()"
+    },
+    {
+      "type": "assert_script",
+      "js": "getSelection().anchorNode.textContent==='$4.8bn'&&getSelection().anchorOffset===6"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#canvas-rich-text').style.caretColor='#ff00ff'"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        701,
+        398,
+        396,
+        125
+      ],
+      "rgba": [
+        [
+          180,
+          255
+        ],
+        [
+          0,
+          40
+        ],
+        [
+          180,
+          255
+        ]
+      ],
+      "count": {
+        "min": 10
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        701,
+        532,
+        396,
+        132
+      ],
+      "rgba": [
+        [
+          180,
+          255
+        ],
+        [
+          0,
+          40
+        ],
+        [
+          180,
+          255
+        ]
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=market-total]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=market-focus]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_surface",
+      "reference": "original-cards",
+      "region": [
+        701,
+        398,
+        396,
+        266
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render [data-slide-object=market-total]')===totalSource"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "caretInCard()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=market-total]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=market-focus]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_surface",
+      "reference": "original-cards",
+      "region": [
+        701,
+        398,
+        396,
+        266
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render [data-slide-object=market-focus]')===focusSource"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": "X"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "contains": "$4.8bnX"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_surface",
+      "reference": "original-cards",
+      "region": [
+        701,
+        398,
+        396,
+        266
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=headline]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_surface",
+      "reference": "original-cards",
+      "region": [
+        701,
+        398,
+        396,
+        266
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": "!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "contains": "$4.8bn!"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      },
+      "contains": "$4.8bn!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-focus]"
+      },
+      "contains": "2,400 accounts"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=market-total]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#slide-render [data-slide-object=market-focus]\").style.visibility!==\"hidden\""
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        400,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        540,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-undo",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#slide-render [data-slide-object=market-total] div')).some(e=>e.textContent==='$4.8bn!'&&e.style.fontSize==='48px')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      },
+      "contains": "$4.8bn"
+    },
+    {
+      "type": "assert_surface",
+      "reference": "original-cards",
+      "region": [
+        701,
+        398,
+        396,
+        266
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-redo"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      },
+      "contains": "$4.8bn!"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        400,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-focus]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "caretInCard()"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "text": "!"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-focus]"
+      },
+      "contains": "2,400 accounts!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      },
+      "contains": "$4.8bn!"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        400,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        540,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#slide-render [data-slide-object=market-focus] div')).some(e=>e.textContent==='2,400 accounts!'&&e.style.fontSize==='34px')"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        400,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        540,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "s",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/edited-cards.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/edited-cards.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"3\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      },
+      "contains": "$4.8bn!"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-focus]"
+      },
+      "contains": "2,400 accounts!"
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        400,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        540,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-total]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 60,
+      "steps": 3
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-rich-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "caretInCard()"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas-rich-text"
+      },
+      "contains": "$4.8bn"
+    },
+    {
+      "type": "key_combo",
+      "key": "enter",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        400,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_surface",
+      "region": [
+        704,
+        540,
+        390,
+        119
+      ],
+      "rgba": [
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ],
+        [
+          250,
+          255
+        ]
+      ],
+      "count": {
+        "min": 25000
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=market-focus]"
+      },
+      "contains": "2,400 accounts!"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

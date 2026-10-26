@@ -14,9 +14,6 @@
 #include <windows.h>
 #include <imm.h>
 
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -35,7 +32,8 @@ struct DocState;
 class DomElement;
 class View;
 
-extern "C" GLFWwindow*   radiant_ui_get_glfw_window(struct UiContext*);
+extern "C" void*         radiant_ui_get_native_window(struct UiContext*);
+extern "C" void          radiant_ui_get_content_scale(struct UiContext*, float* x, float* y);
 extern "C" DocState* radiant_ui_get_state(struct UiContext*);
 extern "C" bool radiant_dispatch_editing_composition_event(struct UiContext*,
                                                            EventType,
@@ -87,11 +85,10 @@ void ime_update_candidate_window(HWND hwnd, HIMC himc) {
     memset(&form, 0, sizeof(form));
     form.dwIndex = 0;
     form.dwStyle = CFS_CANDIDATEPOS;
-    // glfw supplies window DPI scale on the Windows 8 target, where GetDpiForWindow is absent.
+    // the backend supplies window DPI scale on the Windows 8 target, where GetDpiForWindow is absent.
     float scale_x = 1.0f;
     float scale_y = 1.0f;
-    GLFWwindow* window = radiant_ui_get_glfw_window(g_ime_uicon);
-    if (window) glfwGetWindowContentScale(window, &scale_x, &scale_y);
+    radiant_ui_get_content_scale(g_ime_uicon, &scale_x, &scale_y);
     RdtHostRect host = rdt_logical_to_host_rect(
         {x, y, w, h}, {scale_x, scale_y, 0.0f, RDT_HOST_Y_DOWN});
     form.ptCurrentPos.x = (LONG)lroundf(host.x);  // discrete Win32 client coordinate
@@ -194,18 +191,12 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 extern "C" void radiant_ime_win_attach(struct UiContext* uicon) {
     if (!uicon) return;
     g_ime_uicon = uicon;
-    GLFWwindow* glfw_win = radiant_ui_get_glfw_window(uicon);
-    if (!glfw_win) return;
-
-    HWND hwnd = glfwGetWin32Window(glfw_win);
-    if (!hwnd) {
-        log_error("[IME win] glfwGetWin32Window returned NULL");
-        return;
-    }
+    HWND hwnd = (HWND)radiant_ui_get_native_window(uicon);
+    if (!hwnd) return;  // headless, or no window yet
     if (g_orig_wndproc) return; // already attached
     g_orig_wndproc = (WNDPROC)SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
                                                 (LONG_PTR)ime_wndproc);
-    log_info("[IME win] attached IME shim to GLFW HWND");
+    log_info("[IME win] attached IME shim to the host HWND");
 }
 
 #else // !_WIN32

@@ -16,6 +16,8 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-text { width: 100%; height: 100%; white-space: pre-wrap; }
 .slide-text p { margin: 0 0 0.6em; }
 .slide-image { width: 100%; height: 100%; }
+/* a standalone vector graphic uses the object's viewport while retaining its authored viewBox. */
+.slide-graphic > svg { display: block; width: 100%; height: 100%; }
 .slide-controls { position: relative; display: flex; align-items: center; flex-wrap: nowrap; height: 52px; box-sizing: border-box;
     gap: 8px; padding: 8px 12px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
 .slide-controls button, .slide-console button, .slide-overview button { appearance: none; box-sizing: border-box; font-family: inherit;
@@ -158,13 +160,14 @@ fn render_object(obj, visuals, instance, theme) {
     let v = matches[0]
     let hidden = v.visible < 0.5 or v.opacity <= 0.0
     let position = placement_style(obj)
+    let standalone_svg = obj.tag == 'content' and len(content(obj.source)) == 1 and name(content(obj.source)[0]) == 'svg'
     // percentage-sized SVG/images need definite bounds; groups also anchor local children.
     let content_style = "width:100%;height:100%;" ++ (if (obj.tag == 'group') "position:relative;" else "") ++
         c.as_text(c.value(obj.source.style, ""));
     <div id: instance ++ "-place-" ++ obj.dom_key, class: "slide-object", style: position,
         <div id: instance ++ "-" ++ obj.dom_key, class: "slide-effect", style: effect_style(v),
             ["data-slide-object"]: obj.id, ["aria-hidden"]: if (hidden) "true" else "false", *: (if (hidden) {inert: ""} else {}),
-            <div class: c.as_text(c.value(obj.source.class, "")), style: content_style,
+            <div class: (if (standalone_svg) "slide-graphic " else "") ++ c.as_text(c.value(obj.source.class, "")), style: content_style,
                 object_content(obj, v, visuals, instance, theme)
             >
         >

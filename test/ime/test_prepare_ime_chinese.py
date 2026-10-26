@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "utils"))
 import prepare_ime_chinese as ime
 
 
-class PrepareChineseTests(unittest.TestCase):
+class PackFixture(unittest.TestCase):
     def setUp(self):
         (ROOT / "temp").mkdir(exist_ok=True)
         self.scratch = tempfile.TemporaryDirectory(prefix="ime-contract-", dir=ROOT / "temp")
@@ -61,6 +61,8 @@ class PrepareChineseTests(unittest.TestCase):
     def lexicon(self):
         return (self.directory / "lexicon.txt").read_bytes()
 
+
+class PrepareChineseTests(PackFixture):
     def test_fixture_pack_passes(self):
         self.assertEqual(self.validate(), {"ok": True, "errors": []})
 
@@ -222,6 +224,123 @@ class PrepareChineseTests(unittest.TestCase):
                 "phrase": [], "hanlp": [], "jieba_freq": {"北京": 10}, "hanlp_freq": {}}
         entries, _, _ = ime.assemble(data, "phrase", self.syllables, self.chars, self.han, self.scales)
         self.assertNotIn(("北京", ("bei", "jing")), entries)
+
+
+class TraditionalConversionTests(PackFixture):
+    def setUp(self):
+        super().setUp()
+        self.opencc = {
+            "STCharacters.txt": "# authored fixture\n发\t發 髮\n头\t頭\n干\t幹 乾 干\n国\t國\n髮\t發\n".encode(),
+            "STPhrases.txt": "头发\t頭髮\n头发长\t頭髮長\n干杯\t乾杯\n皇后\t皇后\n".encode(),
+            "LICENSE": b"Authored OpenCC-format fixture (MIT)"}
+        self.converter = ime.TraditionalConverter(self.opencc)
+        self.base = {("发", ("fa",)): 100, ("髮", ("fa",)): 200,
+                     ("头发", ("tou", "fa")): 1000, ("干杯", ("gan", "bei")): 900,
+                     ("中国", ("zhong", "guo")): 700}
+        self.base_chars = set("".join(word for word, _ in self.base)) | set("干杯皇后长")
+        self.trad_chars = self.converter.character_set(self.base_chars,self.han)
+        self.converted,self.conversion = ime.traditional_entries(
+            self.base,self.converter,self.syllables,self.trad_chars,self.han)
+        self.sources["opencc"] = self.opencc
+        self.lock["sources"]["opencc"] = {"license":"MIT","revision":"authored-fixture",
+            "provenance_flags":[],"files":{}}
+
+    def traditional_pack(self):
+        self.manifest = ime.write_pack(self.directory,self.converted,{}, {},"aosp",1,
+            self.scales,self.trad_chars,self.sources,self.lock,"zh-Hant",self.conversion)
+
+    def validate_traditional(self):
+        return ime.validate_pack(self.directory,self.syllables,self.trad_chars,self.han,
+            self.lock,self.converted,self.conversion)
+
+    def test_longest_phrase_precedes_character_alternatives(self):
+        self.assertEqual(self.converter.forms("头发长"),("頭髮長",))
+        self.assertEqual(self.converter.forms("头发中国"),("頭髮中國",))
+        self.assertEqual(self.converter.forms("干杯"),("乾杯",))
+        self.assertEqual(self.converter.forms("皇后"),("皇后",))
+        self.assertIn("長",self.trad_chars)  # the phrase introduces a glyph absent from character fallback.
+
+    def test_all_fallback_combinations_and_identity(self):
+        self.assertEqual(set(self.converter.forms("发干")),
+            {a+b for a in ("發","髮") for b in ("幹","乾","干")})
+        self.assertEqual(self.converter.forms("北京"),("北京",))
+        self.assertEqual(self.converter.forms("发"),("發","髮"))
+        # Conversion is one pass: the target 髮 must not become 發 a second time.
+        self.assertEqual(self.converter.forms("头发"),("頭髮",))
+
+    def test_collision_weights_and_readings_are_preserved(self):
+        self.assertEqual(self.converted[("發",("fa",))],200)
+        self.assertEqual(self.converted[("髮",("fa",))],100)
+        self.assertEqual(self.converted[("頭髮",("tou","fa"))],1000)
+        self.assertEqual(self.conversion["merged_postings"],1)
+        self.assertNotIn(("頭發",("tou","fa")),self.converted)
+        self.assertEqual(self.conversion["source_postings"],len(self.base))
+
+    def test_polyphonic_readings_remain_distinct(self):
+        source={("发",("fa",)):10,("发",("ba",)):20}
+        entries,_=ime.traditional_entries(source,self.converter,self.syllables,self.trad_chars,self.han)
+        self.assertEqual(len(entries),4)
+        self.assertEqual(entries[("髮",("ba",))],20)
+
+    def test_nfc_variants_merge_without_losing_alternatives(self):
+        source={"STCharacters.txt":"发\t發 髮 髮\n豈\t豈\n".encode(),
+                "STPhrases.txt":"头发\t頭髮\n".encode()}
+        converter=ime.TraditionalConverter(source)
+        self.assertEqual(converter.forms("发"),("發","髮"))
+        self.assertEqual(converter.forms("豈"),("豈",))
+
+    def test_malformed_opencc_rows_are_rejected(self):
+        for raw in (b"",b"a b\tc\n",b"a\tb\na\tc\n",b"a\t\n",b"a\tb  c\n",b"a b c\n",b"\xff"):
+            with self.subTest(raw=raw), self.assertRaises((ValueError,UnicodeDecodeError)):
+                ime.TraditionalConverter({**self.opencc,"STPhrases.txt":raw})
+        with self.assertRaisesRegex(ValueError,"one code point"):
+            ime.TraditionalConverter({**self.opencc,"STCharacters.txt":"发\t發展\n".encode()})
+
+    def test_invalid_conversion_outputs_are_counted(self):
+        converter=ime.TraditionalConverter({**self.opencc,"STPhrases.txt":"头发\t頭髮 發 A字\n".encode()})
+        chars=converter.character_set(self.base_chars,self.han)
+        entries,report=ime.traditional_entries({("头发",("tou","fa")):100},converter,self.syllables,chars,self.han)
+        self.assertEqual(entries,{("頭髮",("tou","fa")):100})
+        self.assertEqual(report["dropped"],{"syllable_count":1,"non_han":1})
+
+    def test_traditional_pack_has_derived_abbreviations_and_notice(self):
+        self.traditional_pack()
+        self.assertEqual(self.validate_traditional(),{"ok":True,"errors":[]})
+        self.assertIn("頭髮 tou'fa 1000".encode(),(self.directory/"abbrev.txt").read_bytes())
+        self.assertIn(self.opencc["LICENSE"],(self.directory/"NOTICE.txt").read_bytes())
+        self.assertEqual(self.manifest["profile"],"zh-Hant")
+        self.assertEqual(self.manifest["script"],"Hant")
+        other=self.directory/"traditional-rebuild"
+        ime.write_pack(other,dict(reversed(list(self.converted.items()))),{}, {},"aosp",1,
+            self.scales,self.trad_chars,self.sources,self.lock,"zh-Hant",self.conversion)
+        self.assertEqual({p.name:p.read_bytes() for p in other.iterdir()},
+            {p.name:p.read_bytes() for p in self.directory.iterdir() if p.is_file()})
+
+    def test_rehashed_traditional_weight_change_is_rejected(self):
+        self.traditional_pack()
+        self.mutate_table("lexicon",self.lexicon().replace(b"1000",b"999"))
+        self.assertIn("differs from source conversion","\n".join(self.validate_traditional()["errors"]))
+
+    def test_missing_alternative_or_changed_reading_is_rejected(self):
+        for before,after in (("\t髮 100", ""),("1:fa", "1:ba")):
+            with self.subTest(change=before):
+                self.traditional_pack()
+                self.mutate_table("lexicon",self.lexicon().replace(before.encode(),after.encode()))
+                self.assertIn("differs from source conversion","\n".join(self.validate_traditional()["errors"]))
+
+    def test_traditional_validation_requires_its_source_conversion(self):
+        self.traditional_pack()
+        result=ime.validate_pack(self.directory,self.syllables,self.trad_chars,self.han,self.lock)
+        self.assertIn("must be validated explicitly","\n".join(result["errors"]))
+
+    def test_conversion_provenance_cannot_be_removed_or_forged(self):
+        self.traditional_pack()
+        self.manifest["conversion"]={**self.conversion,"source_lexicon_sha256":"0"*64}
+        self.save_manifest()
+        self.assertIn("conversion provenance mismatch","\n".join(self.validate_traditional()["errors"]))
+        del self.manifest["sources"]["opencc"]
+        self.save_manifest()
+        self.assertIn("source identity mismatch","\n".join(self.validate_traditional()["errors"]))
 
 
 if __name__ == "__main__":

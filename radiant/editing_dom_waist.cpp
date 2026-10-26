@@ -43,6 +43,14 @@ static void editing_dom_transaction_note_owned_write(
 static uint64_t editing_dom_transaction_expected_epoch(
         const DomMutationTransaction* transaction, uint64_t fallback);
 
+static void editing_dom_record_selection(DomEditInvocation* invocation,
+                                          DomBoundary anchor, DomBoundary focus) {
+    invocation->selection_anchor = anchor;
+    invocation->selection_focus = focus;
+    invocation->selection_has_extent = true;
+    invocation->selection_changed = true;
+}
+
 static void editing_dom_record_caret(DomEditInvocation* invocation,
                                      DomNode* node, uint32_t offset,
                                      bool changed) {
@@ -1089,6 +1097,27 @@ DomEditInvocation* dom_edit_invocation_lookup(DocState* state,
     return invocation;
 }
 
+// Package history may restore a DOM selection after replacing text. Publish that
+// explicit selection on this capability so its earlier caret cannot overwrite it.
+bool dom_edit_sync_selection(DomEditInvocation* invocation) {
+    if (!invocation || !invocation->active || !invocation->state ||
+        !invocation->state->dom_selection) return false;
+    DomSelection* selection = invocation->state->dom_selection;
+    DomBoundary anchor = dom_selection_anchor_boundary(selection);
+    DomBoundary focus = dom_selection_focus_boundary(selection);
+    if (!anchor.node || !focus.node) {
+        invocation->selection_has_extent = invocation->selection_changed = false;
+        invocation->caret_node = nullptr;
+        return true;
+    }
+    if (!editing_dom_host_contains_boundary(invocation->host, anchor) ||
+        !editing_dom_host_contains_boundary(invocation->host, focus)) return false;
+    editing_dom_record_selection(invocation, anchor, focus);
+    invocation->caret_node = focus.node;
+    invocation->caret_offset = focus.offset;
+    return true;
+}
+
 bool dom_edit_invocation_commit_selection(DomEditInvocation* invocation) {
     if (!invocation || !invocation->active || !invocation->state ||
         !invocation->state->dom_selection) return false;
@@ -1294,10 +1323,9 @@ static void editing_dom_select_mapped_text(DomEditInvocation* invocation,
     invocation->text = mapped_text;
     invocation->text_start = 0;
     invocation->text_end = end.offset;
-    invocation->selection_anchor = invocation->selection_was_backward ? end : start;
-    invocation->selection_focus = invocation->selection_was_backward ? start : end;
-    invocation->selection_has_extent = true;
-    invocation->selection_changed = true;
+    editing_dom_record_selection(invocation,
+        invocation->selection_was_backward ? end : start,
+        invocation->selection_was_backward ? start : end);
 }
 
 // Wrap [start, end) of the resolved text node in a fresh `tag` element.
@@ -2019,10 +2047,8 @@ bool dom_edit_select_host(DomEditInvocation* invocation) {
         return false;
     }
     DomNode* host = static_cast<DomNode*>(invocation->host);
-    invocation->selection_anchor = {host, 0};
-    invocation->selection_focus = {host, dom_node_boundary_length(host)};
-    invocation->selection_has_extent = true;
-    invocation->selection_changed = true;
+    editing_dom_record_selection(invocation, {host, 0},
+        {host, dom_node_boundary_length(host)});
     return true;
 }
 

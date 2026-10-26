@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "license": "MIT (repository-authored conversion cases)",
+  "scope": "Explicit expected OpenCC-standard forms; regional vocabulary is excluded",
+  "cases": [
+    {
+      "source": "发",
+      "reading": "fa",
+      "forms": [
+        "發",
+        "髮"
+      ]
+    },
+    {
+      "source": "干",
+      "reading": "gan",
+      "forms": [
+        "乾",
+        "干",
+        "幹",
+        "榦"
+      ]
+    },
+    {
+      "source": "脏",
+      "reading": "zang",
+      "forms": [
+        "臟",
+        "髒"
+      ]
+    },
+    {
+      "source": "征",
+      "reading": "zheng",
+      "forms": [
+        "征",
+        "徵"
+      ]
+    },
+    {
+      "source": "头发",
+      "reading": "tou'fa",
+      "forms": [
+        "頭髮"
+      ]
+    },
+    {
+      "source": "发展",
+      "reading": "fa'zhan",
+      "forms": [
+        "發展"
+      ]
+    },
+    {
+      "source": "理发",
+      "reading": "li'fa",
+      "forms": [
+        "理髮"
+      ]
+    },
+    {
+      "source": "发型",
+      "reading": "fa'xing",
+      "forms": [
+        "髮型"
+      ]
+    },
+    {
+      "source": "干杯",
+      "reading": "gan'bei",
+      "forms": [
+        "乾杯"
+      ]
+    },
+    {
+      "source": "干细胞",
+      "reading": "gan'xi'bao",
+      "forms": [
+        "幹細胞"
+      ]
+    },
+    {
+      "source": "干净",
+      "reading": "gan'jing",
+      "forms": [
+        "乾淨"
+      ]
+    },
+    {
+      "source": "后台",
+      "reading": "hou'tai",
+      "forms": [
+        "後臺"
+      ]
+    },
+    {
+      "source": "皇后",
+      "reading": "huang'hou",
+      "forms": [
+        "皇后"
+      ]
+    },
+    {
+      "source": "后面",
+      "reading": "hou'mian",
+      "forms": [
+        "後面"
+      ]
+    },
+    {
+      "source": "里面",
+      "reading": "li'mian",
+      "forms": [
+        "裏面"
+      ]
+    },
+    {
+      "source": "面条",
+      "reading": "mian'tiao",
+      "forms": [
+        "麪條"
+      ]
+    },
+    {
+      "source": "重复",
+      "reading": "chong'fu",
+      "forms": [
+        "重複"
+      ]
+    },
+    {
+      "source": "复习",
+      "reading": "fu'xi",
+      "forms": [
+        "複習"
+      ]
+    },
+    {
+      "source": "恢复",
+      "reading": "hui'fu",
+      "forms": [
+        "恢復"
+      ]
+    },
+    {
+      "source": "台风",
+      "reading": "tai'feng",
+      "forms": [
+        "颱風"
+      ]
+    },
+    {
+      "source": "台湾",
+      "reading": "tai'wan",
+      "forms": [
+        "臺灣"
+      ]
+    },
+    {
+      "source": "计算机",
+      "reading": "ji'suan'ji",
+      "forms": [
+        "計算機"
+      ]
+    },
+    {
+      "source": "软件",
+      "reading": "ruan'jian",
+      "forms": [
+        "軟件"
+      ]
+    },
+    {
+      "source": "互联网",
+      "reading": "hu'lian'wang",
+      "forms": [
+        "互聯網"
+      ]
+    },
+    {
+      "source": "数据库",
+      "reading": "shu'ju'ku",
+      "forms": [
+        "數據庫"
+      ]
+    },
+    {
+      "source": "网络",
+      "reading": "wang'luo",
+      "forms": [
+        "網絡"
+      ]
+    },
+    {
+      "source": "中华人民共和国",
+      "reading": "zhong'hua'ren'min'gong'he'guo",
+      "forms": [
+        "中華人民共和國"
+      ]
+    },
+    {
+      "source": "重庆",
+      "reading": "chong'qing",
+      "forms": [
+        "重慶"
+      ]
+    },
+    {
+      "source": "重庆市",
+      "reading": "chong'qing'shi",
+      "forms": [
+        "重慶市"
+      ]
+    },
+    {
+      "source": "长沙",
+      "reading": "chang'sha",
+      "forms": [
+        "長沙"
+      ]
+    },
+    {
+      "source": "银行",
+      "reading": "yin'hang",
+      "forms": [
+        "銀行"
+      ]
+    },
+    {
+      "source": "中文",
+      "reading": "zhong'wen",
+      "forms": [
+        "中文"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 800,
+    "height": 700
+  },
+  "name": "ime_chinese_input",
+  "events": [
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#limit"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#limit"
+      },
+      "text": "beijingdaxue"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#limit"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "beijing"
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/m3/preedit.png"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": ","
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "，"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    }
+  ]
+}

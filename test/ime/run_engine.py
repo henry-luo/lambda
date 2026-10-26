@@ -60,16 +60,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, default=ROOT / "lambda.exe")
     parser.add_argument("--tier", choices=("jit", "interp"), default="jit")
+    parser.add_argument("--profile", choices=("zh-Hans", "zh-Hant"), default="zh-Hans")
+    parser.add_argument("--fixture", type=Path)
     parser.add_argument("--options", type=json.loads, default={})
     parser.add_argument("--report", type=Path, default=WORK / "qualification.json")
-    parser.add_argument("--baseline", type=Path, default=ROOT / "test/ime/baseline.json")
+    parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--record-baseline", type=Path, help="freeze the first report's floors in a new file; refuses overwrite")
     args = parser.parse_args()
+    if args.record_baseline and (args.baseline or args.record_baseline.exists()):
+        parser.error("record-baseline requires a new file and cannot be combined with baseline")
+    args.fixture = args.fixture or ROOT / "test/ime" / (
+        "heldout_zh_hant.json" if args.profile == "zh-Hant" else "heldout.json")
+    args.baseline = args.record_baseline or args.baseline or ROOT / "test/ime" / (
+        "baseline_zh_hant.json" if args.profile == "zh-Hant" else "baseline.json")
+    if not args.record_baseline and not args.baseline.exists():
+        parser.error("baseline is missing; record the initial untuned profile with --record-baseline")
     executable = args.executable.resolve()
     raw = executable.read_bytes()
     if b"VALIDATOR] validate_against_base_type" in raw:
         parser.error("performance qualification requires a release executable")
     WORK.mkdir(parents=True, exist_ok=True)
-    (WORK / "eval-options.json").write_text(json.dumps(args.options) + "\n")
+    (WORK / "eval-config.json").write_text(json.dumps({"profile":args.profile,
+        "fixture":str(args.fixture.resolve()),"options":args.options}) + "\n")
     environment = {**os.environ, "LAMBDA_EXEC_BACKEND": args.tier}
     command = [str(executable), "--no-log", "run", "test/ime/engine_eval.ls"]
     (WORK / "evaluation.json").unlink(missing_ok=True)
@@ -88,15 +100,23 @@ def main():
                ROOT / "lmd/package/io/line_index.ls", ROOT / "lambda/runtime/lambda-vector.cpp",
                ROOT / "lmd/package/ime/chinese/syllables.txt",
                ROOT / "test/ime/engine_eval.ls", Path(__file__).resolve()]
-    report = {"format_version": 1, "tier": args.tier, "host": platform.platform(),
+    report = {"format_version": 1, "profile":args.profile, "tier": args.tier, "host": platform.platform(),
               "executable": {"path": str(executable), "sha256": sha(executable)},
-              "fixture_sha256": sha(ROOT / "test/ime/heldout.json"),
-              "pack_manifest_sha256": sha(ROOT / "lmd/package/ime/chinese/data/zh-Hans/manifest.json"),
+              "fixture_sha256": sha(args.fixture),
+              "pack_manifest_sha256": sha(ROOT / "lmd/package/ime/chinese/data" / args.profile / "manifest.json"),
               "source_sha256": {str(p.relative_to(ROOT)): sha(p) for p in sources},
               "peak_rss_bytes": int(peak_rss),
               "scope": "repository-authored frozen query set; baseline, not a representative quality claim",
               "summary": {mode: summarize(measured["rows"], mode) for mode in ("full", "initials", "fuzzy")},
               **measured}
+    if args.record_baseline:
+        baseline = {"format_version":1,"profile":args.profile,"fixture_sha256":report["fixture_sha256"],
+            "provenance":"First profile report before profile-specific tuning; engine ranking defaults unchanged",
+            "scope":report["scope"],"minimum":{mode:{key:report["summary"][mode][key]
+                for key in ("found","top_1","top_3","top_9")} for mode in ("full","initials","fuzzy")}}
+        # An explicit first baseline never replaces an established acceptance floor.
+        with args.record_baseline.open("x") as target:
+            target.write(json.dumps(baseline,ensure_ascii=False,indent=2) + "\n")
     report["acceptance"] = {"baseline_sha256": sha(args.baseline),
         "failures": check_baseline(report, json.loads(args.baseline.read_bytes()))}
     args.report.parent.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@
 // Full implementation with hashmap-based deduplication and arraylist scheduling
 
 #include "network_resource_manager.h"
+#include "../../lib/host_paths.h"
 #include "network_downloader.h"
 #include "network_scheduler.h"
 #include "font_resource_faces.h"
@@ -383,7 +384,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
 
     bool owns_file_cache = false;
     if (!cache) {
-        cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+        cache = enhanced_cache_create(host_path_dir(HOST_PATH_CACHE, "cache"), 100 * 1024 * 1024, 10000);
         owns_file_cache = cache != NULL;
     }
 

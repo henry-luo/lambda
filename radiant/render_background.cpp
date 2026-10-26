@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "render_metrics.hpp"
+#include "../lib/tagged.hpp"
 #include "glyph_sampling.hpp"
 #include "view.hpp"
 #include "layout_table.hpp"
@@ -2285,6 +2286,44 @@ bool render_paint_text_background(PaintList* paint, UiContext* ui, DomElement* p
         ui_context_raster_scale(ui), nullptr, nullptr, true, mask);
     rdt_path_free(mask);
     return painted;
+}
+
+Rect render_text_inline_padding_box(const DomElement* parent, const TextRect* text_rect, float x, float y, float scale) {
+    const float* padding = parent->boundary()->padding.values;
+    float top = padding[CSS_BOX_SIDE_TOP] * scale, right = padding[CSS_BOX_SIDE_RIGHT] * scale;
+    float bottom = padding[CSS_BOX_SIDE_BOTTOM] * scale, left = padding[CSS_BOX_SIDE_LEFT] * scale;
+    return {x - left, y - top, text_rect->width * scale + left + right, text_rect->height * scale + top + bottom};
+}
+
+Rect render_text_inline_border_box(Rect padding_box, const BorderProp* border, float scale) {
+    return {padding_box.x - border->width.left * scale, padding_box.y - border->width.top * scale,
+        padding_box.width + (border->width.left + border->width.right) * scale,
+        padding_box.height + (border->width.top + border->width.bottom) * scale};
+}
+
+// SVG/PDF counterpart of the raster painter's per-fragment inline background and border. The
+// generic walker never records a span's own boundary, so an inline pill (a highlighted word)
+// vanished from vector exports. A text-clipped background is masked with the glyphs instead.
+bool render_paint_text_inline_box(PaintList* paint, UiContext* ui, DomElement* parent,
+        const TextRect* text_rect, float x, float y) {
+    if (!paint || !text_rect || !parent || parent->view_type != RDT_VIEW_INLINE || !parent->bound) return true;
+    const BoundaryProp* source = parent->boundary();
+    bool background = source->background && !background_has_text_clip(parent);
+    if (!background && !source->border) return true;
+    BoundaryProp local = *source;
+    // shadows and outlines belong to the element's own pass, not to its text fragments
+    local.box_shadow = nullptr; local.outline = nullptr;
+    if (!background) local.background = nullptr;
+    BorderProp border = {};
+    Rect box = render_text_inline_padding_box(parent, text_rect, x, y, 1.0f);
+    if (source->border) {
+        border = *source->border; local.border = lam::own(&border);
+        box = render_text_inline_border_box(box, &border, 1.0f);
+    }
+    if (box.width <= 0.0f || box.height <= 0.0f) return true;
+    ViewBlock view = view_with_boundary(lam::unsafe_view_block_api_span(
+        lam::view_require_element(static_cast<View*>(parent))), &local);
+    return render_paint_boundary_emit_full(paint, ui, &view, box);
 }
 
 static bool background_record_masked_layer(PaintList* destination, const PaintList& layer,

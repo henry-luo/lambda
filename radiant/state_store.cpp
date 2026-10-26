@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "../lib/host_paths.h"
 #include "../lib/file.h"
 #include "state_store_internal.hpp"
 #include "view.hpp"
@@ -90,9 +91,35 @@ static void state_store_destroy_model_edit_surface_bindings(DocState* state) {
     state->editing.next_model_edit_surface_id = 0;
 }
 
+void input_method_clear_labels(InputMethodTransport* transport) {
+    for (char*& label : transport->labels) { mem_free(label); label = nullptr; }
+    transport->count = 0;
+}
+
+void input_method_cleanup(DocState* state) {
+    if (!state) return;
+    InputMethodTransport* transport = &state->input_method;
+    while (transport->head) {
+        ScriptCompositionRequest* request = transport->head;
+        transport->head = request->next;
+        mem_free(request->text);
+        mem_free(request);
+    }
+    transport->tail = nullptr;
+    input_method_clear_labels(transport);
+    transport->visible = false;
+    transport->popup_target = {};
+}
+
 static void state_store_release_script_values(DocState* state, Context* owner) {
     dom_edit_discard_retained_deltas(state);
     state_store_destroy_model_edit_surface_bindings(state);
+    if (state->input_method.session_rooted) {
+        heap_unregister_gc_root_for(owner, &state->input_method.session_root);
+        state->input_method.session_rooted = false;
+        state->input_method.session_root = ItemNull.item;
+    }
+    input_method_cleanup(state);
     if (state->editing.dom_edit_session_rooted) {
         heap_unregister_gc_root_for(owner, &state->editing.dom_edit_session_root);
         state->editing.dom_edit_session_rooted = false;
@@ -218,17 +245,9 @@ void radiant_state_cleanup_interned_names(void) {
 // Mark State Dump
 // ============================================================================
 
+// state dumps live in the host's temp directory (host_paths.h, MB13)
 static void state_dump_make_temp_dir(void) {
-#if defined(_WIN32) && !defined(__MINGW32__)
-    _mkdir("temp");
-    _mkdir("temp\\state");
-#elif defined(_WIN32)
-    mkdir("temp");
-    mkdir("temp/state");
-#else
-    mkdir("temp", 0755);
-    mkdir("temp/state", 0755);
-#endif
+    create_dir(host_path_dir(HOST_PATH_TEMP, "state"));
 }
 
 bool StateDumpLog::init(const char* doc_name) {
@@ -236,8 +255,8 @@ bool StateDumpLog::init(const char* doc_name) {
 
     pid = (int)getpid();
     event_state_log_sanitize_doc_name(doc_name, doc_id, sizeof(doc_id));
-    snprintf(path, sizeof(path), "./temp/state/state_%d_%s.mark",
-             pid, doc_id);
+    snprintf(path, sizeof(path), "%s/state_%d_%s.mark",
+             host_path_dir(HOST_PATH_TEMP, "state"), pid, doc_id);
 
     out = fopen(path, "w");
     if (!out) {
@@ -1882,6 +1901,8 @@ extern "C" void selection_refresh_presentation(DocState* state) {
 }
 
 void DocState::destroy() {
+    // a document may close during preedit, before any compositionend can release its bytes.
+    editing_composition_clear_preedit(this);
     // The package can retain opaque generic DOM delta ids. Release their
     // document-owned snapshots before this state's DOM/storage dependencies
     // begin teardown (D5.3.3).
@@ -2864,6 +2885,9 @@ static void doc_state_detach_transient_owner(DocState* state, View* view) {
         state->dropdown_height = 0.0f;
         dropdown_reset_scroll(state);
     }
+    if (state->input_method.popup_target.address == view) {
+        input_method_cleanup(state);
+    }
     if (state->context_menu_target == view) {
         doc_state_log_context_menu_target_transition(state, state->context_menu_target, NULL);
         if (state->context_menu_hover != -1) {
@@ -3201,6 +3225,12 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
         state->dropdown_width = 0.0f;
         state->dropdown_height = 0.0f;
         dropdown_reset_scroll(state);
+        changed++;
+    }
+    if (state->input_method.popup_target.address &&
+        !view_tree_contains_view(root, state->input_method.popup_target.address)) {
+        // DOM removal can bypass explicit subtree retirement; prune copied popup state too.
+        input_method_cleanup(state);
         changed++;
     }
     if (state->context_menu_target && !view_tree_contains_view(root, state->context_menu_target)) {
@@ -8639,7 +8669,6 @@ View* focus_get_visible(DocState* state) {
 // ============================================================================
 
 #include "../lib/strbuf.h"
-#include <GLFW/glfw3.h>
 
 static void append_view_text_rects(StrBuf* sb, ViewText* text, bool escape_html) {
     const char* text_data = (const char*)text->text_data();
@@ -8934,33 +8963,43 @@ char* extract_selected_html(DocState* state, Arena* arena) {
 // Clipboard helpers — delegate to the canonical Radiant ClipboardStore
 // (see radiant/clipboard.hpp). The store mirrors writes to the OS
 // pasteboard via its installed backend; for headless / test builds the
-// default in-memory backend is used and writes never touch GLFW.
+// default in-memory backend is used and writes never touch the OS.
 
+// Best-effort plain-text mirror of the OS clipboard through the platform
+// backend, so interactive flows keep working where a window is present.
+// macOS installs the multi-MIME store backend instead. Headless runs skip it
+// to avoid cross-process races on the shared OS pasteboard during tests.
+static void clipboard_platform_mirror(const char* text) {
+#ifndef __APPLE__
+    extern UiContext ui_context;
+    if (ui_context.window && !ui_context.headless) {
+        radiant_platform_set_clipboard(ui_context.window, text);
+    }
+#else
+    (void)text;
+#endif
+}
+
+static const char* clipboard_platform_read() {
+#ifndef __APPLE__
+    extern UiContext ui_context;
+    if (ui_context.window && !ui_context.headless) {
+        return radiant_platform_get_clipboard(ui_context.window);
+    }
+#endif
+    return nullptr;
+}
 
 void clipboard_copy_text(const char* text) {
     if (!text) return;
     clipboard_store_write_text(text);
-    // Best-effort GLFW mirror so existing interactive flows keep working
-    // in builds where a GLFW window is present. Skip in headless mode to
-    // avoid cross-process races on the shared OS pasteboard during tests.
-#ifndef __APPLE__
-    extern UiContext ui_context;
-    if (ui_context.window && !ui_context.headless) {
-        glfwSetClipboardString(ui_context.window, text);
-    }
-#endif
+    clipboard_platform_mirror(text);
     log_info("Copied %zu bytes to clipboard", strlen(text));
 }
 
 const char* clipboard_get_text() {
-#ifndef __APPLE__
-    extern UiContext ui_context;
-    if (ui_context.window && !ui_context.headless) {
-        const char* s = glfwGetClipboardString(ui_context.window);
-        if (s) return s;
-    }
-#endif
-    return clipboard_store_read_text();
+    const char* s = clipboard_platform_read();
+    return s ? s : clipboard_store_read_text();
 }
 
 void clipboard_copy_html(const char* html) {
@@ -8968,12 +9007,7 @@ void clipboard_copy_html(const char* html) {
     // Write both representations so paste handlers that ask for text/html
     // get rich content and plain-text consumers still see something useful.
     clipboard_store_write_html(html, html);
-#ifndef __APPLE__
-    extern UiContext ui_context;
-    if (ui_context.window && !ui_context.headless) {
-        glfwSetClipboardString(ui_context.window, html);
-    }
-#endif
+    clipboard_platform_mirror(html);
     log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));
 }
 
@@ -8985,12 +9019,7 @@ void clipboard_copy_rich(const char* html, const char* plain_text) {
     } else {
         clipboard_store_write_text(text);
     }
-#ifndef __APPLE__
-    extern UiContext ui_context;
-    if (ui_context.window && !ui_context.headless) {
-        glfwSetClipboardString(ui_context.window, text);
-    }
-#endif
+    clipboard_platform_mirror(text);
     log_debug("clipboard_copy_rich: wrote html=%zu plain=%zu",
               html ? strlen(html) : 0, strlen(text));
 }

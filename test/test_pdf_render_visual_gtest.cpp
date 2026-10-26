@@ -1274,6 +1274,29 @@ static int count_pdf_regressions(const PdfPageResult* results, int result_count)
     return count;
 }
 
+// An inline element's own background and border are painted per text fragment; the vector
+// backends once recorded only the glyphs, so a highlighted word lost its pill in SVG and PDF.
+TEST(RenderOutputParity, InlineElementBackgroundsReachSvgAndPdf) {
+    bool svg_reader = reference_rasterizer().available(false) || command_exists("rsvg-convert");
+    bool pdf_reader = reference_rasterizer().available(true) || command_exists("pdftocairo");
+    if (!svg_reader || !pdf_reader) GTEST_SKIP() << "SVG and PDF rasterizers are unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "<!doctype html><style>html,body{margin:0;background:white}p{margin:10px;font:24px Arial;color:black}"
+        ".r{padding:0 12px;border-radius:8px;background:rgb(206,66,43);color:white;font-weight:700}"
+        ".b{padding:0 8px;background:rgb(47,111,222);color:white}</style>"
+        "<p><span class=r>Rust</span> <span class=b>Lambda</span></p>";
+    for (bool pdf : {false, true}) {
+        char exported[PATH_MAX], png[PATH_MAX];
+        snprintf(exported, sizeof(exported), "temp/render_output_parity/inline_box.%s", pdf ? "pdf" : "svg");
+        snprintf(png, sizeof(png), "%s.png", exported);
+        ASSERT_TRUE(render_html_fixture("temp/render_output_parity/inline_box.html", exported, html));
+        ASSERT_TRUE(pdf ? rasterize_fixture_pdf(exported, png) : rasterize_fixture_svg(exported, png));
+        // each box is about 2000 pixels before its white text; text alone never reaches these channels
+        expect_png_channel_coverage(png, 0, 0x6, 900);
+        expect_png_channel_coverage(png, 2, 0x3, 900);
+    }
+}
+
 TEST(RenderOutputParity, ReferenceRasterizersMatchCommandLinePixels) {
     if (!reference_rasterizer().available(true) || !reference_rasterizer().available(false))
         GTEST_SKIP() << "optional shared rasterizer libraries are unavailable";

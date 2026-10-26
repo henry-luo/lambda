@@ -1,4 +1,5 @@
 #include "input/input.hpp"
+#include "../lib/host_paths.h"
 #include "input/input-postscript.hpp"
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
@@ -540,6 +541,13 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         uint64_t* result_home, volatile long* harness_us, bool mvp_lmd,
         const char* harness_source, size_t harness_length) {
     if (mvp_lmd) {
+#ifdef LAMBDA_NO_MIR
+        // the MVP batch compiles each test with MIR, which this build excludes
+        (void)source; (void)source_len; (void)filename; (void)inline_module_source;
+        (void)harness_source; (void)harness_length;
+        fputs("MVP_FAILURE admission -\nMVP batch is excluded from this build (no MIR)\n", stdout);
+        return ItemError;
+#else
         if (has_preamble || ast_harness || test262_native_harness) {
             fputs("MVP_FAILURE admission -\nMVP batch requires a complete source\n", stdout);
             return ItemError;
@@ -561,6 +569,7 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         bool failed = diagnostic != NULL;
         mvp_lmd_destroy(execution);
         return failed ? ItemError : ItemNull;
+#endif
     }
     if (ast_harness) {
         if (ast_harness->prepare_failed || !ast_harness->script) {
@@ -1027,8 +1036,10 @@ extern void event_sim_set_result_path(const char* result_path);
 extern int lambda_repl_init(InterpReplSession* session);
 extern void lambda_repl_cleanup();
 
+#ifndef LAMBDA_NO_MIR
 // MIR interpreter mode (from mir.c)
 extern "C" int g_mir_interp_mode;
+#endif
 #ifndef LAMBDA_HEADLESS
 // Legacy document policy used by Lambda Direct; LambdaJS ignores it under
 // D8.1.3v11 and always links selected MIR natively.
@@ -1312,10 +1323,12 @@ int run_repl(Runtime *runtime, bool procedural) {
 
     // The session is always T0; the tier only governs satellite promotion,
     // and `jit` promotes at the first call instead of compiling a module.
+#ifndef LAMBDA_NO_MIR
     if (lambda_tier_selected() == LAMBDA_TIER_JIT) {
         lambda_tier_set(LAMBDA_TIER_AUTO);
         interp_set_func_jit_threshold_default(1);
     }
+#endif
     InterpReplSession session = {};
     if (!interp_repl_session_init(&session, runtime, procedural)) {
         fprintf(stderr, "error: REPL unavailable: could not create the interpreter session\n");
@@ -1972,6 +1985,8 @@ static __thread volatile sig_atomic_t batch_timeout_owner_thread = 0;
 // MIR error recovery for batch mode: longjmp instead of exit(1)
 static __thread jmp_buf mir_error_jmp;
 static __thread volatile sig_atomic_t mir_error_active = 0;
+#ifndef LAMBDA_NO_MIR
+// a T0-only build has no MIR context to report errors, so only the jump target stays
 static __thread char mir_error_msg[256];
 
 static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t error_type, const char *format, ...) {
@@ -1987,6 +2002,7 @@ static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t e
     // fallback: if not in protected region, exit
     exit(1);
 }
+#endif // LAMBDA_NO_MIR
 
 // SIGSEGV/SIGBUS recovery for batch mode: catch runtime crashes in JIT code
 static __thread sigjmp_buf batch_crash_jmp;
@@ -2432,7 +2448,11 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
         return true;
     }
     if (strcmp(arg, "--mir-interp") == 0) {
+#ifdef LAMBDA_NO_MIR
+        log_error("cli: --mir-interp is excluded from this build (no MIR)");
+#else
         g_mir_interp_mode = 1;
+#endif
         return true;
     }
     if (strcmp(arg, "--no-drain") == 0) {
@@ -2526,13 +2546,17 @@ static int lambda_main_impl(int argc, char *argv[]) {
         i--;
     }
 
-    // Initialize logging system with config file if available
-    if (!no_log && file_exists("log.conf")) {
+    // Initialize logging system with config file if available; log.conf and
+    // its relative outputs live in the host's log directory (MB13)
+    log_set_output_dir(host_path(HOST_PATH_LOG));
+    char* log_conf = host_path_join(HOST_PATH_LOG, "log.conf");
+    if (!no_log && log_conf && file_exists(log_conf)) {
         // log.conf exists, load it
-        if (log_parse_config_file("log.conf") != LOG_OK) {
+        if (log_parse_config_file(log_conf) != LOG_OK) {
             fprintf(stderr, "Warning: Failed to parse log.conf, using defaults\n");
         }
     }
+    mem_free(log_conf);
     log_init("");  // Initialize with parsed config or defaults
 
     if (no_log) log_disable_all();
@@ -2543,7 +2567,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         if (strcmp(argv[i], "--mem-dump") == 0 ||
             strncmp(argv[i], "--mem-dump=", 11) == 0) {
             const char* eq = strchr(argv[i], '=');
-            g_lambda_main_mem_dump_path = (eq && eq[1]) ? eq + 1 : "./temp/mem_snapshot.json";
+            g_lambda_main_mem_dump_path = (eq && eq[1]) ? eq + 1 : host_path_dir(HOST_PATH_TEMP, "mem_snapshot.json");
             for (int j = i; j < argc - 1; j++) {
                 argv[j] = argv[j + 1];
             }
@@ -4195,7 +4219,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // the viewer ships with the package tree and follows LAMBDA_HOME (D7.2.4).
         if (filename == NULL) {
-            g_lambda_main_viewer_path = lambda_home_path("package/doc/doc_viewer.ls");
+            g_lambda_main_viewer_path = host_path_join(HOST_PATH_HOME, "package/doc/doc_viewer.ls");
             filename = g_lambda_main_viewer_path;
             log_info("VIEW_DEFAULT: opening bundled document viewer: %s", filename);
         }
@@ -4269,7 +4293,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 } else {
                     // Write non-HTML content to temp file with appropriate extension
                     char temp_path[256];
-                    snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
+                    snprintf(temp_path, sizeof(temp_path), "%s/lambda_view_http%s", host_path(HOST_PATH_TEMP), effective_ext ? effective_ext : ".html");
                     FILE* f = fopen(temp_path, "wb");
                     if (!f) {
                         printf("Error: Failed to create temp file for HTTP content\n");
@@ -4637,7 +4661,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 batch_timeout = atoi(argv[i] + 10);
                 if (batch_timeout <= 0) batch_timeout = 60;
             } else if (strcmp(argv[i], "--mir-interp") == 0) {
+#ifdef LAMBDA_NO_MIR
+                log_error("cli: --mir-interp is excluded from this build (no MIR)");
+#else
                 g_mir_interp_mode = 1;
+#endif
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0 ||
                        strncmp(argv[i], "--optimize=", 11) == 0) {
                 const char* value = strchr(argv[i], '=');
@@ -4888,8 +4916,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef _WIN32
         // Install signal handlers ONCE for the entire batch loop.
         // Catches SIGSEGV, SIGBUS, SIGABRT, and SIGTRAP.
+#ifndef LAMBDA_NO_MIR
         extern MIR_error_func_t g_batch_mir_error_handler;
         g_batch_mir_error_handler = batch_mir_error_handler;
+#endif
         struct sigaction crash_sa, old_segv_sa, old_bus_sa, old_abrt_sa, old_trap_sa;
         crash_sa.sa_handler = batch_crash_handler;
         sigemptyset(&crash_sa.sa_mask);

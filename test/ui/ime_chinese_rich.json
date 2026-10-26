@@ -1,0 +1,71 @@
+{
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 800,
+    "height": 700
+  },
+  "name": "ime_chinese_rich",
+  "events": [
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#rich"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "bei"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    }
+  ]
+}

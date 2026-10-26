@@ -19,9 +19,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-#define GLFW_EXPOSE_NATIVE_COCOA
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+// the desktop backend's window: reached through the platform seam (MB7)
+#include "platform.hpp"
 
 #include <stdint.h>
 #include <string.h>
@@ -39,7 +38,7 @@ struct DocState;
 class DomElement;
 class View;
 
-extern "C" GLFWwindow*    radiant_ui_get_glfw_window(struct UiContext*);
+extern "C" void*          radiant_ui_get_native_window(struct UiContext*);
 extern "C" DocState*  radiant_ui_get_state(struct UiContext*);
 extern "C" void           radiant_state_request_repaint(struct DocState*);
 extern "C" bool           radiant_dispatch_editing_composition_event(struct UiContext*,
@@ -84,7 +83,7 @@ bool ime_dispatch_editing(EventType event_type, const char* text, uint32_t caret
         event_type, text, caret);
     if (handled) {
         radiant_state_request_repaint(ime_state());
-        glfwPostEmptyEvent();
+        radiant_platform_post_empty_event();
     }
     return handled;
 }
@@ -232,14 +231,8 @@ const char* ns_to_utf8(id obj) {
 extern "C" void radiant_ime_mac_attach(struct UiContext* uicon) {
     if (!uicon) return;
     g_ime_uicon = uicon;
-    GLFWwindow* glfw_win = radiant_ui_get_glfw_window(uicon);
-    if (!glfw_win) return;
-
-    NSWindow* ns_window = glfwGetCocoaWindow(glfw_win);
-    if (!ns_window) {
-        log_error("[IME mac] glfwGetCocoaWindow returned nil");
-        return;
-    }
+    NSWindow* ns_window = (__bridge NSWindow*)radiant_ui_get_native_window(uicon);
+    if (!ns_window) return;  // headless, or no window yet
     NSView* content = [ns_window contentView];
     if (!content) {
         log_error("[IME mac] content view is nil");

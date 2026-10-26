@@ -9,6 +9,11 @@ pub fn quality(value) int =>
 fn ordered(items) array =>
     sort(items,(item)=>[quality(string(item.match)),-item.weight,item.line,item.posting])
 
+pub fn distinct(items) array {
+    let positions = map([for (i,item in reverse(items)) (item.text,len(items) - i - 1)]);
+    [for (i,item in items where positions[item.text] == i) item]
+}
+
 pub fn ranked(items,weight_floor,leaders) array {
     let sorted = ordered(items)
     let strong = [for (i in 1 to 9 where any([for (item in sorted)
@@ -28,6 +33,5 @@ pub fn ranked(items,weight_floor,leaders) array {
     }]
     let merged = [for (group in groups,item in group) item]
     // keep the best route for each text, including polyphonic and prefix routes.
-    let positions = map([for (i,item in reverse(merged)) (item.text,len(merged) - i - 1)]);
-    [for (i,item in merged where positions[item.text] == i) item]
+    distinct(merged)
 }

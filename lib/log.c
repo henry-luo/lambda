@@ -37,6 +37,8 @@ LOG_STUB(int, log_add_format, (const char* name, const char* pattern), LOG_INIT_
 LOG_STUB(void, log_set_default_format, (const char* pattern), )
 LOG_STUB(int, log_parse_config_file, (const char* filename), LOG_INIT_FAIL)
 LOG_STUB(int, log_parse_config_string, (const char* config), LOG_INIT_FAIL)
+LOG_STUB(void, log_set_output_dir, (const char* dir), )
+LOG_STUB(int, log_reload_config_in_dir, (const char* dir), 0)
 LOG_STUB(void, log_set_indent, (int indent), )
 LOG_STUB(int, log_get_indent, (void), 0)
 LOG_STUB(void, log_reset_indent, (void), )
@@ -1217,6 +1219,35 @@ static char* trim_whitespace(char *str) {
 }
 
 /* Main configuration parsing function */
+#define LOG_OUTPUT_PATH_MAX 1024
+// host log directory for relative config outputs; empty = working directory
+static char g_log_output_dir[LOG_OUTPUT_PATH_MAX];
+
+void log_set_output_dir(const char *dir) {
+    if (!dir || !dir[0] || strcmp(dir, ".") == 0) { g_log_output_dir[0] = '\0'; return; }
+    size_t length = strlen(dir);
+    while (length > 1 && dir[length - 1] == '/') length--;
+    if (length >= sizeof(g_log_output_dir)) return;
+    memcpy(g_log_output_dir, dir, length);
+    g_log_output_dir[length] = '\0';
+}
+
+int log_reload_config_in_dir(const char *dir) {
+    char config_path[LOG_OUTPUT_PATH_MAX], default_output[LOG_OUTPUT_PATH_MAX];
+    const char *base = dir && dir[0] ? dir : ".";
+    if (snprintf(config_path, sizeof(config_path), "%s/log.conf", base) >= (int)sizeof(config_path) ||
+        snprintf(default_output, sizeof(default_output), "%s/log.txt", base) >= (int)sizeof(default_output))
+        return 0;
+    FILE *probe = fopen(config_path, "r");
+    if (!probe) return 0;
+    fclose(probe);
+    FILE *file = fopen(default_output, "w");
+    if (file) fclose(file);
+    log_set_output_dir(dir);
+    log_parse_config_file(config_path);
+    return 1;
+}
+
 int log_parse_config_string(const char *config) {
     if (!config) return LOG_OK;
 
@@ -1323,12 +1354,20 @@ static int log_parse_zlog_config(const char *config) {
                     // processes (e.g. under parallel test runs) clobber each
                     // other's logs. Redirect only real file targets — leave
                     // stdout/stderr categories untouched.
+                    char resolved_output[LOG_OUTPUT_PATH_MAX];
                     if (output_file && output_file[0] &&
                         strcmp(output_file, "stdout") != 0 &&
                         strcmp(output_file, "stderr") != 0) {
                         const char *log_file_override = getenv("LAMBDA_LOG_FILE");
                         if (log_file_override && log_file_override[0]) {
                             output_file = (char *)log_file_override;
+                        } else if (output_file[0] != '/' && g_log_output_dir[0]) {
+                            // relative config outputs land in the host's log directory
+                            int written = snprintf(resolved_output, sizeof(resolved_output),
+                                                   "%s/%s", g_log_output_dir, output_file);
+                            if (written > 0 && (size_t)written < sizeof(resolved_output)) {
+                                output_file = resolved_output;
+                            }
                         }
                     }
 
