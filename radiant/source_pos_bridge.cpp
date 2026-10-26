@@ -12,8 +12,8 @@
 //   * `source_pos_from_dom_boundary`: walks DOM ancestors from a boundary
 //     point, finds the first DomElement whose Lambda backing is registered
 //     in render_map, retrieves its recorded source path, and (for text
-//     hits) converts the boundary's UTF-16 code-unit offset to a UTF-8
-//     byte offset matching the editor's internal storage.
+//     hits) converts the boundary's UTF-16 code-unit offset to a code-point
+//     offset, the unit Lambda strings and the editor model index by (S2.5.8).
 //   * `dom_boundary_from_source_pos` is left as a stub for now — turning a
 //     SourcePos into a DomBoundary additionally needs an Item→DomElement
 //     reverse map, which is the next sub-step.
@@ -310,7 +310,7 @@ static bool source_position_lookup(Item result_node, RenderMapLookup* lookup,
 // Walk up DOM ancestry from `boundary->node` until a DomElement is found
 // whose Lambda backing is registered in render_map. The recorded path
 // becomes the SourcePos path; the offset is:
-//   * for a text-node boundary: the UTF-8 byte offset within that text
+//   * for a text-node boundary: the code-point offset within that text
 //     leaf, with the path extended by the text node's child index in its
 //     parent;
 //   * for an element-node boundary: the boundary's offset (already a
@@ -327,11 +327,11 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     DomNode* node = boundary->node;
     int leaf_child_index = -1;     // index of `node` within first registered ancestor
     bool is_text_leaf = (node->node_type == DOM_NODE_TEXT);
-    uint32_t leaf_u8_offset = 0;
+    uint32_t leaf_cp_offset = 0;
 
     if (is_text_leaf) {
         DomText* tn = lam::dom_require_text(node);
-        leaf_u8_offset = dom_text_utf16_to_utf8(tn, boundary->offset);
+        leaf_cp_offset = dom_text_utf16_to_codepoint(tn, boundary->offset);
         leaf_child_index = source_child_index(node);
         node = node->parent;
         if (!node) return false;
@@ -362,7 +362,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     }
     if (!found_base) return false;
     if (source_item_is_empty_editor_node(lookup.source_item)) {
-        // a rendered placeholder has no source child or byte offset; reentry names its empty container.
+        // a rendered placeholder has no source child or text offset; reentry names its empty container.
         out->path = base;
         out->offset = 0;
         out->kind = SOURCE_POS_ELEMENT;
@@ -394,7 +394,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     out->path.indices = combined;
     out->path.depth = total;
     if (is_text_leaf) {
-        out->offset = leaf_u8_offset;
+        out->offset = leaf_cp_offset;
         out->kind = SOURCE_POS_TEXT;
     } else {
         // generated markers consume DOM child slots, but never editor child slots.
@@ -431,7 +431,7 @@ bool source_pos_from_dom_range(const DomRange* range,
 //     between source and DOM child lists by editor convention).
 //   * SOURCE_POS_TEXT: recorded path == pos->path with the last index
 //     dropped; the dropped index is the text node's position among that
-//     element's children; offset is converted UTF-8 → UTF-16.
+//     element's children; offset is converted code points → UTF-16.
 
 static bool path_equals_prefix(const SourcePathC* path, int prefix_len,
                                const SourcePathC* other) {
@@ -510,7 +510,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
                     out->node = placeholder;
                     out->offset = 0;
                 } else {
-                    // SourcePos has no kind field: a model container's offset counts children, not text bytes.
+                    // SourcePos has no kind field: a model container's offset counts children, not code points.
                     DomNode* child = pos->offset <= INT_MAX ? source_child_at(de, pos->offset) : nullptr;
                     out->node = de;
                     out->offset = child ? dom_node_child_index(child) : source_selection_child_count(de);
@@ -520,7 +520,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
             DomText* tn = first_text_descendant(static_cast<DomNode*>(de));
             if (tn) {
                 out->node = static_cast<DomNode*>(tn);
-                out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
+                out->offset = dom_text_codepoint_to_utf16(tn, pos->offset);
                 matched = true;
             }
             }
@@ -534,7 +534,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
             DomText* tn = first_text_descendant(child);
             if (tn) {
                 out->node = static_cast<DomNode*>(tn);
-                out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
+                out->offset = dom_text_codepoint_to_utf16(tn, pos->offset);
                 matched = true;
             }
         }

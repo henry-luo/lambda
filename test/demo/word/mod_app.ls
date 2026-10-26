@@ -377,6 +377,14 @@ pn lookup_command(st,id,params,node) {
         return lookup_search({*:st,context:null,review:false,revisions:false},lookup.pane(kind,from.text,pane,from.selection,st.editor.model_revision),node)
     }
     if (pane==null) { return st }
+    let owner = dom.get_element_by_id(dom.root_node(node),"word")
+    // one reading at a time: the speaker button stops its own reading, and closing the pane stops it too.
+    if (pane.speech!=null and (id=="ui.lookupSpeak" or id=="ui.lookupClose")) { dom.speech_command(owner,pane.speech,"cancel") }
+    if (id=="ui.lookupSpeak") {
+        if (pane.speech!=null) { return {*:st,lookup:{*:pane,speech:null}} }
+        let token = dom.speak(owner,params.text,{lang:"en-US",rate:0.9})
+        return {*:st,lookup:{*:pane,speech:token},status:if (token==null) "Speech is unavailable" else "Reading “" ++ params.text ++ "” aloud"}
+    }
     if (id=="ui.lookupClose") { focus_document(node); return {*:st,lookup:null} }
     if (id=="ui.lookupQuery") { return {*:st,lookup:{*:pane,query:params.value}} }
     if (id=="ui.lookupTarget") { return lookup_search(st,{*:pane,target:params.value},node) }

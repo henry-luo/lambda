@@ -437,12 +437,15 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .lookup-source { height:auto; min-height:96px; resize:vertical; line-height:1.45; font-family:inherit; }
 .lookup-pane .shape-field { margin:0; }
 .lookup-go { align-self:flex-start; height:30px; padding:4px 12px; }
-.lookup-result { flex:1; min-height:0; }
+/* a long entry grows the pane's scroll height; no field shrinks or overlaps the credit line */
+.lookup-pane>* { flex-shrink:0; }
+.lookup-result { flex:1 0 auto; }
 .lookup-error { color:#b42318; font-size:12px; line-height:1.5; margin:4px 0; }
 .lookup-entry { border:1px solid var(--line); background:#fff; border-radius:10px; padding:12px 13px; }
-.lookup-word { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font-family:var(--font); }
+.lookup-word { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-family:var(--font); }
 .lookup-word strong { font-size:22px; color:var(--ink); }
 .lookup-phonetic { color:var(--muted); font-size:13px; }
+.lookup-speak { width:32px; height:32px; padding:4px; border-radius:16px; color:var(--accent); }
 .lookup-meaning { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; }
 .lookup-part { color:var(--accent); font-size:12px; font-weight:600; }
 .lookup-definitions { margin:6px 0 0; padding-left:18px; font-size:12px; line-height:1.5; color:var(--ink); }

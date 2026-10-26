@@ -5,7 +5,7 @@
 // ever rendered (CED13): the window is projected as a lambda.editor-shaped
 // document — one node per line, one text leaf per line — and applied, so the
 // render map records each line's source path and the native selection bridge
-// maps DOM positions to [row, 0] plus a UTF-8 byte offset, and back again
+// maps DOM positions to [row, 0] plus a code-point offset, and back again
 // after every render (CED19). Model selection is truth; the DOM selection is
 // its projection, clamped to the window (CED4).
 
@@ -16,7 +16,6 @@ import tools: lambda.edit.toolbar
 import files: lambda.edit.files
 import buf: lambda.edit.source_buffer
 import syn: lambda.edit.source_highlight
-import units: lambda.edit.source_units
 import lambda.editor.mod_doc
 import lambda.editor.mod_source_pos
 import lambda.editor.mod_editor
@@ -277,12 +276,12 @@ fn scrollbar(b, vw) {
 // The leaf holding column `col`: the last one starting at or before it.
 fn leaf_index(leaves, col) => max(0, len([for (lf in leaves where lf.start <= col) lf]) - 1)
 
-// A position on a rendered row as a source position: [row, leaf] and a UTF-8
-// byte offset into that leaf (CED21).
+// A position on a rendered row as a source position: [row, leaf] and a
+// code-point offset into that leaf, the bridge's own unit (CED21).
 fn row_pos(b, hs, row, line, col) {
   let leaves = row_leaves(b, hs, line)
   let j = leaf_index(leaves, col)
-  pos([row, j], units.bytes_before(leaves[j].text, col - leaves[j].start))
+  pos([row, j], col - leaves[j].start)
 }
 
 // A model position as a source position in the rendered window, clamped to it.
@@ -309,7 +308,7 @@ fn from_source(b, top, hs, sp) {
     let leaves = row_leaves(b, hs, l)
     if (len(path) == 1) buf.loc(l, if (sp.offset < len(leaves)) leaves[sp.offset].start else buf.line_len(b, l))
     else if (path[1] >= len(leaves)) buf.loc(l, buf.line_len(b, l))
-    else buf.loc(l, leaves[path[1]].start + units.col_at_byte(leaves[path[1]].text, sp.offset))
+    else buf.loc(l, leaves[path[1]].start + min(sp.offset, len(leaves[path[1]].text)))
   }
 }
 

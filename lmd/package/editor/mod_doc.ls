@@ -8,7 +8,7 @@
 //
 // SourcePath / SourcePos semantics:
 //   path = chain of `content` indices from the root node.
-//   offset on a text leaf  -> byte index in `text`.
+//   offset on a text leaf  -> code-point index in `text` (S2.5.8), the unit of len/slice.
 //   offset on a non-leaf   -> child index in [0 .. len(content)].
 
 // ---------------------------------------------------------------------------

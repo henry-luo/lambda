@@ -144,7 +144,7 @@ two line-number domains, gaps, and metadata. Extract the actual shared shape
 before using it in both surfaces; do not copy `source.ls` into the diff package
 or make the viewer pretend its patch rows are an editable source file.
 
-CED12/CED13/CED19v2/CED21 in the
+CED12/CED13/CED19v2/CED21v2 in the
 [source-editor design](radiant/Radiant_Design_Source_Editor.md) describe the
 existing buffer, viewport, selection bridge, and column conversion mechanisms.
 S2.5.8 remains the authority for text-position units. Syntax highlighting can

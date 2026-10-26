@@ -31,13 +31,19 @@ ask
 lookup.outcome(ask,{ok:false,status:404,body:"{\"title\":\"No Definitions Found\"}"})
 lookup.outcome(ask,{ok:false,status:503,body:""})
 lookup.outcome(ask,{ok:true,status:200,body:hello}).result.word
+// an edge's HTML 404 is an outage, not an unknown word, and the next spelling is tried
+lookup.dictionary_urls(" Evening ")
+let edge = {ok:false,status:404,body:"<!DOCTYPE html><title>404 page</title>"}
+lookup.outcome(ask,edge)
+;[lookup.settled(ask,edge),lookup.settled(ask,{ok:false,status:404,body:"{\"title\":\"No Definitions Found\"}"}),
+    lookup.settled(ask,{ok:true,status:200,body:hello}),lookup.settled(ask,{ok:false,status:502,body:"bad gateway"})]
 
 // translation answers
 let hola = "[[[\"Hola Mundo. \",\"Hello world. \",null,null,10],[\"¿Cómo estás?\",\"How are you?\",null,null,12]],null,\"en\",null,null,null,0.98]"
 lookup.read_translation(hola)
 lookup.read_translation("[null]")
 let pane = lookup.pane("translate","Hello world. How are you?",{target:"fr",seq:4})
-lookup.request(pane).url
+lookup.request(pane).urls
 lookup.outcome(lookup.request(pane),{ok:true,status:200,body:hola})
 lookup.outcome(lookup.request(pane),{ok:true,status:200,body:"<html>"})
 

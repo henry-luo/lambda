@@ -4,12 +4,7 @@ Run `./lambda.exe demo <name>` from the repository root, or `./lambda demo <name
 from an unpacked release. Each named demo uses the same viewer as `lambda view`.
 Run `lambda demo --list` for the catalog.
 
-With no name, `lambda demo` opens the demo index (`index.ls`): one animated tile per
-demo. A click starts that demo as its own `lambda demo <name>` process, so it opens
-in a window of its own; closing the index also closes the demos it started. The
-tile catalog is in `index.ls` and its art in `mod_demo_art.ls`; a new named demo
-needs an entry there as well as in `LAMBDA_DEMOS` (`lambda/main.cpp`). The document
-viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
+With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an app store: a category sidebar beside a Discover page of featured apps and one shelf per category. A click starts that demo as its own `lambda demo <name>` process, so it opens in a window of its own; closing the index also closes the demos it started. The catalog and its categories are in `index.ls`; the tile art and app icons are in `mod_demo_art.ls`. Most tiles show a screenshot of the app from `previews/`, which `sh test/demo/previews/capture.sh [name ...]` recaptures from the repository root; the games, the city film and the photo album stay live drawings. A new named demo needs an entry in `index.ls` and `mod_demo_art.ls` (an icon hue and glyph, plus a capture line or a live drawing) as well as in `LAMBDA_DEMOS` (`lambda/main.cpp`). The document viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 
 | Name | Entry point | Guide |
 | --- | --- | --- |

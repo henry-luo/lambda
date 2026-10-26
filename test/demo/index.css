@@ -81,42 +81,86 @@ h1 .pixel { display: inline-block; width: .19em; height: .19em; margin-left: .05
 .hint { margin: 22px 0 0; color: rgba(255, 255, 255, .8); font-size: 13px; }
 .emblem { flex: none; width: 320px; height: 320px; }
 
-/* tiles */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 22px; }
-.tile {
-  display: flex; flex-direction: column; margin: 0; padding: 0; overflow: hidden;
-  border: 3px solid rgba(255, 255, 255, .7); border-radius: 18px;
-  background: rgba(239, 246, 255, .94); box-shadow: 0 6px 18px rgba(30, 58, 138, .12); color: #0b1a40; font: inherit; text-align: left; cursor: pointer;
-  transition-property: border-color, background-color, color; transition-duration: .25s;
-}
-/* hover changes only the tile's own colors and shadow, so it repaints without
-   relayout: the border keeps its width, and the title inherits `color` rather
-   than using a `.tile:hover .tile-title` rule */
-.tile:hover { border-color: #ff8a1f; background-color: #fff; color: #f97316;
-              box-shadow: 0 10px 28px rgba(255, 255, 255, .4), 0 0 14px rgba(255, 255, 255, .45); }
-.tile:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
-.tile-art { display: block; flex: none; overflow: hidden; border-bottom: 1px solid #e2e8f0; }
-.art { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
-.tile-copy { display: block; padding: 16px 18px 6px; }
-/* a quiet grey label: the tile art carries the demo, not the tag */
-.tile-tag { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #e9edf2;
-            color: #5b6474; font-size: 10.5px; font-weight: 700; letter-spacing: .12em; }
-.tile-title { display: block; margin-top: 8px; font-size: 20px; font-weight: 700; }
-/* every blurb fits two lines; the clamp keeps a longer one from growing the tile */
-.tile-blurb { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
-              margin-top: 7px; color: #475a80; font-size: 13.5px; line-height: 1.5; }
-.tile-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-             margin-top: auto; padding: 12px 18px 16px; }
-.tile-cmd { padding: 3px 8px; border-radius: 6px; background: rgba(59, 130, 246, .1);
-            color: #3b5384; font-family: Menlo, monospace; font-size: 11.5px;
-            min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tile-open { flex: none; color: #2563eb; font-size: 13px; font-weight: 700; white-space: nowrap; }
-.tile.running { border-color: #3b82f6; }
-.tile.running .tile-open { animation-name: pulse; animation-duration: 1.6s;
-                           animation-iteration-count: infinite; }
-@keyframes pulse { from { opacity: 1; } 50% { opacity: .35; } to { opacity: 1; } }
+/* the store: a category sidebar beside the current page, on one glass sheet.
+   Nothing here clips overflow, so the sidebar can stick while the page scrolls. */
+.store { display: flex; align-items: flex-start; border: 1px solid rgba(255, 255, 255, .7); border-radius: 26px;
+         background: rgba(255, 255, 255, .9); box-shadow: 0 24px 60px rgba(30, 58, 138, .2); color: #0b1a40; }
+.sidebar { flex: none; width: 232px; position: sticky; top: 0; padding: 26px 14px 24px; }
+.side-item { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 2px; padding: 8px 10px;
+             border: 0; border-radius: 10px; background: transparent; color: #334155;
+             font: inherit; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; }
+.side-item:hover { background-color: #eef2fb; }
+.side-item.active { background-color: #2563eb; color: #fff; }
+.line-glyph { flex: none; width: 18px; height: 18px; }
+.side-label { flex: 1; min-width: 0; }
+.side-count { color: #94a3b8; font-size: 12px; }
+.side-item.active .side-count { color: rgba(255, 255, 255, .8); }
+.side-head { margin: 18px 10px 6px; color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: .1em;
+             text-transform: uppercase; }
+.side-note { margin: 22px 4px 0; padding: 12px; border-radius: 12px; background: #f1f5fb;
+             color: #64748b; font-size: 12px; line-height: 1.5; }
+.side-note code { display: block; margin-top: 4px; color: #1e3a8a; font-family: Menlo, monospace; font-size: 11.5px;
+                  font-weight: 700; }
 
-.page-foot { margin-top: 44px; color: #1e3a8a; font-size: 13px; text-align: center; }
+.store-main { flex: 1; min-width: 0; padding: 30px 32px 36px; border-left: 1px solid #e6eaf2; }
+.store-head h2 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -.01em; }
+.store-head p { margin: 6px 0 0; color: #64748b; font-size: 14.5px; }
+.back { margin: 0 0 8px; padding: 0; border: 0; background: none; color: #2563eb;
+        font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+
+/* Discover leads with two editorial features */
+.features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 24px; }
+.feature, .card {
+  display: flex; flex-direction: column; margin: 0; padding: 0; overflow: hidden;
+  border: 1px solid #e6eaf2; background: #fff; color: #0b1a40; font: inherit; text-align: left; cursor: pointer;
+  transition-property: border-color, box-shadow; transition-duration: .2s;
+}
+.feature { border-radius: 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, .08); }
+.feature-copy { display: block; padding: 18px 20px 14px; }
+.feature-eyebrow { display: block; color: #2563eb; font-size: 11px; font-weight: 700; letter-spacing: .1em; }
+.feature-title { display: block; margin-top: 6px; font-size: 24px; font-weight: 800; }
+.feature-blurb { display: block; margin-top: 4px; color: #64748b; font-size: 14px; line-height: 1.45; }
+.feature-art, .card-art { display: block; flex: none; }
+.feature-foot { display: flex; align-items: center; gap: 12px; padding: 14px 18px 16px; border-top: 1px solid #eef1f6; }
+.art { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
+
+/* a shelf per category: a heading, See all when it holds more than one row */
+.shelf { margin-top: 34px; }
+.shelf-head { display: flex; align-items: baseline; justify-content: space-between;
+              margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid #e6eaf2; }
+.shelf-head h3 { margin: 0; font-size: 20px; font-weight: 700; }
+.see-all { padding: 0; border: 0; background: none; color: #2563eb; font: inherit; font-size: 14px; font-weight: 600;
+           cursor: pointer; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 20px; }
+.store-head + .cards { margin-top: 24px; }
+
+.card { border-radius: 16px; box-shadow: 0 2px 6px rgba(15, 23, 42, .05); }
+/* hover changes only colors and shadow, so it repaints without relayout */
+.card:hover, .feature:hover { border-color: #93b4f5; box-shadow: 0 12px 30px rgba(37, 99, 235, .16); }
+.card:focus-visible, .feature:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.card-art { border-bottom: 1px solid #eef1f6; }
+.card-info { display: flex; align-items: center; gap: 12px; padding: 14px 14px 0; }
+.app-icon { display: block; flex: none; width: 44px; height: 44px; border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(15, 23, 42, .18); }
+.icon-art { display: block; width: 100%; height: 100%; }
+.card-text { display: block; flex: 1; min-width: 0; }
+.card-title { display: block; overflow: hidden; font-size: 15.5px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+.card-sub { display: block; overflow: hidden; margin-top: 2px; color: #64748b; font-size: 12.5px;
+            white-space: nowrap; text-overflow: ellipsis; }
+/* the App Store's pill button: it fills in on hover and while the demo runs */
+.get { flex: none; min-width: 64px; padding: 5px 14px; border-radius: 999px; background: #eef2f9; color: #2563eb;
+       font-size: 13px; font-weight: 800; text-align: center; }
+.card:hover .get, .feature:hover .get, .running .get { background-color: #2563eb; color: #fff; }
+.running .get { animation-name: pulse; animation-duration: 1.6s; animation-iteration-count: infinite; }
+@keyframes pulse { from { opacity: 1; } 50% { opacity: .5; } to { opacity: 1; } }
+/* every blurb fits two lines; the clamp keeps a longer one from growing the card */
+.card-blurb { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+              margin: 10px 14px 14px; color: #475569; font-size: 13px; line-height: 1.5; }
+.cmd { display: inline-block; max-width: 100%; margin-top: 3px; padding: 2px 7px; border-radius: 6px;
+       background: rgba(59, 130, 246, .1); color: #3b5384; font-family: Menlo, monospace; font-size: 11.5px;
+       overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+.page-foot { margin-top: 36px; color: #1e3a8a; font-size: 13px; text-align: center; }
 .page-foot code { color: #0b1a40; font-weight: 700; font-family: Menlo, monospace; }
 
 /* the bar centres the message; the message itself wraps within 760px */
@@ -135,4 +179,13 @@ h1 .pixel { display: inline-block; width: .19em; height: .19em; margin-left: .05
   h1 { font-size: 40px; }
   .emblem { width: 160px; height: 160px; }
   .stats { flex-wrap: wrap; }
+}
+/* narrow windows put the categories above the page as a row of chips */
+@media (max-width: 900px) {
+  .store { flex-direction: column; align-items: stretch; }
+  .sidebar { position: static; display: flex; flex-wrap: wrap; gap: 6px; width: auto; padding: 18px 18px 0; }
+  .side-item { width: auto; margin: 0; padding: 6px 12px; background-color: #eef2fb; }
+  .side-head, .side-note { display: none; }
+  .store-main { padding: 22px 18px 28px; border-left: 0; }
+  .features { grid-template-columns: minmax(0, 1fr); }
 }

@@ -5,7 +5,7 @@
 //
 //   SourcePath = [int, ...]                 // child indices from the doc root
 //   SourcePos  = { path: SourcePath,        // the containing node
-//                  offset: int }            //   text leaf  -> UTF-8 byte offset
+//                  offset: int }            //   text leaf  -> code-point offset
 //                                           //   non-leaf   -> child index in [0, len]
 //   TextSelection = { kind: 'text', anchor: SourcePos, head: SourcePos }
 //   NodeSelection = { kind: 'node', path:   SourcePath }

@@ -21,7 +21,7 @@
 
 ### 1.1 How the window maps to the selection bridge
 
-The window is projected as a lambda.editor-shaped document, `node('doc', [node('src_line', [text(line)]) …])`, and applied through the edit package's existing `view map` template (`rich_text.ls`). That makes `render_map_maybe_set_source_doc_root` treat it as the editor document root, so every DOM boundary in row `k` maps to source path `[k, 0]` plus a UTF-8 byte offset, and `finish_model_edit` / an `editaction` result projects a model selection back after the render. Byte offsets convert to code-point columns per row (CED21). No native change was needed for the bridge.
+The window is projected as a lambda.editor-shaped document, `node('doc', [node('src_line', [text(line)]) …])`, and applied through the edit package's existing `view map` template (`rich_text.ls`). That makes `render_map_maybe_set_source_doc_root` treat it as the editor document root, so every DOM boundary in row `k` maps to source path `[k, 0]` plus a code-point offset, and `finish_model_edit` / an `editaction` result projects a model selection back after the render. Since CED21v2 (2026-10-26) the bridge reports code points itself, so leaf offsets are columns with no conversion; before that it reported UTF-8 bytes, and this surface converted them.
 
 The host is `contenteditable="true"`, not `plaintext-only` as CED19 says: `radiant_model_edit_surface_bind` accepts only rich surfaces. The surface declines every rich-only intent, so behavior is plaintext; paste reads `evt.data`.
 
@@ -206,7 +206,7 @@ Markdown fidelity over the corpus (window versus full parse, 60,255 lines): 166 
 | Long lines (§5.3) | A line over 10,000 code points gets no runs. | `source_highlight.ls` |
 | Status line (§10) | Left: `Ln, Col`, the selection's size (characters in a line, lines across several), the last message. Right: language, `LF`/`CRLF`, `Unsaved`. | `source.ls` |
 | Soft wrap motion and resize (§6.4) | Up, Down, PageUp and PageDown step by rows while wrapping, keeping an x within the row; `on resize` measures rows and columns again; `on load` measures at once. | `source.ls` |
-| Column units (CED21) | `bytes_before` and `col_at_byte` in one module, each one native UTF-8 encoding instead of per-character prefix sums (the old `col_at_byte` was quadratic in the line length). | `source_units.ls` |
+| Column units (CED21v2) | None: the bridge reports code-point offsets, so `source_units.ls` (`bytes_before`, `col_at_byte`) was deleted on 2026-10-26. | `source_pos_bridge.cpp` |
 | GTest ring (§11) | (a) span text, (b) window vs full parse by per-line coverage over the corpus, (c) span recording leaves the tree identical, (d) HTML lexer vs tree parser, (e) 300 random edits with the carried cache vs a cold parse. | `test/test_input_sourcepos_gtest.cpp`, input suite |
 | Horizontal scrolling (§6.2) | `left` columns in the view; the surface takes a negative `margin-left` and slides under the gutter, which paints above it; `follow` keeps the caret in view with a few columns of context; horizontal wheel deltas scroll by whole columns, carrying the remainder; the measured width subtracts the hidden columns. | `source.ls` |
 | Gutter clicks (§6.3) | A press on a line number (`data-line`) selects the line; Shift extends the selection to it. A click past a line's end needed nothing: native hit-testing puts the caret at the end. | `source.ls` |

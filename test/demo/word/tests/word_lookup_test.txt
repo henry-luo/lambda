@@ -31,20 +31,25 @@ true
   kind: "dictionary",
   seq: 0,
   text: "qwzxv",
-  url: "https://api.dictionaryapi.dev/api/v2/entries/en/qwzxv"
+  urls: ["https://api.dictionaryapi.dev/api/v2/entries/en/qwzxv", "https://api.dictionaryapi.dev/api/v2/entries/en/Qwzxv"]
 }
 {
   error: "No definitions found for “qwzxv”."
 }
 {
-  error: "Dictionary service error (HTTP 503)."
+  error: "The dictionary service is unavailable right now (HTTP 503). Try again later."
 }
 "hello"
+["https://api.dictionaryapi.dev/api/v2/entries/en/evening", "https://api.dictionaryapi.dev/api/v2/entries/en/Evening"]
+{
+  error: "The dictionary service is unavailable right now (HTTP 404). Try again later."
+}
+[false, true, true, false]
 {
   text: "Hola Mundo. ¿Cómo estás?",
   source: "en"
 }
-"https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=fr&q=Hello%20world.%20How%20are%20you%3F"
+["https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=fr&q=Hello%20world.%20How%20are%20you%3F"]
 {
   result: {
     text: "Hola Mundo. ¿Cómo estás?",

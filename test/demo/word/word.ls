@@ -329,6 +329,15 @@ on word_lookup(evt) {
             else "Translated to " ++ lookup.language_name(next.target)}
     }
 }
+// a finished or failed reading frees the speaker button; a reading it already replaced changes nothing.
+on speechend(evt) {
+    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null}} }
+    return 'handled'
+}
+on speecherror(evt) {
+    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null},status:"The word could not be read aloud"} }
+    return 'handled'
+}
 on word_lookup_ready(evt) {
     let root = dom.root_node(evt.target)
     dom.focus_set(dom.get_element_by_id(root,"lookup-query") or dom.get_element_by_id(root,"lookup-text"),false)

@@ -19,6 +19,12 @@ pub let languages = [{value:"es",label:"Spanish"},{value:"fr",label:"French"},{v
 pub fn language_name(code) => [for (entry in languages where entry.value==code) entry.label][0] or code
 
 pub fn dictionary_url(word) => dictionary_api ++ url_encode(lower(trim(word)))
+// the API ignores case, but its Cloudflare edge caches each spelling apart and can keep a stale HTML 404 for one;
+// the capitalized spelling is a second key to the same entry.
+pub fn dictionary_urls(word) {
+    let w = lower(trim(word));
+    unique([dictionary_url(w),dictionary_api ++ url_encode(upper(slice(w,0,1)) ++ slice(w,1))])
+}
 pub fn translate_url(text,target) => translate_api ++ "&sl=auto&tl=" ++ url_encode(target) ++ "&q=" ++ url_encode(text)
 
 // the run of letters around a caret offset; "" between words.
@@ -42,7 +48,7 @@ pub fn source(editor,kind) {
 pub fn pane(kind,text,previous,selection=null,revision=null) => {kind:kind,query:text,target:previous.target or "es",
     seq:previous.seq or 0,loading:false,result:null,error:null,selection:selection,revision:revision}
 pub fn request(pane) => {kind:pane.kind,seq:pane.seq,text:trim(pane.query),
-    url:if (pane.kind=="dictionary") dictionary_url(pane.query) else translate_url(slice(trim(pane.query),0,max_text),pane.target)}
+    urls:if (pane.kind=="dictionary") dictionary_urls(pane.query) else [translate_url(slice(trim(pane.query),0,max_text),pane.target)]}
 
 // dictionaryapi.dev answers an array of entries per spelling; parts of speech keep their order.
 pub fn read_dictionary(body) {
@@ -60,18 +66,29 @@ pub fn read_translation(body) {
     let parts = if (data is array and data[0] is array) data[0] else [];
     if (len(parts)==0) null else {text:join([for (part in parts where part[0] is string) part[0]],""),source:data[2]}
 }
+// only the API's own JSON 404 means the word is unknown; an HTML 404 is the edge's error page.
+pub fn not_found(reply) => reply.status==404 and reply.body is string and
+    ((parse(reply.body,'json') ^ { null }).title is string)
 pub fn outcome(req,reply) {
     let read = if (not reply.ok or not (reply.body is string)) null
-        else if (req.kind=="dictionary") read_dictionary(reply.body) else read_translation(reply.body);
+        else if (req.kind=="dictionary") read_dictionary(reply.body) else read_translation(reply.body)
+    let service = if (req.kind=="dictionary") "dictionary" else "translation";
     if (read!=null) {result:read}
-    else if (req.kind=="dictionary" and reply.status==404) {error:"No definitions found for “" ++ req.text ++ "”."}
-    else if (not reply.ok) {error:(if (req.kind=="dictionary") "Dictionary" else "Translation") ++ " service error (HTTP " ++ string(reply.status) ++ ")."}
-    else {error:"The " ++ (if (req.kind=="dictionary") "dictionary" else "translation") ++ " service sent an unreadable answer."}
+    else if (req.kind=="dictionary" and not_found(reply)) {error:"No definitions found for “" ++ req.text ++ "”."}
+    else if (not reply.ok) {error:"The " ++ service ++ " service is unavailable right now (HTTP " ++ string(reply.status) ++ "). Try again later."}
+    else {error:"The " ++ service ++ " service sent an unreadable answer."}
 }
+// a settled reply ends the attempts: an answer, or the API's own not-found.
+pub fn settled(req,reply) => outcome(req,reply).result!=null or (req.kind=="dictionary" and not_found(reply))
 pub pn run(root,req) {
     var reply = null
     var failure = null
-    io.fetch(req.url,{timeout:15,headers:{Accept:"application/json"}}) ^ { failure = ^ } ~ { reply = ~ }
+    var i = 0
+    while (i<len(req.urls) and (i==0 or failure is error or not settled(req,reply))) {
+        failure = null
+        io.fetch(req.urls[i],{timeout:15,headers:{Accept:"application/json"}}) ^ { failure = ^ } ~ { reply = ~ }
+        i = i+1
+    }
     let detail = {*:if (failure is error) {error:"Could not reach the service: " ++ failure.message} else outcome(req,reply),seq:req.seq}
     // a rebuild may replace the shell element, so it is looked up for each report.
     let owner = dom.get_element_by_id(root,"word")

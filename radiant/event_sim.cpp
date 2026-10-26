@@ -3801,17 +3801,23 @@ static int sim_physical_key_for_codepoint(uint32_t codepoint, int* out_mods) {
     }
 }
 
+// Decode the code point at `cursor`; an invalid byte stands for itself.
+static int sim_next_codepoint(const char* cursor, const char* end, uint32_t* codepoint) {
+    int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), codepoint);
+    if (bytes <= 0) {
+        *codepoint = (uint32_t)(unsigned char)*cursor;
+        bytes = 1;
+    }
+    return bytes;
+}
+
 static void sim_type_physical_text(UiContext* uicon, const char* text) {
     if (!uicon || !text) return;
     const char* cursor = text;
     const char* end = text + strlen(text);
     while (cursor < end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
-        if (bytes <= 0) {
-            codepoint = (uint32_t)(unsigned char)*cursor;
-            bytes = 1;
-        }
+        int bytes = sim_next_codepoint(cursor, end, &codepoint);
         int mods = 0;
         int key = sim_physical_key_for_codepoint(codepoint, &mods);
         // The editor gate must see the ordinary platform sequence; invoking
@@ -3827,10 +3833,12 @@ static void sim_type_physical_text(UiContext* uicon, const char* text) {
 static void sim_type_legacy_text(UiContext* uicon, const char* text) {
     if (!uicon || !text) return;
     const char* cursor = text;
-    while (*cursor) {
-        // Keep the historical `type` fixture contract byte-oriented.
-        sim_text_input(uicon, (uint32_t)(unsigned char)*cursor);
-        cursor++;
+    const char* end = text + strlen(text);
+    while (cursor < end) {
+        // one text input per code point: a byte-wise feed turned UTF-8 into Latin-1 characters.
+        uint32_t codepoint = 0;
+        cursor += sim_next_codepoint(cursor, end, &codepoint);
+        sim_text_input(uicon, codepoint);
     }
 }
 

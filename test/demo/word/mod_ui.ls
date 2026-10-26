@@ -670,8 +670,9 @@ pub fn revisions(editor,read_only=false) {
 }
 
 // Review lookups: one pane, two tabs, sharing the query between Dictionary and Translate.
-fn definition(r) => <article class:"lookup-entry",
-    <div class:"lookup-word",<strong r.word>;if (r.phonetic) <span class:"lookup-phonetic",r.phonetic> else null>;
+fn definition(r,speaking) => <article class:"lookup-entry",
+    <div class:"lookup-word",<strong r.word>;if (r.phonetic) <span class:"lookup-phonetic",r.phonetic> else null;
+        button("lookup-speak","ui.lookupSpeak",if (speaking) "Stop reading" else "Read aloud",ribbon_icons.icon("sound",22),{text:r.word},speaking,false,"icon-only lookup-speak")>;
     *[for (i,m in r.meanings) <section class:"lookup-meaning",
         <em class:"lookup-part",m.part>;
         <ol class:"lookup-definitions",*[for (d in m.definitions) <li <span d.text>;if (d.example) <q class:"lookup-example",d.example> else null>]>;
@@ -706,7 +707,7 @@ pub fn lookup_pane(st) {
             else if (p.error!=null) <p class:"lookup-error",role:"alert",p.error>
             else if (p.result==null) <p class:"pane-hint",if (dictionary) "Select a word, or type one and press Enter."
                 else "Select text, or place the caret in a paragraph. Ctrl/⌘ Enter translates.">
-            else if (dictionary) definition(p.result) else translation(p,st.read_only)>;
+            else if (dictionary) definition(p.result,p.speech!=null) else translation(p,st.read_only)>;
         <p class:"lookup-credit",if (dictionary) "Free Dictionary API (dictionaryapi.dev) · Wiktionary, CC BY-SA" else "Google Translate">>
 }
 
