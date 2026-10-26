@@ -1482,11 +1482,11 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_pdf_parse_content_stream", PROFILE_PDF_FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
 
     {SYSFUNC_PS_SCAN, "ps_scan", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_ps_scan", FPTR(fn_ps_scan), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ps_scan", PROFILE_PDF_FPTR(fn_ps_scan), NULL, NULL, false, 0},
     {SYSFUNC_PS_READ, "ps_read", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_ps_read", FPTR(fn_ps_read), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ps_read", PROFILE_PDF_FPTR(fn_ps_read), NULL, NULL, false, 0},
     {SYSFUNC_PS_PNG, "ps_png", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_ps_png", FPTR(fn_ps_png), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ps_png", PROFILE_PDF_FPTR(fn_ps_png), NULL, NULL, false, 0},
 
     // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
     {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
@@ -1689,12 +1689,15 @@ JitImport jit_runtime_imports[] = {
     {"seq_spread_value", FPTR(seq_spread_value)},
     {"seq_spread_item", FPTR(seq_spread_item)},
     {"array_end", FPTR(array_end)},
+    // These addresses must leave the symbol table with the disabled PDF backend.
+#ifndef LAMBDA_NO_PDF
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
     {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
     {"fn_ps_scan", FPTR(fn_ps_scan)},
     {"fn_ps_read", FPTR(fn_ps_read)},
     {"fn_ps_png", FPTR(fn_ps_png)},
     {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
+#endif
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
     {"array_float_literal_with_nulls", FPTR(array_float_literal_with_nulls)},

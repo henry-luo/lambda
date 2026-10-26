@@ -2256,10 +2256,12 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
+#ifndef LAMBDA_NO_PDF
         if (eps_source_expected(pathname, source, source_len)) effective_type = "eps";
-        else if (detected_archive != ARCHIVE_UNKNOWN)
+#endif
+        if (!effective_type && detected_archive != ARCHIVE_UNKNOWN)
             effective_type = archive_format_name(detected_archive);
-        else if (detected_graph_flavor) effective_type = "graph";
+        if (!effective_type && detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
         if (!effective_type && detector) {
@@ -2383,9 +2385,12 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
                 parse_xml_with_options(input, source, &xml_options);
             }
         }
+// EPS decoding shares PostScript/PDF helpers excluded from the IME profile.
+#ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "eps") == 0 || strcmp(effective_type, "epsi") == 0) {
             parse_eps(input, source, source_len);
         }
+#endif
 #ifndef LAMBDA_NO_IMAGE_IO
         else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
 #endif

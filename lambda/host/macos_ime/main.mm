@@ -580,19 +580,27 @@ static void replace_shown(NSArray** slot, NSArray* value) {
 }
 - (BOOL)handleEvent:(NSEvent*)event client:(id)client {
     if ([event type] != NSEventTypeKeyDown && [event type] != NSEventTypeFlagsChanged) return NO;
-    NSString* key = [event charactersIgnoringModifiers];
+    // Only Shift transitions belong to the reducer's tap contract.
+    if ([event type] == NSEventTypeFlagsChanged && [event keyCode] != kVK_Shift &&
+            [event keyCode] != kVK_RightShift) return NO;
+    NSString* key = [event characters] ?: [event charactersIgnoringModifiers];
     switch ([event keyCode]) {
         case kVK_LeftArrow: key = @"ArrowLeft"; break;
         case kVK_RightArrow: key = @"ArrowRight"; break;
         case kVK_UpArrow: key = @"ArrowUp"; break;
         case kVK_DownArrow: key = @"ArrowDown"; break;
         case kVK_Delete: key = @"Backspace"; break;
+        case kVK_ForwardDelete: key = @"Delete"; break;
         case kVK_Return: key = @"Enter"; break;
+        case kVK_ANSI_KeypadEnter: key = @"Enter"; break;
         case kVK_Escape: key = @"Escape"; break;
         case kVK_Space: key = @" "; break;
+        case kVK_PageUp: key = @"PageUp"; break;
+        case kVK_PageDown: key = @"PageDown"; break;
         default: break;
     }
     if ([event type] == NSEventTypeFlagsChanged) key = @"Shift";
+    if (!key) return NO;
     RootFrame roots(1);
     Rooted<Item> payload(roots, vmap_new());
     ime_set(payload.get(), "type", ime_string([event type] == NSEventTypeFlagsChanged &&

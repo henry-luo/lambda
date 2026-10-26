@@ -9,8 +9,8 @@ pn main() {
     io.mkdir(root)^
     let added = model.change(model.empty(engine.profile),engine,"恩典","en dian",true)^
     let edits = model.change(added,engine,"北京","bei jing",false)^
-    output(edits,path,{format:"json",atomic:true})^
-    let checked = model.validate(input(path,"json")^,engine)^
+    model.save_edits(edits,path,engine)^
+    let checked = model.load_edits(path,engine)^
     let restored = model.restore(engine,checked)^
     let full = ime.candidates(restored,"beijing")^
     let short = ime.candidates(restored,"bj")^
@@ -21,7 +21,7 @@ pn main() {
     var wrong_profile = null
     model.validate({*:edits,profile:"zh-Hant"},engine) ^ { wrong_profile = ^ }
     var write_failure = null
-    output(edits,path ++ "/child.json",{format:"json",atomic:true}) ^ { write_failure = ^ }
+    model.save_edits(edits,path ++ "/child.json",engine) ^ { write_failure = ^ }
     let checks = [checked == edits,
         not ("北京" in [for (item in full.items) item.text]),
         not ("北京" in [for (item in short.items) item.text]),
