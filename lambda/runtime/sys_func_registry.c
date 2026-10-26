@@ -978,6 +978,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_math_incircle", FPTR(fn_math_incircle), NULL, NULL, false, 0,
      false, &TYPE_INT, true},
 
+    {SYSFUNC_WFC, "math_wfc", 4, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_wfc", FPTR(fn_math_wfc), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,

@@ -1,0 +1,21 @@
+"1 grammars with one option per symbol are fixed text"
+["The old knight saw an owl and a unicorn; The Old Knight dashed."]
+["\"hi\" so, end."]
+["cats/cated", "boxes/boxed", "wishes/wished", "cities/citied", "days/dayd", "bakes/baked", "fixes/fixed"]
+["an apple", "a unicorn", "an umbrella", "a hour", "a "]
+"2 keyed choices"
+["Ada found an owl; ada kept embers.", "Ada found a box; ada kept embers.", "Ada found an owl; ada kept embers.", "Uriel found a lantern; uriel kept owls."]
+[true]
+[true, true, true]
+"3 actions push and pop"
+["red, blue, red, green"]
+["inner then outer"]
+["x y!"]
+"4 escapes and plain text"
+["a #tag# and [act] and \\", "no tags"]
+"5 rejected grammars"
+["unknown", "deep", "unclosed", "modifier", "action"]
+"6 Markov names"
+[["<start>", [["a", 2]]], ["a", [["b", 1], ["c", 1]]], ["b", [["<end>", 1]]], ["c", [["<end>", 1]]]]
+["loric", "lowen", "lorian", "aldrian", "fenwic", "cedrian", "fena", "beatrelena"]
+[true, "cedrix", "none", "empty", "order"]

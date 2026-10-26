@@ -33466,6 +33466,14 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
             MIR_reg_t boxed = transpile_box_item(mt, only_arg);
             MIR_reg_t coerced = emit_call_1(mt, "coerce_uint64", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            // Only a u64 carrier names the raw lane. With an `any` operand the
+            // call's carrier is an Item, so an unboxed payload was published as
+            // an Item and dereferenced as a pointer (`fn f(p) => u64(p)`), and
+            // a conversion error was flattened to its payload (D2.4.1-D2.4.3).
+            if (mir_expr_carrier_type(mt, (AstNode*)call_node) != LMD_TYPE_UINT64) {
+                returned_boxed_item = true;
+                RETURN_CALL_VALUE(coerced);
+            }
             RETURN_CALL_VALUE(emit_unbox(mt, coerced, LMD_TYPE_UINT64));
         }
     }

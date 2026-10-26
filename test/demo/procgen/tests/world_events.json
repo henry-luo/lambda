@@ -1,0 +1,15 @@
+{
+  "name": "procgen world: next seed, rivers toggle",
+  "html": "test/demo/procgen/world.ls",
+  "viewport": {"width": 1240, "height": 860},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".seed"}, "equals": "seed 2026"},
+    {"type": "click", "target": {"selector": ".step.primary"}},
+    {"type": "assert_text", "target": {"selector": ".seed"}, "equals": "seed 2027"},
+    {"type": "click", "target": {"selector": "[data-act=rivers]"}},
+    {"type": "assert_attribute", "target": {"selector": "[data-act=rivers]"}, "attribute": "class", "equals": "toggle"},
+    {"type": "click", "target": {"selector": "[data-act=previous]"}},
+    {"type": "assert_text", "target": {"selector": ".seed"}, "equals": "seed 2026"},
+    {"type": "assert_text", "target": {"selector": "h1"}, "equals": "Oakesterly"}
+  ]
+}

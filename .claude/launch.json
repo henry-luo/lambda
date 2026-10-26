@@ -23,6 +23,18 @@
         "site"
       ],
       "port": 8731
+    },
+    {
+      "name": "temp",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8732",
+        "--directory",
+        "temp"
+      ],
+      "port": 8732
     }
   ]
 }

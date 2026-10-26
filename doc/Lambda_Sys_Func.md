@@ -381,6 +381,28 @@ arithmetic prevents cancellation, overflow, or underflow in the determinant
 from changing its sign. Malformed points produce `error`; whole-point `null`
 propagates `null` (S7.10.2, S7.10.5v3).
 
+#### Wave Function Collapse Batch Solver
+
+`math.wfc(key, weights, masks, [width, height, periodic, retries])` runs the
+exact counting kernel used by `lambda.procgen.wfc`. Prefer the package for
+model construction and named options; this primitive accepts numeric buffers.
+It is pure (S12.1.1v3) and returns an owned flat `int[]` in row-major order
+through the boxed system-function ABI (D6.4.1–D6.4.2).
+
+`key` is `u64`. There must be 1–1,000 positive finite `int`/`float` weights,
+with a sum at most 2^53. `masks` has shape `[4, patterns, patterns]`, with
+integer entries 0 or 1: `masks[d][p][q]` allows pattern `q` next to `p` in
+direction right, down, left or up. Nested arrays and packed N-D arrays are
+accepted. Dimensions and retries are positive ints, with at most 10,000
+cells; `periodic` is bool. Malformed inputs and contradictions after all
+retries return `error`. A whole `null` operand propagates `null`, and error
+operands take precedence (S7.1.1v3). Inputs are preserved.
+
+The solver uses smallest-domain observation with row-major ties, keyed draws
+and sequential weighted prefixes. It reproduces `wfc.run_reference` exactly
+for its supported weight domain (PG2, PG7.3). The package keeps other numeric
+weight domains on its Lambda reference implementation.
+
 #### Statistical
 
 | Function                | Description         | Example                         | Result      |
@@ -2171,6 +2193,7 @@ channels continue to process pixel-array input. See the
 | `math.solve` / `math.lstsq` | 2 | Square solve / full-column-rank least squares |
 | `math.orient2d` | 3 | Exact 2D orientation sign after binary64 conversion |
 | `math.orient3d` / `math.incircle` | 4 | Exact 3D orientation / oriented incircle sign |
+| `math.wfc` | 4 | Exact WFC batch solver over numeric weights and adjacency masks |
 | `math.pi` | - | Pi (π) constant |
 | `math.e` | - | Euler's number constant |
 | `math.max_int` | - | Maximum compact `int` constant |

@@ -740,6 +740,7 @@ typedef enum SysFunc {
     SYSFUNC_URL_ENCODE,           // url_encode(text) - RFC 3986 percent-encoding
     SYSPROC_IO_LOOPBACK_LISTEN,   // lambda.io.loopback listen() - a listener on 127.0.0.1
     SYSPROC_IO_LOOPBACK_ACCEPT,   // lambda.io.loopback accept(listener, seconds, page) - one browser request
+    SYSFUNC_WFC,                 // math.wfc(key, weights, masks, control) - exact batch solver
 } SysFunc;
 
 typedef struct Type {
@@ -3220,6 +3221,7 @@ extern "C" {
     Item fn_math_orient2d(Item a, Item b, Item c);
     Item fn_math_orient3d(Item a, Item b, Item c, Item d);
     Item fn_math_incircle(Item a, Item b, Item c, Item d);
+    Item fn_math_wfc(Item key, Item weights, Item masks, Item control);
 
     // ============================================================================
     // UNBOXED SYSTEM FUNCTIONS (fn_*_u)

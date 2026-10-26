@@ -3061,7 +3061,8 @@ static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView*
     snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
         module, (int)func_name->length, func_name->str);
     StrView prefixed_view = strview_from_cstr(prefixed);
-    return get_sys_func_info(&prefixed_view, arg_count);
+    return arg_count < 0 ? get_unambiguous_sys_func_value(&prefixed_view)
+        : get_sys_func_info(&prefixed_view, arg_count);
 }
 
 static SysFuncInfo* lookup_global_imported_sys_func(Transpiler* tp, StrView* func_name, int arg_count) {
@@ -3097,7 +3098,8 @@ static SysFuncInfo* lookup_builtin_module_member(const char* module,
         StrView* member, int arg_count) {
     if (!module || !member) return NULL;
     if (strcmp(module, "sys") == 0) {
-        return get_sys_func_info(member, arg_count);
+        return arg_count < 0 ? get_unambiguous_sys_func_value(member)
+            : get_sys_func_info(member, arg_count);
     }
     return lookup_module_prefixed_sys_func(module, member, arg_count);
 }
@@ -3684,6 +3686,24 @@ static Type* unresolved_type_any(void) {
     return &TYPE_ANY;
 }
 
+// qualified and bare builtin values must publish the same callable contract;
+// a return-typed call callee is not a function value (D6.2.1, S12.3.7).
+static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocated, SysFuncInfo* info) {
+    morph_ast_node(node, AST_NODE_SYS_FUNC, allocated);
+    TypeFunc* type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    type->is_variadic = info->arg_count < 0;
+    type->param_count = type->is_variadic ? 0 : info->arg_count;
+    type->required_param_count = type->is_variadic ? 0 : type->param_count;
+    type->returned = info->return_type;
+    type->inferred_return = info->success_type ? info->success_type : info->return_type;
+    set_function_return_contract(type, info->return_type, true);
+    type->is_proc = info->is_proc;
+    type->can_raise = info->can_raise;
+    type->may_return_error = info->may_return_error;
+    ((AstSysFuncNode*)node)->fn_info = info;
+    node->type = (Type*)type;
+}
+
 AstNode* build_identifier_syntax(Transpiler* tp, SourceSpan span) {
     AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node_from_span(tp,
         AST_NODE_IDENT, span, sizeof(AstIdentNode));
@@ -3751,22 +3771,7 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
         }
         SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
         if (sys_value) {
-            morph_ast_node((AstNode*)ast_node, AST_NODE_SYS_FUNC,
-                sizeof(AstIdentNode));
-            AstSysFuncNode* sys_node = (AstSysFuncNode*)ast_node;
-            TypeFunc* fn_type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
-            fn_type->is_variadic = sys_value->arg_count < 0;
-            fn_type->param_count = fn_type->is_variadic ? 0 : sys_value->arg_count;
-            fn_type->required_param_count = fn_type->is_variadic ? 0 : fn_type->param_count;
-            fn_type->returned = sys_value->return_type;
-            fn_type->inferred_return = sys_value->success_type
-                ? sys_value->success_type : sys_value->return_type;
-            set_function_return_contract(fn_type, sys_value->return_type, true);
-            fn_type->is_proc = sys_value->is_proc;
-            fn_type->can_raise = sys_value->can_raise;
-            fn_type->may_return_error = sys_value->may_return_error;
-            sys_node->fn_info = sys_value;
-            sys_node->type = (Type*)fn_type;
+            resolve_sys_func_value(tp, (AstNode*)ast_node, sizeof(AstIdentNode), sys_value);
             return;
         }
         // ident is used for member access, thus we return TYPE_ANY
@@ -9587,11 +9592,20 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
         const char* qualified_module = NULL;
         StrView qualified_member = {0};
         StrView qualified_path = source_span_text(tp, span);
-        if (resolve_builtin_module_member(qualified_path, &qualified_module,
-                &qualified_member) && strcmp(qualified_module, "math") == 0) {
-            Type* constant = direct_math_constant(tp, qualified_member);
-            if (constant) {
-                morph_member_to_primary(node, NULL, constant);
+        if (resolve_builtin_module_member(qualified_path, &qualified_module, &qualified_member)) {
+            if (strcmp(qualified_module, "math") == 0) {
+                Type* constant = direct_math_constant(tp, qualified_member);
+                if (constant) {
+                    morph_member_to_primary(node, NULL, constant);
+                    return;
+                }
+            }
+            bool shadowed = object_value && object_value->node_type == AST_NODE_IDENT &&
+                lookup_name(tp, source_span_text(tp, object_value->source_span));
+            SysFuncInfo* value = shadowed ? NULL : lookup_builtin_module_member(qualified_module, &qualified_member, -1);
+            if (value) {
+                static_assert(sizeof(AstSysFuncNode) <= sizeof(AstFieldNode), "a field can become a builtin value");
+                resolve_sys_func_value(tp, (AstNode*)node, sizeof(AstFieldNode), value);
                 return;
             }
         }
@@ -9639,6 +9653,14 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
                 Type* constant = direct_math_constant(tp, constant_name);
                 if (constant) {
                     morph_member_to_primary(node, NULL, constant);
+                    return;
+                }
+            }
+            if (module && !lookup_name(tp, module_name)) {
+                StrView member_name = {field_ident->name->chars, field_ident->name->len};
+                SysFuncInfo* value = lookup_builtin_module_member(module, &member_name, -1);
+                if (value) {
+                    resolve_sys_func_value(tp, (AstNode*)node, sizeof(AstFieldNode), value);
                     return;
                 }
             }

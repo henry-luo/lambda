@@ -4,6 +4,7 @@
 #include "lambda-error.h"
 #include "../../lib/math_checked.hpp"
 #include "../../lib/memtrack.h"
+#include "../../lib/procgen/wfc.h"
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -365,6 +366,73 @@ static Item science_linear_solve(Item input_a, Item input_b, bool least_squares)
 Item fn_math_solve(Item a, Item b) { return science_linear_solve(a, b, false); }
 Item fn_math_lstsq(Item a, Item b) { return science_linear_solve(a, b, true); }
 
+// Shewchuk's stage-A filter ("Adaptive Precision Floating-Point Arithmetic and
+// Fast Robust Geometric Predicates", 1997): the binary64 determinant's sign is
+// exact whenever |det| exceeds errbound * permanent. Only undecided cases pay
+// for the exact decimal path, which costs tens of microseconds per call.
+// The bounds assume no underflow or overflow, so the filter declines unless
+// every nonzero coordinate difference lies in [1e-60, 1e60] (products of four
+// stay normal). Each product is its own statement so a contracted FMA cannot
+// replace the separately rounded operations the bounds were derived for.
+static bool science_predicate_filter(const double* p, int count, int dimension, bool lifted, int* sign) {
+    const double eps = 1.1102230246251565e-16;  // 2^-53
+    int rank = count - 1;
+    double d[9];
+    for (int row = 0; row < rank; row++) {
+        for (int col = 0; col < dimension; col++) {
+            double v = p[row * dimension + col] - p[rank * dimension + col];
+            double m = fabs(v);
+            if (v != 0 && (m < 1e-60 || m > 1e60)) return false;
+            d[row * 3 + col] = v;
+        }
+    }
+    double det, permanent, bound;
+    if (count == 3) {
+        double left = d[0] * d[4];
+        double right = d[1] * d[3];
+        det = left - right;
+        permanent = fabs(left) + fabs(right);
+        bound = (3.0 + 16.0 * eps) * eps;
+    } else {
+        double t0 = d[3] * d[7];
+        double t1 = d[6] * d[4];
+        double t2 = d[6] * d[1];
+        double t3 = d[0] * d[7];
+        double t4 = d[0] * d[4];
+        double t5 = d[3] * d[1];
+        double a2, b2, c2;
+        if (lifted) {
+            double ax2 = d[0] * d[0];
+            double ay2 = d[1] * d[1];
+            double bx2 = d[3] * d[3];
+            double by2 = d[4] * d[4];
+            double cx2 = d[6] * d[6];
+            double cy2 = d[7] * d[7];
+            a2 = ax2 + ay2;
+            b2 = bx2 + by2;
+            c2 = cx2 + cy2;
+            bound = (10.0 + 96.0 * eps) * eps;
+        } else {
+            a2 = d[2];
+            b2 = d[5];
+            c2 = d[8];
+            bound = (7.0 + 56.0 * eps) * eps;
+        }
+        double ta = a2 * (t0 - t1);
+        double tb = b2 * (t2 - t3);
+        double tc = c2 * (t4 - t5);
+        det = ta + tb + tc;
+        double pa = (fabs(t0) + fabs(t1)) * fabs(a2);
+        double pb = (fabs(t2) + fabs(t3)) * fabs(b2);
+        double pc = (fabs(t4) + fabs(t5)) * fabs(c2);
+        permanent = pa + pb + pc;
+    }
+    double errbound = bound * permanent;
+    if (det > errbound) { *sign = 1; return true; }
+    if (-det > errbound) { *sign = -1; return true; }
+    return false;
+}
+
 static Item science_predicate(Item* points, int count, int dimension, bool lifted) {
     RootFrame roots(4);
     Rooted<Item> a(roots, points[0]), b(roots, points[1]), c(roots, points[2]);
@@ -381,6 +449,7 @@ static Item science_predicate(Item* points, int count, int dimension, bool lifte
                 return science_error("math geometry predicate: coordinates must convert to finite real floats");
     }
     int sign;
+    if (science_predicate_filter(coordinates, count, dimension, lifted, &sign)) return {.item = i2it(sign)};
     if (!decimal_geometry_sign(coordinates, count, dimension, lifted, &sign)) return ItemError;
     return {.item = i2it(sign)};
 }
@@ -396,4 +465,94 @@ Item fn_math_orient3d(Item a, Item b, Item c, Item d) {
 Item fn_math_incircle(Item a, Item b, Item c, Item d) {
     Item points[] = {a, b, c, d};
     return science_predicate(points, 4, 2, true);
+}
+
+// the native kernel sees only flat numbers; keep every source/row rooted while
+// vector_get boxes lanes, and publish a boxed int array (D5.3.3, D6.4.1).
+Item fn_math_wfc(Item key, Item weights, Item masks, Item control) {
+    GUARD_ERROR3(key, weights, masks);
+    GUARD_ERROR1(control);
+    GUARD_NULL1(key);
+    GUARD_NULL1(weights);
+    GUARD_NULL1(masks);
+    GUARD_NULL1(control);
+    RootFrame roots(6);
+    Rooted<Item> rooted_key(roots, key), rooted_weights(roots, weights);
+    Rooted<Item> rooted_masks(roots, masks), rooted_control(roots, control);
+    Rooted<Item> direction(roots, ItemNull), row(roots, ItemNull);
+    if (get_type_id(key) != LMD_TYPE_UINT64)
+        return science_error("math.wfc: key must be u64");
+    uint64_t seed = rooted_key.get().get_uint64();
+    if (vector_length(control) != 4 || vector_is_ndim(control))
+        return science_error("math.wfc: control must be [width, height, periodic, retries]");
+    int64_t sizes[3];
+    const int indices[] = {0, 1, 3};
+    for (int i = 0; i < 3; i++) {
+        Item value = vector_get(rooted_control.get(), indices[i]);
+        if (get_type_id(value) != LMD_TYPE_INT)
+            return science_error("math.wfc: dimensions and retries must be positive ints");
+        // machine ints are inline; get_int64() is only for pointer-backed i64.
+        sizes[i] = lambda_int_item_to_lane(value.item);
+    }
+    if (sizes[0] < 1 || sizes[1] < 1 || sizes[0] > 10000 || sizes[1] > 10000 ||
+            sizes[0] * sizes[1] > 10000 || sizes[2] < 1)
+        return science_error("math.wfc: expected at most 10,000 cells and positive retries");
+    Item periodic = vector_get(rooted_control.get(), 2);
+    if (get_type_id(periodic) != LMD_TYPE_BOOL)
+        return science_error("math.wfc: periodic must be bool");
+    bool wrap = it2b(periodic);
+    int64_t count = vector_length(rooted_weights.get());
+    if (count < 1 || count > 1000 || vector_is_ndim(rooted_weights.get()))
+        return science_error("math.wfc: weights must contain 1..1000 patterns");
+    int t = (int)count, cells = (int)(sizes[0] * sizes[1]);
+    ScienceScratch weight_memory((size_t)t, sizeof(double));
+    ScienceScratch mask_memory((size_t)4 * t * t, sizeof(uint8_t));
+    ScienceScratch output_memory((size_t)cells, sizeof(int));
+    if (!weight_memory.data || !mask_memory.data || !output_memory.data)
+        return science_error("math.wfc: cannot allocate boundary scratch");
+    double* ws = (double*)weight_memory.data;
+    uint8_t* ms = (uint8_t*)mask_memory.data;
+    double total = 0.0;
+    for (int p = 0; p < t; p++) {
+        Item value = vector_get(rooted_weights.get(), p);
+        TypeId type = get_type_id(value);
+        if ((type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT) ||
+                !science_real(value, &ws[p]) || ws[p] <= 0.0)
+            return science_error("math.wfc: weights must be positive finite int or float values");
+        total += ws[p];
+    }
+    // integer prefixes must remain exactly representable in binary64, matching cumsum.
+    if (total > 9007199254740992.0)
+        return science_error("math.wfc: weight sum must be at most 2^53");
+    // masks may be packed N-D arrays: item_at/len walk rows, vector_get walks leaves.
+    if (fn_len(rooted_masks.get()) != 4)
+        return science_error("math.wfc: masks must have shape [4, patterns, patterns]");
+    for (int d = 0; d < 4; d++) {
+        direction.set(item_at(rooted_masks.get(), d));
+        if (fn_len(direction.get()) != t)
+            return science_error("math.wfc: masks must have shape [4, patterns, patterns]");
+        for (int p = 0; p < t; p++) {
+            row.set(item_at(direction.get(), p));
+            if (vector_length(row.get()) != t || vector_is_ndim(row.get()))
+                return science_error("math.wfc: masks must have shape [4, patterns, patterns]");
+            for (int q = 0; q < t; q++) {
+                Item value = vector_get(row.get(), q);
+                if (get_type_id(value) != LMD_TYPE_INT)
+                    return science_error("math.wfc: mask entries must be 0 or 1");
+                int64_t bit = lambda_int_item_to_lane(value.item);
+                if (bit != 0 && bit != 1)
+                    return science_error("math.wfc: mask entries must be 0 or 1");
+                ms[(d * t + p) * t + q] = (uint8_t)bit;
+            }
+        }
+    }
+    int* output = (int*)output_memory.data;
+    ProcgenWfcResult status = procgen_wfc(seed, (int)sizes[0], (int)sizes[1], wrap, sizes[2], t, ws, ms, output);
+    if (status == PROCGEN_WFC_CONTRADICTION)
+        return science_error("math.wfc: contradiction within retry budget");
+    if (status != PROCGEN_WFC_OK) return science_error("math.wfc: cannot allocate solver scratch");
+    ArrayNum* result = array_int_new(cells);
+    if (!result) return science_error("math.wfc: cannot allocate result");
+    for (int c = 0; c < cells; c++) result->items[c] = output[c];
+    return {.array_num = result};
 }

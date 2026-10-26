@@ -13,14 +13,21 @@
 #include <math.h>
 #include <stdint.h>
 
+// the finalizer also serves keyed draws without inventing a threaded state.
+static inline uint64_t math_splitmix64_mix(uint64_t z) {
+    z = (z ^ (z >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)) * UINT64_C(0x94d049bb133111eb);
+    return z ^ (z >> 31);
+}
+
+static inline double math_splitmix64_unit(uint64_t key) {
+    return (double)(math_splitmix64_mix(key) >> 11) * 0x1.0p-53;
+}
+
 // shared SplitMix64 step; callers own the state and choose pure or mutable semantics.
 static inline double math_splitmix64(uint64_t* state) {
     *state += UINT64_C(0x9e3779b97f4a7c15);
-    uint64_t z = *state;
-    z = (z ^ (z >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27)) * UINT64_C(0x94d049bb133111eb);
-    z ^= z >> 31;
-    return (double)(z >> 11) * 0x1.0p-53;
+    return math_splitmix64_unit(*state);
 }
 
 #ifdef __cplusplus
