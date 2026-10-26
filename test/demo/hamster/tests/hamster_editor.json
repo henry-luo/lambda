@@ -1,0 +1,512 @@
+{
+  "name": "Hamlet builds modular cages, raises residents and saves progress",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===11 && document.querySelectorAll('#cage-residents > group').length===3 && document.querySelectorAll('script').length===0"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 450,
+      "height": 315,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 6000
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.hamMesh=document.getElementById('ham-1').firstElementChild;globalThis.hamPose=document.getElementById('ham-1').getAttribute('position')"
+    },
+    {
+      "type": "advance_time",
+      "ms": 250
+    },
+    {
+      "type": "advance_time",
+      "ms": 250
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('ham-1').firstElementChild===hamMesh && document.getElementById('ham-1').getAttribute('position')!==hamPose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "globalThis.elapsed=document.getElementById('hamster').getAttribute('data-elapsed');globalThis.pausedPose=document.getElementById('ham-1').getAttribute('position')"
+    },
+    {
+      "type": "advance_time",
+      "ms": 250
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('hamster').getAttribute('data-elapsed')===elapsed && document.getElementById('ham-1').getAttribute('position')===pausedPose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-0-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "globalThis.added=document.getElementById('hamster').getAttribute('data-selected')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===12 && document.getElementById(added).getAttribute('data-cell')==='-2,0,0'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rotate"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "JSON.parse(document.getElementById(added).getAttribute('rotation'))[1]>1.5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#move"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-0-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(added).getAttribute('data-cell')==='-2,-1,0'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===11"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(added)!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(added)===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#floor-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-lookout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-1-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===12 && document.getElementById(document.getElementById('hamster').getAttribute('data-selected')).getAttribute('data-cell')==='-1,-2,1'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-ramp"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-0-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===12 && document.getElementById('status').textContent.includes('Ramps start')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('ham-1').getAttribute('data-food'))>0.5 && Number(document.getElementById('ham-2').getAttribute('data-energy'))>0.6 && Array.from(document.querySelectorAll('#cage-residents > group')).every(h=>Number(h.getAttribute('data-walked'))>0)"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.age=document.getElementById('ham-1').getAttribute('data-age')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#treat"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('need-bond').textContent.replace('%',''))>15"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('pet-name').value='Hazel';document.getElementById('pet-name').dispatchEvent(new Event('change',{bubbles:true}))"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('name-ham-1').textContent==='Hazel'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#adopt"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('hamster').getAttribute('data-residents')==='4'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rehome"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('hamster').getAttribute('data-residents')==='3'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-ham-1"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#feed"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#water"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clean"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "['food','water','clean'].every(k=>document.getElementById('supply-'+k).textContent==='100%')"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='temp/hamster-replay.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('ham-1').getAttribute('data-age'))>Number(age)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('ham-1').getAttribute('data-age')===age && document.getElementById('name-ham-1').textContent==='Hazel' && document.querySelectorAll('#cage-modules > group').length===12"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='temp/not-a-cage.txt'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('status').textContent.includes('.json') && document.querySelectorAll('#cage-residents > group').length===3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#follow"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 900,
+      "height": 630,
+      "file": "temp/hamster-follow.png"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 450,
+      "height": 315,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 4000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "globalThis.cameraPose=document.getElementById('cage-camera').getAttribute('position')"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#cage-scene",
+        "offset_x": 30,
+        "offset_y": 30
+      },
+      "dx": 50,
+      "dy": 25,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cage-camera').getAttribute('position')!==cameraPose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#floor-0"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#top"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cage-scene",
+        "offset_x": 269,
+        "offset_y": 495
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cell-0-4').getAttribute('data-module')!==''"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/hamster-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===0 && document.querySelectorAll('#cage-residents > group').length===0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#adopt"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===1 && document.querySelectorAll('#cage-residents > group').length===1 && document.getElementById('connection-note').textContent.includes('kitchen')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===1 && document.getElementById('status').textContent.includes('using this module')"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='test/demo/hamster/tests/coat_cage.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('ham-1').getAttribute('data-coat')==='3' && document.querySelector('#ham-1 > mesh material').getAttribute('color')==='#ead6b1' && document.getElementById('name-ham-1').textContent==='Marzipan'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#starter"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===11 && document.querySelectorAll('#cage-residents > group').length===3"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

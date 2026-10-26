@@ -1,0 +1,124 @@
+{
+  "name": "Hamlet mobile module placement and native canvas",
+  "viewport": {
+    "width": 390,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "document.documentElement.scrollWidth<=390 && document.getElementById('cage-scene').getBoundingClientRect().width>300 && document.getElementById('cage-scene').getBoundingClientRect().height===350"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-0-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-modules > group').length===12"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 320,
+      "height": 300,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 1000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/hamster-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-furnishings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-bottle"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-0-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-12-item-bottle')!==null && document.documentElement.scrollWidth<=390 && document.getElementById('tab-furnishings').getAttribute('aria-selected')==='true'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/hamster-furnishings-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove-item-bottle"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-12-item-bottle')===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-0-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-12')===null && document.documentElement.scrollWidth<=390"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-12')!==null"
+    }
+  ]
+}

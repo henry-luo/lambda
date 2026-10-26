@@ -18,6 +18,8 @@ let DEMOS = [
      blurb: "Cells, dominoes, planets and robots in native 3D."},
     {name: "aquarium", title: "Aquarium", cat: "design", sub: "Aquascape studio",
      blurb: "Build a living tank with fish, plants, rocks and driftwood."},
+    {name: "hamster", title: "Hamlet", cat: "games", sub: "Hamster habitat studio",
+     blurb: "Build a modular home and raise a few tiny virtual neighbors."},
     {name: "cityscape", title: "The Rings of a City", cat: "media", sub: "Live 3D film",
      blurb: "3,000 years of Chengdu in one live 3D film."},
     {name: "tetris", title: "Tetris", cat: "games", sub: "Arcade classic",
