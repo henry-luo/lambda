@@ -39,6 +39,68 @@ merge by maximum weight. Abbreviations are rebuilt from the result. The engine
 performs no script conversion at runtime. This is OpenCC standard Traditional;
 Taiwan/Hong Kong regional vocabulary remains deferred (IME-O8).
 
+### Optional local Bible dictionary
+
+The two Sogou dictionaries [和合本圣经经文词库2](https://pinyin.sogou.com/dict/detail/index/35457)
+and [和合本圣经中的人名和地名](https://pinyin.sogou.com/dict/detail/index/54542)
+can be downloaded and combined into a separate format-v1 pack (IME6):
+
+```sh
+python3 utils/prepare_ime_scel.py fetch
+python3 utils/prepare_ime_scel.py prepare
+python3 utils/prepare_ime_scel.py validate
+```
+
+Downloads are checksum-pinned in `utils/ime_chinese_bible_sources.json` and
+saved beneath `temp/ime_sources/`. The combined pack is
+`lmd/package/ime/chinese/data/zh-Hans-bible/`; both directories are gitignored
+(IME-O7). Preparation and validation are offline. The original SCEL readings
+are retained, with canonical pinyin and deduplicated word/readings; abbreviation
+postings use the same preparation helpers as the base pack. The source files'
+extension prefixes are ordinal permutations, not documented frequencies, so
+the imported entries have weight zero. This pack supplies no sentence model.
+
+Of 29,112 source records, 21,332 are admitted, including all 391 names and
+places. The existing pack contract excludes 7,732 ten-character phrases and
+48 records outside the supported character set. `import-report.json` records
+counts and source identities; `rejected.jsonl` records every omitted entry.
+Original downloads remain available locally. Source notices and provenance
+flags accompany the generated pack.
+
+The interactive demo uses **standard + Bible** dictionaries together by
+default. Prepare its two script profiles with:
+
+```sh
+python3 utils/prepare_ime_scel.py fetch --with-base --profile zh-Hant
+python3 utils/prepare_ime_scel.py prepare --with-base
+python3 utils/prepare_ime_scel.py prepare --with-base --profile zh-Hant
+```
+
+The combined packs are `data/zh-Hans-bible-combined/` and
+`data/zh-Hant-bible-combined/` beneath `lmd/package/ime/chinese/`, also
+gitignored. Preparation merges identical word/readings by maximum weight,
+retaining standard frequency evidence and adding unweighted Bible entries;
+abbreviations are rebuilt from the union (IME6). Traditional preparation uses
+the existing OpenCC conversion with all unresolved forms retained (IME11).
+Both profile buttons select the corresponding combined pack; explicit host
+or test-fixture directory overrides are preserved. Use `validate --with-base`
+with the same `--profile` for full offline validation of either union.
+Acquisition remains lazy on enable/focus (D7.2.4v4/S12.1.1v3).
+
+Load the standalone Bible pack explicitly using the existing directory option:
+
+```lambda
+import ime: lambda.ime.chinese
+
+pn main() {
+    let engine = ime.load("zh-Hans",{
+        directory:"lmd/package/ime/chinese/data/zh-Hans-bible"
+    })^
+    let found = ime.candidates(engine,"matusala")^;
+    print(found.items[0].text)
+}
+```
+
 ## Query
 
 ```lambda
@@ -292,9 +354,12 @@ Readonly/disabled controls pass through. Ordinary pointer/focus changes cancel
 preedit; a toolbar may prevent its mousedown default to keep composition open.
 
 The demo highlights its selected buttons and reports the effective setting,
-scope, character profile and spelling mode. Its Window on/off buttons select
-window scope, clearing the demo's document override; Use window setting keeps
-the existing window value. Document on/off selects an explicit override.
+scope, character profile and spelling mode. The **Window on/off** toggle flips
+the window setting and selects window scope, clearing the document override;
+**Use window setting** keeps the existing window value. The **Document on/off**
+toggle flips the document's effective setting and selects an explicit override.
+Both labels and `aria-pressed` show their current on/off values; the separate
+inherit control and status line identify the active scope.
 Spelling and profile controls can be used before focusing an editor. The
 **Fuzzy pinyin on/off** button enables the selected pairs; its adjacent `v`
 opens the pair configuration panel. The demo starts with all 11 pairs enabled
@@ -307,6 +372,38 @@ is open, the adapter suspends its native mode indicator and candidate popup;
 closing it restores the current frame without resetting the session.
 These demo defaults do not change the engine default of `fuzzy: "none"`
 (IME13, S17.8.1).
+
+The demo's **Dictionary…** button opens a modal for the selected script's
+combined standard and Bible dictionary. Browse with Previous/Next, or search
+by Chinese word text (`北京`, `京`) or a toneless pinyin prefix, separating
+syllables with spaces (`bei jing`). Word search matches text anywhere in an
+entry and retains its distinct readings: `京` finds `京`, `北京` and `北京大学`.
+An empty search browses all entries. Add a word with 1–9 Chinese characters
+and one valid syllable per character; paste Chinese text or use an OS input
+method in that field. Delete removes the displayed word/reading pair from both
+full-pinyin and abbreviation candidates, including its learned promotion.
+Re-adding a built-in pair restores its original weight; new pairs use weight
+zero. Close or Escape restores the previous input-method setting and focuses
+the Dictionary button.
+
+Unsupported search input clears the previous rows and pagination and displays
+a word-or-pinyin prompt. A subsequent valid search clears that message, including
+when it finds no words (S17.8.1).
+
+Edits apply immediately and save atomically to
+`temp/ime_chinese/custom-zh-Hans.json` or `custom-zh-Hant.json`. Each profile
+has independent edits, restored on first use and after profile changes.
+These files are gitignored and persist until removed or `temp/` is cleaned.
+The original downloaded/prepared packs stay intact: demo helpers construct
+an edited engine value and rebuild its two line indexes on explicit edits
+(IME6/IME8, D7.2.4v4/S12.1.1v3). No package query or pack-format change is
+required. This editor targets small personal change lists; it replays edits
+on load, rather than preparing a replacement bulk dictionary.
+
+Explicit fixture/host dictionary directories use document-local changes unless
+the body supplies `data-ime-custom-file`. Invalid files and failed saves show
+an error; a failed save leaves the live dictionary unchanged. Learned selections
+remain document-local and are separate from these explicit dictionary edits.
 
 `lambda.dom.ime` exposes host operations:
 

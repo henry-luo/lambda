@@ -490,7 +490,8 @@ def character_set_identity(profile, chars):
             "sha256": digest("".join(sorted(chars)).encode())}
 
 
-def validate_pack(directory, syllables, chars, han, lock=None, expected_entries=None, expected_conversion=None):
+def validate_pack(directory, syllables, chars, han, lock=None, expected_entries=None, expected_conversion=None,
+                  source_names=None):
     """Full preparation check; deliberately separate from normal runtime loading."""
     errors = []
     try:
@@ -503,8 +504,8 @@ def validate_pack(directory, syllables, chars, han, lock=None, expected_entries=
         if manifest["syllable_table"] != digest(SYLLABLE_PATH.read_bytes()):
             errors.append("manifest: syllable-table hash mismatch")
         mode = manifest["generator"]["options"]["extension"]
-        expected_sources = set(pack_source_names(mode, profile))
-        if mode not in MODES or set(manifest["sources"]) != expected_sources or (
+        expected_sources = set(pack_source_names(mode, profile) if source_names is None else source_names)
+        if (source_names is None and mode not in MODES) or set(manifest["sources"]) != expected_sources or (
                 lock is not None and (manifest["unicode_version"] != lock["unicode_version"] or any(
                     source != lock["sources"].get(name) for name, source in manifest["sources"].items()))):
             errors.append("manifest: source identity mismatch")
@@ -557,10 +558,21 @@ def validate_pack(directory, syllables, chars, han, lock=None, expected_entries=
     return {"ok": not errors, "errors": errors}
 
 
-def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars, sources, lock,
-               profile="zh-Hans", conversion=None):
+def write_pack_payload(directory, entries, limit, notice):
+    """Shared v1 table serialization for base and explicitly imported local packs."""
     directory.mkdir(parents=True, exist_ok=True)
     lexicon, abbrev = table_rows(entries, limit)
+    (directory / "NOTICE.txt").write_bytes(notice)
+    return {
+        "files": {"lexicon": emit_table(directory, "lexicon.txt", lexicon), "abbrev": emit_table(directory, "abbrev.txt", abbrev)},
+        "notice": {"path": "NOTICE.txt", "bytes": len(notice), "sha256": digest(notice)},
+        "counts": {"lexicon": row_counts(lexicon), "abbrev": row_counts(abbrev)},
+        "abbrev_limit": limit,
+    }
+
+
+def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars, sources, lock,
+               profile="zh-Hans", conversion=None):
     selected = pack_source_names(mode, profile)
     notice = [f"Lambda Chinese IME {profile} pack, format version 1\n",
               "Prepared from modified upstream data: normalized readings, filtered entries,\n"
@@ -576,20 +588,17 @@ def write_pack(directory, entries, dropped, accepted, mode, limit, scales, chars
         if name == "hanlp":
             notice.append("\nHanLP: https://github.com/hankcs/HanLP (Apache-2.0)\n")
     raw_notice = "\n".join(notice).encode("utf-8")
-    (directory / "NOTICE.txt").write_bytes(raw_notice)
     weights = list(entries.values())
     manifest = {
         "format": FORMAT, "format_version": 1, "profile": profile, "script": PROFILES[profile][0],
         "unicode_version": lock["unicode_version"],
         "char_set": character_set_identity(profile, chars),
         "syllable_table": digest(SYLLABLE_PATH.read_bytes()),
-        "files": {"lexicon": emit_table(directory, "lexicon.txt", lexicon), "abbrev": emit_table(directory, "abbrev.txt", abbrev)},
-        "notice": {"path": "NOTICE.txt", "bytes": len(raw_notice), "sha256": digest(raw_notice)},
-        "counts": {"lexicon": row_counts(lexicon), "abbrev": row_counts(abbrev)},
+        **write_pack_payload(directory, entries, limit, raw_notice),
         "weights": {"method": "round_half_up(256 * log2(1 + normalized_frequency)), clipped to 1..65535; zero without evidence",
                     "calibration": "median AOSP/frequency ratio over shared admissible multi-character words; AOSP reading weights retained",
                     "scales": scales, "minimum": min(weights), "maximum": max(weights), "zero_postings": weights.count(0)},
-        "abbrev_limit": limit, "dropped": dropped, "accepted_source_records": accepted,
+        "dropped": dropped, "accepted_source_records": accepted,
         "sources": {name: lock["sources"][name] for name in selected},
         "generator": {"tool": "utils/prepare_ime_chinese.py", "version": VERSION,
                       "sha256": digest(Path(__file__).read_bytes()),
