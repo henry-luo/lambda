@@ -2071,18 +2071,38 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
         dom_notify_mutation(dom_style_mutation_kind(property), view->element, view->element->parent);
 }
 
-extern "C" bool dom_cssom_set_inline_property(void* element, const char* property, const char* value) {
+extern "C" const char* dom_cssom_inline_property(void* element, const char* property,
+        void* output_pool, bool priority) {
+    if (!element || !property || !output_pool) return "";
+    CssomDeclarationView view((DomElement*)element);
+    StrView name = strview_from_cstr(property);
+    return view.rule && cssom_decl_supports(view.rule, name)
+        ? cssom_decl_value(view.rule, name, (Pool*)output_pool, priority) : "";
+}
+
+extern "C" bool dom_cssom_edit_inline_property(void* element, const char* property,
+        const char* value, const char* priority) {
     if (!element || !property || !value) return false;
     CssomDeclarationView view((DomElement*)element);
     if (!view.rule) return false;
     StrView name = strview_from_cstr(property);
     if (!cssom_decl_supports(view.rule, name)) return false;
-    CssDeclaration* declaration = css_parse_property_value_declaration(property,
-        strlen(property), value, strlen(value), view.rule->pool);
-    if (!declaration) return false;
+    // an empty value removes the authored declaration, including during inspector undo.
+    CssDeclaration* declaration = nullptr;
+    if (*value) {
+        if (priority && *priority && strcmp(priority, "important")) return false;
+        declaration = css_parse_property_value_declaration(property,
+            strlen(property), value, strlen(value), view.rule->pool);
+        if (!declaration) return false;
+        if (priority) declaration->important = !strcmp(priority, "important");
+    }
     if (cssom_decl_store(view.rule, name, declaration, view.serialization_pool()))
         cssom_decl_commit(&view, name);
     return true;
+}
+
+extern "C" bool dom_cssom_set_inline_property(void* element, const char* property, const char* value) {
+    return dom_cssom_edit_inline_property(element, property, value, nullptr);
 }
 
 static Item cssom_decl_set(Item receiver, Item property, Item value, Item priority, bool named) {

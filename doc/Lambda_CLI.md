@@ -358,6 +358,25 @@ lambda demo tetris --headless --event-file test/ui/tetris_autoplay.json
 
 ---
 
+### `devtools` — Live Document Inspection
+
+```bash
+make devtool
+node utils/devtool/inspect.mjs test/devtools/document.html
+```
+
+In the DevTool application choose **Live**, enter a document path and press
+**Launch**. Inspect the native DOM, computed styles and geometry; pick an element
+from the rendered preview; edit an inline CSS declaration and undo it. The target
+runs in a separate process. **Native window** also opens its own viewer window.
+
+The native launcher entry is `lambda devtools <document> --pipe <inherited-fd>
+[--headless]`; the application/headless client provides the duplex pipe. Mark
+messages use Lambda maps and values, with a four-byte byte-length prefix.
+Source currently means a local-file snapshot at attach. Source stepping and
+runtime-value evaluation are later work. See the
+[DevTool guide](../utils/devtool/README.md#live-document-inspection).
+
 ### `view` — Interactive Document Viewer
 
 Open a document in an interactive viewer window.

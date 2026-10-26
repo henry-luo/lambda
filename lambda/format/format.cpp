@@ -157,7 +157,7 @@ String* format_mark(Pool* pool, Item root_item) {
     if (!pool) return NULL;
     StrBuf* sb = strbuf_new();
     if (!sb) return NULL;
-    print_item(sb, root_item, 0, NULL);
+    print_mark_item(sb, root_item);
     String* result = string_from_strview(strview_init(sb->str, sb->length), pool);
     strbuf_free(sb);
     return result;

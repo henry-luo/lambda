@@ -7,6 +7,8 @@ typedef struct StrBuf StrBuf;
 // Core value rendering is independent of AST inspection and is shared by
 // formatters and active runtime diagnostics.
 void print_item(StrBuf* strbuf, Item item, int depth = 0, const char* indent = "  ");
+// data serialization preserves literal kinds and escapes root strings, unlike display output.
+void print_mark_item(StrBuf* strbuf, Item item);
 void log_item(Item item, const char* msg = "");
 
 // Render an `int` from its native double. THE renderer for the int lane: it

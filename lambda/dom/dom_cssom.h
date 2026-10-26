@@ -128,6 +128,9 @@ Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
 Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
 // native UI defaults use the same declaration replacement and notification path.
 bool dom_cssom_set_inline_property(void* element, const char* property, const char* value);
+// native inspectors use the same authored-declaration read/edit machinery as CSSOM.
+const char* dom_cssom_inline_property(void* element, const char* property, void* output_pool, bool priority);
+bool dom_cssom_edit_inline_property(void* element, const char* property, const char* value, const char* priority);
 
 /**
  * Call method on a CSSStyleDeclaration wrapper.

@@ -60,6 +60,7 @@
 
 #ifndef LAMBDA_HEADLESS
 #include "../radiant/radiant.hpp"
+#include "../radiant/devtools_adapter.hpp"
 #endif
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
@@ -1954,11 +1955,8 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &MARKDOWN_RULES);
         } else if (strcmp(to_format, "mark") == 0) {
-            // Use print_root_item to format as mark representation
-            StrBuf* sb = strbuf_new_cap(1024);
-            print_root_item(sb, input->root);
-            formatted_output = create_string(input->pool, sb->str);
-            strbuf_free(sb);
+            // conversion is data serialization, not the REPL's diagnostic/root-content printer.
+            formatted_output = format_mark(input->pool, input->root);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
             printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, asciidoc, man, typst, eml, vcf, ics, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
@@ -2417,6 +2415,7 @@ static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
     {"layout", "the Radiant layout engine"}, {"render", "the Radiant layout engine"},
     {"render-batch", "the Radiant layout engine"}, {"view", "the Radiant layout engine"},
     {"edit", "the Radiant layout engine"}, {"replay", "the Radiant layout engine"},
+    {"devtools", "the Radiant layout engine"},
 #endif
 #ifdef LAMBDA_NO_JS
     {"js", "the JavaScript runtime"}, {"ts", "the JavaScript runtime"},
@@ -3618,6 +3617,35 @@ static int lambda_main_impl(int argc, char *argv[]) {
     }
 
 #ifndef LAMBDA_HEADLESS
+    if (argc >= 2 && !strcmp(argv[1], "devtools")) {
+        const char* path = nullptr;
+        int fd = -1;
+        bool headless = false;
+        for (int i = 2; i < argc; i++) {
+            if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+                fputs("Usage: lambda devtools <document> --pipe <inherited-fd> [--headless]\n"
+                      "Launch through make devtool or node utils/devtool/inspect.mjs.\n", stdout);
+                return lambda_main_finish(0);
+            }
+            if (!strcmp(argv[i], "--headless")) headless = true;
+            else if (!strcmp(argv[i], "--pipe") && i + 1 < argc) {
+                const char* number = argv[++i];
+                int64_t parsed = str_to_int64_default(number, strlen(number), -1);
+                if (parsed >= 3 && parsed <= INT_MAX) fd = (int)parsed;
+            } else if (!path && argv[i][0] != '-') path = argv[i];
+            else {
+                log_error("devtools: unknown argument: %s", argv[i]);
+                return lambda_main_finish(1);
+            }
+        }
+        if (!path || fd < 3) {
+            fputs("Usage: lambda devtools <document> --pipe <inherited-fd> [--headless]\n", stderr);
+            return lambda_main_finish(1);
+        }
+        default_render_cmd_to_interp();
+        return lambda_main_finish(view_doc_with_devtools(path, fd, headless));
+    }
+
     // Handle layout command
     log_debug("Checking for layout command");
     if (argc >= 2 && strcmp(argv[1], "layout") == 0) {

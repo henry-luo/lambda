@@ -4607,6 +4607,7 @@ typedef struct UiContext {
     bool close_guard_armed;
     bool close_approved;
     int close_request_count; // platform close requests seen (test observable)
+    struct RadiantDevtools* devtools; // optional shell-owned inspector; no managed runtime values
 
     int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
