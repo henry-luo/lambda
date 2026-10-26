@@ -5551,6 +5551,31 @@ TEST(RdtVectorTest, LinearGradientRangeAliasesKeepPixelCenterPrecision) {
     rdt_path_free(path); rdt_engine_term();
 }
 
+TEST(RdtVectorTest, LargeDiagonalGradientMatchesPerPixelReferenceAcrossWorkerRows) {
+    rdt_engine_init(0);
+    const int width = 300, height = 280;
+    lam::Temp<uint32_t> actual = lam::temp_array<uint32_t>(width * height, MEM_CAT_RENDER);
+    ASSERT_TRUE(actual);
+    memset(actual.get(), 0, width * height * sizeof(uint32_t));
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0, 0, width, height, 0, 0);
+    RdtGradientStop stops[] = {{-.2f, 255, 0, 0, 128}, {.35f, 0, 255, 0, 192},
+        {.35f, 0, 0, 255, 255}, {1.2f, 255, 255, 0, 0}};
+    RdtVector vector = {}; rdt_vector_init(&vector, actual.get(), width, height, width);
+    rdt_fill_linear_gradient(&vector, path, 0, 0, width, height, stops, 4,
+        RDT_FILL_WINDING, nullptr, nullptr);
+    rdt_vector_destroy(&vector);
+    size_t mismatches = 0;
+    for (int row = 0; row < height; row++) for (int column = 0; column < width; column++) {
+        float position = (float)(((column + .5) * width + (row + .5) * height) /
+            ((double)width * width + (double)height * height));
+        Color expected = render_sample_gradient_stops(stops, 4, position, 1.0f);
+        mismatches += actual[row * width + column] != render_pixel_premultiply_abgr(expected.c);
+    }
+    EXPECT_EQ(mismatches, 0u);
+    rdt_path_free(path); render_pool_shutdown(); rdt_engine_term();
+}
+
 TEST(RdtVectorTest, LinearGradientTilesKeepClipsTransformsAndBatchOrder) {
     rdt_engine_init(0);
     RdtPath* path = rdt_path_new(); RdtPath* clip = rdt_path_new();
@@ -6794,14 +6819,16 @@ protected:
         ASSERT_NE(svg, nullptr);
     }
 
-    void paint(float x = 0, float y = 0, const RdtMatrix* matrix = nullptr, const Bound* clip = nullptr) {
+    void paint(float x = 0, float y = 0, const RdtMatrix* matrix = nullptr, const Bound* clip = nullptr,
+               bool geometry_offset = false) {
         counters = {};
         RenderPipelineMetricsScope probe(&counters);
         RenderProfiler profiler = {}; RasterRenderContext context;
         RenderFrameScope frame(&context, ui, ui->document->view_tree, &profiler);
         memset(ui->surface->pixels, 255, ui->surface->pitch * ui->surface->height);
         context.transform = matrix ? *matrix : rdt_matrix_translate(x, y);
-        context.has_transform = matrix || x != 0 || y != 0;
+        context.has_transform = !geometry_offset && (matrix || x != 0 || y != 0);
+        if (geometry_offset) { context.block.x = x; context.block.y = y; }
         if (clip) context.block.clip = *clip;
         if (svg->tag() == MARKUP_NAME_IMG) render_image_view(&context, lam::view_require_block(svg));
         else if (svg->tag() == MARKUP_NAME_SVG) render_inline_svg(&context, lam::view_require_block(svg));
@@ -6874,6 +6901,38 @@ TEST_F(SvgLayerScrollTest, IsolatedSvgImageReusesPixelsAcrossHostHoverScrollAndL
     ASSERT_NO_FATAL_FAILURE(paint(40, 30));
     EXPECT_EQ(counters.layer_recordings, 0u);
     EXPECT_EQ(layer_images, 1u);
+}
+
+TEST_F(SvgLayerScrollTest, SvgImageDragReusesFractionalPlacementAndRealignsAtRest) {
+    ASSERT_NO_FATAL_FAILURE(open(
+        "<html><body style='margin:0'><img id='scene' style='display:block' src='data:image/svg+xml,"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"60\" height=\"40\">"
+        "<rect width=\"40\" height=\"30\" fill=\"red\"/></svg>'>"
+        "<div id='scroll' style='height:20px;overflow:auto'><div style='height:200px'></div></div>"
+        "</body></html>"));
+    ASSERT_NO_FATAL_FAILURE(paint(12.875f, 9.875f));
+    ASSERT_NO_FATAL_FAILURE(paint(12.875f, 9.875f));
+    uint8_t expected[160 * 120 * 4]; memcpy(expected, ui->surface->pixels, sizeof(expected));
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ASSERT_NO_FATAL_FAILURE(paint());
+    ViewBlock* pane = lam::view_require_block(dom_find_element_by_id(ui->document->root, "scroll"));
+    DocState* state = ui->document->state;
+    scroll_state_begin_drag_for_view(state, pane, pane->scroll()->pane, false, 0, 0, 0, 0);
+    DragTransitionArgs args = {.target = pane, .dragging = true};
+    drag_transition(state, DRAG_TRANSITION_SET_STATE, &args);
+    for (float offset : {.125f, .375f, .625f, .875f}) {
+        ASSERT_NO_FATAL_FAILURE(paint(12 + offset, 9 + offset));
+        EXPECT_EQ(counters.layer_recordings, 0u);
+        EXPECT_EQ(layer_images, 1u);
+        test_radiant_expect_surface_pixel(ui->surface, 24, 20, 255, 0, 0);
+        test_radiant_expect_surface_pixel(ui->surface, 80, 20, 255, 255, 255);
+    }
+    scroll_state_clear_drag_for_view(state, pane, pane->scroll()->pane);
+    args = {}; drag_transition(state, DRAG_TRANSITION_SET_STATE, &args);
+    ASSERT_NO_FATAL_FAILURE(paint(12.875f, 9.875f));
+    ASSERT_NO_FATAL_FAILURE(paint(12.875f, 9.875f));
+    EXPECT_EQ(counters.layer_recordings, 1u);
+    EXPECT_EQ(memcmp(expected, ui->surface->pixels, sizeof(expected)), 0);
 }
 
 TEST_F(SvgLayerScrollTest, SvgImageLayerRefreshesSourceClockViewportAndResourceChanges) {
@@ -6951,6 +7010,12 @@ TEST_F(SvgLayerScrollTest, OrdinaryBoxShadowReusesBlurAndRefreshesUsedGeometry) 
     ASSERT_NO_FATAL_FAILURE(paint());
     EXPECT_EQ(counters.shadow_image_builds, 0u);
     EXPECT_EQ(counters.shadow_image_hits, 1u);
+    Bound clip = {0, 0, 160, 30};
+    for (float offset : {10.25f, 18.75f, 25.125f}) {
+        ASSERT_NO_FATAL_FAILURE(paint(0, -offset, nullptr, &clip, true));
+        EXPECT_EQ(counters.shadow_image_builds, 0u);
+        EXPECT_EQ(counters.shadow_image_hits, 1u);
+    }
 }
 
 TEST_F(SvgLayerScrollTest, HoverStillInvalidatesAfterScrollIndependentReuse) {

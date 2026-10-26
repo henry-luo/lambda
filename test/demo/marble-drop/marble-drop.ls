@@ -29,7 +29,7 @@ fn initial() {
         frame:0,at:0.0,lag:0.0}
 }
 fn board_key(game) => {*:game,active:if (game.active == null) null else {*:game.active,tick:0}}
-fn pose_game(game,lag) => {*:game,active:if (game.active == null) null else {*:game.active,tick:game.active.tick+lag/40.0}}
+fn pose_game(game,lag) => {*:game,active:if (game.active == null) null else {*:game.active,tick:game.active.tick+lag/model.STEP_MS}}
 fn update(session, game, pose, action) => if (game == session.game) session else
     {*:session,game:game,shown:if (action != "tick" or board_key(game) != board_key(session.game)) pose else session.shown,
         sketches:if (game.stage == session.game.stage) session.sketches else sketches.layout(game.stage),
@@ -81,9 +81,9 @@ on marbletick(evt) {
     // keep routing on 40 ms steps and interpolate only the paint between them
     let elapsed = session.lag+max(0.0,evt.detail.time-session.at)
     let next_drop = session.game.active == null and session.game.autoplay
-    let due = elapsed >= 40.0 or next_drop
+    let due = elapsed >= model.STEP_MS or next_drop
     let game = if (due) model.tick(session.game) else session.game
-    let lag = if (next_drop) 0.0 else if (due) min(40.0,elapsed-40.0) else elapsed
+    let lag = if (next_drop) 0.0 else if (due) min(model.STEP_MS,elapsed-model.STEP_MS) else elapsed
     session = transition(evt,{*:session,frame:0,at:evt.detail.time,lag:lag},game,"tick",evt.detail.time)
     return 'handled'
 }

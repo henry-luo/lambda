@@ -214,6 +214,70 @@
       "count": 0
     },
     {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravity0=document.querySelector('#rolling-marble').getBoundingClientRect().y"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 5
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravity200=document.querySelector('#rolling-marble').getBoundingClientRect().y"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 5
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravity400=document.querySelector('#rolling-marble').getBoundingClientRect().y;globalThis.accelerating=gravity200>gravity0 && gravity400-gravity200>2*(gravity200-gravity0)"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.accelerating"
+    },
+    {
+      "type": "advance_time",
+      "ms": 160,
+      "steps": 4
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravityStillMoving=document.querySelector('#marble-drop').getAttribute('data-active')==='true' && document.querySelector('#marble-drop').getAttribute('data-collected')==='0'"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.gravityStillMoving"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-active",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
       "type": "window_close"
     },
     {

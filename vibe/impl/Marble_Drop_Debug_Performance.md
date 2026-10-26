@@ -123,3 +123,71 @@ expectations or thresholds were relaxed.
 Final aggregate artifacts: `temp/marble-drop/perf/radiant-summary.json` and
 `radiant-baseline-access.log`. Native scenario results are in
 `final-ui-access.log`.
+
+
+## Gravity motion and fractional thumb dragging
+
+The earlier timings above describe the fixed-duration version. The current demo
+uses `mod_motion.ls`: a rolling solid sphere accelerates with 5/7 of the chosen
+gravity along sampled rail length. Gravity is 800 logical units/s². Junctions
+retain 86% of speed, and a spring supplies enough impulse to crest 100 units
+above the higher endpoint. Spring drawing and motion share one exact parabola.
+Routing preserves unused time at a junction; cues follow actual device visits.
+Forty-millisecond model samples and interpolated presentation transforms keep
+ordinary frames free of page layout, following **S12.1.3**.
+
+Dragging exposed a different cost from integral wheel steps: fractional scroll
+offsets changed SVG image pixel phases, and viewport clipping changed cached
+shadow geometry. The former rebuilt SVG style/paint; the latter rebuilt blur.
+During a captured scrollbar gesture, isolated SVG images reuse their raster at
+fractional placement, then realign on resting paint. This retains image-document
+style isolation (**D2.11.2**) and current document-owned resources
+(**D4.5.1v4**). Ordinary shadows cache bounded local geometry, independent of
+position and viewport cropping; oversized entries keep the clipped fallback and
+the existing 64 MiB budget.
+
+The remaining large diagonal-gradient color loop now uses the existing render
+workers for disjoint rows. Coverage, interpolation, pixel centers, compositing
+and ordering are unchanged. Shared `render_parallel_rows` also replaces the
+image projector's identical dispatch shape; nested workers run serially.
+
+Followup artifacts, frozen debug executables, before/after profiles, input
+fixtures, source hashes and captures live in `temp/marble-drop/drag-perf/`.
+Three interleaved pairs at each density used the same final gravity-demo source
+with both frozen debug executables. Each run required pixel, scroll-return and
+window-close assertions, and measured fourteen actual pointer-move paints after
+the initial paint and four warmups. All twelve processes exited successfully.
+Values below are medians of per-run medians/p95 values for recording plus replay.
+They exclude cold startup and do not measure total input-to-screen latency.
+
+| Density | Before median | After median | After p95 | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| 1x | 68.14 ms | 16.63 ms | 17.84 ms | 4.1x |
+| 2x | 164.28 ms | 44.50 ms | 45.81 ms | 3.7x |
+
+Retina full-page paint still takes about 45 ms; this is not a 60 fps claim.
+`drag-comparison.json` records all samples and shared source/binary hashes;
+`compare-drag.py` reproduces the experiment. Before debug SHA256:
+`a4ce490585cadfdde9dcc02161d3931490972b3eae92f40c3b8d8bd9113791bb`. After debug SHA256:
+`eed52100f003e0323c73c4f95394748497987380b7a9f487bf45e6779905482a`. No release build was used.
+
+Final qualification:
+
+- Pure model and physics goldens: **2/2** scripts, **181** checks, including all
+  sixteen solutions at par, rolling energy, acceleration, constant horizontal
+  flight speed, gravity, mass independence and junction continuity.
+- Marble Drop native scenarios: **7/7**, **278/278** assertions. The motion
+  replay freezes observations before asserting acceleration, retains pause/undo
+  and Retina damage-parity coverage, and verifies slower arrival. Device/audio
+  replay step budgets follow the longer physical travel times.
+- Focused renderer checks: **16/16**. SVG rasters survive fractional thumb
+  movement and match a fresh capture after settling; ordinary blur is reused
+  across fractional translation and changed clipping; a large diagonal gradient
+  matches the serial per-pixel reference exactly across worker rows.
+- Full Radiant gate: **0 failures**, **6221 passed**, **141 partial**, **2 skipped**
+  (**6364 total**), including **241/241** vector tests, **713/713** UI gate cases,
+  **504/504** paged tests and the existing layout/visual partial expectations.
+  `radiant-summary.json` and `radiant-baseline.log` retain the complete result.
+- Debug build, targeted Radiant dimension lint and `git diff --check`: passed.
+
+Native captures, including the parabolic spring flight, were visually checked.

@@ -162,9 +162,7 @@ fn route_color(game) => if (game.active == null) game.selected else game.active.
 pub fn apparatus_key(game) => {stage:game.stage,bits:game.bits,filled:game.filled,
     route_color:if (any([for (node in model.level(game).nodes) model.selective(node)])) route_color(game) else -1}
 pub fn rolling_transform(game) {
-    let active = game.active
-    let nodes = model.level(game).nodes
-    let pos = model.point(nodes[active.from],nodes[active.to],active.tick/model.EDGE_TICKS)
+    let pos = model.ball_position(game)
     // transform percentages use the marble's own 20 by 20 logical-pixel box
     "translate(" ++ string((pos.x-10)*5) ++ "%," ++ string((pos.y-10)*5) ++ "%)"
 }

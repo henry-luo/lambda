@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_row_jobs.hpp"
 #include "raster_sampling.hpp"
 #include "../lib/log.h"
 
@@ -285,26 +286,7 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
             }
     }
     };
-    bool dispatched = false;
-    if ((size_t)out_w * out_h >= (size_t)TILE_SIZE_CSS * TILE_SIZE_CSS) {
-        // Reuse the render workers for disjoint scanlines. The closure and job
-        // arguments stay on this stack until synchronous dispatch has joined.
-        using ProjectRows = decltype(project_rows);
-        struct ProjectRowJob { ProjectRows* rows; int begin, end; };
-        ProjectRowJob ranges[8];
-        TileJob jobs[8] = {};
-        int count = min(8, out_h);
-        for (int i = 0; i < count; i++) {
-            ranges[i] = {&project_rows, out_h * i / count, out_h * (i + 1) / count};
-            jobs[i].work_context = &ranges[i];
-            jobs[i].work = [](void* argument) {
-                auto* range = (ProjectRowJob*)argument;
-                (*range->rows)(range->begin, range->end);
-            };
-        }
-        dispatched = render_output_dispatch_jobs(jobs, count) > 0;
-    }
-    if (!dispatched) project_rows(0, out_h);
+    render_parallel_rows(out_w, out_h, project_rows);
     *output = projected; *output_rect = {left, top, (float)out_w, (float)out_h};
     return true;
 }

@@ -55,8 +55,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -100,8 +100,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",

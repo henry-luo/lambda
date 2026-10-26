@@ -8789,12 +8789,15 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     if (!entry) return false;
 
     SvgPaintStamp stamp = svg_paint_stamp(rdcon, dom_elem, paint, image);
+    DocState* state = rdcon->ui_context->document->state;
+    View* drag = state ? static_cast<View*>(state->drag_target) : nullptr;
+    bool scrolling_image = image && drag && scroll_state_is_dragging_for_view(state, drag);
     bool unchanged = !entry->vector_content && entry->element.expected_id == dom_elem->DomNode::id &&
                      entry->image_source == (image ? image->self : lam::Handle<ImageSurface>{}) &&
                      svg_paint_stamp_equal(*entry, stamp) &&
-                     entry->pixel_width == width && entry->pixel_height == height &&
+                     (scrolling_image || (entry->pixel_width == width && entry->pixel_height == height)) &&
                      entry->viewport_width == viewport_width && entry->viewport_height == viewport_height &&
-                     entry->phase_x == phase_x && entry->phase_y == phase_y &&
+                     (scrolling_image || (entry->phase_x == phase_x && entry->phase_y == phase_y)) &&
                      entry->scale == layer_scale && svg_layer_paint_equal(&entry->paint, paint);
     if (!unchanged) {
         if (entry->surface) svg_layer_damage(rdcon, content_rect, device_scale, offset_x, offset_y);
@@ -8822,9 +8825,9 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     // capture can resolve a font source; key the resulting paint by that resource.
     *static_cast<SvgPaintStamp*>(entry) = svg_paint_stamp(rdcon, dom_elem, paint, image);
     ImageSurface* surface = entry->surface;
-    // whole device pixels, so the blit copies samples instead of resampling
-    Rect dst = { image ? floorf(origin_x) : roundf(origin_x),
-                 image ? floorf(origin_y) : roundf(origin_y),
+    // a moving scrollport reuses the capture at fractional placement; resting paint realigns it exactly
+    Rect dst = { image ? origin_x - entry->phase_x : roundf(origin_x),
+                 image ? origin_y - entry->phase_y : roundf(origin_y),
                  (float)surface->width, (float)surface->height };
     Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
     // the cached layer already includes the device transform; vector-backed
@@ -8832,7 +8835,8 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     bool saved_has_transform = rdcon->has_transform;
     rdcon->has_transform = false;
     // aligned layers copy on the CPU; native vector clips can reuse an uploaded image without projecting it again
-    ScaleMode sampling = render_painter_can_blit_surface(rdcon) ? SCALE_MODE_NEAREST : SCALE_MODE_LINEAR;
+    bool aligned = dst.x == floorf(dst.x) && dst.y == floorf(dst.y);
+    ScaleMode sampling = aligned && render_painter_can_blit_surface(rdcon) ? SCALE_MODE_NEAREST : SCALE_MODE_LINEAR;
     render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,
                                        &dst, &clip, sampling, rdcon->clip_shapes,
                                        rdcon->clip_shape_depth, 255);

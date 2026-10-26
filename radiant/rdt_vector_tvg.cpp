@@ -5,6 +5,7 @@
 // Radiant rendering code calls only rdt_* functions.
 
 #include "render.hpp"
+#include "render_row_jobs.hpp"
 #include "../lib/atomic.h"
 #include "../lib/ref_count.h"
 #include "../lib/log.h"
@@ -1191,14 +1192,17 @@ static bool rdt_fill_linear_gradient_analytic(RdtVector* vec, RdtPath* path,
         if (row_colors) for (size_t column = 0; column < width; column++)
             row_colors[column] = sample_color(column, 0).c;
     }
-    for (size_t row = 0; row < height; row++) for (size_t column = 0; column < width; column++) {
-        uint8_t alpha = (uint8_t)(coverage[row * width + column] >> 24);
-        if (!alpha) continue;
-        Color color = row_colors ? Color{row_colors[column]} : sample_color(column, row);
-        uint32_t source = render_pixel_scale_premultiplied(render_pixel_premultiply_abgr(color.c), alpha);
-        uint32_t* destination = impl->pixels + (row + first_row) * (size_t)impl->stride + column + first_column;
-        *destination = render_pixel_source_over_premultiplied_pair(*destination, source);
-    }
+    auto sample_rows = [&](int begin, int end) {
+        for (size_t row = (size_t)begin; row < (size_t)end; row++) for (size_t column = 0; column < width; column++) {
+            uint8_t alpha = (uint8_t)(coverage[row * width + column] >> 24);
+            if (!alpha) continue;
+            Color color = row_colors ? Color{row_colors[column]} : sample_color(column, row);
+            uint32_t source = render_pixel_scale_premultiplied(render_pixel_premultiply_abgr(color.c), alpha);
+            uint32_t* destination = impl->pixels + (row + first_row) * (size_t)impl->stride + column + first_column;
+            *destination = render_pixel_source_over_premultiplied_pair(*destination, source);
+        }
+    };
+    render_parallel_rows((int)width, (int)height, sample_rows); // INT_CAST_OK: raster dimensions bounded by the caller's integer surface
     return true;
 }
 

@@ -90,10 +90,14 @@ moving a marble does not rebuild or embed the artwork. The sketches were made
 with the built-in imagegen tool; exact prompts are recorded in
 [`assets/sketches/artwork.json`](assets/sketches/artwork.json) and
 [`assets/sketches/additional-artwork.json`](assets/sketches/additional-artwork.json).
-A shell-owned frame callback keeps routing on 40 ms steps and interpolates the
-marble between them. Motion writes only the marble's presentation transform;
+A shell-owned frame callback samples motion on 40 ms steps and interpolates the
+marble between them. `mod_motion.ls` integrates rolling energy along sampled rail
+length, carries momentum through junctions and gives spring flights a parabolic
+trajectory. Marbles start from rest, gain speed downhill and slow while rising.
+Motion writes only the marble's presentation transform;
 semantic redraws preserve its current pose. Idle, paused and solved boards
-request no frames. Each rail segment takes 280 ms in both manual and Auto Play.
+request no frames. Travel time follows each rail's length, height and incoming
+speed in both manual and Auto Play.
 Native SVG images and ordinary shadows reuse bounded renderer caches; the
 paper grid is one repeated SVG pattern. Debug profiling and validation are
 recorded in [`Marble_Drop_Debug_Performance.md`](../../../vibe/impl/Marble_Drop_Debug_Performance.md).
@@ -132,7 +136,9 @@ diff -u test/demo/marble-drop/tests/marble_drop_model.txt temp/marble-drop/model
   --event-result temp/marble-drop/devices-result.json
 ```
 
-The model golden checks all sixteen solutions at par as well as device behavior,
+The physics golden independently checks rolling energy, acceleration, spring
+gravity and momentum/time continuity at junctions. The model golden checks all
+sixteen solutions at par as well as device behavior,
 limited stock, wrong colors, undo, pause, hints, restart, progression and sound-cue selection.
 The native replays cover manual controls, keyboard routing, linked machines,
 catches, color-dependent route previews, upward flights, Auto Play, completion
@@ -144,6 +150,8 @@ replays mute through the normal button; the audio replay exercises all seven
 effects, Auto Play, keyboard/button mute, pause, redraws and voice cleanup through native
 playback. It needs access to the macOS audio service; the MIDI bus's offline
 setting does not replace the native WAV backend.
-The motion fixture also checks Retina damage parity, a stable pause position and
-frame cancellation after undo. Run all six registered UI fixtures together with
+The motion fixture also checks Retina damage parity, a stable pause position,
+frame cancellation after undo and downhill acceleration. The scrolling fixture
+checks viewport thumb dragging, track paging and wheel input at 1x and 2x density.
+Run all seven registered UI fixtures together with
 `./test/test_ui_automation_gtest.exe --suite marble-drop`.
