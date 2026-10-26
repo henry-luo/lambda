@@ -33,6 +33,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
 | `mail` | `mail/mail.ls` | [Mail](mail/README.md) |
 | `music` | `music/music.ls` | [Music](music/README.md) |
+| `soundflow` | `soundflow/soundflow.ls` | [Soundflow](soundflow/README.md) |
 | `greetings` | `greetings/greetings.ls` | [Greetings](greetings/README.md) |
 
 Paths in the table are relative to `test/demo/`. Viewer options follow the name:
@@ -72,6 +73,10 @@ Lambda and played through the music package's SoundFont. Generate the model with
 `./lambda.exe demo mail` is a mail client in the spirit of macOS Mail. It reads IMAP accounts (Gmail, iCloud, Fastmail and Yahoo with app passwords, or Proton Mail Bridge) through [`lambda.io.mail`](../../doc/Lambda_Sys_Func.md#lambdaiomail) and keeps passwords in the Keychain. The window has a sidebar of mailboxes, a message list that mounts only the rows in view, and a viewer that shows HTML mail in a sandboxed, script-free frame with remote content blocked until you load it. See [Mail](mail/README.md).
 
 `./lambda.exe demo music` plays sheet music. A library of five scores sits on the left; the chosen one is engraved on A4 pages by [`lambda.music`](../../doc/Lambda_Packages.md) and played through its SoundFont player, with the sounding notes, chords and lyric syllables highlighted as they play. See [Music](music/README.md).
+
+## Soundflow
+
+`./lambda.exe demo soundflow` is a visual instrument after Agoston Nagy's SoundBow. Draw across a field of strings: each stroke replays in a loop, and its tip sounds every string it crosses. Drag a string's end to retune it, since longer strings sound lower, or its middle to slide it sideways. The loops can play from half to double speed, and the wide strokes can be hidden to leave only the moving tips. Harp, kalimba and glass voices are synthesized in Lambda. **Save** writes the loops as a WAV recording and the drawing as SVG. See [Soundflow](soundflow/README.md).
 
 ## Greetings
 
