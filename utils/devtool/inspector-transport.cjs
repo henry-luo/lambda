@@ -5,10 +5,10 @@ const path = require('node:path');
 const MAX_BYTES = 8 * 1024 * 1024;
 
 class InspectorTransport extends EventEmitter {
-  constructor(projectRoot, document, { headless = true, executable } = {}) {
+  constructor(projectRoot, document, { headless = true, executable, scratch = false } = {}) {
     super();
     this.child = spawn(executable || process.env.LAMBDA_DEVTOOLS_EXE || path.join(projectRoot, 'lambda.exe'),
-      ['--no-log', 'devtools', document, '--pipe', '3', ...(headless ? ['--headless'] : [])],
+      ['--no-log', 'devtools', ...(scratch ? ['--scratch'] : [document]), '--pipe', '3', ...(headless ? ['--headless'] : [])],
       { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
     this.channel = this.child.stdio[3];
     this.header = Buffer.alloc(4);

@@ -20,6 +20,7 @@ its name:
 ./lambda demo photo
 ./lambda demo scene3d
 ./lambda demo aquarium
+./lambda demo hamster
 ./lambda demo chart
 ./lambda demo slides
 ./lambda demo archive
@@ -39,6 +40,11 @@ scientific plots, and graphs including word clouds, Mermaid, Graphviz, and TikZ.
 The [Aquarium builder](../test/demo/aquarium/README.md) lets you add, select,
 move, resize, rotate, duplicate, and remove procedural fish, plants, rocks, and
 driftwood in a living native 3D tank, with undo/redo and JSON save/load.
+The [Hamlet hamster studio](../test/demo/hamster/README.md) builds connected
+modular rooms, tunnels, and ramps, with autonomous virtual residents that eat,
+drink, sleep, exercise, and grow. Delete modules, furnish rooms with bowls,
+bottles, hideouts and toys, and inspect detailed hamster bodies with Follow.
+It includes adoption, care, undo/redo, and saved furnishings and progress.
 
 ## Viewer features
 

@@ -31,11 +31,28 @@ does not yet provide source-generation tracking for imported scripts or a
 source-level debugger. Connection/process output is available at the bottom;
 structured runtime console events are a later milestone.
 
+**Lambda scratch** opens a separate persistent functional Lambda REPL. Press
+**Start scratch**, submit declarations/expressions with **Run Lambda** or
+**Cmd/Ctrl+Enter**, and expand returned values. **Bindings** reads the current
+scope without rerunning previous entries. **Collect** forces GC while inspector
+handles remain rooted. **Clear results** releases all inspector handles and
+clears the transcript; existing REPL bindings remain. **Stop scratch** ends only
+the scratch target. Alt+Up/Down recalls entry history. This uses the existing
+session semantics (S16.7.4–S16.7.6 and D8.1.1v18); it does not inherit a document's
+locals. JavaScript evaluation is deferred.
+
+Large results expand in bounded pages. Functions and unsupported live values
+show an opaque preview; they are never invoked by expansion. Typed arrays show
+shape metadata and expand in flattened logical order. Binary and long text use
+byte offsets; text pages end on UTF-8 boundaries. The Radiant tree also pages
+children and reveals the ancestor path of a selected element.
+
 A headless client uses the identical Mark protocol:
 
 ```bash
 node utils/devtool/inspect.mjs test/devtools/document.html
 node utils/devtool/inspect.mjs test/devtools/document.html request.mark
+node utils/devtool/inspect.mjs --scratch request.mark
 node --test test/devtools/protocol.test.mjs
 ```
 

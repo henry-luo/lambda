@@ -33,3 +33,20 @@
 .inspector-center .btn { padding: 4px 8px; font-size: 11px; }.inspector-center .btn.active { background: #245ca8; color: white; }
 @media (max-width: 1050px) { .inspector-panes { grid-template-columns: 220px minmax(240px, 1fr) 300px; }.inspector-preview { padding: 10px; }.inspector-launch { flex-wrap: wrap; } }
 .menu-items .btn[aria-pressed="true"] { color: #215b9c; background: #e3edfc; }
+.inspector-more { margin: 6px 20px; }
+.inspector-console { height: 125px; flex: 0 0 125px; border-top: 1px solid #dce3ed; background: white; }
+.inspector-console.scratch-open { height: 340px; flex-basis: 340px; }
+.inspector-console .inspector-log { height: 85px; border: 0; }.inspector-console .inspector-log pre { height: 85px; }
+.scratch-container { height: 300px; }.scratch-container[hidden], .inspector-log[hidden] { display: none; }
+.lambda-scratch { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.scratch-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #e2e8f0; }
+.scratch-toolbar > span { flex: 1; font-size: 12px; color: #64748b; }.scratch-toolbar .btn { padding: 4px 8px; font-size: 11px; }
+.scratch-transcript { flex: 1; overflow: auto; padding: 8px 14px; font: 12px/1.5 ui-monospace, SFMono-Regular, monospace; }
+.scratch-hint { color: #738299; font: 11px/1.5 system-ui; }.scratch-entry { padding: 6px 0; border-bottom: 1px solid #edf1f6; }
+.scratch-input, .scratch-properties pre, .scratch-output pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0; }
+.scratch-value { display: inline; white-space: pre-wrap; overflow-wrap: anywhere; }.scratch-key { color: #5e7193; }
+.scratch-properties { margin-left: 22px; padding-left: 8px; border-left: 1px solid #dce3ed; }.scratch-properties > div { margin: 4px 0; }
+.scratch-expand { border: 0; background: transparent; color: #3b6093; cursor: pointer; padding: 0 5px 0 0; }
+.scratch-error { color: #ad3341; margin: 3px 0; }.scratch-bindings { padding: 8px 0; }.scratch-output { margin-top: 6px; }
+.scratch-prompt { display: flex; gap: 10px; padding: 8px 12px; border-top: 1px solid #e2e8f0; }
+.scratch-prompt textarea { flex: 1; resize: vertical; min-height: 48px; max-height: 140px; border: 1px solid #cad4e2; border-radius: 4px; padding: 7px; color: #24324a; background: white; font: 12px/1.5 ui-monospace, monospace; }

@@ -1,6 +1,6 @@
 import dom
 import ime: lambda.dom.ime
-import model: .mod_dictionary
+import model: lambda.ime.chinese.dictionary
 
 fn node(body,id) => dom.query_selector(body,"#" ++ id)
 fn field(body,id) => dom.get_state(node(body,id),"value")

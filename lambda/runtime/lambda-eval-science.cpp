@@ -4,6 +4,9 @@
 #include "lambda-error.h"
 #include "../../lib/math_checked.hpp"
 #include "../../lib/memtrack.h"
+#include "../../lib/procgen/wfc.h"
+#include "../../lib/procgen/erosion.h"
+#include "../../lib/procgen/delaunay.h"
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -29,6 +32,13 @@ static bool science_real(Item item, double* value) {
     if (lambda_numeric_kind_from_item(item) == LAMBDA_NUM_INVALID) return false;
     *value = it2d(item);
     return isfinite(*value);
+}
+
+static bool science_int_at(Item input, int index, int64_t* value) {
+    Item item = vector_get(input, index);
+    if (get_type_id(item) != LMD_TYPE_INT) return false;
+    *value = lambda_int_item_to_lane(item.item);
+    return true;
 }
 
 struct ScienceComplex { double re, im; };
@@ -365,6 +375,7 @@ static Item science_linear_solve(Item input_a, Item input_b, bool least_squares)
 Item fn_math_solve(Item a, Item b) { return science_linear_solve(a, b, false); }
 Item fn_math_lstsq(Item a, Item b) { return science_linear_solve(a, b, true); }
 
+
 static Item science_predicate(Item* points, int count, int dimension, bool lifted) {
     RootFrame roots(4);
     Rooted<Item> a(roots, points[0]), b(roots, points[1]), c(roots, points[2]);
@@ -381,6 +392,7 @@ static Item science_predicate(Item* points, int count, int dimension, bool lifte
                 return science_error("math geometry predicate: coordinates must convert to finite real floats");
     }
     int sign;
+    if (procgen_predicate_filter(coordinates, count, dimension, lifted, &sign)) return {.item = i2it(sign)};
     if (!decimal_geometry_sign(coordinates, count, dimension, lifted, &sign)) return ItemError;
     return {.item = i2it(sign)};
 }
@@ -396,4 +408,186 @@ Item fn_math_orient3d(Item a, Item b, Item c, Item d) {
 Item fn_math_incircle(Item a, Item b, Item c, Item d) {
     Item points[] = {a, b, c, d};
     return science_predicate(points, 4, 2, true);
+}
+
+// the native kernel sees only flat numbers; keep every source/row rooted while
+// vector_get boxes lanes, and publish a boxed int array (D5.3.3, D6.4.1).
+Item fn_math_wfc(Item key, Item weights, Item masks, Item control) {
+    GUARD_ERROR3(key, weights, masks);
+    GUARD_ERROR1(control);
+    GUARD_NULL1(key);
+    GUARD_NULL1(weights);
+    GUARD_NULL1(masks);
+    GUARD_NULL1(control);
+    RootFrame roots(6);
+    Rooted<Item> rooted_key(roots, key), rooted_weights(roots, weights);
+    Rooted<Item> rooted_masks(roots, masks), rooted_control(roots, control);
+    Rooted<Item> direction(roots, ItemNull), row(roots, ItemNull);
+    if (get_type_id(key) != LMD_TYPE_UINT64)
+        return science_error("math.wfc: key must be u64");
+    uint64_t seed = rooted_key.get().get_uint64();
+    if (vector_length(control) != 4 || vector_is_ndim(control))
+        return science_error("math.wfc: control must be [width, height, periodic, retries]");
+    int64_t sizes[3];
+    const int indices[] = {0, 1, 3};
+    for (int i = 0; i < 3; i++) {
+        if (!science_int_at(rooted_control.get(), indices[i], &sizes[i]))
+            return science_error("math.wfc: dimensions and retries must be positive ints");
+    }
+    if (sizes[0] < 1 || sizes[1] < 1 || sizes[0] > 10000 || sizes[1] > 10000 ||
+            sizes[0] * sizes[1] > 10000 || sizes[2] < 1)
+        return science_error("math.wfc: expected at most 10,000 cells and positive retries");
+    Item periodic = vector_get(rooted_control.get(), 2);
+    if (get_type_id(periodic) != LMD_TYPE_BOOL)
+        return science_error("math.wfc: periodic must be bool");
+    bool wrap = it2b(periodic);
+    int64_t count = vector_length(rooted_weights.get());
+    if (count < 1 || count > 1000 || vector_is_ndim(rooted_weights.get()))
+        return science_error("math.wfc: weights must contain 1..1000 patterns");
+    int t = (int)count, cells = (int)(sizes[0] * sizes[1]);
+    ScienceScratch weight_memory((size_t)t, sizeof(double));
+    ScienceScratch mask_memory((size_t)4 * t * t, sizeof(uint8_t));
+    ScienceScratch output_memory((size_t)cells, sizeof(int));
+    if (!weight_memory.data || !mask_memory.data || !output_memory.data)
+        return science_error("math.wfc: cannot allocate boundary scratch");
+    double* ws = (double*)weight_memory.data;
+    uint8_t* ms = (uint8_t*)mask_memory.data;
+    double total = 0.0;
+    for (int p = 0; p < t; p++) {
+        Item value = vector_get(rooted_weights.get(), p);
+        TypeId type = get_type_id(value);
+        if ((type != LMD_TYPE_INT && type != LMD_TYPE_FLOAT) ||
+                !science_real(value, &ws[p]) || ws[p] <= 0.0)
+            return science_error("math.wfc: weights must be positive finite int or float values");
+        total += ws[p];
+    }
+    // integer prefixes must remain exactly representable in binary64, matching cumsum.
+    if (total > 9007199254740992.0)
+        return science_error("math.wfc: weight sum must be at most 2^53");
+    // masks may be packed N-D arrays: item_at/len walk rows, vector_get walks leaves.
+    if (fn_len(rooted_masks.get()) != 4)
+        return science_error("math.wfc: masks must have shape [4, patterns, patterns]");
+    for (int d = 0; d < 4; d++) {
+        direction.set(item_at(rooted_masks.get(), d));
+        if (fn_len(direction.get()) != t)
+            return science_error("math.wfc: masks must have shape [4, patterns, patterns]");
+        for (int p = 0; p < t; p++) {
+            row.set(item_at(direction.get(), p));
+            if (vector_length(row.get()) != t || vector_is_ndim(row.get()))
+                return science_error("math.wfc: masks must have shape [4, patterns, patterns]");
+            for (int q = 0; q < t; q++) {
+                Item value = vector_get(row.get(), q);
+                if (get_type_id(value) != LMD_TYPE_INT)
+                    return science_error("math.wfc: mask entries must be 0 or 1");
+                int64_t bit = lambda_int_item_to_lane(value.item);
+                if (bit != 0 && bit != 1)
+                    return science_error("math.wfc: mask entries must be 0 or 1");
+                ms[(d * t + p) * t + q] = (uint8_t)bit;
+            }
+        }
+    }
+    int* output = (int*)output_memory.data;
+    ProcgenWfcResult status = procgen_wfc(seed, (int)sizes[0], (int)sizes[1], wrap, sizes[2], t, ws, ms, output);
+    if (status == PROCGEN_WFC_CONTRADICTION)
+        return science_error("math.wfc: contradiction within retry budget");
+    if (status != PROCGEN_WFC_OK) return science_error("math.wfc: cannot allocate solver scratch");
+    ArrayNum* result = array_int_new(cells);
+    if (!result) return science_error("math.wfc: cannot allocate result");
+    for (int c = 0; c < cells; c++) result->items[c] = output[c];
+    return {.array_num = result};
+}
+
+// native buffers contain no Items; matrix readers retain their sources during boxing (D5.3.3).
+Item fn_math_hydraulic(Item key, Item field, Item control, Item settings) {
+    GUARD_ERROR3(key, field, control); GUARD_ERROR1(settings);
+    GUARD_NULL1(key); GUARD_NULL1(field); GUARD_NULL1(control); GUARD_NULL1(settings);
+    RootFrame roots(4);
+    Rooted<Item> k(roots, key), f(roots, field), c(roots, control), s(roots, settings);
+    if (get_type_id(k.get()) != LMD_TYPE_UINT64)
+        return science_error("math.hydraulic: key must be u64");
+    uint64_t seed = k.get().get_uint64();
+    int64_t limits[5];
+    if (vector_length(c.get()) != 5 || vector_is_ndim(c.get()))
+        return science_error("math.hydraulic: control must be [width, height, droplets, batch, steps]");
+    for (int i = 0; i < 5; i++) if (!science_int_at(c.get(), i, &limits[i]))
+        return science_error("math.hydraulic: controls must be ints");
+    if (limits[0] < 2 || limits[1] < 2 || limits[0] > 250000 || limits[1] > 250000 ||
+            limits[0] * limits[1] > 250000 || limits[2] < 0 || limits[2] > 1000000 ||
+            limits[3] < 1 || limits[3] > 1000000 || limits[4] < 0 || limits[4] > 1000)
+        return science_error("math.hydraulic: control limits exceeded");
+    ScienceMatrix values, parameters;
+    if (!science_read_matrix(f.get(), &values) || !values.vector || values.rows != (size_t)(limits[0] * limits[1]))
+        return science_error("math.hydraulic: field must be a finite flat numeric vector matching the dimensions");
+    if (!science_read_matrix(s.get(), &parameters) || !parameters.vector || parameters.rows != 7)
+        return science_error("math.hydraulic: settings must contain seven finite reals");
+    double* p = parameters.values;
+    if (p[0] < 0 || p[0] > 1 || p[1] < 0 || p[2] < 0 || p[3] < 0 || p[3] > 1 ||
+            p[4] < 0 || p[4] > 1 || p[5] < 0 || p[5] > 1 || p[6] < 0)
+        return science_error("math.hydraulic: rates must be in [0,1], capacity and gravity nonnegative");
+    ProcgenErosion config = {p[0], p[1], p[2], p[3], p[4], p[5], p[6], (int)limits[4]};
+    ScienceScratch output(values.rows, sizeof(double));
+    if (!output.data || !procgen_hydraulic(seed, values.values, (int)limits[0], (int)limits[1],
+            (int)limits[2], (int)limits[3], &config, (double*)output.data))
+        return science_error("math.hydraulic: allocation failure or non-finite arithmetic");
+    ArrayNum* result = array_num_new(ELEM_FLOAT64, (int64_t)values.rows);
+    if (!result) return ItemError;
+    memcpy(result->float_items, output.data, values.rows * sizeof(double));
+    return {.array_num = result};
+}
+
+// the caller chooses unique input order and a CCW seed; lib owns only numeric topology.
+Item fn_math_delaunay(Item points, Item ids, Item seed) {
+    GUARD_ERROR3(points, ids, seed);
+    GUARD_NULL1(points); GUARD_NULL1(ids); GUARD_NULL1(seed);
+    RootFrame roots(3);
+    Rooted<Item> p(roots, points), indices(roots, ids), initial(roots, seed);
+    ScienceMatrix coordinates;
+    if (!science_read_matrix(p.get(), &coordinates) || coordinates.rows > 20000 ||
+            (coordinates.rows && (coordinates.vector || coordinates.cols != 2)))
+        return science_error("math.delaunay: expected at most 20,000 finite 2D points");
+    int n = (int)coordinates.rows;
+    int64_t used = vector_length(indices.get());
+    if (used < 0 || used > n || vector_is_ndim(indices.get()))
+        return science_error("math.delaunay: invalid unique index vector");
+    if (!n && !used && vector_length(initial.get()) == 0) {
+        ArrayNum* empty = array_int_new(0);
+        return empty ? Item{.array_num = empty} : ItemError;
+    }
+    if (used < 3 || vector_length(initial.get()) != 3 || vector_is_ndim(initial.get()))
+        return science_error("math.delaunay: expected three seed indices");
+    ScienceScratch id_memory((size_t)used, sizeof(int));
+    ScienceScratch seen_memory((size_t)n, sizeof(uint8_t));
+    ScienceScratch output_memory((size_t)(2 * n + 4) * 3, sizeof(int));
+    if (!id_memory.data || !seen_memory.data || !output_memory.data) return ItemError;
+    int* order = (int*)id_memory.data;
+    uint8_t* seen = (uint8_t*)seen_memory.data;
+    for (int i = 0; i < used; i++) {
+        int64_t index;
+        if (!science_int_at(indices.get(), i, &index) || index < 0 || index >= n || seen[index])
+            return science_error("math.delaunay: indices must be distinct and in range");
+        order[i] = (int)index;
+        seen[index] = 1;
+    }
+    int first[3];
+    double triangle[6];
+    for (int i = 0; i < 3; i++) {
+        int64_t index;
+        if (!science_int_at(initial.get(), i, &index) || index < 0 || index >= n || !seen[index])
+            return science_error("math.delaunay: seed indices must belong to the input order");
+        first[i] = (int)index;
+        memcpy(triangle + i * 2, coordinates.values + index * 2, 2 * sizeof(double));
+    }
+    int sign;
+    if (!procgen_predicate_filter(triangle, 3, 2, false, &sign) &&
+            !decimal_geometry_sign(triangle, 3, 2, false, &sign)) return ItemError;
+    if (sign <= 0) return science_error("math.delaunay: seed must be non-collinear and counterclockwise");
+    int triangles = 0;
+    int* output = (int*)output_memory.data;
+    if (!procgen_delaunay(coordinates.values, n, order, (int)used, first,
+            decimal_geometry_sign, output, &triangles))
+        return science_error("math.delaunay: allocation, predicate or topology failure");
+    ArrayNum* result = array_int_new((int64_t)triangles * 3);
+    if (!result) return ItemError;
+    for (int i = 0; i < triangles * 3; i++) result->items[i] = output[i];
+    return {.array_num = result};
 }

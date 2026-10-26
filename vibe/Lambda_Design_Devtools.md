@@ -1,8 +1,9 @@
 # Lambda DevTools: live runtime and document inspection
 
 **Status:** working design. M0 and the first live-document slice of M1 are
-implemented and focused/UI checks pass; aggregate failures are recorded in the
-implementation report. Later milestones remain proposed.
+implemented, together with the Lambda scratch/value slice of M2 and Radiant tree
+paging/reveal. JavaScript evaluation is deferred by user direction. Qualification
+and aggregate failures are recorded in the implementation report.
 
 **Date:** 2026-10-26.
 
@@ -21,8 +22,9 @@ possible; use Lambda's data model as the protocol data model.
 The current frontend launches with `make devtool` → **Live**. A headless client
 is available as `node utils/devtool/inspect.mjs <document> [request.mark]`.
 Implemented operations are `hello`, `tree`, `node`, `style`, `set_style`, `pick`,
-`highlight`, `screenshot`, `source` and `release`. Source stepping, runtime-value
-expansion, structured console events, profiling and memory analysis remain later
+`highlight`, `screenshot`, `source`, `release` and `path`. The separate Lambda
+scratch target adds `eval`, `bindings`, `inspect`, `release`, `gc` and `source`.
+Source stepping, structured diagnostic events, profiling and memory analysis remain later
 work. Native-window picking, matched-rule explanations and fragment overlays
 are also outside this first slice.
 
@@ -267,13 +269,27 @@ as a small command table plus normal MarkReader field checks.
 |---|---|
 | `hello` | Check the protocol version and report supported operations. |
 | `tree`, `node` | Read a shallow branch or node snapshot; optional `offset` / `limit` bound large child lists. |
+| `path` | Return a node's ancestors and sibling offsets so Elements can reveal a selected node without loading all siblings. |
 | `style`, `set_style` | Read computed/inline styles and used geometry; edit one inline declaration. |
 | `pick`, `highlight` | Enable/disable the picker and highlight a node. |
 | `source` | Read exact retained source bytes and source location information. |
-| `release` | Release weak node handles with a `refs` array. |
+| `release` | Release node/value handles belonging to the connected target with a `refs` array. Scratch also accepts `all: true`. |
 | `screenshot` | Return native PNG bytes as a Lambda binary value plus viewport dimensions. |
 
-`inspect` for runtime-value handles follows in M2. The current `source` result
+The Lambda scratch target supports `eval {source: string}`, `bindings`,
+`inspect {ref: int, offset: int, limit: int}`, `release`, `gc`, and `source`.
+It uses the same `hello`, pipe and message envelopes; one connection still
+identifies one target. `eval` returns `{result: <preview>, declarations: bool}`.
+A preview contains a native `type` symbol and either a small scalar `value`,
+an expandable `ref`/`count`, exact text for an unqualified scalar spelling,
+or `opaque: true`. `inspect` returns paged `entries` with `key`, `kind` and child
+preview records. User data remains inside the `value` field. Containers expand
+without calling functions. Typed arrays expose their shape and flatten in logical
+order. `bindings` reads the retained scope; `source` pages accepted session text.
+Scratch entries use the existing functional REPL, independently of the document
+(S16.7.4–S16.7.6, D8.1.1v18). JavaScript evaluation is deferred.
+
+The current document `source` result
 is explicitly an `attach_snapshot` of the local source file, not proof of the
 exact bytes admitted by the loader or imported scripts.
 
@@ -390,8 +406,18 @@ remain capability-labeled extensions after the core path works.
 
 ### 7.1 Console and value inspection
 
-The first frontend exposes connection status and captured process output. The
-structured console and runtime-value features below are M2 work.
+The frontend exposes connection status and captured process output. The Lambda
+scratch console and passive value expansion are implemented in M2's Lambda
+slice. It runs the existing persistent functional REPL in a separate process,
+keeps declared bindings through result release, and retains expandable values
+with precise RootVector slots and destination-owned number homes (D5.2, D5.3.3).
+It supports forced collection and bounded pages; functions/unsupported entities
+remain opaque. The limits are 256 entries or 4096 bytes per page, 4096 live value
+handles and 65536 handle IDs over a connection. Clear results releases all
+inspector handles, including those created during a partial/overlapping request.
+Very large exact numbers remain opaque with a digit count to bound formatting.
+Producer-level structured diagnostics remain future work; stderr is visibly
+labeled process diagnostics.
 
 Capture structured diagnostics at their producer, including level, time,
 target/language, source span and available stack data. Preserve existing CLI
@@ -405,14 +431,15 @@ separate operation that may execute code. Where effect-free inspection is not
 available, show an opaque preview. Truncate large values with an explicit count
 or continuation instead of recursively formatting an unbounded graph.
 
-For **JavaScript**, console evaluation can use the existing dynamic-source AST
+For **JavaScript**, evaluation is deferred (user direction, 2026-10-26). A future
+console can use the existing dynamic-source AST
 path in the selected realm at an admitted owner-thread boundary (D8.1.3v42).
 Executing submitted source is explicit and distinct from passive inspection.
 Do not add paused-frame evaluation until the debugger can expose the correct
 live lexical environment and handle reentrancy.
 
-For **Lambda**, initially offer a clearly labeled scratch REPL target using the
-existing persistent host REPL pipeline. It has its own process/session and does
+For **Lambda**, the implemented scratch REPL uses the existing persistent host
+REPL pipeline. It has its own process/session and does
 not pretend to inherit the inspected program's locals. Passive local watches
 use bound names and structured field/index paths, without invoking functions.
 General paused-scope source evaluation needs a separate reviewed scope/effect
@@ -594,7 +621,7 @@ Chrome parity.
 |---|---|---|
 | M0: connection foundation | Lambda/Mark codec, command table, launch/pipe adapter, `hello`, owner-thread dispatch, headless client and bounded queues | Qualify codec round trips; launch two independent targets; reject incompatible versions and malformed/oversized frames; terminate either side without hanging the other; reject stale handles. |
 | M1: live document inspector | Live workspace, lazy DOM, computed styles, source links, box geometry, picker, highlight, inline edit and undo, diagnostic stream | Pick and edit the named block/inline/scroll/transform/flex/grid cases; verify native pixels and geometry; reject stale edits; survive reload and detach. This is the first useful release. |
-| M2: console and runtime values | Structured previews, property pages, explicit handle release, JS realm console, separate Lambda scratch REPL | Preserve exact numeric values; inspect cyclic/large data within limits; avoid getters/proxies; verify selected execution context and unchanged CLI output; force GC during inspection and release handles. |
+| M2: console and runtime values | Implemented Lambda slice: scratch REPL, structured previews, property pages, bindings and release. JS realm console and producer-level diagnostics deferred. | Preserve exact common scalar values; inspect large data within limits without invoking functions; retain aliases through GC; release inspector handles while session bindings remain. Future JS work must avoid getters/proxies. |
 | M3: interpreted source debugger | Loaded-source model, AST breakpoints, synchronous stepping, frames/locals and pause policy | Debug recursion, closures, imports, several sites on one line and Unicode source in both languages; pause a tight interpreted loop; resume after disconnect; show unsupported native/async operations explicitly. |
 | M4: resource and performance tools | Instrumented-loader coverage, waterfall, counters, finite timeline and export | Show cache/failure/redirect cases; correlate one interaction's script/layout/paint events; report drops; qualify release overhead against a matched control. |
 | M5: memory and compiler inspection | Ownership counters and diffs, tier/MIR views, followed by bounded precise retention snapshots | Explain repeated document lifecycle growth; distinguish inspector retention; survive forced GC and teardown; map IR/tier events to the exact source revision. |

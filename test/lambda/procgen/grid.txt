@@ -1,0 +1,29 @@
+"1 exact grids"
+["###..#.#.#..", "..#####...##", "##.#.###.#.#", "#.#.#.#..#.#"]
+["########################", "########################", "####...######.##########", "####...#################", "########################", "########################", "########################", "########################"]
+["################", "######.........#", "#####..........#", "#######........#", "#########.....##", "##########...###", "################"]
+"2 cellular automata"
+[".....", "..#..", "...#.", ".###.", "....."]
+[".#.", ".#.", ".#."]
+[true, "rule", "steps"]
+"3 regions and distances"
+{
+  labels: [[0, 0, -1, 1], [-1, -1, -1, 1], [2, -1, 1, 1]],
+  sizes: [2, 4, 1]
+}
+[[1, 1, 1, 0], [1, 1, 1, 0], [1, 1, 0, 0]]
+[[-1, -1, -1, 0], [-1, -1, -1, 1], [-1, -1, 3, 2]]
+[[0, -1, 0]]
+"4 walks: a connected carve of the requested size inside a wall border"
+[true, 1, true]
+"5 BSP partitions tile the rectangle"
+[31, true, true]
+[1, "min_size"]
+"6 dungeons: one room per leaf, all floor connected"
+[26, true, 1, true]
+"7 mazes are spanning trees"
+[['backtracker', true, true, 1, true, true], ['kruskal', true, true, 1, true, true], ['prim', true, true, 1, true, true], ['wilson', true, true, 1, true, true]]
+[[1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 1], [1, 1, 1, 0, 1, 0, 1], [1, 0, 0, 0, 1, 0, 1], [1, 1, 1, 1, 1, 1, 1]]
+["size", "method"]
+"8 Wilson draws uniformly from the 15 spanning trees of a 3 x 2 grid"
+[15, true]

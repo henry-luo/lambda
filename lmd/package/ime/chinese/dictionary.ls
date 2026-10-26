@@ -9,6 +9,15 @@ import lines: lambda.io.line_index
 pub fn empty(profile) map =>
     {format:"lambda.ime.chinese.edits",format_version:1,profile:profile,entries:[]}
 
+pub pn load_edits(path,engine) map^ {
+    let saved = input(path,"json")^;
+    return validate(saved,engine)^
+}
+
+pub pn save_edits(edits,path,engine) any^ {
+    return output(validate(edits,engine)^,path,{format:"json",atomic:true})^
+}
+
 pub fn reading(text) string => join([for (part in split(replace(lower(trim(text)),"'"," ")," ") where part != "") part],"'")
 
 pub fn validate(value,engine) map^ {

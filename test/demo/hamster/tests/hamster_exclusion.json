@@ -1,0 +1,234 @@
+{
+  "name": "Hamster body exclusion, shared destinations, legacy saves and spawn capacity",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='test/demo/hamster/tests/traffic_cage.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "script",
+      "js": "globalThis.apart=function(){const hs=Array.from(document.querySelectorAll('#cage-residents > group'));return hs.every((h,i)=>hs.every((o,j)=>{if(j<=i)return true;const a=JSON.parse(h.getAttribute('position')),b=JSON.parse(o.getAttribute('position'));return ((a[0]-b[0])/1.4)**2+((a[1]-b[1])/0.85)**2+((a[2]-b[2])/1.4)**2>=0.99999}))};globalThis.mesh=document.getElementById('ham-1').firstElementChild"
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.querySelectorAll('#cage-residents > group').length===2"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 450,
+      "height": 315,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 3000
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('ham-1').firstElementChild===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('ham-1').firstElementChild===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('ham-1').firstElementChild===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('ham-1').firstElementChild===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('ham-1').firstElementChild===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#skip"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('ham-1').firstElementChild===mesh"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#cage-residents > group')).every(h=>Number(h.getAttribute('data-walked'))>10)"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='test/demo/hamster/tests/shared_room_cage.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.querySelectorAll('#cage-residents > group').length===2"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.oldPose=document.getElementById('ham-1').getAttribute('position')"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='test/demo/hamster/tests/crowded_cage.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.getElementById('status').textContent.includes('not enough free rooms') && document.querySelectorAll('#cage-modules > group').length===3 && document.getElementById('ham-1').getAttribute('position')===oldPose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#adopt"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#adopt"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#cage-residents > group').length===1 && document.getElementById('status').textContent.includes('No free room')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-3-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#adopt"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "apart() && document.querySelectorAll('#cage-residents > group').length===2"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/hamster-separated.png"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

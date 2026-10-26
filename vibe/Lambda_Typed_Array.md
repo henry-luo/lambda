@@ -161,7 +161,7 @@ An unannotated mixed literal has an open element type; nothing is inferred from 
 `[[1, 2], [3, 4]]` becomes one 2-D `ArrayNum`. There is no `tensor(...)` builtin and no separate syntax. Detection happens in two places:
 
 - **Statically**, when the builder sees a rectangular nested literal of one numeric kind. It allocates one contiguous buffer and fills it directly; no row arrays are built.
-- **Dynamically**, when an array is finished from runtime rows — `[r1, r2, r3]` where each row is an `ArrayNum` of one kind and equal length, or an N-D array of equal shape (giving N+1 dimensions). Promotion is eager: one new contiguous buffer, one copy per row.
+- **Dynamically**, when an array is finished from runtime rows — `[r1, r2, r3]` where each row is an `ArrayNum` of one kind and equal length, or an N-D array of equal shape (giving N+1 dimensions). Promotion is eager: one new contiguous buffer, one copy per row. A singleton runtime row also preserves rank: `[r1]` and an equivalent nested literal have the same shape (S1.6, S11.1.1v3).
 
 Rows must have the same exact element type. Ragged rows, rows of different types (`int` with `float`, `i64` with `float`, `int` with `i64`) and rows mixed with scalars stay a nested `Array` whose rows keep their own types (S9.3.2). Either way the observable value is the same under indexing and iteration. A nested array is not a tensor, so `shape`, `ndim` and the whole-array reductions do not treat it as one (§13, Q7).
 

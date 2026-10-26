@@ -2,7 +2,7 @@ import ime: lambda.ime.chinese
 import p: lambda.ime.chinese.pack
 import lines: lambda.io.line_index
 import learned: lambda.ime.chinese.user
-import model: ~~.~~.demo.ime.mod_dictionary
+import model: lambda.ime.chinese.dictionary
 
 fn has(engine,raw,word) bool => word in [for (item in ime.candidates(engine,raw)^.items) item.text]
 

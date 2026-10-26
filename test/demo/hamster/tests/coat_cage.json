@@ -1,0 +1,33 @@
+{
+  "format": "lambda-hamster",
+  "version": 1,
+  "modules": [
+    {
+      "id": "room-1",
+      "kind": "room",
+      "x": 0,
+      "z": 0,
+      "level": 0,
+      "turn": 0
+    }
+  ],
+  "residents": [
+    {
+      "id": "ham-1",
+      "name": "Marzipan",
+      "coat": 3,
+      "node": "room-1",
+      "food": 0.8,
+      "water": 0.8,
+      "energy": 0.8,
+      "comfort": 0.8,
+      "bond": 0.2,
+      "age": 1.0,
+      "walked": 0.0
+    }
+  ],
+  "food": 1.0,
+  "water": 1.0,
+  "clean": 1.0,
+  "elapsed": 0.0
+}

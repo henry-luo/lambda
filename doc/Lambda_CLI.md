@@ -358,7 +358,7 @@ lambda demo tetris --headless --event-file test/ui/tetris_autoplay.json
 
 ---
 
-### `devtools` — Live Document Inspection
+### `devtools` — Live Document Inspection and Lambda Scratch
 
 ```bash
 make devtool
@@ -374,7 +374,16 @@ The native launcher entry is `lambda devtools <document> --pipe <inherited-fd>
 [--headless]`; the application/headless client provides the duplex pipe. Mark
 messages use Lambda maps and values, with a four-byte byte-length prefix.
 Source currently means a local-file snapshot at attach. Source stepping and
-runtime-value evaluation are later work. See the
+evaluation in the document's scope are later work.
+
+In **Live** open **Lambda scratch** and press **Start scratch** for an independent
+persistent functional REPL (S16.7.4–S16.7.6, D8.1.1v18). Run entries with
+**Cmd/Ctrl+Enter**, expand returned maps/arrays/elements, browse bindings, and
+clear retained results. The scratch process has its own bindings and remains
+independent of the inspected document. JavaScript evaluation is deferred.
+The native scratch entry is `lambda devtools --scratch --pipe <inherited-fd>`;
+`node utils/devtool/inspect.mjs --scratch request.mark` sends one request such as
+`{op: 'eval', source: "1 + 2"}`. See the
 [DevTool guide](../utils/devtool/README.md#live-document-inspection).
 
 ### `view` — Interactive Document Viewer

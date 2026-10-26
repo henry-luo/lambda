@@ -21,14 +21,5 @@ pub fn natural(value,offset = null) int^ {
     let valid = require(parsed >= 0 and parsed <= 9007199254740991,"invalid or excessive line number",offset)^;
     parsed
 }
-// project encoded keys on demand without allocating a parallel key array.
-pub fn lower_bound(values,value,lo = 0,hi = null,key = null) int {
-    let end = if (hi == null) len(values) else hi
-    let middle = (lo + end) div 2;
-    if (lo >= end) lo
-    else if ((if (key == null) values[middle] else key(values[middle])) < value)
-        lower_bound(values,value,middle + 1,end,key)
-    else lower_bound(values,value,lo,middle,key)
-}
 pub fn kind(node) => string(name(node))
 pub fn count_of(interval) => if (interval.count == null) 1 else natural(interval.count,interval.start)^
