@@ -52,10 +52,19 @@ static bool resolve_font_source_path(char** source, const char* base_path,
         // registration otherwise shadows the completed network face.
         replacement = resource_manager_copy_ready_resource_path(resource_manager, *source, &pending);
     } else {
-        char resolved[2048];
-        if (!base_path || !radiant_resolve_layout_relative_resource_path(
-                *source, base_path, resolved, sizeof(resolved))) return false;
-        replacement = mem_strdup(resolved, MEM_CAT_FONT);
+        if (!base_path || file_exists(*source)) return false;
+        // fonts share the same local resource roots as stylesheets and images;
+        // a missing server-root URL must not silently select system-font metrics.
+        lam::Temp<char> resolved(radiant_resolve_resource_path(
+            *source, base_path, true, MEM_CAT_FONT));
+        if (resolved && file_exists(resolved.get())) {
+            replacement = resolved.release();
+        } else {
+            char relative[2048];
+            if (!radiant_resolve_layout_relative_resource_path(
+                    *source, base_path, relative, sizeof(relative))) return false;
+            replacement = mem_strdup(relative, MEM_CAT_FONT);
+        }
     }
     if (!replacement) return pending;
     lam::Temp<char> previous(*source);  // the replacement takes the slot

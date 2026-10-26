@@ -657,11 +657,15 @@ struct LayoutTextIntrinsicLineOptions {
     float tab_size_length = -1.0f;
     float vertical_line_advance = 0.0f;
     float vertical_inline_basis = 0.0f;
+    bool processed_forced_breaks = false; // layout_collect_inline_text's paragraph markers
 };
 // measure processed text per forced line, retaining edges for its parent's inline run.
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
     float* vertical_text_extent = nullptr);
+bool layout_measure_direct_inline_text_intrinsics(LayoutContext* lycon, ViewBlock* block,
+                                                   IntrinsicSizes* sizes);
+float layout_orthogonal_inline_basis(LayoutContext* lycon, ViewBlock* block);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 bool layout_aspect_ratio_value_has_auto(const CssValue* value);
@@ -1141,6 +1145,8 @@ float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margi
                                          bool horizontal);
 float layout_stretch_fit_used_css_size(ViewBlock* block, float available_margin_box_size,
                                        bool horizontal);
+float layout_stretch_fit_content_box_size(ViewBlock* block, float available_margin_box_size,
+                                          bool horizontal);
 void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin_box_size,
                                         bool available_size_is_definite, bool horizontal);
 
@@ -2382,11 +2388,20 @@ typedef struct FloatAvailableSpace {
     bool has_right_float;
 } FloatAvailableSpace;
 // tier-3: layout-transient, valid within pass
+typedef struct LayoutPlaintextParagraphCache {
+    lam::Up<DomElement> scope;
+    lam::Up<DomText> text;
+    size_t start_byte, end_byte;
+    CssEnum direction;
+} LayoutPlaintextParagraphCache;
+
+// tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     float content_width;
     float paged_reference_width; // the fragmentainer width represented by this context's inline geometry
     float content_height;
     float advance_y;
+    float inline_block_start; // initial surrogate block edge of this inline formatting context
     float max_width;
     float max_height;
     float line_height;
@@ -2453,6 +2468,7 @@ typedef struct BlockContext {
     int balance_wrap_paragraph;
     float balance_wrap_available_width;
     int balance_wrap_start_line;
+    LayoutPlaintextParagraphCache plaintext_paragraph;
 
     lam::Up<struct BlockContext> parent;
     lam::Up<ViewBlock> flow_box; // cursor owner, including blocks that do not establish a BFC
@@ -2725,6 +2741,7 @@ CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
 CssEnum layout_html_replaced_alignment_hint(DomElement* element, CssPropertyCode property);
 CssEnum logical_inline_direction(DomElement* element);
+CssEnum layout_element_css_direction(DomElement* element);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
     if (!element || (element->view_type != RDT_VIEW_BLOCK &&
@@ -4084,11 +4101,12 @@ inline float layout_self_alignment_offset(CssEnum alignment, bool safe,
     }
     return radiant::compute_alignment_offset_simple(physical_alignment, free_space);
 }
-inline bool layout_inline_span_isolate(ViewSpan* span) {
-    if (!span || !span->blk) return false;
-    CssEnum unicode_bidi = span->block()->unicode_bidi;
+inline bool layout_unicode_bidi_isolate(CssEnum unicode_bidi) {
     return unicode_bidi == CSS_VALUE_ISOLATE ||
-        unicode_bidi == CSS_VALUE_ISOLATE_OVERRIDE;
+        unicode_bidi == CSS_VALUE_ISOLATE_OVERRIDE || unicode_bidi == CSS_VALUE_PLAINTEXT;
+}
+inline bool layout_inline_span_isolate(ViewSpan* span) {
+    return span && span->blk && layout_unicode_bidi_isolate(span->block()->unicode_bidi);
 }
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
@@ -4119,6 +4137,7 @@ inline bool layout_text_rect_is_visible(ViewText* text, TextRect* rect) {
 }
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
+float layout_vertical_flow_effective_margin(ViewBlock* block, WritingMode mode, bool start);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
 void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                                       bool swap_dimensions,
@@ -4661,11 +4680,16 @@ void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
+CssEnum layout_inline_boundary_keyword(DomElement* element, CssPropertyCode property,
+                                       CssEnum initial, CssEnum inherited);
 bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
+bool layout_inline_span_has_content_on_line(View* view, int line_number);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem);
+void layout_apply_html_ua_spacing(LayoutContext* lycon, DomElement* element,
+                                  float font_size, bool initial = false);
 View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
@@ -4866,8 +4890,6 @@ struct LayoutLogicalSides {
     CssBoxSide inline_end;
     CssBoxSide block_start;
     CssBoxSide block_end;
-    CssBoxSide block_pair_start;
-    CssBoxSide block_pair_end;
 };
 
 CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
@@ -4986,15 +5008,11 @@ static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
     sides.block_end = inline_vertical
         ? (block_start_right ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT)
         : CSS_BOX_SIDE_BOTTOM;
-    sides.block_pair_start = inline_vertical ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_TOP;
-    sides.block_pair_end = inline_vertical ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_BOTTOM;
     return sides;
 }
 
 inline LayoutLogicalSides layout_element_logical_sides(DomElement* element) {
-    CssEnum direction = layout_specified_keyword(element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-    bool rtl = direction == CSS_VALUE_RTL ||
-        (direction != CSS_VALUE_LTR && logical_inline_direction(element) == CSS_VALUE_RTL);
+    bool rtl = layout_element_css_direction(element) == CSS_VALUE_RTL;
     return layout_logical_sides(layout_element_inline_axis_is_vertical(element),
         layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl);
 }
@@ -5008,15 +5026,12 @@ struct LayoutPhysicalSides {
 };
 
 static inline LayoutPhysicalSides layout_logical_physical_sides(
-    const LayoutLogicalProperty& logical, const LayoutLogicalSides& sides,
-    bool pair_uses_block_start = false) {
+    const LayoutLogicalProperty& logical, const LayoutLogicalSides& sides) {
     LayoutPhysicalSides result = {};
     if (logical.block_axis) {
         if (logical.pair) {
-            result.first = pair_uses_block_start
-                ? sides.block_start : sides.block_pair_start;
-            result.second = pair_uses_block_start
-                ? sides.block_end : sides.block_pair_end;
+            result.first = sides.block_start;
+            result.second = sides.block_end;
         } else {
             result.first = logical.start ? sides.block_start : sides.block_end;
             result.second = result.first;
@@ -5376,6 +5391,8 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_block_font_metrics(LayoutContext* lycon);
 // Initializes the local inline formatting state for a block's content box.
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
+void layout_setup_inline_direction(LayoutContext* lycon, ViewBlock* block);
+bool layout_block_has_multicol_ancestor(ViewBlock* block);
 void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width);
 void layout_intrinsic_apply_first_line_indent(float text_indent, float first_segment_min,
     float remaining_min_content, float* max_content, float* min_content);

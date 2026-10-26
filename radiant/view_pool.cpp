@@ -375,19 +375,20 @@ static void free_vector_path_payload(DomElement* elem, ViewTree* tree) {
     view_pool_free(tree, path->dash_pattern);
 }
 
-static thread_local bool releasing_detached_subtree;
-
 static void release_embedded_document(DomElement* elem) {
     if (!elem || !elem->embed || !elem->embedp()->doc) {
         return;
     }
 
     DomDocument* embedded_doc = elem->embedp()->doc;
+    // adopted nodes and script wrappers can still use the child's arenas after
+    // iframe removal; the parent's resource graph releases them after its views.
+    if (!dom_document_add_resource(elem->doc, embedded_doc, free_document_resource)) {
+        log_error("embedded-document-retire: could not retain child document storage");
+        return;
+    }
     elem->embed->doc = nullptr;
     dom_document_clear_embedding(embedded_doc);
-    // D5.4.1: DOM mutation still runs on its caller's evaluator and native root stack.
-    if (releasing_detached_subtree) radiant_defer_document_destroy(embedded_doc);
-    else free_document(embedded_doc);
 }
 
 static void release_detached_embedded_documents(DomNode* node) {
@@ -972,6 +973,7 @@ void ViewTree::recycle_text_rects(TextRect* first) {
     TextRect* rect = first;
     while (rect) {
         TextRect* next = rect->next;
+        recycle_text_rects(rect->bidi_runs);
         memset(rect, 0, sizeof(TextRect));
         rect->next = free_text_rects;
         free_text_rects = lam::own(rect);
@@ -1083,12 +1085,9 @@ void view_pool_release_detached_subtree(DomNode* root) {
     DomElement* owner = root->is_element() ? root->as_element()
         : root->parent && root->parent->is_element() ? root->parent->as_element() : nullptr;
     ViewTree* tree = owner && owner->doc ? (ViewTree*)owner->doc->view_tree : nullptr;
-    bool previous_detach = releasing_detached_subtree;
-    releasing_detached_subtree = true;
     view_teardown_visit_node(tree, root,
         VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL | VIEW_TEARDOWN_CLEAR_POINTERS,
         false);
-    releasing_detached_subtree = previous_detach;
 }
 
 static void view_pool_release_detached_form_props_walk(DomNode* node) {

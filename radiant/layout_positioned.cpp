@@ -690,10 +690,14 @@ void layout_parent_to_containing_block_offset(ViewBlock* block,
         bool vertical_inline_frame = vertical_line && inline_parent;
         bool inline_extent_frame = get_static_position_block_context_direction(parent) == TD_RTL ||
             static_position_parent_uses_right_block_start(parent);
-        if (!vertical_inline_frame && !inline_extent_frame) {
+        bool physical_anchor = block->position &&
+            block->positionp()->has_vertical_static_anchor;
+        if (physical_anchor || (!vertical_inline_frame && !inline_extent_frame)) {
             parent_to_cb_offset.x -= containing_block->x;
         }
-        if (!vertical_inline_frame) parent_to_cb_offset.y -= containing_block->y;
+        if (physical_anchor || !vertical_inline_frame) {
+            parent_to_cb_offset.y -= containing_block->y;
+        }
     }
 
     if (containing_block && containing_block->parent_view() == nullptr &&
@@ -1518,6 +1522,39 @@ static void positioned_register_static_inline_position(ViewBlock* block, Linebox
     line->last_static_inline_position = lam::up(block);
 }
 
+static bool positioned_capture_vertical_static_anchor(
+        ViewBlock* block, ViewBlock* static_parent, BlockContext* context,
+        Linebox* line, bool was_inline) {
+    if (!static_parent || !context || !line ||
+        !layout_block_inline_axis_is_vertical(static_parent) ||
+        layout_block_has_multicol_ancestor(static_parent) ||
+        static_parent->display.inner == CSS_VALUE_FLEX ||
+        static_parent->display.inner == CSS_VALUE_GRID) return false;
+    CssEnum mode = layout_element_css_writing_mode(static_parent->as_element());
+    if (mode != CSS_VALUE_VERTICAL_LR && mode != CSS_VALUE_VERTICAL_RL) return false;
+    for (LayoutAxis axis : layout_axes()) {
+        if (positioned_axis_uses_static_self_alignment(block, static_parent, axis)) {
+            return false;
+        }
+    }
+    BoxMetrics box = layout_box_metrics(static_parent);
+    PositionProp* position = block->position;
+    position->has_vertical_static_anchor = true;
+    position->static_anchor_is_inline = was_inline;
+    position->static_inline_origin_delta = box.border.top + box.padding.top - line->left;
+    position->static_inline_cursor = line->advance_x + position->static_inline_origin_delta;
+    position->static_inline_edge_reversed = context->direction == CSS_VALUE_RTL;
+    position->static_block_distance = context->advance_y - context->inline_block_start;
+    if (!was_inline && !line->is_line_start) {
+        // a hypothetical block follows the current line in the parent's block axis.
+        position->static_block_distance += context->line_height;
+        position->static_block_after_line = true;
+    }
+    // css position §3.5.2: retain the hypothetical static rectangle;
+    // bidi and final line alignment run before physical-axis publication.
+    return true;
+}
+
 void layout_finalize_static_inline_positions(LayoutContext* lycon) {
     if (!lycon) return;
     ViewBlock* block = lycon->line.first_static_inline_position;
@@ -1527,7 +1564,9 @@ void layout_finalize_static_inline_positions(LayoutContext* lycon) {
             ? block->positionp()->next_static_inline_position : nullptr;
         if (block->position) {
             block->position->next_static_inline_position = nullptr;
-            if (!block->positionp()->has_left && !block->positionp()->has_right &&
+            if (block->positionp()->has_vertical_static_anchor) {
+                block->position->static_inline_cursor += offset;
+            } else if (!block->positionp()->has_left && !block->positionp()->has_right &&
                 (!block->positionp()->static_inline_bidi_candidate ||
                  block->positionp()->static_inline_bidi_placed)) {
                 block->x += offset;
@@ -1545,6 +1584,13 @@ void layout_finalize_static_inline_positions(LayoutContext* lycon) {
 
 void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level) {
     if (!block || !block->position) return;
+    if (block->positionp()->has_vertical_static_anchor) {
+        block->position->static_inline_cursor = line_x +
+            block->positionp()->static_inline_origin_delta;
+        block->position->static_inline_edge_reversed = (level & 1) != 0;
+        block->position->static_inline_bidi_placed = true;
+        return;
+    }
     float edge = block->positionp()->static_parent_offset_x + line_x;
     float margin = block->bound ? ((level & 1)
         ? block->boundary()->margin.right : block->boundary()->margin.left) : 0.0f;
@@ -1567,7 +1613,12 @@ void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
         if (block->position && block->positionp()->static_block_after_line) {
             // following siblings can enlarge the line after the static block
             // position was captured, without consuming that in-flow line.
-            block->y += used_line_height - block->positionp()->static_line_initial_extent;
+            float extent_delta = used_line_height - block->positionp()->static_line_initial_extent;
+            if (block->positionp()->has_vertical_static_anchor) {
+                block->position->static_block_distance += extent_delta;
+            } else {
+                block->y += extent_delta;
+            }
             block->position->static_block_after_line = false;
         } else if (static_containing_block) {
             for (LayoutAxis axis : layout_axes()) {
@@ -2190,6 +2241,7 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     log_enter();
     // a new positioned layout replaces the source origin retained by fragmentation.
     block->position->has_multicol_flow_origin = false;
+    block->position->has_vertical_static_anchor = false;
     // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)
     lycon->depth++;
     if (lycon->depth >= MAX_LAYOUT_DEPTH) {
@@ -2814,6 +2866,8 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     ViewBlock* static_containing_block = layout_nearest_block_ancestor(parent);
     bool static_position_is_inline_layout = was_inline ||
         (parent && parent->view_type == RDT_VIEW_INLINE);
+    bool vertical_static_anchor = positioned_capture_vertical_static_anchor(
+        block, static_containing_block, pa_block, pa_line, was_inline);
     positioned_resolve_reversed_static_inline_y(
         block, static_containing_block, static_position_is_inline_layout);
     positioned_realign_static_self_axes(
@@ -2823,10 +2877,13 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
             block, static_containing_block, pa_block, pa_line);
     }
     bool bidi_static_inline = pa_block && pa_line && was_inline && static_direction == TD_RTL &&
-        !block->positionp()->has_left && !block->positionp()->has_right &&
-        cb->view_type != RDT_VIEW_INLINE && static_containing_block &&
-        !layout_block_inline_axis_is_vertical(static_containing_block) &&
-        !positioned_axis_uses_static_self_alignment(block, static_containing_block, LAYOUT_AXIS_X);
+        (vertical_static_anchor
+            ? !block->positionp()->has_top && !block->positionp()->has_bottom
+            : !block->positionp()->has_left && !block->positionp()->has_right &&
+                cb->view_type != RDT_VIEW_INLINE && static_containing_block &&
+                !layout_block_inline_axis_is_vertical(static_containing_block) &&
+                !positioned_axis_uses_static_self_alignment(
+                    block, static_containing_block, LAYOUT_AXIS_X));
     block->position->static_inline_bidi_candidate = bidi_static_inline;
     block->position->static_inline_bidi_placed = false;
     block->position->static_inline_phantom = false;
@@ -2835,7 +2892,8 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     bool track_phantom_cursor = was_inline && static_containing_block &&
         !layout_block_inline_axis_is_vertical(static_containing_block) &&
         !block->positionp()->has_top && !block->positionp()->has_bottom;
-    if (defer_static_inline_x || bidi_static_inline || track_phantom_cursor) {
+    if ((vertical_static_anchor && was_inline) || defer_static_inline_x ||
+        bidi_static_inline || track_phantom_cursor) {
         positioned_register_static_inline_position(block, pa_line);
     }
     lycon->depth--;
@@ -2851,6 +2909,39 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
     if (!block || !block->position) return;
     if (block->positionp()->position != CSS_VALUE_ABSOLUTE &&
         block->positionp()->position != CSS_VALUE_FIXED) return;
+
+    if (block->positionp()->has_vertical_static_anchor) {
+        ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
+        ViewBlock* cb = find_containing_block(block, block->positionp()->position);
+        if (!parent || !cb) return;
+        float offset_x = 0.0f, offset_y = 0.0f;
+        layout_parent_to_containing_block_offset(block, cb, &offset_x, &offset_y);
+        BoxMetrics parent_box = layout_box_metrics(parent);
+        BoxEdges margin = layout_boundary_margin_edges(block->bound);
+        PositionProp* position = block->position;
+        if (!position->has_left && !position->has_right) {
+            bool reversed = layout_block_writing_mode(parent) == WM_VERTICAL_RL;
+            // the parent block axis selects left/right independently of inline RTL.
+            block->x = offset_x + (reversed
+                ? parent->width - parent_box.border.right - parent_box.padding.right -
+                    position->static_block_distance - block->width - margin.right
+                : parent_box.border.left + parent_box.padding.left +
+                    position->static_block_distance + margin.left);
+            position->static_parent_offset_x = offset_x;
+        }
+        if (!position->has_top && !position->has_bottom) {
+            float inline_edge = position->static_anchor_is_inline
+                ? position->static_inline_cursor
+                : position->static_inline_edge_reversed
+                    ? parent->height - parent_box.border.bottom - parent_box.padding.bottom
+                    : parent_box.border.top + parent_box.padding.top;
+            block->y = offset_y + inline_edge +
+                (position->static_inline_edge_reversed
+                    ? -block->height - margin.bottom : margin.top);
+            position->static_parent_offset_y = offset_y;
+        }
+        return;
+    }
 
     bool needs_inline_cb_extent = block->positionp()->static_x_needs_inline_cb_extent;
     bool needs_offset_delta_x = block->positionp()->has_static_parent_offset_x &&

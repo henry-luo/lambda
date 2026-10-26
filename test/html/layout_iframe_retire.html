@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<iframe srcdoc="iframe source"></iframe>
+<p id="result"></p>
+<script>
+onload = function () {
+    const frame = document.querySelector('iframe');
+    const source = frame.contentDocument;
+    const text = source.createTextNode('');
+    source.body.appendChild(text);
+    text.appendData('ADOPTED_IFRAME_TEXT');
+    document.getElementById('result').appendChild(text);
+    frame.remove();
+};
+</script>

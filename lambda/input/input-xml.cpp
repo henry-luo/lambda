@@ -27,6 +27,7 @@ struct XmlInputContext : InputContext {
     XmlNamespaceFrame* namespaces = nullptr;
     bool doctype_seen = false;
     bool document_seen = false;
+    bool html_entity_catalog = false;
     XmlInputContext(Input* input, const char* source, const XmlParseOptions* opts)
         : InputContext(input, source), options(opts), begin(source), end(source + strlen(source)), document_start(source) {}
     bool preserving() const { return options && options->preserve_whitespace; }
@@ -147,7 +148,7 @@ static void append_xml_reference(XmlInputContext& ctx, StringBuf* sb, const char
     if (!xml_ref_at_limit(*xml, limit) && **xml == ';') {
         size_t entity_len = (size_t)(*xml - entity_start);
         const char* replacement = nullptr;
-        if (ctx.strict()) {
+        if (ctx.strict() && !ctx.html_entity_catalog) {
             const char* names[] = {"lt", "gt", "amp", "apos", "quot"};
             const char* values[] = {"<", ">", "&", "'", "\""};
             for (size_t i = 0; i < 5; i++)
@@ -638,7 +639,7 @@ static Item parse_doctype(XmlInputContext& ctx, const char **xml, int depth) {
     skip_whitespace(xml);
 
     if (ctx.strict()) {
-        // external IDs in interchange documents are metadata, never executable DTDs.
+        // external IDs select only the built-in HTML catalog; no DTD is fetched or executed.
         const char* start = *xml;
         if (depth || ctx.doctype_seen || ctx.document_seen || !ctx.options->allow_inert_doctype) {
             xml_error(ctx, start, "XML_DOCTYPE_POSITION", "DOCTYPE must precede the document element exactly once");
@@ -686,6 +687,28 @@ static Item parse_doctype(XmlInputContext& ctx, const char **xml, int depth) {
         }
         (*xml)++;
         ctx.doctype_seen = true;
+        if (ctx.xhtml() && literal_count == 2 && identifiers[0]) {
+            // HTML §14.2 maps these public IDs to its named character-reference catalog.
+            static const char* catalog_public_ids[] = {
+                "-//W3C//DTD XHTML 1.0 Transitional//EN",
+                "-//W3C//DTD XHTML 1.1//EN",
+                "-//W3C//DTD XHTML 1.0 Strict//EN",
+                "-//W3C//DTD XHTML 1.0 Frameset//EN",
+                "-//W3C//DTD XHTML Basic 1.0//EN",
+                "-//W3C//DTD XHTML 1.1 plus MathML 2.0//EN",
+                "-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN",
+                "-//W3C//DTD MathML 2.0//EN",
+                "-//WAPFORUM//DTD XHTML Mobile 1.0//EN",
+                "-//WAPFORUM//DTD XHTML Mobile 1.1//EN",
+                "-//WAPFORUM//DTD XHTML Mobile 1.2//EN",
+            };
+            for (const char* public_id : catalog_public_ids) {
+                if (!strcmp(identifiers[0]->chars, public_id)) {
+                    ctx.html_entity_catalog = true;
+                    break;
+                }
+            }
+        }
         ElementBuilder doctype = builder.element(ctx.xhtml() ? "#doctype" : "!DOCTYPE");
         if (ctx.xhtml()) doctype.attr("name", "html");
         else doctype.attr("name", {.item = s2it(root_name)});

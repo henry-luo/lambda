@@ -560,40 +560,6 @@ bool layout_get_text_initial_letter_info(const DomNode* text_node,
     return layout_get_initial_letter_info(parent, out_info);
 }
 
-static bool layout_ua_block_margin_em(NameId tag, float* top_em, float* bottom_em) {
-    if (!top_em || !bottom_em) return false;
-    struct UaMarginScale { NameId tag; float value; };
-    static const UaMarginScale scales[] = {
-        {MARKUP_NAME_P, 1.0f}, {MARKUP_NAME_UL, 1.0f}, {MARKUP_NAME_OL, 1.0f},
-        {MARKUP_NAME_MENU, 1.0f}, {MARKUP_NAME_PRE, 1.0f},
-        {MARKUP_NAME_BLOCKQUOTE, 1.0f}, {MARKUP_NAME_DL, 1.0f},
-        {MARKUP_NAME_FIGURE, 1.0f}, {MARKUP_NAME_H1, 0.67f},
-        {MARKUP_NAME_H2, 0.83f}, {MARKUP_NAME_H3, 1.0f},
-        {MARKUP_NAME_H4, 1.33f}, {MARKUP_NAME_H5, 1.67f},
-        {MARKUP_NAME_H6, 2.33f}
-    };
-    for (const UaMarginScale& scale : scales) {
-        if (scale.tag != tag) continue;
-        *top_em = *bottom_em = scale.value;
-        return true;
-    }
-    return false;
-}
-
-static void layout_reresolve_ua_em_margins(DomElement* dom_elem, float font_size) {
-    if (!dom_elem || !dom_elem->bound || font_size <= 0.0f) return;
-    float top_em = 0.0f;
-    float bottom_em = 0.0f;
-    if (!layout_ua_block_margin_em(dom_elem->tag(), &top_em, &bottom_em)) return;
-
-    if (dom_elem->boundary()->margin.top_specificity == -1) {
-        dom_elem->boundary_mut()->margin.top = top_em * font_size;
-    }
-    if (dom_elem->boundary()->margin.bottom_specificity == -1) {
-        dom_elem->boundary_mut()->margin.bottom = bottom_em * font_size;
-    }
-}
-
 float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = x_axis ? elem->x : elem->y;
@@ -2444,7 +2410,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     float used_font_size = (span->font && span->fontp()->font_size > 0)
                                           ? font_prop_used_size(span->font)
                                           : lycon->font.style->font_size;
-                    layout_reresolve_ua_em_margins(dom_elem, used_font_size);
+                    layout_apply_html_ua_spacing(lycon, dom_elem, used_font_size);
                 }
 
                 layout_refresh_font_used_zoom(static_cast<View*>(dom_elem), lycon);
@@ -3107,7 +3073,7 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
     return lycon->block.advance_y + vertical_offset + half_leading - border_top - padding_top;
 }
 
-static bool layout_inline_span_has_content_on_line(View* view, int line_number) {
+bool layout_inline_span_has_content_on_line(View* view, int line_number) {
     if (!view || view->view_type == RDT_VIEW_NONE ||
         layout_view_is_out_of_flow(view)) {
         return false;
@@ -4129,6 +4095,8 @@ static bool expand_line_leaders(LayoutContext* lycon) {
                         success = false; return false;
                     }
                     *copy = *part; copy->x += (float)i * step; copy->next = nullptr;
+                    // repeated leader boxes receive their own bidi runs at line publication.
+                    copy->bidi_runs = nullptr;
                     tail->next = lam::own(copy); tail = copy;
                     if (part == last) break;
                 }
@@ -5397,17 +5365,20 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         line_init(lycon, 0, border_box_width);
     }
 
-    if (root_has_explicit_height) {
-        // CSS 2.1 §10.6: Root element with explicit height.
-        float border_box_height = root_css_height + root_bp_top + root_bp_bottom;
+    if (root_has_explicit_height || layout_block_inline_axis_is_vertical(html)) {
+        float margin_height = html->bound
+            ? html->boundary()->margin.top + html->boundary()->margin.bottom : 0.0f;
+        float border_box_height = root_has_explicit_height
+            ? root_css_height + root_bp_top + root_bp_bottom
+            : max(physical_height - margin_height, root_bp_top + root_bp_bottom);
+        float content_height = max(border_box_height - root_bp_top - root_bp_bottom, 0.0f);
+        // publish a definite vertical inline extent before descendants wrap;
+        // a given height with zero content extent is an inconsistent constraint.
         html->height = border_box_height;
-        lycon->block.given_height = root_css_height;
-        if (html->blk) html->blk->given_height = root_css_height;
-    }
-
-    if (!root_has_explicit_height && layout_block_inline_axis_is_vertical(html)) {
-        lycon->block.given_height = physical_height;
-        if (html->blk) html->blk->given_height = physical_height;
+        html->content_height = content_height;
+        lycon->block.content_height = content_height;
+        lycon->block.given_height = content_height;
+        if (html->blk) html->blk->given_height = content_height;
     }
 
     if (root_is_abspos) {
@@ -5606,8 +5577,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
     if (!root_has_explicit_width && !root_has_explicit_height &&
         root_uses_vertical_writing && body_view) {
-        float body_margin_left = body_view->bound ? body_view->boundary()->margin.left : 0.0f;
-        float body_margin_right = body_view->bound ? body_view->boundary()->margin.right : 0.0f;
         float body_margin_bottom = body_view->bound ? body_view->boundary()->margin.bottom : 0.0f;
         float content_block_size = body_view->width;
         if (content_block_size <= 0.0f) {
@@ -5619,29 +5588,19 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             content_block_size = line_extent > 0.0f ? line_extent : body_view->height;
         }
         WritingMode body_mode = layout_block_writing_mode(body_view);
-        float trailing_child_margin = 0.0f;
-        for (View* child = body_view->first_placed_child(); child; child = child->next()) {
-            LayoutVerticalFlowChild info = {};
-            if (!layout_classify_vertical_flow_child(body_view, child, &info) ||
-                !info.normal_block || info.atomic_inline ||
-                layout_block_is_out_of_flow_positioned(info.block)) {
-                continue;
-            }
-            trailing_child_margin = layout_vertical_flow_block_end_margin(
-                info.block, body_mode);
-        }
         body_view->width = content_block_size;
         body_view->content_width = content_block_size;
-        body_view->height = physical_height - body_view->y - body_margin_bottom;
-        if (body_view->height < 0.0f) body_view->height = 0.0f;
-        body_view->content_height = body_view->height;
-        float root_block_start_margin = body_mode == WM_VERTICAL_RL
-            ? body_margin_right : body_margin_left;
-        float root_block_end_margin = body_mode == WM_VERTICAL_LR
-            ? max(body_margin_right, trailing_child_margin)
-            : max(body_margin_left, trailing_child_margin);
-        // CSS Writing Modes: the final in-flow child margin contributes at the
-        // root body's block-end edge in either vertical direction.
+        if (layout_css_size_is_automatic(body_view, false)) {
+            // principal-flow publication supplies only an automatic inline size;
+            // an authored body height remains its normal used border box.
+            body_view->height = layout_floor_border_box_axis(body_view,
+                physical_height - body_view->y - body_margin_bottom, false);
+            body_view->content_height = layout_content_size_from_border_box(
+                body_view, body_view->height, false);
+        }
+        // adjoining descendant margins belong outside the body's content box.
+        float root_block_start_margin = layout_vertical_flow_effective_margin(body_view, body_mode, true);
+        float root_block_end_margin = layout_vertical_flow_effective_margin(body_view, body_mode, false);
         html->width = root_block_start_margin + content_block_size +
             root_block_end_margin;
         html->content_width = html->width;
@@ -5652,8 +5611,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             ? physical_width - html->width : 0.0f;
         html->x = target_html_x;
         float target_body_x = body_mode == WM_VERTICAL_RL
-            ? html->width - body_margin_right - body_view->width
-            : body_margin_left;
+            ? html->width - root_block_start_margin - body_view->width
+            : root_block_start_margin;
         float body_delta_x = target_body_x - body_view->x;
         if (fabsf(body_delta_x) > 0.01f) {
             // child coordinates are already rooted in the HTML formatting context;

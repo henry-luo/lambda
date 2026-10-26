@@ -211,14 +211,29 @@ struct LayoutFlowResult {
     uint64_t style_epoch, mutation_epoch;
 };
 
+static void layout_flow_release_rects(Pool* pool, lam::Own<TextRect>& first) {
+    while (first) {
+        lam::Own<TextRect> next = first->next;
+        layout_flow_release_rects(pool, first->bidi_runs);
+        lam::free_owned(pool, first);
+        first = next;
+    }
+}
+
 static TextRect* layout_flow_clone_rects(Pool* pool, const TextRect* source) {
     lam::Own<TextRect> first = nullptr;
     TextRect* previous = nullptr;
     for (; source; source = source->next) {
         TextRect* copy = (TextRect*)pool_alloc(pool, sizeof(TextRect));
-        if (!copy) { lam::free_owned_list(pool, first); return nullptr; }
+        if (!copy) { layout_flow_release_rects(pool, first); return nullptr; }
         *copy = *source;
         copy->next = nullptr;
+        copy->bidi_runs = lam::own(layout_flow_clone_rects(pool, source->bidi_runs));
+        if (source->bidi_runs && !copy->bidi_runs) {
+            pool_free(pool, copy);
+            layout_flow_release_rects(pool, first);
+            return nullptr;
+        }
         if (previous) previous->next = lam::own(copy);
         else first = lam::own(copy);
         previous = copy;
@@ -231,7 +246,7 @@ void layout_flow_result_release(Pool* pool, LayoutFlowResult* result) {
     lam::Own<LayoutFlowNode> current = result->first;
     while (current) {
         lam::Own<LayoutFlowNode> next = current->next;
-        lam::free_owned_list(pool, current->text_rects);
+        layout_flow_release_rects(pool, current->text_rects);
         lam::free_owned(pool, current->position);
         lam::free_owned(pool, current->flex);
         lam::free_owned(pool, current->flex_item);
@@ -402,7 +417,7 @@ bool layout_flow_result_apply(LayoutContext* context, const LayoutFlowResult* re
     }
     if (!complete) {
         for (ReplayPayload* copy = first; copy; copy = copy->next) {
-            lam::free_owned_list(context->pool.get(), copy->rects);
+            layout_flow_release_rects(context->pool.get(), copy->rects);
             lam::free_owned(context->pool.get(), copy->tracks);
         }
         return false;

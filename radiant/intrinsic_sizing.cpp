@@ -2005,6 +2005,10 @@ IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     while (line_start <= text_end) {
         const char* newline = preserve_newlines
             ? (const char*)memchr(line_start, '\n', text_end - line_start) : nullptr;
+        if (options.processed_forced_breaks) {
+            const char* forced = (const char*)memchr(line_start, '\v', text_end - line_start);
+            if (forced && (!newline || forced < newline)) newline = forced;
+        }
         size_t line_length = newline ? (size_t)(newline - line_start)
             : (size_t)(text_end - line_start);
         if (newline && !preserve_spaces) {
@@ -5591,7 +5595,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 continue;
             }
 
+            BlockContext intrinsic_parent = lycon->block;
+            BlockContext* saved_parent = lycon->block.parent;
+            if (element_inline_axis_is_vertical && vertical_inline_basis > 0.0f) {
+                // a child's vertical wrapping constraint comes from this box,
+                // even while its block-axis shrink-to-fit query is recursive.
+                intrinsic_parent.content_height = vertical_inline_basis;
+                intrinsic_parent.flow_box = lam::up(view_block);
+                lycon->block.parent = lam::up(&intrinsic_parent);
+            }
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+            lycon->block.parent = lam::up(saved_parent);
             if (is_grid_container) {
                 // Auto-track grids use the normal child walk; retain the grid
                 // item's explicit minimum in that path as well.
@@ -6544,6 +6558,33 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
     }
 
     return text;
+}
+
+bool layout_measure_direct_inline_text_intrinsics(LayoutContext* lycon, ViewBlock* block,
+                                                   IntrinsicSizes* sizes) {
+    if (!lycon || !block || !sizes || !block->is_element()) return false;
+    StrBuf* text = layout_collect_inline_text(block->as_element(), false);
+    if (!text) return false;
+    IntrinsicFontScope font_scope(lycon, lycon->font);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    LayoutTextIntrinsicLineOptions options;
+    options.text_transform = get_element_text_transform(block->as_element());
+    options.font_variant = get_element_font_variant(block->as_element());
+    // whitespace lookup starts at the text node's parent.
+    options.white_space = get_white_space_value(block->first_child);
+    layout_resolve_inherited_text_wrap(block, &options.overflow_wrap, &options.word_break);
+    options.line_break = get_inherited_text_enum(lycon, CSS_PROPERTY_LINE_BREAK,
+        &BlockProp::line_break, CSS_VALUE_AUTO, block->as_element());
+    options.processed_forced_breaks = true;
+    if (block->blk) {
+        if (block->block()->tab_size >= 0.0f) options.tab_size = block->block()->tab_size;
+        options.tab_size_length = block->block()->tab_size_length;
+    }
+    // keep glyph advances in the logical inline axis; physical width queries
+    // additionally map vertical text into its column block extent.
+    *sizes = layout_measure_text_intrinsic_lines(lycon, text->str, text->length, options);
+    strbuf_free(text);
+    return true;
 }
 
 static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,

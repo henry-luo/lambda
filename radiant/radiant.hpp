@@ -388,6 +388,14 @@ int ui_context_init(UiContext* uicon, bool headless, float requested_device_scal
 bool ui_context_enable_native_graphics(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);
+struct DocumentCleanupTiming {
+    double network_ms = 0.0;
+    double state_ms = 0.0;
+    double script_ms = 0.0;
+    double view_ms = 0.0;
+    double document_ms = 0.0;
+};
+bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing);
 void free_document(DomDocument* doc);
 void image_cache_cleanup(UiContext* uicon);
 ImageSurface* load_image(UiContext* uicon, const char* img_url);

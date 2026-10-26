@@ -2030,6 +2030,12 @@ typedef struct PositionProp {
     bool static_inline_bidi_placed;
     bool static_inline_phantom; // auto-inset cursor on a line with no in-flow content
     float static_inline_phantom_x; // aligned cursor relative to its static parent
+    bool has_vertical_static_anchor;
+    bool static_anchor_is_inline; // inline zero-extent cursor or block full-inline rectangle
+    bool static_inline_edge_reversed;
+    float static_inline_cursor; // parent physical inline edge, finalized by line alignment/bidi
+    float static_inline_origin_delta; // surrogate inline coordinate to physical inline coordinate
+    float static_block_distance; // distance from the parent's initial line block-start
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_block_after_line; // hypothetical block follows the unfinished inline line
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
@@ -2469,6 +2475,7 @@ typedef struct BlockProp {
     bool initial_letter_float_clearance;
     bool vertical_geometry_published; // transient: direct vertical-flow children were axis-mapped
     bool vertical_auto_inline_size_constrained; // transient: auto height resolved from the vertical inline-size CB
+    bool auto_inline_fit_content_resolved; // transient: fit-content height keeps authored auto semantics
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
     bool line_clamp_legacy; // legacy counts apply only to a vertical legacy box
@@ -2502,6 +2509,8 @@ typedef struct TextRect {
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
     lam::Up<const char> trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
+    bool bidi_reversed; // paint-run graphemes advance from the inline-end edge
+    lam::Own<TextRect> bidi_runs; // source-indexed paint runs, positioned relative to this query rect
     lam::Own<TextRect> next;
 } TextRect;
 
@@ -4777,6 +4786,6 @@ void loader_runtime_finish_document(DomDocument* doc, Runtime* loader);
 // load diagnostic; a successful load clears it.
 const char* lambda_document_load_diagnostic(void);
 void free_document(DomDocument* doc);
-// D5.4.1: detached iframe ownership is released only after dispatch frames return.
-void radiant_defer_document_destroy(DomDocument* doc);
-bool radiant_drain_document_destruction();
+inline void free_document_resource(DomDocumentResourceData* data) {
+    free_document(static_cast<DomDocument*>(data));
+}
