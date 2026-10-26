@@ -7292,16 +7292,21 @@ void caret_project_visual(DocState* state, float x, float y, float height) {
     state->needs_repaint = true;
 }
 
+RdtLogicalPoint view_frame_translation(View* view, float block_x, float block_y) {
+    // the hit origin already includes ancestor scrolling; retain only the embedding frame translation.
+    RdtLogicalPoint chain = view_geometry_local_to_block_viewport(
+        view, {0.0f, 0.0f}, scroll_state_resolve_view_geometry);
+    return {block_x - chain.x, block_y - chain.y};
+}
+
 void caret_project_visual_from_block(DocState* state, View* view,
                                      float x, float y, float height,
                                      float block_x, float block_y) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     caret_project_visual(state, x, y, height);
-    // the hit origin already includes ancestor scrolling; retain only the embedding frame translation.
-    RdtLogicalPoint chain = view_geometry_local_to_block_viewport(
-        view, {0.0f, 0.0f}, scroll_state_resolve_view_geometry);
-    state->selection_presentation->iframe_offset_x = block_x - chain.x;
-    state->selection_presentation->iframe_offset_y = block_y - chain.y;
+    RdtLogicalPoint frame = view_frame_translation(view, block_x, block_y);
+    state->selection_presentation->iframe_offset_x = frame.x;
+    state->selection_presentation->iframe_offset_y = frame.y;
 }
 
 void caret_project_visual_from_selection(DocState* state, float x, float y, float height) {

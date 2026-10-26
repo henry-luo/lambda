@@ -1451,13 +1451,14 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
             // Flex and block flow share source admission, srcdoc replacement, and resource ownership.
             layout_ensure_iframe_document(lycon, flex_item, iframe_content.width, iframe_content.height);
 
+            CssEnum overflow_x = CSS_VALUE_AUTO, overflow_y = CSS_VALUE_AUTO;
+            if (flex_item->embed) layout_iframe_viewport_overflow(flex_item->embedp()->doc, &overflow_x, &overflow_y);
             if (flex_item->embed && layout_iframe_content_size(flex_item->embedp()->doc,
                     &flex_item->content_width, &flex_item->content_height)) {
-                if (!flex_item->scroller) {
-                    flex_item->ensure_scroll(lycon);
-                    flex_item->scroller->overflow_x = CSS_VALUE_AUTO;
-                    flex_item->scroller->overflow_y = CSS_VALUE_AUTO;
-                }
+                // the frame's scrollbars follow its document's viewport overflow, as in block flow
+                flex_item->ensure_scroll(lycon);
+                flex_item->scroller->overflow_x = overflow_x;
+                flex_item->scroller->overflow_y = overflow_y;
                 update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
             }
             // CRITICAL: Restore the flex-determined dimensions

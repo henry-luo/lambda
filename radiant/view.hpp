@@ -111,6 +111,7 @@ bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, 
 // declaration computation supplies factors when the applied item record is absent.
 bool css_prop_compute_declared_flex_factor(DomElement* element, CssPropertyCode id, float* result);
 bool css_prop_compute_declared_flex_basis(DomElement* element, CssFlexBasisValue* result);
+bool css_prop_compute_declared_overflow(DomElement* element, CssEnum* overflow_x, CssEnum* overflow_y);
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     CssPropertyCode id, const CssValue* value);
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,

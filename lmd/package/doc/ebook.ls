@@ -26,8 +26,8 @@ pub pn read(path,options = null) map^ {
     return parse(snapshot,opts)^
 }
 pub fn chapter(book,target,options = null) map^ {
-    let checked = c.checked_options(options,[])^;
-    chapters.load(book,target)^
+    let checked = c.checked_options(options,["highlights"])^;
+    chapters.load(book,target,c.get(checked,"highlights",[]))^
 }
 pub fn locate(book,locator) map^ => locations.resolve(book,locator)^
 pub fn locator(book,chapter,offset) map^ => locations.at(book,chapter,offset)^

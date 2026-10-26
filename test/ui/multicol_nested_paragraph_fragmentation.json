@@ -1,0 +1,29 @@
+{
+  "name": "A paragraph nested in a wrapper splits at the column break from its offset in the column and continues at the next column top; later paragraphs follow the moved lines",
+  "html": "test/ui/multicol_nested_paragraph_fragmentation.html",
+  "viewport": {"width": 1000, "height": 2000},
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "assert_rect", "target": {"selector": "#a0"}, "relative_to": "#a", "x": 0, "y": 30, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#a7"}, "relative_to": "#a", "x": 0, "y": 170, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#a8"}, "relative_to": "#a", "x": 310, "y": 0, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#b0"}, "relative_to": "#b", "x": 0, "y": 30, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#b7"}, "relative_to": "#b", "x": 0, "y": 170, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#b8"}, "relative_to": "#b", "x": 310, "y": 0, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#c0"}, "relative_to": "#c", "x": 0, "y": 70, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#c5"}, "relative_to": "#c", "x": 0, "y": 170, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#c6"}, "relative_to": "#c", "x": 310, "y": 0, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#d2b"}, "relative_to": "#d", "x": 0, "y": 165, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#d2c"}, "relative_to": "#d", "x": 310, "y": 0, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#d3a"}, "relative_to": "#d", "x": 310, "y": 65, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#d4b"}, "relative_to": "#d", "x": 310, "y": 170, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#d4c"}, "relative_to": "#d", "x": 620, "y": 0, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#e-language"}, "relative_to": "#e", "x": 0, "y": 174, "height": 20, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#e-other"}, "relative_to": "#e", "x": 310, "y": 0, "height": 20, "tolerance": 3},
+    {"type": "assert_script", "js": "document.getElementById('f').scrollWidth === 814"},
+    {"type": "assert_rect", "target": {"selector": "#f25"}, "relative_to": "#f", "x": 564, "y": 100, "tolerance": 3},
+    {"type": "assert_rect", "target": {"selector": "#g-row1"}, "relative_to": "#g", "x": 2, "y": 112, "tolerance": 3},
+    {"type": "assert_script", "js": "document.getElementById('g').scrollWidth === 910"},
+    {"type": "assert_script", "js": "(() => { const f = document.getElementById('f'); f.scrollLeft = 1000; return f.scrollLeft === 514 && Math.abs(document.getElementById('f25').getBoundingClientRect().left - 50) < 1; })()"}
+  ]
+}

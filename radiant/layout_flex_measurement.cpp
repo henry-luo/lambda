@@ -876,6 +876,49 @@ static bool flex_measure_pseudo_contents(LayoutContext* lycon, DomElement* item,
     return found;
 }
 
+// The content height of a column-flex item, measured at the width it will get:
+// a stretched item uses the container cross size, a non-stretch item its
+// max-content cross size (the container width would transfer an arbitrary
+// size through aspect-ratio into its flex base size). Outside a column flex
+// the width is effectively unconstrained.
+static void flex_measure_item_height_at_cross_width(LayoutContext* lycon, ViewElement* item,
+                                                    FlexContainerLayout* flex_layout,
+                                                    float max_content_width,
+                                                    float* min_height, float* max_height) {
+    float available_width = 10000.0f;
+    float percentage_containing_width = -1.0f;
+    if (flex_layout && !is_main_axis_horizontal(flex_layout) &&
+        flex_layout->cross_axis_size > 0) {
+        percentage_containing_width = flex_layout->cross_axis_size;
+        if (flex_item_will_stretch_cross_axis(item, flex_layout)) {
+            available_width = flex_layout->cross_axis_size;
+            // Subtract item's own margin from container cross-axis.
+            if (item->bound) {
+                available_width -= item->boundary()->margin.left +
+                    item->boundary()->margin.right;
+            }
+        } else {
+            // the common clamp/subtraction below expects a border-box budget, not content width.
+            available_width = layout_border_size_from_content_box(
+                lam::view_as_block(item), max_content_width, true);
+        }
+
+        if (item->blk) {
+            if (item->block()->given_width >= 0.0f) {
+                available_width = item->block()->given_width;
+            }
+            available_width = layout_clamp_positive_min_max_width(
+                lam::view_as_block(item), available_width);
+        }
+        available_width = layout_content_size_from_border_box(
+            lam::view_as_block(item), available_width, true);
+    }
+    float height = flex_measure_intrinsic_max_height(
+        lycon, static_cast<DomNode*>(item), available_width, percentage_containing_width);
+    *min_height = *max_height =
+        layout_content_size_from_border_box(lam::view_as_block(item), height, false);
+}
+
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout,
                                     bool width_only) {
     if (!item) {
@@ -1096,43 +1139,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             max_width = layout_content_size_from_border_box(lam::view_as_block(item), max_width, true);
             // height queries use their actual wrapping constraint, when that axis is requested.
             if (!width_only) {
-                float available_width = 10000.0f;
-                float percentage_containing_width = -1.0f;
-                // A stretched column-flex item uses the container cross size. A
-                // non-stretch item instead uses its max-content cross size; using
-                // the container width would transfer that arbitrary size through
-                // aspect-ratio into its flex base size.
-                if (flex_layout && !is_main_axis_horizontal(flex_layout) &&
-                    flex_layout->cross_axis_size > 0) {
-                    percentage_containing_width = flex_layout->cross_axis_size;
-                    if (flex_item_will_stretch_cross_axis(item, flex_layout)) {
-                        available_width = flex_layout->cross_axis_size;
-                        // Subtract item's own margin from container cross-axis.
-                        if (item->bound) {
-                            available_width -= item->boundary()->margin.left +
-                                item->boundary()->margin.right;
-                        }
-                    } else {
-                        // the common clamp/subtraction below expects a border-box budget, not content width.
-                        available_width = layout_border_size_from_content_box(
-                            lam::view_as_block(item), max_width, true);
-                    }
-
-                    if (item->blk) {
-                        if (item->block()->given_width >= 0.0f) {
-                            available_width = item->block()->given_width;
-                        }
-                        available_width = layout_clamp_positive_min_max_width(
-                            lam::view_as_block(item), available_width);
-                    }
-                    available_width = layout_content_size_from_border_box(
-                        lam::view_as_block(item), available_width, true);
-                }
-                min_height = max_height = flex_measure_intrinsic_max_height(
-                    lycon, static_cast<DomNode*>(item), available_width,
-                    percentage_containing_width);
-                min_height = layout_content_size_from_border_box(lam::view_as_block(item), min_height, false);
-                max_height = layout_content_size_from_border_box(lam::view_as_block(item), max_height, false);
+                flex_measure_item_height_at_cross_width(lycon, item, flex_layout, max_width,
+                                                        &min_height, &max_height);
             }
             // Skip the manual child iteration since we've already calculated sizes
             goto store_results;
@@ -1328,7 +1336,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // CRITICAL: cached->measured_height is border-box (includes padding+border added by
         // measure_flex_child_content). calculate_flex_basis will add padding again, so we must
         // store the CONTENT-ONLY height here to avoid double-counting.
-        if (cached && cached->has_height && cached->measured_height > 0 && has_explicit_height) {
+        // A wrapping row's height depends on how many lines its items fill at the
+        // width it gets; the tallest child is only the single-line height, which
+        // let a column flex hand the item too little space (CSS Flexbox §9.2 step 3).
+        bool wrapped_height = is_wrapping_flex && !width_only && lycon && !has_explicit_height &&
+            flex_layout && !is_main_axis_horizontal(flex_layout) && flex_layout->cross_axis_size > 0;
+        if (wrapped_height) {
+            flex_measure_item_height_at_cross_width(lycon, item, flex_layout,
+                layout_content_size_from_border_box(lam::view_as_block(item), max_width, true),
+                &min_height, &max_height);
+        } else if (cached && cached->has_height && cached->measured_height > 0 && has_explicit_height) {
             min_height = layout_content_size_from_border_box(lam::view_as_block(item), cached->measured_height, false);
             max_height = min_height;
         } else if (children.height > 0.0f) {

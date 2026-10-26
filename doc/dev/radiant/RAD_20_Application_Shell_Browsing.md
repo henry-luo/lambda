@@ -206,6 +206,8 @@ The flag becomes `DomDocument::scripting_disabled`. Inheritance copies it and `d
 
 Layout cannot load a frame while an evaluator is executing. This happens when a task's `dom.dispatch` re-renders a template (AR-O13). In that case `layout_ensure_iframe_document` sets `UiContext::frame_loads_deferred`. The next quiescent host turn (`radiant_commit_async_document_loads`) then requests a reflow, and that reflow loads the frame. `test/ui/dom_iframe_task_render.json` covers it; `test/ui/dom_iframe_sandbox.json` covers the sandbox.
 
+A frame's scrollbars follow its document, as in browsers: `layout_iframe_viewport_overflow` (layout_block.cpp) applies the embedded root's `overflow` (or the body's, when the root's is `visible`) to the frame's viewport, `visible` used as `auto` (CSS Overflow 3 §3.3). A document that says `hidden` still scrolls by script without scrollbars, which is how the EPUB reader turns column pages. The value is read from the root's declarations (`css_prop_compute_declared_overflow`) because `layout_iframe_content_size` retires the embedded root's own scroller after the first layout. The block, flex-item and navigation paths share it. Before 2026-10-26 the block path forced `auto`.
+
 ---
 
 ## 7. Networking: window-owned, session/document-borrowed

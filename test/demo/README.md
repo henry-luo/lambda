@@ -35,6 +35,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | `music` | `music/music.ls` | [Music](music/README.md) |
 | `soundflow` | `soundflow/soundflow.ls` | [Soundflow](soundflow/README.md) |
 | `greetings` | `greetings/greetings.ls` | [Greetings](greetings/README.md) |
+| `book` | `book/book.ls` | [Books](book/README.md) |
 
 Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 
@@ -77,6 +78,10 @@ Lambda and played through the music package's SoundFont. Generate the model with
 ## Soundflow
 
 `./lambda.exe demo soundflow` is a visual instrument after Agoston Nagy's SoundBow. Draw across a field of strings: each stroke replays in a loop, and its tip sounds every string it crosses. Drag a string's end to retune it, since longer strings sound lower, or its middle to slide it sideways. The loops can play from half to double speed, and the wide strokes can be hidden to leave only the moving tips. Harp, kalimba and glass voices are synthesized in Lambda. **Save** writes the loops as a WAV recording and the drawing as SVG. See [Soundflow](soundflow/README.md).
+
+## Books
+
+`./lambda.exe demo book` is an ebook library in the spirit of macOS Books. Seven public-domain classics from Project Gutenberg sit on its shelves with their own covers: a Continue Reading row with how far you have read, Up Next, genre collections, sorting and search. A book opens in the [`lambda.doc.ebook`](../../doc/Lambda_Packages.md#19-docebook--epub-reader) reader, which saves your place for the next visit. See [Books](book/README.md).
 
 ## Greetings
 

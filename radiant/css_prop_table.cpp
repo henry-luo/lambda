@@ -711,6 +711,21 @@ bool css_prop_compute_declared_flex_factor(DomElement* element, CssPropertyCode 
     return consume_cascaded_value(element, id, 0, nullptr, false, &target);
 }
 
+// An element's overflow axes computed from its own declarations, independent of
+// layout state: an embedded root's scroller is retired after its first layout.
+bool css_prop_compute_declared_overflow(DomElement* element, CssEnum* overflow_x, CssEnum* overflow_y) {
+    if (!element || !element->specified_style || !overflow_x || !overflow_y) return false;
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    LayoutContext context = cssom_value_context(element, scratch);
+    *overflow_x = *overflow_y = CSS_VALUE_VISIBLE;
+    bool found = layout_compute_scroll_keyword_axes(&context, element->specified_style,
+        layout_element_inline_axis_is_vertical(element), false, CSS_VALUE_VISIBLE, CSS_VALUE_VISIBLE,
+        overflow_x, overflow_y);
+    pool_destroy(scratch);
+    return found;
+}
+
 bool css_prop_compute_declared_flex_basis(DomElement* element, CssFlexBasisValue* result) {
     if (!element || !result) return false;
     CssomValueTarget target = {cssom_consume_flex_basis, result};

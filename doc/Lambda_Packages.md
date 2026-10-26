@@ -1928,10 +1928,10 @@ let first = ebook.chapter(book, 0)^;
 |---|---|
 | `parse(snapshot, options = null)` | Publication map from immutable ZIP bytes or a captured ZIP root |
 | `read(path, options = null)` | Procedural local-file acquisition and publication parsing |
-| `chapter(book, target, options = null)` | Sanitized HTML/document, source text/map, diagnostics and fixed-layout viewport; target is a spine index or canonical href |
+| `chapter(book, target, options = null)` | Sanitized HTML/document, source text/map, diagnostics, fixed-layout viewport and kept highlights; target is a spine index or canonical href |
 | `locator(book, chapter, offset)` | Versioned source locator; offsets count Unicode scalars |
 | `locate(book, locator)` | Validated locator for the same captured publication and source passage |
-| `search(book, query, options = null)` | Exact, case-sensitive whole-book matches with snippets and locators; `limit` defaults to 100, maximum 1,000 |
+| `search(book, query, options = null)` | Whole-book (or `chapter`: one spine index) matches with locators, `chapter`, and `before`/`match`/`after` excerpts cut at word boundaries; exact case unless `match_case:false`, any position unless `whole_word:true`; `limit` defaults to 100, maximum 1,000 |
 | `reader(book, options = null)` | Interactive reader element for embedding; persistence is off by default |
 
 When embedding `reader`, include `lambda.doc.ebook.reader.stylesheet` in the
@@ -1939,7 +1939,10 @@ host document's style element. Native viewing and browser preview include it
 automatically.
 
 Load options are `rendition` (zero-based OCF package index) and
-`unsupported:"error"`. Unknown options are rejected; chapter options are currently reserved. The publication
+`unsupported:"error"`. Unknown options are rejected. The chapter option
+`highlights` takes `{id, spine_occurrence, start, end, color, text}` records
+(chapter-text offsets); those whose `text` still matches render as `<mark>`
+runs, and the rest are dropped. The publication
 includes metadata/cover, manifest, occurrence-preserving reading order,
 contents/landmarks/publisher page links, resources, protection diagnostics,
 and a SHA-256 snapshot identity. Chapters resolve packaged CSS imports,
@@ -1951,26 +1954,40 @@ controls, internal links, history, contents, bookmarks, search, font size and
 family, line spacing, margins, publisher-style selection and three themes.
 A compact toolbar opens search and the **Aa** reading-settings panel; chapter
 and page controls stay in the footer. Contents highlight the current chapter,
-and the sidebar can be toggled on narrow windows. Enter submits a book search.
-Reflowable chapters support scrolling and generated column pages. Fixed-layout
+and the sidebar can be toggled on narrow windows. Enter submits a search; its
+toggles match case, match whole words only, and limit the search to the current
+chapter. Book-wide results start with their chapter number, and every result
+highlights the matched text.
+Selecting a passage opens a color bar above it; a color highlights it, and a
+highlight that overlaps others absorbs them. A click on a highlight recolors or
+removes it, and the sidebar lists highlights with their chapters.
+Reflowable chapters scroll, fit one page to the window, or show two pages side
+by side with a gutter; three toolbar icons switch between them. Paper textures (antique with a rule frame and corner
+flourishes, parchment, linen, newsprint, ivory) sit behind the text, and paged
+layouts animate page turns: slide left, slide up, a turn that folds the page
+toward the spine, or dissolve. Fixed-layout
 XHTML/SVG pages retain a required source viewport and support fit/zoom.
 Selecting EPUB in the file browser opens the same reader; its Source tab shows
 the OPF package. `layout` and `render` project the initial reader viewport,
 rather than exporting an entire book.
 
-Standalone viewing saves preferences, bookmarks and the last source location
+Standalone viewing saves preferences, bookmarks, highlights and the last source location
 atomically under `LAMBDA_EBOOK_STATE_DIR`, or the host's XDG/LOCALAPPDATA state
 directory (HOME fallback). State is keyed by snapshot fingerprint, so moving
 an unchanged book preserves its position. Saved passages are validated before
 resume. The embedded browser preview does not save state.
 
 This is an initial horizontal LTR profile. Continuous scrolling between
-chapters, two-page spreads, RTL/vertical pagination, CFI interchange, obfuscated
+chapters, RTL/vertical pagination, CFI interchange, obfuscated
 fonts, scripted content, media overlays and DRM decoding remain unsupported.
 Protected required spine content raises a package error; protected optional
 resources use a diagnostic and fallback. EPUB package errors occupy
 7800–7809; underlying ZIP/XML errors retain their codes (S7.4.2, S7.4.4).
 MOBI and Kindle AZW/AZW3 are outside this package's scope.
+
+`lambda demo book` hosts the reader in an ebook library of Project Gutenberg
+classics with progress, collections and search; see
+[its guide](../test/demo/book/README.md).
 
 See the [proposal](../vibe/Lambda_Pkg_EPUB.md),
 [implementation and verification record](../vibe/impl/Lambda_Impl_EPUB.md), and

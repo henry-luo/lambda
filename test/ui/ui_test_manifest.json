@@ -99,6 +99,11 @@
       "tags": ["greetings"]
     },
     {
+      "name": "book",
+      "globs": ["test/ui/book/*.json"],
+      "tags": ["book"]
+    },
+    {
       "name": "soundflow",
       "globs": ["test/ui/soundflow/*.json"],
       "tags": ["soundflow"]

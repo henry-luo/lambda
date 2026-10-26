@@ -1,7 +1,7 @@
 # Radiant — Events & Input Dispatch
 
 > **Last verified against tree:** 2026-09-01
-> **Scoped source refresh:** 2026-10-23 — keyboard caret/scroll precedence and focused editing-surface facts (§6); scrollbar drag notifications (§7).
+> **Scoped source refresh:** 2026-10-23 — keyboard caret/scroll precedence and focused editing-surface facts (§6); scrollbar drag notifications (§7). 2026-10-26 — document-space selection geometry inside iframes and `data-selection-event` (§5).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: platform input, IME, automation, and synthetic DOM dispatch construct one native event record and enter the same author-then-UA pipeline. It covers the `RdtEvent` union and `EventContext` record, hit testing, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
@@ -164,6 +164,10 @@ Evidence: `test/ui/window_subscriptions.{ls,json}`,
 `RDT_EVENT_MOUSE_MOVE` (`event.cpp:6702`) hit-tests, updates hover via `update_hover_state`, updates dropdown hover, dispatches `mousemove` to the bridge, then fires the stack. It also advances the drag-and-drop state machine: a pending drag becomes active once movement exceeds a 5px threshold (`dx*dx + dy*dy > 25.0f`, `event.cpp:6741`), at which point `dragstart` fires to both the Lambda bridge and a real JS `DragEvent` (`radiant_dispatch_drag_event`, `event.cpp:6754`), and drop targets are resolved by walking up for a `dropzone` attribute (`event.cpp:6759-6775`). The native `DragDropState` survives handler-driven DOM mutation via fallback retention so JS drag-and-drop rides on it directly.
 
 `RDT_EVENT_MOUSE_DOWN`/`_UP` share a branch (`event.cpp:7144`) covering focus change, text-selection anchoring, checkbox/radio/select/dropdown default actions, context-menu open on right-click, and clipboard shortcuts. Selection and caret writes route through the canonical StateStore / `DomSelection` rather than the view (the Phase-6 single-source-of-truth comment at `event.cpp:6691-6697`); event code computes glyph geometry but writes canonical boundaries — [RAD_17 — Interaction State](RAD_17_Interaction_State.md) owns those mutations.
+
+Editing geometry (`editing_geometry_dom_text_boundary_from_point`, `editing_geometry_hit_test_boundary`, `dom_hit_test_to_boundary`) resolves points in the text's **own document**, not the window. The press and drag selection paths therefore subtract the embedding frame's window translation first: `view_frame_translation(view, block_x, block_y)` (state_store.cpp; the hit block origin minus the view's block-viewport chain, zero at top level) on press, and the selection presentation's recorded `iframe_offset` while dragging. Without it a drag inside an `<iframe>` selected text offset by the frame's left/top edge (2026-10-26, found in the EPUB reader).
+
+Pointer events inside an embedded document stay in that document, as in browsers. A host that needs to react to a selection there opts in on the frame: the DOM mouse policy (`lambda.dom.mouse.release`, run from the `<body>` behavior's `mouseup`) queues the event named by the `<iframe>`'s `data-selection-event` attribute on the frame with `dom.request_frame`, the same queued hand-off that `data-navigation-event` uses for links. The host then reads `dom.document_selection(dom.embedded_document_root(frame))`.
 
 ---
 

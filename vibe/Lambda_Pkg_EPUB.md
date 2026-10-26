@@ -403,7 +403,7 @@ single-page fixed-layout fit/zoom. Reader mutation remains procedural
 (S12.1.3); source parsing remains pure (S12.1.1v3).
 
 The initial acceptance profile is horizontal LTR. The broader targets above
-remain targets: continuous cross-chapter scrolling, two-page spreads,
+remain targets: continuous cross-chapter scrolling, two-page spreads for fixed-layout pages,
 RTL/vertical pagination, CFI interchange, font deobfuscation, media overlays,
 and full EPUB Reading Systems conformance are not implemented. Saved positions
 currently restore a source text node rather than an exact character within a

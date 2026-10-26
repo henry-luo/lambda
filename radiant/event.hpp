@@ -3239,6 +3239,14 @@ void state_store_caret_clear(DocState* state);
 void caret_project_visual(DocState* state, float x, float y, float height);
 
 /**
+ * The window translation of the frame that embeds `view`'s document, from the
+ * hit origin of its containing block (zero in the top-level document).
+ * Editing geometry resolves points in the view's own document, so window
+ * pointers subtract this first.
+ */
+RdtLogicalPoint view_frame_translation(View* view, float block_x, float block_y);
+
+/**
  * Project visual caret geometry and embedding viewport offset from a hit block origin.
  */
 void caret_project_visual_from_block(DocState* state, View* view,

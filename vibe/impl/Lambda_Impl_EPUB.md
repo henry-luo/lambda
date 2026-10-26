@@ -1,6 +1,6 @@
 # EPUB package implementation
 
-**Updated:** 2026-10-16. **Status:** initial reader implemented; broader acceptance incomplete.
+**Updated:** 2026-10-26. **Status:** initial reader implemented; broader acceptance incomplete.
 
 The public package is `lambda.doc.ebook` (D7.2.4). It loads EPUB 2/3 and
 presents chapters through Radiant. The supported profile is horizontal LTR
@@ -174,6 +174,165 @@ expectation changes are included. Reports: `radiant-baseline-isolated.log`,
 `temp/epub-crash/`. The first full Radiant attempt was invalidated by a
 concurrent build removing `lambda.exe` and shared result files; its launch
 failures are not used as qualification evidence.
+
+## Books demo and real-world publications (2026-10-26)
+
+`lambda demo book` (`test/demo/book/`) is a library host for the reader: seven
+Project Gutenberg EPUB 3 editions with images, a Continue Reading row with
+progress, collections, sorting and search, and the package `reader` for
+reading. These are the first real-world publications the package has loaded;
+all seven parse, chapter and resume without package errors, and parsing Moby
+Dick plus one 136K-character chapter takes about 0.1 s in a debug build.
+
+Two package changes came with it. Every Gutenberg chapter showed "Excluded
+active/unsupported element meta" because plain `<meta charset>` was reported as
+blocked content; `meta` without `http-equiv` is now dropped silently, and
+`http-equiv` meta stays reported. The state directory lookup in `state.ls` is
+now `pub fn directory()`, so a host keeps its own records beside reading
+positions without repeating the environment fallback chain; `restore` uses it.
+
+The demo reads saved places through `state.restore` and weighs progress by
+chapter size plus the text passed in the current chapter. Its fixture
+`test/ui/book/library.json` (suite `book`) passes 29/29 with persistence off.
+The three `test/lambda/ebook` goldens pass on both tiers, the 32 EPUB and
+doc-viewer UI fixtures pass, and `test/epub_reader_check.py` passes.
+
+### Highlights and frame selection (2026-10-26)
+
+Drag selection in the chapter frame landed offset from the pointer by the
+frame's window position. `editing_geometry_dom_text_boundary_from_point` and
+`editing_geometry_hit_test_boundary` resolve points in the text's own document,
+but the press and drag paths in `event.cpp` passed window coordinates. They now
+subtract the frame translation: `view_frame_translation` (factored out of
+`caret_project_visual_from_block`) on press, and the selection's recorded
+`iframe_offset` while dragging. A probe page with a scrolled iframe 273 px
+from the window edge selected exactly under the pointer after the fix, versus
+274 px to the right before. The `edit`/`editor` UI suites fail the same 37
+fixtures with and without the fix (pre-existing state-dump and form failures);
+`dom` (165) and `hit-test` (12) pass.
+
+Highlights are `{id, spine_occurrence, href, start, end, color, text}` in
+chapter-text offsets, saved in the reading state. `chapter.load` takes them,
+keeps those whose stored text still matches, and lowers each source string's
+ranges as `<mark class="ebook-highlight">` runs (segments now carry their
+lowering path as `key`). The reader learns of a settled selection through
+`data-selection-event` on its frame: the DOM mouse policy queues that event on
+the embedding `<iframe>`, like `data-navigation-event` for links, because
+pointer events do not cross the frame. A boundary maps back to an offset from
+the nearest `data-ebook-node` element's first source segment plus the DOM text
+before it, so selections across inline elements map exactly. DOM offsets are
+UTF-16 units; they equal the source map's scalar counts only for BMP text, so
+astral characters before a selection shift it (open). Coloring absorbs
+overlapping highlights; a click on a mark opens the bar to recolor or remove;
+a highlight re-render keeps the exact scroll offset. `test/ui/book/highlight.json`
+(24 assertions) covers drag, cross-`<em>` mapping, recolor, merge, removal and
+jumping from the sidebar.
+
+### Page layouts, paper and turns (2026-10-26)
+
+Reflowable chapters have three layouts (`mode`): `scroll`, `paged` (one column
+page fitted to the window) and `spread` (two columns per viewport, so every
+viewport step turns two pages; a 2-column body of width `100vw - 2m` with gap
+`2m` keeps the period at exactly one viewport). Fixed-layout chapters keep
+fit/zoom. Paper (`texture`: none, antique, parchment, linen, newsprint, ivory)
+is host-side layers in `ebook/page.ls` under a transparent chapter frame, so it
+stays put while columns scroll; the chapter takes the paper's ink. Grain and
+mottle are two seamless RGBA noise tiles from `utils/generate_ebook_textures.py`
+(SVG `feTurbulence` tiled with visible seams in Radiant). Antique adds a leather
+board, a double rule and four mirrored corner flourishes, and a minimum 76px
+margin in paged layouts.
+
+Turns (`turn`: none, slide-left, slide-up, turn, dissolve) play in paged
+layouts. A second "ghost" frame with the same srcdoc is scrolled to the page
+being left and animated out over the new page by generated keyframes (two
+parities per name so a repeat restarts). At a chapter boundary the ghost holds
+the old page (`data-turn=hold`) while the next chapter loads, the turn plays on
+`ebook_ready`, and `animationend` hands the ghost the new chapter. Turn folds
+the page toward the spine with 2D `scaleX`/`skewY`; a perspective `rotateY`
+version rendered the nested paper and frame with horizontal stripe artifacts
+in Radiant (open: 3D compositing of nested content). `transform`/`opacity` set
+directly on an `<iframe>` are ignored by Radiant, so animations run on wrappers
+(open). Settings use option buttons (`data-ebook-pref`/`data-ebook-value`)
+instead of the old cycling mode button; `store.preferences` validates the three
+new fields, which persist with the reading state.
+
+Two engine fixes came with it. Frame scrollbars now follow the embedded root's
+overflow (`layout_iframe_viewport_overflow`, RAD_20), so paged chapters scroll
+by script without a scrollbar. And `node_for` resolves a locator owned by the
+chapter's `<html>` (`n`), which `query_selector` cannot match: a new chapter
+whose first text is whitespace under `<html>` kept the previous chapter's
+page offset. Paged layouts exposed a Radiant multicol defect that predates them: a
+paragraph nested in a wrapper (`div.chapter`) that crossed a column break
+overflowed the column and left a blank band at the top of the next page, and
+the error accumulated across paragraphs. `multicol_project_fragmented_descendants`
+now measures nested flow from the column top (forced-break flows included),
+carries the space a split leaves at a column bottom to later siblings, pushes a
+block whose first line cannot fit, and truncates margins at unforced breaks
+(css-break §5.2). Alice ch. I now ends every one of its 18 columns inside the
+page. `test/ui/multicol_nested_paragraph_fragmentation.json` (14 assertions)
+covers it; the multicol WPT suite is unchanged apart from one improvement.
+
+`test/ui/book/page_options.json` (28 assertions) covers layouts,
+papers, option state, turns within and across chapters, and the ghost handoff;
+`test/epub_reader_check.py` now persists `texture` and `turn`.
+
+### Last spread and front matter (2026-10-26)
+
+A chapter whose columns end mid-spread left the last spread unreachable: the
+scrollable overflow of a multicol ends at the last column's edge (Chrome:
+`scrollWidth` 1972 for Peter Pan's front matter at 998px, so `scrollTo(998)`
+clamps to 974), and a turn showed the previous page's line ends at the left
+edge. The reader now appends blank trailing columns in paged layouts (one per
+page, two per spread to round up an odd count) and counts pages from where
+the first blank starts (`page_geometry`; `dom.bounding_box` is in chapter
+document coordinates). Three Radiant defects surfaced on the way and are
+fixed with fixtures in `multicol_nested_paragraph_fragmentation.json`
+(21 assertions, checked against Chrome headless): `dom_scrollable_extent`
+ignored ancestor offsets (the body's inset was lost from `scrollWidth`); a
+pushed monolithic block in a split wrapper overlapped the next line ("Language"
+over "Other information"); and `multicol_has_forced_break_descendant` also
+matched later siblings, so trailing `break-before:column` blocks re-projected
+an earlier table 105px low. Gutenberg's `#pg-machine-header p {font-size:medium}` was
+sized at the body's 20px (Chrome 16px): `medium` is listed in the
+border-width keyword group, so the font-size validator and the `font`
+shorthand parser rejected it and the element inherited. Both now use
+`css_keyword_is_font_size` (`test/ui/css_font_size_medium.json`), and the
+header breaks across columns as in Chrome.
+
+### Icon tooltips (2026-10-26)
+
+The settings panel's reading-layout choices use the toolbar's three icons
+(`layout_switch`). Every icon-only control (toolbar, footer, search toggles,
+layout icons, highlight swatches, **Aa**) carries a `.ebook-tip` span shown
+while its button is hovered, below the control (above it in the footer).
+Radiant shows no native `title` tooltip and generates no `::after` box for
+`<button>`, and `top: calc(100% + 6px)` on the absolute tip did not resolve,
+so the tip is a real child positioned with `top:100%` plus a margin (open:
+the three Radiant gaps).
+
+### Settings panel and the footer (2026-10-26)
+
+With the **Aa** panel wrapped to two rows, the footer was pushed below the
+window. The reader's column flex took the panel's height as its tallest
+setting group (one line), because Radiant measured a wrapping row flex item's
+content height without wrapping. Column flex items that are wrapping rows now
+use the same width-aware height query as blocks (RAD_08). The page-options
+fixture asserts the footer stays at the window bottom with the panel open.
+
+### Search options (2026-10-26)
+
+`search` takes `match_case` (default true, the old exact behavior),
+`whole_word` (no letter, digit or underscore on either side) and `chapter` (one
+spine index). Matches come from `find`, so a chapter is scanned once; case
+folding compares lowercase text, and a chapter whose lowercase form changes
+length (U+0130) is searched exactly so offsets stay valid. Each result adds
+`chapter` and a `before`/`match`/`after` excerpt (about 40 and 70 characters,
+cut at word boundaries, line breaks and space runs collapsed); `snippet` stays.
+The reader puts three icon toggles beside the query (case, whole word, current
+chapter; book-wide case-insensitive by default) and renders results as a
+"Ch. N" label (chapter title on hover) plus the excerpt with the match in a
+`<mark>`. `ebook_locations` gains seven checks; `test/ui/book/search.json`
+(13 assertions) covers the toggles and results.
 
 ## Verification
 
