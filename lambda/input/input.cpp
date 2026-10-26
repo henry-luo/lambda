@@ -1,4 +1,5 @@
 #include "../../lib/utf.h"
+#include "../../lib/host_paths.h"
 #include "input.hpp"
 #include "../io/wiki_format.hpp"
 #include "../io/fs_node.hpp"
@@ -2020,6 +2021,8 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"text/x-3d-model", "a3d"},
     {"model/x-bvh", "bvh"},
     {"model/x-fbx", "fbx"},
+    {"model/stl", "stl"},
+    {"model/x-ply", "ply"},
     {"application/json", "json"},
     {"text/csv", "csv"},
     {"text/tab-separated-values", "tsv"},
@@ -2385,6 +2388,7 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "psd") == 0) { parse_psd(input, source, source_len); }
 #endif
         else if (input_parse_model(input, source, source_len, effective_type)) {}
+        else if (input_parse_mesh(input, source, source_len, effective_type)) {}
         else if (input_parse_source_exact(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF
         else if (strcmp(effective_type, "pdf") == 0) {
@@ -2547,7 +2551,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         const char* type_str = type ? type->chars : NULL;
         const char* flavor_str = flavor ? flavor->chars : NULL;
 
-        Input* input = input_from_http(url->chars, type_str, flavor_str, "./temp/cache");
+        Input* input = input_from_http(url->chars, type_str, flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"));
         url_destroy(abs_url);
         return input;
     }
@@ -2659,7 +2663,7 @@ static Input* input_from_target_impl(Target* target, String* type,
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
             return input_from_http_with_name_parent(url->href->chars, type_str,
-                flavor_str, "./temp/cache", name_parent);
+                flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"), name_parent);
         }
         else if (target->scheme == TARGET_SCHEME_SYS) {
             log_debug("input_from_target: sys:// URL detected");
@@ -2691,7 +2695,7 @@ static Input* input_from_target_impl(Target* target, String* type,
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
             Input* input = input_from_http_with_name_parent(url_buf->str, type_str,
-                flavor_str, "./temp/cache", name_parent);
+                flavor_str, host_path_dir(HOST_PATH_CACHE, "cache"), name_parent);
             strbuf_free(url_buf);
             return input;
         }

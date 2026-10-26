@@ -25,7 +25,7 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .title-actions .tool { color:var(--ink); border-color:transparent; background:var(--hover); height:30px; padding:0 12px; }
 .title-actions #export { background:var(--accent); color:#fff; border-color:var(--accent); }
 .title-actions #export:hover { background:#0071e3; }
-.ribbon-shell { background:var(--panel); flex-shrink:0; border-bottom:1px solid var(--line); }
+.ribbon-shell { position:relative; z-index:10; background:var(--panel); flex-shrink:0; border-bottom:1px solid var(--line); }
 .tabs { height:30px; display:flex; align-items:flex-end; gap:2px; overflow-x:auto; }
 .tabs>.tool { flex-shrink:0; height:28px; font-size:13px; }
 .tool { border:1px solid transparent; border-radius:7px; background:transparent; color:var(--ink);
@@ -43,9 +43,12 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .tab-divider { height:15px; border-left:1px solid var(--line); margin:0 6px 7px; }
 .tab-spacer { flex:1; }
 .tabs>#sample { color:var(--muted); font-size:11px; }
-.ribbon-groups { min-height:80px; display:flex; padding:5px 18px 3px; gap:15px; overflow-x:auto; }
-.ribbon-group { border-right:1px solid #e0e5ed; padding-right:15px; display:flex; flex-direction:column; min-width:0; flex-shrink:0; }
+.ribbon-groups { min-height:80px; display:flex; padding:5px 18px 3px; gap:15px; }
+.ribbon-group { position:relative; border-right:1px solid #e0e5ed; padding-right:15px; display:flex; flex-direction:column; min-width:0; flex-shrink:0; }
 .ribbon-group:last-child { border-right:0; padding-right:0; }
+.ribbon-group-trigger { display:none; width:70px; min-height:70px; padding:4px 2px; flex-direction:column; gap:3px; }
+.ribbon-group-trigger .tool-label { max-width:66px; overflow:hidden; text-overflow:ellipsis; }
+.ribbon-group-trigger .group-chevron { line-height:0; }
 /* scope flex to contents; an outer ribbon group can itself be named Tools. */
 .ribbon-group>.group-tools { flex:1; min-height:72px; }
 .group-label { display:none; color:#768194; font-size:9px; line-height:12px; text-align:center; margin-top:5px; letter-spacing:0.65px; text-transform:uppercase; }
@@ -372,6 +375,8 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .statusbar .icon-only:hover .tool-label,.statusbar .icon-only:focus-visible .tool-label { visibility:visible; }
 .focus-mode .titlebar,.focus-mode .ribbon-shell,.focus-mode .navigation-slot { display:none; }
 .edit-dialog-layer { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:30; }
+/* spelling belongs above document handles but beneath selection chrome and dialogs. */
+#spelling-word { z-index:10; }
 .edit-dialog-backdrop { position:absolute; inset:0; z-index:0; background:rgba(0,0,0,0.32); }
 .edit-dialog { position:relative; z-index:1; width:440px; max-height:calc(100vh - 40px); overflow:auto; background:#fff; padding:28px; border:1px solid var(--line); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,0.2); }
 .edit-dialog-title { font-family:var(--font); font-size:18px; font-weight:600; color:var(--ink); margin-bottom:12px; }
@@ -430,16 +435,53 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .comment-actions { display:flex; flex-wrap:wrap; gap:2px; border-top:1px solid var(--line); padding-top:7px; }
 .comment-actions .tool { padding:2px 5px; height:24px; }
 .comment-actions .tool-icon { font-size:10px; }
+.lookup-pane { width:300px; display:flex; flex-direction:column; gap:10px; }
+.lookup-pane .navigation-tabs { margin-top:0; }
+.lookup-pane #lookup-query,.lookup-source { width:100%; box-sizing:border-box; height:32px; padding:5px 9px; border:1px solid var(--line); border-radius:8px;
+  background:#fff; color:var(--ink); font-size:13px; }
+.lookup-source { height:auto; min-height:96px; resize:vertical; line-height:1.45; font-family:inherit; }
+.lookup-pane .shape-field { margin:0; }
+.lookup-go { align-self:flex-start; height:30px; padding:4px 12px; }
+/* a long entry grows the pane's scroll height; no field shrinks or overlaps the credit line */
+.lookup-pane>* { flex-shrink:0; }
+.lookup-result { flex:1 0 auto; }
+.lookup-error { color:#b42318; font-size:12px; line-height:1.5; margin:4px 0; }
+.lookup-entry { border:1px solid var(--line); background:#fff; border-radius:10px; padding:12px 13px; }
+.lookup-word { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-family:var(--font); }
+.lookup-word strong { font-size:22px; color:var(--ink); }
+.lookup-phonetic { color:var(--muted); font-size:13px; }
+.lookup-speak { width:32px; height:32px; padding:4px; border-radius:16px; color:var(--accent); }
+.lookup-meaning { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; }
+.lookup-part { color:var(--accent); font-size:12px; font-weight:600; }
+.lookup-definitions { margin:6px 0 0; padding-left:18px; font-size:12px; line-height:1.5; color:var(--ink); }
+.lookup-definitions li { margin-bottom:6px; }
+.lookup-example { display:block; color:var(--muted); font-style:italic; margin-top:2px; }
+.lookup-synonyms { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:4px; }
+.lookup-caption { color:var(--muted); font-size:10px; margin-right:2px; }
+.lookup-chip { height:22px; padding:1px 8px; border-radius:11px; font-size:11px; color:var(--accent); }
+.lookup-translation { font-size:14px; line-height:1.55; color:var(--ink); white-space:pre-wrap; margin:8px 0 10px; }
+.lookup-credit { color:var(--muted); font-size:9px; margin:0; }
 .edit-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .edit-dialog-btn { height:32px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); padding:0 13px; }
 .edit-dialog-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
 @media (max-width:1050px) { .navigation-slot { width:205px; }.navigation { padding:22px 13px; }.search-field input { width:139px; }.ribbon-groups { gap:12px; padding-left:15px; }.ribbon-group { padding-right:12px; }.canvas-chrome,.stage { padding-left:24px; padding-right:24px; } }
-@media (max-width:760px) { .navigation-slot { display:none; }.titlebar { padding:6px 12px 0 10px; }.document-title { font-size:14px; }.save-indicator { display:none; }.canvas-chrome,.stage { padding-left:14px; padding-right:14px; }.ribbon-groups { overflow-x:auto; }.statusbar { height:auto; min-height:33px; gap:3px 12px; padding:5px 12px; } }
+@media (max-width:760px) { .navigation-slot { display:none; }.titlebar { padding:6px 12px 0 10px; }.document-title { font-size:14px; }.save-indicator { display:none; }.canvas-chrome,.stage { padding-left:14px; padding-right:14px; }.statusbar { height:auto; min-height:33px; gap:3px 12px; padding:5px 12px; } }
 @media (max-width:600px) { .statusbar { flex-direction:column; align-items:stretch; }.status-right { justify-content:space-between; } }
 @media (max-width:760px) { .search-open .navigation-slot { display:block; } }
 /* in-place equation editing: Word's light equation box with a text caret and no resize handles */
 .object-handles.math-editing { background:rgba(36,99,180,0.05); border-color:#b9cde8; }
 .object-handles.math-editing .object-handle,.object-handles.math-editing .object-rotation-stem { display:none; }
+
+/* compact groups take precedence over tab-specific tool layouts. */
+.ribbon-group[data-compact=true]>.ribbon-group-trigger { display:inline-flex; }
+.ribbon-group[data-compact=true]>.group-label { display:none !important; }
+/* A closed group must lose popup geometry before live resize exposes its tools in flow. */
+.ribbon-group[data-compact=true]>.group-tools { display:none; }
+.ribbon-group[data-compact=true][data-open=true]>.group-tools { display:block; position:absolute; top:100%; left:0; z-index:20;
+  width:max-content; min-width:170px; max-width:calc(100vw - 32px); min-height:0; padding:10px;
+  border:1px solid var(--line); border-radius:7px; background:var(--panel); box-shadow:0 10px 26px #17274330; }
+.ribbon-group[data-compact=true][data-open=true][data-align=right]>.group-tools { left:auto; right:0; }
+.ribbon-group[data-compact=true][data-open=true] { z-index:21; }
 .object-handles.math-editing .object-move { cursor:text; }
 .math-caret { position:absolute; width:1.5px; margin-left:-0.75px; background:#1f2d42; pointer-events:none; }
 /* print page (Chrome / Google Docs print): the preview runs the full dialog height on a gray well; the settings

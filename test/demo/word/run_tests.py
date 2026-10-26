@@ -14,9 +14,9 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "test/demo/word"
 ARTIFACTS = ROOT / "temp/word/tests"
-UI_FIXTURES = ("typing", "smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
-                        "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "home_ribbon", "ribbon_appearance", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
-                        "stories", "advanced_objects", "equations", "equation_caret", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry", "blank_line_delete", "print")
+UI_FIXTURES = ("typing", "spelling", "smoke", "editing", "bindings", "files", "table_caret", "scroll_hit", "tables", "table_selection", "table_drag", "table_design", "table_layout",
+                        "pictures_links", "paragraph_search", "navigation", "editing_ribbon", "home_ribbon", "ribbon_appearance", "ribbon_overflow", "citations", "citation_types", "selection_toolbar", "native_fonts", "layout", "columns", "margins", "review", "insert_pages", "bookmarks_symbols", "shapes",
+                        "stories", "advanced_objects", "equations", "equation_caret", "illustrations", "changes", "object_transform", "object_move", "object_layout", "shape_format", "clipboard_objects", "viewport", "ruler", "ruler_edit", "view_modes", "page_break_typing", "context_menu", "context_items", "lists", "empty_list_reentry", "blank_line_delete", "cjk_caret", "print")
 
 
 def pdf_words(xml):

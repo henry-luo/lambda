@@ -1,7 +1,8 @@
 import c: .common
 import theme_layout: .theme
+import transitions: .transitions
 
-let object_attrs = ["id", "x", "y", "width", "height", "role", "class", "style", "rotation", "scale", "opacity", "morph_id"]
+let object_attrs = ["id", "x", "y", "width", "height", "role", "class", "style", "rotation", "scale", "opacity", "morph_id", "metadata"]
 fn attrs_for(tag) => [*object_attrs,
     *(if (tag == 'text') ["color", "font_size"] else if (tag == 'shape') ["kind", "fill", "stroke", "stroke_width", "radius"]
       else if (tag == 'image') ["src", "fit"] else [])]
@@ -13,6 +14,8 @@ fn build_object(node, path, width, height, theme, layout = 'blank', index = 0) m
     let checked_4 = c.numbers(node, ["opacity"], false, path)^;
     let guard_1 = if (node.opacity != null and (node.opacity < 0.0 or node.opacity > 1.0)) raise c.fail(path, "opacity outside [0,1]")
     let guard_2 = if (node.id != null and not c.text_id(node.id)) raise c.fail(path, "ID must be nonempty text")
+    // editor annotations stay in the authored source and never participate in placement or paint.
+    let checked_metadata = if (node.metadata != null and not (node.metadata is map)) raise c.fail(path, "metadata must be a map")
     let checked_morph_id = if (node.morph_id != null and not c.text_id(node.morph_id)) raise c.fail(path, "morph_id must be nonempty text")
     let checked_strings = if (any([for (key in ["color", "fill", "stroke", "class", "style"] where node[key] != null) not (node[key] is string)]))
         raise c.fail(path, "paint/class/style attributes must be strings")
@@ -50,8 +53,8 @@ pub fn flatten_objects(objects) => [for (obj in objects) for (entry in [obj, *fl
 
 pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_path = null) map^ {
     let path = c.value(source_path, "s" ++ string(index))
-    let checked_5 = c.attributes(node, ["id", "title", "background", "transition", "transition_duration", "direction", "layout", "theme"], path)^;
-    let checked_6 = c.numbers(node, ["transition_duration"], false, path)^;
+    let checked_5 = c.attributes(node, ["id", "title", "background", "layout", "theme", *transitions.attributes], path)^;
+    let checked_6 = c.numbers(node, ["transition_duration", "advance_after"], false, path)^;
     let checked_id = if (node.id != null and not c.text_id(node.id)) raise c.fail(path, "ID must be nonempty text")
     let layout_name = c.value(node.layout, 'blank')
     let layout = c.value(layouts[c.as_text(layout_name)], layout_name)
@@ -59,9 +62,17 @@ pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_p
     let palette = theme_layout.resolve(c.value(node.theme, theme), path ++ ".theme")^;
     let guard_5 = if (node.transition_duration != null and node.transition_duration < 0.0) raise c.fail(path, "negative transition duration")
     let transition = c.value(node.transition, 'cut')
-    let guard_6 = if (not contains(['cut', 'fade', 'push', 'slide', 'morph'], transition)) raise c.fail(path, "unsupported transition")
+    let guard_6 = if (transitions.descriptor(transition) == null) raise c.fail(path, "unsupported transition")
     let direction = c.value(node.direction, 'left')
     let guard_7 = if (not contains(['left', 'right', 'top', 'bottom'], direction)) raise c.fail(path, "invalid direction")
+    let variant = c.value(node.transition_variant,transitions.default_variant(transition))
+    let checked_variant = if (not contains(transitions.descriptor(transition).variants,variant)) raise c.fail(path,"invalid transition variant")
+    let checked_advance = if (node.advance_after != null and node.advance_after < 0.0) raise c.fail(path,"negative advance delay")
+    let checked_click = if (node.advance_on_click != null and not (node.advance_on_click is bool)) raise c.fail(path,"advance_on_click must be bool")
+    let sound = node.transition_sound
+    let checked_sound = if (sound != null and (not (sound is map) or not (sound.src is string) or trim(sound.src) == "" or not (sound.name is string)))
+        raise c.fail(path,"transition_sound needs a name and nonempty src string")
+    let checked_sound_attrs = if (sound != null) c.attributes(sound,["name","src"],path ++ ".transition_sound")^
     let invalid = [for (child in content(node) where not (child is element) or
         not contains(['text', 'image', 'shape', 'group', 'content', 'cue', 'notes'], name(child))) child]
     let guard_8 = if (len(invalid) > 0) raise c.fail(path, "unsupported slide child")
@@ -72,5 +83,6 @@ pub fn build(node, index, width, height, theme = 'light', layouts = {}, source_p
     let checked_8 = c.check_unique(morphs, path ++ ".morph")^;
     {id: c.node_id(node, path), index: index, objects: objects, targets: flat,
         source: node, palette: palette, notes: c.children(node, 'notes'), transition: transition,
-        transition_duration: c.num(node, "transition_duration", 300.0), direction: direction}
+        transition_duration: c.num(node, "transition_duration", 300.0), direction: direction, transition_variant:variant, transition_sound:sound,
+        advance_on_click:c.value(node.advance_on_click,true),advance_after:node.advance_after}
 }

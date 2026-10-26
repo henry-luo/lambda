@@ -5149,6 +5149,30 @@ DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* bloc
     return doc ? doc : previous;
 }
 
+// CSS Overflow 3 §3.3: the embedded root's overflow (or its body's, when the
+// root's is visible) applies to the frame's viewport, `visible` used as `auto`.
+// A frame whose document says `hidden` still scrolls by script, without
+// scrollbars. Declarations are read directly because layout_iframe_content_size
+// retires the root's scroller after the first layout.
+void layout_iframe_viewport_overflow(DomDocument* doc, CssEnum* overflow_x, CssEnum* overflow_y) {
+    *overflow_x = CSS_VALUE_AUTO;
+    *overflow_y = CSS_VALUE_AUTO;
+    ViewBlock* root = doc && doc->view_tree ? lam::view_as_block(doc->view_tree->root) : nullptr;
+    if (!root) return;
+    CssEnum x = CSS_VALUE_VISIBLE, y = CSS_VALUE_VISIBLE;
+    css_prop_compute_declared_overflow(root->as_element(), &x, &y);
+    if (x == CSS_VALUE_VISIBLE && y == CSS_VALUE_VISIBLE) {
+        for (View* child = root->first_child; child; child = child->next_sibling) {
+            ViewBlock* body = lam::view_as_block(child);
+            if (!body || body->tag() != MARKUP_NAME_BODY) continue;
+            css_prop_compute_declared_overflow(body->as_element(), &x, &y);
+            break;
+        }
+    }
+    *overflow_x = x == CSS_VALUE_VISIBLE ? CSS_VALUE_AUTO : x;
+    *overflow_y = y == CSS_VALUE_VISIBLE ? CSS_VALUE_AUTO : y;
+}
+
 bool layout_iframe_content_size(DomDocument* doc, float* width, float* height) {
     ViewBlock* root = doc && doc->view_tree ? lam::view_as_block(doc->view_tree->root) : nullptr;
     if (!root) return false;
@@ -5173,12 +5197,14 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
         return;
     }
     float iframe_width, iframe_height;
+    CssEnum overflow_x, overflow_y;
+    layout_iframe_viewport_overflow(doc, &overflow_x, &overflow_y);
     if (!layout_iframe_content_size(doc, &iframe_width, &iframe_height)) return;
     lycon->block.max_width = iframe_width;
     lycon->block.advance_y = iframe_height;
     block->ensure_scroll(lycon);
-    block->scroller->overflow_x = CSS_VALUE_AUTO;
-    block->scroller->overflow_y = CSS_VALUE_AUTO;
+    block->scroller->overflow_x = overflow_x;
+    block->scroller->overflow_y = overflow_y;
     finalize_block_flow(lycon, block, display.outer);
     if (block->scroller && block->scroll_mut()->pane) {
         float v_max = block->content_height > block->height ?

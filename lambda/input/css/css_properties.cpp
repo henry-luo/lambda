@@ -3758,8 +3758,10 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                 // it is zero, so nonzero font sizes must carry a unit.
                 if (value->data.number.value != 0.0) return false;
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // `medium` is grouped with border widths; without it `font-size: medium`
+                // was dropped and the element inherited its parent's size
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                if (!info || (info->group != CSS_VALUE_GROUP_FONT_SIZE &&
+                if (!info || (!css_keyword_is_font_size(value->data.keyword) &&
                               info->group != CSS_VALUE_GROUP_GLOBAL)) return false;
             } else if (!css_value_is_length_expression(value, true, false)) {
                 return false;

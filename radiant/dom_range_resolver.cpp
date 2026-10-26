@@ -1,11 +1,8 @@
 /**
  * Phase 6 — DOM Range / Selection layout & input bridge.
  *
- * Pure layout/glyph-free implementation. Linear interpolation maps byte
- * offsets within a TextRect to x positions; this is approximate but
- * sufficient for the public bridge API (caret/selection rendering and
- * hit-testing). Pixel-perfect glyph-walk variants live in event.cpp and
- * can be substituted later by callers that already have an EventContext.
+ * Range layout uses the host glyph resolver when a UiContext is available;
+ * isolated layout tests retain linear interpolation as a fallback.
  *
  * Deliberately does NOT include state_store.hpp (which would drag GLFW +
  * the entire render stack into unit-test binaries). The legacy-mirror
@@ -101,7 +98,15 @@ static bool resolve_text_boundary(DomText* text, int byte_off,
     TextRect* r = view_geometry_text_rect_for_offset(text, byte_off);
     if (!r) return false;
 
-    float local_x = view_geometry_interpolate_text_x(text, r, byte_off, true);
+    // The selection presentation copies this boundary into the painted caret.
+    // A proportional-font estimate would shift the caret even when live range
+    // rectangles and text painting use exact glyph widths.
+    DomElement* parent = text->parent && text->parent->is_element()
+        ? text->parent->as_element() : nullptr;
+    UiContext* ui = parent && parent->doc
+        ? static_cast<UiContext*>(parent->doc->js.host_ui_context) : nullptr;
+    float local_x = dom_range_glyph_x_for_byte_offset(
+        ui, static_cast<ViewText*>(text), r, byte_off);
     RdtLogicalPoint point = view_geometry_local_to_block_viewport(
         static_cast<View*>(text), {local_x, r->y});
     if (out_view) *out_view = static_cast<View*>(text);
@@ -759,11 +764,14 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
                                        float abs_x, float abs_y,
                                        bool inside_editable,
                                        bool edge_only,
-                                       EditableBoundaryHit* hit) {
+                                       EditableBoundaryHit* hit,
+                                       ViewGeometryTextPointResolver resolve_point = nullptr) {
     if (!node || !hit) return;
 
     DomText* text = editable_boundary_text(node, inside_editable);
     if (text) {
+        RdtLogicalPoint point = {vx, vy};
+        if (resolve_point && !resolve_point(node, point, {abs_x, abs_y}, &point)) return;
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0) continue;
             float rect_x = abs_x + rect->x;
@@ -774,45 +782,45 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
             float score = -1.0f;
             float local_x = 0.0f;
             bool prefer_later_equal_score = false;
-            bool inside_y = rect_y <= vy && vy < rect_bottom;
+            bool inside_y = rect_y <= point.y && point.y < rect_bottom;
             if (edge_only) {
                 float vertical_gap = inside_y ? 0.0f
-                    : vy < rect_y ? rect_y - vy : vy - rect_bottom;
+                    : point.y < rect_y ? rect_y - point.y : point.y - rect_bottom;
                 float vertical_penalty = inside_y ? 0.0f : 1000.0f;
-                if (vx < rect_x) {
-                    score = (rect_x - vx) + vertical_gap + vertical_penalty;
-                } else if (vx >= rect_right) {
+                if (point.x < rect_x) {
+                    score = (rect_x - point.x) + vertical_gap + vertical_penalty;
+                } else if (point.x >= rect_right) {
                     local_x = rect_width;
-                    score = (vx - rect_right) + vertical_gap + vertical_penalty;
+                    score = (point.x - rect_right) + vertical_gap + vertical_penalty;
                 } else if (!inside_y) {
-                    local_x = vx - rect_x;
+                    local_x = point.x - rect_x;
                     score = vertical_gap + vertical_penalty;
                 }
             } else {
                 if (inside_y) {
-                    if (vx < rect_x) {
-                        score = rect_x - vx;
-                    } else if (vx >= rect_right) {
-                        score = vx - rect_right;
+                    if (point.x < rect_x) {
+                        score = rect_x - point.x;
+                    } else if (point.x >= rect_right) {
+                        score = point.x - rect_right;
                         local_x = rect_width;
                     }
                 } else {
                     float horizontal_gap = 0.0f;
-                    if (vx < rect_x) {
-                        horizontal_gap = rect_x - vx;
-                    } else if (vx >= rect_right) {
-                        horizontal_gap = vx - rect_right;
+                    if (point.x < rect_x) {
+                        horizontal_gap = rect_x - point.x;
+                    } else if (point.x >= rect_right) {
+                        horizontal_gap = point.x - rect_right;
                         local_x = rect_width;
                     } else {
-                        local_x = vx - rect_x;
+                        local_x = point.x - rect_x;
                     }
-                    score = fabsf(vy < rect_y ? rect_y - vy : vy - rect_bottom) +
-                        (vy < rect_y ? 20000.0f : 10000.0f) + horizontal_gap;
-                    if (vy >= rect_bottom &&
+                    score = fabsf(point.y < rect_y ? rect_y - point.y : point.y - rect_bottom) +
+                        (point.y < rect_y ? 20000.0f : 10000.0f) + horizontal_gap;
+                    if (point.y >= rect_bottom &&
                         effective_direction_for_node(static_cast<DomNode*>(text)) ==
                             CSS_VALUE_RTL) {
                         local_x = rect_width;
-                        score = (vy - rect_bottom) + 10000.0f;
+                        score = (point.y - rect_bottom) + 10000.0f;
                         prefer_later_equal_score = true;
                     }
                 }
@@ -854,8 +862,21 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
         if (!child_view->view_type) continue;
         find_editable_boundary_hit(child_view, vx, vy,
                                    child_origin.x, child_origin.y,
-                                   child_inside_editable, edge_only, hit);
+                                   child_inside_editable, edge_only, hit, resolve_point);
     }
+}
+
+extern "C" bool dom_range_find_text_edge_at(View* root_view, float vx, float vy,
+        ViewGeometryTextPointResolver resolve_point, ViewGeometryTextHit* out_hit) {
+    if (!out_hit) return false;
+    *out_hit = {};
+    EditableBoundaryHit hit = {nullptr, nullptr, {nullptr, 0}, false, 0.0f, -1.0f};
+    find_editable_boundary_hit(root_view, vx, vy, 0.0f, 0.0f, true, true, &hit, resolve_point);
+    if (!hit.text || !hit.rect) return false;
+    out_hit->text = lam::up(hit.text);
+    out_hit->rect = lam::up(hit.rect);
+    out_hit->local_x = hit.local_x;
+    return true;
 }
 
 // Replaced / void / form elements cannot hold a text caret inside them; a

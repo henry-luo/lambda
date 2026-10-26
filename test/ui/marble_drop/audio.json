@@ -55,8 +55,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -88,8 +88,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -105,8 +105,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1200,
-      "steps": 30
+      "ms": 3600,
+      "steps": 90
     },
     {
       "type": "assert_attribute",
@@ -134,8 +134,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -213,8 +213,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -264,8 +264,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -307,8 +307,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 800,
-      "steps": 20
+      "ms": 2400,
+      "steps": 60
     },
     {
       "type": "assert_attribute",
@@ -342,8 +342,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 2000,
-      "steps": 50
+      "ms": 6000,
+      "steps": 150
     },
     {
       "type": "assert_attribute",
@@ -377,8 +377,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -410,8 +410,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -441,8 +441,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 4000,
-      "steps": 100
+      "ms": 12000,
+      "steps": 300
     },
     {
       "type": "assert_attribute",
@@ -477,6 +477,216 @@
       "equals": "win"
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#level-10"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=counter]"
+      },
+      "attribute": "data-setting",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "catch"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "29"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=counter]"
+      },
+      "attribute": "data-setting",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "31"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-9"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "switch"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "33"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "34"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-13"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-last-sound",
+      "equals": "steel"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "36"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "38"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-11"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "41"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-12"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-sound-count",
+      "equals": "44"
+    },
+    {
       "type": "key_press",
       "key": "M"
     },
@@ -499,7 +709,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "#level-8"
+        "selector": "#level-16"
       }
     },
     {

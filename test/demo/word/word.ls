@@ -29,9 +29,13 @@ import equation: .mod_equation
 import equation_edit: .mod_equation_edit
 import math_edit: .mod_math_edit
 import print: .mod_print
+import lookup: .mod_lookup
+import spelling: lambda.edit.spelling
+import ribbon_overflow: .mod_ribbon_overflow
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
+let MIN_WINDOW_WIDTH = 800
 
 // keep render-only calculations out of the handler activation scope.
 fn workspace(st) {
@@ -85,6 +89,7 @@ fn workspace(st) {
                         <div class:"canvas-footer", "A little room for your next idea.">>)
             if (st.review and not st.focused) ui.comments(st.editor,st.show_resolved,st.read_only) else null
             if (st.revisions and not st.focused) ui.revisions(st.editor,st.read_only) else null
+            if (st.lookup!=null and not st.focused) ui.lookup_pane(st) else null
             if (st.selection_pane and not st.focused) ui.selection_pane(st) else null
             if (st.shape_pane and not st.focused) ui.shape_pane(st) else null
             if (equation_edit.active(st) and not st.focused) ui.equation_pane(st) else null
@@ -108,6 +113,44 @@ fn workspace(st) {
 }
 edit <word_app> state st:app.initial() { workspace(st) }
 on beforeinput() { return 'pass' }
+on render(evt) {
+    if (evt.event_phase==2) {
+        let word = dom.get_element_by_id(dom.root_node(evt.target),"word")
+        // install the native resize limit before the deferred ribbon measurement.
+        if (dom.get_attribute(word,"data-window-min")!="set" and
+            dom.set_window_min_width(word,MIN_WINDOW_WIDTH))
+            dom.set_attribute(word,"data-window-min","set")
+        let ribbon = dom.query_selector(word,".ribbon-groups")
+        let first_group = if (ribbon==null) null else dom.query_selector(ribbon,".ribbon-group")
+        let ribbon_key = (dom.get_attribute(word,"data-tab") or "") ++ ":" ++
+            (dom.get_attribute(word,"data-ribbon-group-labels") or "")
+        if (dom.get_attribute(word,"data-ribbon-render-key")!=ribbon_key or ribbon==null or
+            dom.get_attribute(ribbon,"data-layout-key")==null or
+            (first_group!=null and dom.get_attribute(first_group,"data-natural-width")==null)) {
+            dom.set_attribute(word,"data-ribbon-render-key",ribbon_key)
+            dom.request_frame(word,"word_ribbon_ready")
+        }
+        spelling.update(evt.target,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)
+        spelling.reposition(evt.target,"word")
+        if (st.dialog!=null) {
+            let dialog = dom.query_selector(evt.target,".edit-dialog")
+            let controls = if (dialog==null) [] else dom.query_selector_all(dialog,"input,textarea,select,button")
+            // native caret paints last; moving focus into the modal hides it without losing the saved range.
+            if (len(controls)>0 and not any([for (control in controls) dom.focused(control)])) dom.focus_set(controls[0],false)
+        }
+    }
+    return 'pass'
+}
+on word_ribbon_ready(evt) {
+    let word = dom.get_element_by_id(dom.root_node(evt.target),"word")
+    let ribbon = dom.query_selector(word,".ribbon-groups")
+    let render_key = dom.get_attribute(word,"data-ribbon-render-key")
+    // Recheck a replaced tab even if live resize cached the same ribbon width.
+    ribbon_overflow.update(word,ribbon!=null and
+        dom.get_attribute(ribbon,"data-measured-render-key")!=render_key)
+    if (ribbon!=null) dom.set_attribute(ribbon,"data-measured-render-key",render_key)
+    return 'pass'
+}
 on word_toolbar_ready(evt) {
     if (not ruler.dragging(evt.target)) mini.position(evt.target)
     return 'pass'
@@ -168,11 +211,19 @@ on word_viewport_changed(evt) {
     if (mini.visible(st) and not ruler.dragging(evt.target)) mini.refresh(evt.target)
 }
 on resize(evt) {
+    // Native live resize can repaint before a requested frame runs.
+    let handoff = ribbon_overflow.begin_resize(evt.target,
+        dom.get_element_by_id(dom.root_node(evt.target),"edit-surface"))
+    ribbon_overflow.update(evt.target)
+    ribbon_overflow.end_resize(handoff)
+    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_ribbon_ready")
     if (st.layout=="web" and not st.read_only)
         dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_viewport_changed")
     if (mini.visible(st)) mini.refresh(evt.target)
+    spelling.reposition(evt.target,"word")
     return 'pass'
 }
+on scroll(evt) { spelling.reposition(evt.target,"word"); return 'pass' }
 on dblclick(evt) {
     if (st.read_only) { return 'pass' }
     if (dom.closest(evt.target,"[data-word-citation]")!=null) {
@@ -203,6 +254,16 @@ on mousedown(evt) {
     // contextmenu precedes mousedown; keep its saved range out of native hit testing.
     if (evt.button==1 and st.context!=null and dom.closest(evt.target,"#edit-surface,#object-handles")!=null) { return 'prevent-default' }
     if (st.context!=null and dom.closest(evt.target,"#word-context-menu,.ribbon-menu-trigger")==null) { st = {*:st,context:null} }
+    if (dom.closest(evt.target,".ribbon-group[data-open=true],.ribbon-group-trigger")==null)
+        ribbon_overflow.close(evt.target)
+    return 'pass'
+}
+on click(evt) {
+    let trigger = dom.closest(evt.target,".ribbon-group-trigger")
+    if (trigger!=null) {
+        ribbon_overflow.toggle(trigger)
+        return 'prevent-default'
+    }
     return 'pass'
 }
 on mouseup(evt) {
@@ -244,6 +305,7 @@ on editaction(evt) {
     }
     if (st.read_only or evt.input_type=="copy") { return run.result }
     st = {*:st,object_picks:[],editor:model.clean(run.editor),status:if (not (run.result.failure is null)) "This edit is unavailable here." else "Writing"}
+    spelling.update(evt.target,"word",st.editor.doc,st.editor.composition!=null,st.editor.model_revision)
     dom.set_close_guard(evt.target,session.is_dirty(st.file_state,st.editor.doc))
     return run.result
 }
@@ -268,6 +330,8 @@ on keyup(evt) {
     return 'pass'
 }
 on word_command(req) {
+    // a nested ribbon menu needs its compact group visible while it reads the trigger geometry.
+    if (req.id!="ui.editingMenu") ribbon_overflow.close(req.node)
     if (dom.closest(req.node,"#selection-toolbar")==null) { st = app.hide_toolbar(st) }
     let menu = st.context
     if (req.id=="ui.editingMenu") {
@@ -318,6 +382,28 @@ on word_command(req) {
         dom.request_frame(dom.get_element_by_id(dom.document_element(req.node),"word"),"word_ruler_focus_ready")
     }
 }
+// a lookup task reports its answer to the shell element (mod_lookup.run).
+on word_lookup(evt) {
+    let next = lookup.receive(st.lookup,evt.detail)
+    if (next!=null) {
+        st = {*:st,lookup:next,status:if (next.error!=null) next.error
+            else if (next.kind=="dictionary") "Definition of “" ++ next.result.word ++ "”"
+            else "Translated to " ++ lookup.language_name(next.target)}
+    }
+}
+// a finished or failed reading frees the speaker button; a reading it already replaced changes nothing.
+on speechend(evt) {
+    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null}} }
+    return 'handled'
+}
+on speecherror(evt) {
+    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null},status:"The word could not be read aloud"} }
+    return 'handled'
+}
+on word_lookup_ready(evt) {
+    let root = dom.root_node(evt.target)
+    dom.focus_set(dom.get_element_by_id(root,"lookup-query") or dom.get_element_by_id(root,"lookup-text"),false)
+}
 on word_ruler_focus_ready(evt) {
     dom.focus_set(dom.get_element_by_id(dom.root_node(evt.target),st.ruler_focus),false)
     return 'pass'
@@ -333,10 +419,25 @@ on control_change(req) {
     else {
         st = app.command(app.adopt(st,req.event),req.action,req.params,req.node)
         // live size edits retain the control caret; restoring the document range steals its focus.
-        app.finish(st,req.node,not contains(["ui.tableSize","ui.shapeField","ui.equationDraft","ui.printSetting"],req.action))
+        app.finish(st,req.node,not contains(["ui.tableSize","ui.shapeField","ui.equationDraft","ui.printSetting","ui.lookupQuery","ui.lookupTarget"],req.action))
     }
 }
 on keydown(evt) {
+    if (evt.key=="Escape" and st.context==null) {
+        let opened = dom.query_selector(dom.root_node(evt.target),".ribbon-group[data-open=true]")
+        if (opened!=null) {
+            let trigger = dom.query_selector(opened,".ribbon-group-trigger")
+            ribbon_overflow.close(evt.target)
+            dom.focus_set(trigger,false)
+            return 'prevent-default'
+        }
+    }
+    // Enter looks a word up; the multi-line translation source needs Ctrl/⌘ Enter.
+    if (evt.key=="Enter" and not evt.shiftKey and (dom.closest(evt.target,"#lookup-query")!=null or
+        (app.primary(evt) and dom.closest(evt.target,"#lookup-text")!=null))) {
+        st = app.command(st,"ui.lookupSearch",{},evt.target)
+        return 'prevent-default'
+    }
     if (app.primary(evt) and evt.key=="Enter" and dom.closest(evt.target,"#equation-editor-pane")!=null) {
         st = app.command(st,"ui.equationApply",{},evt.target)
         app.finish(st,evt.target)
@@ -378,6 +479,7 @@ on keydown(evt) {
         }
         if (contains(["Escape","Tab"],evt.key)) {
             st = {*:st,context:null}
+            ribbon_overflow.close(evt.target)
             app.focus_document(evt.target)
             app.finish(st,evt.target)
             return 'prevent-default'
@@ -419,5 +521,6 @@ on closerequest(evt) {
     return 'prevent-default'
 }
 
-<html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ surface.print_css ++ changes.css>>
-    apply(<word_app>,{mode:"edit"})>
+// keep spelling chrome beside the edit view so async results cannot reconcile the ribbon during typing.
+<html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ surface.print_css ++ changes.css ++ spelling.css>>
+    apply(<word_app>,{mode:"edit"}); spelling.widget("word")>

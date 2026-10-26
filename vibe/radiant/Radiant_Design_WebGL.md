@@ -231,10 +231,10 @@ class and option.
 | `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. |
 | `<group>` | Hierarchy and inherited transforms, corresponding to Group/Object3D. |
 | `<camera type:'perspective'/'orthographic'>` | Position/target or orientation, near/far planes; perspective uses FOV, orthographic uses positive `view_height` (full vertical scene span). |
-| `<light type:'ambient'/'directional'>` | Initial light types, color/intensity, and direction/target where applicable. |
+| `<light type:'ambient'/'directional'/'point'/'spot'>` | Color/intensity; directional and spot lights aim from `position` toward `target`. Point and spot lights fall off with inverse-square distance, cut off smoothly at `distance` (0 = unbounded). A spot's `angle` (radians, default π/3, at most π/2) is its outer cone edge; `penumbra` (0..1) softens that fraction of the cone. At most eight non-ambient lights. |
 | `<mesh>` | Renderable object: transform, visibility, geometry, material, and optional instance data. |
 | `<geometry>` | Box/plane primitives and indexed buffer geometry with positions, normals, UVs, and indices. |
-| `<material>` / texture descriptions | Initial basic/unlit and Lambert shading, color, opacity, culling, and local image textures. Opaque `depth_only:true` writes biased depth before visible geometry for hidden-line plots. |
+| `<material>` / texture descriptions | Initial basic/unlit and Lambert shading, color, opacity, culling, and local image textures. `emissive` (an sRGB color, default black) times `emissive-intensity` (default 1) adds unlit emission. Opaque `depth_only:true` writes biased depth before visible geometry for hidden-line plots. |
 | Scene-local resource definitions/references | Optional shared geometry/material/texture IDs; native caches own derived GPU resources. |
 
 Common object attributes include `id`, position, rotation, scale, and visibility.
@@ -948,8 +948,12 @@ scene or Three.js GPU resources.
 | ASCII Model3D | `.a3d` | `text/x-3d-model` | `<a3d …>` |
 | FBX 7.x, binary or ASCII | `.fbx` | `model/x-fbx` | `<fbx binary, version, …>` record tree |
 | BVH motion capture | `.bvh` | `model/x-bvh` | `<bvh <hierarchy …> <motion …>>` |
+| STL, ASCII or binary | `.stl` | `model/stl` | `<stl format, name/header, normals, positions, attributes>` |
+| PLY, ASCII or binary (either byte order) | `.ply` | `model/x-ply` | `<ply format, version, comments, obj_info, <element count, property…>…>` |
 
 FBX and BVH were added on 2026-10-21 by [Lambda_Pkg_Motion.md](../Lambda_Pkg_Motion.md) §3–§5: the binary FBX signature and the ASCII `; FBX` header, and BVH's leading `HIERARCHY`, are sniffed without a filename. Their scene path is not `scene3d-asset` but `input(source, {type: 'character'})`, converted by `lambda.scene3d.motion` (§15 below keeps its formats).
+
+STL and PLY were added on 2026-10-26; unlike the formats above they may be binary, so they parse in `lambda/input/input-mesh.cpp` from the byte span. An STL whose size equals `84 + 50 × facets` is binary even when its header begins with `solid`. STL facet arrays are typed ndarrays: binary files keep `float32`, ASCII text `float64`; `normals` is `[facets, 3]`, `positions` `[facets × 3, 3]`, and the binary per-facet attribute word appears as a `uint16` array only when one is nonzero. Each PLY element becomes a child named after it, with `count` and one attribute per property: scalar properties are typed columns (`uchar` → `uint8`, `float` → `float32`, …), list properties are arrays of row arrays. A property named `count` is rejected, as is a property-less element that declares rows. Both formats are detected by extension.
 
 Filename detection is case-insensitive and uses the URL pathname. A3D also
 has a distinctive `3dmodel` header followed by space or tab, with an optional
@@ -1249,14 +1253,15 @@ let viewport = s.normalize(s.scene([
 `load(source, options)` returns a `<group>` containing resource definitions,
 object hierarchy, meshes, skeletons, and animation clips. It can be placed
 beside ordinary package-created objects. Supply the enclosing scene's camera
-and lights. Standalone MTL loading returns a group containing material and
+and lights. glTF `KHR_lights_punctual` lights are the exception: they arrive as `<light>` children of their nodes unless `lights: false`. Standalone MTL loading returns a group containing material and
 texture resources. Loading validates references and supported representations;
 `normalize` also checks the final composed scene.
 
 | Option | Meaning |
 |---|---|
 | `id` | Group ID and prefix for every descendant ID, resource reference and track path; default `"model"`. Use distinct IDs for multiple loads. Nonempty, at most 48 characters, without `.`. |
-| `format` | `'auto'` by default, or `'obj'`, `'mtl'`, `'gltf'`, `'a3d'` for extensionless sources. |
+| `format` | `'auto'` by default, or `'obj'`, `'mtl'`, `'gltf'`, `'glb'`, `'a3d'`, `'stl'`, `'ply'` for extensionless sources. |
+| `lights` | `true` by default. `false` drops lights imported from glTF `KHR_lights_punctual`, leaving the enclosing scene's lighting alone. |
 | `autoplay` | `false` by default. `true` starts the selected clip through the existing document animation scheduler. |
 | `clip` | Original clip ID (e.g. `"asset-clip-0"`) or label; a supplied selection must identify exactly one clip. The first clip is selected by default. |
 | `transform` | Optional attributes applied to the returned group, e.g. `{position: [2, 0, 0], scale: [0.5, 0.5, 0.5]}`. |
@@ -1289,7 +1294,9 @@ component boundaries under **S2.6.4**. No new runtime value type is required.
 |---|---|---|
 | OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
 | MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. | Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Specular, ambient, emissive and PBR properties have no faithful Lambert equivalent and emit warnings. |
-| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, base-color texture/factor, opaque/blended materials, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels, `KHR_mesh_quantization` attribute storage. | Required extensions other than `KHR_materials_unlit` and `KHR_mesh_quantization` are rejected. Optional extensions use the core fallback with warnings. PBR metallic/roughness shading uses a documented Lambert base-color approximation; secondary PBR maps are warned and omitted. Alpha masking, vertex alpha, non-UV0/transformed textures, lines/points and compressed geometry codecs are unsupported. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
+| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, base-color texture/factor, opaque/blended materials, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit`, `EXT_meshopt_compression`, `KHR_texture_transform` (base-color texture), core `emissiveFactor` with `KHR_materials_emissive_strength`, and `KHR_lights_punctual`. | Other required extensions are rejected; other optional extensions use the core fallback with warnings. PBR metallic/roughness shading uses a documented Lambert base-color approximation; secondary PBR maps are warned and omitted, and emission is omitted with a warning when an emissive texture would modulate it. Alpha masking, vertex alpha, non-UV0 textures, lines/points, Draco and Basis/KTX2 are unsupported. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
+| STL | Facet triangles with flat normals from their winding (stored facet normals are often zero or stale and are ignored); zero-area facets are dropped; the ASCII solid name becomes the group `name`. | Binary per-facet color conventions are not interpreted. Coordinates are used as authored; Z-up CAD parts need a `transform` rotation. |
+| PLY | `vertex` `x/y/z` with optional `nx/ny/nz` normals, `red/green/blue` (or `diffuse_*`, `r/g/b`) colors normalized by their unsigned type, and `s/t` (or `u/v`, `texture_u/v`) UVs; `face` `vertex_indices`/`vertex_index` polygons, triangulated and stripped of zero-area triangles; per-corner `texcoord` lists; a `comment TextureFile <image>` texture. Missing normals become area-weighted smooth normals. | Point clouds without faces, incomplete attribute groups, signed or mixed color types and out-of-range indices are errors. Vertex alpha is warned and ignored. Other elements and properties remain available through the raw mapping only. |
 | A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |
 
 The glTF decoder supports little-endian signed/unsigned byte/short, unsigned
@@ -1300,7 +1307,8 @@ sparse indices. Required `KHR_mesh_quantization` enables integer positions,
 normalized signed byte/short normals, signed or unnormalized UVs, and signed
 position/normal morph displacements. Dequantization uses the existing node or
 skin transforms and copies decoded values into the destination Input (**D4.1.3**).
-UVs requiring `KHR_texture_transform` remain outside the supported profile.
+`KHR_texture_transform` on the base-color texture is baked into each primitive's UVs (`T · R · S`, before the native flip); a `texCoord` override other than 0 is rejected.
+`EXT_meshopt_compression` views decode once, before any accessor reads them, through a bounds-checked implementation of the extension's attribute, triangle and index codecs and its octahedral, quaternion and exponential filters (`lambda/input/input-meshopt.cpp`). Decoded bytes are loader scratch; accessors copy their values into the destination Input as before (**D4.1.3**). Fallback buffers are never read, so an optional meshopt extension still decodes the compressed data. Only bitstream version 0 attributes and version 1 index streams, the versions this extension defines, are accepted.
 It is a supported-profile loader, not a complete glTF schema
 validator. Raster sampling honors glTF wrap and min/mag filters, generates
 mipmaps when requested, and accounts for their GPU storage. glTF's top-origin
@@ -1355,9 +1363,27 @@ lifetime are the existing SVG/native animation machinery from §8; only the
 native draw path consumes the resulting bone matrices and morph weights.
 A3D quaternion actions use this engine's SLERP interpolation.
 
+### glTF and GLB export
+
+`format(scene, 'gltf')` returns a self-contained glTF 2.0 JSON string with its buffer in a data URI; `format(scene, 'glb')` returns GLB 2.0 bytes as a binary value. `lambda convert model.obj -t glb -o model.glb` loads any supported model through `scene3d-asset` (`-f` names the source format) and writes the result. The exporter lives in `lambda/format/format-gltf.cpp`, below the runtime and Radiant (**D7.1.1**), and reads the same vocabulary the renderer draws. Box and plane geometry come from the shared generator in `lib/mesh_primitive.h`, and buffer geometry without normals receives the renderer's area-weighted normals, so an exported scene shades as it rendered.
+
+| Scene element | glTF |
+|---|---|
+| `<scene3d>` children / any other root element | Scene root nodes |
+| `<group>`, `<rigid-body>` | Nodes with TRS or `matrix`; Euler XYZ becomes a quaternion |
+| `<mesh>` and its geometry/material | Node with one mesh primitive (POSITION, NORMAL, TEXCOORD_0 flipped to top-origin, linear COLOR_0, `uint16`/`uint32` indices); shared geometry/material pairs share a mesh |
+| `instances` | One child node per instance matrix |
+| Lambert / basic material | Rough dielectric `pbrMetallicRoughness` / plus `KHR_materials_unlit`; linear base color with opacity; `BLEND` when `alpha-mode` says so or, without it, when the color or `transparent` is translucent |
+| `emissive` × `emissive-intensity` | `emissiveFactor`, with `KHR_materials_emissive_strength` above 1 |
+| `<texture>` | Image `uri` (the `src` as given) and a sampler for authored wrap/filter attributes |
+| `<camera>` | Perspective (`yfov` in radians) or orthographic camera; a `target` becomes a look-at rotation |
+| Directional, point, spot `<light>` | `KHR_lights_punctual`; aimed lights get a look-at rotation; spot `angle`/`penumbra` become outer/inner cones |
+
+Ambient lights, physics, colliders and joints have no glTF node and are left out, as are invisible subtrees. Skeletons, skinned or morphing meshes, animation clips, motion controllers and depth-only materials are refused with an error naming the construct, rather than exported without their motion. Back-side materials export double-sided, since glTF cannot cull front faces only. Texture URIs are written as resolved, so models loaded from files reference absolute `file:` URLs, and GLB output references images rather than embedding them.
+
 ### Verification fixtures
 
-`test/scene3d/imported-assets.ls` exercises all three mesh formats. Its CC0
+`test/scene3d/imported-assets.ls` exercises the OBJ, glTF and A3D mesh formats; `test/lambda/scene3d/formats.ls` covers `tetra.stl`, `pyramid.ply` and `lit.gltf`, a meshopt-compressed panel with a texture transform, emission and two punctual lights, plus export. Its CC0
 assets and dependency files are under `test/demo/scene3d/assets/loading/`, with a reproducible
 Python standard-library generator. The glTF fixture includes an external buffer
 and an equivalent data-URI version, an interleaved vertex stream, normalized

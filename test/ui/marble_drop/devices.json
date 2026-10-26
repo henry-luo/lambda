@@ -1,0 +1,572 @@
+{
+  "name": "Marble Drop distributor, counterweight, magnet, lens, spring and remote rotor",
+  "html": "test/demo/marble-drop/marble-drop.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sound"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".level"
+      },
+      "count": 16
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-9"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "4"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "U"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-10"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=counter]"
+      },
+      "attribute": "data-setting",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "U"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=counter]"
+      },
+      "attribute": "data-setting",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 960,
+      "steps": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=counter]"
+      },
+      "attribute": "data-setting",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-11"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=magnet]"
+      },
+      "attribute": "data-route",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=magnet]"
+      },
+      "attribute": "data-route",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "7"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-12"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=filter]"
+      },
+      "attribute": "data-route",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=filter]"
+      },
+      "attribute": "data-route",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "8"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "3"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-13"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1320,
+      "steps": 33
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".rolling-marble.airborne"
+      },
+      "count": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/spring-flight.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "5"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-mode",
+      "equals": "won"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-15"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "advance_time",
+      "ms": 2880,
+      "steps": 72
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "2"
+    },
+    {
+      "type": "key_press",
+      "key": "6"
+    },
+    {
+      "type": "key_press",
+      "key": "B"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1920,
+      "steps": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "0"
+    },
+    {
+      "type": "key_press",
+      "key": "U"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-device-kind=rotor]"
+      },
+      "attribute": "data-setting",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#level-16"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".device-guide span"
+      },
+      "count": 5
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/grand-tour.png"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ]
+}

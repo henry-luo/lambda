@@ -4533,6 +4533,7 @@ void layout_iframe_embedded_doc(UiContext* uicon, DomDocument* doc,
                                 float iframe_width, float iframe_height, bool initial_load = true);
 bool layout_iframe_track_source(DomDocument* doc, const char* source_text,
                                float viewport_width, float viewport_height);
+void layout_iframe_viewport_overflow(DomDocument* doc, CssEnum* overflow_x, CssEnum* overflow_y);
 bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
 DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
     float viewport_width, float viewport_height);

@@ -7,6 +7,7 @@ import files: lambda.edit.files
 import page: .mod_page
 import columns: .mod_columns
 import review: .mod_review
+import lookup: .mod_lookup
 import insert: .mod_insert
 import shapes: .mod_shapes
 import stories: .mod_stories
@@ -39,22 +40,13 @@ import shape_format: .mod_shape_format
 import equation_ui: .mod_equation_ui
 import home: .mod_home
 import home_ui: .mod_home_ui
+import text_format: ~~.mod_text_format
+import ribbon: ~~.mod_ribbon
 
 pub let icon = icons.icon
-// retain an imported document's requested family even when it is not installed here.
-pub fn font_options(families,current) => [for (family in sort(unique([*(families or []),current]),(name)=>lower(name)))
-    {value:family,label:family}]
+pub fn font_options(families,current) => text_format.font_options(families,current)
 let text_colors = take(home.font_colors,4)
 
-// choose one word boundary; intrinsic button width keeps both lines fully visible.
-fn ribbon_label(label) {
-    let words = split(label," ")
-    let lines = if (len(words)<2) [label] else {
-        let at = sort(1 to (len(words)-1),(i)=>abs(len(join(slice(words,0,i)," "))-len(join(slice(words,i)," "))))[0];
-        [join(slice(words,0,at)," "),join(slice(words,at)," ")]
-    };
-    [for (line in lines) <span class:"ribbon-label-line",line>]
-}
 view <word_button> {
     let graphic = if (~.icon is string) ribbon_icons.icon(~.icon,16) else ~.icon;
     <button id:~.id, type:"button", class:"tool " ++ (~.class or ""), title:~.title or ~.label,
@@ -67,7 +59,7 @@ view <word_button> {
         if (~.preview!=null) ~.preview else null;
         if (graphic != null) <span class:"tool-icon",["aria-hidden"]:"true",graphic> else null;
         <span class:"tool-label", *if (~.content!=null) [~.content] else if (contains(~.class or "","ribbon-large") or contains(~.class or "","table-large-tool"))
-            ribbon_label(~.label) else [~.label]>;
+            ribbon.label_lines(~.label) else [~.label]>;
         if (~.menu!=null) <span class:"menu-chevron",["aria-hidden"]:"true",icon("down",10)> else null;
         if (~.shortcut!=null) <span class:"context-key",~.shortcut> else null>
 }
@@ -376,14 +368,27 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
                 button("context-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
                     entry.id,{},edit_mark_active(st.editor,entry.mark),disabled,"context-item icon-only")]>
             menu_item("paragraph","ui.paragraph","Paragraph…","settings",disabled);
+            // Word's order: lookups follow Paragraph. Read Mode hands over its copied text instead of a model range.
+            *[for (entry in [{id:"look-up",command:"ui.dictionary",label:"Look Up",icon:"book"},{id:"translate",command:"ui.translate",label:"Translate",icon:"globe"}])
+                menu_item(entry.id,entry.command,entry.label,entry.icon,false,null,
+                    if (st.read_only and st.context.copy_text!="") {text:st.context.copy_text} else {},st.context.item_selection)];
             if (model.current_node(st.editor,'a')==null) menu_item("link","ui.link","Link…","link",disabled,"⌘K") else null;
             menu_item("comment","ui.comment","New Comment…","comment_add",disabled or not model.can_comment(st.editor))>>
         >,false)
 }
 fn mark_button(editor,id,graphic) => button(id,id,model.spec(id).label,graphic,{},
     edit_mark_active(editor,model.spec(id).mark),false,"icon-only")
-fn group(label,items) => <div class:"ribbon-group group-" ++ replace(lower(label)," ","-"),role:"group",["aria-label"]:label,
-    <div class:"group-tools", *items> <div class:"group-label", label>>
+fn group_icon(label) => {
+    Undo:"undo",Clipboard:"paste",Font:"grow_font",Paragraph:"paragraph",Styles:"format_painter",Editing:"search",
+    Table:"table",Page:"document",Illustrations:"shapes",Links:"link",Comments:"comment_add",
+    Zoom:"search",Show:"paragraph",Proofing:"book"
+}[label] or "document"
+fn group(label:string,items) => ribbon.group(label,items,
+    <button type:"button",class:"ribbon-group-trigger tool",title:label ++ " commands",
+        ["aria-label"]:label ++ " commands",["aria-expanded"]:"false",
+        <span class:"tool-icon",ribbon_icons.icon(group_icon(label),23)>
+        <span class:"tool-label",label>
+        <span class:"group-chevron",icon("down",10)>>)
 fn large(id,action,label,graphic,params={},pressed=false,disabled=false,title=null) =>
     button(id,action,label,graphic,params,pressed,disabled,"ribbon-large",title)
 fn selector(id,command,values,current,css="",param="value",disabled=false) =>
@@ -549,6 +554,8 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_f
                 button("update-citations","references.refresh","Update Citations & Bibliography","refresh",{},false,read_only)
                 button("new-source","ui.source","New Source","source_add",{new:true},false,read_only)>>])>
     else if (tab == "Review") <div class:"ribbon-groups review-ribbon",
+        group("Proofing",[large("dictionary","ui.dictionary","Dictionary","book",{},false,false,"Define the selected word")])
+        group("Language",[large("translate","ui.translate","Translate","globe",{},false,false,"Translate the selection or paragraph")])
         group("Comments",[<div class:"ribbon-command-row",
             large("new-comment","ui.comment","New Comment","comment_add",{},false,read_only or not model.can_comment(editor));
             <div class:"ribbon-command-stack",button("show-comments","ui.comments","Comments Pane","comment")
@@ -670,6 +677,48 @@ pub fn revisions(editor,read_only=false) {
                 button("revision-go-" ++ entry.id,"ui.revisionText","Go to","expand",{id:entry.id})
                 button("revision-accept-" ++ entry.id,"review.accept","Accept","check",{id:entry.id},false,read_only)
                 button("revision-reject-" ++ entry.id,"review.reject","Reject","close",{id:entry.id},false,read_only)>>]>
+}
+
+// Review lookups: one pane, two tabs, sharing the query between Dictionary and Translate.
+fn definition(r,speaking) => <article class:"lookup-entry",
+    <div class:"lookup-word",<strong r.word>;if (r.phonetic) <span class:"lookup-phonetic",r.phonetic> else null;
+        button("lookup-speak","ui.lookupSpeak",if (speaking) "Stop reading" else "Read aloud",ribbon_icons.icon("sound",22),{text:r.word},speaking,false,"icon-only lookup-speak")>;
+    *[for (i,m in r.meanings) <section class:"lookup-meaning",
+        <em class:"lookup-part",m.part>;
+        <ol class:"lookup-definitions",*[for (d in m.definitions) <li <span d.text>;if (d.example) <q class:"lookup-example",d.example> else null>]>;
+        if (len(m.synonyms)==0) null else <div class:"lookup-synonyms",<span class:"lookup-caption","Synonyms">;
+            *[for (j,s in m.synonyms) button("lookup-synonym-" ++ string(i) ++ "-" ++ string(j),"ui.lookupWord",s,null,{text:s},false,false,"lookup-chip","Look up " ++ s)]>>]>
+fn translation(p,read_only) => <article class:"lookup-entry",
+    <div class:"lookup-caption",lookup.language_name(p.result.source) ++ " → " ++ lookup.language_name(p.target)>;
+    <p class:"lookup-translation",lang:p.target,p.result.text>;
+    <div class:"comment-actions",button("lookup-copy","ui.lookupCopy","Copy","copy");
+        button("lookup-insert","ui.lookupInsert","Insert","check",{},false,read_only,"","Replace the source text with this translation")>>
+pub fn lookup_pane(st) {
+    let p = st.lookup
+    let dictionary = p.kind=="dictionary"
+    let field = if (dictionary) apply(<control.input id:"lookup-query",class:"ribbon-select",type:"text",label:"Word to look up",
+            placeholder:"Look up an English word",value:p.query,on_change:"ui.lookupQuery">)
+        else apply(<control.text_area id:"lookup-text",class:"lookup-source",label:"Text to translate",
+            placeholder:"Text to translate",value:p.query,rows:5,maxlength:lookup.max_text,on_change:"ui.lookupQuery">);
+    <aside id:"lookup-pane",class:"selection-pane lookup-pane",["aria-label"]:if (dictionary) "Dictionary" else "Translator",["data-lookup"]:p.kind,
+        <div class:"navigation-heading",<strong class:"pane-heading",if (dictionary) "Dictionary" else "Translator">;
+            button("close-lookup-pane","ui.lookupClose","Close","close",{},false,false,"icon-only")>;
+        <div class:"navigation-tabs",role:"tablist",["aria-label"]:"Lookup",
+            button("lookup-tab-dictionary","ui.dictionary","Dictionary","book",{text:p.query},dictionary)
+            button("lookup-tab-translate","ui.translate","Translate","globe",{text:p.query},not dictionary)>;
+        field;
+        if (dictionary) null else <label class:"shape-field",<span "Translate to">;
+            apply(<control.select id:"lookup-target",class:"ribbon-select",label:"Translate to",options:lookup.languages,
+                value:p.target,on_change:"ui.lookupTarget">)>;
+        button("lookup-search","ui.lookupSearch",if (dictionary) "Look Up" else "Translate",if (dictionary) "search" else "globe",{},false,
+            p.loading or trim(p.query)=="","lookup-go");
+        <div id:"lookup-result",class:"lookup-result",role:"status",["aria-busy"]:string(p.loading),
+            if (p.loading) <p class:"pane-hint",if (dictionary) "Looking up…" else "Translating…">
+            else if (p.error!=null) <p class:"lookup-error",role:"alert",p.error>
+            else if (p.result==null) <p class:"pane-hint",if (dictionary) "Select a word, or type one and press Enter."
+                else "Select text, or place the caret in a paragraph. Ctrl/⌘ Enter translates.">
+            else if (dictionary) definition(p.result,p.speech!=null) else translation(p,st.read_only)>;
+        <p class:"lookup-credit",if (dictionary) "Free Dictionary API (dictionaryapi.dev) · Wiktionary, CC BY-SA" else "Google Translate">>
 }
 
 fn dialog_field(id,label,value,numeric=false,min=0,max=2000,step=1) => <label class:"dialog-field",

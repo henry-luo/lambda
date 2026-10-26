@@ -4,6 +4,7 @@
 
 #include <curl/curl.h>
 #include "../network/curl_trust.h"
+#include "../../lib/host_paths.h"
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
@@ -509,7 +510,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
 
 // Cache-aware synchronous download (returns content + size). Checks disk cache first.
 char* download_http_content_cached(const char* url, size_t* content_size, const char* cache_dir) {
-    const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
+    const char* effective_cache_dir = cache_dir ? cache_dir : host_path_dir(HOST_PATH_CACHE, "cache");
     return download_http_content_with_enhanced_cache(
         url, content_size, effective_cache_dir, NULL, false);
 }
@@ -517,7 +518,7 @@ char* download_http_content_cached(const char* url, size_t* content_size, const 
 char* download_http_content_cached_typed(const char* url, size_t* content_size,
         const char* cache_dir, char** content_type) {
     return download_http_content_with_enhanced_cache(url, content_size,
-        cache_dir ? cache_dir : "./temp/cache", NULL, false,
+        cache_dir ? cache_dir : host_path_dir(HOST_PATH_CACHE, "cache"), NULL, false,
         HTTP_MAX_RESPONSE_SIZE, content_type);
 }
 
@@ -529,7 +530,7 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     }
 
     // Use default cache directory if none provided
-    const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
+    const char* effective_cache_dir = cache_dir ? cache_dir : host_path_dir(HOST_PATH_CACHE, "cache");
 
     // Download content (with caching)
     char* cache_path = NULL;

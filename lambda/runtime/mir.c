@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <uv.h>
 #include "../../lib/memtrack.h"
+#include "../../lib/host_paths.h"
 #include "../../lib/mem_grow.h"
 #include <string.h>
 #include <stdarg.h>  // for va_list
@@ -247,7 +248,7 @@ static MIR_context_t jit_init_mode(unsigned int optimize_level,
             // A fresh-process code-size census needs every imported module's
             // lengths, not just the final MIR context's overwritten log.
             const char* append = getenv("LAMBDA_MIR_GEN_DEBUG_APPEND");
-            FILE* f = fopen("temp/mir_gen_debug.txt",
+            FILE* f = fopen(host_path_dir(HOST_PATH_TEMP, "mir_gen_debug.txt"),
                 append && append[0] && strcmp(append, "0") != 0 ? "a" : "w");
             if (f) {
                 MIR_gen_set_debug_file(ctx, f);

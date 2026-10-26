@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- a paragraph nested in a wrapper (not a direct multicol child) that straddles a column break:
+     its first fragment uses only the space left below its offset, and its continuation starts at
+     the next column's top edge, exactly as for a direct child. Lines are forced with <br>. -->
+<html><head><style>
+html, body { margin: 0; background: #fff; }
+.mc { height: 200px; margin-bottom: 100px; column-fill: auto; column-gap: 20px; font: 16px/20px monospace; color: #111; }
+.two { width: 600px; column-count: 2; }
+/* paged mode: one column per page, overflow pages continue in the inline direction */
+.paged { width: 290px; column-count: 1; }
+p { margin: 0 0 10px; }
+.epub .chapter { margin-top: 30px; }
+.epub h2 { break-before: page; margin: 0 0 10px; font: inherit; }
+.epub p { margin: 5px 0; }
+/* the Gutenberg machine-header rules: field paragraphs have only a top margin */
+.gutenberg .machine { margin: 16px 0; }
+.gutenberg p { margin: 16px 0 0; }
+.filler { display: block; break-before: column; height: 1px; margin: 0; }
+</style></head><body>
+<!-- 2 columns, one wrapper: the long paragraph starts at y=30 -->
+<div class="mc two" id="a"><div class="chapter">
+<p>Intro</p>
+<p><span id="a0">L00</span><br>L01<br>L02<br>L03<br>L04<br>L05<br>L06<br><span id="a7">L07</span><br><span id="a8">L08</span><br>L09<br>L10<br>L11<br>L12</p>
+</div></div>
+<!-- paged mode, wrapper inside wrapper -->
+<div class="mc paged" id="b"><div class="outer"><div class="inner">
+<p>Intro</p>
+<p><span id="b0">L00</span><br>L01<br>L02<br>L03<br>L04<br>L05<br>L06<br><span id="b7">L07</span><br><span id="b8">L08</span><br>L09<br>L10<br>L11<br>L12</p>
+</div></div></div>
+<!-- the wrapper follows a sibling (it starts at y=30) and the paragraph has a top margin:
+     Intro 30..50, then the collapsed 20px margin, so lines start at y=70 -->
+<div class="mc two" id="c">
+<p>Before</p>
+<div class="chapter"><p>Intro</p><p style="margin-top: 20px"><span id="c0">L00</span><br>L01<br>L02<br>L03<br>L04<br><span id="c5">L05</span><br><span id="c6">L06</span><br>L07<br>L08<br>L09<br>L10</p></div>
+</div>
+<!-- an EPUB chapter: the chapter margin (30px), a heading with a page break that
+     starts the flow (no effect), and paragraphs with 5px margins. Each split leaves
+     an unused remainder at the column bottom; later paragraphs must follow the moved
+     lines (p2 ends at 60 in column 2, so p3 starts at 65) and the column count grows
+     into an overflow column instead of painting below the bottom edge. -->
+<div class="mc two epub" id="d"><div class="chapter">
+<h2>Heading</h2>
+<p>P1 1<br>P1 2<br>P1 3<br>P1 4</p>
+<p>P2 1<br><span id="d2b">P2 2</span><br><span id="d2c">P2 3</span><br>P2 4<br>P2 5</p>
+<p><span id="d3a">P3 1</span><br>P3 2<br>P3 3<br>P3 4</p>
+<p>P4 1<br><span id="d4b">P4 2</span><br><span id="d4c">P4 3</span><br>P4 4</p>
+</div></div>
+<!-- a Gutenberg header: one paragraph per field with only a top margin. The field
+     block starts low in column 1 and fits it except for its retained end gap.
+     "Language" fits column 1 by its border box, so "Other" starts at column 2's top.
+     Pushing "Language" by its margins, without moving "Other", painted the two lines
+     on top of each other. -->
+<div class="mc two gutenberg" id="e"><div class="header"><div style="height: 122px"></div><div class="machine">
+<p><strong>Release date</strong>: June 25, 2008</p>
+<p id="e-language"><strong>Language</strong>: English</p>
+<p id="e-other"><strong>Other</strong>: formats</p>
+</div></div></div>
+<!-- an EPUB reader page: a scroll container holding a multicol inset by 24px whose
+     content overflows into a third column. Its scrollable overflow reaches that
+     column's inline-end edge measured from the scroller (24 + 3*250 + 2*20 = 814),
+     so scrolling to it shows the third column; the inset used to be dropped. -->
+<div id="f" style="width: 300px; height: 220px; overflow: hidden"><div class="f-mc" style="margin-left: 24px; width: 250px; height: 200px; column-count: 1; column-fill: auto; column-gap: 20px; font: 16px/20px monospace"><div class="chapter">
+<p>F00<br>F01<br>F02<br>F03<br>F04<br>F05<br>F06<br>F07<br>F08<br>F09<br>F10<br>F11<br>F12<br>F13<br>F14<br>F15<br>F16<br>F17<br>F18<br>F19<br>F20<br>F21<br>F22<br>F23<br>F24<br><span id="f25">F25</span></p>
+</div></div></div>
+<!-- an EPUB reader pads the last spread with trailing break-before:column fillers.
+     They add two empty columns (scrollWidth 3*290 + 2*20 = 910) and must not move
+     the table before them: its first row stays right under the table's top. -->
+<div class="mc two" id="g" style="overflow: hidden">
+<p>G00<br>G01<br>G02<br>G03<br>G04</p>
+<table style="border-spacing: 2px"><tr><td id="g-row1">Row 1</td></tr><tr><td>Row 2</td></tr><tr><td>Row 3</td></tr></table>
+<div class="filler"></div><div class="filler"></div>
+</div>
+</body></html>

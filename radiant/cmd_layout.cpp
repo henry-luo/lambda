@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "../lib/mem.h"
+#include "../lib/host_paths.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem_context.h"
 #include "../lib/mem_grow.hpp"
@@ -236,7 +237,7 @@ static bool css_load_source(const char* path, bool is_http, bool binary,
             source->data = resource_manager_copy_resource_content(
                 g_css_resource_manager, path, PRIORITY_HIGH, &source->length);
         } else {
-            source->data = download_http_content_cached(path, &source->length, "./temp/cache");
+            source->data = download_http_content_cached(path, &source->length, host_path_dir(HOST_PATH_CACHE, "cache"));
         }
     } else if (binary) {
         source->data = read_binary_file(path, &source->length);
@@ -3344,7 +3345,7 @@ static CssStylesheet* load_home_stylesheet(CssEngine* css_engine, Pool* pool,
                                            const char* log_prefix,
                                            const char* label,
                                            bool warn_missing) {
-    char* css_filename = lambda_home_path(relative_path);
+    char* css_filename = host_path_join(HOST_PATH_HOME, relative_path);
     CssStylesheet* stylesheet = load_pool_backed_stylesheet(css_engine, pool, css_filename,
                                                             log_prefix, label, warn_missing);
     mem_free(css_filename);
@@ -4444,7 +4445,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     CssStylesheet** inline_stylesheets = nullptr;
 
     if (!is_html_document) {
-        char* css_filename = lambda_home_path("package/doc/script.css");
+        char* css_filename = host_path_join(HOST_PATH_HOME, "package/doc/script.css");
         script_stylesheet = load_pool_backed_stylesheet(
             css_engine, pool, css_filename, "Lambda Script", "script.css", true);
         mem_free(css_filename);
@@ -6324,7 +6325,7 @@ static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context
     // The resource manager changes image/media loading to async mode, so the
     // layout CLI only enables it for documents that need remote webfont metrics.
     network_downloader_init_shared();
-    EnhancedFileCache* file_cache = enhanced_cache_create("./temp/cache",
+    EnhancedFileCache* file_cache = enhanced_cache_create(host_path_dir(HOST_PATH_CACHE, "cache"),
         100 * 1024 * 1024, 10000);
     if (!file_cache) {
         log_warn("[Layout] Network cache unavailable; proceeding without async resources");
@@ -6402,11 +6403,7 @@ int cmd_layout(int argc, char** argv) {
     sigaction(SIGBUS, &sa, NULL);
 #endif
 
-    if (!log_is_disabled() && file_exists("log.conf")) {
-        FILE *file = fopen("log.txt", "w");
-        if (file) { fclose(file); }
-        log_parse_config_file("log.conf");
-    }
+    if (!log_is_disabled()) log_reload_config_in_dir(host_path(HOST_PATH_LOG));
 
     LayoutOptions opts;
     if (!parse_layout_args(argc, argv, &opts)) {

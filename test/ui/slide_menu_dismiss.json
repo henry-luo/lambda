@@ -1,0 +1,250 @@
+{
+  "name": "Slides: closing Shapes removes the menu border and shadow through Escape, toggle, outside click and insertion",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "script",
+      "js": "document.getElementById(\"slide-render\").setAttribute(\"spellcheck\",\"false\")"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "closed-menu"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-shapes"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#home-menu button"
+      },
+      "equals": 4
+    },
+    {
+      "type": "assert_surface",
+      "reference": "closed-menu",
+      "region": [
+        1015,
+        155,
+        260,
+        160
+      ],
+      "count": {
+        "min": 500
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#home-shapes"
+      },
+      "attribute": "aria-expanded",
+      "equals": "false"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_surface",
+      "reference": "closed-menu",
+      "region": [
+        1015,
+        155,
+        260,
+        160
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-shapes"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-shapes"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_surface",
+      "reference": "closed-menu",
+      "region": [
+        1015,
+        155,
+        260,
+        160
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-shapes"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-heading"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_surface",
+      "reference": "closed-menu",
+      "region": [
+        1015,
+        155,
+        260,
+        160
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-shapes"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-action=insert-rect]"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_surface",
+      "reference": "closed-menu",
+      "region": [
+        1015,
+        155,
+        160,
+        160
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Insert]"
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "insert-closed"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-shapes"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": "#home-menu"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_surface",
+      "reference": "insert-closed",
+      "region": [
+        50,
+        155,
+        1120,
+        560
+      ],
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/menu/after.png"
+    }
+  ]
+}

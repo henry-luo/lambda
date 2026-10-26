@@ -107,7 +107,7 @@ fn check_node(n, all_nodes) bool^ {
                     else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
                     else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
                     else if (property == "morph-weights" and kind == 'mesh') 'vector'
-                    else if ((property == "opacity" and kind == 'material') or (property == "intensity" and kind == 'light') or
+                    else if ((property == "opacity" and kind == 'material') or (contains(["intensity", "distance", "angle", "penumbra"], property) and kind == 'light') or
                         (contains(["fov", "near", "far", "aspect", "view_height"], property) and kind == 'camera')) 'number' else null
                 let components = len(n.values) / len(n.times)
                 if (expected == null or n.type != expected or
@@ -147,13 +147,19 @@ fn check_node(n, all_nodes) bool^ {
             raise fail("depth-only materials must be opaque")
         let checked_alpha = if (n["alpha-mode"] != null and not contains(['opaque', 'blend'], n["alpha-mode"])) raise fail("invalid material alpha mode")
         let checked_side = if (n.side != null and not contains(['front', 'back', 'double'], n.side)) raise fail("invalid material side")
+        let checked_emissive = if ((n.emissive != null and not color(n.emissive)) or
+            (n["emissive-intensity"] != null and (not numeric(n["emissive-intensity"]) or n["emissive-intensity"] < 0)))
+            raise fail("invalid material emission")
         let checked_texture = if (n.texture != null) {
             let d = definition(all_nodes, n.texture, 'texture')^
             if (len(children) != 0) raise fail("duplicate material texture") else true
         } else if (len(children) > 1) raise fail("duplicate material texture") else true
         true
     } else if (kind == 'light') {
-        if (not contains(['ambient', 'directional'], n.type) or (n.intensity != null and (not numeric(n.intensity) or n.intensity < 0)))
+        if (not contains(['ambient', 'directional', 'point', 'spot'], n.type) or (n.intensity != null and (not numeric(n.intensity) or n.intensity < 0)) or
+            (n.distance != null and (not numeric(n.distance) or n.distance < 0)) or
+            (n.angle != null and (not numeric(n.angle) or n.angle <= 0 or n.angle > 1.5707963267948966)) or
+            (n.penumbra != null and (not numeric(n.penumbra) or n.penumbra < 0 or n.penumbra > 1)))
             raise fail("invalid light") else true
     } else if (kind == 'texture') {
         let checked_source = if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source")

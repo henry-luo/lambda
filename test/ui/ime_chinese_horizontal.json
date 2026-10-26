@@ -1,0 +1,114 @@
+{
+  "name": "ime_chinese_horizontal",
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 1000,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture_horizontal')"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "xi"
+    },
+    {
+      "type": "assert_ime_popup",
+      "count": 7,
+      "page": 0,
+      "horizontal": true,
+      "within_viewport": true
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "pagedown"
+    },
+    {
+      "type": "assert_ime_popup",
+      "count": 1,
+      "page": 1,
+      "highlight": 0
+    },
+    {
+      "type": "key_press",
+      "key": "pageup"
+    },
+    {
+      "type": "assert_ime_popup",
+      "count": 7,
+      "page": 0
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/horizontal/fixture-wide.png"
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "count": 7,
+      "horizontal": true,
+      "within_viewport": true
+    },
+    {
+      "type": "resize",
+      "width": 320,
+      "height": 600
+    },
+    {
+      "type": "assert_ime_popup",
+      "count": 7,
+      "within_viewport": true
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/horizontal/fixture-narrow.png"
+    },
+    {
+      "type": "ime_popup_click",
+      "row": 6
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "\u5e2d"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#input"
+      }
+    }
+  ]
+}

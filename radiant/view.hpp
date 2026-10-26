@@ -111,6 +111,7 @@ bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, 
 // declaration computation supplies factors when the applied item record is absent.
 bool css_prop_compute_declared_flex_factor(DomElement* element, CssPropertyCode id, float* result);
 bool css_prop_compute_declared_flex_basis(DomElement* element, CssFlexBasisValue* result);
+bool css_prop_compute_declared_overflow(DomElement* element, CssEnum* overflow_x, CssEnum* overflow_y);
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     CssPropertyCode id, const CssValue* value);
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
@@ -602,26 +603,9 @@ static inline RdtMatrix rdt_matrix_translate(float tx, float ty) {
     return m;
 }
 
-#ifndef LAMBDA_HEADLESS
-// On macOS, explicitly include OpenGL headers before GLFW
-#ifdef __APPLE__
-#include <OpenGL/gl.h>
-#endif
-
-#include <GLFW/glfw3.h>
-
-// Windows OpenGL headers may not define these constants (they're from OpenGL 1.2+)
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
-#ifndef GL_CLAMP_TO_BORDER
-#define GL_CLAMP_TO_BORDER 0x812D
-#endif
-#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
-#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
-#endif
-
-#endif // LAMBDA_HEADLESS
+// The windowing library and GL stay inside the platform backend (MB7);
+// Radiant sources see only the seam's opaque handles.
+#include "platform.hpp"
 
 // Keep Radiant's historical unqualified helpers, but delegate the math to lib
 // so layout/render code does not carry a second implementation of these rules.
@@ -943,12 +927,19 @@ inline void font_prop_resolve_spacing(FontProp* font) {
 
 TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source);
 
+// state-only font owners release the same cache alias without linking layout setup.
+inline void font_prop_release_handle(FontProp* font) {
+    if (!font) return;
+    font_cache_unpin_handle(font->font_handle);
+    font->font_handle = nullptr;
+}
+
 inline void font_prop_copy(FontProp* destination, const FontProp* source, Pool* pool) {
     if (!destination || !source || destination == source) return;
     // copied font props own their mutable shadows independently (D4.5.1v4).
     TextShadow* shadows = pool ? clone_text_shadows(pool, source->text_shadow) : nullptr;
     if (pool) lam::free_owned_list(pool, destination->text_shadow);
-    font_cache_unpin_handle(destination->font_handle);
+    font_prop_release_handle(destination);
     *destination = *source;
     destination->text_shadow = lam::own(shadows);
     font_cache_pin_handle(destination->font_handle);
@@ -2807,10 +2798,13 @@ RdtLogicalPoint view_geometry_document_viewport_offset(
     DomDocument* root_document, DomDocument* target_document,
     ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
+typedef bool (*ViewGeometryTextPointResolver)(View*, RdtLogicalPoint, RdtLogicalPoint,
+                                             RdtLogicalPoint*);
 bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
                                 RdtLogicalPoint origin,
                                 bool include_trailing_edges,
-                                ViewGeometryTextHit* out_hit);
+                                ViewGeometryTextHit* out_hit,
+                                ViewGeometryTextPointResolver resolve_point = nullptr);
 
 bool view_geometry_rect_contains_point(Rect rect, RdtLogicalPoint point);
 bool view_geometry_rect_contains_rect(Rect outer, Rect inner, float epsilon);
@@ -4526,7 +4520,7 @@ typedef struct {
     int cursor;  // current cursor style (CssEnum value)
     uint64_t cursor_image_hash;  // stable across relayout; never retains a style pointer
     bool cursor_image_ready;  // retry deferred image resources without rebuilding the fallback
-    GLFWcursor* sys_cursor;
+    RadiantCursor* sys_cursor;
 } MouseState;
 
 // Which application hosts the window. The edit application routes Escape to
@@ -4540,8 +4534,10 @@ typedef enum UiAppMode {
 #include "window_fullscreen.hpp"
 
 typedef struct UiContext {
-    GLFWwindow *window;    // current window
+    RadiantWindow *window;  // current window (platform.hpp)
     RadiantFullscreenState fullscreen; // window-owned; survives document navigation
+    bool chinese_ime_enabled; // opt-in window setting (IME-O2), preserved across navigation
+    uint32_t input_dispatch_depth;
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
@@ -4620,6 +4616,7 @@ typedef struct UiContext {
     bool close_guard_armed;
     bool close_approved;
     int close_request_count; // platform close requests seen (test observable)
+    struct RadiantDevtools* devtools; // optional shell-owned inspector; no managed runtime values
 
     int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
@@ -4698,7 +4695,6 @@ void document_apply_js_host_config(struct DomDocument* doc,
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
-extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 bool document_dependency_admits(const DomDocument* document, const char* source);
 ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source);

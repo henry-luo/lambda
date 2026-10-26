@@ -1,4 +1,6 @@
 #include "render.hpp"
+#include "render_metrics.hpp"
+#include "../lib/tagged.hpp"
 #include "glyph_sampling.hpp"
 #include "view.hpp"
 #include "layout_table.hpp"
@@ -1117,9 +1119,8 @@ static uint32_t* render_outer_shadow_blur_image(
     return shadow_buf;
 }
 
-// A box shadow under a transform is rasterised at record time (rounded rect, blur, border-box
-// exclusion). Re-recording a transformed subtree (each frame of a 3D plane, a paint-layer
-// capture or revalidation) would blur it again, so the document keeps those images, keyed
+// a box shadow is rasterised once (rounded rect, blur, border-box exclusion).
+// ordinary repaints and transformed subtree recordings would blur it again, so the document keeps those images, keyed
 // by the shadow's geometry relative to its pixel origin, and records them by handle.
 struct ShadowImageKey {
     float values[24];
@@ -1206,12 +1207,14 @@ static ImageSurface* shadow_image_cached(RasterRenderContext* rdcon, const Bound
     for (int i = 0; i < cache->count; i++) {
         ShadowImageCacheEntry& entry = cache->entries[i];
         if (memcmp(&entry.key, &key, sizeof(key)) == 0) {
+            RENDER_METRIC_ADD(shadow_image_hits, 1);
             entry.used = cache->clock;
             *x = x0; *y = y0;
             return entry.surface;
         }
     }
     // the build allocates unscoped scratch; rewind it once the pixels are copied out
+    RENDER_METRIC_ADD(shadow_image_builds, 1);
     ScratchMark mark = scratch_mark(&rdcon->scratch);
     int bx = 0, by = 0, bw = 0, bh = 0;
     uint32_t* pixels = render_outer_shadow_blur_image(&rdcon->scratch, limit, shadow_x, shadow_y,
@@ -1327,16 +1330,37 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         exclude_params[6] = r_br;       exclude_params[7] = r_bl;
 
         // the current target clip (window or paint layer capture) bounds the local image
-        Bound local_limit = xform ? outer_shadow_local_limit(rdcon->block.clip, xform, s_blur) : Bound{};
+        Bound local_limit = xform ? outer_shadow_local_limit(rdcon->block.clip, xform, s_blur) : rdcon->block.clip;
+        float cache_x = shadow_x, cache_y = shadow_y;
+        float cache_exclude[RDT_CLIP_PARAM_COUNT];
+        memcpy(cache_exclude, exclude_params, sizeof(cache_exclude));
+        if (!xform) {
+            // cache local shadow geometry, so fractional scrolling cannot rebuild its blur or clipped rows
+            cache_x = s_offset_x - s_spread;
+            cache_y = s_offset_y - s_spread;
+            cache_exclude[0] = cache_exclude[1] = 0.0f;
+            float pad = fmaxf(0.0f, s_blur);
+            Bound full = {floorf(cache_x - pad), floorf(cache_y - pad),
+                ceilf(cache_x + shadow_w + pad), ceilf(cache_y + shadow_h + pad)};
+            double bytes = (double)(full.right - full.left) * (full.bottom - full.top) * 4.0;
+            local_limit = bytes > 0.0 && bytes <= SHADOW_IMAGE_CACHE_MAX_BYTES ? full :
+                Bound{local_limit.left - rect.x, local_limit.top - rect.y,
+                      local_limit.right - rect.x, local_limit.bottom - rect.y};
+        }
         // hard shadows also exclude the border-box, even for transparent square boxes.
         int cached_x = 0, cached_y = 0;
-        ImageSurface* cached = xform && rdcon->ui_context->surface ? shadow_image_cached(rdcon, local_limit,
-            shadow_x, shadow_y, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, s->color, s_blur,
-            exclude_type, exclude_params, &cached_x, &cached_y) : nullptr;
+        ImageSurface* cached = rdcon->ui_context->surface ? shadow_image_cached(rdcon, local_limit,
+            cache_x, cache_y, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, s->color, s_blur,
+            exclude_type, cache_exclude, &cached_x, &cached_y) : nullptr;
         if (cached) {
-            Rect dst = {(float)cached_x, (float)cached_y, (float)cached->width, (float)cached->height};
-            render_painter_draw_pixels_rect(rdcon, (const uint32_t*)cached->pixels, cached->width,
+            Rect dst = {cached_x + (xform ? 0.0f : rect.x), cached_y + (xform ? 0.0f : rect.y),
+                (float)cached->width, (float)cached->height};
+            if (xform) render_painter_draw_pixels_rect(rdcon, (const uint32_t*)cached->pixels, cached->width,
                 cached->height, cached->pitch / 4, &dst, nullptr, 255, cached, SCALE_MODE_LINEAR);
+            else render_painter_blit_surface_scaled(rdcon, cached, nullptr, rdcon->ui_context->surface,
+                &dst, &rdcon->block.clip,
+                dst.x == floorf(dst.x) && dst.y == floorf(dst.y) ? SCALE_MODE_NEAREST : SCALE_MODE_LINEAR,
+                rdcon->clip_shapes, rdcon->clip_shape_depth, 255);
         } else if (xform && rdcon->ui_context->surface) {
             assert(rdcon->dl && "transformed box-shadow requires display-list recording");
             ScratchArena* shadow_arena = &rdcon->dl->arena;
@@ -2281,6 +2305,44 @@ bool render_paint_text_background(PaintList* paint, UiContext* ui, DomElement* p
         ui_context_raster_scale(ui), nullptr, nullptr, true, mask);
     rdt_path_free(mask);
     return painted;
+}
+
+Rect render_text_inline_padding_box(const DomElement* parent, const TextRect* text_rect, float x, float y, float scale) {
+    const float* padding = parent->boundary()->padding.values;
+    float top = padding[CSS_BOX_SIDE_TOP] * scale, right = padding[CSS_BOX_SIDE_RIGHT] * scale;
+    float bottom = padding[CSS_BOX_SIDE_BOTTOM] * scale, left = padding[CSS_BOX_SIDE_LEFT] * scale;
+    return {x - left, y - top, text_rect->width * scale + left + right, text_rect->height * scale + top + bottom};
+}
+
+Rect render_text_inline_border_box(Rect padding_box, const BorderProp* border, float scale) {
+    return {padding_box.x - border->width.left * scale, padding_box.y - border->width.top * scale,
+        padding_box.width + (border->width.left + border->width.right) * scale,
+        padding_box.height + (border->width.top + border->width.bottom) * scale};
+}
+
+// SVG/PDF counterpart of the raster painter's per-fragment inline background and border. The
+// generic walker never records a span's own boundary, so an inline pill (a highlighted word)
+// vanished from vector exports. A text-clipped background is masked with the glyphs instead.
+bool render_paint_text_inline_box(PaintList* paint, UiContext* ui, DomElement* parent,
+        const TextRect* text_rect, float x, float y) {
+    if (!paint || !text_rect || !parent || parent->view_type != RDT_VIEW_INLINE || !parent->bound) return true;
+    const BoundaryProp* source = parent->boundary();
+    bool background = source->background && !background_has_text_clip(parent);
+    if (!background && !source->border) return true;
+    BoundaryProp local = *source;
+    // shadows and outlines belong to the element's own pass, not to its text fragments
+    local.box_shadow = nullptr; local.outline = nullptr;
+    if (!background) local.background = nullptr;
+    BorderProp border = {};
+    Rect box = render_text_inline_padding_box(parent, text_rect, x, y, 1.0f);
+    if (source->border) {
+        border = *source->border; local.border = lam::own(&border);
+        box = render_text_inline_border_box(box, &border, 1.0f);
+    }
+    if (box.width <= 0.0f || box.height <= 0.0f) return true;
+    ViewBlock view = view_with_boundary(lam::unsafe_view_block_api_span(
+        lam::view_require_element(static_cast<View*>(parent))), &local);
+    return render_paint_boundary_emit_full(paint, ui, &view, box);
 }
 
 static bool background_record_masked_layer(PaintList* destination, const PaintList& layer,

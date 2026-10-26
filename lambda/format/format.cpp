@@ -157,7 +157,7 @@ String* format_mark(Pool* pool, Item root_item) {
     if (!pool) return NULL;
     StrBuf* sb = strbuf_new();
     if (!sb) return NULL;
-    print_item(sb, root_item, 0, NULL);
+    print_mark_item(sb, root_item);
     String* result = string_from_strview(strview_init(sb->str, sb->length), pool);
     strbuf_free(sb);
     return result;
@@ -192,6 +192,7 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
     };
     static const FormatEntry SIMPLE_FORMATS[] = {
         { "mark",       format_mark },
+        { "gltf",       format_gltf },
         { "json",       format_json },
         { "xml",        format_xml },
         { "html",       format_html },

@@ -812,8 +812,9 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         // CLI document also needs a style-resolution turn for paint-only
         // mutations: CSS transitions are created by that turn, while the
         // long-lived renderer already owns its normal style/frame cadence.
+        // native CSSOM callers need no JS capsule; scheduling follows the document's host.
         if (kind != DOM_JS_MUTATION_STYLE_REPAINT ||
-            (_js_current_ui_context && !_js_host_driven_loop)) {
+            (doc->js.host_ui_context && !doc->js.host_driven_loop)) {
             doc_state_request_reflow(st);
         }
     }
@@ -5643,19 +5644,27 @@ static bool dom_scrollable_overflow_is_fixed(const DomElement* elem) {
         elem->positionp()->position == CSS_VALUE_FIXED;
 }
 
+// parent_x/parent_y: the content origin the node's x/y are relative to,
+// measured from the scroll container's border box.
 static float dom_scrollable_descendant_extent(DomNode* node, bool width_axis,
-                                              float origin) {
+                                              float parent_x, float parent_y) {
     if (!node || !node->is_element()) return 0.0f;
     DomElement* elem = node->as_element();
     if (!elem || dom_scrollable_overflow_is_fixed(elem)) return 0.0f;
 
-    float end = (width_axis ? elem->x + elem->width : elem->y + elem->height) -
-        origin;
+    float end = width_axis ? parent_x + elem->x + elem->width
+                           : parent_y + elem->y + elem->height;
     if (dom_scrollable_overflow_is_clipped(elem, width_axis)) {
         return max(end, 0.0f);
     }
+    // view x/y are relative to the parent block, so nested descendants need
+    // their ancestors' offsets; without them a multicol body's overflow
+    // columns lost the body's own inset (CSSOM scrollWidth stopped short).
+    float child_x = parent_x;
+    float child_y = parent_y;
+    dom_engine_child_content_origin(node, parent_x, parent_y, &child_x, &child_y);
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        end = max(end, dom_scrollable_descendant_extent(child, width_axis, origin));
+        end = max(end, dom_scrollable_descendant_extent(child, width_axis, child_x, child_y));
     }
     return max(end, 0.0f);
 }
@@ -5665,11 +5674,14 @@ extern "C" float dom_scrollable_extent(void* element, bool width_axis) {
     if (!elem) return 0.0f;
     float extent = max(width_axis ? elem->content_width : elem->content_height,
                        width_axis ? elem->width : elem->height);
-    float origin = width_axis ? elem->x : elem->y;
+    // a block's children are placed relative to its border box; an inline
+    // container's children share its own containing-block origin.
+    float origin_x = elem->is_block() ? 0.0f : -elem->x;
+    float origin_y = elem->is_block() ? 0.0f : -elem->y;
     float descendant_extent = 0.0f;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         descendant_extent = max(descendant_extent,
-            dom_scrollable_descendant_extent(child, width_axis, origin));
+            dom_scrollable_descendant_extent(child, width_axis, origin_x, origin_y));
     }
     // Scrollable overflow includes the padding after overflowing descendants.
     // Flex boxes with overflow: clip otherwise lose that padding because their
@@ -12244,6 +12256,17 @@ static void dom_set_number_property(Item object, const char* name,
     dom_realm_set_name(object, name, push_d((double)value));
 }
 
+extern "C" Item dom_make_rect_data(DomDocument* doc, double x, double y, double width, double height) {
+    if (!doc || !doc->input) return ItemNull;
+    MarkBuilder builder(doc->input);
+    return builder.map()
+        .put("x", x).put("y", y)
+        .put("top", y).put("left", x)
+        .put("right", x + width).put("bottom", y + height)
+        .put("width", width).put("height", height)
+        .final();
+}
+
 Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double height) {
     // A rect is a *result*, and building results through the JS object model
     // costs a realm: the shape allocation runs out of js_input's pool, so a
@@ -12252,15 +12275,8 @@ Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double
     // the last three published operations still crashing). With no realm the
     // same fields are built as a plain Lambda map out of the document's own
     // Input; a JS caller still gets the JS-shaped object below.
-    if (!dom_realm_active() && doc && doc->input) {
-        MarkBuilder builder(doc->input);
-        return builder.map()
-            .put("x", x).put("y", y)
-            .put("top", y).put("left", x)
-            .put("right", x + width).put("bottom", y + height)
-            .put("width", width).put("height", height)
-            .final();
-    }
+    if (!dom_realm_active() && doc && doc->input)
+        return dom_make_rect_data(doc, x, y, width, height);
     Item rect = js_new_object();
     dom_realm_set_name(rect, "x", push_d(x));
     dom_realm_set_name(rect, "y", push_d(y));
@@ -14501,6 +14517,8 @@ static Item dom_boundary_from_point(DomElement* elem,
             hit.dom.node) {
             return dom_make_boundary_object(hit.dom);
         }
+        // an editor-scoped query must never return a different surface's text.
+        return ItemNull;
     }
 
     DomBoundary boundary = dom_hit_test_to_boundary(
@@ -14610,11 +14628,68 @@ static Item dom_text_control_boundary_from_point(DomElement* elem,
     uint32_t offset_u16 = tc_utf8_to_utf16_offset(value ? value : "",
         value_len, hit.offset);
 
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "node", dom_wrap_element(elem));
-    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
-    dom_realm_set_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
-    return out;
+    // the geometry read is shared by Lambda and JS, with IDL UTF-16 offsets.
+    RootFrame roots(1);
+    Rooted<Item> node(roots, dom_wrap_element(elem));
+    static const char* const keys[] = { "node", "offset", "byteOffset" };
+    Item values[] = { node.get(), (Item){.item = i2it((int64_t)offset_u16)},
+        (Item){.item = i2it((int64_t)hit.offset)} };
+    return dom_result_map(elem->doc, keys, values, 3);
+}
+
+static DomElement* dom_op_text_control(Item n);
+
+struct TextControlRangeRectContext {
+    DomDocument* doc;
+    Rooted<Item>* result;
+    float origin_x, origin_y, layout_x, layout_y, scale_x, scale_y;
+    float scroll_x, scroll_y, right, bottom;
+};
+
+static void dom_text_control_range_rect(float x, float y, float width, float height,
+                                        void* data) {
+    auto* ctx = (TextControlRangeRectContext*)data;
+    // selection rectangles are layout-space; project and clip them to the painted control.
+    float left = ctx->origin_x + (x - ctx->layout_x - ctx->scroll_x) * ctx->scale_x;
+    float top = ctx->origin_y + (y - ctx->layout_y - ctx->scroll_y) * ctx->scale_y;
+    float right = left + width * ctx->scale_x;
+    float bottom = top + height * ctx->scale_y;
+    left = fmaxf(left, ctx->origin_x);
+    top = fmaxf(top, ctx->origin_y);
+    right = fminf(right, ctx->right);
+    bottom = fminf(bottom, ctx->bottom);
+    if (right <= left || bottom <= top) return;
+    RootFrame roots(1);
+    Rooted<Item> rect(roots, dom_make_rect_data(ctx->doc, left, top, right - left, bottom - top));
+    js_array_push(ctx->result->get(), rect.get());
+}
+
+extern "C" Item dom_core_text_control_range_rects(Item n, Item start, Item end) {
+    DomElement* elem = dom_op_text_control(n);
+    if (!elem || !_js_current_ui_context || !elem->doc ||
+        !dom_ensure_geometry_snapshot(elem->doc)) return ItemNull;
+    tc_ensure_init(elem);
+    ViewBlock* block = lam::view_require_block(elem);
+    FormControlProp* form = elem->form;
+    if (!block || !form || block->width <= 0.0f || block->height <= 0.0f) return ItemNull;
+    const char* value = form->current_value ? form->current_value : form->value;
+    if (!value) value = "";
+    int64_t start_u16 = it2i(start);
+    int64_t end_u16 = it2i(end);
+    uint32_t first = tc_utf16_to_utf8_offset(value, form->current_value_len,
+        start_u16 < 0 ? 0 : start_u16 > UINT32_MAX ? UINT32_MAX : (uint32_t)start_u16);
+    uint32_t last = tc_utf16_to_utf8_offset(value, form->current_value_len,
+        end_u16 < 0 ? 0 : end_u16 > UINT32_MAX ? UINT32_MAX : (uint32_t)end_u16);
+    float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
+    dom_engine_visual_bounds(static_cast<View*>(elem), &x, &y, &width, &height);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, js_array_new(0));
+    TextControlRangeRectContext ctx = {elem->doc, &result, x, y, block->x, block->y,
+        width / block->width, height / block->height, form->scroll_x, form->scroll_y,
+        x + width, y + height};
+    if (!editing_geometry_text_control_for_each_selection_rect(_js_current_ui_context,
+            elem, first, last, dom_text_control_range_rect, &ctx)) return ItemNull;
+    return result.get();
 }
 JS_FORWARD_ITEM(dom_text_control_caret_bounds_bridge, (void* elem), dom_text_control_caret_bounds, ((DomElement*)elem))
 JS_FORWARD_ITEM(dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))

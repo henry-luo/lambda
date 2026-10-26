@@ -25,6 +25,7 @@ extern "C" {
 
 // geometry and selection results share the same realm-neutral map builder.
 Item dom_result_map(struct DomDocument* doc, const char* const* keys, const Item* vals, int count);
+Item dom_make_rect_data(struct DomDocument* doc, double x, double y, double width, double height);
 
 // Flags carried by every catalog row (see dom_api.def header).
 enum DomOpFlags {
@@ -160,6 +161,7 @@ Item dom_core_remove_node(Item n, Item index);
 Item dom_core_attach_shadow(Item n, Item init);
 Item dom_core_compare_document_position(Item a, Item b);
 Item dom_core_boundary_from_point(Item n, Item x, Item y, Item behavior);
+Item dom_core_text_control_boundary_from_point(Item n, Item x, Item y);
 Item dom_core_focus(Item n, Item options);
 Item dom_core_blur(Item n);
 Item dom_core_show_popover(Item n);
@@ -216,6 +218,13 @@ Item dom_engine_mouse_focus(Item n);
 Item dom_engine_activate_popover(Item a);
 Item dom_engine_caret_operation(Item a, Item b, Item c);
 Item dom_engine_pointer_selection(Item a, Item b);
+Item dom_engine_compose(Item a, Item b, Item c, Item d);
+Item dom_engine_ime_status(Item a);
+Item dom_engine_edit_sync_selection(Item a, Item b);
+Item dom_engine_ime_session(Item a);
+Item dom_engine_set_ime_session(Item a, Item b);
+Item dom_engine_ime_popup(Item a, Item b, Item c);
+Item dom_engine_set_chinese_ime(Item a, Item b);
 Item dom_engine_clear_ime_preedit(Item a);
 Item dom_engine_clipboard_text(void);
 Item dom_engine_clipboard_copy_event(void);
@@ -276,6 +285,7 @@ Item dom_engine_dom_unwrap_range(Item a, Item b, Item c, Item d, Item e);
 Item dom_engine_set_close_guard(Item a, Item b);
 Item dom_engine_request_window_close(Item a);
 Item dom_engine_set_window_title(Item a, Item b);
+Item dom_engine_set_window_min_width(Item a, Item b);
 Item dom_engine_dom_wrap_range(Item a, Item b, Item c, Item d, Item e);
 Item dom_engine_dropdown_open(Item a);
 Item dom_engine_embedded_document_root(Item a);
@@ -358,6 +368,9 @@ Item dom_raise_type_error(const char* message);
 // so one body serves both doors (ES38) instead of a Lambda-only copy.
 Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
 Item dom_create_range_for(Item doc);
+Item dom_core_source_range_rects(Item host, Item start, Item end);
+Item dom_core_text_node_range_rects(Item host, Item text, Item start, Item end);
+Item dom_core_text_control_range_rects(Item n, Item start, Item end);
 // CSSOM rows published at ESO114.
 Item dom_cssom_rule_get_css_rules(Item);
 Item dom_cssom_rule_get_css_text(Item);

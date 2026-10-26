@@ -181,6 +181,20 @@ uint32_t dom_text_utf8_to_utf16(const DomText* t, uint32_t u8) {
         ? tc_utf8_to_utf16_offset(t->text, (uint32_t)t->length, u8) : 0;
 }
 
+// Lambda strings index by code point (S2.5.8), so editor source positions use that unit.
+uint32_t dom_text_utf16_to_codepoint(const DomText* t, uint32_t u16) {
+    if (!t || !t->text) return 0;
+    return (uint32_t)utf8_byte_to_char(t->text, (size_t)t->length, dom_text_utf16_to_utf8(t, u16));
+}
+
+uint32_t dom_text_codepoint_to_utf16(const DomText* t, uint32_t cp) {
+    if (!t || !t->text) return 0;
+    size_t u8 = utf8_char_to_byte(t->text, (size_t)t->length, cp);
+    // a position past the leaf's end clamps to it, as the UTF-8 conversions do.
+    if (u8 == (size_t)-1) u8 = (size_t)t->length;
+    return dom_text_utf8_to_utf16(t, (uint32_t)u8);
+}
+
 // ============================================================================
 // Boundary validity & comparison
 // ============================================================================

@@ -1,0 +1,61 @@
+{
+  "name": "Slides plain text spelling stays in the inline edit",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "This is teh speling",
+      "clear": true
+    },
+    {
+      "type": "wait",
+      "ms": 2200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-text\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-text .spelling-underline\")].map(n=>n.getAttribute(\"data-spelling-word\")).sort().join(\",\")===\"speling,teh\""
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-text .spelling-underline\")].every(n=>{let r=n.getBoundingClientRect(),h=document.getElementById(\"canvas-text\").getBoundingClientRect();return r.width>5&&r.left>=h.left&&r.right<=h.right&&r.top>=h.top&&r.bottom<=h.bottom})"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-slides-plain-inline.png"
+    }
+  ]
+}

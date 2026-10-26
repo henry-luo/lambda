@@ -394,9 +394,6 @@ bool module_is_loading(const char* path) {
 // =============================================================================
 
 #ifndef LAMBDA_NO_MIR
-extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
-    void* type_list);
-
 Item module_build_lambda_namespace(void* script_ptr) {
     Script* script = (Script*)script_ptr;
     if (!script || !script->ast_root) return ItemNull;

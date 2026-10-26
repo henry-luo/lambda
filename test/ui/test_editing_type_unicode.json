@@ -1,0 +1,95 @@
+{
+  "name": "type and type_physical insert non-ASCII text by code point",
+  "html": "test/ui/test_editing_type_unicode.html",
+  "viewport": {
+    "width": 600,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "type sends one text input per code point, so non-ASCII text arrives intact"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "ro 腿部空间 café 😀z"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "ro 腿部空间 café 😀z"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "中文",
+      "clear": true
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "中文"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#p"
+      }
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#p"
+      },
+      "start": 1,
+      "end": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#p"
+      },
+      "text": "ro 腿部空间 café 😀z"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#p"
+      },
+      "equals": "xro 腿部空间 café 😀z"
+    },
+    {
+      "type": "log",
+      "message": "type_physical decodes the same text"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#p"
+      },
+      "text": "汉字é"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#p"
+      },
+      "equals": "xro 腿部空间 café 😀z汉字é"
+    }
+  ]
+}

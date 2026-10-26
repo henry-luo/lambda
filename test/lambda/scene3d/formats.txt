@@ -1,0 +1,11 @@
+[1, 36, [0, 0, -1]]
+[18, 15, 15]
+['ply', 'binary_little_endian', ["CC0 Lambda pyramid"], [['vertex', 5], ['face', 5]], [255, 80, 80, 255, 255]]
+[18, [0, -1, 2, -1], "#7c5900", 2]
+[["lit-asset-light-1", 'spot', "key", 6, 8, 0.6], ["lit-asset-light-2", 'point', "fill", 2, null, null]]
+0
+true
+[17, 3, 3, ["KHR_materials_emissive_strength", "KHR_lights_punctual"], 3]
+[binary, 0]
+true
+true

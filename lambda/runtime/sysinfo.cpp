@@ -825,7 +825,7 @@ static Item resolve_lambda(void) {
 
     lambda.put("version", "0.1.0");  // TODO: get from config
     // Keep package resources aligned with the import resolver's asset root.
-    lambda.put("home", g_lambda_home);
+    lambda.put("home", host_path(HOST_PATH_HOME));
 
     cache->lambda_info = lambda.final();
     cache->lambda_time = time(nullptr);

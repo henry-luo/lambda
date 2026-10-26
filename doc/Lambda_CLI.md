@@ -188,7 +188,9 @@ lambda convert <input> [-f <from>] -t <to> -o <output> [options]
 
 **Supported output formats:**
 
-`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`
+`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`, `gltf`, `glb`
+
+For `gltf` and `glb` the input is loaded as a 3D scene asset (OBJ/MTL, glTF/GLB, A3D, STL or PLY); `-f` then names the source model format instead of a data format. `glb` is written as binary. See the [glTF export mapping](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export).
 
 The input format flag `-f` supports colon-separated `type:flavor` syntax (e.g., `graph:mermaid`).
 
@@ -217,6 +219,7 @@ lambda convert notes.txt -f wiki:zimwiki -t wiki:creole --loss allow -o notes.cr
 lambda convert guide.md -t asciidoc -o guide.adoc
 lambda convert guide.md -t typst -o guide.typ
 lambda convert contacts.vcf -f vcf -t vcf -o exported.vcf
+lambda convert scan.ply -t glb -o scan.glb
 ```
 
 ---
@@ -354,6 +357,25 @@ lambda demo tetris --headless --event-file test/ui/tetris_autoplay.json
 ```
 
 ---
+
+### `devtools` — Live Document Inspection
+
+```bash
+make devtool
+node utils/devtool/inspect.mjs test/devtools/document.html
+```
+
+In the DevTool application choose **Live**, enter a document path and press
+**Launch**. Inspect the native DOM, computed styles and geometry; pick an element
+from the rendered preview; edit an inline CSS declaration and undo it. The target
+runs in a separate process. **Native window** also opens its own viewer window.
+
+The native launcher entry is `lambda devtools <document> --pipe <inherited-fd>
+[--headless]`; the application/headless client provides the duplex pipe. Mark
+messages use Lambda maps and values, with a four-byte byte-length prefix.
+Source currently means a local-file snapshot at attach. Source stepping and
+runtime-value evaluation are later work. See the
+[DevTool guide](../utils/devtool/README.md#live-document-inspection).
 
 ### `view` — Interactive Document Viewer
 
@@ -655,6 +677,10 @@ An interactive terminal keeps its input history in `~/.lambda_history`; `LAMBDA_
 | Variable | Values | Description |
 |----------|--------|-------------|
 | `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lmd` (source checkout and release bundle alike), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
+| `LAMBDA_CACHE_DIR` | path | Base of the purgeable caches (`<dir>/cache` for HTTP and Radiant state, `<dir>/radiant_cache`). Default: `./temp` |
+| `LAMBDA_TEMP_DIR` | path | Scratch files (`io` temp files, downloads) and developer dumps (`mir_dump.txt`, profiles, event/state logs). Default: `./temp` |
+| `LAMBDA_LOG_DIR` | path | Where `log.conf` is read from and where its relative outputs (`log.txt`) are written. Default: the working directory |
+| `LAMBDA_DOCUMENTS_DIR` | path | Base directory for user documents, for hosts without a meaningful working directory. Default: the working directory |
 | `LAMBDA_EXEC_BACKEND` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL always uses its persistent interpreter session; the tier only decides when hot functions compile (`jit`: at the first call) |
 | `LAMBDA_REPL_HISTORY` | path | REPL history file (default `~/.lambda_history`; empty disables) |
 | `JUBE_MODULE_PATH` | path | Where Node modules are discovered (default: `./modules` beside the executable) |

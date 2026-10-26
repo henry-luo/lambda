@@ -15,7 +15,7 @@ pub fn options(value) map^ {
         group_leaders:c.bounded(c.get(opts,"group_leaders",rank.defaults.group_leaders),1,128,"group_leaders")^}
 }
 
-fn query(path) map {
+pub fn query(path) map {
     let tokens = path.tokens
     let initials = any([for (token in tokens) token.kind == "initial"])
     let incomplete = any([for (token in tokens) token.kind == "prefix"])
@@ -40,6 +40,13 @@ fn fits(posting,query) bool {
             else token.value == (if (head == "") reading[0] else head)
         }])
     }
+}
+
+// learned entries share the pack's token filter, including orthographic initials.
+pub fn matches(reading,query) bool {
+    let key = string(len(split(reading,"'"))) ++ ":" ++ reading;
+    if (query.abbreviation) fits({reading:reading},query)
+    else if (query.prefix) starts_with(key,query.key) else key == query.key
 }
 
 fn collect(table,line,at,query,budget,limit,ordinal = 0,items = []) map^ {
@@ -81,9 +88,9 @@ fn search(engine,paths,opts,at,progress) map^ {
     }
 }
 
-pub fn candidates(engine,paths,opts) map^ {
+pub fn candidates(engine,paths,opts,input_length) map^ {
     let result = search(engine,paths,opts,0,{items:[],keys:0,postings:0,truncated:false})^
-    let ranked = rank.ranked(result.items,opts.coverage_floor,opts.group_leaders);
+    let ranked = rank.ranked(result.items,opts.coverage_floor,opts.group_leaders,input_length);
     {items:[for (item in take(ranked,opts.max_candidates)) {text:item.text,reading:item.reading,consumed:item.consumed,
         coverage:item.coverage,match:item.match,weight:item.weight}],truncated:result.truncated or len(ranked) > opts.max_candidates,
         scanned:{keys:result.keys,postings:result.postings}}

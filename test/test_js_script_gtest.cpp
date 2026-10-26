@@ -276,16 +276,23 @@ TEST(JsAgentState, KeepsQueuesGlobalsAndTimerOwnershipSeparate) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
+static void check_native_event_gc(const char* name, void (*check)()) {
     Runtime runtime = {};
     runtime_init(&runtime);
     const char source[] = "0;";
-    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
-        "native-focus-roots.js", NULL);
+    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1, name, NULL);
     EXPECT_FALSE(item_is_error(warmup));
     if (!item_is_error(warmup)) {
         gc_heap_t* gc = runtime.eval_context->heap->gc;
         gc_set_force_collect_interval(gc, 1);
+        check();
+        gc_set_force_collect_interval(gc, 0);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
+    check_native_event_gc("native-focus-roots.js", +[]() {
         {
             RootFrame roots(2);
             Rooted<Item> event(roots, ItemNull);
@@ -310,21 +317,11 @@ TEST(JsDomEvents, NativeFocusConstructionRetainsUncachedRelatedTarget) {
             }
             EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
         }
-        gc_set_force_collect_interval(gc, 0);
-    }
-    runtime_cleanup(&runtime);
+    });
 }
 
 TEST(JsDomEvents, NativeMouseBoundariesRetainRelatedTargetAndEventFlags) {
-    Runtime runtime = {};
-    runtime_init(&runtime);
-    const char source[] = "0;";
-    Item warmup = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
-        "native-mouse-roots.js", NULL);
-    EXPECT_FALSE(item_is_error(warmup));
-    if (!item_is_error(warmup)) {
-        gc_heap_t* gc = runtime.eval_context->heap->gc;
-        gc_set_force_collect_interval(gc, 1);
+    check_native_event_gc("native-mouse-roots.js", +[]() {
         const char* types[] = {"mouseenter", "mouseleave", "mouseover", "mouseout"};
         for (int i = 0; i < 4; i++) {
             SCOPED_TRACE(types[i]);
@@ -351,9 +348,25 @@ TEST(JsDomEvents, NativeMouseBoundariesRetainRelatedTargetAndEventFlags) {
             EXPECT_EQ(js_get_name_key(event.get(), "composed").item, b2it(bubbles));
             EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
         }
-        gc_set_force_collect_interval(gc, 0);
-    }
-    runtime_cleanup(&runtime);
+    });
+}
+
+TEST(JsDomEvents, NativeKeyboardAndCompositionRetainTypeAndPayload) {
+    check_native_event_gc("native-keyboard-composition-roots.js", +[]() {
+        RootFrame roots(1);
+        Rooted<Item> event(roots, js_create_native_keyboard_event("keydown", "b", "KeyB", 66,
+            true, false, false, false, false));
+        EXPECT_STREQ(fn_to_cstr(js_get_name_key(event.get(), "type")), "keydown");
+        EXPECT_STREQ(fn_to_cstr(js_get_name_key(event.get(), "key")), "b");
+        EXPECT_STREQ(fn_to_cstr(js_get_name_key(event.get(), "code")), "KeyB");
+        EXPECT_EQ(js_get_name_key(event.get(), "ctrlKey").item, b2it(true));
+        EXPECT_EQ(js_get_name_key(event.get(), "keyCode").item, i2it(66));
+        event.set(js_create_native_composition_event("compositionupdate", "北京"));
+        heap_gc_collect();
+        EXPECT_STREQ(fn_to_cstr(js_get_name_key(event.get(), "type")), "compositionupdate");
+        EXPECT_STREQ(fn_to_cstr(js_get_name_key(event.get(), "data")), "北京");
+        EXPECT_EQ(js_get_name_key(event.get(), "isTrusted").item, b2it(true));
+    });
 }
 
 TEST(JsObjectMetadata, LambdaInputShapesRemainNeutralAfterJsBootstrap) {

@@ -1,0 +1,64 @@
+["https://api.dictionaryapi.dev/api/v2/entries/en/hello", "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=zh-CN&q=How%20are%20you%3F"]
+["Japanese", "xx"]
+["brave", "Hello", ""]
+{
+  text: "brave",
+  selection: null
+}
+"Hello brave world"
+true
+["world", "world\nSecond"]
+{
+  word: "hello",
+  phonetic: "/həˈləʊ/",
+  meanings: [{
+      part: "noun",
+      definitions: [{
+          text: "A greeting.",
+          example: null
+        }],
+      synonyms: ["greeting", "hi"]
+    }, {
+      part: "interjection",
+      definitions: [{
+          text: "Said on meeting.",
+          example: "Hello, everyone."
+        }],
+      synonyms: []
+    }]
+}
+{
+  kind: "dictionary",
+  seq: 0,
+  text: "qwzxv",
+  urls: ["https://api.dictionaryapi.dev/api/v2/entries/en/qwzxv", "https://api.dictionaryapi.dev/api/v2/entries/en/Qwzxv"]
+}
+{
+  error: "No definitions found for “qwzxv”."
+}
+{
+  error: "The dictionary service is unavailable right now (HTTP 503). Try again later."
+}
+"hello"
+["https://api.dictionaryapi.dev/api/v2/entries/en/evening", "https://api.dictionaryapi.dev/api/v2/entries/en/Evening"]
+{
+  error: "The dictionary service is unavailable right now (HTTP 404). Try again later."
+}
+[false, true, true, false]
+{
+  text: "Hola Mundo. ¿Cómo estás?",
+  source: "en"
+}
+["https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=fr&q=Hello%20world.%20How%20are%20you%3F"]
+{
+  result: {
+    text: "Hola Mundo. ¿Cómo estás?",
+    source: "en"
+  }
+}
+{
+  error: "The translation service sent an unreadable answer."
+}
+{
+  text: "Bonjour"
+}

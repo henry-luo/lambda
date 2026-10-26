@@ -5,10 +5,18 @@
 > dictionary pack format specified in full as version 1 and adopted by the user
 > (§6). M0's offline preparation and data validation are implemented and
 > qualified as of 2026-10-25. M1's engine and its frozen evaluation baseline are
-> implemented; qualification is recorded in the implementation record. M2/M3
-> are not implemented. M0 retained-heap attribution and the provisional
-> performance targets remain open. IME-O1, IME-O2 and
+> implemented. M2's pure session reducer and explicit overlay persistence are
+> implemented as of 2026-10-26; qualification is recorded in the implementation
+> record. M3 Radiant transport, popup and body adapter are implemented and
+> focused-qualified as of 2026-10-26; the aggregate gates retain two failures
+> reproduced on the preserved pre-M3 host. M4 Traditional conversion, the
+> `zh-Hant` pack and profile selection are implemented and qualified by conversion
+> fixtures, reproducibility and the frozen quality report; the same two aggregate
+> failures remain. M0 retained-heap attribution and the
+> provisional performance targets remain open. IME-O1, IME-O2 and
 > IME-O4 are resolved and IME-O7 is deferred (data stays uncommitted).
+> M5, a macOS-wide InputMethodKit host with a Lambda-runtime-only build
+> profile, is designed in §8.5–§8.8 and has not been implemented or installed.
 > Evidence and remaining gates: [implementation record](impl/Lambda_Impl_IME_Chinese.md).
 > **Package:** `lambda.ime.chinese`.
 > **Scope:** a shipped, data-driven pinyin input method that converts typed
@@ -16,9 +24,11 @@
 > syllables, the rest stays in composition, and the text commits when every
 > syllable is consumed. It runs as a pure Lambda library anywhere Lambda runs,
 > and as an in-engine input method for Radiant's editable surfaces through the
-> existing composition pipeline. Simplified Chinese first, Traditional as a
-> converted profile. **Whole-sentence conversion is out of scope** and left to
-> a later proposal (§11.3).
+> existing composition pipeline. M5 adds a macOS input source usable by other
+> applications through InputMethodKit, calling the same engine and reducer.
+> Simplified Chinese first, Traditional as a converted profile.
+> **Whole-sentence conversion is out of scope** and left to a later proposal
+> (§11.3).
 > **Spec linkage:** D7.2.4v4 and D7.2.6 (the `lambda.ime.chinese` path and its
 > resolution); D7.2.1 and D7.2.3 (immutable package bindings, instantiated
 > once: the dictionary is loaded explicitly, never at import, IME2); S12.1.1v3
@@ -28,8 +38,9 @@
 > (Lambda reaches Radiant only through the `radiant-dom` module, IME-E1);
 > D7.1.2v2 (resource IO through `lambda-io`); S2.5.8 and S17.4.1 (code-point
 > positions for the preedit caret); S11.4.2 (`T^` results); S17.8.1 (option
-> names checked at the call). No formal ruling changes.
-> **Authority:** package design. Decisions IME1–IME13, native enablers
+> names checked at the call). D7.2.5 governs Radiant's DOM editing policy; the
+> macOS input source has no Radiant or DOM dependency. No formal ruling changes.
+> **Authority:** package design. Decisions IME1–IME16, native enablers
 > IME-E1–IME-E3, open items IME-O1–IME-O10. The `IME` series is new; it is
 > the home series for input-method packages.
 > **Related:** [Lambda_Pkg_Spelling.md](Lambda_Pkg_Spelling.md) (pack
@@ -68,18 +79,20 @@ filtering).
 4. **Usable everywhere.** The engine is pure Lambda and works in `lambda-cli`
    and `lambda-headless` builds. In Radiant it drives the same composition
    events as an OS input method, so `<input>`, `<textarea>`, `contenteditable`
-   and JavaScript pages need no changes.
+   and JavaScript pages need no changes. M5 also exposes it as a user-installed
+   macOS keyboard input source to other applications (IME14).
 5. **Clean distribution.** Only permissively licensed data is bundled with the
    MIT-licensed repository; every pack is reproducible from pinned sources and
    carries its manifest and notices (§3.3).
 
-**Non-goals (first release).** Whole-sentence conversion and any n-gram
+**Non-goals (first in-engine release).** Whole-sentence conversion and any n-gram
 language model (§11.3); cloud candidates; Zhuyin/Bopomofo, double pinyin
 (shuangpin), Wubi, Cangjie and other schemes (later milestones, which the
 protocol of IME3 accommodates); handwriting and voice; hanzi-to-pinyin
 annotation (the data could serve it later); emoji and symbol pickers beyond
-full-width punctuation; replacing an OS input method the user already runs
-(IME10); Japanese and Korean.
+full-width punctuation; automatically replacing another OS input source
+(IME10); Japanese and Korean. The macOS-wide input source is M5, separate
+from that in-engine release.
 
 ---
 
@@ -217,9 +230,10 @@ terminal UI or a test harness is another host of the same engine.
 
 **IME2 — The dictionary is loaded explicitly.** `pn load(profile)` reads a
 pack and returns an immutable engine value. Importing the package loads no
-data: package bindings are immutable and instantiated once per process
-(D7.2.1, D7.2.3), and a multi-megabyte read is an effect that belongs to the
-caller's `pn`. A host loads once and reuses the value.
+data: package bindings are immutable (D7.2.1, D7.2.3), and a multi-megabyte
+read is an effect that belongs to the caller's `pn`. A host loads once per
+owning document runtime and reuses the value across its controls; GC values
+do not cross runtime heaps (D5.4.1).
 
 **IME3 — The session is a value; the key reducer is pure.**
 `fn key(engine, session, evt)` returns `{session, actions}`. It is a `fn`
@@ -250,8 +264,12 @@ Validation happens at preparation, not at every load. Python is development
 tooling only; loading and conversion never require it. The pack format is
 §6's version 1, adopted 2026-10-25 (USER).
 
-**IME7 — One deterministic ranking rule** (§5.3), tuned against a frozen
-evaluation set before any quality claim (§9).
+**IME7v2 — Match evidence precedes frequency** (§5.3; USER, 2026-10-26).
+After explicit learned selections, complete exact readings precede complete
+fuzzy readings, which precede partial/prefix/abbreviation routes. Frequency
+and rare-word demotion operate within those groups; they cannot demote a
+complete fuzzy reading behind an abbreviation. Qualify the deterministic rule
+against the frozen evaluation sets before any quality claim (§9).
 
 **IME8 — Learning is an overlay value.** The session carries the user's
 selections as an immutable overlay that boosts and adds entries. The engine
@@ -286,6 +304,27 @@ caret reported to Radiant is a code-point offset into the preedit text
 pair is a separate setting, off by default. Settings are part of the session
 value, validated when given, changeable while the input method runs, and saved
 by the host with its other settings, never by the package (§5.7).
+
+**IME14 — One reducer, two hosts** (USER, 2026-10-26). The macOS input source
+calls `lambda.ime.chinese` directly through a retained Lambda runtime. Its
+InputMethodKit adapter translates platform events and applies reducer actions;
+it does not reimplement segmentation, ranking, paging, learning, or key policy.
+The Radiant adapter remains the in-engine host under D7.2.5 and IME9/IME10.
+
+**IME15 — A dedicated macOS IME build profile** (USER, 2026-10-26). Derive
+`macos-ime` from the existing `cli` variant and keep only the Lambda runtime,
+package/resource IO needed by this engine, MIR, and the native InputMethodKit
+host. It contains no JavaScript engine, DOM, Radiant, Jube, HTTP server, or
+CLI command dispatcher (§8.6). The IME executable is placed in a macOS app
+bundle; neither `lambda.exe` nor a per-key child process is its entry point.
+
+**IME16 — Bundle resources and separate user data** (IME-O7, §8.7). Prepared
+pack bytes and Lambda package sources are immutable bundle resources, while
+learned choices, settings, and personal word edits live in the user's
+Application Support directory. Preparation and bundle staging read ignored
+local pack files without adding them to Git. The Sogou Bible packs remain
+optional local data; a distributable artifact omits them unless its
+redistribution rights are established.
 
 ---
 
@@ -340,21 +379,32 @@ package and every pack reading is validated against it at preparation.
 
 ### 5.3 Ranking
 
-Candidates are ordered by these keys in turn:
+Candidates are ordered by these keys in turn (IME7v2):
 
-1. **User overlay**: words the user chose for this input, by recency and count.
-2. **Coverage**: words consuming more syllables first, so the longest word
-   for `beijingdaxue` (北京大学) leads and single characters of the first
-   syllable come last. A longer word is promoted over shorter ones only above
-   a weight floor; below it, it follows the first entries of the next group,
-   so a rare four-syllable word cannot bury a common two-syllable one.
-3. **Match quality**: exact > fuzzy > incomplete last syllable > abbreviation.
-4. **Weight** from the pack.
-5. **Stable tie-break** by pack order.
+1. **User overlay**: words the user chose, by recency and count (IME8).
+2. **Match evidence**: a complete exact reading, then a complete fuzzy
+   reading, then every partial, incomplete or abbreviated route. A complete
+   reading consumes the entire raw input and specifies every syllable in full;
+   consuming all letters as initials alone does not qualify. Use the actual
+   input length, even when the path search is truncated.
+3. **Coverage within each evidence group**: more syllables first. Below the
+   weight floor, a longer word follows the first `group_leaders` entries of
+   the next available shorter group. This demotion never crosses an evidence
+   boundary.
+4. **Match quality within a coverage group**: exact > fuzzy > incomplete last
+   syllable > abbreviation.
+5. **Weight** from the pack, then **stable pack order**.
 
-The same text reached by two paths appears once, at its best position. The
-weight floor and group limits are set from the evaluation set (§9), not
-guessed.
+Thus `sifei` with fuzzy s/sh enabled ranks a complete `shi'fei` (是非) before
+`shi'fou` (是否), which matches only `sif` and leaves `ei`. A low dictionary
+weight cannot reverse that preference. An exact `si'fei` (私费) still leads the
+fuzzy spelling. For `beijingdaxue`, both complete exact homophones precede a
+partial 北京; the common 北京大学 leads the rare 北境大雪 by weight.
+
+The same text reached by multiple paths appears once, at its best position;
+deduplication happens after evidence grouping. The original frozen weight
+floor and group limits remain unchanged. No sentence-context model or
+word-specific ranking overrides are introduced.
 
 ### 5.4 Session state machine
 
@@ -364,20 +414,36 @@ guessed.
 | idle | Shift + letter | `pass`: an uppercase Latin letter |
 | idle | mapped punctuation | `commit` its full-width form (§5.5) |
 | idle | anything else | `pass` |
-| composing | letter, `'` | extend the input; `compose` + `candidates` |
+| composing | letter, `'` | insert at the pinyin caret; `compose` + `candidates` |
 | composing | Space | take the highlighted candidate |
 | composing | `1`–`9` | take that candidate on the current page |
 | composing | `-` / `=`, PageUp / PageDown | previous / next page |
-| composing | arrows | move the highlight |
-| composing | Backspace | drop the last letter; with no letters left, undo the last selection; with nothing left, `cancel` |
-| composing | Enter | commit the preedit as typed (converted words plus raw letters) |
-| composing | Esc | `cancel` |
+| compact | Left / Right | previous pinyin syllable boundary / next letter (USER, 2026-10-26) |
+| compact | Down | open the expanded candidate grid |
+| expanded | Left / Right / Up / Down | previous / next candidate or previous / next grid row; Up on the first row returns to the strip (USER, 2026-10-26) |
+| composing | Backspace / Delete | remove the character before / after the pinyin caret; Backspace with no raw input restores the last selection |
+| compact | Enter | commit the preedit as typed (converted words plus raw letters) |
+| expanded | Enter / Space | select the highlighted candidate |
+| expanded | Esc | return to the compact strip, preserving composition |
+| compact | Esc | `cancel` |
 | any | modified key (Ctrl, Alt, Meta) | `pass`; while composing, commit nothing and keep the session |
 
 Taking a candidate consumes its syllables. If pinyin remains, the reducer
 emits `compose` with the new preedit and fresh `candidates`; otherwise it
-emits `commit` with the full text. Caret movement inside the preedit is a later
-refinement; in the first release the caret stays at the end.
+emits `commit` with the full text. The session keeps a zero-based caret in the
+remaining raw pinyin. A `compose` action offsets it by the converted prefix's
+code-point length (S2.5.8/S17.4.1). Compact Left/Right emit only `compose`;
+they do not re-query or move the candidate highlight. Left uses the preferred
+longest-exact-first viable lattice route, with character stops for invalid tails;
+Right advances one code point. The native expanded grid reports its responsive
+column count to the reducer. Up from its first logical row returns to the
+strip with the same candidate and pinyin caret; Up from lower rows continues
+normal row navigation. Repeated Up in the strip is a no-op. Other grid arrows
+change only the candidate selection; raw edits close the grid. Candidate consumption subtracts the
+consumed raw length from the caret and clamps it to the remaining pinyin.
+Backspace at the start of nonempty pinyin and Delete at its end are consumed
+without changing text. Deleting a syllable's only letter also removes an empty
+separator, preserving the query's no-leading/no-repeated-separator invariant.
 
 ### 5.5 Mode and punctuation
 
@@ -386,13 +452,24 @@ and English mode; in English mode every key passes. In Chinese mode
 punctuation maps to full-width forms (`,`→`，`, `.`→`。`, `?`→`？`, `\`→`、`,
 paired quotes alternate “ ”), committed directly when idle and after the
 current composition when composing. The table is small and self-authored.
+Switching to English with an active composition commits its existing preedit
+before subsequent English keys pass through. Shift chords and key repeats do
+not toggle modes. Paired quotes retain their next opening/closing side across
+compositions in the session.
 
 ### 5.6 Traditional profile
 
 `zh-Hant` (M4) converts every word at preparation with OpenCC's phrase table,
-falling back to its character table; a word with several Traditional forms
+falling back to its character table. The implementation applies the longest
+phrase at each source position before character fallback; outputs are not
+converted a second time. A word with several Traditional forms
 that the phrase table does not resolve (`发` → `發` / `髮`) yields one entry per
-form, each keeping the source weight. Taiwan and Hong Kong vocabulary variants
+form, each keeping the source reading and weight. Identical converted
+word/reading pairs merge by maximum source weight, and abbreviations derive
+again from the converted lexicon. The manifest records the source lexicon
+hash, conversion policy, expansion/merge counts and exact OpenCC pins. The
+source character set is converted with phrase-exception glyphs included;
+pack format remains version 1. Taiwan and Hong Kong vocabulary variants
 use OpenCC's regional tables and are IME-O8.
 
 ### 5.7 Fuzzy pinyin settings
@@ -434,8 +511,10 @@ off by default.
 (the default), `"all"`, or a list of pair names:
 
 ```lambda expr
-{fuzzy: ["z=zh", "c=ch", "s=sh", "an=ang"], page_size: 9}
+{fuzzy: ["z=zh", "c=ch", "s=sh", "an=ang"], page_size: 7}
 ```
+
+`page_size` accepts 1–9 and defaults to **7** (USER, 2026-10-26).
 
 The package exports the supported pairs with their kinds and examples
 (`fuzzy_pairs`), so a host's settings screen lists them from the package and
@@ -661,6 +740,13 @@ survive a pack rebuild; an entry whose pair is not in the pack is a word the
 user added. Recency is a selection counter (`last_seq`, `next_seq`), not a
 clock time, which keeps the reducer a deterministic `fn` (S12.1.1v3). The
 settings map of §5.7 is not stored here: the host saves it separately.
+M2 keeps selected words pending until composition commits: cancellation and
+undo never train the overlay. Loading/attaching validates NFC Han words of
+1–9 code points, syllable count/membership, unique word/reading pairs and
+integer counters with `last_seq < next_seq`. Counters are bounded by the
+compact-int maximum 9007199254740991; exhaustion is an error. Saving validates
+first and atomically replaces only the explicitly supplied path, without its
+in-memory query index or any settings.
 
 ### 6.7 Alternatives and measurements
 
@@ -714,14 +800,14 @@ Actions:
 | `pass` | — | the key was not consumed; default handling continues |
 
 ```lambda no-run
-// no-run: M1 load/candidates exist; this example's session reducer requires M2.
+// no-run: requires the locally prepared zh-Hans dictionary.
 import ime: lambda.ime.chinese
 
 pn main() {
     let engine = ime.load("zh-Hans")^
     let found = ime.candidates(engine, "beijingdaxue")^
     print(found.items[0].text)          // 北京大学
-    var s = ime.session(engine)
+    var s = ime.session(engine)^
     for (k in ["b", "j", " "]) {
         let step = ime.key(engine, s, {type: "keydown", key: k})^
         s = step.session
@@ -758,7 +844,12 @@ rest of today's chain unchanged. The engine and session live in the body
 view's state, beside `ime_composing`: the same document-scoped cardinality
 argument ES18 made for the composition session (`lmd/package/dom/ime.ls`
 header). How `lambda.dom` reaches the engine, by direct import or through a
-registered input method, is IME-O1.
+registered input method, is IME-O1 (resolved: direct import). The implementation
+is in `lambda.dom.ime`; its opaque engine/session value is rooted in the
+owning document runtime (D5.3.3/D5.4.1). `<body data-ime="chinese">` enables a
+document, `off` overrides a window enable, and a missing attribute inherits
+`radiant.set_chinese_ime(owner, enabled)` (IME-O2). The host API and live
+settings operations are documented in `doc/Lambda_IME_Chinese.md`.
 
 ### 8.3 Native enablers
 
@@ -774,14 +865,37 @@ editing controller and the DOM behavior package mid-handler.
 
 **IME-E2 — Candidate popup.** A native popup kind beside the context menu:
 document-scoped, anchored below the caret rectangle from
-`radiant_editing_focused_caret_rect`, laid out horizontally or vertically,
-showing numbered rows and a page indicator. Lambda supplies the rows; a click
+`radiant_editing_focused_caret_rect`, laid out as a horizontal strip,
+showing seven numbered options by default and a trailing mode/page indicator
+(USER, 2026-10-26). Labels retain the editor's family with a reduced size of
+85%, capped at 16 CSS pixels before zoom. Native font snapshots own their
+cached handles and refresh from the selected editor before use (D4.5.1v4).
+Measured strip widths wrap on narrow viewports. Down opens a scrollable grid
+of all returned candidates; Up on its first row collapses to the strip,
+preserving selection and preedit. Native layout reports its column count, while
+Lambda owns expansion, navigation and selection policy (D7.2.5). Lambda supplies the rows; a click
 reaches the behavior package as an index, the ES34 pattern. It is not a DOM
 subtree, so author CSS, `MutationObserver` and selectors never see it.
 Exposing it to assistive technology is a later step.
 
 **IME-E3 — Mode indicator and switch.** A visible Chinese/English indicator
 and the API that turns the input method on for a document or window (IME-O2).
+The demo's selected buttons and live status expose the effective scope,
+spelling and character profile. Choosing a window button clears its document
+override; choosing Use window setting preserves the current window default.
+The fuzzy master button toggles all selected sound pairs; an adjacent `v`
+opens a per-pair configuration panel derived from `fuzzy_pairs` (IME13). All
+11 pairs start enabled in the demo via `data-ime-fuzzy="all"` (USER,
+2026-10-26). Off retains the selections;
+checkbox changes while on refresh candidates and preserve preedit/page size.
+An empty selection switches the master off. Done, Escape and an outside click
+dismiss the bounded, scrollable panel. While it is open, `lambda.dom.ime`
+suspends the native indicator and candidates without canceling composition.
+All presentation paths honor that suspension, including live configuration
+and focus. Dismissal restores a reducer frame snapshot, preserving the current
+mode, page and highlight; an ineligible editor or active OS composition keeps
+it hidden (D7.2.5, IME10). These are demo controls; the IME-O2 API
+precedence and S17.8.1 settings contract remain unchanged.
 
 ### 8.4 Coexistence with OS input methods
 
@@ -790,6 +904,151 @@ in-engine session could start; the adapter checks it and passes every key
 (IME10). When both are enabled the OS input method wins, and the
 documentation tells the user to switch the OS input source to a Latin layout
 to use the bundled one.
+
+### 8.5 macOS input-source host (M5)
+
+The existing `radiant/ime_mac.mm` implements the **client** side of macOS text
+input for Radiant. M5 adds the complementary, process-wide **input-source**
+side. A background `.app` creates an `IMKServer`; InputMethodKit creates an
+`IMKInputController` for each client input session. The native controller owns
+only platform transport and presentation. A retained Lambda runtime imports
+`lambda.ime.chinese` once, loads each selected profile explicitly (IME2,
+D7.2.4v4/D7.2.6), and invokes `session`, `key`, `configure`, and `with_user` on
+the existing engine (IME3/IME14, S12.1.1v3). The engine is cached per profile;
+each controller has its own precisely rooted session value (D5.3.3/D5.4.1).
+Callbacks are serialized through that runtime, and controller close releases
+its root. No Lambda evaluator or dictionary is created for each keystroke.
+
+The controller translates `NSEvent` text, special keys and modifiers into the
+event map of §7. It translates Shift modifier changes into the reducer's
+`keydown`/`keyup` tap contract, with the delivery behavior verified on the
+target macOS version. A selection in the candidate window feeds the reducer's
+`Candidate` event with its index; the native UI never applies a choice on its
+own. `activateServer`, `deactivateServer`, `commitComposition`, focus changes,
+and client loss finish or discard the per-client provisional text exactly
+once. If loading or evaluation fails before consuming a key, the host hides
+its UI and passes that key to the client rather than swallowing it.
+
+The host starts with the demo's user policy of seven candidates, all supported
+fuzzy pairs enabled and Simplified Chinese; persisted user settings take
+precedence (IME13, S17.8.1).
+
+| Reducer action (§7) | InputMethodKit host effect |
+|---|---|
+| `compose` | Set the client's marked text and selection inside it. Convert the Lambda code-point caret to a UTF-16 `NSRange`; chosen Han text may contain supplementary characters (S2.5.8/S17.4.1). |
+| `candidates` | Update or hide the native candidate view, retaining the reducer's page, highlight, expansion and order. |
+| `commit` | Replace the marked range with final text once, then clear the native presentation. |
+| `cancel` | Remove marked text without inserting the original raw pinyin. InputMethodKit's default `cancelComposition` restores the original string, so it cannot implement this action unchanged. |
+| `pass` | Return `NO` from the event handler and leave the client key path intact. |
+
+Apply an action batch after `ime.key` returns; a client callback must not
+re-enter a half-mutated Lambda session. The host neither reads surrounding
+document text for ranking nor sends keystrokes over a network. When this OS
+source is active in Radiant, the existing in-engine adapter stands down under
+IME10; it does not convert the same keys a second time.
+
+### 8.6 `macos-ime` build profile (M5)
+
+`build_lambda_config.json` gains `platforms.macos-ime`, **derived from**
+`platforms.cli`, with a separate `build_ime_macos/` object tree and a native
+InputMethodKit entry point. This is a build variant, not a Lambda execution
+tier: debug and release forms of the same variant must be possible. The
+planned `make build-ime-macos` target generates its own Premake file from the
+JSON config, builds the native executable, then stages the `.app`. Generated
+Lua and Makefiles are never edited by hand.
+
+The variant keeps the CLI profile's Lambda parser, evaluator, GC, MIR Direct,
+package resolver and `lambda-io` resource path (D7.1.2v2). It keeps only the
+JSON/binary/text input and JSON output support needed for pack and user-state
+files. It replaces `lambda/main.cpp` with `lambda/host/macos_ime/main.mm`, an
+InputMethodKit controller, and a narrow native-to-Lambda invocation bridge.
+Its platform links are Foundation, AppKit, InputMethodKit and the text input
+source APIs needed for registration. The bundle uses no Radiant rendering
+library or browser view for candidates.
+
+The required source/link closure excludes `lambda/js/`, `lambda/dom/`,
+`radiant/`, Jube/Node modules, the HTTP server, CLI command handlers, and
+unrelated CLI image, document, physics and network facilities. It also
+excludes their libraries, including GLFW, ThorVG, WebKit and curl. The CLI
+variant currently lists `lambda/js/js_well_known_names.c` and the generator
+adds some libraries without checking a variant's actual consumers. M5 must
+move any genuinely shared names to a runtime-neutral owner and make library
+selection follow the target's dependency graph; it may not retain a JS object
+or library merely to satisfy a link error. A build manifest plus symbol/link
+audit proves this boundary, rather than assuming a `LAMBDA_NO_JS` define is
+sufficient (IME15).
+
+`utils/generate_premake.py` currently applies one variant overlay; it cannot
+inherit `cli`, add host sources, restore the AppKit/Carbon links excluded by
+`cli`, or emit an extensionless macOS bundle executable as specified here.
+Extend that general overlay mechanism with a resolved parent variant and
+add/remove deltas for sources and libraries. The effective profile must be
+used by both library parsing and main-program generation. Keep one canonical
+CLI source list in `build_lambda_config.json`; copying it into `macos-ime`
+would make the exclusion contract drift. The new output is staged as
+`LambdaChineseIME.app/Contents/MacOS/LambdaChineseIME`.
+
+### 8.7 Resources, preferences and installation (M5)
+
+Stage `package/ime/chinese.ls`, its module sources and `syllables.txt`, plus
+validated `zh-Hans` and `zh-Hant` packs with their manifests and notices under
+`LambdaChineseIME.app/Contents/Resources/lmd/`. The host sets `HOST_PATH_HOME`
+to that read-only `lmd` directory before runtime import, so ordinary
+`ime.load(profile)` and relative package imports work independent of the
+current working directory (D7.2.4v4/D7.2.6). It sets cache, scratch and log
+paths to per-user locations before runtime startup. Learned choices, fuzzy
+settings and personal word edits are saved atomically under
+`~/Library/Application Support/<bundle-id>/`; they never modify signed
+bundle resources (IME8/IME16). A missing or invalid pack leaves the source
+inactive with an actionable local error, not an empty candidate list.
+
+The pure edit/browse/replay logic now used by the demo's
+`test/demo/ime/mod_dictionary.ls` moves into the shipped IME package and is
+imported by both hosts. Its DOM dialog stays in the demo. The macOS host
+supplies its own preferences UI and atomic persistence; this shares the
+word/reading validation and pack-update rules without bringing DOM or
+Radiant into `macos-ime` (IME14/IME16).
+
+The app has a stable unique bundle ID, `CFBundleExecutable`,
+`LSBackgroundOnly`, `InputMethodConnectionName`,
+`InputMethodServerControllerClass`, a Chinese repertoire and an input-source
+icon. A development install copies the built app to
+`~/Library/Input Methods/` and calls `TISRegisterInputSource`. The user adds
+it in macOS Keyboard → Text Input → Input Sources; selection remains under
+macOS control. The installer verifies discovery, records the installed bundle
+path and supplies a removal path. It does not write into `/System` or replace
+another input source.
+
+Prepared data remains gitignored under IME-O7. Local bundle staging consumes
+those ignored outputs and checks hashes/notices; a public release artifact is
+separately gated on redistribution rights for every included source. The two
+Sogou Bible dictionaries may be added by the local user as an optional pack,
+but are not part of the distributable default. For distribution outside the
+developer's Mac, sign the bundle and nested code with Developer ID, enable
+Hardened Runtime and notarize it. MIR JIT needs its macOS execution-memory
+path tested under that signature and the narrow JIT entitlement; interpreter
+fallback is tested separately, not assumed to meet the latency target.
+
+### 8.8 Candidate presentation and settings (M5)
+
+Start with InputMethodKit's candidate panel and seven selection keys. Verify
+the compact horizontal strip, page navigation and pointer choice against the
+same reducer frames as Radiant. If its layout cannot present the specified
+expanded grid and collapse behavior, use a native AppKit panel anchored to
+the client's insertion rectangle. That panel has accessible candidate labels,
+selection and page status, follows the active client and display, and hides on
+deactivation, cancel and secure input. A small input-source menu opens profile,
+fuzzy-pair and personal-dictionary settings; changes call `configure` or
+reload the edited engine while preserving the session contract (IME13/IME16).
+The test page remains a fixture, not the system settings UI.
+
+Apple's [IMKServer bundle contract](https://developer.apple.com/documentation/inputmethodkit/imkserver/init%28name%3Abundleidentifier%3A%29),
+[IMKInputController lifecycle](https://developer.apple.com/documentation/inputmethodkit/imkinputcontroller),
+[candidate API](https://developer.apple.com/documentation/inputmethodkit/imkcandidates),
+[input-source installation guidance](https://developer.apple.com/library/archive/qa/qa1810/_index.html),
+and [JIT entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.allow-jit)
+are the platform references for M5. The InputMethodKit interaction and
+registration behavior still require on-device qualification.
 
 ---
 
@@ -803,6 +1062,9 @@ to use the bundled one.
 | Candidate quality | A frozen held-out list of words with their readings, from a corpus whose license permits committing the fixture; report the rank of the expected word for full pinyin and for initials: top-1, top-3 and first-page (top-9) rates, and simulated keystrokes per character. Thresholds are recorded from the first baseline before any tuning; no quality score is claimed here |
 | Session | Golden key sequences → action lists: paging, Backspace undoing a selection, Enter, Esc, Shift toggle, punctuation, user-overlay promotion |
 | Radiant | UI automation tests (`test/ui/ime_chinese_*.json`) on `<input>`, `<textarea>` and `contenteditable`: preedit shown, commit inserted, one undo step per commit, `maxlength`, cancel, OS-composition stand-down, popup click |
+| macOS build profile (M5) | Generate debug and release `macos-ime` from the CLI parent; cold-build the extensionless executable and app; inspect compiled-object manifest, link map and dependencies for zero JS, DOM, Radiant, Jube, server, CLI command or unrelated codec/network modules; load `lambda.ime.chinese` from bundled resources |
+| macOS input-source behavior (M5) | Install and select the source; replay reducer goldens through InputMethodKit in TextEdit, a browser field and Radiant; verify marked-text caret and UTF-16 conversion, candidate click, Shift tap, punctuation, focus transfer, client cancel, secure input and no duplicate commit; remove and reinstall cleanly |
+| macOS packaging (M5) | Bundle manifests/hashes and notices match staged packs; user overlay survives restart and bundle upgrade; code signature and Hardened Runtime JIT work in the installed app; notarization and a rights-cleared resource inventory gate public distribution |
 | Performance | Release build only (AGENTS.md rule 10), named host: pack load time, peak memory, per-key latency p50/p95. Provisional targets: load under 200 ms, per-key p95 under 5 ms; revised from evidence |
 
 Golden-driven `.ls` fixtures live under `test/lambda/ime/`, each with its
@@ -817,15 +1079,17 @@ Golden-driven `.ls` fixtures live under `test/lambda/ime/`, each with its
 | **M0 Data** | `utils/prepare_ime_chinese.py`; the `zh-Hans` pack in format v1 (§6), with manifest and notices, under `lmd/package/ime/chinese/data/zh-Hans/`; source choice settled (IME-O4) | Data gate of §9; the measurements of §6.7; coverage of the held-out list |
 | **M1 Engine** | `ime/chinese.ls` with `syllables`, `lattice`, `pack`, `lookup`, `rank` modules; `load` and `candidates`; fuzzy-pair expansion and `fuzzy_pairs` | Segmentation and fuzzy-settings gates; candidate-quality baseline recorded |
 | **M2 Session** | The reducer, punctuation, mode toggle, paging, settings with `configure` and `settings`, user overlay and its persistence | Session goldens in both execution tiers |
-| **M3 Radiant** | IME-E1–IME-E3; the body-level adapter in `lambda.dom` | Radiant gate; `make test-radiant-baseline`; **first release** |
-| **M4 Traditional** | The `zh-Hant` pack from OpenCC | Conversion fixtures; quality report for `zh-Hant` |
-| **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, preedit caret movement, popup accessibility | One at a time, each with its own gate |
+| **M3 Radiant** | IME-E1–IME-E3; the body-level adapter in `lambda.dom` | Radiant gate; `make test-radiant-baseline`; **first in-engine release** |
+| **M4 Traditional** | The `zh-Hant` pack from OpenCC; implemented 2026-10-26 | 32 conversion fixtures; [frozen quality report](../test/ime/quality_zh_hant.md) |
+| **M5 macOS input source** | `macos-ime` CLI-derived runtime profile, retained Lambda bridge, InputMethodKit controller/candidates/settings, `.app` staging and per-user install/remove path (IME14–IME16) | All three M5 gates in §9, plus release-host end-to-end latency and memory report; local install works before public-signing/distribution is claimed |
+| **Later** | Domain overlays (THUOCL), double pinyin, Zhuyin, additional regional packs | One at a time, each with its own gate |
 | **Future** | Whole-sentence conversion (§11.3) | A separate proposal |
 
 Package-only milestones run their focused fixtures in the interpreter and JIT
 tiers. M3 changes Radiant and the DOM behavior package, so it also reads
-`radiant/README.md` and runs the Radiant baseline. This proposal itself needs
-document checks only.
+`radiant/README.md` and runs the Radiant baseline. M5 adds separate native
+cross-application and installed-bundle gates; passing M3's Radiant fixtures
+does not qualify it. This proposal itself needs document checks only.
 
 ---
 
@@ -852,10 +1116,26 @@ document checks only.
   keystroke; hot paths should promote to MIR JIT under D8.1.1v18's tiering.
   Measure both tiers; the release gate is the JIT tier on a release build.
 - **Load cost.** Indexing a few megabytes in Lambda is a measurable startup
-  cost; it happens once per process, on first enable, never at import (IME2).
+  cost; the adapter loads in its owning document runtime on first eligible
+  enable/focus and explicit profile/directory changes, never at import
+  (IME2, D5.4.1).
 - **Re-entrant dispatch.** IME-E1 must queue its events (§8.3); a nested
   dispatch from inside `keydown` is the failure mode to test for.
 - **Two input methods at once.** Covered by IME10 and §8.4, and tested.
+- **macOS range and lifecycle mismatch.** Lambda's caret is code-point based,
+  while marked text uses UTF-16 ranges; client deactivation may arrive during
+  composition. M5 owns one conversion helper and a per-client finalization
+  state, tested with supplementary Han and rapid focus changes (IME14,
+  S2.5.8/S17.4.1).
+- **Build leakage.** The CLI profile still names a JS source file and the
+  generator has unconditional link inputs. M5 moves shared code to a neutral
+  owner and makes the resolved source/link manifest a gate, rather than
+  trusting source-directory names or preprocessor defines (IME15).
+- **Bundle execution.** The package resolver currently defaults to a
+  working-directory `lmd`, and MIR JIT must run under a signed, hardened
+  background process. M5 sets explicit host paths and tests the installed
+  release artifact before claiming startup or latency targets (IME16,
+  D7.2.4v4/D8.1.1v18).
 
 ### 11.3 Whole-sentence conversion (future)
 
@@ -897,6 +1177,10 @@ kinds (IME4) and the reducer contract (IME3) are the extension points.
 | `ime/chinese/lookup.ls` | Full-key, prefix and abbreviation queries (§5.2) |
 | `ime/chinese/rank.ls` | The ranking rule (§5.3) |
 | `ime/chinese/session.ls` | The reducer, paging, punctuation, mode (§5.4–§5.5) |
+| `ime/chinese/dictionary.ls` (planned) | Promote the demo's pure personal edit/browse/replay model for both hosts (M5, IME16) |
 | `ime/chinese/data/zh-Hans/` | Prepared pack, manifest, NOTICE |
 | `utils/prepare_ime_chinese.py` | Offline preparation (development tooling only) |
 | `lmd/package/dom/ime.ls` | Extended with the key adapter (M3, IME-O1) |
+| `lambda/host/macos_ime/` (planned) | InputMethodKit entry, per-client controller, candidate UI and native-to-Lambda bridge (M5, IME14) |
+| `build_lambda_config.json` `platforms.macos-ime` (planned) | CLI-derived runtime-only source/link profile (M5, IME15) |
+| `utils/generate_premake.py` / `Makefile` (planned) | Resolve inherited variant deltas, build and stage the macOS app without editing generated Lua (M5, IME15) |

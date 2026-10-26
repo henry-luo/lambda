@@ -1,0 +1,665 @@
+{
+  "name": "Books demo: two-page and fit-to-window layouts, paper textures and page-turn animations in the ebook reader",
+  "html": "test/ui/book/_library.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 820
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "the reader starts scrolling on plain paper"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".grid [data-book=alice]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-layout",
+      "equals": "scroll"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-texture",
+      "equals": "none"
+    },
+    {
+      "type": "log",
+      "message": "the toolbar's layout icons mirror the setting and switch it directly"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".ebook-toolbar [data-ebook-value=spread]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-toolbar [data-ebook-value=spread] .ebook-tip"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-toolbar [data-ebook-value=spread] .ebook-tip"
+      },
+      "equals": "Two pages"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-toolbar [data-ebook-value=scroll] .ebook-tip"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-toolbar .ebook-layout-switch [data-ebook-pref=mode]"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-layout-switch [data-ebook-value=scroll]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".ebook-layout-switch [data-ebook-value=paged]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-layout",
+      "equals": "paged"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-layout-switch [data-ebook-value=paged]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".ebook-layout-switch [data-ebook-value=scroll]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=scroll]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "log",
+      "message": "the open settings panel wraps to two rows and the footer stays at the window bottom"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".ebook-footer"
+      },
+      "y": 768,
+      "height": 52
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-settings .ebook-layout-switch [data-ebook-pref=mode]"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-ebook-pref=texture]"
+      },
+      "count": 6
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-ebook-pref=turn]"
+      },
+      "count": 5
+    },
+    {
+      "type": "log",
+      "message": "two pages side by side, antique paper with its frame"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=spread]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=texture][data-ebook-value=antique]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=turn][data-ebook-value=dissolve]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-layout",
+      "equals": "spread"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-texture",
+      "equals": "antique"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-ebook-pref=texture][data-ebook-value=antique]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=scroll]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-sheet[data-side=right]"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-corner[data-corner=tl]"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-frame"
+      },
+      "property": "background-color",
+      "equals": "rgba(0, 0, 0, 0)"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-ghost"
+      },
+      "attribute": "srcdoc",
+      "contains": "data-ebook-node"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "log",
+      "message": "the one-page cover chapter turns into the next chapter: the ghost holds the old page, then takes the new chapter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "1 / 15"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "2 / 15"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "dissolve-next-1"
+    },
+    {
+      "type": "wait",
+      "ms": 700
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-ghost"
+      },
+      "attribute": "srcdoc",
+      "contains": "MILLENNIUM FULCRUM"
+    },
+    {
+      "type": "log",
+      "message": "within a chapter each turn shows the next spread and restarts the animation"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 1–2 / "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 3–4 / "
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn-kind",
+      "equals": "dissolve-next"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-previous]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 1–2 / "
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn-kind",
+      "equals": "dissolve-prev"
+    },
+    {
+      "type": "log",
+      "message": "fit to window shows one page per turn; scrolling has no turn"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=paged]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=texture][data-ebook-value=linen]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-layout",
+      "equals": "paged"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-sheet[data-side=right]"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-corner[data-corner=tl]"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=scroll]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-ghost"
+      },
+      "attribute": "srcdoc",
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "equals": "Scrolling"
+    },
+    {
+      "type": "log",
+      "message": "a chapter ending mid-spread: blank trailing columns let the last spread scroll fully into place (Peter Pan front matter)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=close]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".grid [data-book=peter-pan]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".ebook-toolbar [data-ebook-value=spread]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=turn][data-ebook-value=none]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "equals": "Pages 1–2 / 5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "equals": "Pages 3–4 / 5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "equals": "Pages 5–5 / 5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "2 / 20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "3 / 20"
+    }
+  ]
+}

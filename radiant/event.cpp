@@ -1757,9 +1757,9 @@ static const char* key_code_to_name(int key) {
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
         "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "F25"
     };
-    if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F25) return function_keys[key - GLFW_KEY_F1];
+    if (key >= RDT_KEY_F1 && key <= RDT_KEY_F25) return function_keys[key - RDT_KEY_F1];
     switch (key) {
-        case GLFW_KEY_MENU: return "ContextMenu";
+        case RDT_KEY_MENU: return "ContextMenu";
         case RDT_KEY_BACKSPACE: return "Backspace";
         case RDT_KEY_DELETE:    return "Delete";
         case RDT_KEY_ENTER:     return "Enter";
@@ -4835,6 +4835,18 @@ extern "C" bool radiant_dispatch_behavior_text_input_fallback(
 // ES34: overlay geometry resolves only a menu row. Mapping that row to a
 // command and closing the popup are document policy, routed through the same
 // generic command waist keyboard shortcuts already use.
+void radiant_input_method_setting_changed(DomElement* owner) {
+    DomElement* body = owner && owner->doc ? radiant_document_body_element(owner->doc) : nullptr;
+    if (body) dispatch_behavior_handler(nullptr, body, "imewindowchange", nullptr, nullptr);
+}
+
+bool radiant_dispatch_input_method_action(EventContext* evcon, View* target, int index) {
+    InputIntent intent;
+    if (index >= 0) intent.option_index = index;
+    else intent.command = index == -1 ? "toggle" : "cancel";
+    return dispatch_behavior_document_policy(evcon, target, "imecandidate", &intent);
+}
+
 extern "C" bool radiant_dispatch_behavior_context_menu_action(
     EventContext* evcon, View* target, const InputIntent* intent) {
     return dispatch_behavior_document_policy(evcon, target,
@@ -5148,7 +5160,8 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
 static void radiant_dispatch_composition_event(EventContext* evcon,
                                                View* target,
                                                const char* type,
-                                               const char* data);
+                                               const char* data,
+                                               uint32_t caret_cp = 0);
 extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
                                                            EventType event_type,
                                                            const char* text,
@@ -6414,11 +6427,9 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     intent.composition_caret = caret_cp;
     intent.is_composing = true;
 
-    context.event.composition_caret_hint = caret_cp;
     radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionupdate",
-                                       preedit ? preedit : "");
-    context.event.composition_caret_hint = 0;
+                                       preedit ? preedit : "", caret_cp);
     bool prevented = false;
     dispatch_form_beforeinput(&context.event, &context.surface, &intent,
                               &prevented);
@@ -6602,6 +6613,11 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
                 caret_utf8, &rect)) {
             return false;
         }
+        // shared caret metrics are block-local; platform IME and popups need viewport coordinates.
+        RdtLogicalPoint point = view_geometry_local_to_block_viewport(surface.owner,
+            {rect.x, rect.y}, scroll_state_resolve_view_geometry);
+        rect.x = point.x;
+        rect.y = point.y - surface.owner->form->scroll_y;
     } else {
         View* caret_view = nullptr;
         int caret_offset = 0;
@@ -6615,6 +6631,10 @@ extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
                 lam::dom_require_text(caret_view), offset, &rect)) {
             return false;
         }
+        RdtLogicalPoint point = view_geometry_local_to_block_viewport(caret_view,
+            {rect.x, rect.y}, scroll_state_resolve_view_geometry);
+        rect.x = point.x;
+        rect.y = point.y;
     }
 
     if (!rect.valid) return false;
@@ -8992,7 +9012,9 @@ static bool dispatch_contenteditable_composition_event(
         phase = "cancel";
     }
 
-    radiant_dispatch_composition_event(evcon, target, event_name, intent->data);
+    // forward the same code-point caret to body policy as to the rich-text edit.
+    radiant_dispatch_composition_event(evcon, target, event_name, intent->data,
+                                       intent->composition_caret);
     DocState* state = event_context_target_state(evcon);
     event_log_editing_composition(state, surface, intent, phase, preedit_len,
                                   commit_len, intent->composition_caret);
@@ -9721,6 +9743,8 @@ static Item build_keyboard_event_item(void* userdata) {
         args->ctrl, args->shift, args->alt, args->meta, args->repeat);
 }
 
+static bool editing_key_may_emit_text(const KeyEvent* key_event);
+
 static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
                                             const char* type, int key_code,
                                             int mods, bool repeat)
@@ -9740,8 +9764,16 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
     // Editable libraries inspect `key`/`code` before legacy keyCode. Preserve
     // the physical key identity here so ordinary typing does not look like an
     // empty-key shortcut to script-owned editors.
-    return radiant_dispatch_built_event(evcon, target, build_keyboard_event_item,
+    bool prevented = radiant_dispatch_built_event(evcon, target, build_keyboard_event_item,
         &args, true, nullptr, true, type);
+    // text controls and rich surfaces share the delayed character-callback decision.
+    DocState* state = event_context_target_state(evcon);
+    if (state && strcmp(type, "keydown") == 0 && editing_key_may_emit_text(&evcon->event.key)) {
+        state->editing.pending_text_input = true;
+        state->editing.pending_text_input_prevented = prevented;
+        state->editing.pending_text_input_key = key_code;
+    }
+    return prevented;
 }
 
 static View* live_keyboard_event_target(DocState* state, DomDocument* doc,
@@ -9950,7 +9982,8 @@ static Item build_composition_event_item(void* userdata) {
 static void radiant_dispatch_composition_event(EventContext* evcon,
                                                View* target,
                                                const char* type,
-                                               const char* data)
+                                               const char* data,
+                                               uint32_t caret_cp)
 {
     if (!evcon || !target || !type) return;
     CompositionEventBuildArgs args = {type, data};
@@ -9958,7 +9991,7 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
     comp_intent.type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     comp_intent.data = data ? data : "";
     comp_intent.is_composing = true;
-    comp_intent.composition_caret = evcon->composition_caret_hint;
+    comp_intent.composition_caret = caret_cp;
     // F20: composition joins the same author-then-UA dispatch as every other
     // trusted input, preserving its editing payload for the behavior action.
     radiant_dispatch_built_event(evcon, target, build_composition_event_item,
@@ -12808,7 +12841,14 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     ui_context_sync_document_raster_scale(uicon, new_doc);
 
     layout_iframe_embedded_doc(uicon, new_doc, viewport.width, viewport.height);
+    CssEnum overflow_x, overflow_y;
+    layout_iframe_viewport_overflow(new_doc, &overflow_x, &overflow_y);
     if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
+        // the navigated document decides the frame's scrollbars (layout_iframe_viewport_overflow)
+        if (block->scroller) {
+            block->scroller->overflow_x = overflow_x;
+            block->scroller->overflow_y = overflow_y;
+        }
         update_scroller(block, block->content_width, block->content_height);
     }
     if (old_doc) {
@@ -13350,15 +13390,17 @@ static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
     return run;
 }
 
-static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned char* end,
+static bool event_text_glyph_advance(UiContext* uicon, FontBox* font,
+                                     unsigned char* p, unsigned char* end,
                                      bool* has_space, int* out_bytes, float* out_advance) {
     *out_bytes = 1;
     *out_advance = 0.0f;
     if (is_space(*p)) {
         if (*has_space) return false;
         *has_space = true;
-        *out_advance = font->style->space_width;
-        return true;
+        *out_advance = font->style->space_width + font->style->word_spacing;
+        if (p + 1 < end) *out_advance += font->style->letter_spacing;
+        return *out_advance > 0.0f;
     }
 
     *has_space = false;
@@ -13368,13 +13410,16 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
         *out_bytes = 1;
         codepoint = *p;
     }
-    GlyphInfo glyph = font_get_glyph(font_box_handle(font), codepoint);
-    if (glyph.id == 0) return false;
-    *out_advance = glyph.advance_x;
+    // Layout and paint use CSS-pixel advances; raw glyph metrics are physical
+    // pixels on dense displays and shift the caret farther on every character.
+    *out_advance = layout_measure_font_glyph_advance(
+        font_box_handle(font), font->style, codepoint, ui_context_raster_scale(uicon));
+    if (*out_advance <= 0.0f) return false;
+    if (p + *out_bytes < end) *out_advance += font->style->letter_spacing;
     return true;
 }
 
-static float event_text_x_for_offset(FontBox* font, ViewText* text,
+static float event_text_x_for_offset(UiContext* uicon, FontBox* font, ViewText* text,
                                      TextRect* rect, int byte_offset,
                                      EventTextRun run) {
     unsigned char* data = text->text_data();
@@ -13386,7 +13431,7 @@ static float event_text_x_for_offset(FontBox* font, ViewText* text,
         float advance = 0.0f;
         int bytes = 1;
         bool has_advance = event_text_glyph_advance(
-            font, current, run.end, &has_space, &bytes, &advance);
+            uicon, font, current, run.end, &has_space, &bytes, &advance);
         current += bytes;
         current_offset += bytes;
         if (has_advance) x += advance;
@@ -13430,47 +13475,22 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
         byte_offset++;
     }
 
-    float raster_scale = ui_context_raster_scale(uicon);
-    float letter_spacing = font->style->letter_spacing;
-    float word_spacing = font->style->word_spacing;
     bool has_space = false;
     while (current < run.end) {
         // A normal-flow newline collapses to a space within the same text rect;
         // preserved line breaks are already split into separate rects by layout.
         float advance = 0.0f;
         int bytes = 1;
-        if (is_space(*current)) {
-            if (has_space) {
-                current++;
-                byte_offset++;
-                continue;
-            }
-            has_space = true;
-            advance = font->style->space_width + word_spacing;
-        } else {
-            has_space = false;
-            uint32_t codepoint;
-            bytes = str_utf8_decode(
-                (const char*)current, (size_t)(run.end - current), &codepoint);
-            if (bytes <= 0) {
-                bytes = 1;
-                codepoint = *current;
-            }
-            advance = layout_measure_font_glyph_advance(
-                font_box_handle(font), font->style, codepoint, raster_scale);
-            if (advance <= 0.0f) {
-                current += bytes;
-                byte_offset += bytes;
-                continue;
-            }
-        }
-        unsigned char* next = current + bytes;
-        if (next < run.end) {
-            advance += letter_spacing;
+        bool has_advance = event_text_glyph_advance(
+            uicon, font, current, run.end, &has_space, &bytes, &advance);
+        if (!has_advance) {
+            current += bytes;
+            byte_offset += bytes;
+            continue;
         }
         if (target_x < x + advance / 2.0f) return byte_offset;
         x += advance;
-        current = next;
+        current += bytes;
         byte_offset += bytes;
     }
     return byte_offset;
@@ -13503,7 +13523,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
         font_box_handle(&evcon->font) ? (int)font_handle_get_physical_size_px(font_box_handle(&evcon->font)) : -1);
 
     float x = event_text_x_for_offset(
-        &evcon->font, text, rect, target_offset, run);
+        evcon->ui_context, &evcon->font, text, rect, target_offset, run);
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
     *out_x = x;
@@ -13552,7 +13572,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     if (text->font) setup_font(uicon, &fbox, text->font);
     if (!font_box_handle(&fbox) || !fbox.style) return rect->x;
 
-    return event_text_x_for_offset(&fbox, text, rect, byte_offset, run);
+    return event_text_x_for_offset(uicon, &fbox, text, rect, byte_offset, run);
 }
 
 // Static registration: hooks the resolver into dom_range_resolver.cpp at
@@ -13876,7 +13896,7 @@ static int native_cursor_hotspot(float coordinate, int extent) {
     return (int)lroundf(coordinate); // INT_CAST_OK: bounded native cursor pixel index.
 }
 
-static GLFWcursor* create_native_image_cursor(UiContext* uicon,
+static RadiantCursor* create_native_image_cursor(UiContext* uicon,
                                               const CursorImageSpec* specification) {
     if (!uicon || !specification || !specification->url) return nullptr;
     ImageSurfaceReadScope scope;
@@ -13890,7 +13910,7 @@ static GLFWcursor* create_native_image_cursor(UiContext* uicon,
     } else {
         image_surface_ensure_decoded(surface, width, height);
     }
-    // A decoder may return a scaled buffer; GLFW must receive its actual extent.
+    // A decoder may return a scaled buffer; the backend must receive its actual extent.
     if (surface->decoded_width > 0) width = surface->decoded_width;
     if (surface->decoded_height > 0) height = surface->decoded_height;
     if (width <= 0 || height <= 0 || width > INT_MAX / 4 ||
@@ -13899,7 +13919,7 @@ static GLFWcursor* create_native_image_cursor(UiContext* uicon,
     size_t bytes = (size_t)width * (size_t)height * 4u;
     uint8_t* rgba = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
     if (!rgba) return nullptr;
-    // GLFW consumes straight RGBA; SVG paint surfaces are premultiplied ABGR words.
+    // Cursors take straight RGBA; SVG paint surfaces are premultiplied ABGR words.
     for (int row = 0; row < height; row++) {
         const uint32_t* source = (const uint32_t*)((const uint8_t*)surface->pixels +
                                                     (size_t)row * surface->pitch);
@@ -13913,12 +13933,12 @@ static GLFWcursor* create_native_image_cursor(UiContext* uicon,
             target[column * 4 + 3] = (uint8_t)(pixel >> 24);
         }
     }
-    GLFWimage image = {width, height, rgba};
+    RadiantIconImage image = {width, height, rgba};
     int hotspot_x = specification->has_hotspot
         ? native_cursor_hotspot(specification->hotspot_x, width) : 0;
     int hotspot_y = specification->has_hotspot
         ? native_cursor_hotspot(specification->hotspot_y, height) : 0;
-    GLFWcursor* cursor = glfwCreateCursor(&image, hotspot_x, hotspot_y);
+    RadiantCursor* cursor = radiant_platform_create_image_cursor(&image, hotspot_x, hotspot_y);
     mem_free(rgba);
     if (cursor) log_debug("[CURSOR_IMAGE] native cursor %s (%dx%d hotspot %d,%d)",
                           specification->url, width, height, hotspot_x, hotspot_y);
@@ -13935,46 +13955,44 @@ static void update_native_cursor(UiContext* uicon, CssEnum keyword,
     CssEnum previous = (CssEnum)state->cursor;
     state->cursor = keyword;
     state->cursor_image_hash = image_hash;
-    GLFWcursor* cursor = nullptr;
+    RadiantCursor* cursor = nullptr;
     for (const CursorImageSpec* image = images; image && !cursor; image = image->next)
         cursor = create_native_image_cursor(uicon, image);
     // Network images may become ready after the first hover; retain the fallback until then.
     if (unchanged && !cursor) return;
     state->cursor_image_ready = cursor != nullptr && images != nullptr;
     if (!cursor && keyword != CSS_VALUE_NONE) {
-        int shape = GLFW_ARROW_CURSOR;
+        RadiantCursorShape shape = RADIANT_CURSOR_ARROW;
         switch (keyword) {
-            case CSS_VALUE_TEXT: shape = GLFW_IBEAM_CURSOR; break;
-            case CSS_VALUE_POINTER: shape = GLFW_HAND_CURSOR; break;
-            case CSS_VALUE_COL_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
-            case CSS_VALUE_EW_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
-            case CSS_VALUE_ROW_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
-            case CSS_VALUE_NS_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
-#ifdef GLFW_RESIZE_NWSE_CURSOR
-            case CSS_VALUE_NWSE_RESIZE: shape = GLFW_RESIZE_NWSE_CURSOR; break;
-            case CSS_VALUE_NESW_RESIZE: shape = GLFW_RESIZE_NESW_CURSOR; break;
-            case CSS_VALUE_MOVE: shape = GLFW_RESIZE_ALL_CURSOR; break;
-#endif
+            case CSS_VALUE_TEXT: shape = RADIANT_CURSOR_IBEAM; break;
+            case CSS_VALUE_POINTER: shape = RADIANT_CURSOR_HAND; break;
+            case CSS_VALUE_COL_RESIZE: shape = RADIANT_CURSOR_EW_RESIZE; break;
+            case CSS_VALUE_EW_RESIZE: shape = RADIANT_CURSOR_EW_RESIZE; break;
+            case CSS_VALUE_ROW_RESIZE: shape = RADIANT_CURSOR_NS_RESIZE; break;
+            case CSS_VALUE_NS_RESIZE: shape = RADIANT_CURSOR_NS_RESIZE; break;
+            case CSS_VALUE_NWSE_RESIZE: shape = RADIANT_CURSOR_NWSE_RESIZE; break;
+            case CSS_VALUE_NESW_RESIZE: shape = RADIANT_CURSOR_NESW_RESIZE; break;
+            case CSS_VALUE_MOVE: shape = RADIANT_CURSOR_ALL_RESIZE; break;
             case CSS_VALUE_GRAB:
-            case CSS_VALUE_GRABBING: shape = GLFW_HAND_CURSOR; break;
-            case CSS_VALUE_CROSSHAIR: shape = GLFW_CROSSHAIR_CURSOR; break;
+            case CSS_VALUE_GRABBING: shape = RADIANT_CURSOR_HAND; break;
+            case CSS_VALUE_CROSSHAIR: shape = RADIANT_CURSOR_CROSSHAIR; break;
             default: break;
         }
-        cursor = glfwCreateStandardCursor(shape);
+        cursor = radiant_platform_create_standard_cursor(shape);
     }
     // An image overrides a `none` fallback; hide only when no image was usable.
     if ((previous == CSS_VALUE_NONE || keyword == CSS_VALUE_NONE) &&
         !radiant_relative_mouse_target(uicon))
-        glfwSetInputMode(uicon->window, GLFW_CURSOR,
-            cursor || keyword != CSS_VALUE_NONE ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+        radiant_platform_set_cursor_hidden(uicon->window, !cursor && keyword == CSS_VALUE_NONE);
     if (cursor) {
-        glfwSetCursor(uicon->window, cursor);
-        if (state->sys_cursor) glfwDestroyCursor(state->sys_cursor);
+        radiant_platform_set_cursor(uicon->window, cursor);
+        if (state->sys_cursor) radiant_platform_destroy_cursor(state->sys_cursor);
         state->sys_cursor = cursor;
     }
 }
 
-void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
+static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* event,
+                              DomDocument** completed_doc) {
     // host presentation keys use the same gate for native input and event replay.
     if (radiant_window_fullscreen_key(uicon, event)) {
         event_log_raw_input(uicon->event_log, 0, event);
@@ -14347,7 +14365,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool has_hit_boundary = has_anchor_surface &&
                     editing_geometry_hit_test_boundary(evcon.ui_context,
                         static_cast<View*>(selection_doc->view_tree->root), &anchor_surface,
-                        (float)motion->x, (float)motion->y,
+                        (float)motion->x - selection_iframe_offset_x,
+                        (float)motion->y - selection_iframe_offset_y,
                         EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit_boundary);
                 if (has_hit_boundary && hit_boundary.dom.node &&
                     hit_boundary.dom.node->node_type == DOM_NODE_TEXT) {
@@ -14449,10 +14468,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else if (in_gap && gap_offset >= 0) {
                     char_offset = gap_offset;
                 } else {
+                    // the selection's frame translation maps the window pointer into the text's document
                     EditingBoundary hit_boundary;
                     if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
                             text, rect,
-                            (float)motion->x, (float)motion->y,
+                            (float)motion->x - selection_iframe_offset_x,
+                            (float)motion->y - selection_iframe_offset_y,
                             &hit_boundary)) {
                         char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
                     } else {
@@ -14581,15 +14602,33 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         DocState* state = event_context_target_state(&evcon);
 
-        if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
             uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
         }
 
         // scrollbar release is captured even outside the popup and cannot commit a row.
         if (state && state->dropdown_scrollbar_pressed && event->type == RDT_EVENT_MOUSE_UP &&
-            btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+            btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
             doc_state_set_dropdown_scrollbar_press(state, false, false, mouse_y);
             break;
+        }
+
+        // IME-E2: popup presses keep editing focus and never click the underlying DOM.
+        if (state && event->type == RDT_EVENT_MOUSE_UP && state->input_method.pointer_down) {
+            state->input_method.pointer_down = false;
+            break;
+        }
+        if (state && event->type == RDT_EVENT_MOUSE_DOWN && state->input_method.visible) {
+            int row = input_method_popup_hit(uicon, state, mouse_x, mouse_y);
+            DomNode* popup_target = dom_node_ref_validate(event_context_target_document(&evcon),
+                state->input_method.popup_target);
+            if (row != -2 && popup_target) {
+                state->input_method.pointer_down = true;
+                if (row >= -1 && btn_event->button == RDT_MOUSE_BUTTON_LEFT)
+                    radiant_dispatch_input_method_action(&evcon, popup_target, row);
+                evcon.need_repaint = true;
+                break;
+            }
         }
 
         // Popup rows receive the press and release before the underlying DOM.
@@ -14599,7 +14638,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             ScrollbarPressPart part = select_dropdown_scrollbar_part(state, select->form, mouse_x, mouse_y);
             if (part != SCROLLBAR_PRESS_NONE) {
                 evcon.target = state->open_dropdown;
-                if (event->type == RDT_EVENT_MOUSE_DOWN && btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                if (event->type == RDT_EVENT_MOUSE_DOWN && btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
                     bool prevented = radiant_dispatch_button_pointer_event(&evcon, evcon.target,
                         "pointerdown", mouse_x, mouse_y, btn_event, 1);
                     prevented |= radiant_dispatch_button_mouse_event(&evcon, evcon.target,
@@ -14620,7 +14659,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 break;
             }
             if (event->type == RDT_EVENT_MOUSE_UP &&
-                btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
                 handle_dropdown_option_click(&evcon, mouse_x, mouse_y);
             }
             break;
@@ -14633,7 +14672,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             float mxp = (float)btn_event->x;
             float myp = (float)btn_event->y;
             if (context_menu_contains(state, mxp, myp)) {
-                if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                if (btn_event->button == RDT_MOUSE_BUTTON_LEFT) {
                     InputIntent intent;
                     intent.context_menu_item = context_menu_item_at(state, mxp, myp);
                     if (intent.context_menu_item >= 0) {
@@ -14651,7 +14690,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // an author can install a custom menu. Only an unclaimed default reaches
         // the behavior template, which computes the native popup's item policy.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
-            btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
+            btn_event->button == RDT_MOUSE_BUTTON_RIGHT &&
             state && evcon.target) {
             // text hits use the mouse dispatcher's existing nearest-element promotion.
             bool prevented = radiant_dispatch_button_mouse_event(
@@ -14691,14 +14730,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
-            if (!evcon.default_prevented && btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+            if (!evcon.default_prevented && btn_event->button == RDT_MOUSE_BUTTON_LEFT &&
                 native_resize_begin(&evcon, evcon.target, mouse_x, mouse_y)) break;
 
             // A scrollbar hit has its own package-selected default. It never
             // enters mousepress: clicking browser chrome must not clear focus
             // or begin a document selection behind the scrollbar.
             ViewBlock* scrollbar_press_block = nullptr;
-            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT && evcon.target &&
+            if (btn_event->button == RDT_MOUSE_BUTTON_LEFT && evcon.target &&
                 evcon.target->is_block()) {
                 ViewBlock* target_block = lam::view_require_block(evcon.target);
                 if (scrollpane_press_part(&evcon, target_block) !=
@@ -14822,7 +14861,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // reach word/line selection, and a shift-click must still extend.
             bool text_drag_armed = false;
             if (event->type == RDT_EVENT_MOUSE_DOWN &&
-                btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                btn_event->button == RDT_MOUSE_BUTTON_LEFT &&
                 event->mouse_button.clicks == 1 &&
                 !(event->mouse_button.mods & RDT_MOD_SHIFT) &&
                 state && evcon.target && !evcon.default_prevented) {
@@ -14866,10 +14905,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     ? evcon.target_text_offset
                     : 0;
                 if (!evcon.target_text_offset_valid) {
+                    // the boundary resolver works in the text's own document, not the window
+                    RdtLogicalPoint frame = view_frame_translation(evcon.target,
+                        evcon.block.x, evcon.block.y);
                     EditingBoundary hit_boundary;
                     if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
                             text, rect,
-                            (float)btn_event->x, (float)btn_event->y,
+                            (float)btn_event->x - frame.x, (float)btn_event->y - frame.y,
                             &hit_boundary)) {
                         char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
                     } else {
@@ -14885,7 +14927,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 if (mouse_down_in_selection) {
                     DomSelection* drag_selection = state->dom_selection;
-                    if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                    if (btn_event->button == RDT_MOUSE_BUTTON_LEFT &&
                         btn_event->clicks == 1 &&
                         !(btn_event->mods & RDT_MOD_SHIFT) &&
                         drag_selection && drag_selection->range_count == 1 &&
@@ -15461,7 +15503,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // A secondary-button release emits mouseup/contextmenu, not the
             // primary click activation that can toggle controls or submit forms.
-            bool primary_activation = btn_event->button == GLFW_MOUSE_BUTTON_LEFT;
+            bool primary_activation = btn_event->button == RDT_MOUSE_BUTTON_LEFT;
             // Only process other click handlers if dropdown wasn't involved and not a drag
             if (primary_activation && !dropdown_handled && !drag_handled &&
                 !text_selection_drag_handled) {
@@ -15641,6 +15683,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         DocState* popup_state = event_context_target_state(&evcon);
+        if (input_method_popup_scroll(uicon, popup_state, mouse_x, mouse_y,
+                -scroll->yoffset * RDT_WHEEL_PIXEL_STEP)) {
+            evcon.need_repaint = true;
+            break;
+        }
         bool popup_scroll = dropdown_point_inside(popup_state, mouse_x, mouse_y);
         if (popup_scroll) evcon.target = popup_state->open_dropdown;
 
@@ -15766,11 +15813,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool prevented = keydown_target && radiant_dispatch_keyboard_event(
                 &evcon, keydown_target,
                 "keydown", key_event->key, key_event->mods, false);
-            if (editing_key_may_emit_text(key_event)) {
-                state->editing.pending_text_input = true;
-                state->editing.pending_text_input_prevented = prevented;
-                state->editing.pending_text_input_key = key_event->key;
-            }
             if (prevented) {
                 evcon.default_prevented = true;
                 break;
@@ -16296,6 +16338,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     log_debug("end of event %d", event->type);
 
+    *completed_doc = event_context_target_document(&evcon);
     state_end_event_cascade(cascade_state, cascade_log, cascade_id);
     event_context_cleanup(&evcon);
+}
+
+// IME-E1: finish and unwind the key's entire dispatch before delivering queued composition.
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
+    if (!uicon) return;
+    uicon->input_dispatch_depth++;
+    DomDocument* completed = nullptr;
+    // an OS start takes priority; cancel the package's provisional range before replacing it.
+    if (doc && doc->state && event->type == RDT_EVENT_COMPOSITION_START &&
+        !event->composition.scripted && doc->state->editing.composition.active &&
+        doc->state->editing.composition.scripted) {
+        RdtEvent cancel = {};
+        cancel.composition.type = RDT_EVENT_COMPOSITION_END;
+        cancel.composition.text = "";
+        cancel.composition.scripted = true;
+        handle_event_impl(uicon, doc, &cancel, &completed);
+    }
+    handle_event_impl(uicon, doc, event, &completed);
+    uicon->input_dispatch_depth--;
+    if (uicon->input_dispatch_depth == 0 && completed) input_method_drain(uicon, completed);
 }

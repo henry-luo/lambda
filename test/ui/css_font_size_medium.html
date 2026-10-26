@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>font-size: medium is absolute</title>
+<style>
+/* medium is an absolute keyword (CSS Fonts §2.5): 16px whatever the parent size */
+body { font-size: 20px; }
+#plain { font-size: medium; }
+#nested { font-size: 30px; }
+#nested > p { font-size: medium; }
+#shorthand-box { font-size: 30px; }
+#shorthand { font: italic medium serif; }
+#small { font-size: small; }
+/* the same keyword stays a border width */
+#border { border: medium solid #888; }
+</style></head>
+<body>
+<p id="plain">medium under a 20px body</p>
+<div id="nested"><p id="inner">medium under a 30px parent</p></div>
+<div id="shorthand-box"><p id="shorthand">medium from the font shorthand</p></div>
+<p id="small">small</p>
+<div id="border">medium border</div>
+</body></html>

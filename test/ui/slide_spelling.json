@@ -1,0 +1,85 @@
+{
+  "name": "Slides asynchronous spelling",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-notes\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-notes\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#speaker-notes"
+      },
+      "text": "This is teh speling note.",
+      "clear": true
+    },
+    {
+      "type": "wait",
+      "ms": 2200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-notes\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-notes .spelling-underline\")].map(n=>n.getAttribute(\"data-spelling-word\")).sort().join(\",\")===\"speling,teh\""
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-slides-notes .spelling-underline\")].every(n=>{let r=n.getBoundingClientRect(),h=document.getElementById(\"speaker-notes\").getBoundingClientRect();return r.width>5&&r.left>=h.left&&r.right<=h.right&&r.top>=h.top&&r.bottom<=h.bottom})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#spelling-slides-notes button\")==null"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-slides-notes-inline.png"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#speaker-notes"
+      },
+      "text": " More text."
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-notes\").getAttribute(\"data-spelling-state\")===\"pending\"&&[...document.querySelectorAll(\"#spelling-slides-notes .spelling-underline\")].map(n=>n.getAttribute(\"data-spelling-word\")).sort().join(\",\")===\"speling,teh\""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-slides-notes\").getAttribute(\"data-spelling-state\")===\"ready\"&&document.querySelectorAll(\"#spelling-slides-notes .spelling-underline\").length===2",
+      "assert_timeout": 8000
+    }
+  ]
+}

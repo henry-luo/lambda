@@ -1,0 +1,474 @@
+{
+  "name": "ime_chinese_dictionary",
+  "html": "test/demo/ime/chinese.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "script",
+      "js": "document.body.setAttribute('data-ime-directory','test/ime/fixture');document.body.setAttribute('data-ime-fuzzy','none')"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "text": "beijing",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "equals": "北京",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "assert_visible",
+      "visible": true,
+      "target": {
+        "selector": "#dictionary-dialog"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "assert_ime_popup",
+      "visible": false
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "disabled",
+      "present": true,
+      "target": {
+        "selector": "#dictionary-prev"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-next"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Page 2",
+      "target": {
+        "selector": "#dictionary-page"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-prev"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Page 1",
+      "target": {
+        "selector": "#dictionary-page"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#dictionary-search"
+      },
+      "text": "bei jing"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#dictionary-search"
+      },
+      "equals": "bei jing"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "北京",
+      "target": {
+        "selector": "#dictionary-rows"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "背景",
+      "target": {
+        "selector": "#dictionary-rows"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-rows button[data-word=\"北京\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Deleted 北京.",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "背景",
+      "target": {
+        "selector": "#dictionary-rows"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-dictionary-action=\"close\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-ime",
+      "equals": "chinese",
+      "target": {
+        "selector": "body"
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": ""
+    },
+    {
+      "type": "type_physical",
+      "text": "beijing",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "equals": "背景",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-word"
+      },
+      "text": "恩典"
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-reading"
+      },
+      "text": "en"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-add"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "invalid user word or reading",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-reading"
+      },
+      "text": "en dian"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-add"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "Added 恩典.",
+      "target": {
+        "selector": "#dictionary-message"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-search"
+      },
+      "text": "en dian"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#dictionary-search"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "contains": "恩典",
+      "target": {
+        "selector": "#dictionary-rows"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/dictionary_dialog/added.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_visible",
+      "visible": false,
+      "target": {
+        "selector": "#dictionary-dialog"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": ""
+    },
+    {
+      "type": "type_physical",
+      "text": "endian",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "equals": "恩典",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-search"
+      },
+      "text": "en dian"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-find"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-rows button[data-word=\"恩典\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "contains": "No matching words",
+      "target": {
+        "selector": "#dictionary-page"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-dictionary-action=\"close\"]"
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": ""
+    },
+    {
+      "type": "type_physical",
+      "text": "endian",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_value",
+      "equals": "",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-word"
+      },
+      "text": "北京"
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#dictionary-reading"
+      },
+      "text": "bei jing"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-add"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijing"
+    },
+    {
+      "type": "key_press",
+      "key": "2"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dictionary-open"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "attribute": "data-ime",
+      "present": false,
+      "target": {
+        "selector": "body"
+      }
+    }
+  ]
+}

@@ -28,6 +28,7 @@ ifeq ($(OS),Darwin)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
 	PREMAKE_HEADLESS_FILE := premake5.headless.mac.lua
+	PREMAKE_NOMIR_FILE := premake5.nomir.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
 	MACOS_DEPLOYMENT_TARGET ?= $(or $(MACOSX_DEPLOYMENT_TARGET),15.0)
 else ifeq ($(OS),Linux)
@@ -35,6 +36,7 @@ else ifeq ($(OS),Linux)
 	PREMAKE_FILE := premake5.lin.lua
 	PREMAKE_CLI_FILE := premake5.cli.lin.lua
 	PREMAKE_HEADLESS_FILE := premake5.headless.lin.lua
+	PREMAKE_NOMIR_FILE := premake5.nomir.lin.lua
 	PREMAKE_JUBE_FILE := premake5.jube.lin.lua
 else
 	# Windows/MSYS2 detection
@@ -42,6 +44,7 @@ else
 	PREMAKE_FILE := premake5.win.lua
 	PREMAKE_CLI_FILE := premake5.cli.win.lua
 	PREMAKE_HEADLESS_FILE := premake5.headless.win.lua
+	PREMAKE_NOMIR_FILE := premake5.nomir.win.lua
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
 
@@ -538,7 +541,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-layout-baseline-suites \
@@ -566,6 +569,7 @@ help:
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build runtime-only CLI (release; no Radiant, JS, Jube or serve; outputs lambda-cli.exe)"
 	@echo "  lambda-headless - Build headless full engine (release; no GLFW/GUI, no view/edit; outputs lambda-headless.exe)"
+	@echo "  lambda-nomir  - Build no-MIR desktop twin of the iOS profile (debug; lambda.exe minus MIR, T0 only; outputs lambda-nomir.exe)"
 	@echo "  lambda-cst    - Build the Tree-sitter Lambda/JS/TS CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
@@ -914,6 +918,22 @@ else
 endif
 	@echo "✅ Headless build completed. Executable: lambda-headless.exe"
 	@ls -lh lambda-headless.exe 2>/dev/null || true
+
+# Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2):
+# the full lambda.exe minus MIR: T0 AST interpreters only, no JIT.
+# Debug configuration; produces lambda-nomir.exe
+lambda-nomir: build-nomir
+
+build-nomir:
+	@echo "Building Lambda no-MIR desktop profile (debug) using Premake build system..."
+	@echo "Excluded: MIR and every JIT/native-code path (Lambda and LambdaJS run in T0)"
+	$(PYTHON) utils/generate_premake.py --variant lambda-nomir --output $(PREMAKE_NOMIR_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_NOMIR_FILE)
+	@echo "Building lambda-nomir executable (debug) with $(JOBS) parallel jobs..."
+	$(call run_make_with_error_summary,lambda-nomir,debug_native)
+	@echo "✅ No-MIR build completed. Executable: lambda-nomir.exe"
+	@ls -lh lambda-nomir.exe 2>/dev/null || true
 
 # Compatibility name for the former polyglot executable. It is a link to the
 # normal host, never a separately compiled runtime.

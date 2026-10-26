@@ -10,15 +10,16 @@ pub fn status(sound) => if (sound.failed) "unavailable" else if (sound.enabled) 
 pub fn cue(before, after, command) {
     if (contains(["undo","restart","level","next"],command) or before.stage != after.stage) ""
     else if (before.active == null and after.active != null and after.moves == before.moves+1) "drop"
-    else if (command != "tick" or before.active == null or before.paused or
-        before.active.tick+1 < model.EDGE_TICKS) ""
+    else if (command != "tick" or before.active == null or before.paused) ""
     else {
         let node = model.level(before).nodes[before.active.to]
         if (after.active != null) {
-            if (after.active.from != before.active.from and contains(["switch","relay"],node.kind)) "switch" else ""
+            if (after.active.from == before.active.from) ""
+            else if (node.kind == "spring") "steel"
+            else if (model.indexed(node) or model.selective(node) or node.kind == "relay") "switch" else ""
         }
         else if (after.mode == "won") "win"
-        else if (node.kind == "gate" and before.bits[before.active.to] == 0) "catch"
+        else if (model.catching(node) and before.bits[before.active.to] < node.threshold) "catch"
         else if (after.losses > before.losses) "miss"
         else if (model.collected(after) > model.collected(before)) "pocket"
         else if (before.active.color == 6) "steel"

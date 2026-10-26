@@ -1,0 +1,214 @@
+{
+  "name": "Word asynchronous spelling",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 920,
+    "height": 500
+  },
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "type",
+      "text": "This is teh speling test."
+    },
+    {
+      "type": "wait",
+      "ms": 2200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-state\")===\"ready\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-count\")===\"2\""
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-word .spelling-underline\")].map(n=>n.getAttribute(\"data-spelling-word\")).sort().join(\",\")===\"speling,teh\""
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-word .spelling-underline\")].every(n=>{let r=n.getBoundingClientRect(),h=document.getElementById(\"edit-surface\").getBoundingClientRect();return r.width>5&&r.left>=h.left&&r.right<=h.right&&r.top>=h.top&&r.bottom<=h.bottom})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector(\"#spelling-word button\")==null"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-word-inline.png"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 8,
+      "end": 11
+    },
+    {
+      "type": "type_physical",
+      "text": "t"
+    },
+    {
+      "type": "type_physical",
+      "text": "h"
+    },
+    {
+      "type": "type_physical",
+      "text": "e"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "This is the speling test."
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-state\")===\"pending\""
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll(\"#spelling-word .spelling-underline\")].some(n=>n.getAttribute(\"data-spelling-word\")===\"speling\")"
+    },
+    {
+      "type": "wait",
+      "ms": 2200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-state\")===\"ready\"&&document.getElementById(\"spelling-word\").getAttribute(\"data-spelling-count\")===\"1\"",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#spelling-word .spelling-underline\").length===1&&document.querySelector(\"#spelling-word .spelling-underline\").getAttribute(\"data-spelling-word\")===\"speling\""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog-unsaved"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let m=document.querySelector(\"#spelling-word .spelling-underline\").getBoundingClientRect(),d=document.querySelector(\".edit-dialog\").getBoundingClientRect();return m.left<d.right&&m.right>d.left&&m.top<d.bottom&&m.bottom>d.top&&Number(getComputedStyle(document.getElementById(\"spelling-word\")).zIndex)<Number(getComputedStyle(document.querySelector(\".edit-dialog-layer\")).zIndex)})()"
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "assert_script",
+      "js": "document.activeElement!=null&&document.activeElement.closest(\".edit-dialog\")!=null"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-word-modal.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll(\"#spelling-word .spelling-underline\").length===1"
+    },
+    {
+      "type": "assert_caret",
+      "visible": true
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('spelling-word').setAttribute('data-base-width',document.querySelector('#spelling-word .spelling-underline').getBoundingClientRect().width)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#status-zoom-in"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('zoom-label').textContent==='150%'&&document.querySelectorAll('#spelling-word .spelling-underline').length===1&&Math.abs(document.querySelector('#spelling-word .spelling-underline').getBoundingClientRect().width/Number(document.getElementById('spelling-word').getAttribute('data-base-width'))-1.5)<0.05"
+    },
+    {
+      "type": "render",
+      "file": "temp/spelling-word-zoom.png"
+    }
+  ]
+}

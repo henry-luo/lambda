@@ -205,6 +205,7 @@ DOM_OP(CORE, edit_release_delta, editing, 2, "pn(host: any, delta: int) -> bool"
 DOM_OP(CORE, clear_editing_focus, editing, 1, "pn(host: any) -> bool", dom_engine_clear_editing_focus, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Opaque per-document behavior-package state. The engine roots this Item but
 // has no visibility into its session schema or editing policy (D7.2.5).
+DOM_OP(CORE, edit_sync_selection, editing, 2, "pn(host: any, invocation: int) -> bool", dom_engine_edit_sync_selection, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, edit_session, editing, 1, "fn(host: any) -> any", dom_engine_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, set_edit_session, editing, 2, "pn(host: any, session: any) -> any", dom_engine_set_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // A model surface gets a document-local logical handle; toolbar edits finish
@@ -246,6 +247,14 @@ DOM_OP(CORE, edit_clipboard_write, editing, 4, "pn(host: any, invocation: int, h
 DOM_OP(CORE, open_context_menu, input, 2, "pn(n: any, enabled_mask: int) -> bool",          dom_engine_open_context_menu, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, context_menu_target, input, 1, "fn(n: any) -> any",                            dom_engine_context_menu_target, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 
+// IME-E1/E2: transport and opaque package state, with no input-method policy.
+DOM_OP(CORE, compose, input, 4, "pn(n: any, phase: string, text: string, caret: int) -> bool", dom_engine_compose, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, ime_status, input, 1, "fn(n: any) -> any", dom_engine_ime_status, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, ime_session, input, 1, "fn(n: any) -> any", dom_engine_ime_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, set_ime_session, input, 2, "pn(n: any, session: any) -> any", dom_engine_set_ime_session, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, ime_popup, input, 3, "pn(n: any, frame: any, mode: string) -> bool", dom_engine_ime_popup, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, set_chinese_ime, window, 2, "pn(n: any, enabled: bool) -> bool", dom_engine_set_chinese_ime, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
 // ---------------------------------------------------------------------------
 // CORE — ranges and selection (boundary storage is mechanism)
 // ---------------------------------------------------------------------------
@@ -256,6 +265,8 @@ DOM_OP(CORE, range_set_end,    range, 3, "pn(r: any, n: any, offset: int) -> nul
 DOM_OP(CORE, selection,        selection, 0, "fn() -> any",                                 dom_global_get_selection,  0, "", none, "", "")
 // ESO113: a Lambda script names its document; the ambient forms above stay JS's.
 DOM_OP(CORE, document_create_range, range, 1, "fn(doc: any) -> any",                     dom_create_range_for,      DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, source_range_rects, geometry, 3, "fn(host: any, start: map, end: map) -> array", dom_core_source_range_rects, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, text_node_range_rects, geometry, 4, "fn(host: any, text: any, start: int, end: int) -> array", dom_core_text_node_range_rects, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, document_selection,    selection, 1, "fn(doc: any) -> any",                 dom_get_selection_for,     DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, selection_boundaries, selection, 1, "fn(s: any) -> map",                       dom_core_selection_boundaries, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, set_base_and_extent, selection, 5, "pn(s: any, an: any, ao: int, fn_: any, fo: int) -> null", js_selection_set_base_and_extent, DOM_F_MUTATES | DOM_F_NEUTRAL, "", none, "", "")
@@ -515,6 +526,8 @@ DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", do
 
 // no member: the engine boundary hit-test has no JS spelling on an element
 DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, text_control_boundary_from_point, geometry, 3, "fn(n: any, x: number, y: number) -> any", dom_core_text_control_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, text_control_range_rects, geometry, 3, "fn(n: any, start: int, end: int) -> any", dom_core_text_control_range_rects, DOM_F_NEUTRAL, "", none, "", "")
 
 DOM_OP(CORE, focus,  focus, 2, "pn(n: any, options: any) -> null", dom_core_focus, DOM_F_MUTATES, "", html_element, "", "")
 DOM_OP(CORE, blur,   focus, 1, "pn(n: any) -> null", dom_core_blur, DOM_F_MUTATES, "", html_element, "", "")
@@ -689,6 +702,7 @@ DOM_OP(CORE, scroll_into_view_if_needed, geometry, 2, "pn(n: any, center: bool) 
 DOM_OP(CORE, set_close_guard, window, 2, "pn(n: any, armed: bool) -> bool", dom_engine_set_close_guard, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, request_window_close, window, 1, "pn(n: any) -> bool", dom_engine_request_window_close, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, set_window_title, window, 2, "pn(n: any, title: string) -> bool", dom_engine_set_window_title, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, set_window_min_width, window, 2, "pn(n: any, width: int) -> bool", dom_engine_set_window_min_width, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 // appended so published catalog ordinals remain stable
 DOM_OP(CORE, rule_get_parent_style_sheet, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_parent_style_sheet, DOM_F_NEUTRAL, "", none, "", "")

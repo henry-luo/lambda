@@ -2717,6 +2717,14 @@ RADIANT_C_API Item fn_radiant_set_window_title(Item node_item, Item title_item) 
     return radiant_bool_item(doc && title && radiant_window_set_title(doc, title));
 }
 
+RADIANT_C_API Item fn_radiant_set_window_min_width(Item node_item, Item width_item) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "SET_WINDOW_MIN_WIDTH");
+    if (!doc || get_type_id(width_item) != LMD_TYPE_INT) return radiant_bool_item(false);
+    int64_t width = it2i(width_item);
+    if (width <= 0 || width > INT_MAX) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_window_set_min_width(doc, (int)width));
+}
+
 // The text node an editing dispatch resolved to, and its range. Three scalar
 // accessors rather than one map, matching selection_start/selection_end: the
 // module has no map-building idiom, and a template reads these once each.
@@ -2869,6 +2877,11 @@ RADIANT_C_API Item fn_radiant_dom_edit_abort_transaction(Item node_item,
 // Retained history is a generic DOM transaction snapshot. The bridge exposes
 // opaque document-local ids only; package code retains command and grouping
 // policy while the waist owns identity-preserving replay (D7.2.5, D5.3.3).
+RADIANT_C_API Item fn_radiant_edit_sync_selection(Item node, Item token) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(node, token, "EDIT_SYNC_SELECTION", nullptr);
+    return radiant_bool_item(dom_edit_sync_selection(invocation));
+}
+
 RADIANT_C_API Item fn_radiant_dom_edit_retain_delta(Item node_item,
                                                     Item token_item) {
     DomEditInvocation* invocation = radiant_dom_edit_invocation(
@@ -3620,6 +3633,73 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
 // document — the body, in practice, since that is where the session template
 // matches. Writing it is what suppresses nothing else: the placeholder rule and
 // the orphan cleanup are the template's policy, expressed through these.
+// D7.2.5: the session is opaque; only the Lambda adapter reads its policy fields.
+RADIANT_C_API Item fn_radiant_ime_session(Item node_item) {
+    DocState* state = radiant_state_for_element(node_item, "IME_SESSION", nullptr);
+    return state && state->input_method.session_rooted
+        ? (Item){.item = state->input_method.session_root} : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_set_ime_session(Item node_item, Item session) {
+    DocState* state = radiant_state_for_element(node_item, "SET_IME_SESSION", nullptr);
+    if (!state) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> value(roots, session);
+    if (!roots.valid()) return ItemNull;
+    if (!state->input_method.session_rooted) {
+        state->input_method.session_root = ItemNull.item;
+        if (!heap_try_register_gc_root(&state->input_method.session_root)) return ItemNull;
+        state->input_method.session_rooted = true;
+    }
+    state->input_method.session_root = value.get().item;
+    return value.get();
+}
+
+RADIANT_C_API Item fn_radiant_ime_status(Item node_item) {
+    DomElement* element = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "IME_STATUS", &element);
+    if (!state) return ItemNull;
+    UiContext* ui = static_cast<UiContext*>(element->doc->js.host_ui_context);
+    DomElement* target = input_method_target(state);
+    Rect popup_cell = {};
+    if (ui && state->input_method.visible) input_method_popup_row_rect(ui, state, -1, &popup_cell);
+    RootFrame roots(2);
+    Rooted<Item> result(roots, radiant_obj_new());
+    Rooted<Item> target_value(roots, target ? radiant_dom_wrap_node(target) : ItemNull);
+    radiant_rooted_obj_set(result, "target", target_value.get());
+    radiant_rooted_obj_set(result, "active", radiant_bool_item(state->editing.composition.active));
+    radiant_rooted_obj_set(result, "scripted", radiant_bool_item(state->editing.composition.scripted));
+    radiant_rooted_obj_set(result, "enabled", radiant_bool_item(ui && ui->chinese_ime_enabled));
+    radiant_rooted_obj_set(result, "candidate_columns", radiant_int_item(state->input_method.columns));
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_compose(Item node, Item phase, Item text, Item caret) {
+    DomElement* target = radiant_dom_element_from_item(node, "COMPOSE");
+    int64_t offset = get_type_id(caret) == LMD_TYPE_INT ? it2i(caret) : -1;
+    bool valid = target && get_type_id(phase) == LMD_TYPE_STRING &&
+        get_type_id(text) == LMD_TYPE_STRING && offset >= 0 && offset <= UINT32_MAX;
+    return radiant_bool_item(valid && input_method_queue(target, fn_to_cstr(phase),
+        fn_to_cstr(text), (uint32_t)offset));
+}
+
+RADIANT_C_API Item fn_radiant_ime_popup(Item node, Item frame, Item mode) {
+    DomElement* element = radiant_dom_element_from_item(node, "IME_POPUP");
+    UiContext* ui = element ? static_cast<UiContext*>(element->doc->js.host_ui_context) : nullptr;
+    return radiant_bool_item(element && get_type_id(mode) == LMD_TYPE_STRING &&
+        input_method_popup(ui, element, frame, fn_to_cstr(mode)));
+}
+
+RADIANT_C_API Item fn_radiant_set_chinese_ime(Item node, Item enabled) {
+    DomElement* element = radiant_dom_element_from_item(node, "SET_CHINESE_IME");
+    UiContext* ui = element ? static_cast<UiContext*>(element->doc->js.host_ui_context) : nullptr;
+    if (!ui || get_type_id(enabled) != LMD_TYPE_BOOL) return radiant_bool_item(false);
+    ui->chinese_ime_enabled = enabled.item == ITEM_TRUE;
+    radiant_input_method_setting_changed(element);
+    doc_state_mark_dirty(element->doc->state);
+    return radiant_bool_item(true);
+}
+
 RADIANT_C_API Item fn_radiant_ime_preedit(Item node_item) {
     DomElement* elem = nullptr;
     DocState* state = radiant_state_for_element(node_item, "IME_PREEDIT", &elem);
@@ -5146,6 +5226,8 @@ static Item fn_radiant_physics(Item node,Item request) {
     return scene3d_physics_control(element,operation.get());
 }
 static const JubeFuncDef radiant_functions[] = {
+    {"set_chinese_ime", "pn(n: any, enabled: bool) -> bool", (fn_ptr)fn_radiant_set_chinese_ime, JUBE_FN_NONE,
+     "Item fn_radiant_set_chinese_ime(Item n, Item enabled)", (fn_ptr)fn_radiant_set_chinese_ime},
     {"pdf_walk", "fn(path: string, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk, JUBE_FN_NONE,
      "Item fn_radiant_pdf_walk(Item path, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk},
     {"pdf_walk_view", "fn(source: element, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk_view, JUBE_FN_NONE,
@@ -5556,6 +5638,13 @@ RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
 RADIANT_PROVIDE_ENGINE_2(keyboard_command, fn_radiant_keyboard_command)
 RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
 RADIANT_PROVIDE_ENGINE_2(pointer_selection, fn_radiant_pointer_selection)
+RADIANT_PROVIDE_ENGINE_4(compose, fn_radiant_compose)
+RADIANT_PROVIDE_ENGINE_1(ime_status, fn_radiant_ime_status)
+RADIANT_PROVIDE_ENGINE_2(edit_sync_selection, fn_radiant_edit_sync_selection)
+RADIANT_PROVIDE_ENGINE_1(ime_session, fn_radiant_ime_session)
+RADIANT_PROVIDE_ENGINE_2(set_ime_session, fn_radiant_set_ime_session)
+RADIANT_PROVIDE_ENGINE_3(ime_popup, fn_radiant_ime_popup)
+RADIANT_PROVIDE_ENGINE_2(set_chinese_ime, fn_radiant_set_chinese_ime)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
 RADIANT_PROVIDE_ENGINE_1(clipboard_write, fn_radiant_clipboard_write)
@@ -5597,6 +5686,7 @@ RADIANT_PROVIDE_ENGINE_2(finish_model_edit, fn_radiant_finish_model_edit)
 RADIANT_PROVIDE_ENGINE_2(set_close_guard, fn_radiant_set_close_guard)
 RADIANT_PROVIDE_ENGINE_1(request_window_close, fn_radiant_request_window_close)
 RADIANT_PROVIDE_ENGINE_2(set_window_title, fn_radiant_set_window_title)
+RADIANT_PROVIDE_ENGINE_2(set_window_min_width, fn_radiant_set_window_min_width)
 
 // is_focusable has no radiant.* spelling to forward to: the engine keeps the
 // predicate internal and publishes only focus_candidates, the whole list. A

@@ -46,6 +46,56 @@ Item asset_color(SceneAsset& asset, const double* color) {
     }
     return asset.text(hex);
 }
+void asset_geometry_columns(SceneAsset& a,Item geometry,AssetColumn* columns,const lam::ArrayList<unsigned>* vertices) {
+    for(unsigned k=0;k<ASSET_COLUMN_COUNT;k++) if(columns[k].name) {
+        auto& column=columns[k];
+        if(!vertices) a.attr(geometry,column.name,a.array(column.values.data(),column.values.size()));
+        else {
+            auto array=a.ctx.builder.array();
+            for(unsigned vertex:*vertices) for(unsigned axis=0;axis<column.width;axis++)
+                array.append(a.number(column.values[(size_t)vertex*column.width+axis]));
+            a.attr(geometry,column.name,array.final());
+        }
+    }
+}
+bool asset_face_normal(const lam::ArrayList<double>& points,unsigned p,unsigned q,unsigned r,double* normal) {
+    double u[3],v[3];for(unsigned axis=0;axis<3;axis++) {u[axis]=points[q*3+axis]-points[p*3+axis];v[axis]=points[r*3+axis]-points[p*3+axis];}
+    for(unsigned axis=0;axis<3;axis++) normal[axis]=u[(axis+1)%3]*v[(axis+2)%3]-u[(axis+2)%3]*v[(axis+1)%3];
+    double length=hypot(hypot(normal[0],normal[1]),normal[2]);if(!length) return false;
+    for(unsigned axis=0;axis<3;axis++) normal[axis]/=length;return true;
+}
+void asset_static_chunks(SceneAsset& a,Item parent,Item material,AssetColumn* columns,const lam::ArrayList<double>& triangles,size_t vertex_count,bool flat) {
+    lam::ArrayList<int> remap;for(size_t i=0;i<vertex_count;i++) remap.append(-1);
+    lam::ArrayList<unsigned> vertices;lam::ArrayList<double> indices;
+    auto flush=[&]() {
+        if(indices.empty()) return;
+        Item mesh=a.element("mesh"),geometry=a.element("geometry");
+        a.attr(mesh,"id",a.id("mesh",a.serial++));a.attr(mesh,"material",material);
+        a.attr(geometry,"type",a.symbol("buffer"));asset_geometry_columns(a,geometry,columns,&vertices);
+        if(flat) {
+            auto normals=a.ctx.builder.array();
+            for(size_t i=0;i<vertices.size();i+=3) {
+                double normal[3];asset_face_normal(columns[0].values,vertices[i],vertices[i+1],vertices[i+2],normal);
+                for(unsigned corner=0;corner<3;corner++) for(double component:normal) normals.append(a.number(component));
+            }
+            a.attr(geometry,"normals",normals.final());
+        }
+        a.attr(geometry,"indices",a.array(indices.data(),indices.size()));a.append(mesh,geometry);a.append(parent,mesh);
+        for(unsigned vertex:vertices) remap[vertex]=-1;
+        vertices.clear();indices.clear();
+    };
+    // preserve every triangle and UV seam while bounding each native draw's buffers.
+    for(size_t i=0;i<triangles.size();i+=3) {
+        unsigned needed=0;for(unsigned j=0;j<3;j++) if(flat||remap[(unsigned)triangles[i+j]]<0) needed++;
+        if(vertices.size()+needed>262144||indices.size()+3>1572864) flush();
+        for(unsigned j=0;j<3;j++) {
+            unsigned vertex=(unsigned)triangles[i+j];
+            if(flat||remap[vertex]<0) {remap[vertex]=(int)vertices.size();vertices.append(vertex);}
+            indices.append(remap[vertex]);
+        }
+    }
+    flush();
+}
 static double cross2(const double* a,const double* b,const double* c,unsigned x,unsigned y) {
     return (b[x]-a[x])*(c[y]-a[y])-(b[y]-a[y])*(c[x]-a[x]);
 }
@@ -342,11 +392,14 @@ void input_scene3d_asset(Input* input,const char* source,size_t length,const cha
         Url* url=(Url*)input->url;const char* path=url&&url->pathname?url->pathname->chars:"";
         MimeDetector* detector=mime_detector_init();const char* mime=detect_mime_type(detector,path,source,length);
         type=asset_is(mime,"model/obj")?"obj":asset_is(mime,"model/mtl")?"mtl":
-            asset_is(mime,"model/gltf+json")?"gltf":asset_is(mime,"text/x-3d-model")?"a3d":"unknown";
+            asset_is(mime,"model/gltf+json")?"gltf":asset_is(mime,"text/x-3d-model")?"a3d":
+            asset_is(mime,"model/stl")?"stl":asset_is(mime,"model/x-ply")?"ply":"unknown";
         mime_detector_destroy(detector);
     }
     if(!strcmp(type,"glb")) asset_import_glb(asset,source,length);
-    else if(!input_parse_model(input,source,length,type)) asset.fail("expected .obj, .mtl, .gltf, .glb or .a3d (or an explicit format)");
+    else if(!strcmp(type,"stl")) asset_import_stl(asset,source,length);
+    else if(!strcmp(type,"ply")) asset_import_ply(asset,source,length);
+    else if(!input_parse_model(input,source,length,type)) asset.fail("expected .obj, .mtl, .gltf, .glb, .a3d, .stl or .ply (or an explicit format)");
     else if(!input->parse_failed) {
         Item raw=input->root;
         bool ok=!strcmp(type,"gltf")?asset_import_gltf(asset,raw):

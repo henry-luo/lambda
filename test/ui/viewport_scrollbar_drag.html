@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="UTF-8">
+<title>Viewport scrollbar capture and cancellation</title>
+<style>
+html { overflow: scroll; }
+body { margin: 0; width: 640px; height: 480px; background: linear-gradient(#eef, #cdb); }
+</style>
+<script>
+window.cancelScrollbar = false;
+document.addEventListener('mousedown', event => {
+    if (window.cancelScrollbar) event.preventDefault();
+});
+</script>

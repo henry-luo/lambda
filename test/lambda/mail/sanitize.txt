@@ -1,6 +1,6 @@
 "=== cid parts ==="
 {
-  logo@x: "data:image/png;base64,iVBORw=="
+  "logo@x": "data:image/png;base64,iVBORw=="
 }
 "=== blocked ==="
 8

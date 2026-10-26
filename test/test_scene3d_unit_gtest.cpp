@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+// the native-graphics cases observe gl_core's GLFW context directly
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 #include "../radiant/scene3d.hpp"
 #include "../radiant/scene3d_math.hpp"
 #include "../radiant/animation_mixer.hpp"

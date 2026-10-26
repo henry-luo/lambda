@@ -6,6 +6,10 @@
 #include "../lib/mime-detect.h"
 #include "../lib/url.h"
 #include "../lib/strbuf.h"
+#include "../lib/base64.h"
+#include "../lib/mem.h"
+#include "../lambda/input/input-scene3d.hpp"
+#include "../lambda/format/format.h"
 #include <zlib.h>
 
 class ModelInputTest : public ::testing::Test {
@@ -748,4 +752,367 @@ TEST_F(ModelInputTest, FbxDetectionUsesTheBinarySignatureAndTheAsciiHeader) {
     Input* input = parse(fbx.out->str, nullptr, nullptr, fbx.out->length);
     ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
     EXPECT_TRUE(ElementReader(input->root).hasTag("fbx"));
+}
+
+// ---- EXT_meshopt_compression, KHR texture/emission/light extensions, STL, PLY, glTF export ----
+
+// a mode-3 (raw delta) attribute stream with a zero baseline: valid for any input
+static void meshopt_test_attributes(StrBuf* out, const uint8_t* data, size_t count, size_t stride) {
+    strbuf_append_char(out, (char)0xa0);
+    size_t block = (8192 / stride) & ~(size_t)15; if (block > 256) block = 256;
+    uint8_t last[256] = {};
+    for (size_t offset = 0; offset < count; offset += block) {
+        size_t n = count - offset < block ? count - offset : block, groups = (n + 15) / 16;
+        for (size_t k = 0; k < stride; k++) {
+            for (size_t h = 0; h < (groups + 3) / 4; h++) strbuf_append_char(out, (char)0xff);
+            for (size_t i = 0; i < groups * 16; i++) {
+                uint8_t delta = i < n ? (uint8_t)(data[(offset + i) * stride + k] - (i ? data[(offset + i - 1) * stride + k] : last[k])) : 0;
+                strbuf_append_char(out, (char)(uint8_t)((delta << 1) ^ (uint8_t)((int8_t)delta >> 7)));
+            }
+            last[k] = data[(offset + n - 1) * stride + k];
+        }
+    }
+    size_t tail = stride < 32 ? 32 : stride;
+    for (size_t i = 0; i < tail; i++) strbuf_append_char(out, 0);
+}
+
+TEST_F(ModelInputTest, MeshoptAttributeGroupsDecodeEveryModeAndEscape) {
+    // lane 0 raw, lane 1 4-bit with an escaped 40, lane 2 2-bit with an escaped 60, lane 3 raw.
+    StrBuf* s = strbuf_new(); strbuf_append_char(s, (char)0xa0);
+    const uint8_t lane0[] = {3, 20, 2}, lane1[] = {2, 0xf3, 0, 0, 0, 0, 0, 0, 0, 40}, lane2[] = {1, 0xc0, 0, 0, 0, 60}, lane3[] = {3, 80, 81};
+    strbuf_append_str_n(s, (const char*)lane0, 3); for (int i = 0; i < 14; i++) strbuf_append_char(s, 0);
+    strbuf_append_str_n(s, (const char*)lane1, sizeof(lane1)); strbuf_append_str_n(s, (const char*)lane2, sizeof(lane2));
+    strbuf_append_str_n(s, (const char*)lane3, 3); for (int i = 0; i < 14; i++) strbuf_append_char(s, 0);
+    for (int i = 0; i < 32; i++) strbuf_append_char(s, 0);
+    uint8_t out[8] = {};
+    EXPECT_EQ(lambda::meshopt_decode(out, 2, 4, (const uint8_t*)s->str, s->length, "ATTRIBUTES", nullptr), nullptr);
+    const uint8_t expected[] = {10, 20, 30, 40, 11, 18, 30, 255};
+    EXPECT_EQ(memcmp(out, expected, 8), 0);
+    // a missing tail byte or an unknown codec version is rejected.
+    EXPECT_NE(lambda::meshopt_decode(out, 2, 4, (const uint8_t*)s->str, s->length - 1, "ATTRIBUTES", nullptr), nullptr);
+    s->str[0] = (char)0xa1; EXPECT_NE(lambda::meshopt_decode(out, 2, 4, (const uint8_t*)s->str, s->length, "ATTRIBUTES", nullptr), nullptr);
+    strbuf_free(s);
+}
+
+TEST_F(ModelInputTest, MeshoptAttributesCarryTheBaselineAcrossBlocks) {
+    // 600 elements of stride 12 span three 256-element blocks.
+    const size_t count = 600, stride = 12; uint8_t source[count * stride], out[count * stride];
+    for (size_t i = 0; i < sizeof(source); i++) source[i] = (uint8_t)(i * 37 + (i / stride) * 11);
+    StrBuf* s = strbuf_new(); meshopt_test_attributes(s, source, count, stride);
+    EXPECT_EQ(lambda::meshopt_decode(out, count, stride, (const uint8_t*)s->str, s->length, "ATTRIBUTES", "NONE"), nullptr);
+    EXPECT_EQ(memcmp(out, source, sizeof(source)), 0);
+    strbuf_free(s);
+}
+
+TEST_F(ModelInputTest, MeshoptTrianglesFollowEdgeAndVertexFifos) {
+    // codes: fe(00) reset, edge+next, edge+last+1, edge+free index, codeaux table, ff with three free indices.
+    const uint8_t stream[] = {0xe1, 0xfe, 0x10, 0x0e, 0x0f, 0xf0, 0xff, 0x00, 0x08, 0xff, 0x04, 0x02, 0x02,
+        0x12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t out[18] = {};
+    ASSERT_EQ(lambda::meshopt_decode((uint8_t*)out, 18, 4, stream, sizeof(stream), "TRIANGLES", nullptr), nullptr);
+    const uint32_t expected[] = {0, 1, 2, 2, 1, 3, 2, 3, 1, 2, 1, 5, 4, 5, 1, 7, 8, 9};
+    for (unsigned i = 0; i < 18; i++) EXPECT_EQ(out[i], expected[i]) << i;
+    uint16_t narrow[18] = {};
+    ASSERT_EQ(lambda::meshopt_decode((uint8_t*)narrow, 18, 2, stream, sizeof(stream), "TRIANGLES", nullptr), nullptr);
+    EXPECT_EQ(narrow[17], 9);
+    // trailing data, a non-multiple-of-three count and a filter are all invalid.
+    uint8_t padded[sizeof(stream) + 1]; memcpy(padded, stream, 13); padded[13] = 0; memcpy(padded + 14, stream + 13, 16);
+    EXPECT_NE(lambda::meshopt_decode((uint8_t*)out, 18, 4, padded, sizeof(padded), "TRIANGLES", nullptr), nullptr);
+    EXPECT_NE(lambda::meshopt_decode((uint8_t*)out, 17, 4, stream, sizeof(stream), "TRIANGLES", nullptr), nullptr);
+    EXPECT_NE(lambda::meshopt_decode((uint8_t*)out, 18, 4, stream, sizeof(stream), "TRIANGLES", "OCTAHEDRAL"), nullptr);
+}
+
+TEST_F(ModelInputTest, MeshoptIndexSequencesUseTwoBaselines) {
+    const uint8_t stream[] = {0xd1, 20, 4, 0x91, 0x03, 4, 0, 0, 0, 0};
+    uint32_t out[4] = {};
+    ASSERT_EQ(lambda::meshopt_decode((uint8_t*)out, 4, 4, stream, sizeof(stream), "INDICES", nullptr), nullptr);
+    EXPECT_EQ(out[0], 5u); EXPECT_EQ(out[1], 6u); EXPECT_EQ(out[2], 100u); EXPECT_EQ(out[3], 7u);
+    EXPECT_NE(lambda::meshopt_decode((uint8_t*)out, 5, 4, stream, sizeof(stream), "INDICES", nullptr), nullptr);
+}
+
+TEST_F(ModelInputTest, MeshoptFiltersReconstructNormalsQuaternionsAndFloats) {
+    // octahedral: +Z, +X, and a folded lower-hemisphere direction.
+    StrBuf* s = strbuf_new();
+    const int8_t oct[] = {0, 0, 127, 5, 127, 0, 127, -7, -100, 50, 127, 0};
+    meshopt_test_attributes(s, (const uint8_t*)oct, 3, 4);
+    int8_t normals[12];
+    ASSERT_EQ(lambda::meshopt_decode((uint8_t*)normals, 3, 4, (const uint8_t*)s->str, s->length, "ATTRIBUTES", "OCTAHEDRAL"), nullptr);
+    const int8_t expected_oct[] = {0, 0, 127, 5, 127, 0, 0, -7, -115, 40, -34, 0};
+    for (unsigned i = 0; i < 12; i++) EXPECT_EQ(normals[i], expected_oct[i]) << i;
+    // quaternion: largest w with x = 1/sqrt2, and largest x stored in slot 0.
+    strbuf_reset(s);
+    const int16_t quat[] = {8191, 0, 0, 0x1fff, 8191, 0, 0, 0x1ffc};
+    meshopt_test_attributes(s, (const uint8_t*)quat, 2, 8);
+    int16_t q[8];
+    ASSERT_EQ(lambda::meshopt_decode((uint8_t*)q, 2, 8, (const uint8_t*)s->str, s->length, "ATTRIBUTES", "QUATERNION"), nullptr);
+    EXPECT_EQ(q[0], 23170); EXPECT_EQ(q[1], 0); EXPECT_EQ(q[2], 0); EXPECT_EQ(q[3], 23170);
+    EXPECT_EQ(q[4], 23170); EXPECT_EQ(q[5], 23170); EXPECT_EQ(q[6], 0); EXPECT_EQ(q[7], 0);
+    // exponential: 6 * 2^-2 and -3 * 2^1.
+    strbuf_reset(s);
+    const uint32_t exp[] = {0xfe000006u, 0x01fffffdu};
+    meshopt_test_attributes(s, (const uint8_t*)exp, 1, 8);
+    float f[2];
+    ASSERT_EQ(lambda::meshopt_decode((uint8_t*)f, 1, 8, (const uint8_t*)s->str, s->length, "ATTRIBUTES", "EXPONENTIAL"), nullptr);
+    EXPECT_FLOAT_EQ(f[0], 1.5f); EXPECT_FLOAT_EQ(f[1], -6.f);
+    EXPECT_NE(lambda::meshopt_decode((uint8_t*)f, 1, 8, (const uint8_t*)s->str, s->length, "ATTRIBUTES", "OCTAGONAL"), nullptr);
+    strbuf_free(s);
+}
+
+static StrBuf* meshopt_test_model(bool required) {
+    // compressed positions and triangle indices in buffer 0; buffer 1 is the fallback.
+    const float positions[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    StrBuf* data = strbuf_new(); meshopt_test_attributes(data, (const uint8_t*)positions, 3, 12);
+    size_t attributes = data->length;
+    const uint8_t triangles[] = {0xe1, 0xfe, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    strbuf_append_str_n(data, (const char*)triangles, sizeof(triangles));
+    char* encoded = base64_encode_alloc((const uint8_t*)data->str, data->length, BASE64_STD);
+    StrBuf* json = strbuf_new();
+    strbuf_append_format(json, R"({"asset":{"version":"2.0"},"extensionsUsed":["EXT_meshopt_compression"],%s
+        "buffers":[{"byteLength":%zu,"uri":"data:application/octet-stream;base64,%s"},
+            {"byteLength":44,"extensions":{"EXT_meshopt_compression":{"fallback":true}}}],
+        "bufferViews":[{"buffer":1,"byteLength":36,"byteStride":12,"extensions":{"EXT_meshopt_compression":
+            {"buffer":0,"byteLength":%zu,"byteStride":12,"count":3,"mode":"ATTRIBUTES"}}},
+            {"buffer":1,"byteOffset":36,"byteLength":6,"extensions":{"EXT_meshopt_compression":
+            {"buffer":0,"byteOffset":%zu,"byteLength":%zu,"byteStride":2,"count":3,"mode":"TRIANGLES"}}}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+            {"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1}]}],"nodes":[{"mesh":0}]})",
+        required ? R"("extensionsRequired":["EXT_meshopt_compression"],)" : "",
+        data->length, encoded, attributes, attributes, sizeof(triangles));
+    mem_free(encoded); strbuf_free(data); return json;
+}
+
+TEST_F(ModelInputTest, SceneAssetDecodesMeshoptViewsInsteadOfFallbackBuffers) {
+    for (bool required : {true, false}) {
+        SCOPED_TRACE(required);
+        StrBuf* json = meshopt_test_model(required);
+        Input* input = parse(json->str, "scene3d-asset", "meshopt.gltf"); strbuf_free(json);
+        ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+        auto mesh = ElementReader(input->root).findChildElement("group").findChildElement("group").findChildElement("mesh");
+        auto positions = mesh.findChildElement("geometry").get_attr("positions").asArray();
+        ASSERT_EQ(positions.length(), 9);
+        EXPECT_DOUBLE_EQ(positions.get(3).asFloat(), 1); EXPECT_DOUBLE_EQ(positions.get(7).asFloat(), 1);
+    }
+    // an unknown meshopt mode is refused.
+    StrBuf* json = meshopt_test_model(true);
+    char* compressed = strstr(json->str, "\"mode\":\"ATTRIBUTES\"");
+    ASSERT_NE(compressed, nullptr); memcpy(compressed, "\"mode\":\"ATTRIBUTEX\"", 19);
+    Input* bad = parse(json->str, "scene3d-asset", "meshopt-bad.gltf"); strbuf_free(json);
+    ASSERT_NE(bad, nullptr); EXPECT_TRUE(bad->parse_failed);
+}
+
+static const char* textured_extension_model = R"({"asset":{"version":"2.0"},
+    "extensionsUsed":["KHR_texture_transform","KHR_materials_emissive_strength","KHR_lights_punctual"],
+    "extensions":{"KHR_lights_punctual":{"lights":[{"type":"directional","intensity":2},
+        {"type":"point","color":[1,0,0],"range":5,"name":"lamp"},
+        {"type":"spot","spot":{"innerConeAngle":0.2,"outerConeAngle":0.4}}]}},
+    "buffers":[{"byteLength":60,"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/"}],
+    "bufferViews":[{"buffer":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":24}],
+    "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},{"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"}],
+    "images":[{"uri":"data:image/png;base64,AAAA"}],"textures":[{"source":0}],
+    "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"extensions":{"KHR_texture_transform":{"offset":[0.5,0],"scale":[2,2]}}}},
+        "emissiveFactor":[1,0,0],"extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":3}}}],
+    "meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0}]}],
+    "nodes":[{"mesh":0},{"extensions":{"KHR_lights_punctual":{"light":0}}},
+        {"extensions":{"KHR_lights_punctual":{"light":1}},"translation":[0,2,0]},{"extensions":{"KHR_lights_punctual":{"light":2}}}]})";
+
+TEST_F(ModelInputTest, SceneAssetBakesTextureTransformsAndMapsEmissionAndPunctualLights) {
+    Input* input = parse(textured_extension_model, "scene3d-asset", "extensions.gltf");
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+    ElementReader root(input->root);
+    ElementReader geometry, material = root.findChildElement("resources").findChildElement("material"), lights[3];
+    unsigned light_count = 0;
+    auto visit = [&](auto&& self, ElementReader e) -> void {
+        for (int64_t i = 0; i < e.childCount(); i++) {
+            if (!e.childAt(i).isElement()) continue;
+            ElementReader child = e.childAt(i).asElement();
+            if (child.hasTag("geometry")) geometry = child;
+            if (child.hasTag("light") && light_count < 3) lights[light_count++] = child;
+            self(self, child);
+        }
+    };
+    visit(visit, root);
+    // uv' = (2u + 0.5, 2v), then the native lower-left flip.
+    auto uv = geometry.get_attr("uvs").asArray(); ASSERT_EQ(uv.length(), 6);
+    EXPECT_DOUBLE_EQ(uv.get(0).asFloat(), .5); EXPECT_DOUBLE_EQ(uv.get(1).asFloat(), 1);
+    EXPECT_DOUBLE_EQ(uv.get(2).asFloat(), 2.5); EXPECT_DOUBLE_EQ(uv.get(5).asFloat(), -1);
+    EXPECT_STREQ(material.get_attr("emissive").cstring(), "#ff0000");
+    EXPECT_DOUBLE_EQ(material.get_attr("emissive-intensity").asFloat(), 3);
+    ASSERT_EQ(light_count, 3u);
+    EXPECT_STREQ(lights[0].get_attr("type").cstring(), "directional");
+    EXPECT_DOUBLE_EQ(lights[0].get_attr("intensity").asFloat(), 2);
+    EXPECT_EQ(lights[0].get_attr("target").asArray().get(2).asFloat(), -1);
+    EXPECT_STREQ(lights[1].get_attr("color").cstring(), "#ff0000");
+    EXPECT_DOUBLE_EQ(lights[1].get_attr("distance").asFloat(), 5);
+    EXPECT_TRUE(lights[1].get_attr("target").isNull());
+    EXPECT_STREQ(lights[1].get_attr("name").cstring(), "lamp");
+    EXPECT_DOUBLE_EQ(lights[2].get_attr("angle").asFloat(), .4);
+    EXPECT_DOUBLE_EQ(lights[2].get_attr("penumbra").asFloat(), .5);
+}
+
+TEST_F(ModelInputTest, SceneAssetOmitsTexturedEmissionAndRejectsInvalidExtensionValues) {
+    StrBuf* source = strbuf_new(); strbuf_append_str(source, textured_extension_model);
+    char* factor = strstr(source->str, "\"emissiveFactor\""); ASSERT_NE(factor, nullptr);
+    StrBuf* textured = strbuf_new(); strbuf_append_str_n(textured, source->str, factor - source->str);
+    strbuf_append_str(textured, "\"emissiveTexture\":{\"index\":0},"); strbuf_append_str(textured, factor);
+    Input* input = parse(textured->str, "scene3d-asset", "textured-emission.gltf");
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+    EXPECT_TRUE(ElementReader(input->root).findChildElement("resources").findChildElement("material").get_attr("emissive").isNull());
+    const char* replacements[][2] = {{"\"outerConeAngle\":0.4", "\"outerConeAngle\":0.1"}, {"\"range\":5", "\"range\":0"},
+        {"\"scale\":[2,2]", "\"scale\":[2]"}, {"\"type\":\"point\"", "\"type\":\"area\""}, {"\"light\":2", "\"light\":9"}};
+    for (auto& r : replacements) {
+        SCOPED_TRACE(r[1]); StrBuf* bad = strbuf_new(); char* at = strstr(source->str, r[0]); ASSERT_NE(at, nullptr);
+        strbuf_append_str_n(bad, source->str, at - source->str); strbuf_append_str(bad, r[1]); strbuf_append_str(bad, at + strlen(r[0]));
+        Input* failed = parse(bad->str, "scene3d-asset", "bad-extension.gltf"); strbuf_free(bad);
+        ASSERT_NE(failed, nullptr); EXPECT_TRUE(failed->parse_failed);
+    }
+    strbuf_free(textured); strbuf_free(source);
+}
+
+static StrBuf* binary_stl(unsigned facets, const char* header = "test part") {
+    StrBuf* out = strbuf_new(); char head[80] = {}; strncpy(head, header, 79); strbuf_append_str_n(out, head, 80);
+    glb_test_word(out, facets);
+    for (unsigned f = 0; f < facets; f++) {
+        float values[12] = {0, 0, 1, (float)f, 0, 0, (float)f + 1, 0, 0, (float)f, 1, 0};
+        for (float v : values) { uint32_t bits; memcpy(&bits, &v, 4); glb_test_word(out, bits); }
+        strbuf_append_char(out, (char)(f == 1 ? 7 : 0)); strbuf_append_char(out, 0);
+    }
+    return out;
+}
+
+TEST_F(ModelInputTest, StlAsciiAndBinaryMapToTypedFacetArrays) {
+    ElementReader ascii = parsed("solid wedge\n facet normal 0 0 1\n  outer loop\n   vertex 0 0 0\n   vertex 1 0 0\n   vertex 0 1 0\n"
+        "  endloop\n endfacet\nendsolid wedge\nsolid second\nendsolid\n", "stl");
+    EXPECT_STREQ(ascii.get_attr("format").cstring(), "ascii"); EXPECT_STREQ(ascii.get_attr("name").cstring(), "wedge");
+    EXPECT_EQ(ascii.get_attr("solids").asInt(), 2);
+    EXPECT_EQ(ascii.get_attr("positions").asArray().length(), 3);
+    EXPECT_DOUBLE_EQ(ascii.get_attr("normals").asArray().get(0).asArray().get(2).asFloat(), 1);
+    StrBuf* stl = binary_stl(3);
+    Input* input = parse(stl->str, "stl", nullptr, stl->length);
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+    ElementReader binary(input->root);
+    EXPECT_STREQ(binary.get_attr("format").cstring(), "binary"); EXPECT_STREQ(binary.get_attr("header").cstring(), "test part");
+    EXPECT_EQ(binary.get_attr("positions").asArray().length(), 9);
+    EXPECT_EQ(binary.get_attr("attributes").asArray().get(1).asInt(), 7);
+    // a header that starts like ASCII must not hide a size-consistent binary body.
+    strbuf_free(stl); stl = binary_stl(2, "solid binary");
+    EXPECT_FALSE(parse(stl->str, "stl", nullptr, stl->length)->parse_failed);
+    EXPECT_TRUE(parse(stl->str, "stl", nullptr, stl->length - 1)->parse_failed);
+    strbuf_free(stl);
+    const char* invalid[] = {"solid x\n facet normal 0 0 1\n outer loop\n vertex 0 0\n", "solid x\n facet normal 0 0 nan\n",
+        "solid x\n facet normal 0 0 1\n outer loop\n vertex 0 0 0\n vertex 1 0 0\n vertex 0 1 0\n vertex 1 1 0\n endloop\n endfacet\nendsolid\n",
+        "polygon\n"};
+    for (const char* source : invalid) { SCOPED_TRACE(source); EXPECT_TRUE(parse(source, "stl")->parse_failed); }
+}
+
+TEST_F(ModelInputTest, PlyAsciiAndBinaryKeepPropertyTypesListsAndComments) {
+    ElementReader ascii = parsed("ply\nformat ascii 1.0\ncomment hello\nobj_info scan 3\nelement vertex 2\nproperty float x\n"
+        "property uchar red\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0.5 255\n1 7\n3 0 1 1\n", "ply");
+    EXPECT_STREQ(ascii.get_attr("format").cstring(), "ascii");
+    EXPECT_STREQ(ascii.get_attr("comments").asArray().get(0).cstring(), "hello");
+    EXPECT_STREQ(ascii.get_attr("obj_info").asArray().get(0).cstring(), "scan 3");
+    ElementReader vertex = ascii.childAt(0).asElement(), face = ascii.childAt(1).asElement();
+    EXPECT_TRUE(vertex.hasTag("vertex")); EXPECT_EQ(vertex.get_attr("count").asInt(), 2);
+    EXPECT_DOUBLE_EQ(vertex.get_attr("x").asArray().get(0).asFloat(), .5);
+    EXPECT_EQ(vertex.get_attr("red").asArray().get(1).asInt(), 7);
+    EXPECT_EQ(face.get_attr("vertex_indices").asArray().get(0).asArray().get(2).asInt(), 1);
+    for (bool big : {false, true}) {
+        SCOPED_TRACE(big);
+        StrBuf* ply = strbuf_new();
+        strbuf_append_format(ply, "ply\nformat binary_%s_endian 1.0\nelement vertex 1\nproperty short x\nproperty double y\n"
+            "element face 1\nproperty list uchar ushort vertex_indices\nend_header\n", big ? "big" : "little");
+        const uint8_t le[] = {0xfe, 0xff, 0, 0, 0, 0, 0, 0, 0xf8, 0x3f, 2, 0x34, 0x12, 1, 0},
+            be[] = {0xff, 0xfe, 0x3f, 0xf8, 0, 0, 0, 0, 0, 0, 2, 0x12, 0x34, 0, 1};
+        strbuf_append_str_n(ply, (const char*)(big ? be : le), sizeof(le));
+        Input* input = parse(ply->str, "ply", nullptr, ply->length);
+        ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
+        ElementReader root(input->root);
+        EXPECT_EQ(root.childAt(0).asElement().get_attr("x").asArray().get(0).asInt(), -2);
+        EXPECT_DOUBLE_EQ(root.childAt(0).asElement().get_attr("y").asArray().get(0).asFloat(), 1.5);
+        auto list = root.childAt(1).asElement().get_attr("vertex_indices").asArray().get(0).asArray();
+        EXPECT_EQ(list.get(0).asInt(), 0x1234); EXPECT_EQ(list.get(1).asInt(), 1);
+        // truncating the last list item is an error.
+        EXPECT_TRUE(parse(ply->str, "ply", nullptr, ply->length - 1)->parse_failed);
+        strbuf_free(ply);
+    }
+    const char* invalid[] = {"ply\nformat ascii 2.0\nend_header\n", "ply\nformat ascii 1.0\nelement vertex 1\nproperty float count\nend_header\n1\n",
+        "ply\nformat ascii 1.0\nelement vertex 1\nproperty uchar x\nend_header\n256\n", "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\n",
+        "ply\nformat ascii 1.0\nelement vertex 2000000000\nend_header\n", "obj\n"};
+    for (const char* source : invalid) { SCOPED_TRACE(source); EXPECT_TRUE(parse(source, "ply")->parse_failed); }
+    MimeDetector* detector = mime_detector_init();
+    EXPECT_STREQ(detect_mime_from_filename(detector, "scan.ply"), "model/x-ply");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "part.stl"), "model/stl");
+    mime_detector_destroy(detector);
+}
+
+TEST_F(ModelInputTest, SceneAssetConvertsStlFacetsAndPlyPolygonsWithColorsAndNormals) {
+    StrBuf* stl = binary_stl(2);
+    Input* part = parse(stl->str, "scene3d-asset", "part.stl", stl->length); strbuf_free(stl);
+    ASSERT_NE(part, nullptr); ASSERT_FALSE(part->parse_failed) << part->parse_error_message;
+    auto geometry = ElementReader(part->root).findChildElement("mesh").findChildElement("geometry");
+    // facet normals come from the winding, not the stored (0,0,1).
+    EXPECT_EQ(geometry.get_attr("positions").asArray().length(), 18);
+    EXPECT_DOUBLE_EQ(geometry.get_attr("normals").asArray().get(2).asFloat(), 1);
+    Input* quad = parse("ply\nformat ascii 1.0\ncomment TextureFile data:image/png;base64,AAAA\nelement vertex 4\nproperty float x\nproperty float y\n"
+        "property float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nproperty float s\nproperty float t\n"
+        "element face 2\nproperty list uchar int vertex_indices\nend_header\n"
+        "0 0 0 255 0 0 0 0\n1 0 0 0 255 0 1 0\n1 1 0 0 0 255 1 1\n0 1 0 255 255 255 0 1\n4 0 1 2 3\n3 0 0 1\n", "scene3d-asset", "quad.ply");
+    ASSERT_NE(quad, nullptr); ASSERT_FALSE(quad->parse_failed) << quad->parse_error_message;
+    ElementReader root(quad->root);
+    auto mesh = root.findChildElement("mesh"); geometry = mesh.findChildElement("geometry");
+    // the quad triangulates to six indices; the zero-area face is dropped.
+    EXPECT_EQ(geometry.get_attr("indices").asArray().length(), 6);
+    EXPECT_EQ(geometry.get_attr("colors").asArray().length(), 12);
+    EXPECT_EQ(geometry.get_attr("uvs").asArray().length(), 8);
+    EXPECT_DOUBLE_EQ(geometry.get_attr("normals").asArray().get(2).asFloat(), 1);
+    EXPECT_FALSE(root.findChildElement("resources").findChildElement("texture").get_attr("src").isNull());
+    const char* invalid[] = {"ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n",
+        "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nelement face 1\n"
+        "property list uchar int vertex_indices\nend_header\n0 0 0\n3 0 0 4\n",
+        "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nproperty float red\n"
+        "element face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0 1\n1 0 0 1\n0 1 0 1\n3 0 1 2\n"};
+    for (const char* source : invalid) { SCOPED_TRACE(source); EXPECT_TRUE(parse(source, "scene3d-asset", "invalid.ply")->parse_failed); }
+}
+
+TEST_F(ModelInputTest, GltfExportRoundTripsImportedGeometryMaterialsAndLights) {
+    Input* source = parse(textured_extension_model, "scene3d-asset", "extensions.gltf");
+    ASSERT_NE(source, nullptr); ASSERT_FALSE(source->parse_failed) << source->parse_error_message;
+    for (bool binary : {false, true}) {
+        SCOPED_TRACE(binary);
+        StrBuf* out = strbuf_new(); const char* error = nullptr;
+        ASSERT_TRUE(format_gltf_bytes(source->root, binary, out, &error)) << error;
+        if (binary) { ASSERT_GE(out->length, 20u); EXPECT_EQ(memcmp(out->str, "glTF", 4), 0); EXPECT_EQ(out->length % 4, 0u); }
+        else EXPECT_NE(strstr(out->str, "\"KHR_lights_punctual\""), nullptr);
+        Input* again = parse(out->str, "scene3d-asset", binary ? "export.glb" : "export.gltf", out->length); strbuf_free(out);
+        ASSERT_NE(again, nullptr); ASSERT_FALSE(again->parse_failed) << again->parse_error_message;
+        // nodes nest one level deeper under the exported root group.
+        ElementReader root(again->root), material = root.findChildElement("resources").findChildElement("material");
+        EXPECT_STREQ(material.get_attr("emissive").cstring(), "#ff0000");
+        EXPECT_DOUBLE_EQ(material.get_attr("emissive-intensity").asFloat(), 3);
+        unsigned lights = 0; ElementReader geometry;
+        auto visit = [&](auto&& self, ElementReader e) -> void {
+            for (int64_t i = 0; i < e.childCount(); i++) {
+                if (!e.childAt(i).isElement()) continue;
+                ElementReader child = e.childAt(i).asElement();
+                if (child.hasTag("light")) lights++;
+                if (child.hasTag("geometry")) geometry = child;
+                self(self, child);
+            }
+        };
+        visit(visit, root);
+        EXPECT_EQ(lights, 3u);
+        ASSERT_TRUE(geometry.isValid());
+        auto uv = geometry.get_attr("uvs").asArray(); ASSERT_EQ(uv.length(), 6);
+        EXPECT_NEAR(uv.get(2).asFloat(), 2.5, 1e-6); EXPECT_NEAR(uv.get(5).asFloat(), -1, 1e-6);
+    }
+}
+
+TEST_F(ModelInputTest, GltfExportRefusesSkinsAndAnimationClips) {
+    Input* rigged = load_scene_asset("test/demo/scene3d/assets/loading/articulated.gltf");
+    ASSERT_NE(rigged, nullptr); ASSERT_FALSE(rigged->parse_failed);
+    StrBuf* out = strbuf_new(); const char* error = nullptr;
+    EXPECT_FALSE(format_gltf_bytes(rigged->root, false, out, &error));
+    ASSERT_NE(error, nullptr);
+    EXPECT_TRUE(strstr(error, "skin") || strstr(error, "skeleton") || strstr(error, "animation")) << error;
+    strbuf_free(out);
 }

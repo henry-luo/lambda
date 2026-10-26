@@ -89,10 +89,67 @@
     clean: true,
     stock: true,
     medal: true
+  }, {
+    puzzle: 9,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 10,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 11,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 12,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 13,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 14,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 15,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
+  }, {
+    puzzle: 16,
+    solved: true,
+    par: true,
+    clean: true,
+    stock: true,
+    medal: true
   }]
 {
   all_solved: true,
-  downward: true,
+  acyclic_routes: true,
+  ordinary_descents: true,
   valid_links: true,
   hint: true,
   hint_changes: true,
@@ -124,4 +181,30 @@
   quiet_invalid: true,
   quiet_empty: true,
   voice_budget: true
+}
+{
+  sixteen_puzzles: true,
+  rotary_advances: true,
+  rotary_wraps: true,
+  rotary_undo: true,
+  counter_first: true,
+  counter_second: true,
+  counter_pass: true,
+  counter_undo: true,
+  magnet_steel: true,
+  magnet_glass: true,
+  steel_collection: true,
+  magnet_fixed: true,
+  filter_match: true,
+  filter_other: true,
+  filter_black: true,
+  selected_preview: true,
+  spring_launch: true,
+  spring_arc: true,
+  spring_arrival: true,
+  spring_cue: true,
+  remote_rotor: true,
+  remote_wrap: true,
+  remote_preview: true,
+  new_autoplay: true
 }

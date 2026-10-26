@@ -5,6 +5,7 @@
   "events": [
     {"type": "advance_time", "ms": 200, "steps": 4},
     {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "flex"},
+    {"type": "assert_count", "target": {"selector": "[data-slide-tool=fullscreen] svg"}, "equals": 2},
     {"type": "assert_script", "js": "(document.getElementById('presenter-demo').dispatchEvent(new CustomEvent('slide_fullscreen', {bubbles: false, detail: {fullscreen: true}})), true)"},
     {"type": "advance_time", "ms": 64, "steps": 4},
     {"type": "assert_style", "target": {"selector": ".slide-controls"}, "property": "display", "equals": "none"},

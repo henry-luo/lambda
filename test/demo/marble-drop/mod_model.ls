@@ -1,10 +1,10 @@
 // Pure transitions, with mutable ownership confined to the view (S1.4, S12.1.3).
 import levels: .mod_levels
+import motion: .mod_motion
 pub let LEVELS = levels.LEVELS
 pub let COLORS = levels.COLORS
 pub let INKS = levels.INKS
-// Each rail takes 280 ms on the shared 40 ms clock.
-pub let EDGE_TICKS = 7
+pub let STEP_MS = motion.STEP_MS
 pub fn level(game) => LEVELS[game.stage]
 fn replace_at(values, index, value) => [for (i,v in values) if (i == index) value else v]
 pub fn targets(game) => [for (i,n in level(game).nodes where n.kind == "bin") i]
@@ -22,22 +22,36 @@ pub fn new_game(stage = 0, medals = []) {
         moves:0, losses:0, history:[], hint:"", message:"Choose a marble, then drop it into an inlet."}
 }
 
-// Both animation and planning enter devices through this single routing rule.
-pub fn visit(machine, bits, index) {
+pub fn indexed(node) => node.kind == "switch" or node.kind == "rotor"
+pub fn selective(node) => node.kind == "magnet" or node.kind == "filter"
+pub fn catching(node) => node.kind == "gate" or node.kind == "counter"
+fn advance_device(machine,bits,index) {
+    let next = bits[index]+1
+    replace_at(bits,index,if (next >= len(machine.nodes[index].exits)) 0 else next)
+}
+pub fn outlet(machine,bits,index,color) {
     let node = machine.nodes[index]
-    let closed = node.kind == "gate" and bits[index] == 0
-    let updated = if (node.kind == "switch") replace_at(bits,index,1-bits[index])
-        else if (node.kind == "gate") replace_at(bits,index,1)
-        else if (node.kind == "relay") replace_at(bits,node.link,1-bits[node.link]) else bits
+    if (indexed(node)) bits[index]
+    else if (selective(node)) (if (color == node.match) 0 else 1)
+    else 0
+}
+// Animation, colored route previews and the planner share every device rule.
+pub fn visit(machine, bits, index, color = -1) {
+    let node = machine.nodes[index]
+    let closed = catching(node) and bits[index] < node.threshold
+    let updated = if (indexed(node)) advance_device(machine,bits,index)
+        else if (catching(node)) replace_at(bits,index,min(node.threshold,bits[index]+1))
+        else if (node.kind == "relay") advance_device(machine,bits,node.link) else bits
     {bits:updated, next:if (node.kind == "bin" or closed) -1
-        else node.exits[if (node.kind == "switch") bits[index] else 0], caught:closed, node:index}
+        else node.exits[outlet(machine,bits,index,color)], caught:closed, node:index}
 }
-fn trace(machine, bits, index, remaining) {
-    let step = visit(machine,bits,index)
+fn trace(machine, bits, index, remaining, color) {
+    let step = visit(machine,bits,index,color)
     if (step.next == -1 or remaining == 0) step
-    else trace(machine,step.bits,step.next,remaining-1)
+    else trace(machine,step.bits,step.next,remaining-1,color)
 }
-pub fn preview(game, funnel) => trace(level(game),game.bits,level(game).funnels[funnel],len(level(game).nodes))
+pub fn preview(game, funnel, color = null) => trace(level(game),game.bits,level(game).funnels[funnel],
+    len(level(game).nodes),if (color == null) game.selected else color)
 
 fn finish(game, result, color) {
     let node = level(game).nodes[result.node]
@@ -51,7 +65,9 @@ fn finish(game, result, color) {
     let medals = if (won) [for (i in 0 to len(LEVELS)-1)
         if (i == game.stage) max(medal,game.medals[i] or 0) else game.medals[i] or 0] else game.medals
     let message = if (won) "A beautiful solution. Every color is home."
-        else if (result.caught) (if (color == 6) "Steel caught. The passage is now open." else "The catch kept your marble. Its passage is now open.")
+        else if (result.caught) (if (result.bits[result.node] < node.threshold)
+            "Counterweight loaded: " ++ string(result.bits[result.node]) ++ " / " ++ string(node.threshold) ++ ". One more marble opens it."
+            else if (color == 6) "Steel caught. The passage is now open." else "The catch kept your marble. Its passage is now open.")
         else if (correct) COLORS[if (color == 7) node.color else color] ++ " arrived safely."
         else if (color == 6) "Test complete. The steel ball leaves the machine."
         else if (game.filled[result.node] >= node.need) "That pocket is full. Undo to recover the marble."
@@ -66,24 +82,29 @@ pub fn drop(game, funnel, color) {
         funnel < 0 or funnel >= len(level(game).funnels) or color < 0 or color > 7 or game.stock[color] <= 0) game
     else {
         let from = level(game).funnels[funnel]
-        let step = visit(level(game),game.bits,from)
+        let step = visit(level(game),game.bits,from,color)
         {*:game, bits:step.bits, stock:replace_at(game.stock,color,game.stock[color]-1),
             selected:color, funnel:funnel, moves:game.moves+1, hint:"", message:"Follow the marble…",
-            active:{from:from, to:step.next, tick:0, color:color}, history:[*game.history,snapshot(game)]}
+            active:{from:from, to:step.next, tick:0, color:color,
+                motion:motion.start(level(game).nodes[from],level(game).nodes[step.next])},
+            history:[*game.history,snapshot(game)]}
     }
 }
 // A planner move runs the same devices and pocket rules without animation/history.
 fn trial(game, funnel, color, result) => finish({*:game, moves:game.moves+1,
     stock:replace_at(game.stock,color,game.stock[color]-1)},result,color)
 fn state_key(game) => {bits:game.bits, filled:game.filled}
-fn candidates(game) => [for (f in 0 to len(level(game).funnels)-1) {
-    let result = preview(game,f)
-    let node = level(game).nodes[result.node]
-    let wanted = not result.caught and game.filled[result.node] < node.need
-    let color = if (wanted) (if (game.stock[node.color] > 0) node.color else 7)
-        else if (game.stock[6] > 0) 6 else 7
-    {funnel:f, color:color, result:result, useful:wanted or result.caught}
-}]
+fn candidates(game) {
+    let moves = [for (f in 0 to len(level(game).funnels)-1, color in 0 to 7 where game.stock[color] > 0) {
+        let result = preview(game,f,color)
+        let node = level(game).nodes[result.node]
+        let wanted = not result.caught and node.kind == "bin" and game.filled[result.node] < node.need and
+            (color == node.color or color == 7)
+        {funnel:f,color:color,result:result,useful:wanted or result.caught,
+            legal:wanted or color >= 6}
+    }];
+    [for (move in moves where move.legal) move]
+}
 fn search(game, seen, depth) {
     if (game.mode == "won") []
     else if (depth == 0) null
@@ -119,11 +140,15 @@ pub fn tick(game) {
         else {*:drop(game,game.plan[0].funnel,game.plan[0].color), plan:slice(game.plan,1,len(game.plan))}
     } else {
         let ball = game.active
-        if (ball.tick+1 < EDGE_TICKS) {*:game,active:{*:ball,tick:ball.tick+1}}
+        let elapsed = (ball.tick+1)*STEP_MS
+        if (elapsed < ball.motion.duration) {*:game,active:{*:ball,tick:ball.tick+1}}
         else {
-            let step = visit(level(game),game.bits,ball.to)
+            let step = visit(level(game),game.bits,ball.to,ball.color)
             if (step.next == -1) finish(game,step,ball.color)
-            else {*:game,bits:step.bits,active:{*:ball,from:ball.to,to:step.next,tick:0}}
+            else {*:game,bits:step.bits,active:{*:ball,from:ball.to,to:step.next,
+                tick:(elapsed-ball.motion.duration)/STEP_MS,
+                // junctions dissipate energy; a spring supplies its own launch impulse
+                motion:motion.start(level(game).nodes[ball.to],level(game).nodes[step.next],ball.motion.speed*.86)}}
         }
     }
 }
@@ -155,12 +180,6 @@ pub fn action(game, command, value = 0) {
     else game
 }
 
-// The SVG rail and moving ball share the same cubic, including its control points.
-pub fn point(a, b, t) {
-    let u = 1-t
-    let mid = (a.y+b.y)/2
-    {x:u*u*u*a.x+3*u*u*t*a.x+3*u*t*t*b.x+t*t*t*b.x,
-     y:u*u*u*a.y+3*u*u*t*mid+3*u*t*t*mid+t*t*t*b.y}
-}
-pub fn rail(a,b) => "M" ++ string(a.x) ++ " " ++ string(a.y) ++ " C" ++ string(a.x) ++ " " ++
-    string((a.y+b.y)/2) ++ " " ++ string(b.x) ++ " " ++ string((a.y+b.y)/2) ++ " " ++ string(b.x) ++ " " ++ string(b.y)
+pub fn point(a,b,t) => motion.point(a,b,t)
+pub fn rail(a,b) => motion.rail(a,b)
+pub fn ball_position(game) => motion.position(game.active.motion,game.active.tick*STEP_MS)

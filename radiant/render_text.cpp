@@ -1132,20 +1132,11 @@ static void render_text_inline_background(RasterRenderContext* rdcon, ViewText* 
     float s = rdcon->raster_scale;
     BackgroundProp* bg = parent_elem->boundary()->background;
     Color* bg_color = bg ? &bg->color : nullptr;
-    const float* padding = parent_elem->boundary()->padding.values;
-    float bg_pad_top = padding[CSS_BOX_SIDE_TOP] * s;
-    float bg_pad_right = padding[CSS_BOX_SIDE_RIGHT] * s;
-    float bg_pad_bottom = padding[CSS_BOX_SIDE_BOTTOM] * s;
-    float bg_pad_left = padding[CSS_BOX_SIDE_LEFT] * s;
     float bg_radius = parent_elem->boundary()->border ?
         parent_elem->boundary()->border->radius.top_left * s : 0;
 
-    Rect bg_rect = {
-        x - bg_pad_left,
-        y - bg_pad_top,
-        text_rect->width * s + bg_pad_left + bg_pad_right,
-        text_rect->height * s + bg_pad_top + bg_pad_bottom
-    };
+    // SVG and PDF record the same box (render_paint_text_inline_box)
+    Rect bg_rect = render_text_inline_padding_box(parent_elem, text_rect, x, y, s);
 
     if (bg_color && bg_color->a > 0) {
         if (bg_radius > 0) {
@@ -1195,11 +1186,7 @@ static void render_text_inline_border(RasterRenderContext* rdcon, ViewText* text
 
     float s = rdcon->raster_scale;
     BorderProp* border = parent_elem->boundary()->border;
-    Rect border_rect = *bg_rect;
-    border_rect.x -= border->width.left * s;
-    border_rect.y -= border->width.top * s;
-    border_rect.width += (border->width.left + border->width.right) * s;
-    border_rect.height += (border->width.top + border->width.bottom) * s;
+    Rect border_rect = render_text_inline_border_box(*bg_rect, border, s);
 
     if (border_rect.width <= 0.0f || border_rect.height <= 0.0f) {
         return;

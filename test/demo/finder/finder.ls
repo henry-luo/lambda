@@ -6,6 +6,7 @@ import files: .mod_io
 import ui: .mod_ui
 import thumbs: .mod_thumbnails
 import updates: ~~.mod_publish
+import splitter: ~~.mod_splitter
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CWD = sys.proc.self.cwd#
@@ -42,12 +43,7 @@ pn resize_preview(owner,st,width) {
     let available = dom.bounding_box(node(owner,"content")).width
     let size = model.preview_size(width,available)
     let limits = model.preview_limits(available)
-    let requested = string(size) ++ "px"
-    let changed = dom.style_get_property(node(owner,"preview-pane"),"width") != requested
-    if (changed)
-        dom.style_set_property(node(owner,"preview-pane"),"width",requested)
-    for (key,value in {valuemin:limits.min,valuemax:limits.max,valuenow:round(size)})
-        updates.attr(node(owner,"preview-divider"),"aria-" ++ string(key),value)
+    let changed = splitter.publish(node(owner,"preview-pane"),node(owner,"preview-divider"),size,limits)
     // panel changes also rewrap icon columns; measure the resulting layout on the next frame.
     return {*:st,preview_width:size,measure_frame:if (changed and st.measure_frame==0) dom.request_frame(owner,"finder_measure") else st.measure_frame}
 }
@@ -58,7 +54,7 @@ pn finish_preview_resize(owner,st,cancel=false) {
     if (cancel) { next = resize_preview(owner,next,gesture.width) }
     updates.attr(owner,"data-preview-resizing",false)
     let divider = node(owner,"preview-divider")
-    if (dom.has_pointer_capture(divider,gesture.pointer)) dom.release_pointer_capture(divider,gesture.pointer)
+    splitter.release(divider,gesture)
     return {*:next,thumbnails:thumbs.schedule(owner,next.thumbnails)}
 }
 pn publish_columns(owner,st,listing) {
@@ -428,17 +424,15 @@ on pointerdown(evt) {
     let divider = dom.closest(evt.target,"#preview-divider")
     if (divider == null or evt.button != 0 or modal_id(session) != "") { return 'pass' }
     let owner = owner_of(evt)
-    session = {*:session,preview_drag:{x:evt.clientX,width:dom.bounding_box(node(owner,"preview-pane")).width,pointer:evt.pointerId}}
+    session = {*:session,preview_drag:splitter.start(node(owner,"preview-pane"),divider,evt)}
     updates.attr(owner,"data-preview-resizing",true)
-    dom.focus_set(divider,false)
-    dom.set_pointer_capture(divider,evt.pointerId)
     return 'prevent-default'
 }
 on pointermove(evt) {
     if (session.preview_drag == null) { return 'pass' }
     let owner = owner_of(evt)
     let gesture = session.preview_drag
-    session = resize_preview(owner,session,gesture.width+gesture.x-evt.clientX)
+    session = resize_preview(owner,session,splitter.pointer_width(gesture,evt.clientX,-1.0))
     session = {*:session,thumbnails:thumbs.schedule(owner,session.thumbnails)}
     return 'prevent-default'
 }
@@ -484,8 +478,7 @@ on keydown(evt) {
     if (modal == "" and dom.closest(evt.target,"#preview-divider") != null and contains(["ArrowLeft","ArrowRight","Home","End"],key)) {
         let limits = model.preview_limits(dom.bounding_box(node(owner,"content")).width)
         let width = dom.bounding_box(node(owner,"preview-pane")).width
-        session = resize_preview(owner,session,if (key == "Home") limits.min else if (key == "End") limits.max
-            else width+(if (key == "ArrowLeft") 20 else -20))
+        session = resize_preview(owner,session,splitter.key_width(width,key,limits,-1.0))
         session = {*:session,thumbnails:thumbs.schedule(owner,session.thumbnails)}
         return 'prevent-default'
     }

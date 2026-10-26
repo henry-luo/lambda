@@ -6,7 +6,9 @@
 > **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
 > **Focus presentation verified:** 2026-10-15 (§4 CSS outlines and editable-only carets).
 > **Scoped source refresh:** 2026-10-19 — shared float paint phases and document/semantic-visit ownership (§2.4).
+> **Scoped source refresh:** 2026-10-25 — hidden retained records excluded from positioned and signed stacking collections (§2.4).
 > **Viewport clipping verified:** 2026-10-23 — caret overflow ancestry and raster vector list markers (`editor_viewport` and Word `viewport` replays).
+> **Scaled caret presentation verified:** 2026-10-26 — DOM-text caret client-matrix painting and shared transformed rectangles (§4).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree through shared paint phases and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
@@ -74,6 +76,13 @@ layer sequence in [CSS Appendix E](https://www.w3.org/TR/CSS22/zindex.html#paint
 2. `render_walk_children` walks in-flow children, **skipping** negative positioned blocks, out-of-flow positioned children (`absolute`/`fixed`) and positive-z positioned children. In-flow positioned children (`relative`/`sticky`) with `z-index` auto or 0 (`radiant_stack_is_in_flow_positioned_step8`) paint in a second loop after their non-positioned siblings, in tree order — CSS 2.1 Appendix E step 8.
 3. `render_walk_positioned_children` collects the block's `first_abs_child` chain, excluding signed layers already owned by a stacking context, and paints the remaining entries in stable ascending z-index order. Custom layouts retain their local signed sequence.
 4. `render_walk_positive_z_descendants` collects positive-z positioned descendants at their nearest real stacking context and paints them last in stable ascending order. Positive and negative collection share ancestry traversal and clip replay. `layout_positioned_parent_offset` translates absolute/fixed layer coordinates from the replayed DOM-parent frame to their containing-block frame.
+
+All collections exclude `RDT_VIEW_NONE` records before classifying their retained
+styles. Signed traversal also stops at a hidden ancestor. A `display:none` record
+can retain border/shadow properties and old dimensions in the selected view's
+storage (D4.1.4v5); these records cannot contribute stacking paint or hit layers.
+`RadiantTextQuery.HiddenPositionedPopupDoesNotPaintRetainedDecoration` and
+`test/ui/slide_menu_dismiss.json` cover closing and reopening styled popups.
 
 Zero-level descendant lifting remains partial. Absolute/fixed children follow in-flow step-8 boxes rather than interleaving with them by tree order. Negative positioned inline spans and complete isolation/flex/grid context rules remain outside the signed block-layer path. The shared helper preserves source order for equal z-index entries. `event.cpp` consumes its lists in reverse, testing negative layers after flow children and before the context's own background. `test/ui/{negative,positive}_stacking.{html,json}` and the corresponding `RenderOutputParity` cases cover paragraph anchors, nested zero contexts, ancestor clips, containing-block offsets, hit order and PNG/SVG/PDF parity.
 
@@ -150,9 +159,16 @@ and author rules share cascade, clipping, and export behavior. Insertion-caret
 paint reads the editable-only visibility projection described in
 [RAD_17](RAD_17_Interaction_State.md#3-the-data-model) (D7.2.5).
 
+The DOM-text caret in `render_overlay.cpp` maps its containing-block snapshot
+through the view's client matrix, embedding offset and raster scale. It uses
+`render_painter_fill_transformed_rect`, shared with the context-rectangle
+painter, inside the existing overflow clips. This keeps a scaled or rotated
+editor's caret beside its glyphs instead of painting at untransformed layout
+coordinates (D7.2.5/D4.5.1v4).
+
 <img alt="render_bound painter order for a box" src="diagram/rad13_render_bound_order.svg" width="490">
 
-The raster block paint itself is decomposed into the same four phases as the walker, driven through `render_paint_block_run`. `render_block_view` (`render_block.cpp:691`) first calls `render_block_skip_paint` (`render_block.cpp:368`) — empty-clip, fully-transparent (opacity ≈ 0), viewport-miss, dirty-miss, and retained-fragment-hit early exits — then runs the pipeline: `render_block_begin_phase` (`render_block.cpp:437`, element marker, visibility, transform push, font, default list marker, CSS-clip scope, effect group), `render_block_paint_self` (`render_block.cpp:458`, `render_bound` + vector path + form control), `render_block_paint_children_phase` (`render_block.cpp:593`, inherited color, scroller, overflow clip, `render_children`, positioned, positive-z), and `render_block_finish_phase` (`render_block.cpp:599`, scroller chrome, column rules, effect-group finish, clip pop, transform pop, restore, marker end). Inline elements are painted by `render_inline_view` (`render.cpp:194`), which suppresses inline background/border on the aggregate box and defers them to per-line-fragment painting in the text path so a wrapping `<code>` breaks its decoration at line boundaries (`render.cpp:200-221`).
+The raster block paint itself is decomposed into the same four phases as the walker, driven through `render_paint_block_run`. `render_block_view` (`render_block.cpp:691`) first calls `render_block_skip_paint` (`render_block.cpp:368`) — empty-clip, fully-transparent (opacity ≈ 0), viewport-miss, dirty-miss, and retained-fragment-hit early exits — then runs the pipeline: `render_block_begin_phase` (`render_block.cpp:437`, element marker, visibility, transform push, font, default list marker, CSS-clip scope, effect group), `render_block_paint_self` (`render_block.cpp:458`, `render_bound` + vector path + form control), `render_block_paint_children_phase` (`render_block.cpp:593`, inherited color, scroller, overflow clip, `render_children`, positioned, positive-z), and `render_block_finish_phase` (`render_block.cpp:599`, scroller chrome, column rules, effect-group finish, clip pop, transform pop, restore, marker end). Inline elements are painted by `render_inline_view` (`render.cpp:194`), which suppresses inline background/border on the aggregate box and defers them to per-line-fragment painting in the text path so a wrapping `<code>` breaks its decoration at line boundaries (`render.cpp:200-221`). The generic inline walker (`render_walk_inline`) records no span boundary, so SVG and PDF paint the same per-fragment box from their text painters (`render_text_view_svg`, `pdf_walk_text`) through `render_paint_text_inline_box`, which shares the raster painter's padding and border geometry (`render_text_inline_padding_box`, `render_text_inline_border_box`).
 
 ### 4.1 The individual painters
 

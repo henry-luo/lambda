@@ -32,22 +32,22 @@ fn make(tag,attrs,kids) {
 }
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
-fn projected_attrs(attrs,preview=false) => {*:map([for (a in attrs where contains(['style','align','start','indent','colspan','rowspan','data-word-style',
+fn projected_attrs(attrs,preview=false,extra=[]) => {*:map([for (a in attrs where contains([*extra,'style','align','start','indent','colspan','rowspan','data-word-style',
     'src','alt','width','height','href','title','data-word-citation','data-word-bibliography',*table_design.attributes,'data-word-repeat-header','data-word-formula','data-word-page-break','data-word-comment',
     'data-word-cover','data-word-blank-page',*[for (entry in graphics.catalog) entry.key],'data-word-rotation',object_layout.key,group_data.key,
     'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
     (not preview and a.name=='id' and (starts_with(string(a.value),insert.bookmark_prefix) or starts_with(string(a.value),"word-source-"))))
     (string(a.name),string(a.value))])}
-fn wrap_marks(marks,i,child,preview=false) => if (i >= len(marks)) child else {
+fn wrap_marks(marks,i,child,preview=false,extra=[]) => if (i >= len(marks)) child else {
     let m = marks[i]
-    let projected = if (m.value is array) projected_attrs(m.value,preview) else {}
+    let projected = if (m.value is array) projected_attrs(m.value,preview,extra) else {}
     let attrs = if (projected["data-word-change-kind"]=="delete") {*:projected,contenteditable:"false"} else projected
-    wrap_marks(marks,i+1,make(m.name,attrs,[child]),preview)
+    wrap_marks(marks,i+1,make(m.name,attrs,[child]),preview,extra)
 }
-fn project(n,child,preview=false) {
+pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") {
     // one wrapper per leaf preserves source identity (S2.6.5) and lets read-only navigation resolve text ranges.
-    if (n.kind=='text') <span class:"word-text-run",wrap_marks(n.marks,0,if (n.text=="") "\u200B" else n.text,preview)>
-    else if (n.kind=='node') make(n.tag,projected_attrs(n.attrs,preview),rendering.surface_children(n,child))
+    if (n.kind=='text') <span class:text_class,wrap_marks(n.marks,0,if (n.text=="") "\u200B" else n.text,preview,extra)>
+    else if (n.kind=='node') make(n.tag,projected_attrs(n.attrs,preview,extra),rendering.surface_children(n,child))
     else ""
 }
 // Thumbnails share document painting but never apply source nodes or duplicate bookmark IDs.

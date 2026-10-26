@@ -1,0 +1,238 @@
+{
+  "name": "Books demo: ebook search options (case, whole word, chapter scope) and results with chapter numbers and highlighted matches",
+  "html": "test/ui/book/_library.ls",
+  "viewport": {
+    "width": 1240,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "a book-wide search matches inside words, ignores case, and names each result's chapter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".grid [data-book=sherlock]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=find]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "log",
+      "message": "filled buttons keep their fill on hover: Search stays readable, swatches keep their color"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".ebook-search-panel [data-ebook-command=search]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-search-panel [data-ebook-command=search]"
+      },
+      "property": "background-color",
+      "equals": "rgb(27, 84, 68)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-search-panel [data-ebook-command=search]"
+      },
+      "property": "color",
+      "equals": "rgb(255, 255, 255)"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".ebook-swatch[data-ebook-color=green]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-swatch[data-ebook-color=green]"
+      },
+      "property": "background-color",
+      "equals": "rgb(127, 209, 107)"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": ".ebook-query"
+      },
+      "text": "test"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-results button"
+      },
+      "count": 23
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-ebook-command=search-option][data-ebook-value=case]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-results button:nth-child(1) .ebook-result-chapter"
+      },
+      "equals": "Ch. 4"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-results button:nth-child(1) .ebook-result-match"
+      },
+      "equals": "test"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-results button:nth-child(1) .ebook-result-text"
+      },
+      "contains": "greatest interest"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-notices"
+      },
+      "equals": "23 matches in the book"
+    },
+    {
+      "type": "log",
+      "message": "whole words only re-runs the search; exact case keeps the six lowercase matches"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=search-option][data-ebook-value=word]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-ebook-command=search-option][data-ebook-value=word]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-results button"
+      },
+      "count": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=search-option][data-ebook-value=case]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-results button"
+      },
+      "count": 6
+    },
+    {
+      "type": "log",
+      "message": "a result opens its chapter; the chapter scope searches only there and drops the chapter column"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".ebook-results button:nth-child(2)"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "5 / 15"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=search-option][data-ebook-value=chapter]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-results button"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-result-chapter"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-notices"
+      },
+      "equals": "2 matches in this chapter"
+    }
+  ]
+}

@@ -1,0 +1,288 @@
+{
+  "name": "Slides Home quick actions: history, Save and printable PDF",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".group-undo .group-tools svg"
+      },
+      "equals": 4
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const b=id=>document.getElementById(id).getBoundingClientRect(),u=b('home-undo'),r=b('home-redo'),s=b('home-save'),p=b('home-print');return s.top>=u.bottom&&Math.abs(s.left-u.left)<1&&Math.abs(p.left-r.left)<1&&Math.abs(p.top-s.top)<1})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-undo').disabled&&document.getElementById('home-redo').disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('home-undo').disabled&&document.getElementById('home-redo').disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "18"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-undo').disabled&&!document.getElementById('home-redo').disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-redo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('home-undo').disabled&&document.getElementById('home-redo').disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-save"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": "save"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/home-actions.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/slides/home-actions.slides",
+      "contains": "presentation"
+    },
+    {
+      "type": "script",
+      "js": "window.quickUndo=document.getElementById('slides-editor').getAttribute('data-undo')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-print"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": "print"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-title"
+      },
+      "equals": "Print presentation"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#file-path"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/home-actions.txt",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "contains": ".pdf"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": "print"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/slides/home-actions.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#home-print"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_file",
+      "path": "temp/slides/home-actions.pdf",
+      "contains": "%PDF-"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "for printing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('slides-editor').getAttribute('data-undo')===quickUndo"
+    },
+    {
+      "type": "key_combo",
+      "key": "p",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": "print"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#home-print"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Insert]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Home]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('home-undo').disabled&&document.getElementById('home-redo').disabled"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides/home-actions.png"
+    }
+  ]
+}

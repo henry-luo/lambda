@@ -149,7 +149,7 @@
     {
       "type": "click",
       "target": {
-        "selector": "[data-ebook-command=mode]"
+        "selector": "[data-ebook-pref=mode][data-ebook-value=paged]"
       }
     },
     {

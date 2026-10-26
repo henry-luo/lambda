@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Chinese input method</title>
+<style>
+body {font-family: sans-serif; margin:24px; background:#f4f6fa; color:#202630;}
+label {display:block; margin-top:14px;}
+input, textarea, [contenteditable] {display:block; width:420px; padding:8px; font:18px sans-serif; border:1px solid #98a2b4; background:white;}
+textarea {height:64px;} [contenteditable] {min-height:48px;}
+#events {font:11px monospace; margin-top:18px; overflow-wrap:anywhere;}
+</style></head><body data-ime="chinese" data-ime-directory="test/ime/fixture">
+<h1>中文 · Pinyin</h1><p>Type pinyin, select with Space or a number. Tap Shift for English.</p>
+<label>Input<input id="input"></label>
+<label>Textarea<textarea id="textarea"></textarea></label>
+<label>Contenteditable<div id="rich" contenteditable="true" tabindex="0"></div></label>
+<label>Two-character limit<input id="limit" maxlength="2"></label>
+<div id="events"></div>
+<script>
+var trace = [];
+['input','textarea','rich','limit'].forEach(function(id) {
+  var target = document.getElementById(id);
+  ['keydown','keyup','compositionstart','compositionupdate','compositionend','beforeinput','input'].forEach(function(name) {
+    target.addEventListener(name,function(event) {
+      trace.push(id+':'+name+':'+(event.inputType || event.data || event.key || ''));
+      if (name == 'input') document.getElementById('events').textContent = trace.join('|');
+    });
+  });
+});
+</script></body></html>

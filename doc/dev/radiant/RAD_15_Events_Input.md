@@ -1,7 +1,7 @@
 # Radiant — Events & Input Dispatch
 
 > **Last verified against tree:** 2026-09-01
-> **Scoped source refresh:** 2026-10-23 — keyboard caret/scroll precedence and focused editing-surface facts (§6); scrollbar drag notifications (§7).
+> **Scoped source refresh:** 2026-10-26 — document-space selection geometry inside iframes and `data-selection-event` (§5); keyboard caret/scroll precedence and focused editing-surface facts, scrollbar drag notifications, and viewport default routing (§6–§7).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: platform input, IME, automation, and synthetic DOM dispatch construct one native event record and enter the same author-then-UA pipeline. It covers the `RdtEvent` union and `EventContext` record, hit testing, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
@@ -165,6 +165,10 @@ Evidence: `test/ui/window_subscriptions.{ls,json}`,
 
 `RDT_EVENT_MOUSE_DOWN`/`_UP` share a branch (`event.cpp:7144`) covering focus change, text-selection anchoring, checkbox/radio/select/dropdown default actions, context-menu open on right-click, and clipboard shortcuts. Selection and caret writes route through the canonical StateStore / `DomSelection` rather than the view (the Phase-6 single-source-of-truth comment at `event.cpp:6691-6697`); event code computes glyph geometry but writes canonical boundaries — [RAD_17 — Interaction State](RAD_17_Interaction_State.md) owns those mutations.
 
+Editing geometry (`editing_geometry_dom_text_boundary_from_point`, `editing_geometry_hit_test_boundary`, `dom_hit_test_to_boundary`) resolves points in the text's **own document**, not the window. The press and drag selection paths therefore subtract the embedding frame's window translation first: `view_frame_translation(view, block_x, block_y)` (state_store.cpp; the hit block origin minus the view's block-viewport chain, zero at top level) on press, and the selection presentation's recorded `iframe_offset` while dragging. Without it a drag inside an `<iframe>` selected text offset by the frame's left/top edge (2026-10-26, found in the EPUB reader).
+
+Pointer events inside an embedded document stay in that document, as in browsers. A host that needs to react to a selection there opts in on the frame: the DOM mouse policy (`lambda.dom.mouse.release`, run from the `<body>` behavior's `mouseup`) queues the event named by the `<iframe>`'s `data-selection-event` attribute on the frame with `dom.request_frame`, the same queued hand-off that `data-navigation-event` uses for links. The host then reads `dom.document_selection(dom.embedded_document_root(frame))`.
+
 ---
 
 Reactive reconciliation captures a focused element's `data-focus-key` before
@@ -209,6 +213,15 @@ The three `RDT_EVENT_COMPOSITION_*` events (`event.cpp:9367`) carry native IME p
 ## 7. Scrolling and the context menu
 
 Scrolling is handled in `scroller.cpp`. `scrollpane_target` (`scroller.cpp:255`) hit-tests the scrollbar track/thumb; `scrollpane_scroll` (`scroller.cpp:214`) applies wheel deltas; `scrollpane_drag` (`scroller.cpp:340`) converts a thumb drag delta into a scroll position. Crucially, scroll position is **not** stored on the view — every write goes through `scroll_state_set_position_for_view` into the StateStore ([RAD_17](RAD_17_Interaction_State.md)), so scroll survives relayout and participates in incremental reconcile. `RDT_EVENT_SCROLL` in `handle_event` hit-tests to find the scrollable block; the package-selected wheel operation applies `scrollpane_scroll` through the live scroll chain. Thumb motion publishes changed offsets through `radiant_notify_scrolled_view`, as wheel and track paging do, and resamples geometry observers; clamped or stationary motion emits no extra `scroll` event (**D7.2.5**; ES33 in `vibe/Lambda_Design_DOM_Default.md` §2.9). A scroll repaints without relayout; because sticky offsets depend on the scroll position, a moved position marks `sticky_scroll_stale`, and paint and `handle_event` re-solve sticky boxes first ([RAD_11 §2.1](RAD_11_Positioned_Float_Multicol_Lists.md)).
+
+Wheel and scrollbar-press defaults in `lambda.dom.form` match `view any`,
+including the viewport's `<html>` target above `<body>` and XML document roots.
+A body-only handler misses viewport scrollbar presses even though hit testing
+finds the thumb. Author cancellation still precedes this package policy
+(**S12.1.3**, **D7.2.5**); native retains drag capture, geometry and scroll state.
+`viewport_scrollbar_drag` covers capture outside the track and cancellation;
+`marble_drop/scrolling` covers viewport dragging, track paging and wheel input
+at 1x and 2x device density.
 
 A sticky box re-solved after a scroll is an in-flow positioned box (CSS 2.1 Appendix E step 8), so it paints and hit-tests above the content it scrolls over (§3, step 6).
 

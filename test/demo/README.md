@@ -4,12 +4,7 @@ Run `./lambda.exe demo <name>` from the repository root, or `./lambda demo <name
 from an unpacked release. Each named demo uses the same viewer as `lambda view`.
 Run `lambda demo --list` for the catalog.
 
-With no name, `lambda demo` opens the demo index (`index.ls`): one animated tile per
-demo. A click starts that demo as its own `lambda demo <name>` process, so it opens
-in a window of its own; closing the index also closes the demos it started. The
-tile catalog is in `index.ls` and its art in `mod_demo_art.ls`; a new named demo
-needs an entry there as well as in `LAMBDA_DEMOS` (`lambda/main.cpp`). The document
-viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
+With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an app store: a category sidebar beside a Discover page of featured apps and one shelf per category. A click starts that demo as its own `lambda demo <name>` process, so it opens in a window of its own; closing the index also closes the demos it started. The catalog and its categories are in `index.ls`; the tile art and app icons are in `mod_demo_art.ls`. Most tiles show a screenshot of the app from `previews/`, which `sh test/demo/previews/capture.sh [name ...]` recaptures from the repository root; the games, the city film and the photo album stay live drawings. A new named demo needs an entry in `index.ls` and `mod_demo_art.ls` (an icon hue and glyph, plus a capture line or a live drawing) as well as in `LAMBDA_DEMOS` (`lambda/main.cpp`). The document viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 
 | Name | Entry point | Guide |
 | --- | --- | --- |
@@ -25,6 +20,7 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
 | `note` | `note/note.ls` | [Notes](note/README.md) |
 | `scene3d` | `scene3d/index.html` | [Scene3D collection](scene3d/README.md) |
+| `aquarium` | `aquarium/aquarium.ls` | [Aquarium builder](aquarium/README.md) |
 | `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
 | `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
@@ -33,7 +29,9 @@ viewer's startup splash is still at `lmd/package/doc/doc_viewer.html`.
 | `archive` | `archive/archive.ls` | [Archive](archive/README.md) |
 | `mail` | `mail/mail.ls` | [Mail](mail/README.md) |
 | `music` | `music/music.ls` | [Music](music/README.md) |
+| `soundflow` | `soundflow/soundflow.ls` | [Soundflow](soundflow/README.md) |
 | `greetings` | `greetings/greetings.ls` | [Greetings](greetings/README.md) |
+| `book` | `book/book.ls` | [Books](book/README.md) |
 
 Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 
@@ -72,6 +70,14 @@ Lambda and played through the music package's SoundFont. Generate the model with
 `./lambda.exe demo mail` is a mail client in the spirit of macOS Mail. It reads IMAP accounts (Gmail, iCloud, Fastmail and Yahoo with app passwords, or Proton Mail Bridge) through [`lambda.io.mail`](../../doc/Lambda_Sys_Func.md#lambdaiomail) and keeps passwords in the Keychain. The window has a sidebar of mailboxes, a message list that mounts only the rows in view, and a viewer that shows HTML mail in a sandboxed, script-free frame with remote content blocked until you load it. See [Mail](mail/README.md).
 
 `./lambda.exe demo music` plays sheet music. A library of five scores sits on the left; the chosen one is engraved on A4 pages by [`lambda.music`](../../doc/Lambda_Packages.md) and played through its SoundFont player, with the sounding notes, chords and lyric syllables highlighted as they play. See [Music](music/README.md).
+
+## Soundflow
+
+`./lambda.exe demo soundflow` is a visual instrument after Agoston Nagy's SoundBow. Draw across a field of strings: each stroke replays in a loop, and its tip sounds every string it crosses. Drag a string's end to retune it, since longer strings sound lower, or its middle to slide it sideways. The loops can play from half to double speed, and the wide strokes can be hidden to leave only the moving tips. Harp, kalimba and glass voices are synthesized in Lambda. **Save** writes the loops as a WAV recording and the drawing as SVG. See [Soundflow](soundflow/README.md).
+
+## Books
+
+`./lambda.exe demo book` is an ebook library in the spirit of macOS Books. Seven public-domain classics from Project Gutenberg sit on its shelves with their own covers: a Continue Reading row with how far you have read, Up Next, genre collections, sorting and search. A book opens in the [`lambda.doc.ebook`](../../doc/Lambda_Packages.md#19-docebook--epub-reader) reader, which saves your place for the next visit. See [Books](book/README.md).
 
 ## Greetings
 

@@ -47,6 +47,7 @@
     "lambda",
     "lambda/core",
     "lambda/io",
+    "lambda/devtools",
     "lambda/runtime",
     "lambda/runtime/gc",
     "lambda/runtime/grammar",
@@ -578,7 +579,8 @@
         "lambda/input/markup/inline/*.cpp",
         "lambda/input/markup/format/*.cpp",
         "lambda/format/format*.cpp",
-        "lambda/network/*.cpp"
+        "lambda/network/*.cpp",
+        "lambda/devtools/*.cpp"
       ],
       "exclude_patterns": [
         "lambda/format/format_latex_html.cpp",
@@ -1250,7 +1252,7 @@
       ]
     },
     "lambda-headless": {
-      "description": "Headless full build: Lambda + Radiant + JS linked against the null windowing backend (radiant/headless.cpp); no GLFW, OpenGL or native GUI toolkits, no view/edit commands",
+      "description": "Headless full build: Lambda + Radiant + JS linked against the null platform backend (radiant/platform_null.cpp); no GLFW, OpenGL or native GUI toolkits, no view/edit commands",
       "output": "lambda-headless.exe",
       "extra_exclude_source_files": [
         "radiant/clipboard_mac.mm",
@@ -1364,6 +1366,24 @@
       "linker_flags": [],
       "build_dir": "build_cli",
       "debug": false
+    },
+    "lambda-nomir": {
+      "description": "Desktop twin of the iOS phase-1 profile (vibe/Lambda_Design_Mobile.md MB2): the full lambda.exe with GLFW Radiant and the JS/TS runtime, minus MIR -- T0 AST interpreters only (Lambda and LambdaJS), no JIT, no MIR code generation",
+      "output": "lambda-nomir.exe",
+      "extra_exclude_source_files": [
+        "lambda/runtime/transpile-mir.cpp",
+        "lambda/runtime/mir.c",
+        "lambda/runtime/mir_dump.cpp",
+        "lambda/js/mvp-lmd/mvp_lmd_mir.cpp"
+      ],
+      "exclude_libraries": [
+        "mir"
+      ],
+      "defines": [
+        "LAMBDA_NO_MIR"
+      ],
+      "build_dir": "build_nomir",
+      "debug": true
     },
     "windows": {
       "output": "lambda.exe",
@@ -2192,6 +2212,7 @@
         "lambda/core/utf_string.cpp",
         "lambda/core/well_known_lambda_names.c",
         "lambda/core/well_known_markup_names.c",
+        "lambda/format/format-gltf.cpp",
         "lambda/format/format-html.cpp",
         "lambda/format/format-json.cpp",
         "lambda/format/format-jsx.cpp",
@@ -2233,6 +2254,8 @@
         "lambda/input/input-latex-tables.cpp",
         "lambda/input/input-mark.cpp",
         "lambda/input/input-mdx.cpp",
+        "lambda/input/input-mesh.cpp",
+        "lambda/input/input-meshopt.cpp",
         "lambda/input/input-model.cpp",
         "lambda/input/input-scene3d.cpp",
         "lambda/input/input-scene3d-gltf.cpp",
@@ -2360,6 +2383,7 @@
         "lib/html_entities.cpp",
         "lib/line_framer.c",
         "lib/log.c",
+        "lib/host_paths.c",
         "lib/mem_context.c",
         "lib/mem_factory.c",
         "lib/mem_vm.c",
@@ -6385,6 +6409,16 @@
       }
     ],
     "script_tests": [
+      {
+        "runner_name": "test_devtools_protocol",
+        "name": "Live DevTools Protocol",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/devtools/run.mjs",
+        "args": [],
+        "parallel": true,
+        "worker_slots": 1
+      },
       {
         "runner_name": "test_epub_reader_state",
         "name": "EPUB Reader Persistence",

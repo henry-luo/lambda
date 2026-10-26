@@ -5,7 +5,8 @@
 namespace lambda {
 namespace {
 struct GltfBuffer { const uint8_t* data; size_t length; };
-struct GltfColumn { const char* name=nullptr; unsigned width=0; lam::ArrayList<double> values; };
+// a 2x3 affine UV matrix (row-major) from a material's base-color texture transform
+struct GltfUvTransform { bool present=false; double m[6]={1,0,0,0,1,0}; };
 struct GltfSkin {
     Item value;
     unsigned count = 0;
@@ -16,14 +17,18 @@ struct Gltf {
     ItemReader source;
     lam::ArrayList<GltfBuffer> buffers;
     lam::ArrayList<Item> materials, nodes;
+    lam::ArrayList<GltfUvTransform> uv_transforms;   // parallel to materials
     lam::ArrayList<int> parents;
     lam::ArrayList<unsigned char> visited;
     lam::ArrayList<GltfSkin> skins;
+    // decoded EXT_meshopt_compression views, indexed like bufferViews; scratch owned here.
+    lam::ArrayList<GltfBuffer> decoded;
     const uint8_t* binary;
     size_t embedded_length;
-    bool quantization=false;
+    bool quantization=false,meshopt=false;
     explicit Gltf(SceneAsset& asset,Item input,const uint8_t* data,size_t length):
         a(asset),source(asset_read(input)),binary(data),embedded_length(length) {}
+    ~Gltf() {for(auto& view:decoded) if(view.data) mem_free((void*)view.data);}
     ItemReader field(const char* key) {return asset_field(source,key);}
     ItemReader object(const char* key,size_t i) {return asset_at(field(key),i);}
     bool fail(const char* reason) {return a.fail(reason);}
@@ -43,6 +48,9 @@ struct Gltf {
             auto buffer=object("buffers",i);int length=integer(buffer,"byteLength");
             const char* uri=asset_field(buffer,"uri").cstring();
             if(length<0||(size_t)length>SCENE_ASSET_BUFFER_LIMIT) return fail("buffer byteLength must be no greater than 64 MiB");
+            // a meshopt fallback buffer only sizes the uncompressed views; it carries no bytes.
+            bool fallback=asset_field(asset_field(asset_field(buffer,"extensions"),"EXT_meshopt_compression"),"fallback").asBool();
+            if(meshopt&&(fallback||(!uri&&(i!=0||!binary)))) {buffers.append({nullptr,(size_t)length});continue;}
             if(!uri) {
                 // GLB's first buffer refers to BIN; its final 0..3 alignment bytes are not buffer data.
                 if(i!=0||!binary||(size_t)length>embedded_length||embedded_length-(size_t)length>3)
@@ -56,6 +64,29 @@ struct Gltf {
         }
         return true;
     }
+    // EXT_meshopt_compression: decode each compressed view once, before any accessor reads it.
+    bool load_views() {
+        size_t count=asset_count(field("bufferViews"));
+        for(size_t i=0;i<count;i++) decoded.append({nullptr,0});
+        if(!meshopt) return true;
+        for(size_t i=0;i<count;i++) {
+            auto v=object("bufferViews",i),ext=asset_field(asset_field(v,"extensions"),"EXT_meshopt_compression");
+            if(ext.isNull()) continue;
+            int b=integer(ext,"buffer"),start=integer(ext,"byteOffset",0),length=integer(ext,"byteLength");
+            int stride=integer(ext,"byteStride"),elements=integer(ext,"count"),declared=integer(v,"byteStride",stride);
+            int view_length=integer(v,"byteLength");
+            if(b<0||(size_t)b>=buffers.size()||start<0||length<0||stride<=0||elements<=0||view_length<0) return fail("invalid meshopt bufferView");
+            auto buffer=buffers[b];
+            if(!buffer.data||(size_t)start>buffer.length||(size_t)length>buffer.length-start) return fail("meshopt data exceeds its buffer");
+            if(declared!=stride||(uint64_t)stride*(uint64_t)elements!=(uint64_t)view_length) return fail("meshopt bufferView size does not match stride and count");
+            uint8_t* out=(uint8_t*)mem_alloc((size_t)view_length,MEM_CAT_INPUT_OTHER);if(!out) return fail("meshopt allocation failed");
+            decoded[i]={out,(size_t)view_length};
+            const char* error=meshopt_decode(out,elements,stride,buffer.data+start,length,
+                asset_field(ext,"mode").cstring(),asset_field(ext,"filter").cstring());
+            if(error) {a.ctx.addError("scene3d asset: meshopt: %s",error);return false;}
+        }
+        return true;
+    }
     bool view(int index,size_t offset,size_t count,size_t width,size_t stride,const uint8_t** out) {
         if(index<0||(size_t)index>=asset_count(field("bufferViews"))) return fail("bufferView index out of bounds");
         auto v=object("bufferViews",index);int b=integer(v,"buffer"),start=integer(v,"byteOffset",0),length=integer(v,"byteLength");
@@ -63,6 +94,8 @@ struct Gltf {
         auto buffer=buffers[b];
         if((size_t)start>buffer.length||(size_t)length>buffer.length-start||offset>(size_t)length||
             width>(size_t)length-offset||(count&&count-1>((size_t)length-offset-width)/stride)) return fail("accessor exceeds bufferView bounds");
+        if(decoded[index].data) {*out=decoded[index].data+offset;return true;}
+        if(!buffer.data) return fail("bufferView reads a meshopt fallback buffer");
         *out=buffer.data+start+offset;return true;
     }
     static double decode(const uint8_t* p,unsigned type,bool normalized) {
@@ -162,8 +195,12 @@ struct Gltf {
             a.attr(material,"opacity",a.number(asset_is(alpha,"BLEND")?rgba[3]:1));
             a.attr(material,"side",a.symbol(asset_field(m,"doubleSided").asBool()?"double":"front"));
             auto tex=asset_field(pbr,"baseColorTexture");
+            GltfUvTransform uv;
             if(!tex.isNull()) {
-                if(integer(tex,"texCoord",0)!=0||!asset_field(tex,"extensions").isNull()) return fail("only untransformed TEXCOORD_0 textures are supported");
+                auto extensions=asset_field(tex,"extensions"),transform=asset_field(extensions,"KHR_texture_transform");
+                bool other_extension=extensions.isMap()&&extensions.asMap().size()>(transform.isNull()?0:1);
+                if(integer(tex,"texCoord",0)!=0||other_extension||integer(transform,"texCoord",0)!=0) return fail("only TEXCOORD_0 textures are supported");
+                if(!transform.isNull()&&!texture_transform(transform,uv)) return false;
                 int ti=integer(tex,"index");if(ti<0||(size_t)ti>=asset_count(field("textures"))) return fail("texture index out of bounds");
                 auto texture=object("textures",ti);int image=integer(texture,"source");
                 if(image<0||(size_t)image>=asset_count(field("images"))) return fail("image index out of bounds");
@@ -192,9 +229,65 @@ struct Gltf {
             if(!unlit) a.ctx.addWarning("scene3d asset: glTF metallic/roughness shading is approximated by Lambert base color");
             if(!asset_field(m,"normalTexture").isNull()||!asset_field(m,"occlusionTexture").isNull()||!asset_field(m,"emissiveTexture").isNull()||
                 !asset_field(pbr,"metallicRoughnessTexture").isNull()) a.ctx.addWarning("scene3d asset: secondary PBR texture maps are not rendered");
-            materials.append(material);
+            if(!emissive(m,material)) return false;
+            materials.append(material);uv_transforms.append(uv);
         }
-        materials.append(a.material());return true;
+        materials.append(a.material());uv_transforms.append(GltfUvTransform());return true;
+    }
+    // KHR_texture_transform: uv' = T * R * S * uv, baked into each primitive's UVs.
+    bool texture_transform(ItemReader transform,GltfUvTransform& uv) {
+        double offset[2]={0,0},scale[2]={1,1},rotation=asset_number(asset_field(transform,"rotation"),0);
+        const char* keys[]={"offset","scale"};double* values[]={offset,scale};
+        for(unsigned k=0;k<2;k++) {
+            auto value=asset_field(transform,keys[k]);if(value.isNull()) continue;
+            if(asset_count(value)!=2) return fail("invalid KHR_texture_transform vector");
+            for(unsigned c=0;c<2;c++) values[k][c]=asset_component(value,c);
+        }
+        if(!isfinite(offset[0])||!isfinite(offset[1])||!isfinite(scale[0])||!isfinite(scale[1])||!isfinite(rotation))
+            return fail("invalid KHR_texture_transform value");
+        double c=cos(rotation),s=sin(rotation);
+        uv={true,{c*scale[0],s*scale[1],offset[0],-s*scale[0],c*scale[1],offset[1]}};return true;
+    }
+    // core emissiveFactor, scaled by KHR_materials_emissive_strength.
+    bool emissive(ItemReader m,Item material) {
+        auto factor=asset_field(m,"emissiveFactor");if(factor.isNull()) return true;
+        double rgb[3];if(asset_count(factor)!=3) return fail("invalid emissiveFactor");
+        for(unsigned c=0;c<3;c++) {rgb[c]=asset_component(factor,c);if(!isfinite(rgb[c])||rgb[c]<0||rgb[c]>1) return fail("invalid emissive component");}
+        if(!rgb[0]&&!rgb[1]&&!rgb[2]) return true;
+        // the factor only scales the unrendered emissive map; applying it alone would wash the surface out.
+        if(!asset_field(m,"emissiveTexture").isNull()) {a.ctx.addWarning("scene3d asset: textured emission is omitted");return true;}
+        auto strength=asset_field(asset_field(asset_field(m,"extensions"),"KHR_materials_emissive_strength"),"emissiveStrength");
+        double intensity=asset_number(strength,1);if(!isfinite(intensity)||intensity<0) return fail("invalid emissiveStrength");
+        a.attr(material,"emissive",asset_color(a,rgb));a.attr(material,"emissive-intensity",a.number(intensity));return true;
+    }
+    // KHR_lights_punctual: the light shines along its node's -Z axis.
+    bool light(Item parent,ItemReader node,unsigned node_index) {
+        auto reference=asset_field(asset_field(asset_field(node,"extensions"),"KHR_lights_punctual"),"light");
+        if(reference.isNull()) return true;
+        auto lights=asset_field(asset_field(field("extensions"),"KHR_lights_punctual"),"lights");
+        int index=integer(reference);if(index<0||(size_t)index>=asset_count(lights)) return fail("light index out of bounds");
+        auto source=asset_at(lights,index);const char* type=asset_field(source,"type").cstring();
+        bool spot=asset_is(type,"spot"),point=asset_is(type,"point");
+        if(!spot&&!point&&!asset_is(type,"directional")) return fail("unknown punctual light type");
+        double rgb[3]={1,1,1};auto color=asset_field(source,"color");
+        if(!color.isNull()&&asset_count(color)!=3) return fail("invalid light color");
+        for(unsigned c=0;c<3&&!color.isNull();c++) {rgb[c]=asset_component(color,c);if(!isfinite(rgb[c])||rgb[c]<0||rgb[c]>1) return fail("invalid light color component");}
+        double intensity=asset_number(asset_field(source,"intensity"),1),range=asset_number(asset_field(source,"range"),0);
+        if(!isfinite(intensity)||intensity<0||!isfinite(range)||range<0||(!asset_field(source,"range").isNull()&&range<=0)) return fail("invalid light intensity or range");
+        Item out=a.element("light");a.attr(out,"id",a.id("light",node_index));a.attr(out,"type",a.symbol(type));
+        auto label=asset_field(source,"name");if(label.isString()) a.attr(out,"name",a.text(label.cstring()));
+        a.attr(out,"color",asset_color(a,rgb));a.attr(out,"intensity",a.number(intensity));
+        double origin[3]={0,0,0},forward[3]={0,0,-1};a.attr(out,"position",a.array(origin,3));
+        if(!point) a.attr(out,"target",a.array(forward,3));
+        if(range>0&&!asset_is(type,"directional")) a.attr(out,"distance",a.number(range));
+        if(spot) {
+            auto cone=asset_field(source,"spot");
+            double inner=asset_number(asset_field(cone,"innerConeAngle"),0),outer=asset_number(asset_field(cone,"outerConeAngle"),M_PI/4);
+            if(!isfinite(inner)||!isfinite(outer)||inner<0||outer<=inner||outer>M_PI/2) return fail("invalid spot light cone");
+            // Three.js-style cone: `angle` is the outer edge, `penumbra` the softened fraction.
+            a.attr(out,"angle",a.number(outer));a.attr(out,"penumbra",a.number(1-inner/outer));
+        }
+        a.append(parent,out);return true;
     }
     bool hierarchy() {
         size_t count=asset_count(field("nodes"));if(count>4096) return fail("node quota exceeded");
@@ -244,67 +337,18 @@ struct Gltf {
         }
         return true;
     }
-    void geometry_columns(Item geometry,GltfColumn* columns,const lam::ArrayList<unsigned>* vertices=nullptr) {
-        for(unsigned k=0;k<6;k++) if(columns[k].name) {
-            auto& column=columns[k];
-            if(!vertices) a.attr(geometry,column.name,a.array(column.values.data(),column.values.size()));
-            else {
-                auto array=a.ctx.builder.array();
-                for(unsigned vertex:*vertices) for(unsigned axis=0;axis<column.width;axis++)
-                    array.append(a.number(column.values[(size_t)vertex*column.width+axis]));
-                a.attr(geometry,column.name,array.final());
-            }
-        }
-    }
-    bool face_normal(const lam::ArrayList<double>& points,unsigned p,unsigned q,unsigned r,double* normal) {
-        double u[3],v[3];for(unsigned axis=0;axis<3;axis++) {u[axis]=points[q*3+axis]-points[p*3+axis];v[axis]=points[r*3+axis]-points[p*3+axis];}
-        for(unsigned axis=0;axis<3;axis++) normal[axis]=u[(axis+1)%3]*v[(axis+2)%3]-u[(axis+2)%3]*v[(axis+1)%3];
-        double length=hypot(hypot(normal[0],normal[1]),normal[2]);if(!length) return false;
-        for(unsigned axis=0;axis<3;axis++) normal[axis]/=length;return true;
-    }
-    void static_chunks(Item parent,Item material,GltfColumn* columns,const lam::ArrayList<double>& triangles,size_t vertex_count,bool flat) {
-        lam::ArrayList<int> remap;for(size_t i=0;i<vertex_count;i++) remap.append(-1);
-        lam::ArrayList<unsigned> vertices;lam::ArrayList<double> indices;
-        auto flush=[&]() {
-            if(indices.empty()) return;
-            Item mesh=a.element("mesh"),geometry=a.element("geometry");
-            a.attr(mesh,"id",a.id("mesh",a.serial++));a.attr(mesh,"material",material);
-            a.attr(geometry,"type",a.symbol("buffer"));geometry_columns(geometry,columns,&vertices);
-            if(flat) {
-                auto normals=a.ctx.builder.array();
-                for(size_t i=0;i<vertices.size();i+=3) {
-                    double normal[3];face_normal(columns[0].values,vertices[i],vertices[i+1],vertices[i+2],normal);
-                    for(unsigned corner=0;corner<3;corner++) for(double component:normal) normals.append(a.number(component));
-                }
-                a.attr(geometry,"normals",normals.final());
-            }
-            a.attr(geometry,"indices",a.array(indices.data(),indices.size()));a.append(mesh,geometry);a.append(parent,mesh);
-            for(unsigned vertex:vertices) remap[vertex]=-1;
-            vertices.clear();indices.clear();
-        };
-        // preserve every triangle and UV seam while bounding each native draw's buffers.
-        for(size_t i=0;i<triangles.size();i+=3) {
-            unsigned needed=0;for(unsigned j=0;j<3;j++) if(flat||remap[(unsigned)triangles[i+j]]<0) needed++;
-            if(vertices.size()+needed>262144||indices.size()+3>1572864) flush();
-            for(unsigned j=0;j<3;j++) {
-                unsigned vertex=(unsigned)triangles[i+j];
-                if(flat||remap[vertex]<0) {remap[vertex]=(int)vertices.size();vertices.append(vertex);}
-                indices.append(remap[vertex]);
-            }
-        }
-        flush();
-    }
     bool primitive(Item parent,ItemReader node,unsigned node_index,ItemReader mesh,ItemReader primitive,unsigned primitive_index) {
         auto attributes=asset_field(primitive,"attributes");lam::ArrayList<double> positions;
         if(!components(attributes,"POSITION",3,positions)||positions.empty()) return fail("invalid mesh positions");
         size_t vertices=positions.size()/3;Item geometry=a.element("geometry"),out=a.element("mesh");
-        GltfColumn columns[6];columns[0].name="positions";columns[0].width=3;
+        AssetColumn columns[ASSET_COLUMN_COUNT];columns[0].name="positions";columns[0].width=3;
         columns[0].values=static_cast<lam::ArrayList<double>&&>(positions);
         a.attr(out,"id",a.id("mesh",a.serial++));a.attr(geometry,"type",a.symbol("buffer"));
         const char* keys[]={"NORMAL","TEXCOORD_0","COLOR_0","JOINTS_0","WEIGHTS_0"};const char* attrs[]={"normals","uvs","colors","skin-indices","skin-weights"};
         int si=integer(node,"skin");if(si>=0&&(size_t)si>=skins.size()) return fail("skin index out of bounds");
         bool has_joints=!asset_field(attributes,"JOINTS_0").isNull(),has_weights=!asset_field(attributes,"WEIGHTS_0").isNull();
         if(has_joints!=has_weights||(has_joints&&si<0)) return fail("joint/weight attributes require a skin");
+        int mi=integer(primitive,"material",materials.size()-1);if(mi<0||(size_t)mi>=materials.size()) return fail("material index out of bounds");
         if(!asset_field(attributes,"JOINTS_1").isNull()||!asset_field(attributes,"WEIGHTS_1").isNull()) return fail("more than four skin influences are not supported");
         for(unsigned k=0;k<5;k++) if(!asset_field(attributes,keys[k]).isNull()) {
             lam::ArrayList<double> data;unsigned c,ct;if(!accessor(integer(attributes,keys[k]),data,&c,&ct)) return false;
@@ -313,6 +357,10 @@ struct Gltf {
             if((k<2&&!attribute_encoding(keys[k],ct,normalized))||(k==3&&normalized)||
                 (k>=2&&k!=3&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
             if((c!=expected&&!(k==2&&c==4))||data.size()!=vertices*c) return fail("vertex attribute size mismatch");
+            if(k==1&&uv_transforms[mi].present) for(size_t v=0;v<vertices;v++) {
+                const double* m=uv_transforms[mi].m;double u=data[v*2],t=data[v*2+1];
+                data[v*2]=m[0]*u+m[1]*t+m[2];data[v*2+1]=m[3]*u+m[4]*t+m[5];
+            }
             // native raster textures use lower-left UVs; glTF image UVs start at the top.
             if(k==1) for(size_t v=0;v<vertices;v++) data[v*2+1]=1-data[v*2+1];
             if(k==3) {
@@ -358,21 +406,20 @@ struct Gltf {
             lam::ArrayList<double> faces;
             for(size_t i=0;i<triangles.size();i+=3) {
                 double normal[3];
-                if(!face_normal(columns[0].values,(unsigned)triangles[i],(unsigned)triangles[i+1],(unsigned)triangles[i+2],normal)) continue;
+                if(!asset_face_normal(columns[0].values,(unsigned)triangles[i],(unsigned)triangles[i+1],(unsigned)triangles[i+2],normal)) continue;
                 for(unsigned j=0;j<3;j++) faces.append(triangles[i+j]);
             }
             triangles=static_cast<lam::ArrayList<double>&&>(faces);
             if(triangles.empty()) return fail("mesh contains no nondegenerate triangles");
         }
-        int mi=integer(primitive,"material",materials.size()-1);if(mi<0||(size_t)mi>=materials.size()) return fail("material index out of bounds");
         Item material=ElementReader(materials[mi]).get_attr("id").item();
         char id[80];snprintf(id,sizeof(id),"asset-node-%u-primitive-%u",node_index,primitive_index);
         if(flat||vertices>262144||triangles.size()>1572864) {
             if(si>=0||target_count) return fail("large animated primitives exceed the native deformation budget");
             Item group=a.element("group");a.attr(group,"id",a.text(id));
-            static_chunks(group,material,columns,triangles,vertices,flat);a.append(parent,group);return true;
+            asset_static_chunks(a,group,material,columns,triangles,vertices,flat);a.append(parent,group);return true;
         }
-        geometry_columns(geometry,columns);a.attr(geometry,"indices",a.array(triangles.data(),triangles.size()));
+        asset_geometry_columns(a,geometry,columns);a.attr(geometry,"indices",a.array(triangles.data(),triangles.size()));
         if(target_count) {
             lam::ArrayList<double> morph,normals;
             for(size_t t=0;t<target_count;t++) for(unsigned k=0;k<2;k++) {
@@ -402,6 +449,7 @@ struct Gltf {
             if(!asset_count(primitives)) return fail("mesh has no primitives");
             for(unsigned p=0;p<asset_count(primitives);p++) if(!primitive(out,node,index,source,asset_at(primitives,p),p)) return false;
         }
+        if(!light(out,node,index)) return false;
         if(!asset_field(node,"camera").isNull()) a.ctx.addWarning("scene3d asset: embedded glTF camera is omitted; supply a scene camera");
         auto children=asset_field(node,"children");for(size_t i=0;i<asset_count(children);i++) if(!build_node(integer(asset_at(children,i)),out,depth+1)) return false;
         return true;
@@ -479,15 +527,22 @@ struct Gltf {
 bool asset_import_gltf(SceneAsset& asset,Item source,const uint8_t* binary,size_t binary_length) {
     Gltf g(asset,source,binary,binary_length);const char* version=asset_field(asset_field(g.source,"asset"),"version").cstring();
     if(!asset_is(version,"2.0")) return g.fail("only glTF 2.0 is supported");
+    static const char* supported[]={"KHR_mesh_quantization","KHR_materials_unlit","EXT_meshopt_compression",
+        "KHR_texture_transform","KHR_materials_emissive_strength","KHR_lights_punctual"};
+    auto known=[&](const char* extension) {for(const char* name:supported) if(asset_is(extension,name)) return true;return false;};
     auto required=g.field("extensionsRequired");for(size_t i=0;i<asset_count(required);i++) {
         const char* extension=asset_at(required,i).cstring();
+        if(!known(extension)) return g.fail("unsupported required glTF extension");
         if(asset_is(extension,"KHR_mesh_quantization")) g.quantization=true;
-        else if(!asset_is(extension,"KHR_materials_unlit")) return g.fail("unsupported required glTF extension");
+        if(asset_is(extension,"EXT_meshopt_compression")) g.meshopt=true;
     }
-    auto used=g.field("extensionsUsed");for(size_t i=0;i<asset_count(used);i++) if(!asset_is(asset_at(used,i).cstring(),"KHR_materials_unlit")&&
-        !asset_is(asset_at(used,i).cstring(),"KHR_mesh_quantization"))
-        asset.ctx.addWarning("scene3d asset: optional glTF extension '%s' uses its core fallback",asset_at(used,i).cstring());
-    return g.load_buffers()&&g.load_materials()&&g.hierarchy()&&g.load_skins()&&g.load_scene()&&g.load_animations();
+    auto used=g.field("extensionsUsed");for(size_t i=0;i<asset_count(used);i++) {
+        const char* extension=asset_at(used,i).cstring();
+        // an optional meshopt view still has compressed data, which is preferred over its fallback.
+        if(asset_is(extension,"EXT_meshopt_compression")) g.meshopt=true;
+        else if(!known(extension)) asset.ctx.addWarning("scene3d asset: optional glTF extension '%s' uses its core fallback",extension);
+    }
+    return g.load_buffers()&&g.load_views()&&g.load_materials()&&g.hierarchy()&&g.load_skins()&&g.load_scene()&&g.load_animations();
 }
 
 static uint32_t glb_word(const char* bytes) {

@@ -1,0 +1,127 @@
+{
+  "name": "Root scrollbar captures vertical dragging above body and respects author cancellation",
+  "html": "test/ui/viewport_scrollbar_drag.html",
+  "viewport": {
+    "width": 240,
+    "height": 180
+  },
+  "event_interval_ms": 0,
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "mouse_down",
+      "x": 234,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": true
+    },
+    {
+      "type": "mouse_move",
+      "x": 234,
+      "y": 80
+    },
+    {
+      "type": "assert_scroll",
+      "y": 173.494,
+      "tolerance": 0.6
+    },
+    {
+      "type": "mouse_move",
+      "x": 80,
+      "y": -100
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "mouse_up",
+      "x": 80,
+      "y": -100
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false,
+      "drag_active": false
+    },
+    {
+      "type": "script",
+      "js": "window.cancelScrollbar=true"
+    },
+    {
+      "type": "mouse_down",
+      "x": 234,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false,
+      "drag_active": false
+    },
+    {
+      "type": "mouse_move",
+      "x": 234,
+      "y": 80
+    },
+    {
+      "type": "assert_scroll",
+      "y": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "mouse_up",
+      "x": 234,
+      "y": 80
+    },
+    {
+      "type": "script",
+      "js": "window.cancelScrollbar=false"
+    },
+    {
+      "type": "mouse_down",
+      "x": 234,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": true,
+      "drag_active": true
+    },
+    {
+      "type": "mouse_up",
+      "x": 234,
+      "y": 20
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "html"
+      },
+      "scrollbar_v_dragging": false,
+      "drag_active": false
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ],
+  "device_scale": 2
+}

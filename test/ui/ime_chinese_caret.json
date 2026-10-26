@@ -1,0 +1,671 @@
+{
+  "name": "ime_chinese_caret",
+  "html": "test/ui/ime_chinese.html",
+  "viewport": {
+    "width": 1000,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "bejing"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "bejing",
+      "caret": 6
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "bejing",
+      "caret": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 0
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "i"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "beijing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "beijing",
+      "caret": 4
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "bejing",
+      "caret": 2
+    },
+    {
+      "type": "key_press",
+      "key": "delete"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "being",
+      "caret": 2
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "j"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "bejing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#input"
+      },
+      "text": "i"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "beijing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "beijing",
+      "caret": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#input"
+      },
+      "equals": ""
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "bejing"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "bejing",
+      "caret": 6
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "bejing",
+      "caret": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 0
+    },
+    {
+      "type": "render",
+      "file": "temp/ime_chinese/caret/pinyin-caret.png"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "i"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "beijing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "beijing",
+      "caret": 4
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "bejing",
+      "caret": 2
+    },
+    {
+      "type": "key_press",
+      "key": "delete"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "being",
+      "caret": 2
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "j"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "bejing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "i"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "beijing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "beijing",
+      "caret": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": ""
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#textarea"
+      },
+      "text": "beijingqq"
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "北京qq",
+      "caret": 4
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "北京qq",
+      "caret": 2
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "北京qq",
+      "caret": 2
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": "beijing",
+      "caret": 7
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#textarea"
+      },
+      "equals": ""
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#rich"
+      }
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "bejing"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "bejing",
+      "caret": 6
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "bejing",
+      "caret": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 0
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "i"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "beijing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "beijing",
+      "caret": 4
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "backspace"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "bejing",
+      "caret": 2
+    },
+    {
+      "type": "key_press",
+      "key": "delete"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "being",
+      "caret": 2
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "j"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "bejing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "type_physical",
+      "target": {
+        "selector": "#rich"
+      },
+      "text": "i"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "beijing",
+      "caret": 3
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "left"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_preedit",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "beijing",
+      "caret": 2
+    },
+    {
+      "type": "assert_ime_popup",
+      "highlight": 1
+    },
+    {
+      "type": "key_press",
+      "key": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": "北京"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rich"
+      },
+      "equals": ""
+    }
+  ]
+}

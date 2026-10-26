@@ -13,7 +13,7 @@
 #include <gtk/gtk.h>
 #include "../lib/file.h"
 
-struct GLFWwindow;
+struct RadiantWindow;
 
 static inline const char* webview_linux_mime_for_path(const char* path) {
     if (!path) return "application/octet-stream";
@@ -42,7 +42,7 @@ struct WebViewHandle {
 
     // child window mode fields
     GtkWidget* gtk_window;      // GtkWindow (GTK_WINDOW_POPUP) hosting the web view
-    GLFWwindow* glfw_window;    // GLFW window for screen-position queries
+    struct RadiantWindow* host_window; // host window for screen-position queries
     float last_x, last_y;       // last positioned coords (CSS pixels, for repositioning)
 
     // layer mode fields

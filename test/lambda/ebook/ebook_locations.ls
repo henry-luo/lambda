@@ -18,5 +18,15 @@ let changed = e.parse(input("test/input/ebook/epub2.epub","zip")^)^;
     (e.locator(book,chapter,-1) ^ { ^.code }) == 7809,
     (e.locator(book,chapter,null) ^ { ^.code }) == 7809,
     (e.locate(book,{*:found,quote:"wrong passage"}) ^ { ^.code }) == 7809,
-    e.search(book,"")^ == []
+    e.search(book,"")^ == [],
+    // options: exact case by default, case folding, whole words, one chapter
+    len(e.search(book,"PASSAGE")^) == 0,
+    len(e.search(book,"PASSAGE",{match_case:false})^) == 2,
+    len(e.search(book,"pass")^) == 2,
+    len(e.search(book,"pass",{whole_word:true})^) == 0,
+    [for (r in e.search(book,"passage",{chapter:1})^) r.chapter] == [1],
+    (e.search(book,"passage",{chapter:9}) ^ { ^.code }) == 7801,
+    // the excerpt splits around the match
+    (let r = e.search(book,"remember")^[0], r.before ++ r.match ++ r.after == "First chapterCafé 世界 😀. A passage to remember.Continue reading"
+        and r.match == "remember")
 ]

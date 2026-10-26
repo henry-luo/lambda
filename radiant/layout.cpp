@@ -1064,6 +1064,8 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
         boundary->outline->style = CSS_VALUE_NONE;
         boundary->outline->color = {};
     }
+    // A removed box-shadow declaration must release its retained list before recascade.
+    if (lycon->pool) lam::free_owned_list(lycon->pool.get(), boundary->box_shadow);
 }
 
 CssEnum layout_element_css_all_reset_keyword(DomElement* element) {

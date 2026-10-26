@@ -1,6 +1,6 @@
 # Radiant — View & DOM Model
 
-> **Last verified against tree:** 2026-10-13 (§6 retained flex items, measurement restyle, consumed boundary); 2026-10-09 (§6 retained flow classification); 2026-07-14 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-10-26 (§7 code-point text offsets); 2026-10-13 (§6 retained flex items, measurement restyle, consumed boundary); 2026-10-09 (§6 retained flow classification); 2026-07-14 *(initial stamp from git history)*
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the single most load-bearing decision in Radiant: there is no separate layout "view tree" — a parsed DOM node *is* its own view. It describes the unified `DomNode`/`View` representation, the method-only view-wrapper hierarchy, how layout "builds" the view tree by tagging nodes in place, the two-tier arena+pool memory model, incremental relayout, and the source-position bridge that anchors the rich-text editor.
 >
@@ -116,13 +116,13 @@ Two rules keep a retained element's used style trustworthy:
 
 `event.hpp` / `source_pos_bridge.cpp` maps `(DomNode*, dom_offset) ↔ (source_path, offset)` so the Lambda rich-text editor can round-trip a caret/selection between the rendered DOM and the editor's Lambda "doc tree" value. It exists because Lambda map equality is structural and therefore unusable as identity (`event.hpp` design-contract comment); instead the `render_map` records a stable **source path** — a heap-owned array of child indices — for every rendered subtree at apply time, and reverse lookup returns that path.
 
-The DOM→source direction (`source_pos_from_dom_boundary`) walks DOM ancestors from a boundary to the first `DomElement` whose `native_element` is registered in `render_map`, converting UTF-16 API offsets to the UTF-8 internal storage for text leaves; the source→DOM direction (`dom_boundary_from_source_pos`) walks the subtree consulting `render_map` to match a path. `MarkBuilder` helpers build the Lambda `pos`/`selection` values, and `dom_selection_apply_source_selection` applies a Lambda selection back onto a `DomSelection` ([RAD_18](RAD_18_Editing_Selection_Ranges.md)). The header carries an explicit maturity caveat (`event.hpp`): several of these functions were committed as no-ops returning `false` until `render_map` gained its path field, so the wiring must be confirmed against the current `.cpp` rather than assumed.
+The DOM→source direction (`source_pos_from_dom_boundary`) walks DOM ancestors from a boundary to the first `DomElement` whose `native_element` is registered in `render_map`, converting UTF-16 API offsets to code-point offsets for text leaves — the unit Lambda strings index by (S2.5.8), so the editor model does no unit conversion (`dom_text_utf16_to_codepoint` / `dom_text_codepoint_to_utf16` in `dom_range.cpp`); the source→DOM direction (`dom_boundary_from_source_pos`) walks the subtree consulting `render_map` to match a path. `MarkBuilder` helpers build the Lambda `pos`/`selection` values, and `dom_selection_apply_source_selection` applies a Lambda selection back onto a `DomSelection` ([RAD_18](RAD_18_Editing_Selection_Ranges.md)). The header carries an explicit maturity caveat (`event.hpp`): several of these functions were committed as no-ops returning `false` until `render_map` gained its path field, so the wiring must be confirmed against the current `.cpp` rather than assumed.
 
 An empty editor container can render a caret placeholder without a source text
 child. DOM boundaries within that projection map to the container path at child
 offset zero, regardless of which side of the placeholder was hit. The source
 node's empty `content` identifies this case; authored zero-width text retains
-its ordinary leaf path and byte offset. This keeps native projection separate
+its ordinary leaf path and code-point offset. This keeps native projection separate
 from model editing policy (**D7.2.5**) and lets a caret leave and reenter empty
 paragraphs and list items without inventing a source child.
 

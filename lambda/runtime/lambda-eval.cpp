@@ -1,4 +1,5 @@
 #include "../../lib/utf.h"
+#include "../../lib/host_paths.h"
 #include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
@@ -6911,6 +6912,7 @@ Item fn_parse_html_fragment1(Item str_item) {
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
+bool format_gltf_bytes(Item root_item, bool binary, struct StrBuf* out, const char** error);
 
 // D6.4.1: format returns an Item, so a failure is an error value, never text.
 // It returned String*: an error operand became the text "<error>" on both
@@ -7035,6 +7037,18 @@ Item fn_format2(Item item, Item type) {
             type_id == LMD_TYPE_MAP ? rooted_options.get() : ItemNull};
         return interp_call_package_export(context->runtime,
             route.package, "format_native", args, 3);
+    }
+    const char* type_name = rooted_type.get() ? rooted_type.get()->chars : nullptr;
+    if (type_name && (!strcmp(type_name, "gltf") || !strcmp(type_name, "glb"))) {
+        // GLB is bytes, and an unsupported scene construct deserves its own message.
+        StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
+        bool binary = !strcmp(type_name, "glb");
+        bool ok = format_gltf_bytes(source.get(), binary, bytes, &reason);
+        Item output = ItemError;
+        if (!ok) set_runtime_error(ERR_FORMAT_ERROR, "format: glTF export: %s", reason);
+        else if (binary) output = (Item){.item = x2it(heap_binary_from_bytes(bytes->str, (int64_t)bytes->length))};
+        else output = (Item){.item = s2it(heap_strcpy(bytes->str, bytes->length))};
+        strbuf_free(bytes); return output;
     }
     String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
@@ -11371,9 +11385,9 @@ void cow_profile_count_js_realm_reservation(void) {
 void cow_profile_dump(void) {
 #ifndef LAMBDA_NO_CONSOLE_DUMP
     if (!cow_profile_enabled()) return;
-    create_dir("temp");
+    host_path_ensure(HOST_PATH_TEMP);
     const char* output_path = getenv("COW_EXEC_PROFILE_OUT");
-    if (!output_path || !output_path[0]) output_path = "temp/cow_exec_profile.tsv";
+    if (!output_path || !output_path[0]) output_path = host_path_dir(HOST_PATH_TEMP, "cow_exec_profile.tsv");
 
     StrBuf* output = strbuf_new();
     if (!output) return;
@@ -11459,7 +11473,7 @@ void cow_profile_dump(void) {
 
     if (!g_cow_profile_sites_enabled) return;
     const char* sites_path = getenv("COW_EXEC_PROFILE_SITES_OUT");
-    if (!sites_path || !sites_path[0]) sites_path = "temp/cow_exec_sites.tsv";
+    if (!sites_path || !sites_path[0]) sites_path = host_path_dir(HOST_PATH_TEMP, "cow_exec_sites.tsv");
     StrBuf* sites = strbuf_new();
     if (!sites) return;
     strbuf_append_str(sites, "event\ttype\tcaller_pc\tcount\tbytes\tnative_symbol\tsymbol_offset\n");
@@ -11543,7 +11557,7 @@ static int g_lambda_exec_profile_enabled = -1;
 static void lambda_exec_profile_dump(void) {
 #ifndef LAMBDA_NO_CONSOLE_DUMP
     const char* path = getenv("LAMBDA_EXEC_PROFILE_OUT");
-    if (!path || !path[0]) path = "temp/lambda_exec_profile.tsv";
+    if (!path || !path[0]) path = host_path_dir(HOST_PATH_TEMP, "lambda_exec_profile.tsv");
     StrBuf* output = strbuf_new();
     if (!output) return;
     strbuf_append_str(output, "kind\tname\tcount\n");

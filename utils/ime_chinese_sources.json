@@ -140,6 +140,31 @@
       "license": "Unicode-3.0",
       "provenance_flags": [],
       "revision": "18.0.0"
+    },
+    "opencc": {
+      "revision": "025f371dc76b598d77384fbdab90c937471844d8",
+      "release": "ver.1.4.2",
+      "license": "Apache-2.0",
+      "provenance_flags": [
+        "Only STPhrases and STCharacters are used; unresolved alternatives are retained per IME11, not reduced to OpenCC defaults."
+      ],
+      "files": {
+        "LICENSE": {
+          "bytes": 9165,
+          "sha256": "b534e465949558eec2597b04f5092b5e161236a68dfbfd04d547592ac3964308",
+          "url": "https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/LICENSE"
+        },
+        "STCharacters.txt": {
+          "bytes": 36026,
+          "sha256": "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b",
+          "url": "https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/data/dictionary/STCharacters.txt"
+        },
+        "STPhrases.txt": {
+          "bytes": 1007834,
+          "sha256": "f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a",
+          "url": "https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/data/dictionary/STPhrases.txt"
+        }
+      }
     }
   },
   "unicode_version": "18.0.0"
