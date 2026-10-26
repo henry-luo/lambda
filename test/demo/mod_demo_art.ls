@@ -317,6 +317,7 @@ fn photo_album(t) => window("photo-album", t, <g
 
 // Strokes on a 24-unit grid: the app glyphs, then the sidebar's category glyphs.
 let GLYPHS = {
+    aquarium: "M3 5h18v15H3z M7 12c3-4 6-4 9 0-3 4-6 4-9 0z M16 12l3-3v6z M5 17q2-2 4 0t4 0t4 0",
     chart: "M4 20v-8 M9.3 20V6 M14.6 20v-9 M20 20V4",
     scene3d: "M12 2.5l8.5 4.8v9.4L12 21.5l-8.5-4.8V7.3z M12 12l8.5-4.7 M12 12v9.5 M12 12L3.5 7.3",
     cityscape: "M3 21h18 M5 21V11h4v10 M9 21V5h6v16 M15 21v-8h4v8 M11.5 9h1 M11.5 13h1 M11.5 17h1",
@@ -353,7 +354,7 @@ pub fn glyph(key) => <svg class:"line-glyph", viewBox:"0 0 24 24", 'aria-hidden'
         'stroke-linejoin':"round">>
 
 // each icon's hue, top to bottom, and the ink its glyph draws in
-let HUES = {chart: ["#a5b4fc", "#4f46e5"], scene3d: ["#64748b", "#0f172a"], cityscape: ["#1e3a8a", "#0b1229", "#fcd34d"],
+let HUES = {aquarium: ["#78bda3", "#174c50"], chart: ["#a5b4fc", "#4f46e5"], scene3d: ["#64748b", "#0f172a"], cityscape: ["#1e3a8a", "#0b1229", "#fcd34d"],
     tetris: ["#8b5cf6", "#3b0764"], 'marble-drop': ["#e8c27a", "#9a6a24"], superlambda: ["#bae6fd", "#38bdf8"],
     doom: ["#b91c1c", "#1f0707"], 'sentence-game': ["#fef08a", "#f59e0b", "#78350f"], 'photo-album': ["#fda4af", "#e11d48"],
     photo: ["#6ee7b7", "#047857"], photos: ["#67e8f9", "#0e7490"], draw: ["#fdba74", "#ea580c"],
@@ -449,7 +450,7 @@ pub fn emblem() => <svg class:"emblem", viewBox:"0 0 320 320", 'aria-hidden':"tr
 let LIVE = {tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
 
 let TONE_OF = {tetris: "arcade", 'marble-drop': "amber", 'sentence-game': "amber", superlambda: "sky", doom: "clay",
-    scene3d: "slate", cityscape: "night", 'photo-album': "rose", photo: "teal", photos: "cyan",
+    aquarium: "sage", scene3d: "slate", cityscape: "night", 'photo-album': "rose", photo: "teal", photos: "cyan",
     draw: "clay", word: "blue", note: "gold", slides: "rose", chart: "indigo",
     finder: "blue", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose"}
 

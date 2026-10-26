@@ -1,5 +1,6 @@
 import s: lambda.scene3d
 import dom
+import scene_dom: lambda.scene3d.dom
 import data: .mod_data
 
 let REMOTE = "https://raw.githubusercontent.com/cclank/cell-architecture-studio/1cab982e7a0f96af854a696430c0724707764358/public/"
@@ -29,16 +30,6 @@ pub fn load(base,id) element^ {
     s.group([loaded],{id:"imported-model",rotation:asset.rotation,scale:[asset.scale,asset.scale,asset.scale]})
 }
 
-// DOM attributes accept JSON component arrays; HTML's formatter omits typed array attributes.
-pn mount(parent,tree,texture_size) {
-    let node = dom.create_element(dom.owner_document(parent),string(name(tree)))
-    for (key,value in tree where key is string or key is symbol)
-        dom.set_attribute(node,string(key),if (value is array) format(value,'json') else string(value))
-    if (name(tree) == 'texture') dom.set_attribute(node,"max-size",string(texture_size))
-    for (child in content(tree)) mount(node,child,texture_size)
-    dom.append_child(parent,node)
-}
-
 pub pn ensure(viewport,base,id) {
     let slot = dom.query_selector(viewport,"#imported-specimen")
     let asset = models[id]
@@ -48,13 +39,14 @@ pub pn ensure(viewport,base,id) {
         return dom.get_attribute(slot,"data-error")
     }
     // Only the selected imported model occupies this viewport; camera changes retain its buffers.
-    for (child in dom.child_nodes(slot)) dom.remove_child(slot,child)
+    let previous_children = [for (child in dom.child_nodes(slot)) child]
+    for (child in previous_children) dom.remove_child(slot,child)
     dom.set_attribute(slot,"data-model",id)
     var loaded = null
     var problem = ""
     load(base,id) ^ { problem = "Could not load " ++ data.cell(id).name ++ ". " ++ ^.message } ~ { loaded = ~ }
     if (loaded != null) {
-        mount(slot,loaded,if (id == "whiteBlood") 1024 else 2048)
+        scene_dom.mount(slot,loaded,if (id == "whiteBlood") 1024 else 2048)
     }
     dom.set_attribute(slot,"data-error",problem)
     dom.set_attribute(viewport,"data-model-source",source(base,id))
