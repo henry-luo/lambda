@@ -502,6 +502,7 @@ TEST(RadiantViewTest, DemoCommandListsNamesAndRejectsUnknownNames) {
         EXPECT_NE(strstr(output, "test/demo/marble-drop/marble-drop.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/sentence-game/sentence-game.ls"), nullptr) << output;
         EXPECT_NE(strstr(output, "test/demo/scene3d/index.html"), nullptr) << output;
+        EXPECT_NE(strstr(output, "test/demo/aquarium/aquarium.ls"), nullptr) << output;
         EXPECT_EQ(strstr(output, "asset-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "three-gallery"), nullptr) << output;
         EXPECT_EQ(strstr(output, "cellscope"), nullptr) << output;
@@ -526,6 +527,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
         {"superlambda", "#superlambda[data-mode=ready]"},
         {"doom", "#doom[data-mode=ready]"},
         {"scene3d", ".scene3d-index .demo-tile"},
+        {"aquarium", "#aquarium #tank-scene", true},
         {"slides", "#slides-editor #stage"},
         {"readability", "#readability-demo[data-mode=original] #page-frame"},
         {"chart", ".demo-tile"},
