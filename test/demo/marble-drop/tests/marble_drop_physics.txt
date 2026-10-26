@@ -1,0 +1,16 @@
+{
+  fall_duration: true,
+  accelerates_from_rest: true,
+  rolling_energy: true,
+  distance_controls_time: true,
+  momentum_carries: true,
+  clamped_start: true,
+  clamped_finish: true,
+  flight_horizontal_speed: true,
+  flight_gravity: true,
+  flight_rises: true,
+  flight_lands: true,
+  junction_keeps_speed: true,
+  junction_keeps_time: true,
+  mass_independent: true
+}

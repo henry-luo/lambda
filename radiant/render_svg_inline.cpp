@@ -11,6 +11,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "radiant.hpp"
+#include "event.hpp"
 #include "svg_animation.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/format/format.h"
@@ -8398,12 +8399,14 @@ struct SvgPaintStamp {
 enum SvgVectorState { SVG_VECTOR_UNTRIED, SVG_VECTOR_UNSUPPORTED, SVG_VECTOR_READY };
 struct SvgLayerEntry : SvgPaintStamp {
     DomNodeRef element;             // the node id guards against a recycled element address
+    lam::Handle<ImageSurface> image_source; // SVG images own their isolated selector state
     int pixel_width, pixel_height;  // layer size in physical pixels
     float scale;
     ImageSurface* surface;          // null until the content was painted twice unchanged
     bool vector_content;
     SvgVectorState vector_state;
     float viewport_width, viewport_height;
+    float phase_x, phase_y;         // image captures preserve fractional device-pixel placement
     RdtMatrix vector_transform;     // original device placement; translations reuse its commands
     lam::Own<SvgLayerEntry> next;
 };
@@ -8517,7 +8520,8 @@ static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* 
                                     uint32_t* out, size_t count);
 static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
                                   float viewport_width, float viewport_height, float scale,
-                                  const SvgInitialPaint* paint, ImageSurface* surface) {
+                                  const SvgInitialPaint* paint, ImageSurface* surface, ImageSurface* image,
+                                  float phase_x, float phase_y) {
     int width = surface->width, height = surface->height;
     RENDER_METRIC_ADD(layer_recordings, 1);
     OffscreenRenderArenas arenas;
@@ -8552,15 +8556,25 @@ static bool svg_layer_render_passes(RasterRenderContext* rdcon, Element* svg_ele
     rdcon->has_dirty_union = false;
 
     RdtMatrix base_transform = { scale, 0.0f, 0.0f, 0.0f, scale, 0.0f, 0.0f, 0.0f, 1.0f };
+    if (image) {
+        base_transform.e13 = phase_x;
+        base_transform.e23 = phase_y;
+        RdtPath* clip = rdt_path_new();
+        rdt_path_add_rect(clip, phase_x, phase_y, viewport_width * scale, viewport_height * scale, 0, 0);
+        rc_push_clip(rdcon, clip, nullptr);
+        rdt_path_free(clip);
+    }
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
-                               rdcon->ui_context->document->document_pool, scale,
+                               image ? rdt_picture_get_pool(image->pic) : rdcon->ui_context->document->document_pool, scale,
                                font_ctx, &base_transform, &dl, &paint->current_color,
                                paint->has_fill_color ? &paint->fill_color : nullptr,
-                               nullptr, 1.0f, paint->fill_none,
+                               image ? rdt_picture_get_source_path(image->pic) : nullptr, 1.0f, paint->fill_none,
                                paint->has_stroke_color ? &paint->stroke_color : nullptr,
                                paint->stroke_none, paint->stroke_width,
-                               &paint_list, &scratch, render_svg_reference_scope(dom_elem));
+                               &paint_list, &scratch, image ? nullptr : render_svg_reference_scope(dom_elem),
+                               image != nullptr, image ? rdt_picture_animation_time(image->pic) : 0);
+    if (image) rc_pop_clip(rdcon);
 
     rdcon->dl = lam::up(saved_dl);
     rdcon->paint_list = lam::up(saved_paint_list);
@@ -8654,7 +8668,7 @@ static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* 
 static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* registry,
                               SvgLayerEntry* entry, Element* svg_elem, DomElement* dom_elem,
                               float viewport_width, float viewport_height, float scale,
-                              const SvgInitialPaint* paint) {
+                              const SvgInitialPaint* paint, ImageSurface* image) {
     int width = entry->pixel_width;
     int height = entry->pixel_height;
     size_t count = (size_t)width * (size_t)height;
@@ -8665,7 +8679,7 @@ static bool svg_layer_capture(RasterRenderContext* rdcon, SvgLayerRegistry* regi
     ImageSurface* surface = image_surface_create(width, height);
     if (!surface) return false;
     bool ok = svg_layer_render_passes(rdcon, svg_elem, dom_elem, viewport_width, viewport_height,
-        scale, paint, surface);
+        scale, paint, surface, image, entry->phase_x, entry->phase_y);
     if (!ok) {
         image_surface_destroy(surface);
         return false;
@@ -8688,7 +8702,8 @@ static bool svg_layer_device_transform(const RasterRenderContext* rdcon, float* 
     if (!rdcon->has_transform) return true;
     const RdtMatrix* m = &rdcon->transform;
     if (m->e11 <= 0.0f || fabsf(m->e11 - m->e22) > 0.0005f ||
-        fabsf(m->e12) > 0.0005f || fabsf(m->e21) > 0.0005f) {
+        fabsf(m->e12) > 0.0005f || fabsf(m->e21) > 0.0005f ||
+        m->e31 != 0.0f || m->e32 != 0.0f || m->e33 != 1.0f) {
         return false;
     }
     *sx = m->e11;
@@ -8706,8 +8721,18 @@ static uint64_t svg_layer_interaction_generation(DomDocument* document) {
 }
 
 static SvgPaintStamp svg_paint_stamp(RasterRenderContext* rdcon, DomElement* element,
-    const SvgInitialPaint* paint) {
+    const SvgInitialPaint* paint, ImageSurface* image = nullptr) {
     DomDocument* document = rdcon->ui_context->document;
+    if (image) {
+        // SVG image style is isolated (D2.11.2); source/time and shared paint resources invalidate its pixels.
+        double time = rdt_picture_animation_time(image->pic);
+        uint64_t animation = 0;
+        memcpy(&animation, &time, sizeof(animation));
+        return {0, image->generation, 0, animation,
+            font_context_glyph_cache_generation(rdcon->ui_context->font_ctx),
+            font_context_resource_generation(rdcon->ui_context->font_ctx),
+            image_cache_resource_generation(rdcon->ui_context), *paint};
+    }
     return {element->layer_generation, document->style_content_epoch,
         svg_layer_interaction_generation(document), svg_animation_generation(document),
         font_context_glyph_cache_generation(rdcon->ui_context->font_ctx),
@@ -8722,13 +8747,26 @@ static bool svg_paint_stamp_equal(const SvgPaintStamp& a, const SvgPaintStamp& b
         a.image_resource_generation == b.image_resource_generation && svg_layer_paint_equal(&a.paint, &b.paint);
 }
 
+static void svg_layer_damage(RasterRenderContext* rdcon, const Rect* rect,
+    float device_scale, float offset_x, float offset_y) {
+    if (!rdcon->presentation_damage) return;
+    // switching between live vectors and a captured raster can change antialiased edges outside the moving leaf
+    float scale = rdcon->raster_scale;
+    presentation_damage_mark(rdcon->ui_context->document->state,
+        {(rect->x * device_scale + offset_x) / scale,
+         (rect->y * device_scale + offset_y) / scale,
+         ((rect->x + rect->width) * device_scale + offset_x) / scale,
+         ((rect->y + rect->height) * device_scale + offset_y) / scale});
+}
+
 // Paint the SVG from its cached layer when its content is unchanged. Returns
 // false when the caller must record the SVG directly: the first paint of new
 // content (which also arms the capture), a layer that is too large, or a
 // transform the blit cannot express.
 static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, Element* svg_elem,
                             const Rect* content_rect, float viewport_width,
-                            float viewport_height, float scale, const SvgInitialPaint* paint) {
+                            float viewport_height, float scale, const SvgInitialPaint* paint,
+                            ImageSurface* image = nullptr) {
     SvgLayerMode mode = svg_layer_mode();
     if (mode == SVG_LAYER_MODE_OFF || !rdcon->ui_context || !rdcon->ui_context->document) {
         return false;
@@ -8737,8 +8775,12 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     if (!svg_layer_device_transform(rdcon, &device_scale, &offset_x, &offset_y)) return false;
     // the layer is rasterised at the scale it lands on the surface
     float layer_scale = scale * device_scale;
-    int width = (int)lroundf(content_rect->width * device_scale);   // INT_CAST_OK: layer pixel size
-    int height = (int)lroundf(content_rect->height * device_scale); // INT_CAST_OK: layer pixel size
+    float origin_x = content_rect->x * device_scale + offset_x;
+    float origin_y = content_rect->y * device_scale + offset_y;
+    float phase_x = image ? origin_x - floorf(origin_x) : 0.0f;
+    float phase_y = image ? origin_y - floorf(origin_y) : 0.0f;
+    int width = (int)(image ? ceilf(content_rect->width * device_scale + phase_x) : roundf(content_rect->width * device_scale)); // INT_CAST_OK: layer pixel columns
+    int height = (int)(image ? ceilf(content_rect->height * device_scale + phase_y) : roundf(content_rect->height * device_scale)); // INT_CAST_OK: layer pixel rows
     if (width <= 0 || height <= 0 || (size_t)width * (size_t)height * 4u > SVG_LAYER_MAX_BYTES) {
         return false;
     }
@@ -8746,43 +8788,79 @@ static bool svg_layer_paint(RasterRenderContext* rdcon, DomElement* dom_elem, El
     SvgLayerEntry* entry = registry ? svg_layer_entry_for_element(registry, dom_elem) : nullptr;
     if (!entry) return false;
 
-    SvgPaintStamp stamp = svg_paint_stamp(rdcon, dom_elem, paint);
+    SvgPaintStamp stamp = svg_paint_stamp(rdcon, dom_elem, paint, image);
+    DocState* state = rdcon->ui_context->document->state;
+    View* drag = state ? static_cast<View*>(state->drag_target) : nullptr;
+    bool scrolling_image = image && drag && scroll_state_is_dragging_for_view(state, drag);
     bool unchanged = !entry->vector_content && entry->element.expected_id == dom_elem->DomNode::id &&
+                     entry->image_source == (image ? image->self : lam::Handle<ImageSurface>{}) &&
                      svg_paint_stamp_equal(*entry, stamp) &&
-                     entry->pixel_width == width && entry->pixel_height == height &&
+                     (scrolling_image || (entry->pixel_width == width && entry->pixel_height == height)) &&
+                     entry->viewport_width == viewport_width && entry->viewport_height == viewport_height &&
+                     (scrolling_image || (entry->phase_x == phase_x && entry->phase_y == phase_y)) &&
                      entry->scale == layer_scale && svg_layer_paint_equal(&entry->paint, paint);
     if (!unchanged) {
+        if (entry->surface) svg_layer_damage(rdcon, content_rect, device_scale, offset_x, offset_y);
         svg_layer_entry_release_surface(registry, entry);
         entry->element = dom_node_ref(dom_elem);
+        entry->image_source = image ? image->self : lam::Handle<ImageSurface>{};
         *static_cast<SvgPaintStamp*>(entry) = stamp;
         entry->vector_content = false;
         entry->pixel_width = width;
         entry->pixel_height = height;
         entry->scale = layer_scale;
+        entry->viewport_width = viewport_width;
+        entry->viewport_height = viewport_height;
+        entry->phase_x = phase_x;
+        entry->phase_y = phase_y;
         if (mode != SVG_LAYER_MODE_EAGER) return false;
     }
-    if (!entry->surface &&
+    bool captured = entry->surface == nullptr;
+    if (captured &&
         !svg_layer_capture(rdcon, registry, entry, svg_elem, dom_elem,
-                           viewport_width, viewport_height, layer_scale, paint)) {
+                           viewport_width, viewport_height, layer_scale, paint, image)) {
         return false;
     }
+    if (captured) svg_layer_damage(rdcon, content_rect, device_scale, offset_x, offset_y);
     // capture can resolve a font source; key the resulting paint by that resource.
-    *static_cast<SvgPaintStamp*>(entry) = svg_paint_stamp(rdcon, dom_elem, paint);
+    *static_cast<SvgPaintStamp*>(entry) = svg_paint_stamp(rdcon, dom_elem, paint, image);
     ImageSurface* surface = entry->surface;
-    // whole device pixels, so the blit copies samples instead of resampling
-    Rect dst = { roundf(content_rect->x * device_scale + offset_x),
-                 roundf(content_rect->y * device_scale + offset_y),
+    // a moving scrollport reuses the capture at fractional placement; resting paint realigns it exactly
+    Rect dst = { image ? origin_x - entry->phase_x : roundf(origin_x),
+                 image ? origin_y - entry->phase_y : roundf(origin_y),
                  (float)surface->width, (float)surface->height };
     Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
     // the cached layer already includes the device transform; vector-backed
     // blits must not apply the ancestor translation/scale a second time.
     bool saved_has_transform = rdcon->has_transform;
     rdcon->has_transform = false;
+    // aligned layers copy on the CPU; native vector clips can reuse an uploaded image without projecting it again
+    bool aligned = dst.x == floorf(dst.x) && dst.y == floorf(dst.y);
+    ScaleMode sampling = aligned && render_painter_can_blit_surface(rdcon) ? SCALE_MODE_NEAREST : SCALE_MODE_LINEAR;
     render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,
-                                       &dst, &clip, SCALE_MODE_NEAREST, rdcon->clip_shapes,
+                                       &dst, &clip, sampling, rdcon->clip_shapes,
                                        rdcon->clip_shape_depth, 255);
     rdcon->has_transform = saved_has_transform;
     return true;
+}
+
+bool render_svg_image_layer(RasterRenderContext* rdcon, ViewBlock* view,
+                            ImageSurface* image, const Rect* image_rect) {
+    if (!rdcon || !view || !image || image->self.is_null() || !image_rect || !image->pic ||
+        rdcon->css3d_context || rdcon->raster_scale <= 0.0f) return false;
+    Element* root = rdt_picture_get_svg_root(image->pic);
+    if (!root) return false;
+    SvgInitialPaint paint = {};
+    paint.current_color = Color{0xff000000u};
+    paint.stroke_none = true;
+    paint.stroke_width = -1.0f;
+    RasterRenderContext* saved = g_svg_active_rdcon;
+    g_svg_active_rdcon = rdcon;
+    bool painted = svg_layer_paint(rdcon, view->as_element(), root, image_rect,
+        image_rect->width / rdcon->raster_scale, image_rect->height / rdcon->raster_scale,
+        rdcon->raster_scale, &paint, image);
+    g_svg_active_rdcon = saved;
+    return painted;
 }
 
 static SvgLayerEntry* svg_vector_prepare(RasterRenderContext* rdcon, DomElement* element,

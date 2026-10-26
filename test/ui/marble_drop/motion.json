@@ -1,0 +1,294 @@
+{
+  "name": "Marble Drop Retina motion damage, pause and frame cancellation",
+  "html": "test/demo/marble-drop/marble-drop.ls",
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "device_scale": 2,
+  "event_interval_ms": 0,
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sound"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#marble-clock"
+      },
+      "property": "animation-name",
+      "equals": "none"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255,
+      "force_render": true
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255,
+      "force_render": true
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255,
+      "force_render": true
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255,
+      "force_render": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#drop"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255,
+      "force_render": true
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255
+    },
+    {
+      "type": "advance_time",
+      "ms": 40,
+      "steps": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255
+    },
+    {
+      "type": "script",
+      "js": "globalThis.marbleBeforeFraction=document.querySelector('#rolling-marble').getBoundingClientRect()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 17,
+      "steps": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 1,
+      "y": 1,
+      "min_a": 255
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#rolling-marble').getBoundingClientRect().x!==globalThis.marbleBeforeFraction.x || document.querySelector('#rolling-marble').getBoundingClientRect().y!==globalThis.marbleBeforeFraction.y"
+    },
+    {
+      "type": "assert_damage_parity",
+      "min_frames": 5,
+      "min_selective": 5
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/marble-drop/motion.png"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.marbleBeforePause=document.querySelector('#rolling-marble').getBoundingClientRect()"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-paused",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#rolling-marble').getBoundingClientRect().x===globalThis.marbleBeforePause.x && document.querySelector('#rolling-marble').getBoundingClientRect().y===globalThis.marbleBeforePause.y"
+    },
+    {
+      "type": "key_press",
+      "key": "P"
+    },
+    {
+      "type": "advance_time",
+      "ms": 80,
+      "steps": 2
+    },
+    {
+      "type": "key_press",
+      "key": "U"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rolling-marble"
+      },
+      "count": 0
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-moves",
+      "equals": "0"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#rolling-marble"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_press",
+      "key": "A"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravity0=document.querySelector('#rolling-marble').getBoundingClientRect().y"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 5
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravity200=document.querySelector('#rolling-marble').getBoundingClientRect().y"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 5
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravity400=document.querySelector('#rolling-marble').getBoundingClientRect().y;globalThis.accelerating=gravity200>gravity0 && gravity400-gravity200>2*(gravity200-gravity0)"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.accelerating"
+    },
+    {
+      "type": "advance_time",
+      "ms": 160,
+      "steps": 4
+    },
+    {
+      "type": "script",
+      "js": "globalThis.gravityStillMoving=document.querySelector('#marble-drop').getAttribute('data-active')==='true' && document.querySelector('#marble-drop').getAttribute('data-collected')==='0'"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.gravityStillMoving"
+    },
+    {
+      "type": "advance_time",
+      "ms": 1600,
+      "steps": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-active",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#marble-drop"
+      },
+      "attribute": "data-collected",
+      "equals": "1"
+    },
+    {
+      "type": "window_close"
+    },
+    {
+      "type": "assert_window_closed",
+      "closed": true
+    }
+  ],
+  "env": [
+    {
+      "key": "RADIANT_DAMAGE_VERIFY",
+      "value": "1"
+    }
+  ]
+}

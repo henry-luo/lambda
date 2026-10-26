@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_metrics.hpp"
 #include "../lib/tagged.hpp"
 #include "glyph_sampling.hpp"
 #include "view.hpp"
@@ -1118,9 +1119,8 @@ static uint32_t* render_outer_shadow_blur_image(
     return shadow_buf;
 }
 
-// A box shadow under a transform is rasterised at record time (rounded rect, blur, border-box
-// exclusion). Re-recording a transformed subtree (each frame of a 3D plane, a paint-layer
-// capture or revalidation) would blur it again, so the document keeps those images, keyed
+// a box shadow is rasterised once (rounded rect, blur, border-box exclusion).
+// ordinary repaints and transformed subtree recordings would blur it again, so the document keeps those images, keyed
 // by the shadow's geometry relative to its pixel origin, and records them by handle.
 struct ShadowImageKey {
     float values[24];
@@ -1207,12 +1207,14 @@ static ImageSurface* shadow_image_cached(RasterRenderContext* rdcon, const Bound
     for (int i = 0; i < cache->count; i++) {
         ShadowImageCacheEntry& entry = cache->entries[i];
         if (memcmp(&entry.key, &key, sizeof(key)) == 0) {
+            RENDER_METRIC_ADD(shadow_image_hits, 1);
             entry.used = cache->clock;
             *x = x0; *y = y0;
             return entry.surface;
         }
     }
     // the build allocates unscoped scratch; rewind it once the pixels are copied out
+    RENDER_METRIC_ADD(shadow_image_builds, 1);
     ScratchMark mark = scratch_mark(&rdcon->scratch);
     int bx = 0, by = 0, bw = 0, bh = 0;
     uint32_t* pixels = render_outer_shadow_blur_image(&rdcon->scratch, limit, shadow_x, shadow_y,
@@ -1328,16 +1330,37 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         exclude_params[6] = r_br;       exclude_params[7] = r_bl;
 
         // the current target clip (window or paint layer capture) bounds the local image
-        Bound local_limit = xform ? outer_shadow_local_limit(rdcon->block.clip, xform, s_blur) : Bound{};
+        Bound local_limit = xform ? outer_shadow_local_limit(rdcon->block.clip, xform, s_blur) : rdcon->block.clip;
+        float cache_x = shadow_x, cache_y = shadow_y;
+        float cache_exclude[RDT_CLIP_PARAM_COUNT];
+        memcpy(cache_exclude, exclude_params, sizeof(cache_exclude));
+        if (!xform) {
+            // cache local shadow geometry, so fractional scrolling cannot rebuild its blur or clipped rows
+            cache_x = s_offset_x - s_spread;
+            cache_y = s_offset_y - s_spread;
+            cache_exclude[0] = cache_exclude[1] = 0.0f;
+            float pad = fmaxf(0.0f, s_blur);
+            Bound full = {floorf(cache_x - pad), floorf(cache_y - pad),
+                ceilf(cache_x + shadow_w + pad), ceilf(cache_y + shadow_h + pad)};
+            double bytes = (double)(full.right - full.left) * (full.bottom - full.top) * 4.0;
+            local_limit = bytes > 0.0 && bytes <= SHADOW_IMAGE_CACHE_MAX_BYTES ? full :
+                Bound{local_limit.left - rect.x, local_limit.top - rect.y,
+                      local_limit.right - rect.x, local_limit.bottom - rect.y};
+        }
         // hard shadows also exclude the border-box, even for transparent square boxes.
         int cached_x = 0, cached_y = 0;
-        ImageSurface* cached = xform && rdcon->ui_context->surface ? shadow_image_cached(rdcon, local_limit,
-            shadow_x, shadow_y, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, s->color, s_blur,
-            exclude_type, exclude_params, &cached_x, &cached_y) : nullptr;
+        ImageSurface* cached = rdcon->ui_context->surface ? shadow_image_cached(rdcon, local_limit,
+            cache_x, cache_y, shadow_w, shadow_h, sr_tl, sr_tr, sr_br, sr_bl, s->color, s_blur,
+            exclude_type, cache_exclude, &cached_x, &cached_y) : nullptr;
         if (cached) {
-            Rect dst = {(float)cached_x, (float)cached_y, (float)cached->width, (float)cached->height};
-            render_painter_draw_pixels_rect(rdcon, (const uint32_t*)cached->pixels, cached->width,
+            Rect dst = {cached_x + (xform ? 0.0f : rect.x), cached_y + (xform ? 0.0f : rect.y),
+                (float)cached->width, (float)cached->height};
+            if (xform) render_painter_draw_pixels_rect(rdcon, (const uint32_t*)cached->pixels, cached->width,
                 cached->height, cached->pitch / 4, &dst, nullptr, 255, cached, SCALE_MODE_LINEAR);
+            else render_painter_blit_surface_scaled(rdcon, cached, nullptr, rdcon->ui_context->surface,
+                &dst, &rdcon->block.clip,
+                dst.x == floorf(dst.x) && dst.y == floorf(dst.y) ? SCALE_MODE_NEAREST : SCALE_MODE_LINEAR,
+                rdcon->clip_shapes, rdcon->clip_shape_depth, 255);
         } else if (xform && rdcon->ui_context->surface) {
             assert(rdcon->dl && "transformed box-shadow requires display-list recording");
             ScratchArena* shadow_arena = &rdcon->dl->arena;

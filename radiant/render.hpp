@@ -4967,6 +4967,8 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view);
 // Starts a paint pass: inline SVGs painted in it share one host style context.
 void render_svg_begin_paint_pass(void);
 bool render_svg_layers_pending(DomDocument* document);
+bool render_svg_image_layer(RasterRenderContext* rdcon, ViewBlock* view,
+                            ImageSurface* image, const Rect* image_rect);
 void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element,
                                 float viewport_width, float viewport_height);
 

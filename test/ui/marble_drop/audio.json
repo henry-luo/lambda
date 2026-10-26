@@ -55,8 +55,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -88,8 +88,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -105,8 +105,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1200,
-      "steps": 30
+      "ms": 3600,
+      "steps": 90
     },
     {
       "type": "assert_attribute",
@@ -134,8 +134,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -213,8 +213,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -264,8 +264,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -307,8 +307,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 800,
-      "steps": 20
+      "ms": 2400,
+      "steps": 60
     },
     {
       "type": "assert_attribute",
@@ -342,8 +342,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 2000,
-      "steps": 50
+      "ms": 6000,
+      "steps": 150
     },
     {
       "type": "assert_attribute",
@@ -377,8 +377,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -410,8 +410,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 1600,
-      "steps": 40
+      "ms": 4800,
+      "steps": 120
     },
     {
       "type": "assert_attribute",
@@ -441,8 +441,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 4000,
-      "steps": 100
+      "ms": 12000,
+      "steps": 300
     },
     {
       "type": "assert_attribute",
@@ -492,8 +492,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -525,8 +525,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -556,8 +556,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -577,8 +577,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -600,8 +600,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 320,
-      "steps": 8
+      "ms": 960,
+      "steps": 24
     },
     {
       "type": "assert_attribute",
@@ -621,8 +621,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -648,8 +648,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
@@ -675,8 +675,8 @@
     },
     {
       "type": "advance_time",
-      "ms": 640,
-      "steps": 16
+      "ms": 1920,
+      "steps": 48
     },
     {
       "type": "assert_attribute",
