@@ -9,16 +9,17 @@ import { decodeMark, encodeMark } from './src/inspector/mark.mjs';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const [document, requestFile] = process.argv.slice(2);
 if (!document || document === '--help') {
-  console.log('Usage: node utils/devtool/inspect.mjs <document> [request.mark]');
+  console.log('Usage: node utils/devtool/inspect.mjs <document>|--scratch [request.mark]');
   console.log('Without a request file, reads the root DOM branch. The target runs headlessly.');
   process.exit(document ? 0 : 1);
 }
-const transport = new InspectorTransport(projectRoot, document);
+const scratch = document === '--scratch';
+const transport = new InspectorTransport(projectRoot, document, { scratch });
 transport.on('output', text => process.stderr.write(text));
 const client = new InspectorClient(transport);
 try {
   await client.request('hello', { version: 1 });
-  const request = requestFile ? decodeMark(await fs.readFile(requestFile, 'utf8')) : { op: { name: 'tree' } };
+  const request = requestFile ? decodeMark(await fs.readFile(requestFile, 'utf8')) : { op: { name: scratch ? 'bindings' : 'tree' } };
   const { id, op, ...fields } = request;
   if (!op?.name) throw new Error('request file must contain an op symbol');
   const result = await client.request(op.name, fields);

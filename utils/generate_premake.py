@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import glob
+import fnmatch
 import shlex
 import platform
 import copy
@@ -73,6 +74,7 @@ class PremakeGenerator:
         self.premake_content = []
         self._linux_pkg_config_includes: Optional[List[str]] = linux_pkg_config_includes
         self.variant = variant
+        self.variant_config = {}
         # (makefile-relative path, text) of the host export list; see _host_export_link_options
         self.host_export_file = None
         self.coverage_bin_dir = os.environ.get('LAMBDA_COVERAGE_BIN_DIR', 'test/coverage/bin')
@@ -309,9 +311,10 @@ class PremakeGenerator:
 
         # Step 1b: Remove libraries excluded by variant (e.g., cli headless build)
         if self.variant:
-            variant_config = self.config.get('platforms', {}).get(self.variant, {})
+            variant_config = self.variant_config
             exclude_libs = set(variant_config.get('exclude_libraries', []))
-            exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', []))
+            exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', [])) - set(
+                variant_config.get('restore_macos_libraries', []))
             all_excluded = exclude_libs | exclude_macos_libs
             libraries = {k: v for k, v in libraries.items() if k not in all_excluded}
 
@@ -567,7 +570,7 @@ class PremakeGenerator:
         This is applied before library parsing so exclude_libraries takes effect.
         """
         platforms_config = self.config.get('platforms', {})
-        variant_config = platforms_config.get(variant)
+        variant_config = self._resolve_variant(variant)
         if not variant_config:
             elog(f"Warning: variant '{variant}' not found in platforms config, ignoring")
             return
@@ -575,11 +578,23 @@ class PremakeGenerator:
         vlog(f"DEBUG: Applying variant overlay '{variant}'")
 
         # Override top-level keys if the variant specifies them
-        overlay_keys = ['output', 'source_dirs', 'source_files', 'exclude_source_files', 'includes']
+        overlay_keys = ['output', 'source_dirs', 'source_files', 'exclude_source_files',
+                        'includes', 'object_dir']
         for key in overlay_keys:
             if key in variant_config:
                 vlog(f"DEBUG: Variant override: {key} = {variant_config[key]}")
                 self.config[key] = variant_config[key]
+
+        # Keep one parent source list: native hosts describe only their delta.
+        for key, extra_key, remove_key in (
+                ('source_dirs', 'extra_source_dirs', 'remove_source_dirs'),
+                ('source_files', 'extra_source_files', 'remove_source_files')):
+            values = self.config.get(key, [])
+            removed = set(variant_config.get(remove_key, []))
+            self.config[key] = [value for value in values if value not in removed]
+            for value in variant_config.get(extra_key, []):
+                if value not in self.config[key]:
+                    self.config[key].append(value)
 
         # Variant exclusions on top of the inherited list, so a variant that
         # only drops a few files does not fork the whole exclusion list.
@@ -608,6 +623,38 @@ class PremakeGenerator:
                 existing_libs.append(lib)
             self.config['libraries'] = existing_libs
             vlog(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
+
+        self.variant_config = variant_config
+
+    def _resolve_variant(self, variant: str, seen=None) -> Dict[str, Any]:
+        """Resolve a profile's parent before applying its source and link deltas."""
+        profiles = self.config.get('platforms', {})
+        if variant not in profiles:
+            return {}
+        seen = set() if seen is None else seen
+        if variant in seen:
+            raise ValueError(f"Cyclic build variant inheritance: {variant}")
+        seen.add(variant)
+        child = profiles[variant]
+        parent = self._resolve_variant(child['extends'], seen) if 'extends' in child else {}
+        resolved = copy.deepcopy(parent)
+        additive = {'defines', 'extra_source_dirs', 'remove_source_dirs',
+                    'extra_source_files', 'remove_source_files',
+                    'extra_exclude_source_files', 'additional_libraries',
+                    'exclude_libraries', 'exclude_macos_libraries',
+                    'restore_macos_libraries', 'exclude_source_globs'}
+        for key, value in child.items():
+            if key == 'extends':
+                continue
+            if key in additive:
+                resolved[key] = copy.deepcopy(resolved.get(key, []))
+                for entry in value:
+                    if entry not in resolved[key]:
+                        resolved[key].append(copy.deepcopy(entry))
+            else:
+                resolved[key] = copy.deepcopy(value)
+        seen.remove(variant)
+        return resolved
 
     def _release_excluded_libraries(self) -> set[str]:
         """Return archives intentionally omitted by a configuration overlay."""
@@ -792,6 +839,8 @@ class PremakeGenerator:
 
     def _premake_location(self) -> str:
         """Directory, relative to the premake file, where gmake makefiles land."""
+        if self.variant_config.get('premake_location'):
+            return self.variant_config['premake_location']
         if self.config.get('platform', 'macOS') == 'Linux_x64':
             return 'build_linux/test'
         return 'build/premake'
@@ -3551,9 +3600,10 @@ class PremakeGenerator:
 
         # Filter out libraries excluded by variant (e.g., cli headless build)
         if self.variant:
-            variant_config = platforms_config.get(self.variant, {})
+            variant_config = self.variant_config
             exclude_libs = set(variant_config.get('exclude_libraries', []))
-            exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', []))
+            exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', [])) - set(
+                variant_config.get('restore_macos_libraries', []))
             all_excluded = exclude_libs | exclude_macos_libs
             if all_excluded:
                 vlog(f"DEBUG: Variant '{self.variant}' excluding libraries: {all_excluded}")
@@ -3579,7 +3629,7 @@ class PremakeGenerator:
 
         # Use platform-specific target names
         target_name = output.replace('.exe', '')  # Use the config output name without .exe
-        target_extension = '.exe'
+        target_extension = self.variant_config.get('target_extension', '.exe')
 
         # Add files from source directories explicitly
         all_source_files = source_files[:]
@@ -3625,6 +3675,10 @@ class PremakeGenerator:
         # _stub.cpp below (the no-GUI variant drops the .mm and builds the stub)
         if exclude_files:
             all_source_files = [f for f in all_source_files if f not in exclude_files]
+        patterns = self.variant_config.get('exclude_source_globs', [])
+        if patterns:
+            all_source_files = [f for f in all_source_files
+                                if not any(fnmatch.fnmatchcase(f, pattern) for pattern in patterns)]
 
         # On macOS, remove _stub.cpp files when a platform-specific .mm exists
         # e.g., rdt_video_stub.cpp is excluded when rdt_video_avf.mm is present
@@ -3657,7 +3711,7 @@ class PremakeGenerator:
             '    kind "ConsoleApp"',
             '    language "C++"',  # Use C++ as primary language since we have mixed sources
             '    targetdir "."',
-            '    objdir "build/obj/%{prj.name}"',
+            f'    objdir "{self.config.get("object_dir", "build/obj/%{prj.name}")}"',
             '    filter "configurations:coverage"',
             f'        targetdir "{self.coverage_bin_dir}"',
             '    filter {}',

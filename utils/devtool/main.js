@@ -14,7 +14,7 @@ class LayoutDevTool {
     this.pdfTestDir = path.join(this.projectRoot, 'test/pdf');
     this.lambdaExe = path.join(this.projectRoot, 'lambda.exe');
     this.recentTests = [];
-    this.inspector = null;
+    this.inspectors = { document: null, scratch: null };
 
     console.log('LayoutDevTool initialized:');
     console.log('  __dirname:', __dirname);
@@ -65,33 +65,37 @@ class LayoutDevTool {
     this.mainWindow.on('closed', () => this.stopInspector());
   }
 
-  stopInspector() {
-    const inspector = this.inspector;
-    this.inspector = null;
-    if (inspector) inspector.stop();
+  stopInspector(target) {
+    for (const kind of target ? [target] : Object.keys(this.inspectors)) {
+      const inspector = this.inspectors[kind];
+      this.inspectors[kind] = null;
+      if (inspector) inspector.stop();
+    }
   }
 
   setupIPC() {
-    ipcMain.handle('devtools-start', async (event, document, headless) => {
-      if (event.sender !== this.mainWindow.webContents || typeof document !== 'string' || !document.trim())
-        throw new Error('Choose a document to inspect');
-      this.stopInspector();
-      const inspector = new InspectorTransport(this.projectRoot, document, { headless: headless !== false });
-      this.inspector = inspector;
-      for (const [source, destination] of [['message', 'devtools-message'], ['output', 'devtools-output'], ['closed', 'devtools-closed']]) {
-        inspector.on(source, data => {
-          if (this.inspector === inspector && !event.sender.isDestroyed()) event.sender.send(destination, data);
-        });
-      }
-    });
-    ipcMain.handle('devtools-send', (event, text) => {
-      if (event.sender !== this.mainWindow.webContents || !this.inspector || typeof text !== 'string')
-        throw new Error('Inspector is disconnected');
-      this.inspector.send(text);
-    });
-    ipcMain.handle('devtools-stop', event => {
-      if (event.sender === this.mainWindow.webContents) this.stopInspector();
-    });
+    for (const [kind, channel] of [['document', 'devtools'], ['scratch', 'devtools-scratch']]) {
+      ipcMain.handle(`${channel}-start`, async (event, document, headless) => {
+        if (event.sender !== this.mainWindow.webContents || (kind === 'document' && (typeof document !== 'string' || !document.trim())))
+          throw new Error('Choose a document to inspect');
+        this.stopInspector(kind);
+        const inspector = new InspectorTransport(this.projectRoot, document, { headless: headless !== false, scratch: kind === 'scratch' });
+        this.inspectors[kind] = inspector;
+        for (const source of ['message', 'output', 'closed']) {
+          inspector.on(source, data => {
+            if (this.inspectors[kind] === inspector && !event.sender.isDestroyed()) event.sender.send(`${channel}-${source}`, data);
+          });
+        }
+      });
+      ipcMain.handle(`${channel}-send`, (event, text) => {
+        if (event.sender !== this.mainWindow.webContents || !this.inspectors[kind] || typeof text !== 'string')
+          throw new Error('Inspector is disconnected');
+        this.inspectors[kind].send(text);
+      });
+      ipcMain.handle(`${channel}-stop`, event => {
+        if (event.sender === this.mainWindow.webContents) this.stopInspector(kind);
+      });
+    }
 
     // Load test tree
     ipcMain.handle('load-test-tree', async () => {

@@ -191,3 +191,4 @@ test/benchmark/exe/
 # Prepared Chinese IME dictionary packs (vibe/Lambda_Pkg_IME_Chinese.md §6).
 # Not committed until the user decides how the data is distributed (IME-O7).
 lmd/package/ime/chinese/data/
+LambdaChineseIME

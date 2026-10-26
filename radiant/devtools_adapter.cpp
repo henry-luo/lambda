@@ -246,6 +246,32 @@ static Item inspector_highlight(DevtoolsExchange& exchange, MapReader request, v
     return inspector_box(builder, node);
 }
 
+static Item inspector_path(DevtoolsExchange& exchange, MapReader request, void* owner) {
+    RadiantDevtools* inspector = (RadiantDevtools*)owner;
+    DomNode* node = inspector_node(inspector, request, exchange);
+    if (!node) return ItemNull;
+    DomNode* ancestors[256];
+    size_t count = 0;
+    for (DomNode* current = node; current; current = current->parent) {
+        if (count == sizeof(ancestors) / sizeof(ancestors[0]))
+            return exchange.fail("limit", "DOM ancestor path is too deep");
+        ancestors[count++] = current;
+    }
+    MarkBuilder builder(exchange.input);
+    auto path = builder.array();
+    for (size_t i = count; i > 0; i--) {
+        DomNode* current = ancestors[i - 1];
+        int64_t offset = 0;
+        for (DomNode* sibling = current->parent ? current->parent->as_element()->first_child.get() : nullptr;
+                sibling && sibling != current; sibling = sibling->next_sibling) offset++;
+        Item record = inspector_node_record(builder, inspector, current);
+        if (record.item == ITEM_NULL) return exchange.fail("limit", "inspector handle limit reached");
+        path.append(builder.map().put("node", record).put("offset", offset).final());
+    }
+    exchange.revision = inspector->revision;
+    return path.final();
+}
+
 static Item inspector_screenshot(DevtoolsExchange& exchange, MapReader, void* owner) {
     RadiantDevtools* inspector = (RadiantDevtools*)owner;
     if (!inspector->document || !inspector->document->view_tree)
@@ -295,6 +321,7 @@ static const DevtoolsCommand INSPECTOR_COMMANDS[] = {
     {"set_style", inspector_set_style}, {"pick", inspector_pick},
     {"highlight", inspector_highlight}, {"screenshot", inspector_screenshot}, {"source", inspector_source},
     {"release", inspector_release},
+    {"path", inspector_path},
 };
 
 RadiantDevtools* radiant_devtools_open(UiContext* ui, int fd, const char* source_path) {

@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { InspectorClient } from '../inspector/client.mjs';
 import { MarkElement, encodeMark } from '../inspector/mark.mjs';
 import '../styles/inspector.css';
+import LambdaScratch from './LambdaScratch';
 
-function NodeRow({ row, branches, selected, select, expand, depth = 0 }) {
+function NodeRow({ row, branches, selected, select, expand, more, previous, depth = 0 }) {
   const branch = branches[row.node];
   const element = row.value instanceof MarkElement;
   const attrs = element ? row.value.attrs : {};
@@ -16,9 +17,10 @@ function NodeRow({ row, branches, selected, select, expand, depth = 0 }) {
       </button>
       <button className="inspector-node-label" onClick={() => select(row)} title={label}>{label || 'whitespace'}</button>
     </div>
+    {branch?.offset > 0 && <button className="btn inspector-more" onClick={() => previous(row.node)}>Previous children</button>}
     {branch?.children.filter(child => typeof child.value !== 'string' || child.value.trim()).map(child => <NodeRow key={child.node} row={child} branches={branches} selected={selected}
-      select={select} expand={expand} depth={depth + 1} />)}
-    {branch && branch.count > branch.children.length && <div className="inspector-note">Showing the first {branch.children.length} children.</div>}
+      select={select} expand={expand} more={more} previous={previous} depth={depth + 1} />)}
+    {branch && branch.count > (branch.offset || 0) + branch.children.length && <button className="btn inspector-more" onClick={() => more(row.node)}>Load more children ({(branch.offset || 0) + branch.children.length}/{branch.count})</button>}
   </>;
 }
 
@@ -42,6 +44,7 @@ export default function LiveInspector({ defaultPath }) {
   const [picking, setPicking] = useState(false);
   const [filter, setFilter] = useState('');
   const [logs, setLogs] = useState([]);
+  const [consoleTab, setConsoleTab] = useState('output');
   const client = useRef(null);
   const current = useRef({ branches, selection });
   current.current = { branches, selection };
@@ -84,6 +87,17 @@ export default function LiveInspector({ defaultPath }) {
     setSelection(row);
     setUndo(null);
     setStyle(null);
+    const path = (await active.request('path', { node: row.node })).value;
+    const revealed = {};
+    for (let i = 0; i + 1 < path.length; i++) {
+      const node = path[i].node.node, index = path[i + 1].offset;
+      const existing = current.current.branches[node];
+      if (existing && index >= (existing.offset || 0) && index < (existing.offset || 0) + existing.children.length) continue;
+      const offset = Math.floor(index / 100) * 100;
+      revealed[node] = { ...(await active.request('tree', { node, offset })).value, offset };
+    }
+    if (client.current !== active) return;
+    setBranches(previous => ({ ...previous, ...revealed }));
     if (!(row.value instanceof MarkElement)) return;
     const reply = await active.request('style', { node: row.node });
     if (client.current !== active) return;
@@ -97,7 +111,17 @@ export default function LiveInspector({ defaultPath }) {
     const next = { [reply.value.node.node]: reply.value };
     for (const node of Object.keys(current.current.branches)) {
       if (Number(node) === reply.value.node.node) continue;
-      try { next[node] = (await active.request('tree', { node: Number(node) })).value; }
+      try {
+        const count = current.current.branches[node].children.length;
+        const start = current.current.branches[node].offset || 0;
+        let offset = start;
+        while (offset - start < count) {
+          const page = (await active.request('tree', { node: Number(node), offset, limit: Math.min(500, count - offset + start) })).value;
+          next[node] = offset > start ? { ...page, offset: start, children: [...next[node].children, ...page.children] } : { ...page, offset: start };
+          offset += page.children.length;
+          if (!page.children.length || offset >= page.count) break;
+        }
+      }
       catch (error) { if (error.code !== 'stale') throw error; }
     }
     setRoot(reply.value.node);
@@ -153,6 +177,16 @@ export default function LiveInspector({ defaultPath }) {
       setBranches(previous => ({ ...previous, [node]: reply.value }));
     }
   }
+  async function more(node) {
+    const branch = branches[node];
+    const reply = await client.current.request('tree', { node, offset: (branch.offset || 0) + branch.children.length });
+    setBranches(previous => ({ ...previous, [node]: { ...reply.value, offset: branch.offset || 0, children: [...previous[node].children, ...reply.value.children] } }));
+  }
+  async function previous(node) {
+    const offset = Math.max(0, branches[node].offset - 100);
+    const reply = await client.current.request('tree', { node, offset });
+    setBranches(current => ({ ...current, [node]: { ...reply.value, offset } }));
+  }
   async function edit(restore = false) {
     if (!selection) return;
     const fields = restore ? undo : { name: property, value, priority: priority ? 'important' : '' };
@@ -162,12 +196,11 @@ export default function LiveInspector({ defaultPath }) {
     log(`${restore ? 'Restored' : 'Changed'} ${fields.name}${fields.priority ? ' !important' : ''}`);
     await refresh();
   }
-  async function pick(event) {
+  async function pick({ x, y, rect }) {
     if (!picking || !snapshot) return;
-    const rect = event.currentTarget.getBoundingClientRect();
     await client.current.request('pick', {
-      x: (event.clientX - rect.left) * snapshot.width / rect.width,
-      y: (event.clientY - rect.top) * snapshot.height / rect.height
+      x: (x - rect.left) * snapshot.width / rect.width,
+      y: (y - rect.top) * snapshot.height / rect.height
     });
     setPicking(false);
   }
@@ -190,7 +223,7 @@ export default function LiveInspector({ defaultPath }) {
     <div className="inspector-status"><span className={connected ? 'inspector-connected' : ''}>{status}</span><span>Revision {revision}</span></div>
     <div className="inspector-panes">
       <div className="inspector-tree"><div className="inspector-panel-title">Elements</div>
-        {root ? <NodeRow row={root} branches={branches} selected={selection?.node} select={row => attempt(() => select(row))} expand={node => attempt(() => expand(node))} />
+        {root ? <NodeRow row={root} branches={branches} selected={selection?.node} select={row => attempt(() => select(row))} expand={node => attempt(() => expand(node))} more={node => attempt(() => more(node))} previous={node => attempt(() => previous(node))} />
           : <p className="inspector-empty">Launch a document to inspect its live DOM.</p>}
       </div>
       <div className="inspector-center">
@@ -199,7 +232,11 @@ export default function LiveInspector({ defaultPath }) {
         </div>
         <div className="inspector-preview">
           {snapshot ? <div className="inspector-image" style={{ maxWidth: snapshot.width }}>
-            <img src={snapshot.url} data-revision={snapshot.revision} alt="Live Radiant rendering" onClick={event => attempt(() => pick(event))} style={{ cursor: picking ? 'crosshair' : 'default' }} />
+            <img src={snapshot.url} data-revision={snapshot.revision} alt="Live Radiant rendering" onClick={event => {
+              // React clears currentTarget after dispatch; capture geometry before deferring.
+              const point = { x: event.clientX, y: event.clientY, rect: event.currentTarget.getBoundingClientRect() };
+              attempt(() => pick(point));
+            }} style={{ cursor: picking ? 'crosshair' : 'default' }} />
             {box && selection && <div className="inspector-highlight" style={{ left: `${100 * Number(box.x) / snapshot.width}%`, top: `${100 * Number(box.y) / snapshot.height}%`, width: `${100 * Number(box.width) / snapshot.width}%`, height: `${100 * Number(box.height) / snapshot.height}%` }} />}
           </div> : <p className="inspector-empty">Rendered pixels appear here.</p>}
         </div>
@@ -223,6 +260,11 @@ export default function LiveInspector({ defaultPath }) {
           </> : <p className="inspector-empty">Select an element to inspect its styles and box.</p>}
       </div>
     </div>
-    <div className="inspector-log"><div className="inspector-panel-title">Connection &amp; process output</div><pre>{logs.join('\n')}</pre></div>
+    <div className={`inspector-console ${consoleTab === 'scratch' ? 'scratch-open' : ''}`}>
+      <div className="inspector-tabs"><button className={consoleTab === 'output' ? 'active' : ''} onClick={() => setConsoleTab('output')}>Process output</button>
+        <button className={consoleTab === 'scratch' ? 'active' : ''} onClick={() => setConsoleTab('scratch')}>Lambda scratch</button></div>
+      <div className="inspector-log" hidden={consoleTab !== 'output'}><pre>{logs.join('\n')}</pre></div>
+      <div hidden={consoleTab !== 'scratch'} className="scratch-container"><LambdaScratch /></div>
+    </div>
   </section>;
 }

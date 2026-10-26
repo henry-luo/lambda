@@ -1,5 +1,5 @@
 // adopted resource §4.3; prefix counts are code points (S2.5.8), seeks use bytes (S17.4.1).
-import search: lambda.doc.diff.common
+import search: lambda.io.search
 import utf8: lambda.io.utf8
 import lines: lambda.io.line_index
 

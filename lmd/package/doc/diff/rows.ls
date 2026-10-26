@@ -1,6 +1,7 @@
 // Byte spans remain authoritative; only requested rows become display strings (S2.5.8).
 import math
 import c: .common
+import search: lambda.io.search
 
 pub fn index(change) map {
     let counts = [for (h in change.hunks) len(h.lines) + 1]
@@ -19,7 +20,7 @@ pub fn summary(change) string {
 pub fn at(document,change,projection,row) map^ {
     if (len(change.hunks) == 0) {row:row,kind:"summary",text:summary(change)}
     else {
-        let h = c.lower_bound(projection.starts,row + 1) - 1
+        let h = search.lower_bound(projection.starts,row + 1) - 1
         let own = row - projection.starts[h]
         let block = change.hunks[h];
         if (own == 0) {row:row,kind:"hunk",text:block.header,hunk:h}

@@ -21,7 +21,7 @@ async function capture(window, filename) {
   await fs.writeFile(path.join(root, 'temp/devtools', filename), (await window.webContents.capturePage()).toPNG());
 }
 function setInput(selector, value) {
-  return `(() => { const input = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', {bubbles:true})); })()`;
+  return `(() => { const input = document.querySelector(${JSON.stringify(selector)}); const prototype = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', {bubbles:true})); })()`;
 }
 function click(window, label) {
   return window.webContents.executeJavaScript(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(label)}).click()`);
@@ -50,16 +50,66 @@ app.whenReady().then(async () => {
     await capture(window, 'live-inspector-edited.png');
     await click(window, 'Undo');
     await waitFor(window, `document.querySelector('.inspector-box')?.textContent.includes('228.00')`);
+    await window.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.inspector-node-label')).find(button => button.textContent === '<body>').parentElement.querySelector('.inspector-expand').click()`);
+    await waitFor(window, `!Array.from(document.querySelectorAll('.inspector-node-label')).some(button => button.textContent.includes('id="card"'))`);
+    await click(window, 'Pick element');
+    await window.webContents.executeJavaScript(`(() => {
+      const highlight = document.querySelector('.inspector-highlight').getBoundingClientRect();
+      document.querySelector('.inspector-image img').dispatchEvent(new MouseEvent('click', { bubbles: true,
+        clientX: highlight.left + highlight.width / 2, clientY: highlight.top + highlight.height / 2 }));
+    })()`);
+    await waitFor(window, `document.querySelector('.inspector-node.selected')?.textContent.includes('id="card"')`);
+    await click(window, 'Lambda scratch');
+    await click(window, 'Start scratch');
+    await waitFor(window, `document.querySelector('.scratch-toolbar')?.textContent.includes('independent session')`);
+    async function entry(source) {
+      const count = await window.webContents.executeJavaScript(`document.querySelectorAll('.scratch-entry').length`);
+      await window.webContents.executeJavaScript(setInput('[aria-label="Lambda source"]', source));
+      await click(window, 'Run Lambda');
+      await waitFor(window, `document.querySelectorAll('.scratch-entry').length === ${count + 1} && document.querySelector('.scratch-prompt button').textContent === 'Run Lambda'`);
+    }
+    await entry('let inspector_data = {title: "Lambda λ", items: [1, 2, 3]}');
+    await waitFor(window, `document.querySelector('.scratch-transcript')?.textContent.includes('Binding accepted')`);
+    await entry('inspector_data');
+    await waitFor(window, `!!document.querySelector('.scratch-expand')`);
+    await window.webContents.executeJavaScript(`document.querySelector('.scratch-expand').click()`);
+    await waitFor(window, `document.querySelector('.scratch-properties')?.textContent.includes('Lambda λ')`);
+    await click(window, 'Collect');
+    await waitFor(window, `document.querySelector('.scratch-toolbar')?.textContent.includes('inspector values retained')`);
+    await click(window, 'Bindings');
+    await waitFor(window, `document.querySelector('.scratch-bindings')?.textContent.includes('inspector_data')`);
+    await capture(window, 'lambda-scratch.png');
+    await click(window, 'Clear results');
+    await waitFor(window, `document.querySelectorAll('.scratch-entry').length === 0`);
+    await entry('inspector_data.title');
+    await waitFor(window, `document.querySelector('.scratch-entry')?.textContent.includes('Lambda λ')`);
+    await click(window, 'Stop scratch');
+    await click(window, 'Process output');
+    assert(await window.webContents.executeJavaScript(`document.querySelector('.inspector-status').textContent.includes('Connected')`));
     await click(window, 'Source');
     await waitFor(window, `document.querySelector('.inspector-source')?.textContent.includes('Lambda DevTools fixture')`);
     await click(window, 'Stop');
     await window.webContents.executeJavaScript(`document.querySelector('.inspector-native input').click()`);
     await click(window, 'Launch');
     await waitFor(window, `document.querySelector('.inspector-status')?.textContent.includes('Connected') && !!document.querySelector('.inspector-preview img')`);
+    await click(window, 'Stop');
+    await window.webContents.executeJavaScript(`document.querySelector('.inspector-native input').click()`);
+    const paged = path.join(root, 'temp/devtools/paging.html');
+    await fs.writeFile(paged, '<html><body><ul>' + Array.from({ length: 150 }, (_, i) => `<li id="row-${i}">${i}</li>`).join('') + '</ul></body></html>');
+    await window.webContents.executeJavaScript(setInput('#inspector-document', paged));
+    await click(window, 'Launch');
+    await waitFor(window, '!!document.querySelector(".inspector-preview img")');
+    for (const name of ['body', 'ul']) {
+      await waitFor(window, `Array.from(document.querySelectorAll('.inspector-node-label')).some(button => button.textContent === '<${name}>')`);
+      await window.webContents.executeJavaScript(`Array.from(document.querySelectorAll('.inspector-node-label')).find(button => button.textContent === '<${name}>').parentElement.querySelector('.inspector-expand').click()`);
+    }
+    await waitFor(window, `!!document.querySelector('.inspector-more')`);
+    await window.webContents.executeJavaScript(`document.querySelector('.inspector-more').click()`);
+    await waitFor(window, `Array.from(document.querySelectorAll('.inspector-node-label')).some(button => button.textContent.includes('id="row-125"'))`);
     await click(window, 'Tests');
     await waitFor(window, '!!document.querySelector(".left-sidebar")');
     assert(await window.webContents.executeJavaScript('!!document.querySelector(".comparison-panel")'));
-    console.log('PASS: Live workspace, tree/style/PNG, edit/undo, source, native window and comparison workspace.');
+    console.log('PASS: Live inspector, edit/undo, picker reveal, child paging, persistent Lambda scratch, expansion/GC/release/bindings, source, native window and Tests workspace.');
   } catch (error) {
     console.error(error);
     process.exitCode = 1;
@@ -69,6 +119,6 @@ app.whenReady().then(async () => {
     }
   } finally {
     if (window && !window.isDestroyed()) window.close();
-    app.quit();
+    app.exit(process.exitCode || 0);
   }
 });

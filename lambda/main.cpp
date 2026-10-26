@@ -50,6 +50,7 @@
 #include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
 #include "runtime/terminal_host.h"
+#include "devtools/scratch.hpp"
 
 // Error handling with stack traces
 #include "runtime/lambda-error.h"
@@ -2415,7 +2416,6 @@ static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
     {"layout", "the Radiant layout engine"}, {"render", "the Radiant layout engine"},
     {"render-batch", "the Radiant layout engine"}, {"view", "the Radiant layout engine"},
     {"edit", "the Radiant layout engine"}, {"replay", "the Radiant layout engine"},
-    {"devtools", "the Radiant layout engine"},
 #endif
 #ifdef LAMBDA_NO_JS
     {"js", "the JavaScript runtime"}, {"ts", "the JavaScript runtime"},
@@ -3617,18 +3617,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(exit_code);
     }
 
-#ifndef LAMBDA_HEADLESS
     if (argc >= 2 && !strcmp(argv[1], "devtools")) {
         const char* path = nullptr;
         int fd = -1;
         bool headless = false;
+        bool scratch = false;
         for (int i = 2; i < argc; i++) {
             if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
-                fputs("Usage: lambda devtools <document> --pipe <inherited-fd> [--headless]\n"
+                fputs("Usage: lambda devtools <document>|--scratch --pipe <inherited-fd> [--headless]\n"
                       "Launch through make devtool or node utils/devtool/inspect.mjs.\n", stdout);
                 return lambda_main_finish(0);
             }
             if (!strcmp(argv[i], "--headless")) headless = true;
+            else if (!strcmp(argv[i], "--scratch")) scratch = true;
             else if (!strcmp(argv[i], "--pipe") && i + 1 < argc) {
                 const char* number = argv[++i];
                 int64_t parsed = str_to_int64_default(number, strlen(number), -1);
@@ -3639,14 +3640,21 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 return lambda_main_finish(1);
             }
         }
-        if (!path || fd < 3) {
-            fputs("Usage: lambda devtools <document> --pipe <inherited-fd> [--headless]\n", stderr);
+        if ((!path && !scratch) || (path && scratch) || fd < 3) {
+            fputs("Usage: lambda devtools <document>|--scratch --pipe <inherited-fd> [--headless]\n", stderr);
             return lambda_main_finish(1);
         }
+        if (scratch) return lambda_main_finish(devtools_run_scratch(fd));
+#ifndef LAMBDA_HEADLESS
         default_render_cmd_to_interp();
         return lambda_main_finish(view_doc_with_devtools(path, fd, headless));
+#else
+        fputs("Document inspection requires the Radiant layout engine\n", stderr);
+        return lambda_main_finish(1);
+#endif
     }
 
+#ifndef LAMBDA_HEADLESS
     // Handle layout command
     log_debug("Checking for layout command");
     if (argc >= 2 && strcmp(argv[1], "layout") == 0) {

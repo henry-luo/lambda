@@ -1,5 +1,5 @@
 import ime: lambda.ime.chinese
-import model: ~~.~~.demo.ime.mod_dictionary
+import model: lambda.ime.chinese.dictionary
 
 pn main() {
     let engine = ime.load("zh-Hans",{directory:"test/ime/fixture"})^

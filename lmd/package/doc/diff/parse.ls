@@ -1,5 +1,6 @@
 import math
 import c: .common
+import search: lambda.io.search
 import g: .grammar
 
 fn line_kind(record) {
@@ -92,7 +93,7 @@ fn header_paths(header) map^ {
     else equal_pairs[0]
 }
 fn inside_hunk(hunks,positions,index) {
-    let i = c.lower_bound(positions,index + 1) - 1;
+    let i = search.lower_bound(positions,index + 1) - 1;
     i >= 0 and index < hunks[i].record_end
 }
 fn metadata(records,kind) => [for (record in records where c.kind(record) == "Metadata" and c.text(record.kind)^ == kind) record]
@@ -107,8 +108,8 @@ fn path_record(record,strip,timestamp) {
     named_path(value,strip,record.start)^
 }
 fn file(source,records,at,end,hunks,hunk_positions,git) map^ {
-    let first_hunk = c.lower_bound(hunk_positions,at)
-    let final_hunk = c.lower_bound(hunk_positions,end)
+    let first_hunk = search.lower_bound(hunk_positions,at)
+    let final_hunk = search.lower_bound(hunk_positions,end)
     let own_hunks = slice(hunks,first_hunk,final_hunk)
     let first_body = if (len(own_hunks) > 0) own_hunks[0].record else end
     let headers = slice(records,at,first_body)
@@ -176,7 +177,7 @@ pub fn parse(source,options = null) map^ {
         (profile == "auto" or len(records) == 0 or git == (profile == "git")),"patch profile does not match source")^
     let hunks = [for (i,pos in positions) {
         let next_hunk = if (i + 1 < len(positions)) positions[i + 1] else len(records)
-        let next_file = c.lower_bound(git_headers,pos + 1)
+        let next_file = search.lower_bound(git_headers,pos + 1)
         let limit = min(next_hunk,if (next_file < len(git_headers)) git_headers[next_file] else len(records));
         hunk(bytes,records,pos,limit)^
     }]

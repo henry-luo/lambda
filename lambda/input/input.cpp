@@ -2328,9 +2328,11 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         if (wiki_flavor) {
             input->root = input_markup_wiki(input, source, wiki_flavor);
         }
+#ifndef LAMBDA_NO_CSS_INPUT
         else if (strcmp(effective_type, "css") == 0 && flavor && !strcmp(flavor->chars, "tokens")) {
             input_css_tokens(input, source, source_len);
         }
+#endif
         else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
             const char* markup_flavor = (flavor) ? flavor->chars : "markdown";
