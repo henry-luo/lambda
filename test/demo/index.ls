@@ -12,6 +12,8 @@ let EXE = sys.proc.self.argv#[0]
 // the catalog of `lambda demo` (LAMBDA_DEMOS in lambda/main.cpp), in showcase order;
 // `cat` files each demo under one CATEGORIES entry and `sub` is its store subtitle
 let DEMOS = [
+    {name: "procgen", title: "World", cat: "science", sub: "Procedural generation",
+     blurb: "One seed grows terrain, rivers, towns and a lost ruin."},
     {name: "chart", title: "Charts", cat: "science", sub: "Data visualization",
      blurb: "Dashboards, 3D surfaces and graphs, all live."},
     {name: "scene3d", title: "Scene3D", cat: "science", sub: "Interactive 3D",

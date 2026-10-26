@@ -44,7 +44,7 @@ let streams = terrain.rivers(isle, {sea_level: 0.4, threshold: 8});
 let water = [for (row in isle) [for (v in row) v <= 0.4]]
 let wet = terrain.moisture(rng.key(5), water)^;
 [field.bounds(wet)[0] >= 0.0, field.bounds(wet)[1] <= 1.0];
-terrain.biomes([[0.3, 0.41, 0.6, 0.6, 0.8, 0.8, 0.95, 0.95]], [[0.5, 0.5, 0.1, 0.9, 0.2, 0.7, 0.05, 0.6]]);
+terrain.biomes([[0.3, 0.41, 0.6, 0.6, 0.8, 0.8, 0.95, 0.95]], [[0.5, 0.5, 0.1, 0.9, 0.2, 0.7, 0.05, 0.6]])^;
 [len(terrain.biome_colors()), terrain.biome_colors().river];
 
 "6 the whole recipe";

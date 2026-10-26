@@ -4,6 +4,7 @@
 // kernel uses only integer ops and IEEE basic arithmetic, with gradient tables
 // and skew factors written as constants, so all of it is exact-tier (PG2).
 import rng: .rng
+import core: ._field
 
 // the classic doubled permutation: lattice lookups never need a second wrap.
 pub fn table(k: u64) array {
@@ -241,9 +242,12 @@ pub fn make(k: u64, spec = {}) map^ {
         raise error("procgen.noise: unknown fractal " ++ string(fractal))
     else if (not (octaves is int) or octaves < 1 or octaves > 16)
         raise error("procgen.noise: octaves must be an int in 1..16")
+    else if (spec.period != null and (not (spec.period is array) or not (len(spec.period) in [2, 3]) or
+        not all([for (p in spec.period) core.finite(p) and p > 0])))
+        raise error("procgen.noise: period must contain two or three positive finite lengths")
     else {
         let amps = running(1.0, float(either(spec.gain, 0.5)), octaves);
-        {kind: kind, fractal: fractal, octaves: octaves,
+        {kind: kind, fractal: fractal, octaves: octaves, period: spec.period,
          frequencies: running(float(either(spec.frequency, 0.03125)), float(either(spec.lacunarity, 2.0)), octaves),
          amplitudes: amps, total: sum(amps),
          jitter: float(either(spec.jitter, 1.0)), metric: either(spec.metric, 'euclidean'),
@@ -270,18 +274,37 @@ fn octaves3(gen, x: float, y: float, z: float) float {
 }
 
 // domain warp: offset the sample point by simplex noise before evaluating the generator.
-pub fn sample(gen, x: float, y: float) float {
+fn sample_raw(gen, x: float, y: float) float {
     if (gen.warp == null) octaves2(gen, x, y)
     else (let w = gen.warp, let wx = x * w.frequency, let wy = y * w.frequency,
         octaves2(gen, x + w.amplitude * simplex2(w.tables[0], wx, wy), y + w.amplitude * simplex2(w.tables[1], wx, wy)))
 }
 
-pub fn sample3(gen, x: float, y: float, z: float) float {
+fn sample3_raw(gen, x: float, y: float, z: float) float {
     if (gen.warp == null) octaves3(gen, x, y, z)
     else (let w = gen.warp, let wx = x * w.frequency, let wy = y * w.frequency, let wz = z * w.frequency,
         octaves3(gen, x + w.amplitude * simplex3(w.tables[0], wx, wy, wz),
             y + w.amplitude * simplex3(w.tables[1], wx, wy, wz), z + w.amplitude * simplex3(w.tables[2], wx, wy, wz)))
 }
+
+// quintic cross-fades preserve seam derivatives for smooth kernels;
+// this also tiles fractals and domain warp without transcendental embeddings (PG2).
+fn periodic(gen, coordinates, dimension: int) float {
+    let count = min(dimension, len(gen.period))
+    let wrapped = [for (i in 0 to (dimension - 1)) if (i < count)
+        coordinates[i] - floor(coordinates[i] / gen.period[i]) * gen.period[i] else coordinates[i]]
+    let t = [for (i in 0 to (count - 1)) fade(wrapped[i] / gen.period[i])];
+    sum([for (corner in 0 to ([1, 2, 4, 8][count] - 1))
+        (let bits = [for (i in 0 to (count - 1)) band(corner, [1, 2, 4][i]) != 0],
+         let point = [for (i in 0 to (dimension - 1)) wrapped[i] - (if (i < count and bits[i]) gen.period[i] else 0.0)],
+         let weight = prod([for (i in 0 to (count - 1)) if (bits[i]) t[i] else 1.0 - t[i]]),
+         weight * (if (dimension == 2) sample_raw(gen, point[0], point[1]) else sample3_raw(gen, point[0], point[1], point[2])))])
+}
+
+pub fn sample(gen, x: float, y: float) float =>
+    if (gen.period == null) sample_raw(gen, x, y) else periodic(gen, [x, y], 2)
+pub fn sample3(gen, x: float, y: float, z: float) float =>
+    if (gen.period == null) sample3_raw(gen, x, y, z) else periodic(gen, [x, y, z], 3)
 
 // the field-builder unit a native kernel replaces (PG10): rows of `width` samples at integer points.
 pub fn field(gen, width: int, height: int) array =>

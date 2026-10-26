@@ -1,0 +1,8 @@
+"native hydraulic"
+true
+true
+true
+true
+true
+"bounded errors"
+["ragged", "steps", "rate", "finite", "length"]

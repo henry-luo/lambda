@@ -982,6 +982,14 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_math_wfc", FPTR(fn_math_wfc), NULL, NULL, false, 0,
      false, &TYPE_ARRAY, true},
 
+    {SYSFUNC_HYDRAULIC, "math_hydraulic", 4, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_hydraulic", FPTR(fn_math_hydraulic), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_DELAUNAY, "math_delaunay", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_delaunay", FPTR(fn_math_delaunay), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,

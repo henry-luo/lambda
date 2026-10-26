@@ -2883,6 +2883,13 @@ Item fn_reduce(Item collection, Item func_item) {
     Rooted<Item> rooted_function(roots, func_item);
     Rooted<Item> rooted_acc(roots, ItemNull);
 
+    // reduce consumes leading-axis elements, as for-in does (S1.6, S13.4.1).
+    // Packing a singleton matrix must not turn its one row into scalar fold inputs.
+    if (vector_is_ndim(rooted_collection.get())) {
+        rooted_collection.set(vector_unstack_rows(rooted_collection.get()));
+        if (item_is_error(rooted_collection.get())) return rooted_collection.get();
+    }
+
     int64_t len = vector_length(rooted_collection.get());
     if (len <= 0) return ItemNull;  // empty collection
     if (len == 1) return vector_get(rooted_collection.get(), 0);  // single element

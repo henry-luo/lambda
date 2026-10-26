@@ -402,15 +402,18 @@ static bool interp_array_num_expr(AstNode* node, int depth) {
     return call->argument && interp_array_num_expr(call->argument, depth + 1);
 }
 
-static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
-    object = ast_unwrap_primary(object);
-    if (!interp_array_num_expr(object, 0)) return false;
+static bool interp_literal_ndim_indices(AstNode* first_index) {
     int count = 0;
     for (AstNode* index = first_index; index; index = index->next) {
         if (count >= AST_COW_PATH_MAX || !interp_integer_literal(index)) return false;
         count++;
     }
     return count >= 2;
+}
+
+static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
+    return interp_array_num_expr(ast_unwrap_primary(object), 0) &&
+        interp_literal_ndim_indices(first_index);
 }
 
 // Scalar stores retain boxed keys through the checked COW setter (S7.1.3v2).
@@ -730,12 +733,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         }
     }
     // `t[i, j]` carries a chain of index expressions for one N-D subscript.
-    // The direct numeric-literal slice shares ArrayNum's established N-D
-    // helpers; generic or effectful coordinate expressions remain on MIR.
+    // Literal coordinates use the checked runtime N-D reader, even when a call
+    // returns the array. Requiring a literal receiver rejected image.sample's
+    // read_region(...)^[0,0] before any imported function ran (D8.1.1).
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* field = (AstFieldNode*)node;
         if (field->field && field->field->next &&
-                !interp_direct_ndim_indices(field->object, field->field)) {
+                !interp_literal_ndim_indices(field->field)) {
             sc->ok = false;
             sc->reject = node->node_type;
             return;

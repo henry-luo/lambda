@@ -101,6 +101,12 @@ TEST(ProcgenTests, KeyedNoiseIsExactAcrossTiers) {
         test_lambda_script_against_file("test/lambda/procgen/text.ls", "test/lambda/procgen/text.txt", false, tier);
         test_lambda_script_against_file("test/lambda/procgen/wfc.ls", "test/lambda/procgen/wfc.txt", false, tier);
         test_lambda_script_against_file("test/lambda/procgen/wfc_native.ls", "test/lambda/procgen/wfc_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/erosion_native.ls", "test/lambda/procgen/erosion_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/geom_native.ls", "test/lambda/procgen/geom_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/field.ls", "test/lambda/procgen/field.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/extensions.ls", "test/lambda/procgen/extensions.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/transpose_singleton.ls", "test/lambda/transpose_singleton.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/interp_ndim_return.ls", "test/lambda/interp_ndim_return.txt", false, tier);
         test_lambda_script_against_file("test/lambda/procgen/terrain.ls", "test/lambda/procgen/terrain.txt", false, tier);
     }
 }

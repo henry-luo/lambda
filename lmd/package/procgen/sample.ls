@@ -2,6 +2,8 @@
 // floats in a width x height domain. Every draw is keyed (PG3) and every
 // sampler uses only basic arithmetic, so all of it is exact-tier (PG2).
 import rng: .rng
+import field: .field
+import core: ._field
 
 fn frac(x: float) float => x - floor(x)
 fn cells(extent: float, side: float) int => int(ceil(extent / side))
@@ -20,36 +22,45 @@ fn domain(options) map^ {
 // never conflict, so each of the 9 phases fills its cells from the previous
 // grid in one pure comprehension. Each round gives every empty cell one keyed
 // candidate; `attempts` rounds approach a maximal sampling.
-fn phase_of(c: int, nx: int) int => (c % nx) % 3 + 3 * ((c div nx) % 3)
+fn phase_of(c: int, nx: int, stride: int) int => (c % nx) % stride + stride * ((c div nx) % stride)
 
-fn conflicts(grid, nx: int, ny: int, ci: int, cj: int, x: float, y: float, r2: float) bool =>
-    any([for (dj in -2 to 2) for (di in -2 to 2) (let i = ci + di, let j = cj + dj,
+fn conflicts(grid, nx: int, ny: int, ci: int, cj: int, x: float, y: float, r2: float, reach: int, variable: bool) bool =>
+    any([for (dj in (0 - reach) to reach) for (di in (0 - reach) to reach) (let i = ci + di, let j = cj + dj,
         // corner cells two apart are at least r away, so they are skipped
-        if ((abs(di) == 2 and abs(dj) == 2) or i < 0 or j < 0 or i >= nx or j >= ny) false
-        else (let q = grid[j * nx + i], q != null and (q[0] - x) * (q[0] - x) + (q[1] - y) * (q[1] - y) < r2))])
+        if ((not variable and abs(di) == 2 and abs(dj) == 2) or i < 0 or j < 0 or i >= nx or j >= ny) false
+        else (let q = grid[j * nx + i], q != null and (q[0] - x) * (q[0] - x) + (q[1] - y) * (q[1] - y) <
+            (if (variable) max(r2, q[2] * q[2]) else r2)))])
 
 fn try_cell(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, c: int) {
     let ci = c % nx
     let cj = c div nx
     let x = (float(ci) + rng.unit(rng.at(kr, 2 * c))) * s
-    let y = (float(cj) + rng.unit(rng.at(kr, 2 * c + 1))) * s;
-    if (x >= d.width or y >= d.height or conflicts(grid, nx, ny, ci, cj, x, y, r2)) null else [x, y]
+    let y = (float(cj) + rng.unit(rng.at(kr, 2 * c + 1))) * s
+    let density = if (d.density == null) 1.0 else field.sample(d.density,
+        x / d.width * float(field.width(d.density) - 1), y / d.height * float(field.height(d.density) - 1))
+    let radius = if (d.density == null or density <= 0.0) math.sqrt(r2) else min(d.max_radius, math.sqrt(r2) / math.sqrt(density));
+    if (x >= d.width or y >= d.height or density <= 0.0 or
+        conflicts(grid, nx, ny, ci, cj, x, y, if (d.density == null) r2 else radius * radius,
+            if (d.reach == null) 2 else d.reach, d.density != null)) null
+    else if (d.density == null) [x, y] else [x, y, radius]
 }
 
-fn poisson_phase(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, ph: int) array =>
-    [for (c, q in grid) if (q != null or phase_of(c, nx) != ph) q else try_cell(grid, d, s, r2, nx, ny, kr, c)]
+fn poisson_phase(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, ph: int, stride: int) array =>
+    [for (c, q in grid) if (q != null or phase_of(c, nx, stride) != ph) q else try_cell(grid, d, s, r2, nx, ny, kr, c)]
 
 // the domain and phases with every value typed, so the round fold stays error-free.
 fn poisson_grid(k: u64, d, width: float, height: float, r: float, attempts: int) array^ {
     let s = r * 0.7071067811865476
     let nx = cells(width, s)
-    let ny = cells(height, s);
+    let ny = cells(height, s)
+    let stride: int = if (d.density == null) 3 else int(ceil(d.max_radius / s)) + 1
+    let phases: int = stride * stride;
     if (nx * ny > 4000000) raise error("procgen.sample.poisson: more than 4,000,000 cells; raise the radius")
     else {
         // step = pass * 9 + phase
-        let grid = reduce([[for (c in 0 to (nx * ny - 1)) null], *[for (step in 0 to (attempts * 9 - 1)) step]],
-            (g, step: int) => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div 9), step % 9));
-        [for (q in grid where q != null) q]
+        let grid = reduce([[for (c in 0 to (nx * ny - 1)) null], *[for (step in 0 to (attempts * phases - 1)) step]],
+            (g, step: int) => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div phases), step % phases, stride));
+        [for (q in grid where q != null) if (d.density == null) q else [q[0], q[1]]]
     }
 }
 
@@ -59,7 +70,17 @@ pub fn poisson(k: u64, options) array^ {
     if (not (options.radius is number) or options.radius <= 0) raise error("procgen.sample.poisson: radius must be positive")
     else if (not (attempts is int) or attempts < 1 or attempts > 100)
         raise error("procgen.sample.poisson: attempts must be an int in 1..100")
-    else poisson_grid(k, d, d.width, d.height, float(options.radius), attempts)^
+    else if (options.density == null) poisson_grid(k, d, d.width, d.height, float(options.radius), attempts)^
+    else {
+        let maximum = if (options.max_radius == null) float(options.radius) * 4.0 else options.max_radius;
+        if (not core.valid(options.density) or field.width(options.density) == 0 or
+            not all([for (row in options.density) for (v in row) v >= 0 and v <= 1]) or
+            not core.finite(maximum) or maximum < options.radius or maximum / options.radius > 16)
+            raise error("procgen.sample.poisson: density must be in [0,1], max_radius in radius..16*radius")
+        else poisson_grid(k, {*: d, density: options.density, max_radius: float(maximum),
+                reach: int(ceil(maximum / (float(options.radius) * 0.7071067811865476)))},
+            d.width, d.height, float(options.radius), attempts)^
+    }
 }
 
 // --- one jittered point per square cell of side `cell` ---

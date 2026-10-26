@@ -1,5 +1,6 @@
 // The procgen showcase's world model (test/demo/procgen/mod_world.ls): one seed fixes everything.
 import W: ~~.mod_world
+import geometry: lambda.chart.geometry
 
 let w = W.generate(2026)^
 let kinds = [for (row in w.land.biomes) for (b in row) b]
@@ -12,4 +13,10 @@ w.towns |> ~.name;
 [for (b in kinds group by b as biome into g order by biome) [biome, len(g)]];
 let dry = W.generate(2026, {erosion: false})^;
 // erosion reshapes the land, but every name and the lore come from their own keys
-[dry.land.height != w.land.height, dry.lore == w.lore, dry.dungeon == w.dungeon]
+[dry.land.height != w.land.height, dry.lore == w.lore, dry.dungeon == w.dungeon];
+// Voronoi districts tile the map; climate changes biomes while preserving terrain.
+[len(w.districts) == len(w.towns), abs(sum(w.districts |> abs(geometry.area(~))) - float(W.WIDTH * W.HEIGHT)) < 1e-6,
+ len(w.land.river_polylines) > 0];
+let climate = W.generate(2026, {climate: true})^;
+[climate.land.height == w.land.height, climate.land.biomes != w.land.biomes,
+ len(climate.land.temperature) == W.HEIGHT, w.land.temperature == null]

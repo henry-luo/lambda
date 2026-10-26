@@ -1,7 +1,7 @@
 // Fresh counting propagator after Gumin's WaveFunctionCollapse (2016).
 // The Lambda reference defines ordering and keyed choices (PG2, PG7.3).
 #include "wfc.h"
-#include "../math_utils.h"
+#include "rng.h"
 #include "../memtrack.h"
 #include <stddef.h>
 #include <string.h>
@@ -19,10 +19,6 @@ typedef struct WfcState {
     int* queue;
     int head, tail;
 } WfcState;
-
-static uint64_t wfc_at(uint64_t key, uint64_t index) {
-    return math_splitmix64_mix((key ^ index) + UINT64_C(0x9e3779b97f4a7c15));
-}
 
 static int wfc_neighbour(const WfcState* s, int cell, int direction) {
     static const int dx[] = {1, 0, -1, 0}, dy[] = {0, 1, 0, -1};
@@ -86,13 +82,13 @@ static bool wfc_attempt(WfcState* s, uint64_t key, const double* weights,
             }
             return true;
         }
-        uint64_t draw = wfc_at(key, (uint64_t)step);
-        int rank = (int)(math_splitmix64_unit(wfc_at(draw, 0)) * (double)ties), cell = 0;
+        uint64_t draw = procgen_key_at(key, (uint64_t)step);
+        int rank = (int)(math_splitmix64_unit(procgen_key_at(draw, 0)) * (double)ties), cell = 0;
         for (; cell < s->cells; cell++) if (s->sizes[cell] == least && rank-- == 0) break;
         uint8_t* domain = s->domains + cell * t;
         double total = 0.0;
         for (int p = 0; p < t; p++) if (domain[p]) total += weights[p];
-        double target = math_splitmix64_unit(wfc_at(draw, 1)) * total, cumulative = 0.0;
+        double target = math_splitmix64_unit(procgen_key_at(draw, 1)) * total, cumulative = 0.0;
         int chosen = -1;
         // ascending pattern order and sequential sums match rng.weighted's cumsum.
         for (int p = 0; p < t; p++) if (domain[p]) {
@@ -122,7 +118,7 @@ ProcgenWfcResult procgen_wfc(uint64_t key, int width, int height, bool periodic,
             for (int q = 0; q < patterns; q++) full[d * patterns + q] += masks[(d * patterns + p) * patterns + q];
         result = PROCGEN_WFC_CONTRADICTION;
         for (int64_t i = 0; i < retries; i++) {
-            if (wfc_attempt(&s, wfc_at(key, (uint64_t)i), weights, full, output)) {
+            if (wfc_attempt(&s, procgen_key_at(key, (uint64_t)i), weights, full, output)) {
                 result = PROCGEN_WFC_OK;
                 break;
             }

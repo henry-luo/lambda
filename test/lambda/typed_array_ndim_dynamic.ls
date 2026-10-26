@@ -75,15 +75,15 @@ ndim(jagged)                       // 0 — remains generic Array
 shape(jagged)                      // error
 
 // ============================================================
-// SINGLE-ROW NOT PROMOTED — needs at least 2 rows
+// SINGLE-ROW PROMOTION — static and dynamic construction preserve rank (S1.6)
 // ============================================================
 '=== single row ==='
 let only = [[1, 2, 3]]              // static detection: 2-D shape [1,3]
 ndim(only)                         // 2 (static AST detected)
 shape(only)                        // [1, 3]
 
-let runtime_only = [r1]            // dynamic: only 1 row → not promoted
-ndim(runtime_only)                 // 0
+let runtime_only = [r1]            // dynamic: one row still has rank two
+ndim(runtime_only)                 // 2
 
 // ============================================================
 // 3-D PROMOTION — rows are themselves 2-D ArrayNums

@@ -7,6 +7,7 @@ import sample: lambda.procgen.sample
 import text: lambda.procgen.text
 import grid: lambda.procgen.grid
 import lsystem: lambda.procgen.lsystem
+import geom: lambda.procgen.geom
 
 pub let WIDTH = 120
 pub let HEIGHT = 80
@@ -33,7 +34,8 @@ fn settles(biome) bool => not contains(["ocean", "beach", "snow", "scorched", "b
 
 pub fn generate(seed, options = {}) map^ {
     let k = rng.key(seed)
-    let land = terrain.world(rng.derive(k, "land"), {width: WIDTH, height: HEIGHT, sea_level: SEA, island: 0.55, erosion: options.erosion != false})^
+    let land = terrain.world(rng.derive(k, "land"), {width: WIDTH, height: HEIGHT, sea_level: SEA, island: 0.55,
+        erosion: options.erosion != false, climate: options.climate == true})^
     let sites = sample.poisson(rng.derive(k, "towns"), {width: float(WIDTH), height: float(HEIGHT), radius: 13.0})^
     // Poisson points come out row by row: shuffle so the towns spread over the whole land
     let homes = rng.shuffle(rng.derive(k, "homes"), [for (p in sites where settles(land.biomes[int(p[1])][int(p[0])])) p])
@@ -45,6 +47,8 @@ pub fn generate(seed, options = {}) map^ {
     let ruin = if (len(names) > 1) names[len(names) - 1] else "the North"
     let emblem = lsystem.turtle(lsystem.expand("X", {X: [[1, "F[+X][-X]FX"], [1, "F[-X]F[+X]X"], [1, "F[+X]F[-X]X"]], F: "FF"},
         4, rng.derive(k, "emblem"))^, {angle: 24.0, heading: 90.0})^;
-    {seed: seed, land: land, towns: towns, realm: realm, lore: lore, ruin: ruin,
+    let districts = geom.voronoi(geom.delaunay([for (t in towns) [t.x, t.y]])^,
+        {bounds: [0.0, 0.0, float(WIDTH), float(HEIGHT)]})^;
+    {seed: seed, land: land, towns: towns, districts: districts, realm: realm, lore: lore, ruin: ruin,
      dungeon: grid.dungeon(rng.derive(k, "ruin"), {width: 44, height: 26, min_size: 7})^, emblem: emblem.segments}
 }

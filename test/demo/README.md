@@ -22,6 +22,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `scene3d` | `scene3d/index.html` | [Scene3D collection](scene3d/README.md) |
 | `aquarium` | `aquarium/aquarium.ls` | [Aquarium builder](aquarium/README.md) |
 | `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
+| `procgen` | `procgen/world.ls` | [World generator](procgen/README.md) |
 | `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
 | `slides` | `slides/slides.ls` | [Slides](slides/README.md) |

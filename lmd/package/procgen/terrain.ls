@@ -6,6 +6,8 @@ import rng: .rng
 import noise: .noise
 import field: .field
 import grid: .grid
+import core: ._field
+import contour: lambda.chart.mesh_contour
 
 fn flat(f) array => [for (row in f) for (v in row) float(v)]
 fn rows(values, w: int, h: int) array => [for (y in 0 to (h - 1)) [for (x in 0 to (w - 1)) values[y * w + x]]]
@@ -124,17 +126,34 @@ fn apply_batch(values, w: int, h: int, s, k: u64, first: int, stop: int) array {
                 (n div w == c div w or n % w == c % w)) values[n]]], max(min(near), min(max(near), v + d))))]
 }
 
-pub fn hydraulic(k: u64, height, options = {}) array^ {
+fn hydraulic_with(k: u64, height, options, use_native: bool) array^ {
     let h = len(height)
     let w = if (h == 0) 0 else len(height[0])
     let n = if (options.droplets == null) w * h else options.droplets
     let batch = if (options.batch == null) 64 else options.batch
     let s = {inertia: 0.05, capacity: 4.0, min_capacity: 0.01, erode: 0.3, deposit: 0.3, evaporate: 0.02, gravity: 4.0, steps: 48, *: options};
     if (w < 2 or h < 2) raise error("procgen.terrain.hydraulic: the height field must be at least 2 x 2")
+    else if (w * h > 250000 or not all([for (row in height) row is array and len(row) == w]))
+        raise error("procgen.terrain.hydraulic: expected a rectangular field of at most 250,000 cells")
     else if (not (n is int) or n < 0 or n > 1000000) raise error("procgen.terrain.hydraulic: droplets must be an int in 0..1,000,000")
-    else if (not (batch is int) or batch < 1) raise error("procgen.terrain.hydraulic: batch must be a positive int")
-    else rows(rain(flat(height), w, h, s, k, n, batch), w, h)
+    else if (not (batch is int) or batch < 1 or batch > 1000000) raise error("procgen.terrain.hydraulic: batch must be an int in 1..1,000,000")
+    else if (not (s.steps is int) or s.steps < 0 or s.steps > 1000) raise error("procgen.terrain.hydraulic: steps must be an int in 0..1000")
+    else {
+        let params = [s.inertia, s.capacity, s.min_capacity, s.erode, s.deposit, s.evaporate, s.gravity]
+        let values = flat(height);
+        if (not all([for (p in params) p is number and float(p) - float(p) == 0.0]) or
+            not all([for (v in values) v - v == 0.0])) raise error("procgen.terrain.hydraulic: heights and settings must be finite")
+        else if (s.inertia < 0 or s.inertia > 1 or s.capacity < 0 or s.min_capacity < 0 or
+            s.erode < 0 or s.erode > 1 or s.deposit < 0 or s.deposit > 1 or
+            s.evaporate < 0 or s.evaporate > 1 or s.gravity < 0) raise error("procgen.terrain.hydraulic: invalid rate or capacity")
+        else rows(if (use_native) math.hydraulic(k, values, [w, h, n, batch, s.steps], params)^
+            else rain(values, w, h, s, k, n, batch), w, h)
+    }
 }
+
+// PG7.3: the original snapshot-batched implementation remains an explicit oracle.
+pub fn hydraulic(k: u64, height, options = {}) array^ => hydraulic_with(k, height, options, math.hydraulic is fn)^
+pub fn hydraulic_reference(k: u64, height, options = {}) array^ => hydraulic_with(k, height, options, false)^
 
 fn rain(values, w: int, h: int, s, k: u64, n: int, batch: int) array =>
     reduce([values, *[for (b in 0 to ((n + batch - 1) div batch - 1)) b]], (vs, b: int) => apply_batch(vs, w, h, s, k, b * batch, if ((b + 1) * batch < n) (b + 1) * batch else n))
@@ -193,10 +212,13 @@ pub fn rivers(height, options = {}) map {
     let values = flat(filled)
     let down = downhill(values, w, h)
     let acc = accumulation(filled)
-    let flows = flat(acc);
+    let flows = flat(acc)
+    let segments = [for (c, f in flows where f >= float(minimum_flow) and values[c] > sea and down[c] >= 0)
+        [float(c % w) + 0.5, float(c div w) + 0.5, float(down[c] % w) + 0.5, float(down[c] div w) + 0.5, int(f)]]
+    let paths = contour.stitch([for (s in segments)
+        {a: {key: [s[0], s[1]], point: [s[0], s[1]]}, b: {key: [s[2], s[3]], point: [s[2], s[3]]}, faces: []}]);
     {accumulation: acc, filled: filled,
-     segments: [for (c, f in flows where f >= float(minimum_flow) and values[c] > sea and down[c] >= 0)
-        [float(c % w) + 0.5, float(c div w) + 0.5, float(down[c] % w) + 0.5, float(down[c] div w) + 0.5, int(f)]]}
+     segments: segments, polylines: paths |> ~.points}
 }
 
 // --- moisture and biomes ---
@@ -220,11 +242,29 @@ fn biome_of(e: float, m: float) string {
     else (if (m < 0.16) "subtropical desert" else if (m < 0.33) "grassland" else if (m < 0.66) "tropical seasonal forest" else "tropical rain forest")
 }
 
-pub fn biomes(height, wetness, options = {}) array {
+// latitude is normalized to [-1,1] (poles); temperature is in [0,1].
+pub fn temperature(height, options = {}) array^ {
+    let centre = if (options.latitude == null) 0.0 else options.latitude
+    let span = if (options.latitude_span == null) 2.0 else options.latitude_span
+    let lapse = if (options.lapse_rate == null) 0.6 else options.lapse_rate
+    let sea = if (options.sea_level == null) 0.4 else options.sea_level;
+    if (not core.valid(height) or not all([for (v in [centre, span, lapse, sea]) core.finite(v)]) or
+        abs(centre) > 1 or span < 0 or span > 2 or lapse < 0 or sea < 0 or sea >= 1)
+        raise error("procgen.terrain.temperature: invalid latitude, lapse rate or sea level")
+    else (let h = len(height), [for (y, row in height)
+        (let latitude = centre + (if (h < 2) 0.0 else (float(y) / float(h - 1) - 0.5) * span),
+        [for (v in row) max(0.0, min(1.0, 1.0 - abs(latitude) - max(0.0, float(v) - sea) / (1.0 - sea) * lapse))])])
+}
+
+pub fn biomes(height, wetness, options = {}) array^ {
     let sea: float = if (options.sea_level == null) 0.4 else float(options.sea_level)
     let beach: float = if (options.beach == null) 0.02 else float(options.beach);
-    [for (y, row in height) [for (x, v in row) if (v <= sea) "ocean" else if (v <= sea + beach) "beach"
-        else biome_of((v - sea) / (1.0 - sea), wetness[y][x])]]
+    if (options.temperature != null and (not core.valid(options.temperature) or len(options.temperature) != len(height) or
+        not all([for (y, row in height) len(options.temperature[y]) == len(row) and
+            all([for (v in options.temperature[y]) v >= 0 and v <= 1])])))
+        raise error("procgen.terrain.biomes: temperature must match the height field and lie in [0,1]")
+    else [for (y, row in height) [for (x, v in row) if (v <= sea) "ocean" else if (v <= sea + beach) "beach"
+        else biome_of(if (options.temperature == null) (v - sea) / (1.0 - sea) else 1.0 - options.temperature[y][x], wetness[y][x])]]
 }
 
 // mapgen2's colours as [r, g, b], plus "river".
@@ -235,7 +275,7 @@ pub fn biome_colors() map => {ocean: [68, 68, 122], beach: [160, 144, 119], rive
     'subtropical desert': [210, 185, 139], 'tropical seasonal forest': [85, 153, 68], 'tropical rain forest': [51, 119, 85]}
 
 // --- the whole recipe ---
-// {height, rivers, moisture, biomes}; options pass to heightmap and the erosion steps.
+// fields, flow segments/paths and optional climate; options pass to heightmap/erosion.
 pub fn world(k: u64, options) map^ {
     let sea: float = if (options.sea_level == null) 0.4 else float(options.sea_level)
     let raw = heightmap(k, {island: 0.5, *: options})^
@@ -245,6 +285,8 @@ pub fn world(k: u64, options) map^ {
     let river_cells = [for (s in streams.segments) [int(s[0]), int(s[1])]]
     let on_river = map([for (p in river_cells) for (x in [string(p[1] * len(eroded[0]) + p[0]), true]) x])
     let water = [for (y, row in eroded) [for (x, v in row) v <= sea or on_river[string(y * len(row) + x)] == true]]
-    let wet = moisture(k, water)^;
-    {height: eroded, rivers: streams.segments, moisture: wet, biomes: biomes(eroded, wet, {sea_level: sea})}
+    let wet = moisture(k, water)^
+    let climate = if (options.climate == true) temperature(eroded, options)^ else null;
+    {height: eroded, rivers: streams.segments, river_polylines: streams.polylines, moisture: wet, temperature: climate,
+        biomes: biomes(eroded, wet, {sea_level: sea, temperature: climate})^}
 }

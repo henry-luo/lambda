@@ -4,6 +4,7 @@
 // Rewriting is exact-tier; the turtle turns by free angles through cos/sin, so
 // it is tolerance-tier (PG2).
 import rng: .rng
+import core: ._field
 
 let MAX_SYMBOLS = 100000
 
@@ -104,6 +105,13 @@ pub fn turtle(sequence, options = {}) map^ {
         let origin = if (options.start == null) [0.0, 0.0] else options.start
         let items = blocks(syms, depth, closer, 0, len(syms), 0)
         let done = walk(t, items, 0, len(items), float(origin[0]), float(origin[1]), float(if (options.heading == null) 0.0 else options.heading), 0);
-        {segments: done[3], end: [done[0], done[1], done[2]]}
+        if (options.width == null) {segments: done[3], end: [done[0], done[1], done[2]]}
+        else (let decay = if (options.width_decay == null) 1.0 else options.width_decay,
+            if (not core.finite(options.width) or options.width < 0 or not core.finite(decay) or decay < 0)
+                raise error("procgen.lsystem.turtle: widths and decay must be finite and nonnegative")
+            else (let depth = if (len(done[3]) == 0) 0 else max([for (s in done[3]) s[4]]),
+                // depth taper uses running products, preserving the exact-tier width metadata.
+                let widths = math.cumprod([float(options.width), *[for (i in 1 to depth) float(decay)]]),
+                {segments: [for (s in done[3]) [*s, widths[s[4]]]], end: [done[0], done[1], done[2]]}))
     }
 }

@@ -21,14 +21,20 @@ fn label(t, width: float) element {
 
 pub fn world_map(world, show_rivers) element {
     let w = float(len(world.land.biomes[0])) * CELL
-    let h = float(len(world.land.biomes)) * CELL;
+    let h = float(len(world.land.biomes)) * CELL
+    let columns = len(world.land.biomes[0])
+    // joined paths use their largest drainage, retaining flow-dependent widths.
+    let flows = map([for (s in world.land.rivers) for (v in [string(int(s[1]) * columns + int(s[0])), s[4]]) v]);
     // element content takes one spread, so the layers join in one array
     <svg class:"map", viewBox:"0 0 " ++ string(w) ++ " " ++ string(h), width:w, height:h, preserveAspectRatio:"xMidYMid meet",
         *[*[for (y, row in world.land.biomes) for (r in runs(row))
             <rect x:float(r[0]) * CELL, y:float(y) * CELL, width:float(r[1]) * CELL + 0.5, height:CELL + 0.5, fill:rgb(COLORS[r[2]])>],
-          *(if (show_rivers) [for (s in world.land.rivers)
-            <line x1:s[0] * CELL, y1:s[1] * CELL, x2:s[2] * CELL, y2:s[3] * CELL, stroke:rgb(COLORS.river),
-                'stroke-width':river_width(s[4]), 'stroke-linecap':"round">] else []),
+          *[for (cell in world.districts) <polygon class:"district", fill:"none", stroke:"#64593f", opacity:0.45,
+            'stroke-width':0.8, 'stroke-dasharray':"4 3", points:join([for (p in cell) string(p[0] * CELL) ++ "," ++ string(p[1] * CELL)], " ")>],
+          *(if (show_rivers) [for (line in world.land.river_polylines)
+            <polyline points:join([for (p in line) string(p[0] * CELL) ++ "," ++ string(p[1] * CELL)], " "), fill:"none", stroke:rgb(COLORS.river),
+                'stroke-width':river_width(max([for (p in line) either(flows[string(int(p[1]) * columns + int(p[0]))], 0)])),
+                'stroke-linecap':"round", 'stroke-linejoin':"round">] else []),
           *[for (t in world.towns) <g class:"town",
             <circle cx:t.x * CELL, cy:t.y * CELL, r:(if (t.capital) 6.5 else 4.5), fill:(if (t.capital) "#b91c1c" else "#fff7ed"),
                 stroke:"#1f1a17", 'stroke-width':1.6>

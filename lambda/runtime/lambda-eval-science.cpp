@@ -5,6 +5,8 @@
 #include "../../lib/math_checked.hpp"
 #include "../../lib/memtrack.h"
 #include "../../lib/procgen/wfc.h"
+#include "../../lib/procgen/erosion.h"
+#include "../../lib/procgen/delaunay.h"
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -30,6 +32,13 @@ static bool science_real(Item item, double* value) {
     if (lambda_numeric_kind_from_item(item) == LAMBDA_NUM_INVALID) return false;
     *value = it2d(item);
     return isfinite(*value);
+}
+
+static bool science_int_at(Item input, int index, int64_t* value) {
+    Item item = vector_get(input, index);
+    if (get_type_id(item) != LMD_TYPE_INT) return false;
+    *value = lambda_int_item_to_lane(item.item);
+    return true;
 }
 
 struct ScienceComplex { double re, im; };
@@ -366,72 +375,6 @@ static Item science_linear_solve(Item input_a, Item input_b, bool least_squares)
 Item fn_math_solve(Item a, Item b) { return science_linear_solve(a, b, false); }
 Item fn_math_lstsq(Item a, Item b) { return science_linear_solve(a, b, true); }
 
-// Shewchuk's stage-A filter ("Adaptive Precision Floating-Point Arithmetic and
-// Fast Robust Geometric Predicates", 1997): the binary64 determinant's sign is
-// exact whenever |det| exceeds errbound * permanent. Only undecided cases pay
-// for the exact decimal path, which costs tens of microseconds per call.
-// The bounds assume no underflow or overflow, so the filter declines unless
-// every nonzero coordinate difference lies in [1e-60, 1e60] (products of four
-// stay normal). Each product is its own statement so a contracted FMA cannot
-// replace the separately rounded operations the bounds were derived for.
-static bool science_predicate_filter(const double* p, int count, int dimension, bool lifted, int* sign) {
-    const double eps = 1.1102230246251565e-16;  // 2^-53
-    int rank = count - 1;
-    double d[9];
-    for (int row = 0; row < rank; row++) {
-        for (int col = 0; col < dimension; col++) {
-            double v = p[row * dimension + col] - p[rank * dimension + col];
-            double m = fabs(v);
-            if (v != 0 && (m < 1e-60 || m > 1e60)) return false;
-            d[row * 3 + col] = v;
-        }
-    }
-    double det, permanent, bound;
-    if (count == 3) {
-        double left = d[0] * d[4];
-        double right = d[1] * d[3];
-        det = left - right;
-        permanent = fabs(left) + fabs(right);
-        bound = (3.0 + 16.0 * eps) * eps;
-    } else {
-        double t0 = d[3] * d[7];
-        double t1 = d[6] * d[4];
-        double t2 = d[6] * d[1];
-        double t3 = d[0] * d[7];
-        double t4 = d[0] * d[4];
-        double t5 = d[3] * d[1];
-        double a2, b2, c2;
-        if (lifted) {
-            double ax2 = d[0] * d[0];
-            double ay2 = d[1] * d[1];
-            double bx2 = d[3] * d[3];
-            double by2 = d[4] * d[4];
-            double cx2 = d[6] * d[6];
-            double cy2 = d[7] * d[7];
-            a2 = ax2 + ay2;
-            b2 = bx2 + by2;
-            c2 = cx2 + cy2;
-            bound = (10.0 + 96.0 * eps) * eps;
-        } else {
-            a2 = d[2];
-            b2 = d[5];
-            c2 = d[8];
-            bound = (7.0 + 56.0 * eps) * eps;
-        }
-        double ta = a2 * (t0 - t1);
-        double tb = b2 * (t2 - t3);
-        double tc = c2 * (t4 - t5);
-        det = ta + tb + tc;
-        double pa = (fabs(t0) + fabs(t1)) * fabs(a2);
-        double pb = (fabs(t2) + fabs(t3)) * fabs(b2);
-        double pc = (fabs(t4) + fabs(t5)) * fabs(c2);
-        permanent = pa + pb + pc;
-    }
-    double errbound = bound * permanent;
-    if (det > errbound) { *sign = 1; return true; }
-    if (-det > errbound) { *sign = -1; return true; }
-    return false;
-}
 
 static Item science_predicate(Item* points, int count, int dimension, bool lifted) {
     RootFrame roots(4);
@@ -449,7 +392,7 @@ static Item science_predicate(Item* points, int count, int dimension, bool lifte
                 return science_error("math geometry predicate: coordinates must convert to finite real floats");
     }
     int sign;
-    if (science_predicate_filter(coordinates, count, dimension, lifted, &sign)) return {.item = i2it(sign)};
+    if (procgen_predicate_filter(coordinates, count, dimension, lifted, &sign)) return {.item = i2it(sign)};
     if (!decimal_geometry_sign(coordinates, count, dimension, lifted, &sign)) return ItemError;
     return {.item = i2it(sign)};
 }
@@ -488,11 +431,8 @@ Item fn_math_wfc(Item key, Item weights, Item masks, Item control) {
     int64_t sizes[3];
     const int indices[] = {0, 1, 3};
     for (int i = 0; i < 3; i++) {
-        Item value = vector_get(rooted_control.get(), indices[i]);
-        if (get_type_id(value) != LMD_TYPE_INT)
+        if (!science_int_at(rooted_control.get(), indices[i], &sizes[i]))
             return science_error("math.wfc: dimensions and retries must be positive ints");
-        // machine ints are inline; get_int64() is only for pointer-backed i64.
-        sizes[i] = lambda_int_item_to_lane(value.item);
     }
     if (sizes[0] < 1 || sizes[1] < 1 || sizes[0] > 10000 || sizes[1] > 10000 ||
             sizes[0] * sizes[1] > 10000 || sizes[2] < 1)
@@ -554,5 +494,100 @@ Item fn_math_wfc(Item key, Item weights, Item masks, Item control) {
     ArrayNum* result = array_int_new(cells);
     if (!result) return science_error("math.wfc: cannot allocate result");
     for (int c = 0; c < cells; c++) result->items[c] = output[c];
+    return {.array_num = result};
+}
+
+// native buffers contain no Items; matrix readers retain their sources during boxing (D5.3.3).
+Item fn_math_hydraulic(Item key, Item field, Item control, Item settings) {
+    GUARD_ERROR3(key, field, control); GUARD_ERROR1(settings);
+    GUARD_NULL1(key); GUARD_NULL1(field); GUARD_NULL1(control); GUARD_NULL1(settings);
+    RootFrame roots(4);
+    Rooted<Item> k(roots, key), f(roots, field), c(roots, control), s(roots, settings);
+    if (get_type_id(k.get()) != LMD_TYPE_UINT64)
+        return science_error("math.hydraulic: key must be u64");
+    uint64_t seed = k.get().get_uint64();
+    int64_t limits[5];
+    if (vector_length(c.get()) != 5 || vector_is_ndim(c.get()))
+        return science_error("math.hydraulic: control must be [width, height, droplets, batch, steps]");
+    for (int i = 0; i < 5; i++) if (!science_int_at(c.get(), i, &limits[i]))
+        return science_error("math.hydraulic: controls must be ints");
+    if (limits[0] < 2 || limits[1] < 2 || limits[0] > 250000 || limits[1] > 250000 ||
+            limits[0] * limits[1] > 250000 || limits[2] < 0 || limits[2] > 1000000 ||
+            limits[3] < 1 || limits[3] > 1000000 || limits[4] < 0 || limits[4] > 1000)
+        return science_error("math.hydraulic: control limits exceeded");
+    ScienceMatrix values, parameters;
+    if (!science_read_matrix(f.get(), &values) || !values.vector || values.rows != (size_t)(limits[0] * limits[1]))
+        return science_error("math.hydraulic: field must be a finite flat numeric vector matching the dimensions");
+    if (!science_read_matrix(s.get(), &parameters) || !parameters.vector || parameters.rows != 7)
+        return science_error("math.hydraulic: settings must contain seven finite reals");
+    double* p = parameters.values;
+    if (p[0] < 0 || p[0] > 1 || p[1] < 0 || p[2] < 0 || p[3] < 0 || p[3] > 1 ||
+            p[4] < 0 || p[4] > 1 || p[5] < 0 || p[5] > 1 || p[6] < 0)
+        return science_error("math.hydraulic: rates must be in [0,1], capacity and gravity nonnegative");
+    ProcgenErosion config = {p[0], p[1], p[2], p[3], p[4], p[5], p[6], (int)limits[4]};
+    ScienceScratch output(values.rows, sizeof(double));
+    if (!output.data || !procgen_hydraulic(seed, values.values, (int)limits[0], (int)limits[1],
+            (int)limits[2], (int)limits[3], &config, (double*)output.data))
+        return science_error("math.hydraulic: allocation failure or non-finite arithmetic");
+    ArrayNum* result = array_num_new(ELEM_FLOAT64, (int64_t)values.rows);
+    if (!result) return ItemError;
+    memcpy(result->float_items, output.data, values.rows * sizeof(double));
+    return {.array_num = result};
+}
+
+// the caller chooses unique input order and a CCW seed; lib owns only numeric topology.
+Item fn_math_delaunay(Item points, Item ids, Item seed) {
+    GUARD_ERROR3(points, ids, seed);
+    GUARD_NULL1(points); GUARD_NULL1(ids); GUARD_NULL1(seed);
+    RootFrame roots(3);
+    Rooted<Item> p(roots, points), indices(roots, ids), initial(roots, seed);
+    ScienceMatrix coordinates;
+    if (!science_read_matrix(p.get(), &coordinates) || coordinates.rows > 20000 ||
+            (coordinates.rows && (coordinates.vector || coordinates.cols != 2)))
+        return science_error("math.delaunay: expected at most 20,000 finite 2D points");
+    int n = (int)coordinates.rows;
+    int64_t used = vector_length(indices.get());
+    if (used < 0 || used > n || vector_is_ndim(indices.get()))
+        return science_error("math.delaunay: invalid unique index vector");
+    if (!n && !used && vector_length(initial.get()) == 0) {
+        ArrayNum* empty = array_int_new(0);
+        return empty ? Item{.array_num = empty} : ItemError;
+    }
+    if (used < 3 || vector_length(initial.get()) != 3 || vector_is_ndim(initial.get()))
+        return science_error("math.delaunay: expected three seed indices");
+    ScienceScratch id_memory((size_t)used, sizeof(int));
+    ScienceScratch seen_memory((size_t)n, sizeof(uint8_t));
+    ScienceScratch output_memory((size_t)(2 * n + 4) * 3, sizeof(int));
+    if (!id_memory.data || !seen_memory.data || !output_memory.data) return ItemError;
+    int* order = (int*)id_memory.data;
+    uint8_t* seen = (uint8_t*)seen_memory.data;
+    for (int i = 0; i < used; i++) {
+        int64_t index;
+        if (!science_int_at(indices.get(), i, &index) || index < 0 || index >= n || seen[index])
+            return science_error("math.delaunay: indices must be distinct and in range");
+        order[i] = (int)index;
+        seen[index] = 1;
+    }
+    int first[3];
+    double triangle[6];
+    for (int i = 0; i < 3; i++) {
+        int64_t index;
+        if (!science_int_at(initial.get(), i, &index) || index < 0 || index >= n || !seen[index])
+            return science_error("math.delaunay: seed indices must belong to the input order");
+        first[i] = (int)index;
+        memcpy(triangle + i * 2, coordinates.values + index * 2, 2 * sizeof(double));
+    }
+    int sign;
+    if (!procgen_predicate_filter(triangle, 3, 2, false, &sign) &&
+            !decimal_geometry_sign(triangle, 3, 2, false, &sign)) return ItemError;
+    if (sign <= 0) return science_error("math.delaunay: seed must be non-collinear and counterclockwise");
+    int triangles = 0;
+    int* output = (int*)output_memory.data;
+    if (!procgen_delaunay(coordinates.values, n, order, (int)used, first,
+            decimal_geometry_sign, output, &triangles))
+        return science_error("math.delaunay: allocation, predicate or topology failure");
+    ArrayNum* result = array_int_new((int64_t)triangles * 3);
+    if (!result) return ItemError;
+    for (int i = 0; i < triangles * 3; i++) result->items[i] = output[i];
     return {.array_num = result};
 }

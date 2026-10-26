@@ -13,6 +13,18 @@
 #include <math.h>
 #include <stdint.h>
 
+// numeric extrema preserve NaN and the signed-zero rules on both runtime tiers.
+static inline double math_min_double(double a, double b) {
+    if (isnan(a) || isnan(b)) return NAN;
+    if (a == 0.0 && b == 0.0) return (signbit(a) || signbit(b)) ? -0.0 : 0.0;
+    return a < b ? a : b;
+}
+static inline double math_max_double(double a, double b) {
+    if (isnan(a) || isnan(b)) return NAN;
+    if (a == 0.0 && b == 0.0) return (signbit(a) && signbit(b)) ? -0.0 : 0.0;
+    return a > b ? a : b;
+}
+
 // the finalizer also serves keyed draws without inventing a threaded state.
 static inline uint64_t math_splitmix64_mix(uint64_t z) {
     z = (z ^ (z >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);

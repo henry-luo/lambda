@@ -60,7 +60,7 @@ fn line_hull(points, ids) array {
     if (len(order) == 0) [] else if (len(order) == 1) [order[0][2]] else [order[0][2], order[len(order) - 1][2]]
 }
 
-pub fn delaunay(points) map^ {
+fn delaunay_with(points, use_native: bool) map^ {
     if (not (points is array)) raise error("procgen.geom.delaunay: points must be an array of [x, y]")
     else if (len(points) > 20000) raise error("procgen.geom.delaunay: more than 20000 points")
     else if (not all([for (p in points) finite_point(p)])) raise error("procgen.geom.delaunay: every point must be a finite [x, y]")
@@ -76,12 +76,18 @@ pub fn delaunay(points) map^ {
             let a = if (ccw) a0 else b0
             let b = if (ccw) b0 else a0
             let seed = [[a, b, c], [b, a, -1], [c, b, -1], [a, c, -1]]
-            let tris = reduce([seed, *[for (i in ids where i != a and i != b and i != c) i]],
-                (acc, i: int) => insert(points, acc, i));
+            let tris = if (use_native) (let flat = math.delaunay(points, ids, [a, b, c])^,
+                [for (i in 0 to (len(flat) div 3 - 1)) slice(flat, i * 3, i * 3 + 3)])
+                else reduce([seed, *[for (i in ids where i != a and i != b and i != c) i]],
+                    (acc, i: int) => insert(points, acc, i));
             mesh_of(points, [for (t in tris where t[2] != -1) t], hull_from([for (t in tris where t[2] == -1) t]))
         }
     }
 }
+
+// the native cavity walker preserves creation order; keep the full-scan oracle (PG7.3).
+pub fn delaunay(points) map^ => delaunay_with(points, math.delaunay is fn)^
+pub fn delaunay_reference(points) map^ => delaunay_with(points, false)^
 
 // --- navigation (Delaunator half-edge layout: edge 3t + s runs from triangle t's vertex s) ---
 pub fn next_edge(e: int) int => if (e % 3 == 2) e - 2 else e + 1
