@@ -6,7 +6,7 @@ pub let colors = ["yellow","green","blue","pink","purple"]
 // reflowable layouts: scrolling, one page fitted to the window, or a two-page spread
 pub let layouts = ["scroll","paged","spread"]
 pub let textures = ["none","antique","parchment","linen","newsprint","ivory"]
-pub let turns = ["none","slide-left","slide-up","turn","dissolve"]
+pub let turns = ["none","slide-left","slide-up","turn","flip","dissolve"]
 pub let defaults = {font_size:20,font_family:"publisher",line_height:1.6,margin:24,theme:"light",publisher:true,mode:"scroll",zoom:1.0,
     texture:"none",turn:"slide-left"}
 pub fn preferences(prefs) {

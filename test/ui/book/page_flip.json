@@ -1,0 +1,495 @@
+{
+  "name": "Books demo: the flip page turn — timed flips in spreads and single pages, a curled corner on hover, and corner drags that turn or fall back",
+  "html": "test/ui/book/_library.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 820
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "a flip needs a paged layout: the corners to drag appear only then"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".grid [data-book=alice]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=turn][data-ebook-value=flip]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-flip",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-flip-corner[data-corner=bottom-right]"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=spread]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=texture][data-ebook-value=ivory]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-flip-corner"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-flip-corner[data-corner=bottom-right]"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-turn-next"
+      },
+      "attribute": "srcdoc",
+      "contains": "data-ebook-node"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-ghost-hold"
+      },
+      "attribute": "srcdoc",
+      "contains": "data-ebook-node"
+    },
+    {
+      "type": "log",
+      "message": "a flip into the next chapter: the ghosts keep the cover until the leaf lands"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "1 / 15"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-status"
+      },
+      "equals": "2 / 15"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "flip"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn-kind",
+      "equals": "flip-next"
+    },
+    {
+      "type": "wait",
+      "ms": 1100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-ghost"
+      },
+      "attribute": "srcdoc",
+      "contains": "MILLENNIUM FULCRUM"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-ghost-hold"
+      },
+      "attribute": "srcdoc",
+      "contains": "MILLENNIUM FULCRUM"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 300
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 1–2 / "
+    },
+    {
+      "type": "log",
+      "message": "a timed flip within the chapter places the leaf, then clears it"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 3–4 / "
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "flip"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-turn-back"
+      },
+      "property": "transform",
+      "contains": "matrix"
+    },
+    {
+      "type": "wait",
+      "ms": 1100
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-turn-back"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "log",
+      "message": "hovering a corner curls it; leaving the corner lays it flat"
+    },
+    {
+      "type": "mouse_move",
+      "x": 1236,
+      "y": 728
+    },
+    {
+      "type": "wait",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "peel"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": ".ebook-sheet[data-side=right]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "none"
+    },
+    {
+      "type": "log",
+      "message": "dragging the corner past the spine turns the page"
+    },
+    {
+      "type": "mouse_move",
+      "x": 1236,
+      "y": 728
+    },
+    {
+      "type": "mouse_down",
+      "x": 1236,
+      "y": 728
+    },
+    {
+      "type": "mouse_move",
+      "x": 1000,
+      "y": 680
+    },
+    {
+      "type": "mouse_move",
+      "x": 700,
+      "y": 650
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "flip"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 5–6 / "
+    },
+    {
+      "type": "mouse_move",
+      "x": 500,
+      "y": 680
+    },
+    {
+      "type": "mouse_up",
+      "x": 500,
+      "y": 680
+    },
+    {
+      "type": "wait",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "none"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 5–6 / "
+    },
+    {
+      "type": "log",
+      "message": "a drag let go before the spine falls back to the same page"
+    },
+    {
+      "type": "mouse_move",
+      "x": 1236,
+      "y": 728
+    },
+    {
+      "type": "mouse_down",
+      "x": 1236,
+      "y": 728
+    },
+    {
+      "type": "mouse_move",
+      "x": 1100,
+      "y": 700
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 7–8 / "
+    },
+    {
+      "type": "mouse_up",
+      "x": 1100,
+      "y": 700
+    },
+    {
+      "type": "wait",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "none"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Pages 5–6 / "
+    },
+    {
+      "type": "log",
+      "message": "one page to the window flips about its left edge"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-pref=mode][data-ebook-value=paged]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "flip"
+    },
+    {
+      "type": "wait",
+      "ms": 900
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".ebook-stage"
+      },
+      "attribute": "data-turn",
+      "equals": "none"
+    }
+  ]
+}

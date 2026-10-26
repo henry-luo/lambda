@@ -13833,6 +13833,34 @@ struct EventDocumentScope {
     }
 };
 
+/**
+ * Hover is per document. A pointer over an iframe's content also hovers the
+ * iframe element in each embedding document, outermost first (UI Events
+ * order), each under its own document's evaluator; without this the parent's
+ * last hover target kept :hover and never saw mouseout/mouseleave when the
+ * pointer moved from it into the frame. Leaves evcon->target as the hit.
+ */
+static void update_embedding_hover(EventContext* evcon, EventDocumentScope* scope) {
+    const int max_frame_depth = 8;
+    View* hit = evcon->target;
+    DomElement* element = view_geometry_nearest_dom_element(hit, 0);
+    DomDocument* inner = element && element->doc ? element->doc : event_context_target_document(evcon);
+    DomElement* frames[max_frame_depth];
+    int depth = 0;
+    for (DomDocument* d = inner; d && d->embedding_document && depth < max_frame_depth;
+         d = d->embedding_document) {
+        DomElement* frame = dom_document_embedding_element(d);
+        if (!frame) break;
+        frames[depth++] = frame;
+    }
+    for (int i = depth - 1; i >= 0; i--) {
+        evcon->target = static_cast<View*>(frames[i]);
+        scope->activate_target(evcon);
+        update_hover_state(evcon, evcon->target);
+    }
+    evcon->target = hit;
+}
+
 void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc) return;
     EventDocumentScope scope(uicon, doc);
@@ -14129,6 +14157,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
         if (!evcon.target) {
             evcon.target = native_pointer_capture_target(doc);
         }
+        update_embedding_hover(&evcon, &document_scope);
         document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 

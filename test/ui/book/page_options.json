@@ -173,7 +173,7 @@
       "target": {
         "selector": "[data-ebook-pref=turn]"
       },
-      "count": 5
+      "count": 6
     },
     {
       "type": "log",

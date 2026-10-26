@@ -1965,7 +1965,8 @@ Reflowable chapters scroll, fit one page to the window, or show two pages side
 by side with a gutter; three toolbar icons switch between them. Paper textures (antique with a rule frame and corner
 flourishes, parchment, linen, newsprint, ivory) sit behind the text, and paged
 layouts animate page turns: slide left, slide up, a turn that folds the page
-toward the spine, or dissolve. Fixed-layout
+toward the spine, a flip that folds the page from its corner like paper (its
+corners curl on hover and can be dragged to turn the page), or dissolve. Fixed-layout
 XHTML/SVG pages retain a required source viewport and support fit/zoom.
 Selecting EPUB in the file browser opens the same reader; its Source tab shows
 the OPF package. `layout` and `render` project the initial reader viewport,
