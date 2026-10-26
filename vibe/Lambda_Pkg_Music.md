@@ -639,6 +639,36 @@ These choices refine the package proposal. A future change to an existing
 language/host ruling requires the paired formal-spec and working-design
 revision prescribed by [Documentation Convention](../doc/Doc_Convention.md).
 
+### 9.1 Possible future work: live MIDI devices (not scheduled)
+
+**Status (2026-10-26):** recorded as an option only; no action is planned. Start it only when a concrete feature below is wanted.
+
+Phases 1–2 treat MIDI as files: SMF import/export and a self-contained TinySoundFont transport. Nothing enumerates MIDI ports, receives live input, or sends to external synths/DAWs. Platform MIDI services (CoreMIDI; ALSA/WinMM, or [rtmidi](https://github.com/thestk/rtmidi) over them) cover that half and are complementary to the current stack.
+
+Candidate features, in order of fit with this package:
+
+1. **Play-along / score following:** live keyboard input matched against the performance timeline, reusing the existing highlight and follow path.
+2. **Record to notation:** capture input into the performance model, export SMF, and later quantize toward a written score.
+3. **Live synthesis:** a "note on now" path into `midi_player` (today it only plays an immutable event buffer).
+4. **Web MIDI for LambdaJS:** `navigator.requestMIDIAccess` in `lambda/dom`, so existing web MIDI apps run in Radiant.
+
+Backend options:
+
+| | rtmidi | Lambda-owned native backends |
+|---|---|---|
+| Size | One `.cpp`, ~3–4K lines, MIT-style license | ~150–250 lines per platform (CoreMIDI, WinMM, ALSA sequencer) |
+| Coverage | macOS, Windows, Linux (ALSA/JACK) at once | One platform at a time; macOS first, matching the verified audio platform |
+| Repo fit | API uses `std::string`/`std::vector` and exceptions, so it needs a C seam, as RE2 does; vendored code stays unpatched | `lib/` types only; no seam needed |
+| Gaps | Network/BLE MIDI, MIDI 2.0, weak iOS story | Same, unless CoreMIDI is used directly, which also serves the iOS port |
+
+Tentative direction: shape the Lambda surface after Web MIDI, start with native CoreMIDI on macOS, and adopt rtmidi only if all three desktop platforms are needed at once. The device layer is the small part; these open questions need user rulings first:
+
+- **Delivery:** DOM-style `midimessage` events for UI code versus mailbox messages for task code.
+- **Clocks:** live timestamps come from the host clock, while the transport runs on the audio-bus sample clock. Play-along and recording need a defined mapping.
+- **Discovery and permission:** port enumeration, hot-plug, and whether access prompts as browsers do for Web MIDI.
+
+As with the player, the adapter stays above the runtime boundary and reaches Lambda only through the `radiant-dom` module (D7.5.3v2); Lambda values crossing it are copied.
+
 ## Appendix A. Integration and module boundaries
 
 The following are integration points in the 2026-10-13 implementation:

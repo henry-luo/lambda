@@ -1536,6 +1536,11 @@ float css_font_size_keyword_px(CssEnum keyword) {
     }
 }
 
+bool css_keyword_is_font_size(CssEnum keyword) {
+    const CssEnumInfo* info = css_enum_info(keyword);
+    return keyword == CSS_VALUE_MEDIUM || (info && info->group == CSS_VALUE_GROUP_FONT_SIZE);
+}
+
 static const CssEnumInfo css_value_definitions[] = {
     {"_undef", 6, CSS_VALUE__UNDEF, CSS_VALUE_GROUP__UNDEF},
     {"_length", 7, CSS_VALUE__LENGTH, CSS_VALUE_GROUP_SPECIAL_TYPE},

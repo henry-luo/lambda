@@ -161,7 +161,7 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 
 | File | Responsibility (this doc) |
 |---|---|
-| `radiant/event.hpp` / `dom_range.cpp` | `DomBoundary`/`DomRange`/`DomSelection`, UTF-16↔UTF-8 offsets, Range/Selection methods, live-range mutation envelopes, navigation, and stringification. |
+| `radiant/event.hpp` / `dom_range.cpp` | `DomBoundary`/`DomRange`/`DomSelection`, UTF-16↔UTF-8 and UTF-16↔code-point offsets, Range/Selection methods, live-range mutation envelopes, navigation, and stringification. |
 | `radiant/event.hpp` / `dom_range_resolver.cpp` | Layout-cache resolution, pixel↔boundary hit-testing, selection rectangles, and glyph-precise X resolvers. |
 | `radiant/event.hpp` / `editing.cpp` | `EditingSurface`/`EditingMode` resolution and canonical-host helpers. |
 | `radiant/event.hpp` / `radiant/event.cpp` | Contenteditable action-owner/target snapshot, source projection, model surface binding/completion, and notification/action/input gate. |

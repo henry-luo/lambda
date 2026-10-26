@@ -1247,8 +1247,10 @@ accepts any filename regardless of its extension (D2.9.2).
 | MTL | Wavefront material library as ordered Lambda elements | `input("model.mtl", 'mtl')` |
 | glTF | JSON model, skin, and animation document as maps/arrays | `input("scene.gltf", 'gltf')` |
 | A3D | ASCII Model3D geometry, skeletons, actions, and voxels | `input("character.a3d", 'a3d')` |
+| STL | ASCII or binary facets as typed `normals`/`positions` arrays | `input("part.stl", 'stl')` |
+| PLY | ASCII or binary elements, one typed column or list per property | `input("scan.ply", 'ply')` |
 
-These textual model formats map to existing Lambda values (D4.1.3). External
+These model formats map to existing Lambda values (D4.1.3). External
 buffers, textures, and procedural scripts remain references; parsing does not
 load dependencies or start playback. To resolve supported model assets into
 renderable scene elements and shared animation clips, use `lambda.scene3d.load()`
@@ -1291,7 +1293,7 @@ network acquisition (S12.1.1v3, S12.4.1v2, S14.3.1v2).
 | `parse(str, g.rule)` | Parse from a rule given as a type | `parse("42", calc.number)` |
 | `parse(str, g, options)` | Options map: `rule` (a symbol) and `spans` (bool: `start`/`end` byte offsets on every element) | `parse(s, calc, {rule: 'expr', spans: true})` |
 
-**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
+**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`, `stl`, `ply`
 
 `parse(css, {type:"css", flavor:"tokens"})^` returns an ordered array of
 `{kind, raw, value}` CSS tokens. Values decode CSS escapes; raw slices retain
@@ -1428,6 +1430,8 @@ before allowing them. See [wiki output](Markup_Formats_Support.md#51-wiki-output
 let document = parse("= Title =\n\n**Text**", "wiki:creole")^
 format(document, {type:"wiki", flavor:"jira"})^
 ```
+
+`format(scene, 'gltf')` serializes a `lambda.scene3d` element tree, such as a `scene()` or a `load()` result, as a self-contained glTF 2.0 JSON string; `format(scene, 'glb')` returns GLB bytes as a binary value. Groups, meshes (buffer, box and plane geometry), Lambert/basic materials, textures, cameras and directional/point/spot lights are exported; skeletons, morphs and animation clips raise an error naming the construct. See the [export mapping](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export).
 
 `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, and
 `ics`/`ical`/`icalendar` use the shipped `lambda.doc.misc` package (D7.2.4).

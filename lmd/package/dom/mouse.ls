@@ -52,3 +52,13 @@ pub pn press(root, evt) {
     let operation = selection_operation(evt);
     if (operation == null) 'pass' else dom.pointer_selection(root, operation)
 }
+
+// A frame that names `data-selection-event` hears when a pointer gesture in its
+// document settles, so its host can act on the new selection. Like link
+// delegation, the event is queued in the embedding document, never run inline.
+pub pn release(root) {
+    let frame = dom.embedding_element(root)
+    let delegated = if (frame == null) null else dom.get_attribute(frame, "data-selection-event");
+    if (delegated != null and delegated != "") { dom.request_frame(frame, delegated) }
+    return 'pass'
+}

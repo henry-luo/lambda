@@ -21,6 +21,8 @@ def workflow():
         env = {**os.environ, 'LAMBDA_EBOOK_STATE_DIR': str(work / 'state')}
         def click(command):
             return {'type':'click','target':{'selector':f'[data-ebook-command={command}]'}}
+        def option(pref, value):
+            return {'type':'click','target':{'selector':f'[data-ebook-pref={pref}][data-ebook-value={value}]'}}
         def check(label, path, events):
             script = work / f'{label}.json'
             result = work / f'{label}-result.json'
@@ -35,7 +37,8 @@ def workflow():
         wait = {'type':'wait','ms':200}
         status = lambda text: {'type':'assert_text','target':{'selector':'.ebook-status'},'equals':text}
         check('save',book,[click('next'),wait,click('bookmark'),click('settings'),wait,click('larger'),wait,
-            click('theme'),wait,click('mode'),wait,status('2 / 2')])
+            click('theme'),wait,option('mode','paged'),wait,option('texture','antique'),wait,option('turn','dissolve'),wait,
+            status('2 / 2')])
         state = work / 'state' / f'{identity}.json'
         saved = json.loads(state.read_text())
         assert saved['publication_fingerprint'] == identity
@@ -44,6 +47,8 @@ def workflow():
         assert saved['preferences']['font_size'] == 22
         assert saved['preferences']['theme'] == 'sepia'
         assert saved['preferences']['mode'] == 'paged'
+        assert saved['preferences']['texture'] == 'antique'
+        assert saved['preferences']['turn'] == 'dissolve'
         moved = work / 'renamed.epub'
         shutil.copyfile(book,moved)
         check('resume',moved,[status('2 / 2'),

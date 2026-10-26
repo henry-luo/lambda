@@ -1,0 +1,218 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Lambda fixture generator"
+  },
+  "extensionsUsed": [
+    "EXT_meshopt_compression",
+    "KHR_texture_transform",
+    "KHR_materials_emissive_strength",
+    "KHR_lights_punctual"
+  ],
+  "extensionsRequired": [
+    "EXT_meshopt_compression"
+  ],
+  "extensions": {
+    "KHR_lights_punctual": {
+      "lights": [
+        {
+          "type": "spot",
+          "name": "key",
+          "color": [
+            1,
+            0.9,
+            0.7
+          ],
+          "intensity": 6,
+          "range": 8,
+          "spot": {
+            "innerConeAngle": 0.3,
+            "outerConeAngle": 0.6
+          }
+        },
+        {
+          "type": "point",
+          "name": "fill",
+          "intensity": 2
+        }
+      ]
+    }
+  },
+  "buffers": [
+    {
+      "byteLength": 423,
+      "uri": "data:application/octet-stream;base64,oP8AAAAAAAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAD/AAAAAAAAAAAAAAAAAAAAAP+B/wD/AAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAD/AAAAAAAAAAAAAAAAAAAAAP8AAAAAAAAAAAAAAAAAAAAA/4EA/wAAAAAAAAAAAAAAAAD/AAAAAAAAAAAAAAAAAAAAAP8AAAAAAAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAD/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoP8AAAAAAAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAD/AP8A/wAAAAAAAAAAAAAAAP8AfgB9AAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAD/AAAAAAAAAAAAAAAAAAAAAP//AP8AAAAAAAAAAAAAAAAA/34AfQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANEABAQGCAQAAAAA"
+    },
+    {
+      "byteLength": 92,
+      "extensions": {
+        "EXT_meshopt_compression": {
+          "fallback": true
+        }
+      }
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 1,
+      "byteOffset": 0,
+      "byteLength": 48,
+      "extensions": {
+        "EXT_meshopt_compression": {
+          "buffer": 0,
+          "byteOffset": 0,
+          "byteLength": 237,
+          "byteStride": 12,
+          "count": 4,
+          "mode": "ATTRIBUTES"
+        }
+      },
+      "byteStride": 12
+    },
+    {
+      "buffer": 1,
+      "byteOffset": 48,
+      "byteLength": 32,
+      "extensions": {
+        "EXT_meshopt_compression": {
+          "buffer": 0,
+          "byteOffset": 240,
+          "byteLength": 169,
+          "byteStride": 8,
+          "count": 4,
+          "mode": "ATTRIBUTES"
+        }
+      },
+      "byteStride": 8
+    },
+    {
+      "buffer": 1,
+      "byteOffset": 80,
+      "byteLength": 12,
+      "extensions": {
+        "EXT_meshopt_compression": {
+          "buffer": 0,
+          "byteOffset": 412,
+          "byteLength": 11,
+          "byteStride": 2,
+          "count": 6,
+          "mode": "INDICES"
+        }
+      }
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3",
+      "min": [
+        -0.5,
+        -0.5,
+        0
+      ],
+      "max": [
+        0.5,
+        0.5,
+        0
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5123,
+      "count": 6,
+      "type": "SCALAR"
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/checker.png"
+    }
+  ],
+  "textures": [
+    {
+      "source": 0
+    }
+  ],
+  "materials": [
+    {
+      "name": "glow",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0,
+          "extensions": {
+            "KHR_texture_transform": {
+              "scale": [
+                2,
+                2
+              ]
+            }
+          }
+        }
+      },
+      "emissiveFactor": [
+        0.2,
+        0.1,
+        0
+      ],
+      "extensions": {
+        "KHR_materials_emissive_strength": {
+          "emissiveStrength": 2
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "TEXCOORD_0": 1
+          },
+          "indices": 2,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "panel"
+    },
+    {
+      "name": "key light",
+      "translation": [
+        0,
+        0,
+        2
+      ],
+      "extensions": {
+        "KHR_lights_punctual": {
+          "light": 0
+        }
+      }
+    },
+    {
+      "name": "fill light",
+      "translation": [
+        1,
+        1,
+        1
+      ],
+      "extensions": {
+        "KHR_lights_punctual": {
+          "light": 1
+        }
+      }
+    }
+  ]
+}

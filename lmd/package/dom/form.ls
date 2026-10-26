@@ -581,6 +581,7 @@ view <body> state ime_composing, context_menu_open {}
 // element-local press behavior (such as range capture). This hook chooses the
 // remaining document-wide focus and selection default action.
 on mousepress(evt) { ime.pointer_press(~)^; mouse.press(~, evt) }
+on mouseup(evt) { mouse.release(~) }
 // S12.1.3: clipboard/select-all key policy is a cancelable package default;
 // the native waist owns only event, selection/edit, and clipboard mechanism.
 on keydown(evt) {

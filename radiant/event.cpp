@@ -12841,7 +12841,14 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     ui_context_sync_document_raster_scale(uicon, new_doc);
 
     layout_iframe_embedded_doc(uicon, new_doc, viewport.width, viewport.height);
+    CssEnum overflow_x, overflow_y;
+    layout_iframe_viewport_overflow(new_doc, &overflow_x, &overflow_y);
     if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
+        // the navigated document decides the frame's scrollbars (layout_iframe_viewport_overflow)
+        if (block->scroller) {
+            block->scroller->overflow_x = overflow_x;
+            block->scroller->overflow_y = overflow_y;
+        }
         update_scroller(block, block->content_width, block->content_height);
     }
     if (old_doc) {
@@ -14378,7 +14385,8 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 bool has_hit_boundary = has_anchor_surface &&
                     editing_geometry_hit_test_boundary(evcon.ui_context,
                         static_cast<View*>(selection_doc->view_tree->root), &anchor_surface,
-                        (float)motion->x, (float)motion->y,
+                        (float)motion->x - selection_iframe_offset_x,
+                        (float)motion->y - selection_iframe_offset_y,
                         EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit_boundary);
                 if (has_hit_boundary && hit_boundary.dom.node &&
                     hit_boundary.dom.node->node_type == DOM_NODE_TEXT) {
@@ -14480,10 +14488,12 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 } else if (in_gap && gap_offset >= 0) {
                     char_offset = gap_offset;
                 } else {
+                    // the selection's frame translation maps the window pointer into the text's document
                     EditingBoundary hit_boundary;
                     if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
                             text, rect,
-                            (float)motion->x, (float)motion->y,
+                            (float)motion->x - selection_iframe_offset_x,
+                            (float)motion->y - selection_iframe_offset_y,
                             &hit_boundary)) {
                         char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
                     } else {
@@ -14915,10 +14925,13 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                     ? evcon.target_text_offset
                     : 0;
                 if (!evcon.target_text_offset_valid) {
+                    // the boundary resolver works in the text's own document, not the window
+                    RdtLogicalPoint frame = view_frame_translation(evcon.target,
+                        evcon.block.x, evcon.block.y);
                     EditingBoundary hit_boundary;
                     if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
                             text, rect,
-                            (float)btn_event->x, (float)btn_event->y,
+                            (float)btn_event->x - frame.x, (float)btn_event->y - frame.y,
                             &hit_boundary)) {
                         char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
                     } else {

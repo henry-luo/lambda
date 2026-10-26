@@ -1,0 +1,13 @@
+{
+  "name": "font-size: medium resolves to 16px (it shares its keyword with border widths)",
+  "html": "test/ui/css_font_size_medium.html",
+  "viewport": {"width": 600, "height": 400},
+  "events": [
+    {"type": "assert_style", "target": {"selector": "#plain"}, "property": "font-size", "equals": "16px"},
+    {"type": "assert_style", "target": {"selector": "#inner"}, "property": "font-size", "equals": "16px"},
+    {"type": "assert_style", "target": {"selector": "#shorthand"}, "property": "font-size", "equals": "16px"},
+    {"type": "assert_style", "target": {"selector": "#shorthand"}, "property": "font-style", "equals": "italic"},
+    {"type": "assert_style", "target": {"selector": "#small"}, "property": "font-size", "equals": "13px"},
+    {"type": "assert_style", "target": {"selector": "#border"}, "property": "border-top-width", "equals": "3px"}
+  ]
+}

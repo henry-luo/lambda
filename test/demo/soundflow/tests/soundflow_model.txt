@@ -1,0 +1,48 @@
+{
+  pitches: ["C3", "D3", "E3", "G3", "A3", "C4", "D4", "E4", "G4", "A4", "C5", "D5", "E5"],
+  grabs: [{
+      s: 12,
+      end: "a"
+    }, {
+      s: 6,
+      end: "body"
+    }, {
+      s: 12,
+      end: "a"
+    }, null],
+  longer_is_lower: true,
+  end_keeps_line: true,
+  retune_undo: true,
+  retune_plucks: true,
+  shortest: true,
+  longest: true,
+  slides_sideways: true,
+  slide_keeps_pitch: true,
+  slide_stays_in_field: true,
+  tap_plucks: true,
+  live_plucks: 13,
+  crossings: 13,
+  timed: true,
+  first_pass_is_the_drawing: true,
+  replayed: 22,
+  paused_silent: true,
+  speeds: ["1×", "2×", "0.5×"],
+  fast_clock: 4800,
+  fast_replayed: 43,
+  slow_replayed: 11,
+  speed_steps: [0, 4, 0],
+  export_at_speed: true,
+  ribbons: [true, false, true],
+  tip_moves: true,
+  tip_rests: true,
+  tap: true,
+  voices: [60, 60, 72],
+  scales: ["E5", "D5", "F5", "C5"],
+  layouts: [13, 12, 12, 16],
+  relayout_keeps_strokes: true,
+  sample: true,
+  clear_undo: true,
+  cap: true,
+  export_seconds: 8,
+  export_hits: 13
+}

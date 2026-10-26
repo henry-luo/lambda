@@ -1,0 +1,254 @@
+{
+  "name": "Word caret steps one character at a time through Chinese text (UTF-8 byte offsets in assertions)",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "ro",
+      "clear": false
+    },
+    {
+      "type": "ime_compose",
+      "phase": "begin"
+    },
+    {
+      "type": "ime_compose",
+      "phase": "update",
+      "preedit": "tuibu",
+      "caret": 5
+    },
+    {
+      "type": "ime_compose",
+      "phase": "commit",
+      "commit": "腿部空间"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "om",
+      "clear": false
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "equals": "ro腿部空间om"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 16,
+      "end": 16
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 15,
+      "end": 15
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 14,
+      "end": 14
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 11,
+      "end": 11
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 8,
+      "end": 8
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 5,
+      "end": 5
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 2,
+      "end": 2
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 1,
+      "end": 1
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowLeft"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 1,
+      "end": 1
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 2,
+      "end": 2
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 5,
+      "end": 5
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 8,
+      "end": 8
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 11,
+      "end": 11
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 14,
+      "end": 14
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 15,
+      "end": 15
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 16,
+      "end": 16
+    }
+  ]
+}

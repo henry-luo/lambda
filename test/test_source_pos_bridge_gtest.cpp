@@ -555,6 +555,39 @@ TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextBoundary) {
     source_pos_free(&pos);
 }
 
+TEST_F(SourcePosBridgeRoundTrip, TextOffsetsCountCodePoints) {
+    // text-leaf offsets use the unit Lambda strings index by (S2.5.8): after the
+    // CJK run and the emoji, UTF-16 units, code points and UTF-8 bytes all differ.
+    static const char text[] = "ro腿部空间😀m";
+    hello->text = lam::up(text);
+    hello->length = sizeof(text) - 1;
+    struct { uint32_t u16; uint32_t cp; } cases[] = {{0, 0}, {2, 2}, {4, 4}, {6, 6}, {8, 7}, {9, 8}};
+    for (const auto& c : cases) {
+        DomBoundary b{ (DomNode*)hello, c.u16 };
+        SourcePosC pos;
+        ASSERT_TRUE(source_pos_from_dom_boundary(&b, &pos));
+        EXPECT_EQ(pos.offset, c.cp) << "utf16 offset " << c.u16;
+        DomBoundary out{ nullptr, 0 };
+        ASSERT_TRUE(dom_boundary_from_source_pos((DomNode*)root, &pos, &out));
+        EXPECT_EQ(out.node, (DomNode*)hello);
+        EXPECT_EQ(out.offset, c.u16) << "code point " << c.cp;
+        source_pos_free(&pos);
+    }
+    // a model offset past the leaf clamps to its end.
+    SourcePosC past;
+    source_path_init(&past.path);
+    past.path.indices = (int*)malloc(sizeof(int) * 2);
+    past.path.indices[0] = 0;
+    past.path.indices[1] = 0;
+    past.path.depth = 2;
+    past.offset = 40;
+    past.kind = SOURCE_POS_TEXT;
+    DomBoundary end{ nullptr, 0 };
+    ASSERT_TRUE(dom_boundary_from_source_pos((DomNode*)root, &past, &end));
+    EXPECT_EQ(end.offset, 9u);
+    source_pos_free(&past);
+}
+
 TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextUsesRecordedAncestor) {
     // A retransform can retain only the doc-level render-map entry while an
     // intermediate apply() result is rebuilt. The source bridge must still
@@ -687,7 +720,8 @@ TEST_F(SourcePosBridgeRoundTrip, AuthoredZeroWidthTextRetainsItsLeafPosition) {
     EXPECT_EQ(position.path.indices[0], 0);
     EXPECT_EQ(position.path.indices[1], 0);
     EXPECT_EQ(position.kind, SOURCE_POS_TEXT);
-    EXPECT_EQ(position.offset, 3u);
+    // the zero-width space is one code point (three UTF-8 bytes).
+    EXPECT_EQ(position.offset, 1u);
     source_pos_free(&position);
 }
 

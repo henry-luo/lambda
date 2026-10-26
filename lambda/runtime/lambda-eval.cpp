@@ -6912,6 +6912,7 @@ Item fn_parse_html_fragment1(Item str_item) {
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
+bool format_gltf_bytes(Item root_item, bool binary, struct StrBuf* out, const char** error);
 
 // D6.4.1: format returns an Item, so a failure is an error value, never text.
 // It returned String*: an error operand became the text "<error>" on both
@@ -7036,6 +7037,18 @@ Item fn_format2(Item item, Item type) {
             type_id == LMD_TYPE_MAP ? rooted_options.get() : ItemNull};
         return interp_call_package_export(context->runtime,
             route.package, "format_native", args, 3);
+    }
+    const char* type_name = rooted_type.get() ? rooted_type.get()->chars : nullptr;
+    if (type_name && (!strcmp(type_name, "gltf") || !strcmp(type_name, "glb"))) {
+        // GLB is bytes, and an unsupported scene construct deserves its own message.
+        StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
+        bool binary = !strcmp(type_name, "glb");
+        bool ok = format_gltf_bytes(source.get(), binary, bytes, &reason);
+        Item output = ItemError;
+        if (!ok) set_runtime_error(ERR_FORMAT_ERROR, "format: glTF export: %s", reason);
+        else if (binary) output = (Item){.item = x2it(heap_binary_from_bytes(bytes->str, (int64_t)bytes->length))};
+        else output = (Item){.item = s2it(heap_strcpy(bytes->str, bytes->length))};
+        strbuf_free(bytes); return output;
     }
     String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {

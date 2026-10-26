@@ -192,6 +192,7 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
     };
     static const FormatEntry SIMPLE_FORMATS[] = {
         { "mark",       format_mark },
+        { "gltf",       format_gltf },
         { "json",       format_json },
         { "xml",        format_xml },
         { "html",       format_html },

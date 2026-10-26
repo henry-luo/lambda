@@ -29,6 +29,7 @@ import equation: .mod_equation
 import equation_edit: .mod_equation_edit
 import math_edit: .mod_math_edit
 import print: .mod_print
+import lookup: .mod_lookup
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -85,6 +86,7 @@ fn workspace(st) {
                         <div class:"canvas-footer", "A little room for your next idea.">>)
             if (st.review and not st.focused) ui.comments(st.editor,st.show_resolved,st.read_only) else null
             if (st.revisions and not st.focused) ui.revisions(st.editor,st.read_only) else null
+            if (st.lookup!=null and not st.focused) ui.lookup_pane(st) else null
             if (st.selection_pane and not st.focused) ui.selection_pane(st) else null
             if (st.shape_pane and not st.focused) ui.shape_pane(st) else null
             if (equation_edit.active(st) and not st.focused) ui.equation_pane(st) else null
@@ -318,6 +320,28 @@ on word_command(req) {
         dom.request_frame(dom.get_element_by_id(dom.document_element(req.node),"word"),"word_ruler_focus_ready")
     }
 }
+// a lookup task reports its answer to the shell element (mod_lookup.run).
+on word_lookup(evt) {
+    let next = lookup.receive(st.lookup,evt.detail)
+    if (next!=null) {
+        st = {*:st,lookup:next,status:if (next.error!=null) next.error
+            else if (next.kind=="dictionary") "Definition of “" ++ next.result.word ++ "”"
+            else "Translated to " ++ lookup.language_name(next.target)}
+    }
+}
+// a finished or failed reading frees the speaker button; a reading it already replaced changes nothing.
+on speechend(evt) {
+    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null}} }
+    return 'handled'
+}
+on speecherror(evt) {
+    if (st.lookup!=null and evt.token==st.lookup.speech) { st = {*:st,lookup:{*:st.lookup,speech:null},status:"The word could not be read aloud"} }
+    return 'handled'
+}
+on word_lookup_ready(evt) {
+    let root = dom.root_node(evt.target)
+    dom.focus_set(dom.get_element_by_id(root,"lookup-query") or dom.get_element_by_id(root,"lookup-text"),false)
+}
 on word_ruler_focus_ready(evt) {
     dom.focus_set(dom.get_element_by_id(dom.root_node(evt.target),st.ruler_focus),false)
     return 'pass'
@@ -333,10 +357,16 @@ on control_change(req) {
     else {
         st = app.command(app.adopt(st,req.event),req.action,req.params,req.node)
         // live size edits retain the control caret; restoring the document range steals its focus.
-        app.finish(st,req.node,not contains(["ui.tableSize","ui.shapeField","ui.equationDraft","ui.printSetting"],req.action))
+        app.finish(st,req.node,not contains(["ui.tableSize","ui.shapeField","ui.equationDraft","ui.printSetting","ui.lookupQuery","ui.lookupTarget"],req.action))
     }
 }
 on keydown(evt) {
+    // Enter looks a word up; the multi-line translation source needs Ctrl/⌘ Enter.
+    if (evt.key=="Enter" and not evt.shiftKey and (dom.closest(evt.target,"#lookup-query")!=null or
+        (app.primary(evt) and dom.closest(evt.target,"#lookup-text")!=null))) {
+        st = app.command(st,"ui.lookupSearch",{},evt.target)
+        return 'prevent-default'
+    }
     if (app.primary(evt) and evt.key=="Enter" and dom.closest(evt.target,"#equation-editor-pane")!=null) {
         st = app.command(st,"ui.equationApply",{},evt.target)
         app.finish(st,evt.target)

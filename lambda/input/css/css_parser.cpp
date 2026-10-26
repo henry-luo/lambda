@@ -952,7 +952,7 @@ bool css_parse_font_shorthand(const CssValue* value, CssFontShorthandParts* part
                 parts->style = item;
             } else if (item->data.keyword == CSS_VALUE_SMALL_CAPS) {
                 parts->small_caps = true;
-            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE && !parts->size) {
+            } else if (css_keyword_is_font_size(item->data.keyword) && !parts->size) {
                 parts->size = item;
                 size_t next = i + 1;
                 if (next < count && css_font_shorthand_is_slash(group->data.list.values[next])) {

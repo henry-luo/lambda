@@ -13,6 +13,7 @@
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/mesh_primitive.h"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include <float.h>
@@ -38,7 +39,7 @@ struct Scene3dGeometry {
 };
 struct Scene3dMaterial {
     DomNodeRef source;
-    float color[4];
+    float color[4], emissive[3];   // emissive is linear color times its intensity
     bool source_transparent;
     bool lambert, transparent, force_opaque, depth_only;
     int side;
@@ -79,6 +80,8 @@ struct Scene3dProjection {
     float fov, near_plane, far_plane, aspect, view_height;
     bool orthographic;
     float background[4], ambient[3], directions[8][3], lights[8][3];
+    // per light: world position, and (kind 0 directional/1 point/2 spot, distance, cos outer, cos inner)
+    float light_positions[8][3], light_params[8][4];
     unsigned light_count, geometry_count, texture_count;
     DomNodeRef* dynamic_objects;
     int dynamic_count, dynamic_capacity;
@@ -322,28 +325,15 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
         if (!scene3d_vector(node,"size",{1,1,1},&size) || size.x<=0 || size.y<=0 || size.z<=0) {
             scene3d_fail(build->entry,"invalid primitive size"); return nullptr;
         }
-        geometry->vertex_count=box?24:4; geometry->index_count=box?36:6;
+        geometry->vertex_count=box?MESH_BOX_VERTICES:MESH_PLANE_VERTICES; geometry->index_count=box?MESH_BOX_INDICES:MESH_PLANE_INDICES;
         vertices=(Scene3dVertex*)pool_calloc(p->pool,sizeof(Scene3dVertex)*geometry->vertex_count);
         indices=(uint32_t*)pool_alloc(p->pool,sizeof(uint32_t)*geometry->index_count);
         if (!vertices || !indices) return nullptr;
-        const Scene3dVec normals[]={{0,0,1},{0,0,-1},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
-        const Scene3dVec rights[]={{1,0,0},{-1,0,0},{0,0,-1},{0,0,1},{1,0,0},{1,0,0}};
-        const Scene3dVec ups[]={{0,1,0},{0,1,0},{0,1,0},{0,1,0},{0,0,-1},{0,0,1}};
-        const float corners[4][2]={{-1,-1},{1,-1},{1,1},{-1,1}};
-        const unsigned triangles[]={0,1,2,0,2,3};
-        for (unsigned face=0;face<(box?6u:1u);face++) {
-            for (unsigned corner=0;corner<4;corner++) {
-                Scene3dVertex* v=&vertices[face*4+corner];
-                const Scene3dVec& n=normals[face]; const Scene3dVec& r=rights[face]; const Scene3dVec& u=ups[face];
-                const float nvalues[]={n.x,n.y,n.z}, rvalues[]={r.x,r.y,r.z}, uvalues[]={u.x,u.y,u.z};
-                const float sizes[]={size.x,size.y,size.z};
-                for (unsigned c=0;c<3;c++) {
-                    v->position[c]=((box?nvalues[c]:0)+corners[corner][0]*rvalues[c]+corners[corner][1]*uvalues[c])*sizes[c]*.5f;
-                    v->normal[c]=nvalues[c]; v->color[c]=1;
-                }
-                v->uv[0]=(corners[corner][0]+1)*.5f; v->uv[1]=(corners[corner][1]+1)*.5f;
-            }
-            for (unsigned i=0;i<6;i++) indices[face*6+i]=face*4+triangles[i];
+        float sizes[3]={size.x,size.y,size.z},positions[MESH_BOX_VERTICES*3],normals[MESH_BOX_VERTICES*3],uvs[MESH_BOX_VERTICES*2];
+        mesh_primitive(box,sizes,positions,normals,uvs,indices);
+        for (unsigned i=0;i<geometry->vertex_count;i++) {
+            for (unsigned c=0;c<3;c++) {vertices[i].position[c]=positions[i*3+c];vertices[i].normal[c]=normals[i*3+c];vertices[i].color[c]=1;}
+            vertices[i].uv[0]=uvs[i*2];vertices[i].uv[1]=uvs[i*2+1];
         }
     } else if (type && !strcmp(type,"buffer")) {
         float *positions,*normals,*uvs,*colors,*raw_indices; unsigned pc,nc,uc,cc,ic;
@@ -372,13 +362,10 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
             }
             if (uc) memcpy(vertices[i].uv,uvs+i*2,sizeof(float)*2);
         }
-        if (!nc) for (unsigned i=0;i<(ic?ic:geometry->vertex_count);i+=3) {
-            unsigned ids[]={ic?indices[i]:i,ic?indices[i+1]:i+1,ic?indices[i+2]:i+2};
-            Scene3dVec a={positions[ids[0]*3],positions[ids[0]*3+1],positions[ids[0]*3+2]};
-            Scene3dVec b={positions[ids[1]*3],positions[ids[1]*3+1],positions[ids[1]*3+2]};
-            Scene3dVec c={positions[ids[2]*3],positions[ids[2]*3+1],positions[ids[2]*3+2]};
-            Scene3dVec n=scene3d_cross(scene3d_sub(b,a),scene3d_sub(c,a));
-            for (unsigned id:ids) { vertices[id].normal[0]+=n.x; vertices[id].normal[1]+=n.y; vertices[id].normal[2]+=n.z; }
+        if (!nc) {
+            float* sums=(float*)pool_calloc(p->pool,sizeof(float)*3*geometry->vertex_count); if (!sums) return nullptr;
+            mesh_accumulate_normals(positions,ic?indices:nullptr,ic?ic:geometry->vertex_count,sums);
+            for (unsigned i=0;i<geometry->vertex_count;i++) for (unsigned c=0;c<3;c++) vertices[i].normal[c]=sums[i*3+c];
         }
         for (unsigned i=0;i<geometry->vertex_count;i++) {
             Scene3dVec n={vertices[i].normal[0],vertices[i].normal[1],vertices[i].normal[2]};
@@ -492,6 +479,12 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     material->source_transparent=material->transparent||(alpha_mode&&!strcmp(alpha_mode,"blend"));
     material->transparent=material->source_transparent;
     material->color[3]*=opacity; material->transparent=material->transparent || material->color[3]<1;
+    float emissive[4],emissive_intensity;
+    if (!scene3d_color(node,"emissive","#000000",emissive) || !scene3d_number(node,"emissive-intensity",1,&emissive_intensity) ||
+        !isfinite(emissive_intensity) || emissive_intensity<0) {
+        scene3d_fail(build->entry,"invalid material emission"); return nullptr;
+    }
+    for (unsigned c=0;c<3;c++) material->emissive[c]=emissive[c]*emissive_intensity;
     const char* side=scene3d_text(node,"side");
     if (side && strcmp(side,"front") && strcmp(side,"back") && strcmp(side,"double")) {
         scene3d_fail(build->entry,"invalid material side"); return nullptr;
@@ -698,17 +691,29 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
             p->orthographic=orthographic;p->view_height=view_height;
         }
     } else if (scene3d_tag(node,"light")) {
-        const char* type=scene3d_text(node,"type"); float color[4],intensity;
-        if (!type || (strcmp(type,"ambient") && strcmp(type,"directional")) ||
-            !scene3d_animated_color(build->entry,node,color) || !scene3d_animated_number(build->entry,node,"intensity",1,&intensity) || intensity<0)
+        const char* type=scene3d_text(node,"type"); float color[4],intensity,distance,angle,penumbra;
+        unsigned kind=!type?3:!strcmp(type,"directional")?0:!strcmp(type,"point")?1:!strcmp(type,"spot")?2:3;
+        if ((kind==3 && (!type || strcmp(type,"ambient"))) ||
+            !scene3d_animated_color(build->entry,node,color) || !scene3d_animated_number(build->entry,node,"intensity",1,&intensity) || intensity<0 ||
+            !scene3d_animated_number(build->entry,node,"distance",0,&distance) || distance<0 ||
+            !scene3d_animated_number(build->entry,node,"angle",(float)M_PI/3,&angle) || angle<=0 || angle>(float)M_PI/2 ||
+            !scene3d_animated_number(build->entry,node,"penumbra",0,&penumbra) || penumbra<0 || penumbra>1)
             return scene3d_fail(build->entry,"invalid light");
-        if (visible && !strcmp(type,"ambient")) for (unsigned c=0;c<3;c++) p->ambient[c]+=color[c]*intensity;
+        if (visible && kind==3) for (unsigned c=0;c<3;c++) p->ambient[c]+=color[c]*intensity;
         else if (visible) {
-            if (p->light_count>=8) return scene3d_fail(build->entry,"directional light quota exceeded");
-            Scene3dVec target; if (!scene3d_vector(node,"target",{},&target)) return scene3d_fail(build->entry,"invalid light target");
-            Scene3dVec direction=scene3d_sub(scene3d_point(world,{}),scene3d_point(parent,target));
-            if (!scene3d_normalize(&direction)) return scene3d_fail(build->entry,"directional light has zero direction");
-            unsigned i=p->light_count++; p->directions[i][0]=direction.x;p->directions[i][1]=direction.y;p->directions[i][2]=direction.z;
+            if (p->light_count>=8) return scene3d_fail(build->entry,"light quota exceeded");
+            unsigned i=p->light_count++;Scene3dVec origin=scene3d_point(world,{});
+            if (kind!=1) {
+                // directional and spot lights point from their position toward the target.
+                Scene3dVec target; if (!scene3d_vector(node,"target",{},&target)) return scene3d_fail(build->entry,"invalid light target");
+                Scene3dVec direction=scene3d_sub(origin,scene3d_point(parent,target));
+                if (!scene3d_normalize(&direction)) return scene3d_fail(build->entry,"light has zero direction");
+                p->directions[i][0]=direction.x;p->directions[i][1]=direction.y;p->directions[i][2]=direction.z;
+            }
+            p->light_positions[i][0]=origin.x;p->light_positions[i][1]=origin.y;p->light_positions[i][2]=origin.z;
+            // a hard cone (penumbra 0) keeps smoothstep's edges strictly ordered.
+            float outer=cosf(angle),inner=fmaxf(cosf(angle*(1-penumbra)),outer+1e-5f);
+            float params[4]={(float)kind,distance,outer,inner};memcpy(p->light_params[i],params,sizeof(params));
             for (unsigned c=0;c<3;c++) p->lights[i][c]=color[c]*intensity;
         }
     }
@@ -941,7 +946,7 @@ uniform mat4 model, projection;
 uniform sampler2D palette;
 uniform vec2 morph_weights;
 uniform float skinned, colored;
-out vec3 world_normal, vertex_color;
+out vec3 world_normal, vertex_color, world_position;
 out vec2 texture_uv;
 // a bone matrix is one palette row: four texels, one per column
 mat4 bone(float index) {
@@ -960,15 +965,17 @@ void main() {
     }
     world_normal = transpose(inverse(mat3(world))) * posed_normal;
     vertex_color = colored>0.5?color:vec3(1); texture_uv = uv;
-    gl_Position = projection * world * vec4(vertex,1.0);
+    vec4 placed = world * vec4(vertex,1.0); world_position = placed.xyz;
+    gl_Position = projection * placed;
 }
 )GLSL";
 static const char* scene3d_fragment_shader = R"GLSL(#version 330 core
-in vec3 world_normal, vertex_color;
+in vec3 world_normal, vertex_color, world_position;
 in vec2 texture_uv;
 uniform vec4 material;
 uniform float lambert, textured, opaque, light_count;
-uniform vec3 ambient, directions[8], lights[8];
+uniform vec3 ambient, emissive, directions[8], lights[8], light_positions[8];
+uniform vec4 light_params[8];
 uniform sampler2D image;
 out vec4 fragment;
 void main() {
@@ -979,9 +986,20 @@ void main() {
     if (lambert > 0.5) {
         vec3 n = normalize(world_normal) * (gl_FrontFacing ? 1.0 : -1.0);
         irradiance = ambient;
-        for (int i=0; i<8; i++) if (float(i)<light_count) irradiance += lights[i] * max(dot(n,directions[i]),0.0);
+        for (int i=0; i<8; i++) if (float(i)<light_count) {
+            vec4 params = light_params[i];
+            vec3 l = directions[i]; float falloff = 1.0;
+            if (params.x > 0.5) {
+                // point and spot lights: inverse-square falloff, smoothly cut off at `distance`
+                vec3 d = light_positions[i] - world_position; float distance = max(length(d),1e-4);
+                l = d / distance; falloff = 1.0 / max(distance*distance,0.01);
+                if (params.y > 0.0) { float window = clamp(1.0 - pow(distance/params.y,4.0),0.0,1.0); falloff *= window*window; }
+                if (params.x > 1.5) falloff *= smoothstep(params.z,params.w,dot(l,directions[i]));
+            }
+            irradiance += lights[i] * falloff * max(dot(n,l),0.0);
+        }
     }
-    fragment = vec4(base.rgb * irradiance * base.a, base.a);
+    fragment = vec4((base.rgb * irradiance + emissive) * base.a, base.a);
 }
 )GLSL";
 
@@ -1082,7 +1100,8 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     qsort(p->meshes,p->mesh_count,sizeof(Scene3dMesh*),scene3d_draw_compare);
     bool rendered=native_gl_begin(entry->graphics,entry->target,p->background) &&
         scene3d_uniform(entry,"projection",projection.v,16) && scene3d_uniform(entry,"ambient",p->ambient,3) &&
-        scene3d_uniform(entry,"directions[0]",p->directions[0],3,8) && scene3d_uniform(entry,"lights[0]",p->lights[0],3,8);
+        scene3d_uniform(entry,"directions[0]",p->directions[0],3,8) && scene3d_uniform(entry,"lights[0]",p->lights[0],3,8) &&
+        scene3d_uniform(entry,"light_positions[0]",p->light_positions[0],3,8) && scene3d_uniform(entry,"light_params[0]",p->light_params[0],4,8);
     float light_count=p->light_count;rendered=rendered&&scene3d_uniform(entry,"light_count",&light_count,1);
     for (int i=0;rendered && i<p->mesh_count;i++) {
         Scene3dMesh* mesh=p->meshes[i];Scene3dMaterial* material=mesh->material;
@@ -1090,7 +1109,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         float lambert=material->lambert?1:0,textured=material->texture.id?1:0,opaque=material->force_opaque?1:0;
         rendered=scene3d_uniform(entry,"model",mesh->world.v,16) && scene3d_uniform(entry,"material",material->color,4) &&
             scene3d_uniform(entry,"lambert",&lambert,1) && scene3d_uniform(entry,"textured",&textured,1) &&
-            scene3d_uniform(entry,"opaque",&opaque,1);
+            scene3d_uniform(entry,"opaque",&opaque,1) && scene3d_uniform(entry,"emissive",material->emissive,3);
         float skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0;
         rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"colored",&colored,1)&&
             scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);

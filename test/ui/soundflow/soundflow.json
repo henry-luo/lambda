@@ -1,0 +1,817 @@
+{
+ "name": "Soundflow drawing, looping, retuning, sliding, speed, stroke visibility, menu, undo and save",
+ "html": "test/demo/soundflow/soundflow.ls",
+ "viewport": {
+  "width": 1280,
+  "height": 800
+ },
+ "input_turn_ms": 0,
+ "events": [
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "0"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-sound",
+   "equals": "on"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-layout",
+   "equals": "harp"
+  },
+  {
+   "type": "mouse_down",
+   "x": 200,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 230,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 260,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 290,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 320,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 350,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 380,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 410,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 440,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 470,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 500,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 530,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 560,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 590,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 620,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 650,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 680,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 710,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 740,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 770,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 800,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 830,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 860,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 890,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 920,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 950,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 980,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 1010,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 1040,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 1070,
+   "y": 500
+  },
+  {
+   "type": "advance_time",
+   "ms": 30,
+   "steps": 1
+  },
+  {
+   "type": "mouse_move",
+   "x": 1100,
+   "y": 500
+  },
+  {
+   "type": "mouse_up",
+   "x": 1100,
+   "y": 500
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "1"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-plucks",
+   "equals": "13"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-drawing",
+   "equals": "false"
+  },
+  {
+   "type": "advance_time",
+   "ms": 2400,
+   "steps": 96
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "1"
+  },
+  {
+   "type": "key_press",
+   "key": " "
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-paused",
+   "equals": "true"
+  },
+  {
+   "type": "key_press",
+   "key": " "
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-paused",
+   "equals": "false"
+  },
+  {
+   "type": "mouse_down",
+   "x": 1030,
+   "y": 448
+  },
+  {
+   "type": "mouse_move",
+   "x": 1030,
+   "y": 380
+  },
+  {
+   "type": "mouse_move",
+   "x": 1030,
+   "y": 250
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-dragging",
+   "equals": "true"
+  },
+  {
+   "type": "mouse_up",
+   "x": 1030,
+   "y": 250
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-dragging",
+   "equals": "false"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:last-child"
+   },
+   "attribute": "data-note",
+   "equals": "C4"
+  },
+  {
+   "type": "key_press",
+   "key": "z"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:last-child"
+   },
+   "attribute": "data-note",
+   "equals": "E5"
+  },
+  {
+   "type": "mouse_down",
+   "x": 640,
+   "y": 500
+  },
+  {
+   "type": "mouse_move",
+   "x": 670,
+   "y": 420
+  },
+  {
+   "type": "mouse_move",
+   "x": 700,
+   "y": 300
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-dragging",
+   "equals": "true"
+  },
+  {
+   "type": "mouse_up",
+   "x": 700,
+   "y": 300
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:nth-child(7) > path"
+   },
+   "attribute": "d",
+   "contains": "M700 "
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:nth-child(7)"
+   },
+   "attribute": "data-note",
+   "equals": "D4"
+  },
+  {
+   "type": "mouse_down",
+   "x": 1030,
+   "y": 449
+  },
+  {
+   "type": "mouse_move",
+   "x": 1120,
+   "y": 420
+  },
+  {
+   "type": "mouse_up",
+   "x": 1120,
+   "y": 420
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:last-child > path"
+   },
+   "attribute": "d",
+   "contains": "M1030 "
+  },
+  {
+   "type": "key_press",
+   "key": "z"
+  },
+  {
+   "type": "key_press",
+   "key": "z"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:nth-child(7) > path"
+   },
+   "attribute": "d",
+   "contains": "M640 "
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": ".strings > g:last-child"
+   },
+   "attribute": "data-note",
+   "equals": "E5"
+  },
+  {
+   "type": "key_press",
+   "key": "2"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-voice",
+   "equals": "kalimba"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".menu-button"
+   }
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".panel"
+   },
+   "equals": 1
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".choice[data-action='scale'][data-value='1']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-scale",
+   "equals": "dub"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".panel"
+   },
+   "equals": 0
+  },
+  {
+   "type": "key_press",
+   "key": "l"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-layout",
+   "equals": "loom"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "1"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".tool[data-action='clear']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "0"
+  },
+  {
+   "type": "key_press",
+   "key": "z"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "1"
+  },
+  {
+   "type": "key_press",
+   "key": "e"
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".status"
+   },
+   "contains": "Saved temp/soundflow/soundflow-"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".tool[data-action='clear']"
+   }
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".hint-sample"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-strokes",
+   "equals": "4"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-layout",
+   "equals": "harp"
+  },
+  {
+   "type": "advance_time",
+   "ms": 1500,
+   "steps": 60
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-speed",
+   "equals": "1"
+  },
+  {
+   "type": "key_press",
+   "key": "="
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-speed",
+   "equals": "1.5"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".tool.speed"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-speed",
+   "equals": "2"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".tool.speed"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-speed",
+   "equals": "0.5"
+  },
+  {
+   "type": "key_press",
+   "key": "-"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-speed",
+   "equals": "0.5"
+  },
+  {
+   "type": "advance_time",
+   "ms": 500,
+   "steps": 20
+  },
+  {
+   "type": "key_press",
+   "key": "h"
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-ribbons",
+   "equals": "false"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".ribbon"
+   },
+   "equals": 0
+  },
+  {
+   "type": "advance_time",
+   "ms": 600,
+   "steps": 24
+  },
+  {
+   "type": "render",
+   "file": "temp/soundflow/ui_thread.png"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".tool[data-action='ribbons']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-ribbons",
+   "equals": "true"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".ribbon"
+   },
+   "equals": 4
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": ".tool[data-action='sound']"
+   }
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#soundflow"
+   },
+   "attribute": "data-sound",
+   "equals": "off"
+  }
+ ]
+}

@@ -6,6 +6,7 @@
 {"MixedSvgAndNativeTimelinesPauseAndSeekIndependently", "test/demo/scene3d/shared-animation.html", "test/scene3d/events/MixedSvgAndNativeTimelinesPauseAndSeekIndependently.json", 18},
 {"ParentTransformAndVisibilityUpdatePixels", "test/scene3d/events/ParentTransformAndVisibilityUpdatePixels.html", "test/scene3d/events/ParentTransformAndVisibilityUpdatePixels.json", 10},
 {"LambertAmbientDirectionalAndNonuniformNormals", "test/scene3d/events/LambertAmbientDirectionalAndNonuniformNormals.html", "test/scene3d/events/LambertAmbientDirectionalAndNonuniformNormals.json", 1},
+{"PointSpotAndEmissiveLightsShadeLambertSurfaces", "test/scene3d/events/PointSpotAndEmissiveLightsShadeLambertSurfaces.html", "test/scene3d/events/PointSpotAndEmissiveLightsShadeLambertSurfaces.json", 4},
 {"TransparencyIsOrderedAndPremultipliedOverBackground", "test/scene3d/events/TransparencyIsOrderedAndPremultipliedOverBackground.html", "test/scene3d/events/TransparencyIsOrderedAndPremultipliedOverBackground.json", 1},
 {"SharedGeometryMaterialAndActualInstancedDraw", "test/scene3d/events/SharedGeometryMaterialAndActualInstancedDraw.html", "test/scene3d/events/SharedGeometryMaterialAndActualInstancedDraw.json", 2},
 {"ViewBoxFramingMeetNoneSliceOriginAndDensity", "test/scene3d/events/ViewBoxFramingMeetNoneSliceOriginAndDensity.html", "test/scene3d/events/ViewBoxFramingMeetNoneSliceOriginAndDensity.json", 19},

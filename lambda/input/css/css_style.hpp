@@ -250,6 +250,9 @@ bool css_compute_line_height_value(const CssValue* value,
 // CSS Fonts §2.5 maps absolute font-size keywords before layout applies
 // inherited relative sizes such as larger and smaller.
 float css_font_size_keyword_px(CssEnum keyword);
+// whether a keyword is an absolute or relative font-size: `medium` is listed in
+// the border-width group it shares with thin/thick, so its group alone misses it
+bool css_keyword_is_font_size(CssEnum keyword);
 
 // CSS Color types
 typedef enum CssColorType {

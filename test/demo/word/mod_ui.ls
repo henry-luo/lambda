@@ -7,6 +7,7 @@ import files: lambda.edit.files
 import page: .mod_page
 import columns: .mod_columns
 import review: .mod_review
+import lookup: .mod_lookup
 import insert: .mod_insert
 import shapes: .mod_shapes
 import stories: .mod_stories
@@ -367,6 +368,10 @@ pub fn context_menu(st) => if (st.context==null) null else if (st.context.menu!=
                 button("context-" ++ entry.id,"format." ++ entry.id,model.spec("format." ++ entry.id).label,
                     entry.id,{},edit_mark_active(st.editor,entry.mark),disabled,"context-item icon-only")]>
             menu_item("paragraph","ui.paragraph","Paragraph…","settings",disabled);
+            // Word's order: lookups follow Paragraph. Read Mode hands over its copied text instead of a model range.
+            *[for (entry in [{id:"look-up",command:"ui.dictionary",label:"Look Up",icon:"book"},{id:"translate",command:"ui.translate",label:"Translate",icon:"globe"}])
+                menu_item(entry.id,entry.command,entry.label,entry.icon,false,null,
+                    if (st.read_only and st.context.copy_text!="") {text:st.context.copy_text} else {},st.context.item_selection)];
             if (model.current_node(st.editor,'a')==null) menu_item("link","ui.link","Link…","link",disabled,"⌘K") else null;
             menu_item("comment","ui.comment","New Comment…","comment_add",disabled or not model.can_comment(st.editor))>>
         >,false)
@@ -539,6 +544,8 @@ pub fn ribbon(editor,tab,nav,read_only,show_changes=true,opened_menu=null,font_f
                 button("update-citations","references.refresh","Update Citations & Bibliography","refresh",{},false,read_only)
                 button("new-source","ui.source","New Source","source_add",{new:true},false,read_only)>>])>
     else if (tab == "Review") <div class:"ribbon-groups review-ribbon",
+        group("Proofing",[large("dictionary","ui.dictionary","Dictionary","book",{},false,false,"Define the selected word")])
+        group("Language",[large("translate","ui.translate","Translate","globe",{},false,false,"Translate the selection or paragraph")])
         group("Comments",[<div class:"ribbon-command-row",
             large("new-comment","ui.comment","New Comment","comment_add",{},false,read_only or not model.can_comment(editor));
             <div class:"ribbon-command-stack",button("show-comments","ui.comments","Comments Pane","comment")
@@ -660,6 +667,48 @@ pub fn revisions(editor,read_only=false) {
                 button("revision-go-" ++ entry.id,"ui.revisionText","Go to","expand",{id:entry.id})
                 button("revision-accept-" ++ entry.id,"review.accept","Accept","check",{id:entry.id},false,read_only)
                 button("revision-reject-" ++ entry.id,"review.reject","Reject","close",{id:entry.id},false,read_only)>>]>
+}
+
+// Review lookups: one pane, two tabs, sharing the query between Dictionary and Translate.
+fn definition(r,speaking) => <article class:"lookup-entry",
+    <div class:"lookup-word",<strong r.word>;if (r.phonetic) <span class:"lookup-phonetic",r.phonetic> else null;
+        button("lookup-speak","ui.lookupSpeak",if (speaking) "Stop reading" else "Read aloud",ribbon_icons.icon("sound",22),{text:r.word},speaking,false,"icon-only lookup-speak")>;
+    *[for (i,m in r.meanings) <section class:"lookup-meaning",
+        <em class:"lookup-part",m.part>;
+        <ol class:"lookup-definitions",*[for (d in m.definitions) <li <span d.text>;if (d.example) <q class:"lookup-example",d.example> else null>]>;
+        if (len(m.synonyms)==0) null else <div class:"lookup-synonyms",<span class:"lookup-caption","Synonyms">;
+            *[for (j,s in m.synonyms) button("lookup-synonym-" ++ string(i) ++ "-" ++ string(j),"ui.lookupWord",s,null,{text:s},false,false,"lookup-chip","Look up " ++ s)]>>]>
+fn translation(p,read_only) => <article class:"lookup-entry",
+    <div class:"lookup-caption",lookup.language_name(p.result.source) ++ " → " ++ lookup.language_name(p.target)>;
+    <p class:"lookup-translation",lang:p.target,p.result.text>;
+    <div class:"comment-actions",button("lookup-copy","ui.lookupCopy","Copy","copy");
+        button("lookup-insert","ui.lookupInsert","Insert","check",{},false,read_only,"","Replace the source text with this translation")>>
+pub fn lookup_pane(st) {
+    let p = st.lookup
+    let dictionary = p.kind=="dictionary"
+    let field = if (dictionary) apply(<control.input id:"lookup-query",class:"ribbon-select",type:"text",label:"Word to look up",
+            placeholder:"Look up an English word",value:p.query,on_change:"ui.lookupQuery">)
+        else apply(<control.text_area id:"lookup-text",class:"lookup-source",label:"Text to translate",
+            placeholder:"Text to translate",value:p.query,rows:5,maxlength:lookup.max_text,on_change:"ui.lookupQuery">);
+    <aside id:"lookup-pane",class:"selection-pane lookup-pane",["aria-label"]:if (dictionary) "Dictionary" else "Translator",["data-lookup"]:p.kind,
+        <div class:"navigation-heading",<strong class:"pane-heading",if (dictionary) "Dictionary" else "Translator">;
+            button("close-lookup-pane","ui.lookupClose","Close","close",{},false,false,"icon-only")>;
+        <div class:"navigation-tabs",role:"tablist",["aria-label"]:"Lookup",
+            button("lookup-tab-dictionary","ui.dictionary","Dictionary","book",{text:p.query},dictionary)
+            button("lookup-tab-translate","ui.translate","Translate","globe",{text:p.query},not dictionary)>;
+        field;
+        if (dictionary) null else <label class:"shape-field",<span "Translate to">;
+            apply(<control.select id:"lookup-target",class:"ribbon-select",label:"Translate to",options:lookup.languages,
+                value:p.target,on_change:"ui.lookupTarget">)>;
+        button("lookup-search","ui.lookupSearch",if (dictionary) "Look Up" else "Translate",if (dictionary) "search" else "globe",{},false,
+            p.loading or trim(p.query)=="","lookup-go");
+        <div id:"lookup-result",class:"lookup-result",role:"status",["aria-busy"]:string(p.loading),
+            if (p.loading) <p class:"pane-hint",if (dictionary) "Looking up…" else "Translating…">
+            else if (p.error!=null) <p class:"lookup-error",role:"alert",p.error>
+            else if (p.result==null) <p class:"pane-hint",if (dictionary) "Select a word, or type one and press Enter."
+                else "Select text, or place the caret in a paragraph. Ctrl/⌘ Enter translates.">
+            else if (dictionary) definition(p.result,p.speech!=null) else translation(p,st.read_only)>;
+        <p class:"lookup-credit",if (dictionary) "Free Dictionary API (dictionaryapi.dev) · Wiktionary, CC BY-SA" else "Google Translate">>
 }
 
 fn dialog_field(id,label,value,numeric=false,min=0,max=2000,step=1) => <label class:"dialog-field",

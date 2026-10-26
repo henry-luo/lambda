@@ -1,0 +1,16 @@
+{
+  "name": "A column flex item that is a wrapping row gets its wrapped height, so later items stay inside the container",
+  "html": "test/ui/flex_column_wrapping_row_height.html",
+  "viewport": {"width": 1000, "height": 600},
+  "events": [
+    {"type": "log", "message": "six 300px items with 20px gaps wrap to two lines in 964px: 50 + 20 + 50 + 36 padding = 156"},
+    {"type": "assert_rect", "target": {"selector": "#bar"}, "y": 64, "height": 156},
+    {"type": "assert_rect", "target": {"selector": "#body"}, "y": 220, "height": 328},
+    {"type": "assert_rect", "target": {"selector": "#foot"}, "y": 548, "height": 52},
+    {"type": "resize", "width": 700, "height": 600},
+    {"type": "wait", "ms": 50},
+    {"type": "log", "message": "at 664px content width two items fit per line: three lines, 3x50 + 2x20 + 36 = 226"},
+    {"type": "assert_rect", "target": {"selector": "#bar"}, "y": 64, "height": 226},
+    {"type": "assert_rect", "target": {"selector": "#foot"}, "y": 548, "height": 52}
+  ]
+}

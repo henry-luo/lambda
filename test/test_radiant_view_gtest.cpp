@@ -520,7 +520,7 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     };
     const DemoCase cases[] = {
         // with no name, `lambda demo` opens the demo index (test/demo/index.ls).
-        {nullptr, "#demo-index .tile[data-demo=doom]"},
+        {nullptr, "#demo-index .card[data-demo=tetris]"},
         {"tetris", "#tetris[data-mode=ready]"},
         {"marble-drop", "#marble-drop[data-level='1']"},
         {"superlambda", "#superlambda[data-mode=ready]"},

@@ -911,6 +911,9 @@ uint32_t dom_node_child_index(const DomNode* child);
 uint32_t dom_text_utf16_length(const DomText* t);
 uint32_t dom_text_utf16_to_utf8(const DomText* t, uint32_t u16_offset);
 uint32_t dom_text_utf8_to_utf16(const DomText* t, uint32_t u8_offset);
+// Code-point offsets for the Lambda editor's source positions (S2.5.8).
+uint32_t dom_text_utf16_to_codepoint(const DomText* t, uint32_t u16_offset);
+uint32_t dom_text_codepoint_to_utf16(const DomText* t, uint32_t cp_offset);
 
 // ============================================================================
 // DomRange — live range
@@ -3248,6 +3251,14 @@ void state_store_caret_clear(DocState* state);
 void caret_project_visual(DocState* state, float x, float y, float height);
 
 /**
+ * The window translation of the frame that embeds `view`'s document, from the
+ * hit origin of its containing block (zero in the top-level document).
+ * Editing geometry resolves points in the view's own document, so window
+ * pointers subtract this first.
+ */
+RdtLogicalPoint view_frame_translation(View* view, float block_x, float block_y);
+
+/**
  * Project visual caret geometry and embedding viewport offset from a hit block origin.
  */
 void caret_project_visual_from_block(DocState* state, View* view,
@@ -4547,9 +4558,10 @@ struct SmTransitionGuard {
 //   render_map records the SOURCE PATH (a heap-owned int[] of child
 //   indices) for every rendered subtree at apply() time. Reverse lookup
 //   then returns a stable path.
-// * UTF-16 ↔ UTF-8 conversion happens here, at the DOM-API boundary,
-//   matching dom_text_utf16_to_utf8 / dom_text_utf8_to_utf16 in
-//   dom_range.hpp.
+// * A text-leaf offset counts code points, the unit Lambda strings index
+//   by (S2.5.8). UTF-16 ↔ code-point conversion happens here, at the
+//   DOM-API boundary, through dom_text_utf16_to_codepoint /
+//   dom_text_codepoint_to_utf16 in dom_range.cpp.
 //
 // What is implemented in this header today: the data types and function
 // declarations the renderer + event dispatch will call. The DOM-side
@@ -4588,7 +4600,7 @@ bool source_path_equal(const SourcePathC* a, const SourcePathC* b);
 // ---------------------------------------------------------------------------
 
 typedef enum SourcePosKind {
-    SOURCE_POS_TEXT    = 0,   // offset is UTF-8 byte offset within text
+    SOURCE_POS_TEXT    = 0,   // offset is a code-point offset within text
     SOURCE_POS_ELEMENT = 1,   // offset is child index within container
 } SourcePosKind;
 
