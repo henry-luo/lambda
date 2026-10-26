@@ -1407,6 +1407,8 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         return;
     }
 
+    // final item flow owns its paragraph direction as well as its font/strut.
+    layout_setup_inline_direction(lycon, flex_item);
     line_init(lycon, content_x_offset, content_x_offset + content_width);
     // CRITICAL: Check if this flex item is ITSELF a flex container (nested flex)
     if (flex_item->display.inner == CSS_VALUE_FLEX) {
@@ -1594,6 +1596,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
 
     if (has_text_content && flex) {
+        layout_setup_inline_direction(lycon, flex_container);
         // Direct text is laid out against the flex container's resolved axes;
         // the anonymous-item pass must not replace those physical rectangles.
         flex->direct_text_geometry_handled = true;

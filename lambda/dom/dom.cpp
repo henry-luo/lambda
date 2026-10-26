@@ -3576,14 +3576,12 @@ static void reset_foreign_document_cache() {
     }
     s_doc_with_window_count = 0;
 }
-JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (DomDocumentResourceData* data), free_document, (static_cast<DomDocument*>(data)))
-
 static bool dom_retains_adopted_document(DomDocument* owner,
                                            DomDocument* target) {
     if (owner == target) return true;
     for (DomDocumentResource* resource = owner->resources; resource;
          resource = resource->next) {
-        if (resource->destroy == dom_destroy_adopted_document &&
+        if (resource->destroy == free_document_resource &&
             dom_retains_adopted_document((DomDocument*)resource->data, target)) {
             return true;
         }
@@ -3621,7 +3619,7 @@ static bool dom_transfer_document_storage(DomDocument* source,
     if (dom_retains_adopted_document(source, destination)) return true;
 
     if (!dom_document_add_resource(destination, source,
-                                   dom_destroy_adopted_document)) {
+                                   free_document_resource)) {
         log_error("dom_adopt: failed to retain source document storage");
         return false;
     }

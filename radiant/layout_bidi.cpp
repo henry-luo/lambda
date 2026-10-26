@@ -22,10 +22,13 @@ typedef struct BidiCharFragment {
     TextRect* rect;
     int rect_slot;
     int logical_index;
+    int source_index;
+    int source_length;
     uint32_t codepoint;
     float width;
     float advance_width;
     float visual_x;
+    bool synthetic_control;
 } BidiCharFragment;
 
 typedef struct BidiRectInfo {
@@ -61,8 +64,43 @@ typedef struct BidiLineCounts {
     bool has_bidi_trigger;
     bool has_bidi_inline_content;
     bool has_bidi_layout_feature;
+    bool has_css_scope_controls;
     bool has_inline_block;
 } BidiLineCounts;
+
+typedef struct BidiScopeControls {
+    uint32_t start[2];
+    uint32_t end[2];
+    int count;
+} BidiScopeControls;
+
+static BidiScopeControls bidi_scope_controls(CssEnum mode, CssEnum direction) {
+    // css writing modes §2.2: markup contributes these zero-advance codes
+    // to the UAX #9 input without changing source text or box ownership.
+    const static struct {
+        CssEnum mode;
+        uint32_t ltr[2], rtl[2], end[2];
+        int count;
+    } scopes[] = {
+        {CSS_VALUE_EMBED, {0x202a, 0}, {0x202b, 0}, {0x202c, 0}, 1},
+        {CSS_VALUE_BIDI_OVERRIDE, {0x202d, 0}, {0x202e, 0}, {0x202c, 0}, 1},
+        {CSS_VALUE_ISOLATE, {0x2066, 0}, {0x2067, 0}, {0x2069, 0}, 1},
+        {CSS_VALUE_ISOLATE_OVERRIDE, {0x2068, 0x202d}, {0x2068, 0x202e}, {0x202c, 0x2069}, 2},
+        {CSS_VALUE_PLAINTEXT, {0x2068, 0}, {0x2068, 0}, {0x2069, 0}, 1}
+    };
+    BidiScopeControls controls = {};
+    for (const auto& scope : scopes) {
+        if (scope.mode != mode) continue;
+        const uint32_t* start = direction == CSS_VALUE_RTL ? scope.rtl : scope.ltr;
+        for (int i = 0; i < scope.count; i++) {
+            controls.start[i] = start[i];
+            controls.end[i] = scope.end[i];
+        }
+        controls.count = scope.count;
+        break;
+    }
+    return controls;
+}
 
 static bool bidi_element_has_layout_feature(DomElement* element) {
     if (!element || !element->specified_style) return false;
@@ -151,58 +189,144 @@ int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir) {
     return dom_find_strong_direction(node, skip_explicit_dir, false);
 }
 
-CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback) {
-    int strong_class = layout_find_first_strong_direction(element, false);
-    if (strong_class > 0) return CSS_VALUE_RTL;
-    if (strong_class < 0) return CSS_VALUE_LTR;
-    return fallback;
+typedef struct BidiParagraphSearch {
+    DomText* anchor;
+    size_t anchor_byte;
+    size_t start_byte, end_byte;
+    int first_strong;
+    int isolate_depth;
+    bool contains_anchor;
+    bool complete;
+} BidiParagraphSearch;
+
+static void bidi_paragraph_boundary(BidiParagraphSearch* search) {
+    if (search->contains_anchor) search->complete = true;
+    else {
+        search->first_strong = 0;
+        search->isolate_depth = 0;
+    }
 }
 
-static int bidi_first_strong_in_line_view(View* view, int line_number) {
+static void bidi_scan_paragraph(DomNode* node, BidiParagraphSearch* search, bool isolated) {
+    if (!node || search->complete) return;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        const unsigned char* start = text->text_data();
+        if (!start) return;
+        const unsigned char* cursor = start;
+        const unsigned char* end = start + text->length;
+        bool preserve_breaks = !layout_white_space_collapses_newlines(get_white_space_value(node));
+        while (cursor < end && !search->complete) {
+            const unsigned char* before = cursor;
+            uint32_t codepoint = 0;
+            if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
+            size_t byte = (size_t)(before - start);
+            if (text == search->anchor && search->anchor_byte >= byte &&
+                search->anchor_byte < (size_t)(cursor - start)) search->contains_anchor = true;
+            bool paragraph_break = codepoint == 0x2029 ||
+                (preserve_breaks && layout_text_is_segment_break(codepoint));
+            if (paragraph_break) {
+                if (text == search->anchor) {
+                    if (search->contains_anchor) search->end_byte = (size_t)(cursor - start);
+                    else search->start_byte = (size_t)(cursor - start);
+                }
+                bidi_paragraph_boundary(search);
+                continue;
+            }
+            // P2 ignores the contents of both CSS and source Unicode isolates.
+            if (isolated) continue;
+            if (codepoint >= 0x2066 && codepoint <= 0x2068) search->isolate_depth++;
+            else if (codepoint == 0x2069 && search->isolate_depth > 0) search->isolate_depth--;
+            else if (!search->isolate_depth && !search->first_strong)
+                search->first_strong = utf_bidi_strong_class(codepoint);
+        }
+        if (text == search->anchor && search->anchor_byte == text->length)
+            search->contains_anchor = true;
+        return;
+    }
+    if (!node->is_element()) return;
+    DomElement* element = node->as_element();
+    DisplayValue display = resolve_display_value(element);
+    if (layout_display_is_none(display) || layout_element_is_abs_or_fixed(element) ||
+        layout_element_is_floated(element)) return;
+    if (element->tag() == MARKUP_NAME_BR) { bidi_paragraph_boundary(search); return; }
+    if (layout_intrinsic_element_is_atomic_inline(element)) return;
+    if (display.outer != CSS_VALUE_INLINE && display.outer != CSS_VALUE_CONTENTS) {
+        // an intervening block ends the parent's paragraph; its contents have
+        // an independent formatting context and cannot supply this P2 level.
+        bidi_paragraph_boundary(search);
+        return;
+    }
+    if (display.outer != CSS_VALUE_CONTENTS) isolated |= layout_unicode_bidi_isolate(
+        layout_inline_boundary_keyword(element, CSS_PROPERTY_UNICODE_BIDI,
+            CSS_VALUE_NORMAL, CSS_VALUE_NORMAL));
+    for (DomNode* child = element->first_child; child && !search->complete; child = child->next_sibling)
+        bidi_scan_paragraph(child, search, isolated);
+}
+
+static CssEnum bidi_plaintext_paragraph_direction(DomElement* scope, DomText* anchor,
+        size_t anchor_byte, LayoutPlaintextParagraphCache* cache = nullptr) {
+    if (cache && cache->scope == scope && cache->text == anchor &&
+        anchor_byte >= cache->start_byte && anchor_byte < cache->end_byte) return cache->direction;
+    BidiParagraphSearch search = {};
+    search.anchor = anchor;
+    search.anchor_byte = anchor_byte;
+    search.end_byte = anchor ? (size_t)anchor->length + 1 : 0;
+    search.contains_anchor = anchor == nullptr;
+    for (DomNode* child = scope->first_child; child && !search.complete; child = child->next_sibling)
+        bidi_scan_paragraph(child, &search, false);
+    CssEnum direction = search.contains_anchor && search.first_strong > 0 ? CSS_VALUE_RTL : CSS_VALUE_LTR;
+    if (cache && anchor) {
+        cache->scope = lam::up(scope);
+        cache->text = lam::up(anchor);
+        cache->start_byte = search.start_byte;
+        cache->end_byte = search.end_byte;
+        cache->direction = direction;
+    }
+    return direction;
+}
+
+CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback) {
+    return element ? bidi_plaintext_paragraph_direction(element, nullptr, 0) : fallback;
+}
+
+static bool bidi_find_line_anchor(View* view, int line_number, DomText** anchor, size_t* byte) {
     for (View* current = view; current; current = current->next()) {
         if (current->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(current);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 if (!bidi_is_line_text_rect(text, rect, line_number)) continue;
-                const char* cursor = (const char*)text->text_data() + rect->start_index;
-                const char* end = cursor + rect->length;
-                while (cursor < end) {
-                    uint32_t codepoint = 0;
-                    if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
-                    int strong_class = utf_bidi_strong_class(codepoint);
-                    if (strong_class != 0) return strong_class;
-                }
+                *anchor = text;
+                *byte = (size_t)rect->start_index;
+                return true;
             }
         } else if (current->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
-            int strong_class = span->first_child
-                ? bidi_first_strong_in_line_view(span->first_child, line_number) : 0;
-            if (strong_class != 0) return strong_class;
+            if (bidi_find_line_anchor(span->first_child, line_number, anchor, byte)) return true;
         }
     }
-    return 0;
+    return false;
 }
 
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon) {
     if (!lycon) return CSS_VALUE_LTR;
-    View* content = nullptr;
-    ViewBlock* line_block = nullptr;
-    if (lycon->view && lycon->view->is_block()) {
+    ViewBlock* line_block = lycon->block.flow_box;
+    if (!line_block && lycon->view && lycon->view->is_block()) {
         line_block = lam::view_require_block(lycon->view);
-    } else if (lycon->view) {
+    } else if (!line_block && lycon->view) {
         line_block = layout_nearest_block_ancestor(lycon->view->parent_view());
     }
-    if (line_block) {
-        content = line_block->first_child;
-    }
-    int strong_class = bidi_first_strong_in_line_view(
-        content, lycon->block.line_number);
-    if (strong_class > 0) return CSS_VALUE_RTL;
-    if (strong_class < 0) return CSS_VALUE_LTR;
-    // CSS Writing Modes §2.4.1: plaintext uses UAX #9 P2/P3 per paragraph;
-    // a neutral-only paragraph therefore falls back to the default LTR level,
-    // rather than inheriting a preceding paragraph's strong direction.
-    return CSS_VALUE_LTR;
+    if (!line_block) return CSS_VALUE_LTR;
+    DomText* anchor = lycon->line.last_text_view;
+    size_t byte = lycon->line.last_text_rect ? (size_t)lycon->line.last_text_rect->start_index : 0;
+    if (!bidi_is_line_text_rect(lycon->line.last_text_view, lycon->line.last_text_rect,
+            lycon->block.line_number) &&
+        !bidi_find_line_anchor(line_block->first_child, lycon->block.line_number, &anchor, &byte))
+        return CSS_VALUE_LTR;
+    // soft wraps reuse the same source paragraph, including strong text before
+    // this line or after its current source anchor. P3 defaults neutrals to LTR.
+    return bidi_plaintext_paragraph_direction(line_block->as_element(), anchor, byte,
+        &lycon->block.plaintext_paragraph);
 }
 
 static ViewBlock* bidi_static_inline_candidate(View* view, int line_number) {
@@ -248,12 +372,9 @@ static void bidi_count_views(View* view, int line_number, int depth,
                     bool bidi_format_control = bidi_codepoint_is_format_control(codepoint);
                     counts->chars++;
                     counts->has_bidi_trigger = counts->has_bidi_trigger ||
-                        bidi_reorder ||
-                        // the fragment pass protects inline-box edge geometry;
-                        // controls in bare text are already represented by the
-                        // normal text layout and must not reshuffle its ranges.
-                        (current_depth > 0 &&
-                         bidi_format_control);
+                        bidi_reorder || bidi_format_control;
+                    // source controls can open before an inline box and close
+                    // after it; their scope belongs to the whole paragraph.
                     counts->has_bidi_inline_content =
                         counts->has_bidi_inline_content ||
                         (current_depth > 0 &&
@@ -279,6 +400,12 @@ static void bidi_count_views(View* view, int line_number, int depth,
                 counts->chars++;
                 return false;
             }
+            if (span->blk) {
+                int controls = bidi_scope_controls(
+                    span->block()->unicode_bidi, span->block()->direction).count;
+                counts->chars += 2 * controls;
+                counts->has_css_scope_controls |= controls > 0;
+            }
             if (current_depth > counts->max_depth) counts->max_depth = current_depth;
             return true;
         }
@@ -293,6 +420,7 @@ static void bidi_count_views(View* view, int line_number, int depth,
             return false;
         }
         if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
+            if (!layout_inline_span_has_content_on_line(current, line_number)) return false;
             counts->has_inline_block = true;
             counts->chars++;
             return false;
@@ -353,6 +481,15 @@ static BidiCharFragment* bidi_append_atomic_fragment(
     fragment->advance_width = width;
     fragment->visual_x = 0.0f;
     return fragment;
+}
+
+static void bidi_append_controls(BidiCharFragment* chars, int* cursor,
+                                 const uint32_t* controls, int count) {
+    for (int i = 0; i < count; i++) {
+        BidiCharFragment* fragment = bidi_append_atomic_fragment(
+            chars, cursor, nullptr, controls[i], 0.0f);
+        if (fragment) fragment->synthetic_control = true;
+    }
 }
 
 static float bidi_char_raw_width(LayoutContext* lycon, ViewText* text,
@@ -454,6 +591,8 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                     fragment->rect = rect;
                     fragment->rect_slot = *rect_cursor - 1;
                     fragment->logical_index = *char_cursor - 1;
+                    fragment->source_index = rect->start_index + rect->length - remaining;
+                    fragment->source_length = consumed;
                     fragment->codepoint = codepoint;
                     fragment->width = bidi_char_raw_width(
                         lycon, text, codepoint, rect_use_fallback_metrics);
@@ -499,10 +638,16 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                 span_info->logical_end = *char_cursor - 1;
                 continue;
             }
+            BidiScopeControls controls = span_info->span->blk
+                ? bidi_scope_controls(span_info->span->block()->unicode_bidi,
+                    span_info->span->block()->direction) : BidiScopeControls{};
+            bidi_append_controls(chars, char_cursor, controls.start, controls.count);
+            span_info->logical_start = *char_cursor;
             bidi_fill_views(lycon, span_info->span->first_child, line_number, depth + 1,
                             chars, rects, spans, char_cursor, rect_cursor, span_cursor,
                             direction, use_fallback_metrics);
             span_info->logical_end = *char_cursor - 1;
+            bidi_append_controls(chars, char_cursor, controls.end, controls.count);
             continue;
         }
         if (current->view_type == RDT_VIEW_MARKER) {
@@ -515,6 +660,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             continue;
         }
         if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
+            if (!layout_inline_span_has_content_on_line(current, line_number)) continue;
             // UAX #9 treats an atomic inline box as an object, not as a letter
             // from the box's fallback font; U+FFFC gives it neutral bidi type.
             bidi_append_atomic_fragment(chars, char_cursor, current, 0xFFFC,
@@ -618,11 +764,75 @@ static void bidi_update_span_visual_ranges(BidiCharFragment* chars,
     for (int visual = 0; visual < char_count; visual++) {
         int logical = visual_to_logical[visual];
         if (logical < 0 || logical >= char_count) continue;
+        if (chars[logical].synthetic_control) continue;
         for (int span_index = 0; span_index < span_count; span_index++) {
             BidiSpanInfo* span = &spans[span_index];
             if (logical < span->logical_start || logical > span->logical_end) continue;
             span->min_visual = min(span->min_visual, visual);
             span->max_visual = max(span->max_visual, visual);
+        }
+    }
+}
+
+static void bidi_publish_paint_runs(LayoutContext* lycon, BidiCharFragment* chars,
+                                    BidiRectInfo* rects, int rect_count, const int* levels) {
+    if (!lycon->doc || !lycon->doc->view_tree ||
+        layout_block_inline_axis_is_vertical(lycon->block.flow_box)) return;
+    ViewTree* tree = lycon->doc->view_tree;
+    for (int i = 0; i < rect_count; i++) {
+        BidiRectInfo* info = &rects[i];
+        TextRect* source = info->rect;
+        tree->recycle_text_rects(source->bidi_runs);
+        source->bidi_runs = nullptr;
+        bool reversed = false;
+        for (int j = 0; j < info->char_count; j++) {
+            int index = info->first_char + j;
+            reversed |= chars[index].width > 0.0f && (levels[index] & 1);
+        }
+        if (!reversed) continue;
+        TextRect* previous = nullptr;
+        for (int begin = 0; begin < info->char_count;) {
+            int first = info->first_char + begin;
+            if (bidi_codepoint_is_format_control(chars[first].codepoint)) { begin++; continue; }
+            int level = levels[first];
+            int end = begin + 1;
+            while (end < info->char_count &&
+                (bidi_codepoint_is_format_control(chars[info->first_char + end].codepoint) ||
+                 levels[info->first_char + end] == level)) end++;
+            float left = FLT_MAX, right = -FLT_MAX;
+            for (int j = begin; j < end; j++) {
+                BidiCharFragment* part = &chars[info->first_char + j];
+                if (part->width <= 0.0f) continue;
+                left = min(left, part->visual_x);
+                right = max(right, part->visual_x + part->width);
+            }
+            if (left != FLT_MAX) {
+                TextRect* run = tree->alloc_text_rect();
+                if (!run) break;
+                *run = *source;
+                run->bidi_runs = nullptr;
+                run->next = nullptr;
+                // relative paint geometry survives parent shifts and retained replay;
+                // the original source/query rectangle keeps its existing visual union.
+                run->x = left - source->x;
+                run->y = 0.0f;
+                run->width = right - left;
+                run->start_index = chars[first].source_index;
+                BidiCharFragment* last = &chars[info->first_char + end - 1];
+                run->length = last->source_index + last->source_length - run->start_index;
+                run->hyphenated_leading_bytes = run->hyphenated_trailing_bytes = 0;
+                run->trailing_whitespace_bytes = 0;
+                run->has_trailing_hyphen = run->has_trailing_ellipsis = false;
+                run->bidi_reversed = (level & 1) != 0;
+                if (previous) previous->next = lam::own(run);
+                else source->bidi_runs = lam::own(run);
+                previous = run;
+            }
+            begin = end;
+        }
+        if (previous) {
+            previous->has_trailing_hyphen = source->has_trailing_hyphen;
+            previous->has_trailing_ellipsis = source->has_trailing_ellipsis;
         }
     }
 }
@@ -837,13 +1047,22 @@ static void bidi_position_forced_breaks(View* view, int line_number,
 }
 
 static void bidi_resolve_line(LayoutContext* lycon, View* root,
-                               CssEnum line_direction, bool isolated_paragraph) {
+                               CssEnum line_direction, bool isolated_paragraph,
+                               CssEnum root_mode = CSS_VALUE_NORMAL) {
     if (!root) return;
     BidiLineCounts counts = {};
     bidi_count_views(root, lycon->block.line_number, 0,
                      line_direction, &counts);
+    bool root_override = root_mode == CSS_VALUE_BIDI_OVERRIDE ||
+        root_mode == CSS_VALUE_ISOLATE_OVERRIDE;
+    BidiScopeControls root_controls = bidi_scope_controls(
+        root_override ? CSS_VALUE_BIDI_OVERRIDE : CSS_VALUE_NORMAL, line_direction);
+    counts.chars += 2 * root_controls.count;
+    counts.has_bidi_layout_feature |= root_controls.count > 0;
+    counts.has_css_scope_controls |= root_controls.count > 0;
     if (counts.has_inline_block && counts.has_bidi_layout_feature &&
-        !counts.has_bidi_trigger) {
+        !counts.has_bidi_trigger && !counts.has_css_scope_controls &&
+        line_direction != CSS_VALUE_RTL) {
         // keep atomic lines without a directional run in their native geometry;
         // orthogonal descendants do not need a second UAX #9 placement pass.
         return;
@@ -872,9 +1091,11 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     int char_cursor = 0;
     int rect_cursor = 0;
     int span_cursor = 0;
+    bidi_append_controls(chars, &char_cursor, root_controls.start, root_controls.count);
     bidi_fill_views(lycon, root, lycon->block.line_number, 0, chars, rects, spans,
                     &char_cursor, &rect_cursor, &span_cursor,
                     line_direction, counts.has_bidi_trigger);
+    bidi_append_controls(chars, &char_cursor, root_controls.end, root_controls.count);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
     for (int i = 0; i < rect_cursor; i++) {
         rects[i].line_has_bidi_inline_content = counts.has_bidi_inline_content;
@@ -995,6 +1216,7 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     bidi_place_visual_line(lycon, chars, rects, counts.rects, spans, counts.spans,
                            visual_to_logical, counts.chars, counts.max_depth,
                            levels, counts.has_inline_block && !isolated_paragraph);
+    bidi_publish_paint_runs(lycon, chars, rects, counts.rects, levels);
     float visual_left = FLT_MAX;
     float visual_right = -FLT_MAX;
     for (int i = 0; i < counts.chars; i++) {
@@ -1032,8 +1254,16 @@ static void bidi_resolve_inline_isolates(LayoutContext* lycon, View* view) {
         // CSS Writing Modes §2.2 gives an isolate its own bidi paragraph;
         // treating it atomically outside does not reorder its split text runs.
         CssEnum parent_direction = lycon->line.inline_base_direction;
-        lycon->line.inline_base_direction = span->block()->direction;
-        bidi_resolve_line(lycon, span->first_child, span->block()->direction, true);
+        CssEnum direction = span->block()->direction;
+        if (span->block()->unicode_bidi == CSS_VALUE_PLAINTEXT) {
+            DomText* anchor = nullptr;
+            size_t byte = 0;
+            direction = bidi_find_line_anchor(span->first_child, lycon->block.line_number, &anchor, &byte)
+                ? bidi_plaintext_paragraph_direction(span->as_element(), anchor, byte) : CSS_VALUE_LTR;
+        }
+        lycon->line.inline_base_direction = direction;
+        bidi_resolve_line(lycon, span->first_child, direction, true,
+            span->block()->unicode_bidi);
         lycon->line.inline_base_direction = parent_direction;
     }
 }
@@ -1042,5 +1272,7 @@ void layout_bidi_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.start_view) return;
     View* root = layout_inline_fragment_root(lycon->line.start_view);
     bidi_resolve_inline_isolates(lycon, root);
-    bidi_resolve_line(lycon, root, lycon->line.inline_base_direction, false);
+    ViewBlock* block = lycon->block.flow_box;
+    bidi_resolve_line(lycon, root, lycon->line.inline_base_direction, false,
+        block && block->blk ? block->block()->unicode_bidi : CSS_VALUE_NORMAL);
 }

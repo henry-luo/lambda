@@ -312,6 +312,53 @@ bool layout_block_has_automatic_height(ViewBlock* block) {
     return layout_block_has_automatic_size(block, false);
 }
 
+static float orthogonal_fixed_size_limit(ViewBlock* block, bool horizontal, bool minimum) {
+    if (!block || !block->blk || !block->is_element()) return -1.0f;
+    CssDeclaration* declaration = layout_specified_physical_minmax_size_declaration(
+        block->as_element(), horizontal, minimum);
+    const CssValue* value = declaration ? declaration->value : nullptr;
+    if (!value || layout_css_value_has_percentage(value) ||
+        (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_NUMBER &&
+         value->type != CSS_VALUE_TYPE_FUNCTION)) return -1.0f;
+    float limit = minimum ? layout_explicit_min_axis_or(block, horizontal, -1.0f)
+                          : layout_explicit_max_axis_or(block, horizontal, -1.0f);
+    return limit < 0.0f ? limit : layout_content_size_if_border_box(block, limit, horizontal);
+}
+
+float layout_orthogonal_inline_basis(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block) return 0.0f;
+    bool horizontal = !layout_block_inline_axis_is_vertical(block);
+    ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
+    const BlockContext* context = lycon->block.parent;
+    float given_size = context ? (horizontal ? context->given_width : context->given_height) : -1.0f;
+    if (parent && context && given_size >= 0.0f &&
+        (!layout_block_has_automatic_size(parent, horizontal) ||
+         (!horizontal && layout_percentage_height_basis_is_algorithmically_definite(parent, lycon)))) {
+        return max(horizontal ? context->content_width : context->content_height, 0.0f);
+    }
+    // css writing modes §7.3.1: only the containing block's fixed maximum,
+    // nearest scrollport and initial containing block bound indefinite space.
+    float fallback = horizontal ? lycon->width : lycon->height;
+    float parent_maximum = orthogonal_fixed_size_limit(parent, horizontal, false);
+    if (parent_maximum >= 0.0f) {
+        fallback = min(fallback, max(parent_maximum, orthogonal_fixed_size_limit(parent, horizontal, true)));
+    }
+    for (ViewElement* ancestor = block->parent_view(); ancestor;
+         ancestor = ancestor->parent_view()) {
+        ViewBlock* scrollport = lam::view_as_block(ancestor);
+        if (!scrollport || !layout_block_establishes_scroll_container(scrollport)) continue;
+        float limit = !layout_block_has_automatic_size(scrollport, horizontal)
+            ? layout_block_given_content_size(scrollport, horizontal) : -1.0f;
+        float maximum = orthogonal_fixed_size_limit(scrollport, horizontal, false);
+        if (maximum >= 0.0f) limit = limit < 0.0f ? maximum : min(limit, maximum);
+        if (limit >= 0.0f) {
+            fallback = min(fallback, max(limit, orthogonal_fixed_size_limit(scrollport, horizontal, true)));
+        }
+        break;
+    }
+    return max(fallback, 0.0f);
+}
+
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode) {
     // Sideways modes keep vertical block geometry; their distinction is typographic.
     if (writing_mode == CSS_VALUE_VERTICAL_RL || writing_mode == CSS_VALUE_SIDEWAYS_RL) {
@@ -324,22 +371,19 @@ WritingMode layout_writing_mode_from_css(CssEnum writing_mode) {
 }
 
 WritingMode layout_block_writing_mode(ViewBlock* block) {
+    if (block && block->doc && block->doc->root.get() == block &&
+        dom_element_is_html_tag(block->as_element(), MARKUP_NAME_HTML)) {
+        DomElement* body = dom_document_body_element(block->doc);
+        // principal flow propagation changes the root's used mode, preserving
+        // its computed CSS mode for inheritance and logical-property mapping.
+        if (body && dom_element_is_html_tag(body, MARKUP_NAME_BODY))
+            return layout_element_writing_mode(body);
+    }
     WritingMode mode = block && block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
     if (mode != WM_HORIZONTAL_TB || !block) return mode;
-    // Intrinsic sizing may run before the computed BlockProp exists; resolve
-    // the inherited specified axis there instead of falling back to horizontal.
-    DomElement* current = block->as_element();
-    for (DomNode* node = current; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        DomElement* element = node->as_element();
-        CssDeclaration* declaration = element && element->specified_style
-            ? style_tree_get_declaration(element->specified_style, CSS_PROPERTY_WRITING_MODE)
-            : nullptr;
-        if (!declaration || !declaration->value ||
-            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
-        return layout_writing_mode_from_css(declaration->value->data.keyword);
-    }
-    return mode;
+    // intrinsic sizing can precede BlockProp resolution; share computed
+    // inheritance with logical-property mapping instead of reparsing it here.
+    return layout_element_writing_mode(block->as_element());
 }
 
 bool layout_block_inline_axis_is_vertical(ViewBlock* block) {

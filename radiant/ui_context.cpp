@@ -14,6 +14,7 @@
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+#include "../lib/time_util.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -405,41 +406,22 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
-struct DeferredDocumentDestroy {
-    lam::Own<DomDocument> document;
-    DeferredDocumentDestroy* next;
-};
-static thread_local DeferredDocumentDestroy* deferred_documents;
-static thread_local bool draining_documents;
-
-void radiant_defer_document_destroy(DomDocument* doc) {
-    if (!doc) return;
-    for (DeferredDocumentDestroy* pending = deferred_documents; pending; pending = pending->next)
-        if (pending->document.get() == doc) return;
-    auto* pending = (DeferredDocumentDestroy*)mem_calloc(1, sizeof(DeferredDocumentDestroy), MEM_CAT_DOM);
-    if (!pending) { log_error("document-retire: could not retain deferred document"); return; }
-    pending->document = lam::own(doc);
-    pending->next = deferred_documents;
-    deferred_documents = pending;
-}
-
-bool radiant_drain_document_destruction() {
-    if (draining_documents || (context && context->execution_depth != 0)) return false;
-    bool released = deferred_documents != nullptr;
-    draining_documents = true;
-    while (deferred_documents) {
-        DeferredDocumentDestroy* pending = deferred_documents;
-        deferred_documents = pending->next;
-        free_document(pending->document.get());
-        mem_free(pending);
+struct DocumentCleanupTimer {
+    double* elapsed_ms;
+    uint64_t start_ns;
+    explicit DocumentCleanupTimer(double* duration)
+        : elapsed_ms(duration), start_ns(duration ? time_now_ns() : 0) {}
+    ~DocumentCleanupTimer() {
+        if (elapsed_ms) *elapsed_ms += time_elapsed_ms_f(start_ns, time_now_ns());
     }
-    draining_documents = false;
-    return released;
-}
+};
 
 void free_document(DomDocument* doc) {
-    if (!doc) return;
-    radiant_drain_document_destruction();
+    free_document_profiled(doc, nullptr);
+}
+
+bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
+    if (!doc) return true;
     // Every check that can refuse teardown runs before the first release, so a
     // refused document stays whole and owned instead of half torn down (its
     // Input and loader pool used to be detached and then dropped on return).
@@ -453,7 +435,7 @@ void free_document(DomDocument* doc) {
         // One document cannot multiplex independent evaluators on one host
         // thread. Such documents need a shared owner or separate worker.
         log_error("free_document: Lambda and JS runtimes have different EvalContexts; document retained");
-        return;
+        return false;
     }
     EvalContext* document_owner = state_owner ? state_owner : timer_owner;
     // EO5v2: another document may hold the thread (each manages its own
@@ -461,7 +443,7 @@ void free_document(DomDocument* doc) {
     // than refusing — refusing here used to leak the whole document.
     if (document_owner && !radiant_eval_context_switch(document_owner)) {
         log_error("free_document: could not bind the document EvalContext; document retained");
-        return;
+        return false;
     }
     // Timer handles live in the document capsule; teardown must not inspect
     // another document's queue through an ambient host context. StateStore owns
@@ -472,19 +454,19 @@ void free_document(DomDocument* doc) {
         (state_owner && (!eval_context_matches(state_owner) ||
             (js_runtime_state_for(state_owner) && !js_runtime_state_init(state_owner))))) {
         log_error("free_document: document runtime state unavailable; document retained");
-        return;
+        return false;
     }
 
     // S13.3.1v2: tasks the document owns are cancelled, then joined, while its
     // state and DOM still exist, so their cleanup runs against a live document
     if (state_owner) lambda_document_tasks_release(doc);
 
-    radiant_cancel_async_document_loads(doc);
-    // Network image release detaches surfaces from element embed props, which
-    // live in the view tree's prop pool; run it while that pool is alive rather
-    // than from the document-resource destructor after the view tree is gone
-    // (teardown audit F3). The destructor then finds no manager.
-    radiant_cleanup_network_support(doc);
+    {
+        DocumentCleanupTimer phase(timing ? &timing->network_ms : nullptr);
+        radiant_cancel_async_document_loads(doc);
+        // network image release detaches surfaces from still-live embed props.
+        radiant_cleanup_network_support(doc);
+    }
 
     Input* document_input = dom_document_take_owned_input_resources(doc);
     Pool* owned_loader_pool = doc->owned_loader_pool;
@@ -502,8 +484,11 @@ void free_document(DomDocument* doc) {
         }
     }
 
-    dom_retire_begin_destroy(doc);
-    radiant_document_destroy_state(doc);
+    {
+        DocumentCleanupTimer phase(timing ? &timing->state_ms : nullptr);
+        dom_retire_begin_destroy(doc);
+        radiant_document_destroy_state(doc);
+    }
 
     // JS mutation records can retain detached controls with heap-owned props.
     // Release them while the document arena is still valid: runtime teardown
@@ -519,17 +504,23 @@ void free_document(DomDocument* doc) {
 
     // State teardown releases context-owned maps, so the retained JS runtime
     // can be destroyed only after the document has detached those references.
-    script_runner_cleanup_js_state(doc);
+    {
+        DocumentCleanupTimer phase(timing ? &timing->script_ms : nullptr);
+        script_runner_cleanup_js_state(doc);
+    }
 
     // Embedded documents belong to their iframe elements. The view-tree walk
     // below releases them only when the tree is laid out and reaches the
     // iframe; walk the DOM first so a parent with no view tree, or one reset
     // since its last layout, does not leak a child whose embedding edge would
     // then dangle.
-    if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
-
-    view_tree_secondary_release_all(doc);
-    view_tree_shell_destroy(doc, doc->view_tree);
+    {
+        DocumentCleanupTimer phase(timing ? &timing->view_ms : nullptr);
+        if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
+        view_tree_secondary_release_all(doc);
+        view_tree_shell_destroy(doc, doc->view_tree);
+    }
+    DocumentCleanupTimer document_phase(timing ? &timing->document_ms : nullptr);
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
     if (doc->url) {
@@ -562,13 +553,14 @@ void free_document(DomDocument* doc) {
         if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
             log_error("free_document: could not rebind owned runtime for cleanup; runtime retained");
             owned_runtime.release();
-            return;
+            return true;
         }
         runtime_cleanup(owned_runtime.get());
         log_debug("free_document: released the document-owned script runtime");
     }
     if (document_input) input_release_document_resources(document_input);
     if (owned_loader_pool) mem_pool_destroy(owned_loader_pool);
+    return true;
 }
 
 void ui_context_cleanup(UiContext* uicon) {

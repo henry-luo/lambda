@@ -37,6 +37,7 @@ extern "C" {
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/url.h"
+#include "../lib/base64.h"
 #include "../lib/path_str.h"
 #include "../lib/log.h"
 #include "../lib/image.h"
@@ -2360,6 +2361,21 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (html_source) {
         html_content = const_cast<char*>(html_source);
         html_length = strlen(html_source);
+    } else if (html_url->scheme == URL_SCHEME_DATA) {
+        // data URLs carry a MIME-selected document body and have no local file path.
+        char content_type[256] = {};
+        lam::Temp<uint8_t> body(parse_data_uri(url_get_href(html_url), content_type,
+                                             sizeof(content_type), &html_length));
+        const char* extension = mime_extension_from_content_type(content_type);
+        if (!body || !extension ||
+                (strcmp(extension, ".html") && strcmp(extension, ".xhtml"))) {
+            log_error("document-data-url: unsupported or malformed HTML/XHTML transport");
+            mem_free(html_filepath);
+            return nullptr;
+        }
+        xhtml = !strcmp(extension, ".xhtml");
+        html_content = (char*)body.release();
+        html_content_owned = true;
     } else if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
         const char* url_str = url_get_href(html_url);
         char* eff_url = nullptr;
@@ -3008,8 +3024,9 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
             viewport_height, pool, true, &handled, js_host_config, defer_html_scripts,
             js_host_config && js_host_config->host_driven_loop);
         document_apply_js_host_config(doc, js_host_config);
-    } else if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
-        log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
+    } else if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS ||
+               full_url->scheme == URL_SCHEME_DATA) {
+        log_info("document-url: loading HTML transport: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
             !defer_html_scripts, print_media);
@@ -5886,8 +5903,10 @@ static bool layout_single_file(
     {
         // the batch's documents share one loader runtime, as a window's do
         LayoutLoaderHostScope loader_host(ui_context);
-        doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                       pool, false, &special_handled, &js_host_config, false, false);
+        if (input_url->scheme != URL_SCHEME_DATA) {
+            doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
+                                           pool, false, &special_handled, &js_host_config, false, false);
+        }
     }
     if (!special_handled) {
         const int max_redirects = 8;
@@ -6066,38 +6085,24 @@ static bool layout_single_file(
 
     auto cleanup_start = time_now_ns();
     if (doc) {
-        if (doc->resource_manager) {
-            auto cleanup_phase_start = time_now_ns();
-            radiant_cleanup_network_support(doc);
-            phase_timing.cleanup_network_ms += time_elapsed_ms_f(
-                cleanup_phase_start, time_now_ns());
-        }
-        Runtime* render_runtime = dom_document_script_runtime(doc);
-        // A custom layout may have left the batch's loader runtime bound;
-        // teardown is quiescent, so take the binding as free_document does.
-        if (render_runtime &&
-                !radiant_eval_context_switch(runtime_get_eval_context(render_runtime))) {
-            log_error("[Layout] document cleanup reached a foreign eval thread");
-        }
         source_pos_bridge_reset();
-        auto cleanup_phase_start = time_now_ns();
-        radiant_document_destroy_state(doc);
-        phase_timing.cleanup_state_ms += time_elapsed_ms_f(cleanup_phase_start, time_now_ns());
-        render_map_destroy();
-        cleanup_phase_start = time_now_ns();
-        script_runner_cleanup_js_state(doc);
-        phase_timing.cleanup_script_ms += time_elapsed_ms_f(cleanup_phase_start, time_now_ns());
-
-        if (doc->view_tree) {
-            cleanup_phase_start = time_now_ns();
-            view_tree_shell_destroy(doc, doc->view_tree);
-            phase_timing.cleanup_view_ms += time_elapsed_ms_f(
-                cleanup_phase_start, time_now_ns());
+        // retired iframe storage belongs to the document resource graph and
+        // must outlive this document's state and view teardown.
+        if (input_url == doc->url) {
+            InputManager::detach_url(input_url);
+            input_url = nullptr;
         }
-        cleanup_phase_start = time_now_ns();
-        dom_document_destroy(doc);
-        phase_timing.cleanup_document_ms += time_elapsed_ms_f(
-            cleanup_phase_start, time_now_ns());
+        if (doc->owned_loader_pool == pool) pool = nullptr;
+        DocumentCleanupTiming cleanup_timing;
+        if (!free_document_profiled(doc, &cleanup_timing)) {
+            log_error("layout-document-cleanup: document retained at a non-quiescent boundary");
+            return false;
+        }
+        phase_timing.cleanup_network_ms += cleanup_timing.network_ms;
+        phase_timing.cleanup_state_ms += cleanup_timing.state_ms;
+        phase_timing.cleanup_script_ms += cleanup_timing.script_ms;
+        phase_timing.cleanup_view_ms += cleanup_timing.view_ms;
+        phase_timing.cleanup_document_ms += cleanup_timing.document_ms;
         if (ui_context->document == doc) {
             ui_context->document = nullptr;
         }

@@ -437,16 +437,76 @@ CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors) {
     return tag == MARKUP_NAME_OL || tag == MARKUP_NAME_MENU ? CSS_VALUE_DECIMAL : CSS_VALUE__UNDEF;
 }
 
+struct HtmlUaListAncestors {
+    bool nested;
+    size_t unordered;
+};
+
+static HtmlUaListAncestors html_ua_list_ancestors(DomElement* element) {
+    HtmlUaListAncestors result = {};
+    for (DomElement* ancestor = dom_parent_element(element); ancestor;
+         ancestor = dom_parent_element(ancestor)) {
+        if (layout_html_ua_list_nesting_ancestor(ancestor->tag())) result.nested = true;
+        if (ancestor->tag() == MARKUP_NAME_UL) result.unordered++;
+    }
+    return result;
+}
+
+void layout_apply_html_ua_spacing(LayoutContext* lycon, DomElement* element,
+                                  float font_size, bool initial) {
+    HtmlUaElementDefault ua;
+    if (!lycon || !element || !dom_element_is_html_tag(element, element->tag()) ||
+        !layout_html_ua_element_default(element->tag(), &ua)) return;
+    if (ua.margin_block_em < 0.0f && ua.margin_inline_px < 0.0f &&
+        ua.margin_inline_start_px < 0.0f && ua.padding_inline_start_px < 0.0f) return;
+
+    ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
+    BoundaryProp* boundary = span->ensure_boundary(lycon);
+    if (initial) {
+        // retained recascade must drop indentation from the previous flow axis.
+        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+            CssBoxSide physical = (CssBoxSide)side;
+            if (*radiant_spacing_specificity(&boundary->padding, physical) == -1) {
+                *radiant_spacing_value(&boundary->padding, physical) = 0.0f;
+                *radiant_spacing_specificity(&boundary->padding, physical) = 0;
+            }
+        }
+    }
+    const LayoutLogicalSides sides = layout_element_logical_sides(element);
+    float zoom = layout_effective_zoom(static_cast<View*>(element));
+    float block_margin = ua.margin_block_em * font_size;
+    if (layout_is_html_list_container_tag(element->tag()) && html_ua_list_ancestors(element).nested)
+        block_margin = 0.0f;
+
+    // HTML's flow defaults use the computed axes; authored sides retain their
+    // cascade priority when font size, zoom or direction refreshes UA lengths.
+    struct UaSpacingRule { Spacing* spacing; CssBoxSide first, second; float value; };
+    const UaSpacingRule rules[] = {
+        {&boundary->margin, sides.block_start, sides.block_end, block_margin},
+        {&boundary->margin, sides.inline_start, sides.inline_end, ua.margin_inline_px * zoom},
+        {&boundary->margin, sides.inline_start, sides.inline_start, ua.margin_inline_start_px * zoom},
+        {&boundary->padding, sides.inline_start, sides.inline_start, ua.padding_inline_start_px * zoom}
+    };
+    for (const UaSpacingRule& rule : rules) {
+        if (rule.value < 0.0f) continue;
+        const CssBoxSide physical[] = {rule.first, rule.second};
+        for (CssBoxSide side : physical) {
+            if (initial || *radiant_spacing_specificity(rule.spacing, side) == -1) {
+                *radiant_spacing_value(rule.spacing, side) = rule.value;
+                *radiant_spacing_specificity(rule.spacing, side) = -1;
+            }
+        }
+    }
+}
+
 static void html_ua_keyword(StrBuf* css, const char* property, CssEnum value) {
     const CssEnumInfo* info = value != CSS_VALUE__UNDEF ? css_enum_info(value) : nullptr;
     if (info) strbuf_append_format(css, "%s:%s;", property, info->name);
 }
 
-static void html_ua_length(StrBuf* css, const char* property, float value, const char* unit,
-        const char* paired = nullptr) {
+static void html_ua_length(StrBuf* css, const char* property, float value, const char* unit) {
     if (value < 0.0f) return;
     strbuf_append_format(css, "%s:%g%s;", property, value, unit);
-    if (paired) strbuf_append_format(css, "%s:%g%s;", paired, value, unit);
 }
 
 const char* layout_html_ua_focus_css() {
@@ -458,7 +518,6 @@ const char* layout_html_ua_focus_css() {
 
 bool layout_html_ua_stylesheet(StrBuf* css) {
     if (!css) return false;
-    // physical sides follow the default view's left-to-right element defaults.
     for (size_t index = 0; index < g_well_known_markup_name_count; index++) {
         const WellKnownNameRecord& record = g_well_known_markup_names[index];
         HtmlUaElementDefault value;
@@ -475,11 +534,11 @@ bool layout_html_ua_stylesheet(StrBuf* css) {
         html_ua_keyword(css, "list-style-type", value.list_style);
         html_ua_keyword(css, "color", value.color);
         html_ua_length(css, "margin", value.margin_px, "px");
-        html_ua_length(css, "margin-top", value.margin_block_em, "em", "margin-bottom");
-        html_ua_length(css, "margin-left", value.margin_inline_px, "px", "margin-right");
-        html_ua_length(css, "margin-left", value.margin_inline_start_px, "px");
+        html_ua_length(css, "margin-block", value.margin_block_em, "em");
+        html_ua_length(css, "margin-inline", value.margin_inline_px, "px");
+        html_ua_length(css, "margin-inline-start", value.margin_inline_start_px, "px");
         html_ua_length(css, "padding", value.padding_px, "px");
-        html_ua_length(css, "padding-left", value.padding_inline_start_px, "px");
+        html_ua_length(css, "padding-inline-start", value.padding_inline_start_px, "px");
         strbuf_append_char(css, '}');
     }
     // UA focus indicators participate in the cascade; author outline rules can replace or suppress them.
@@ -491,7 +550,7 @@ bool layout_html_ua_stylesheet(StrBuf* css) {
         for (size_t inner = 0; inner < g_well_known_markup_name_count; inner++) {
             const WellKnownNameRecord& list = g_well_known_markup_names[inner];
             if (layout_html_ua_list_marker(list.meta.name_id, 0) != CSS_VALUE__UNDEF)
-                strbuf_append_format(css, "%s %s{margin-top:0;margin-bottom:0}", ancestor.chars, list.chars);
+                strbuf_append_format(css, "%s %s{margin-block:0}", ancestor.chars, list.chars);
         }
     }
     strbuf_append_format(css, "ul ul{list-style-type:%s}ul ul ul{list-style-type:%s}",
@@ -1050,9 +1109,6 @@ static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
     apply_html_font_size(font, heading_size,
         value.keeps_medium && lycon->font.style->font_size_from_medium);
     apply_html_font_weight(font, value.font_weight, 700);
-    block->ensure_boundary(lycon);
-    radiant_spacing_set_pair(&block->boundary_mut()->margin,
-        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, heading_size * value.margin_block_em);
     apply_html_text_align_attribute(lycon, element, block);
 }
 
@@ -1214,10 +1270,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_heading_default(lycon, elmt, block, elmt_name);
         break;
     case MARKUP_NAME_P: {
-        block->ensure_boundary(lycon);
-        // margin: 1em 0;
-        radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size * ua.margin_block_em);
         apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
@@ -1234,53 +1286,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // use the direct computed parent rather than the ambient context.
             block->blk->text_align = parent->block()->text_align;
         }
-        // margin: 1em 0; padding: 0 0 0 40px;
-        // UA stylesheet: nested lists have margin: 0
-        // Chrome: :is(ul, ol, dir, menu, dl) ul, :is(ul, ol, dir, menu, dl) ol { margin-block: 0 }
-        // Also: ul ul { list-style-type: circle }, ul ul ul { list-style-type: square }
-        {
-            bool is_nested = false;
-            int ul_ancestor_count = 0;
-            DomNode* ancestor = elmt->parent;
-            while (ancestor) {
-                if (ancestor->is_element()) {
-                    NameId atag = ancestor->tag();
-                    if (layout_html_ua_list_nesting_ancestor(atag)) {
-                        is_nested = true;
-                    }
-                    if (atag == MARKUP_NAME_UL) {
-                        ul_ancestor_count++;
-                    }
-                }
-                ancestor = ancestor->parent;
-            }
-            // Browser UA: ul=disc, ul ul=circle, ul ul ul (and deeper)=square
-            block->blk->list_style_type = layout_html_ua_list_marker(elmt_name, (size_t)ul_ancestor_count);
-            if (!is_nested) {
-                float ua_zoom = layout_effective_zoom((View*)block);
-                radiant_spacing_set_pair(&block->boundary_mut()->margin,
-                    CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM,
-                    lycon->font.style->font_size * ua.margin_block_em * ua_zoom);
-            }
-        }
-        CssEnum direction = layout_specified_keyword(
-            elmt->as_element(), CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-        const char* dir_attr = dom_element_attribute_value_ns(elmt->as_element(), "", "dir");
-        if (dir_attr && str_ieq_cstr(dir_attr, "rtl")) {
-            // HTML §3.2.6: dir=rtl maps to direction before the UA list
-            // padding-inline-start rule is applied.
-            direction = CSS_VALUE_RTL;
-        } else if (dir_attr && str_ieq_cstr(dir_attr, "ltr")) {
-            direction = CSS_VALUE_LTR;
-        }
-        if (direction != CSS_VALUE_RTL) direction = CSS_VALUE_LTR;
-        CssBoxSide inline_start = direction == CSS_VALUE_RTL
-            ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT;
-        // CSS Writing Modes: the list UA rule is padding-inline-start; a
-        // physical left default would remain in RTL and inflate the list box.
-        *radiant_spacing_value(&block->boundary_mut()->padding, inline_start) =
-            ua.padding_inline_start_px * layout_effective_zoom((View*)block);
-        *radiant_spacing_specificity(&block->boundary_mut()->padding, inline_start) = -1;
+        block->blk->list_style_type = layout_html_ua_list_marker(
+            elmt_name, html_ua_list_ancestors(elmt->as_element()).unordered);
         break;
     }
     case MARKUP_NAME_CENTER:
@@ -1458,48 +1465,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // transitions to monospace and no explicit font-size on this element,
         // scale inherited size by 13/16. Only applies when the inherited font-size
         // originates from the CSS 'medium' keyword (initial value).
-        float pre_font_size = lycon->font.style->font_size;
         {
             bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
                 str_ieq_cstr(lycon->font.style->family, "monospace");
             if (!parent_is_mono && block->fontp()->font_size > 0 && block->fontp()->font_size_from_medium) {
                 block->font->font_size = block->font->font_size * 13.0f / 16.0f;
             }
-            if (!parent_is_mono && pre_font_size > 0 && block->fontp()->font_size_from_medium) {
-                pre_font_size = pre_font_size * 13.0f / 16.0f;
-            }
         }
         block->ensure_block(lycon);
         block->blk->white_space = ua.white_space;
-        block->ensure_boundary(lycon);
-        radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, pre_font_size * ua.margin_block_em);
         break;
     }
-    case MARKUP_NAME_BLOCKQUOTE:
-    case MARKUP_NAME_FIGURE:
-        // margin: 1em 40px
-        block->ensure_boundary(lycon);
-        radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size * ua.margin_block_em);
-        radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, ua.margin_inline_px);
-        break;
     case MARKUP_NAME_ADDRESS:
         // italic, block display
         block->ensure_font(lycon)->font_style = ua.font_style;
-        break;
-    case MARKUP_NAME_DL:
-        // definition list: margin 1em 0
-        block->ensure_boundary(lycon);
-        radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size * ua.margin_block_em);
-        break;
-    case MARKUP_NAME_DD:
-        // definition description: margin-left 40px
-        block->ensure_boundary(lycon);
-        *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = ua.margin_inline_start_px;
-        *radiant_spacing_specificity(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = -1;
         break;
     case MARKUP_NAME_SUMMARY: {
         // UA default: list-style: inside disclosure-closed/-open.
@@ -2056,4 +2035,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             }
         }
     }
+    const FontProp* ua_font = block->font ? block->font.get() : lycon->font.style.get();
+    layout_apply_html_ua_spacing(lycon, direction_element, font_prop_used_size(ua_font), true);
 }

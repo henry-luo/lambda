@@ -1347,6 +1347,52 @@ TEST_F(HtmlParserTest, XhtmlPreservesXmlContentAndForeignNamespaces) {
     EXPECT_NE(findElementByTag(input->root, "DIV"), nullptr);
 }
 
+TEST_F(HtmlParserTest, XhtmlRecognizedPublicIdsResolveTheHtmlEntityCatalog) {
+    const char* public_ids[] = {
+        "-//W3C//DTD XHTML 1.0 Strict//EN",
+        "-//W3C//DTD MathML 2.0//EN",
+        "-//WAPFORUM//DTD XHTML Mobile 1.2//EN",
+    };
+    for (const char* public_id : public_ids) {
+        SCOPED_TRACE(public_id);
+        char source[768];
+        int length = snprintf(source, sizeof(source),
+            "<!DOCTYPE html PUBLIC \"%s\" \"about:invalid\">"
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>"
+            "<p title=\"&NotEqualTilde;\">&nbsp;&Afr;&lt;&amp;&apos;&quot;</p>"
+            "</body></html>", public_id);
+        ASSERT_GT(length, 0);
+        ASSERT_LT((size_t)length, sizeof(source));
+        Input* input = parse_document_as(source);
+        ASSERT_NE(input, nullptr);
+        ASSERT_FALSE(input->parse_failed);
+        Element* paragraph = findElementByTag(input->root, "p");
+        ASSERT_NE(paragraph, nullptr);
+        EXPECT_STREQ(paragraph->get_attr("title").string()->chars, u8"\u2242\u0338");
+        ASSERT_EQ(paragraph->length, 1);
+        EXPECT_STREQ(paragraph->items[0].get_string()->chars, u8"\u00a0\U0001d504<&'\"");
+    }
+}
+
+TEST_F(HtmlParserTest, XhtmlEntityCatalogDoesNotEnableUnknownEntitiesOrDtds) {
+    const char* invalid[] = {
+        "<!DOCTYPE html PUBLIC \"urn:unknown\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">&nbsp;</html>",
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"about:invalid\">"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">&unknown;</html>",
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"about:invalid\">"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">&nbsp</html>",
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"about:invalid\" [<!ENTITY e 'x'>]>"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">&e;</html>",
+    };
+    for (const char* source : invalid) {
+        SCOPED_TRACE(source);
+        Input* input = parse_document_as(source);
+        ASSERT_NE(input, nullptr);
+        EXPECT_TRUE(input->parse_failed);
+    }
+}
+
 TEST_F(HtmlParserTest, XhtmlRejectsMalformedXmlAndWrongRoots) {
     const char* invalid[] = {
         "", "<html/>", "<html xmlns=\"urn:wrong\"/>",
