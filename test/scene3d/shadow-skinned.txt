@@ -1,0 +1,20 @@
+<html
+  <head
+    <style
+      "html,body{margin:0;background:#000} scene3d{display:block}">>
+  <body
+    <scene3d id: "scene", camera: "camera", width: 320, height: 240,
+      <camera type: 'perspective', fov: 45, near: 0.1, far: 1000, position: [0, 5, 4], target: [0, 0, 0], id: "camera">
+      <light type: 'ambient', color: "#ffffff", intensity: 0.2>
+      <light type: 'directional', color: "#ffffff", intensity: 1, position: [2, 5, 0], target: [0, 0, 0], cast-shadow: true, shadow-map-size: 1024, shadow-softness: 1>
+      <skeleton id: "rig",
+        <bone id: "root",
+          <bone id: "arm", position: [-0.6, 1, 0]>>>
+      <animation-clip id: "slide", duration: 2, autoplay: true,
+        <keyframe-track path: "arm.position", type: 'vector', times: [0, 1], values: [-0.6, 1, 0, 0.6, 1, 0]>>
+      <mesh id: "ground",
+        <geometry type: 'buffer', positions: [-3, 0, -3, 3, 0, -3, 3, 0, 3, -3, 0, 3], indices: [0, 2, 1, 0, 3, 2]>
+        <material type: 'lambert', color: "#ffffff", opacity: 1>>
+      <mesh id: "tile", skeleton: "rig",
+        <geometry type: 'buffer', positions: [-0.9, 1, -0.3, -0.3, 1, -0.3, -0.3, 1, 0.3, -0.9, 1, 0.3], indices: [0, 2, 1, 0, 3, 2], skin-indices: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], skin-weights: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]>
+        <material type: 'lambert', color: "#ff3030", opacity: 1, side: 'double'>>>>>

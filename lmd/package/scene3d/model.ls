@@ -156,6 +156,7 @@ fn check_node(n, all_nodes) bool^ {
         let near = value(n.near, 0.1), far = value(n.far, 100.0)
         if (any([for (c in slice(inside, 1, len(inside))) contains(['camera', 'environment'], name(c))]))
             raise fail("environments cannot hold cameras or environments")
+        else if (any([for (c in inside) name(c) == 'light' and c["cast-shadow"] == true])) raise fail("environment lights cannot cast shadows")
         else if (not numeric(near) or not numeric(far) or near <= 0 or far <= near) raise fail("invalid environment background or clip planes")
         else true
     } else if (kind == 'geometry') check_geometry(n)^
@@ -190,7 +191,19 @@ fn check_node(n, all_nodes) bool^ {
             (n.distance != null and (not numeric(n.distance) or n.distance < 0)) or
             (n.angle != null and (not numeric(n.angle) or n.angle <= 0 or n.angle > 1.5707963267948966)) or
             (n.penumbra != null and (not numeric(n.penumbra) or n.penumbra < 0 or n.penumbra > 1)))
-            raise fail("invalid light") else true
+            raise fail("invalid light")
+        // shadows (SP3: lights opt in); point-light shadows arrive with M5
+        else if ((n["cast-shadow"] != null and not (n["cast-shadow"] is bool)) or
+            (n["shadow-map-size"] != null and (not numeric(n["shadow-map-size"]) or floor(n["shadow-map-size"]) != n["shadow-map-size"] or
+                n["shadow-map-size"] < 512 or n["shadow-map-size"] > 4096)) or
+            (n["shadow-intensity"] != null and (not numeric(n["shadow-intensity"]) or n["shadow-intensity"] < 0 or n["shadow-intensity"] > 1)) or
+            any([for (key in ["shadow-bias", "shadow-normal-bias"] where n[key] != null) not numeric(n[key])]) or
+            (n["shadow-softness"] != null and (not numeric(n["shadow-softness"]) or n["shadow-softness"] < 0 or n["shadow-softness"] > 16)) or
+            (n["shadow-extent"] != null and (not numeric(n["shadow-extent"]) or n["shadow-extent"] < 0)))
+            raise fail("invalid light shadow")
+        else if (n["cast-shadow"] == true and not contains(['directional', 'spot'], n.type))
+            raise fail("cast-shadow requires a directional or spot light")
+        else true
     } else if (kind == 'texture') {
         let checked_source = if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source")
         let checked_space = if (n["color-space"] != null and not contains(['srgb', 'linear'], n["color-space"])) raise fail("invalid texture color space")
@@ -219,6 +232,8 @@ fn check_node(n, all_nodes) bool^ {
             let bones = [for (b in nodes(rig)^ where name(b) == 'bone') b]
             if (len(bones) == 0 or len(bones) > 256 or n.instances != null) raise fail("invalid skeleton or skinned instances") else true
         } else true
+        let checked_shadows = if (any([for (key in ["cast-shadow", "receive-shadow"] where n[key] != null) not (n[key] is bool)]))
+            raise fail("invalid mesh shadow flags")
         let checked_weights = if (n["morph-weights"] != null and
             (not (n["morph-weights"] is array) or len(n["morph-weights"]) < 1 or len(n["morph-weights"]) > 2 or
             not all([for (x in n["morph-weights"]) numeric(x)]))) raise fail("invalid morph weights")
@@ -248,6 +263,9 @@ pub fn normalize(scene) element^ {
     // physical descriptions share the native validator used by batch and live worlds.
     let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','joint'],name(n)) or n.physics != null]))
         lambda.sys.physics_validate(scene)^
+    // SP5: each casting light owns a depth map and a texture unit
+    let checked_shadows = if (len([for (n in all_nodes where name(n) == 'light' and n["cast-shadow"] == true) n]) > 4)
+        raise fail("shadow light quota exceeded")
     let cameras = [for (n in all_nodes where name(n) == 'camera') n]
     let checked_camera = if (scene.camera != null) definition(all_nodes, scene.camera, 'camera')^
         else if (len(cameras) == 0) raise fail("active camera is missing") else cameras[0]

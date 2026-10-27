@@ -380,6 +380,33 @@ TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmen
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cannot nest"),nullptr);
 }
 
+TEST_F(Scene3dTest, ShadowMapsDarkenReceiversAndRenderOnlyWhenTheirCastersOrFrameChange) {
+    // a light at 45 degrees; a small box on its axis shadows the middle of a Lambert plane facing the camera
+    DomElement* plane=mesh("plane","#ff0000","lambert");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","3 0 3");attr(sun,"cast-shadow","true");
+    DomElement* caster=mesh("box","#00ff00","lambert");attr(caster->first_child->as_element(),"size","0.3 0.3 0.3");attr(caster,"position","0.75 0 0.75");
+    ImageSurface* image=snapshot();
+    // in shadow nothing lights the plane; beside it the light falls at 45 degrees (cos 45 = 0.707 linear)
+    pixel(image,64,64,0,0,0);pixel(image,52,64,218,0,0);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.shadow_passes,1u);
+    // camera moves never redraw the map; moving a caster does
+    attr(camera,"fov","80");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.shadow_passes,1u);
+    attr(caster,"position","0.75 0.4 0.75");pixel(snapshot(),64,64,218,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.shadow_passes,2u);
+    // a mesh that opts out casts no shadow; a receiver that opts out is lit
+    attr(caster,"position","0.75 0 0.75");attr(caster,"cast-shadow","false");pixel(snapshot(),64,64,218,0,0);
+    attr(caster,"cast-shadow","true");attr(plane,"receive-shadow","false");pixel(snapshot(),64,64,218,0,0);
+    attr(plane,"receive-shadow","true");attr(sun,"shadow-intensity","0.5");pixel(snapshot(),64,64,160,0,0);
+    // only directional and spot lights cast (point shadows are M5), at most four of them
+    DomElement* point=element("light",root);attr(point,"type","point");attr(point,"cast-shadow","true");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"directional or spot"),nullptr);
+    root->remove_child(point);doc.mutation_epoch++;
+    for (unsigned i=0;i<4;i++) {
+        DomElement* extra=element("light",root);attr(extra,"type","directional");attr(extra,"position","0 1 1");attr(extra,"cast-shadow","true");
+    }
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"shadow light quota"),nullptr);
+}
+
 TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {
     DomElement* config=element("physics",root);attr(config,"gravity","0 -1 0");attr(config,"state","paused");
     DomElement* body=element("rigid-body",root);attr(body,"id","falling");attr(body,"type","dynamic");attr(body,"position","0 1 0");

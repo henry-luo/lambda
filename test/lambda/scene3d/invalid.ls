@@ -43,5 +43,14 @@ let camera = s.camera({id: "main"});
  contains(message(s.scene([camera, <environment id: "e", near: 2.0, far: 1.0>])), "clip planes"),
  contains(message(s.scene([camera, s.light('hemisphere', {'ground-color': "#zz0000"})])), "color"),
  s.validate(s.scene([camera, s.environment('room')^, s.environment('sky', {'sun-direction': [0.0, 1.0, 0.0]})^,
-    s.light('hemisphere', {'ground-color': "#443322"})], {environment: "sky", 'environment-intensity': 0.5})) ^ { ^.message }
+    s.light('hemisphere', {'ground-color': "#443322"})], {environment: "sky", 'environment-intensity': 0.5})) ^ { ^.message },
+ contains(message(s.scene([camera, s.light('point', {'cast-shadow': true})])), "directional or spot"),
+ contains(message(s.scene([camera, s.light('directional', {'cast-shadow': true, 'shadow-map-size': 256})])), "shadow"),
+ contains(message(s.scene([camera, s.light('spot', {'cast-shadow': true, 'shadow-softness': -1.0})])), "shadow"),
+ contains(message(s.scene([camera, *[for (i in 1 to 5) s.light('directional', {'cast-shadow': true})]])), "quota"),
+ contains(message(s.scene([camera, s.mesh(s.box(), s.material(), {'receive-shadow': "yes"})])), "shadow flags"),
+ contains(message(s.scene([camera, <environment id: "e", (s.light('directional', {'cast-shadow': true}))>])), "cannot cast"),
+ s.validate(s.scene([camera, s.light('directional', {'cast-shadow': true, 'shadow-map-size': 2048, 'shadow-bias': -0.0005,
+    'shadow-normal-bias': 0.02, 'shadow-softness': 2.0, 'shadow-extent': 6.0, 'shadow-intensity': 0.8}),
+    s.mesh(s.box(), s.material('standard'), {'cast-shadow': false, 'receive-shadow': true})])) ^ { ^.message }
 ]

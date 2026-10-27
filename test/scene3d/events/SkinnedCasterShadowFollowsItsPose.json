@@ -1,0 +1,127 @@
+{
+  "name": "SkinnedCasterShadowFollowsItsPose",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "a tile bound to a sliding bone moves its shadow with it: the map re-renders for the pose without re-projecting the scene"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "width": 320,
+      "height": 240
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 320,
+      "height": 240,
+      "pixels": [
+        [
+          114,
+          120,
+          124,
+          124,
+          124,
+          255,
+          3
+        ],
+        [
+          168,
+          120,
+          255,
+          255,
+          255,
+          255,
+          3
+        ],
+        [
+          128,
+          88,
+          248,
+          46,
+          46,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "posed"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#scene",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 320,
+      "height": 240,
+      "pixels": [
+        [
+          114,
+          120,
+          255,
+          255,
+          255,
+          255,
+          3
+        ],
+        [
+          168,
+          120,
+          124,
+          124,
+          124,
+          255,
+          3
+        ],
+        [
+          188,
+          88,
+          214,
+          39,
+          39,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "projection_generation": {
+          "baseline": "posed",
+          "eq": 0
+        },
+        "shadow_passes": {
+          "baseline": "posed",
+          "min": 1
+        }
+      }
+    }
+  ]
+}

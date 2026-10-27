@@ -18,6 +18,7 @@ struct Scene3dStats {
     uint64_t projection_bytes, projection_reserved_bytes, snapshot_bytes;
     uint32_t meshes, geometries, textures;
     uint32_t environment_builds; // environment captures and prefilters since the viewport was created
+    uint32_t shadow_passes;      // shadow maps rendered since the viewport was created
     unsigned raster_width, raster_height;
     float camera_aspect;
 };

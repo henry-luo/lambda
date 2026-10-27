@@ -20,12 +20,24 @@ camera.lookAt(new THREE.Vector3().fromArray(d.camera.target));
 
 // native intensities carry the physical convention's π (SP1); Three.js lights are physical
 if (d.ambient > 0) scene.add(new THREE.AmbientLight(0xffffff, d.ambient * Math.PI));
+const casting = [];
 for (const l of d.lights) {
   const light = l.type === 'point' ? new THREE.PointLight(l.color, l.intensity * Math.PI, 0, 2)
+    : l.type === 'spot' ? new THREE.SpotLight(l.color, l.intensity * Math.PI, l.distance, l.angle, l.penumbra, 2)
     : new THREE.DirectionalLight(l.color, l.intensity * Math.PI);
   light.position.fromArray(l.position);
   scene.add(light);
+  if (light.target) scene.add(light.target);
+  if (l.shadow) {
+    light.castShadow = true;
+    light.shadow.mapSize.set(l.shadow.size, l.shadow.size);
+    light.shadow.bias = l.shadow.bias;
+    light.shadow.normalBias = l.shadow.normal_bias;
+    light.shadow.radius = l.shadow.softness;
+    casting.push({light, l});
+  }
 }
+renderer.shadowMap.enabled = casting.length > 0;
 if (d.hemisphere) scene.add(new THREE.HemisphereLight(d.hemisphere.sky, d.hemisphere.ground, d.hemisphere.intensity * Math.PI));
 // the native room is a port of this RoomEnvironment, captured and prefiltered without blur
 if (d.environment === 'room') scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0).texture;
@@ -51,7 +63,8 @@ await Promise.all(Object.entries(d.textures).map(async ([name, t]) => {
   textures[name] = texture;
 }));
 
-for (const b of d.spheres) {
+const objects = [];
+for (const b of d.objects) {
   const m = b.material;
   const material = new THREE.MeshStandardMaterial({color: m.color, metalness: m.metalness ?? 0, roughness: m.roughness ?? 1});
   if (m.map) material.map = textures[m.map];
@@ -63,8 +76,43 @@ for (const b of d.spheres) {
   if (m.double) material.side = THREE.DoubleSide;
   const mesh = new THREE.Mesh(geometries[b.geometry], material);
   mesh.position.fromArray(b.position);
+  if (b.rotation) mesh.rotation.fromArray(b.rotation);
   mesh.scale.setScalar(d.scale);
+  // native meshes cast and receive by default (SP3)
+  mesh.castShadow = mesh.receiveShadow = true;
   scene.add(mesh);
+  objects.push(mesh);
+}
+// Frame each shadow camera as the native renderer does: depth fitted to the casters and receivers
+// with a 1% margin, sideways to them unless the light gives an extent (spot lights: their reach)
+scene.updateMatrixWorld(true);
+for (const {light, l} of casting) {
+  const cam = light.shadow.camera;
+  cam.position.setFromMatrixPosition(light.matrixWorld);
+  cam.lookAt(new THREE.Vector3().setFromMatrixPosition(light.target.matrixWorld));
+  cam.updateMatrixWorld();
+  const lo = new THREE.Vector3(Infinity, Infinity, Infinity), hi = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (const mesh of objects) {
+    mesh.geometry.computeBoundingBox();
+    const b = mesh.geometry.boundingBox;
+    for (let c = 0; c < 8; c++) {
+      const p = new THREE.Vector3(c & 1 ? b.max.x : b.min.x, c & 2 ? b.max.y : b.min.y, c & 4 ? b.max.z : b.min.z);
+      p.applyMatrix4(mesh.matrixWorld).applyMatrix4(cam.matrixWorldInverse);
+      lo.min(p); hi.max(p);
+    }
+  }
+  let near = -hi.z, far = -lo.z;
+  const margin = Math.max(0.01 * (far - near), 0.01);
+  if (l.type === 'spot') {
+    far = l.distance > 0 ? l.distance : far + margin;
+    cam.near = Math.min(Math.max(near - margin, far * 0.001), far * 0.999);
+    cam.far = far;
+  } else {
+    const e = l.shadow.extent;
+    cam.left = e ? -e : lo.x; cam.right = e ? e : hi.x; cam.bottom = e ? -e : lo.y; cam.top = e ? e : hi.y;
+    cam.near = near - margin; cam.far = far + margin;
+  }
+  cam.updateProjectionMatrix();
 }
 renderer.render(scene, camera);
 globalThis.pbrReady = true;
