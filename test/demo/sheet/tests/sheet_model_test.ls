@@ -52,3 +52,8 @@ f.cell(m.current(m.autosum(m.select(gap,4,0))),4,0).raw=="=SUM(A3:A4)"
 let mixed=m.set_value(m.select(st,0,0),"'0123")
 f.display(m.current(mixed),0,0)=="0123"
 result("=10^1000")=="#NUM!"
+
+// committing an unchanged native field only closes its draft, without creating history.
+let unchanged=m.set_value({*:sample,editing:true},m.active(sample).raw)
+unchanged.book==sample.book and unchanged.undo==sample.undo and not unchanged.editing
+m.set_value(m.select(st,0,0),"").book==st.book

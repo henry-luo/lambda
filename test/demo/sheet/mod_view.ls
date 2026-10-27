@@ -115,6 +115,7 @@ pub fn workspace(st) {
     let dirty=st.book!=st.saved
     let stats=m.stats(st);
     <body id:"sheet",'data-dirty':string(dirty),'data-cell':f.address(st.row,st.col),'data-sheets':string(len(st.book.sheets)),'data-tab':st.tab,
+        'data-selecting':string(st.selection_drag!=null),
         <header class:"titlebar",
             <div class:"brand",<span class:"brand-mark",icons.icon("table",30)> <span "Sheet">>
             <div class:"title-stack",
@@ -134,7 +135,7 @@ pub fn workspace(st) {
         <div class:"sheet-tabs",<span class:"sheet-nav",icons.icon("table",15)>;
             for (i,s in st.book.sheets) <button type:"button",id:"sheet-tab-" ++ string(i),'data-sheet':string(i),class:if (st.sheet==i) "sheet-tab current" else "sheet-tab",'aria-selected':string(st.sheet==i),s.title>;
             button("add-sheet","New sheet","plus",false,false,"icon-only");<span class:"tab-spacer">;
-            <span class:"sheet-hint","Double-click to edit · Shift-click to select a range">>
+            <span class:"sheet-hint","Drag or Shift-click to select · Double-click to edit">>
         <footer class:"statusbar",<div class:"status-left",<span class:"status-dot"> <span id:"status",role:"status",st.status>
             <span class:"status-divider"> <span id:"selection-label",f.address(m.bounds(st).top,m.bounds(st).left) ++
                 (if (st.anchor.row==st.row and st.anchor.col==st.col) "" else ":" ++ f.address(m.bounds(st).bottom,m.bounds(st).right))>>

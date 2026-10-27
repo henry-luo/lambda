@@ -1,0 +1,391 @@
+{
+  "name": "Sheet pointer ranges, cancellation, capture release and edit handoff",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "script",
+      "js": "window.sheetScrollport=document.getElementById('grid-scroll')"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-selecting",
+      "equals": "true"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-cell",
+      "equals": "E8"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('formula-input').value==='16200'"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('undo').disabled"
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-G10"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-A4"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "A4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-E8"
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:E8"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 16
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "C5:F8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-A4"
+      }
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-selecting",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "A4"
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "A4"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-E8"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#status"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-selecting",
+      "equals": "false"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#cell-A4"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 12
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('grid-scroll')===sheetScrollport"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#cell-editor"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "55555",
+      "clear": true
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#cell-D6"
+      }
+    },
+    {
+      "type": "mouse_up",
+      "target": {
+        "selector": "#cell-D6"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#cell-C5"
+      },
+      "attribute": "data-raw",
+      "equals": "55555"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$146055.00"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "td[aria-selected=true]"
+      },
+      "equals": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#selection-label"
+      },
+      "contains": "D6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-selecting",
+      "equals": "false"
+    }
+  ]
+}

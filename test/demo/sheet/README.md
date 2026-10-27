@@ -13,8 +13,9 @@ an empty workbook; Studio example restores the sample.
 Click a cell to select it. Double-click or press F2 to edit, or type directly to
 replace its contents. Enter commits and moves down; Tab moves across. Escape
 cancels the draft. The formula bar edits the active cell, and the address box
-accepts a cell or range such as `C5` or `C5:E10`. Shift-click and Shift-arrow
-extend a selection; row and column headers select a whole row or column.
+accepts a cell or range such as `C5` or `C5:E10`. Drag across cells to select a
+rectangle; Shift-click and Shift-arrow extend a selection. Escape during a drag
+restores the previous selection. Row and column headers select a whole row or column.
 
 Home provides undo/redo, plain-text clipboard copy/cut/paste, font and fill colors,
 type size, emphasis, alignment, wrapping, borders, number/currency/percent formats,
@@ -74,13 +75,15 @@ Verification:
   --event-file test/ui/sheet_editor.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_ribbon.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_selection.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
 
 # Refresh the demo index's actual app screenshot.
 sh test/demo/previews/capture.sh sheet
 ```
 
-The UI checks cover cell editing, recalculation, ranges, formatting, clipboard,
+The UI checks cover cell editing, recalculation, pointer ranges and cancellation, formatting, clipboard,
 undo/redo, formula display, worksheet creation, editable save/open, CSV export,
 unsaved-change prompts and renaming. The Word ribbon appearance and Slides Home
 action replays cover the shared stylesheet extraction.

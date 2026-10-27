@@ -4,7 +4,8 @@ pub fn empty_sheet(title="Sheet1") => {title:title,rows:60,cols:20,cells:[]}
 pub fn blank() => {format:"lambda-sheet",version:1,title:"Untitled workbook",sheets:[empty_sheet()]}
 pub fn current(st) => st.book.sheets[st.sheet]
 pub fn initial(book=null) => {book:book or sample(),saved:book or sample(),sheet:0,row:4,col:4,anchor:{row:4,col:4},
-    undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0}
+    undo:[],redo:[],tab:"Home",editing:false,draft:"",dialog:"",path:"",dialog_path:"",error:null,pending:null,status:"Ready",grid:true,formulas:false,zoom:1.0,
+    selection_drag:null,selection_click:false}
 pub fn bounds(st) => {top:min(st.row,st.anchor.row),bottom:max(st.row,st.anchor.row),left:min(st.col,st.anchor.col),right:max(st.col,st.anchor.col)}
 pub fn selected(st,row,col) => {let b=bounds(st);row>=b.top and row<=b.bottom and col>=b.left and col<=b.right}
 pub fn active(st) => f.cell(current(st),st.row,st.col)
@@ -19,7 +20,9 @@ fn replace_sheet(st,sheet,status="Ready") => change(st,{*:st.book,sheets:[for (i
 pub fn set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cells:cells},status)
 fn patch_cell(sheet,row,col,raw,style=null) => [for (cell in sheet.cells where cell.row!=row or cell.col!=col) cell,
     {row:row,col:col,raw:raw,style:style or f.cell(sheet,row,col).style or {}}]
-pub fn set_value(st,text) => set_cells(st,patch_cell(current(st),st.row,st.col,text),"Cell updated")
+// selecting another cell can blur an unchanged native draft without creating an edit.
+pub fn set_value(st,text) => if ((active(st).raw or "")==text) {*:st,editing:false}
+    else set_cells(st,patch_cell(current(st),st.row,st.col,text),"Cell updated")
 pub fn clear(st) => set_cells(st,[for (c in current(st).cells) if (selected(st,c.row,c.col)) {*:c,raw:""} else c],"Selection cleared")
 pub fn format_cells(st,key,value) {
     let b = bounds(st)

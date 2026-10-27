@@ -5,6 +5,7 @@ import f: .mod_formula
 import app: .mod_app
 import v: .mod_view
 import overflow: ~~.mod_ribbon_overflow
+import selection: .mod_selection
 
 let BASE=url_resolve(resources.entry_uri()^,".")
 let CSS=input(url_resolve(BASE,"../office.css"),'text')^ ++ input(url_resolve(BASE,"../ribbon.css"),'text')^ ++ input(url_resolve(BASE,"sheet.css"),'text')^
@@ -33,8 +34,43 @@ on sheet_focus(evt) {
     if (st.dialog=="" and not st.editing) dom.scroll_into_view_options(node(evt.target,"cell-" ++ f.address(st.row,st.col)),{block:"nearest",inline:"nearest"})
     return 'handled'
 }
+on pointerdown(evt) {
+    if (evt.button!=0 or st.dialog!="" or st.selection_drag!=null or
+        dom.closest(evt.target,"#cell-editor")!=null or selection.cell(evt.target)==null) { return 'pass' }
+    // commit the native draft before changing the active cell or preventing its blur.
+    if (st.editing or dom.focused(node(evt.target,"formula-input"))) { st=app.accept(st,evt.target) }
+    st=selection.begin(evt.target,st,evt)
+    return 'prevent-default'
+}
+on pointermove(evt) {
+    if (st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer) { return 'pass' }
+    st=selection.move(evt.target,st,evt.clientX,evt.clientY)
+    return 'prevent-default'
+}
+on pointerup(evt) {
+    if (st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer) { return 'pass' }
+    st=selection.move(evt.target,st,evt.clientX,evt.clientY)
+    st=selection.finish(evt.target,st)
+    app.focus(evt.target)
+    return 'prevent-default'
+}
+on pointercancel(evt) {
+    if (st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer) { return 'pass' }
+    st=selection.finish(evt.target,st,true)
+    app.focus(evt.target)
+    return 'handled'
+}
+on lostpointercapture(evt) {
+    if (st.selection_drag!=null and evt.pointerId==st.selection_drag.pointer) { st=selection.finish(evt.target,st) }
+    return 'pass'
+}
 on click(evt) {
     if (evt.button!=null and evt.button!=0) { return 'pass' }
+    // selection is complete on pointerup; its compatibility click must not collapse the range.
+    if (st.selection_click) {
+        st={*:st,selection_click:false}
+        if (dom.closest(evt.target,"#grid-scroll")!=null) { return 'prevent-default' }
+    }
     let group_trigger=dom.closest(evt.target,".ribbon-group-trigger")
     if (group_trigger!=null and st.dialog=="") { overflow.toggle(group_trigger); return 'prevent-default' }
     overflow.close(dom.query_selector(node(evt.target,"sheet"),".editor-ribbon"))
@@ -114,6 +150,7 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (key=="Escape") {
+        if (st.selection_drag!=null) { st=selection.finish(evt.target,st,true) }
         overflow.close(dom.query_selector(node(evt.target,"sheet"),".editor-ribbon"))
         st={*:st,editing:false,status:"Ready"}
         dom.set_state(node(evt.target,"formula-input"),"value",m.active(st).raw or "")

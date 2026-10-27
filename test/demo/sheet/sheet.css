@@ -34,7 +34,7 @@
 #sheet-grid tbody th { position:sticky; left:0; z-index:3; background:#f0f3f0; color:#728176; font-size:11px; text-align:center; font-weight:400; cursor:pointer; }
 #sheet-grid thead th.corner { position:sticky; left:0; z-index:5; background:#e6ece7; }
 #sheet-grid .heading-selected { background:#dcece1; color:#185b36; font-weight:600; }
-#sheet-grid td { position:relative; padding:4px 10px; cursor:cell; white-space:nowrap; user-select:none; }
+#sheet-grid td { position:relative; padding:4px 10px; cursor:cell; white-space:nowrap; user-select:none; touch-action:none; }
 .cell-text { display:block; overflow:hidden; text-overflow:clip; max-height:100%; line-height:18px; pointer-events:none; }
 .cell-text.spill { overflow:visible; width:max-content; position:relative; z-index:1; }
 #sheet-grid td.selected { background-image:linear-gradient(#21734612,#21734612); }
