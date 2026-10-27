@@ -13,10 +13,11 @@ import glsl: .mod_glsl
 let ATLAS = fx.svg_texture(atlas.atlas(), {id: "atlas", width: 2048, height: 2048, 'min-filter': 9987})^
 let SWARM = 64      // 64 × 64 simulation records, one butterfly each
 let HOUR = 3600.0   // the flight clip; the simulation restarts when it loops
+let WING_CELLS = [12.0, 8.0]
 
 // one wing grid, 12 × 8 cells hinged on the body axis, so the wings can bend
 fn wing_grid() element {
-    let sx = 12, sy = 8;
+    let sx = int(WING_CELLS[0]), sy = int(WING_CELLS[1]);
     s.geometry([for (j in 0 to sy) for (i in 0 to sx) *[i * 1.0 / sx - 0.5, j * 1.0 / sy - 0.5, 0.0]], {id: "wing-grid",
         uvs: [for (j in 0 to sy) for (i in 0 to sx) *[i * 1.0 / sx, j * 1.0 / sy]],
         normals: [for (j in 0 to sy) for (i in 0 to sx) *[0.0, 0.0, 1.0]],
@@ -61,8 +62,9 @@ fn solo(i, card) element => s.scene([
     s.camera({id: "main", fov: 40.0, position: [0.0, 0.0, 1.9]}),
     s.resources([ATLAS, wing_grid()]),
     <mesh geometry: "wing-grid",
-        s.shader_material(glsl.SOLO_VERTEX, glsl.FRAGMENT, {time: 0.0, species: card.species * 1.0, flex: card.flex,
-            curl: card.curl, lag: card.lag, beat: card.beat, amplitude: card.amplitude, atlas: "atlas"},
+        s.shader_material(glsl.SOLO_VERTEX, glsl.SOLO_FRAGMENT, {time: 0.0, species: card.species * 1.0, flex: card.flex,
+            curl: card.curl, lag: card.lag, beat: card.beat, amplitude: card.amplitude, atlas: "atlas",
+            display_mode: i * 1.0, grid_size: WING_CELLS},
             {id: "wing", side: 'double', 'alpha-to-coverage': true})>,
     flight(["wing.uniforms.time"])
 ], {id: "solo-" ++ string(i), width: 300, height: 190, viewBox: "0 0 300 190", camera: "main", background: "#f6f2ea",

@@ -132,15 +132,33 @@ pub let VELOCITY_STEP = TRAITS ++ FLOW ++ FLOCK ++ "void main() {
 let SHADED = "uniform sampler2D atlas;
 in vec2 surface;
 in float shade, fog;
-void main() {
+vec4 wing_color() {
     vec4 c = texture(atlas, surface);
     if (c.a < 0.08) discard;
     vec3 color = c.rgb * shade;
     // undersides read paler and duller
     if (!gl_FrontFacing) color = mix(color, vec3(dot(color, vec3(0.3, 0.59, 0.11))), 0.4) * 0.9 + 0.06;
-    fragment_color = vec4(mix(color, vec3(1.0), fog * 0.7), c.a);
+    return vec4(mix(color, vec3(1.0), fog * 0.7), c.a);
 }"
-pub let FRAGMENT = SHADED
+pub let FRAGMENT = SHADED ++ "void main() { fragment_color = wing_color(); }"
+
+// the UV grid includes each cell's diagonal, matching wing_grid's triangles after deformation
+pub let SOLO_FRAGMENT = SHADED ++ "uniform float display_mode;
+uniform vec2 grid_size;
+in vec2 wing_uv;
+void main() {
+    vec2 grid = wing_uv * grid_size;
+    vec3 edges = vec3(grid, grid.x - grid.y);
+    vec3 distance_px = abs(fract(edges + 0.5) - 0.5) / max(fwidth(edges), vec3(1e-5));
+    float wire = 1.0 - smoothstep(0.45, 1.05, min(min(distance_px.x, distance_px.y), distance_px.z));
+    vec4 c = wing_color();
+    // modes 0/1/2 show wireframe, left texture with right wireframe, and full texture.
+    if (display_mode < 0.5 || (display_mode < 1.5 && wing_uv.x >= 0.5)) {
+        c = vec4(vec3(0.10, 0.18, 0.24) * shade, c.a * wire);
+        if (c.a < 0.01) discard;
+    }
+    fragment_color = c;
+}"
 
 // the swarm: one instance per record, placed and turned by the simulation; flex grows with size
 pub let SWARM_VERTEX = TRAITS ++ WING ++ "uniform sampler2D positions, velocities;
@@ -172,6 +190,7 @@ void main() {
 // the bending wings both read; every motion parameter is a uniform the sliders drive
 pub let SOLO_VERTEX = WING ++ "uniform float time, species, flex, curl, lag, beat, amplitude;
 out vec2 surface;
+out vec2 wing_uv;
 out float shade, fog;
 void main() {
     vec3 n, q = wing(position, time * beat, flex, curl, lag, amplitude, n);
@@ -183,5 +202,6 @@ void main() {
     shade = light_on(normalize(basis * n));
     fog = 0.0;
     surface = atlas_uv(species, uv);
+    wing_uv = uv;
     gl_Position = projection_matrix * view_matrix * model_matrix * vec4(basis * q, 1.0);
 }"
