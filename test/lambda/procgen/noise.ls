@@ -44,4 +44,15 @@ let plain = noise.make(rng.key(2))^;
 
 "5 rejected specs";
 [noise.make(rng.key(2), {kind: 'bogus'}) ^ { "kind" }, noise.make(rng.key(2), {fractal: 'x'}) ^ { "fractal" },
- noise.make(rng.key(2), {octaves: 0}) ^ { "octaves" }, noise.make(rng.key(2), {octaves: 2.5}) ^ { "octaves" }]
+ noise.make(rng.key(2), {octaves: 0}) ^ { "octaves" }, noise.make(rng.key(2), {octaves: 2.5}) ^ { "octaves" }];
+
+// PG2/PG5: batching changes storage, never a point value or its signed zero.
+"6 row batching agrees with point sampling";
+fn zero_signs(f) => [for (row in f) [for (v in row) if (v == 0.0) 1.0 / v else v]];
+all([for (kind in ['simplex', 'perlin', 'value', 'white', 'cellular'])
+    for (fractal in ['none', 'fbm', 'ridged', 'billow']) for (octaves in [1, 3])
+    for (size in [[0, 0], [0, 3], [5, 0], [1, 1], [5, 1], [1, 5], [7, 5]])
+    (let gen = noise.make(rng.key(17), {kind: kind, fractal: fractal, octaves: octaves})^,
+     let batched = noise.field(gen, size[0], size[1]),
+     let points = [for (y in 0 to (size[1] - 1)) [for (x in 0 to (size[0] - 1)) noise.sample(gen, float(x), float(y))]],
+     batched == points and zero_signs(batched) == zero_signs(points))])

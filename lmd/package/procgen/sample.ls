@@ -22,16 +22,57 @@ fn domain(options) map^ {
 // never conflict, so each of the 9 phases fills its cells from the previous
 // grid in one pure comprehension. Each round gives every empty cell one keyed
 // candidate; `attempts` rounds approach a maximal sampling.
-fn phase_of(c: int, nx: int, stride: int) int => (c % nx) % stride + stride * ((c div nx) % stride)
 
-fn conflicts(grid, nx: int, ny: int, ci: int, cj: int, x: float, y: float, r2: float, reach: int, variable: bool) bool =>
-    any([for (dj in (0 - reach) to reach) for (di in (0 - reach) to reach) (let i = ci + di, let j = cj + dj,
-        // corner cells two apart are at least r away, so they are skipped
-        if ((not variable and abs(di) == 2 and abs(dj) == 2) or i < 0 or j < 0 or i >= nx or j >= ny) false
-        else (let q = grid[j * nx + i], q != null and (q[0] - x) * (q[0] - x) + (q[1] - y) * (q[1] - y) <
-            (if (variable) max(r2, q[2] * q[2]) else r2)))])
+// each bit certifies a quarter cell covered by an accepted point. Every
+// future distance is bounded by the same rounded farthest-corner operations.
+fn cover_pair(dx2: float, dy02: float, dy12: float, r2: float) int =>
+    (if (dx2 + dy02 < r2) 1 else 0) + (if (dx2 + dy12 < r2) 2 else 0)
 
-fn try_cell(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, c: int) {
+fn cell_coverage(qx: float, qy: float, x0: float, y0: float, x1: float, y1: float, r2: float) int {
+    let mx = x0 + (x1 - x0) * 0.5
+    let my = y0 + (y1 - y0) * 0.5
+    let dx0 = max(abs(qx - x0), abs(qx - mx))
+    let dx1 = max(abs(qx - mx), abs(qx - x1))
+    let dy0 = max(abs(qy - y0), abs(qy - my))
+    let dy1 = max(abs(qy - my), abs(qy - y1));
+    cover_pair(dx0 * dx0, dy0 * dy0, dy1 * dy1, r2) +
+        4 * cover_pair(dx1 * dx1, dy0 * dy0, dy1 * dy1, r2)
+}
+
+// zero is a free candidate; bit 4 marks a conflict, low bits certify coverage.
+fn conflict_span(grid, x: float, y: float, r2: float, variable: bool, first: int, stop: int,
+        x0: float, y0: float, x1: float, y1: float) int {
+    if (first > stop) 0 else {
+        let q = grid[first]
+        let status: int = if (q is array) (let qx = float(q[0]), let qy = float(q[1]),
+            let dx = qx - x, let dy = qy - y,
+            if (dx * dx + dy * dy < (if (variable) max(r2, float(q[2]) * float(q[2])) else r2))
+                (16 + (if (variable) 0 else cell_coverage(qx, qy, x0, y0, x1, y1, r2))) else 0) else 0;
+        if (status != 0) status else conflict_span(grid, x, y, r2, variable, first + 1, stop, x0, y0, x1, y1)
+    }
+}
+
+fn conflict_rows(grid, nx: int, ci: int, cj: int, x: float, y: float, r2: float,
+        reach: int, variable: bool, row: int, stop: int, x0: float, y0: float, x1: float, y1: float) int {
+    if (row > stop) 0 else {
+        // constant-radius corner cells two apart are at least r away.
+        let trim = if (not variable and abs(row - cj) == 2) 1 else 0
+        let first: int = row * nx + max(0, ci - reach + trim)
+        let stop_cell: int = row * nx + min(nx - 1, ci + reach - trim)
+        let status = conflict_span(grid, x, y, r2, variable, first, stop_cell, x0, y0, x1, y1);
+        if (status != 0) status else
+            conflict_rows(grid, nx, ci, cj, x, y, r2, reach, variable, row + 1, stop, x0, y0, x1, y1)
+    }
+}
+
+fn conflicts(grid, nx: int, ny: int, ci: int, cj: int, x: float, y: float, r2: float,
+        reach: int, variable: bool, x0: float, y0: float, x1: float, y1: float) int {
+    let first: int = max(0, cj - reach)
+    let stop: int = min(ny - 1, cj + reach);
+    conflict_rows(grid, nx, ci, cj, x, y, r2, reach, variable, first, stop, x0, y0, x1, y1)
+}
+
+fn try_cell(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, c: int, covered: int) {
     let ci = c % nx
     let cj = c div nx
     let x = (float(ci) + rng.unit(rng.at(kr, 2 * c))) * s
@@ -39,14 +80,25 @@ fn try_cell(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, c: int) {
     let density = if (d.density == null) 1.0 else field.sample(d.density,
         x / d.width * float(field.width(d.density) - 1), y / d.height * float(field.height(d.density) - 1))
     let radius = if (d.density == null or density <= 0.0) math.sqrt(r2) else min(d.max_radius, math.sqrt(r2) / math.sqrt(density));
-    if (x >= d.width or y >= d.height or density <= 0.0 or
-        conflicts(grid, nx, ny, ci, cj, x, y, if (d.density == null) r2 else radius * radius,
-            if (d.reach == null) 2 else d.reach, d.density != null)) null
-    else if (d.density == null) [x, y] else [x, y, radius]
+    if (x >= d.width or y >= d.height or density <= 0.0) covered
+    else {
+        let status = conflicts(grid, nx, ny, ci, cj, x, y, if (d.density == null) r2 else radius * radius,
+            if (d.reach == null) 2 else d.reach, d.density != null,
+            float(ci) * s, float(cj) * s, float(ci + 1) * s, float(cj + 1) * s);
+        // coverage only grows: accepted points never move or disappear.
+        if (status != 0) bor(covered, band(status, 15))
+        else if (d.density == null) [x, y] else [x, y, radius]
+    }
 }
 
-fn poisson_phase(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, ph: int, stride: int) array =>
-    [for (c, q in grid) if (q != null or phase_of(c, nx, stride) != ph) q else try_cell(grid, d, s, r2, nx, ny, kr, c)]
+fn poisson_phase(grid, d, s: float, r2: float, nx: int, ny: int, kr: u64, ph: int, stride: int) array {
+    // copy untouched rows in bulk; only one row residue changes.
+    let px = ph % stride
+    let py = ph div stride;
+    [for (j in 0 to (ny - 1)) *(if (j % stride != py) slice(grid, j * nx, (j + 1) * nx)
+        else [for (i in 0 to (nx - 1)) (let c = j * nx + i, let q = grid[c],
+            if (q is array or q == 15 or i % stride != px) q else try_cell(grid, d, s, r2, nx, ny, kr, c, q))])]
+}
 
 // the domain and phases with every value typed, so the round fold stays error-free.
 fn poisson_grid(k: u64, d, width: float, height: float, r: float, attempts: int) array^ {
@@ -58,9 +110,9 @@ fn poisson_grid(k: u64, d, width: float, height: float, r: float, attempts: int)
     if (nx * ny > 4000000) raise error("procgen.sample.poisson: more than 4,000,000 cells; raise the radius")
     else {
         // step = pass * 9 + phase
-        let grid = reduce([[for (c in 0 to (nx * ny - 1)) null], *[for (step in 0 to (attempts * phases - 1)) step]],
+        let grid = reduce([[for (c in 0 to (nx * ny - 1)) 0], *[for (step in 0 to (attempts * phases - 1)) step]],
             (g, step: int) => poisson_phase(g, d, s, r * r, nx, ny, rng.at(k, step div phases), step % phases, stride));
-        [for (q in grid where q != null) if (d.density == null) q else [q[0], q[1]]]
+        [for (q in grid where q is array) if (d.density == null) q else [q[0], q[1]]]
     }
 }
 

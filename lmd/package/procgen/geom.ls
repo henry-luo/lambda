@@ -135,12 +135,12 @@ fn clip_half(poly, p, q) array {
     let mx = (p[0] + q[0]) * 0.5
     let my = (p[1] + q[1]) * 0.5
     let f = [for (v in poly) (v[0] - mx) * dx + (v[1] - my) * dy];
-    let pieces = [for (i, a in poly) (let j = (i + 1) % len(poly), let fa = f[i], let fb = f[j],
+    // spread each edge directly, without a temporary array of pieces and a second walk.
+    [for (i, a in poly) *(let j = (i + 1) % len(poly), let fa = f[i], let fb = f[j],
         if (fa <= 0.0 and fb <= 0.0) [a]
         else if (fa <= 0.0) (if (fa == 0.0) [a] else [a, crossing(a, poly[j], fa, fb)])
         else if (fb < 0.0) [crossing(a, poly[j], fa, fb)]
-        else [])];
-    [for (piece in pieces) for (v in piece) v]
+        else [])]
 }
 
 fn bounds_of(points, ids) array {

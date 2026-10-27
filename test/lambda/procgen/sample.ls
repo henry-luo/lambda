@@ -44,4 +44,10 @@ let ws = sample.weighted(rng.key(9), [[0.0, 1.0, 0.0], [2.0, 0.0, 1.0]], 400)^;
 [sample.poisson(k, {width: 10.0, height: 10.0, radius: 0}) ^ { "radius" }, sample.poisson(k, {width: -1, height: 10.0, radius: 1}) ^ { "domain" },
  sample.poisson(k, {width: 10.0, height: 10.0, radius: 1, attempts: 0}) ^ { "attempts" },
  sample.poisson(k, {width: 1e6, height: 1e6, radius: 1}) ^ { "cells" }, sample.best_candidate(k, {width: 1, height: 1, count: 5000}) ^ { "count" },
- sample.weighted(k, [[0.0]], 1) ^ { "weight" }, sample.weighted(k, [[-1.0, 2.0]], 1) ^ { "negative" }]
+ sample.weighted(k, [[0.0]], 1) ^ { "weight" }, sample.weighted(k, [[-1.0, 2.0]], 1) ^ { "negative" }];
+
+// PG2: full ordered samples pin conservative coverage and partial boundary cells.
+"7 coverage certificates preserve keyed samples";
+[for (seed in [0, 17]) for (size in [[4.5, 3.0, 1.0], [0.3, 7.0, 1.0], [6.0, 4.0, 0.75]])
+    for (attempts in [1, 20])
+    sample.poisson(rng.key(seed), {width: size[0], height: size[1], radius: size[2], attempts: attempts})^]
