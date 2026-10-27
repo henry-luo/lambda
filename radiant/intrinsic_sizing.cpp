@@ -648,7 +648,8 @@ static void intrinsic_complete_inherited_font(FontProp* font, FontProp* parent_f
 
 static float intrinsic_element_line_height(LayoutContext* lycon,
                                            DomElement* element,
-                                           ViewBlock* view) {
+                                           ViewBlock* view, bool* normal = nullptr) {
+    if (normal) *normal = true;
     if (!lycon || !element) return 0.0f;
     float font_size = view && view->font && view->fontp()->font_size > 0.0f
         ? view->fontp()->font_size
@@ -668,9 +669,24 @@ static float intrinsic_element_line_height(LayoutContext* lycon,
         float resolved = layout_resolve_line_height_value(
             lycon, line_height_value, element, font_size);
         // zero leading is valid; normal font metrics must not enlarge its strut.
-        if (resolved >= 0.0f) line_height = resolved;
+        if (resolved >= 0.0f) {
+            line_height = resolved;
+            if (normal) *normal = line_height_value->type == CSS_VALUE_TYPE_KEYWORD &&
+                line_height_value->data.keyword == CSS_VALUE_NORMAL;
+        }
     }
     return line_height;
+}
+
+static void intrinsic_font_line_extents(LayoutContext* lycon, DomElement* element,
+                                       ViewBlock* view, float* before, float* after) {
+    bool normal = true;
+    float line_height = intrinsic_element_line_height(lycon, element, view, &normal);
+    // reuse used-line metrics with the measured baseline owner, preserving the caller's cursor owner.
+    ViewBlock* caller_flow_box = lycon->block.flow_box;
+    lycon->block.flow_box = lam::up(view);
+    layout_inline_font_metrics(lycon, font_box_handle(&lycon->font), line_height, normal, before, after);
+    lycon->block.flow_box = lam::up(caller_flow_box);
 }
 
 static bool css_has_horizontal_box_decl(StyleTree* style) {
@@ -6107,15 +6123,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 vertical_block_axis_max > 0.0f) {
                 float sideways_ascender = 0.0f;
                 float sideways_descender = 0.0f;
-                if (font_box_handle(&lycon->font)) {
-                    // sideways-rl maps the font's cross-axis content area into
-                    // the inline box; the descender therefore contributes to
-                    // the physical block extent alongside the child box.
-                    font_get_content_area_split(font_box_handle(&lycon->font),
-                        &sideways_ascender, &sideways_descender);
-                }
+                // intrinsic and used lines must align the same selected font and atomic baselines.
+                intrinsic_font_line_extents(lycon, element, view_block,
+                    &sideways_ascender, &sideways_descender);
+                float child_baseline = layout_synthesized_inline_baseline(
+                    view_block, vertical_block_axis_max);
                 block_axis_extent = max(block_axis_extent,
-                    vertical_block_axis_max + sideways_descender);
+                    max(sideways_ascender, child_baseline) +
+                    max(sideways_descender, vertical_block_axis_max - child_baseline));
             }
             sizes.min_content = max(sizes.min_content, block_axis_extent);
             sizes.max_content = max(sizes.max_content, block_axis_extent);
@@ -7321,6 +7336,11 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
             }
         }
 
+        float inline_before = 0.0f, inline_after = 0.0f;
+        bool has_direct_inline_text = false;
+        bool has_orthogonal_baseline_child = false;
+        bool horizontal_inline_line = has_only_inline_content &&
+            !layout_block_inline_axis_is_vertical(view);
         int height_item_count = 0;
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (is_vertical_fieldset_legend(child)) continue;
@@ -7334,6 +7354,13 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                 if (intrinsic_should_skip_height_child(child_elem)) continue;
             }
             if (child->is_text() && text_node_is_ascii_whitespace(child)) continue;
+            if (horizontal_inline_line && child->is_text()) {
+                float before = 0.0f, after = 0.0f;
+                intrinsic_font_line_extents(lycon, element, view, &before, &after);
+                inline_before = max(inline_before, before);
+                inline_after = max(inline_after, after);
+                has_direct_inline_text = true;
+            }
             height_item_count++;
             // CSS 2.1 §10.3.3: The available width for a child element's content
             // is the parent's content width minus the child's own padding and border.
@@ -7437,6 +7464,20 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                 }
             }
 
+            if (horizontal_inline_line && child->is_element()) {
+                ViewBlock* child_view = lam::view_as_block(child->as_element());
+                CssEnum align = child_view && child_view->in_line
+                    ? child_view->inl()->vertical_align : CSS_VALUE_BASELINE;
+                if (child_view && layout_inline_box_is_orthogonal_to_parent(child_view) &&
+                    (!align || align == CSS_VALUE_BASELINE)) {
+                    // an orthogonal atom exports a synthesized baseline; its height alone loses the font's other edge.
+                    float baseline = layout_synthesized_inline_baseline(view, child_height);
+                    float shift = child_view->in_line ? child_view->inl()->vertical_align_offset : 0.0f;
+                    inline_before = max(inline_before, baseline + shift);
+                    inline_after = max(inline_after, child_height - baseline - shift);
+                    has_orthogonal_baseline_child = true;
+                }
+            }
             if (is_grid_column_flow || is_flex_row || has_only_inline_content) {
                 // These layouts take the maximum block contribution among same-line children.
                 height = fmax(height, child_height);
@@ -7452,6 +7493,9 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
             } else if (block_flow_margin_handled) {
                 block_flow_has_prior_content = true;
             }
+        }
+        if (has_direct_inline_text && has_orthogonal_baseline_child) {
+            height = max(height, inline_before + inline_after);
         }
         // grid auto tracks must include the same main-axis gaps as final flex layout.
         if (is_flex_container && !is_flex_row && height_item_count > 1) {
