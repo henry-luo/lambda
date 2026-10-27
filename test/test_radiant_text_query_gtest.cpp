@@ -346,6 +346,17 @@ protected:
         EXPECT_FLOAT_EQ(element->width, width) << id;
         EXPECT_FLOAT_EQ(element->height, height) << id;
     }
+    IntrinsicSizes measure_physical_widths(DomElement* element, DomElement* flow_box = nullptr) {
+        LayoutContext context = {};
+        LayoutPassScope pass(&context, document, &ui);
+        context.selected_view_tree = lam::up(document->view_tree.get());
+        context.root_font_size = 16.0f;
+        ViewBlock* caller = flow_box ? lam::view_as_block(flow_box) : nullptr;
+        context.block.flow_box = lam::up(caller);
+        IntrinsicSizes sizes = layout_measure_intrinsic_widths(&context, element, true);
+        EXPECT_EQ(context.block.flow_box.get(), caller);
+        return sizes;
+    }
     void expect_inline_pair(const char* actual_id, const char* control_id) {
         DomElement* actual = dom_find_element_by_id(document->root->as_element(), actual_id);
         DomElement* control = dom_find_element_by_id(document->root->as_element(), control_id);
@@ -652,6 +663,215 @@ TEST_F(RadiantTextQuery, VerticalAutoInlineSizeKeepsPhysicalDecorationsAndBodyCo
                 document = nullptr;
             }
         }
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalAutoBlockSizeRetainsMinMaxAndBoxEdges) {
+    struct State {
+        bool visible;
+        const char* child_width;
+        float natural_width;
+        const char* minimum;
+        float min_width;
+        const char* maximum;
+        float max_width;
+        const char* height;
+        float css_height;
+    };
+    const State states[] = {
+        {false, "23px", 0, "50px", 50, "none", -1, "40px", 40},
+        {true, "80px", 80, "50px", 50, "none", -1, "70px", 70},
+        {true, "80px", 80, "50px", 50, "60px", 60, "40px", 40},
+        {true, "80px", 80, "90px", 90, "60px", 60, "70px", 70},
+        {true, "80px", 80, "0px", 0, "60px", 60, "40px", 40},
+        {false, "23px", 0, "0px", 0, "4px", 4, "70px", 70},
+        {true, "23px", 23, "50px", 50, "none", -1, "40px", 40}
+    };
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"}) for (bool border_box : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(border_box);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0;font:10px/10px Ahem}#outer{position:absolute}"
+            "#result{writing-mode:%s;box-sizing:%s;height:40px;padding:2px 7px 4px 3px;"
+            "border:2px solid;min-width:50px}#child{width:23px;height:20px;display:none}"
+            "</style><div id=outer><div id=result><div id=child></div></div></div>",
+            mode, border_box ? "border-box" : "content-box");
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* outer = dom_find_element_by_id(document->root->as_element(), "outer");
+        DomElement* child = dom_find_element_by_id(result, "child");
+        ASSERT_NE(outer, nullptr);
+        ASSERT_NE(child, nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.minimum);
+            SCOPED_TRACE(state.maximum);
+            SCOPED_TRACE(state.child_width);
+            SCOPED_TRACE(state.visible);
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "min-width", state.minimum));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "max-width", state.maximum));
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "height", state.height));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "display", state.visible ? "block" : "none"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "width", state.child_width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // min/max constrain the used box, while an oversized child retains its physical extent.
+            float decoration = 14.0f;
+            float minimum = state.min_width + (border_box ? 0.0f : decoration);
+            float width = state.natural_width + decoration;
+            if (state.max_width >= 0.0f)
+                width = min(width, state.max_width + (border_box ? 0.0f : decoration));
+            width = max(max(width, minimum), decoration);
+            float height = state.css_height + (border_box ? 0.0f : 10.0f);
+            EXPECT_FLOAT_EQ(result->width, width);
+            EXPECT_FLOAT_EQ(result->height, height);
+            EXPECT_FLOAT_EQ(outer->width, width);
+            EXPECT_FLOAT_EQ(outer->height, height);
+            if (state.visible) {
+                EXPECT_FLOAT_EQ(child->width, state.natural_width);
+                EXPECT_FLOAT_EQ(child->height, 20.0f);
+                EXPECT_FLOAT_EQ(child->x, strcmp(mode, "vertical-rl") == 0
+                    ? width - 9.0f - state.natural_width : 5.0f);
+                EXPECT_FLOAT_EQ(child->y, 4.0f);
+            }
+            IntrinsicSizes contribution = measure_physical_widths(result, outer);
+            EXPECT_FLOAT_EQ(contribution.min_content, width);
+            EXPECT_FLOAT_EQ(contribution.max_content, width);
+            EXPECT_FLOAT_EQ(result->width, width);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, BlockFlowUsesChildBoxRatherThanDescendantOverflow) {
+    struct State { const char* used; float block_size; const char* content; float content_size; };
+    const State states[] = {{"40px", 40, "90px", 90}, {"70px", 70, "30px", 30},
+        {"40px", 40, "110px", 110}, {"auto", -1, "90px", 90}, {"40px", 40, "90px", 90}};
+    for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"}) for (bool decorated : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(decorated);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        bool reverse = strcmp(mode, "vertical-rl") == 0;
+        const char* block_axis = vertical ? "width" : "height";
+        const char* inline_axis = vertical ? "height" : "width";
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0;font:10px/10px Ahem}"
+            "#result{writing-mode:%s;%s:120px}#before{%s:11px;%s:20px}"
+            "#after{%s:17px;%s:20px}#child{%s:40px;%s:60px;padding:%s;border:%s}"
+            "#content{%s:90px;%s:20px}</style><div id=result><div id=before></div>"
+            "<div id=child><div id=content></div></div><div id=after></div></div>",
+            mode, inline_axis, block_axis, inline_axis, block_axis, inline_axis,
+            block_axis, inline_axis, decorated ? "3px 5px 7px 9px" : "0",
+            decorated ? "2px solid" : "0", block_axis, inline_axis);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        DomElement* before = dom_find_element_by_id(result, "before");
+        DomElement* child = dom_find_element_by_id(result, "child");
+        DomElement* content = dom_find_element_by_id(result, "content");
+        DomElement* after = dom_find_element_by_id(result, "after");
+        ASSERT_NE(before, nullptr);
+        ASSERT_NE(child, nullptr);
+        ASSERT_NE(content, nullptr);
+        ASSERT_NE(after, nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.used);
+            SCOPED_TRACE(state.content);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, block_axis, state.used));
+            ASSERT_TRUE(dom_cssom_set_inline_property(content, block_axis, state.content));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float decoration_x = decorated ? 18.0f : 0.0f;
+            float decoration_y = decorated ? 14.0f : 0.0f;
+            float natural_block = state.block_size < 0.0f ? state.content_size : state.block_size;
+            float child_width = vertical ? natural_block + decoration_x : 60.0f + decoration_x;
+            float child_height = vertical ? 60.0f + decoration_y : natural_block + decoration_y;
+            float parent_block = 28.0f + (vertical ? child_width : child_height);
+            // normal-flow advancement uses the child's margin box even when its content overflows.
+            EXPECT_FLOAT_EQ(result->width, vertical ? parent_block : 120.0f);
+            EXPECT_FLOAT_EQ(result->height, vertical ? 120.0f : parent_block);
+            EXPECT_FLOAT_EQ(before->x, reverse ? parent_block - 11.0f : 0.0f);
+            EXPECT_FLOAT_EQ(before->y, 0.0f);
+            EXPECT_FLOAT_EQ(child->width, child_width);
+            EXPECT_FLOAT_EQ(child->height, child_height);
+            EXPECT_FLOAT_EQ(child->x, reverse ? 17.0f : vertical ? 11.0f : 0.0f);
+            EXPECT_FLOAT_EQ(child->y, vertical ? 0.0f : 11.0f);
+            EXPECT_FLOAT_EQ(after->x, reverse || !vertical ? 0.0f : 11.0f + child_width);
+            EXPECT_FLOAT_EQ(after->y, vertical ? 0.0f : 11.0f + child_height);
+            EXPECT_FLOAT_EQ(content->width, vertical ? state.content_size : 20.0f);
+            EXPECT_FLOAT_EQ(content->height, vertical ? 20.0f : state.content_size);
+            float content_x = reverse
+                ? child_width - (decorated ? 7.0f : 0.0f) - state.content_size
+                : decorated ? 11.0f : 0.0f;
+            float content_y = decorated ? 5.0f : 0.0f;
+            EXPECT_FLOAT_EQ(content->x, content_x);
+            EXPECT_FLOAT_EQ(content->y, content_y);
+            float overflow_min = 0.0f, overflow_max = 0.0f;
+            layout_in_flow_content_bounds(lam::view_as_element(child),
+                vertical ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y, true, &overflow_min, &overflow_max);
+            float content_start = vertical ? content_x : content_y;
+            EXPECT_FLOAT_EQ(overflow_min, min(content_start, 0.0f));
+            EXPECT_FLOAT_EQ(overflow_max, max(content_start + state.content_size, 0.0f));
+            if (vertical) {
+                IntrinsicSizes intrinsic = measure_physical_widths(result);
+                EXPECT_FLOAT_EQ(intrinsic.min_content, parent_block);
+                EXPECT_FLOAT_EQ(intrinsic.max_content, parent_block);
+                EXPECT_FLOAT_EQ(result->width, parent_block);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalAtomicOverflowParticipatesThroughLineBaselines) {
+    struct State { const char* width_css; float width; const char* line_height_css; float line_height; };
+    const State states[] = {{"10px", 10, "13px", 13}, {"10px", 10, "14px", 14},
+        {"100px", 100, "14px", 14}, {"100px", 100, "13px", 13}, {"10px", 10, "13px", 13}};
+    for (const char* mode : {"vertical-lr", "vertical-rl"})
+        for (const char* align : {"bottom", "baseline"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(align);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}.outer{writing-mode:%s;display:inline-block}"
+            "#result{display:inline-block;vertical-align:%s;height:80px;border:2px solid;font:8px/13px Ahem}"
+            ".atom{display:inline-block;width:10px;border:2px solid}</style><div class=outer><div id=result>"
+            "<div class=atom>10px<br>container: min-content.</div> "
+            "<div class=atom>10px<br>container: min-content.</div></div></div>", mode, align);
+        DomElement* result = layout_script_source(source);
+        ASSERT_NE(result, nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.width_css);
+            SCOPED_TRACE(state.line_height_css);
+            float width = state.width;
+            ASSERT_TRUE(dom_cssom_set_inline_property(result, "line-height", state.line_height_css));
+            for (DomNode* node = result->first_child; node; node = node->next_sibling) {
+                if (node->is_element()) ASSERT_TRUE(dom_cssom_set_inline_property(node->as_element(), "width", state.width_css));
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // the final overflowing Ahem line exports a baseline beyond the atom's small used width.
+            float advance = max(width + 4.0f, 4.0f * state.line_height + 2.0f);
+            float expected_width = 4.0f + 2.0f * advance;
+            EXPECT_FLOAT_EQ(result->width, expected_width);
+            EXPECT_FLOAT_EQ(result->height, 84.0f);
+            float index = 0.0f;
+            for (DomNode* node = result->first_child; node; node = node->next_sibling) {
+                if (!node->is_element()) continue;
+                DomElement* atom = node->as_element();
+                EXPECT_FLOAT_EQ(atom->width, width + 4.0f);
+                EXPECT_FLOAT_EQ(atom->height, 84.0f);
+                EXPECT_FLOAT_EQ(atom->x, strcmp(mode, "vertical-rl") == 0
+                    ? expected_width - 2.0f - width - 4.0f - index * advance : 2.0f + index * advance);
+                EXPECT_FLOAT_EQ(atom->y, 2.0f);
+                index += 1.0f;
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
     }
 }
 
@@ -1163,21 +1383,24 @@ TEST_F(RadiantTextQuery, VerticalSourceBaselineOriginsIncludePaddingOnce) {
         {"inline-flex", blocks}, {"inline-grid", blocks}, {"inline-table", rows},
         {"inline-table", fragments}, {"inline-block", fieldset}, {"inline-flex", fieldset}
     };
-    for (const char* mode : {"vertical-rl", "vertical-lr"}) for (const auto& owner : owners) {
+    for (const char* mode : {"vertical-rl", "vertical-lr"}) for (const auto& owner : owners)
+        for (bool margins : {false, true}) {
         SCOPED_TRACE(mode);
         SCOPED_TRACE(owner.display);
         SCOPED_TRACE(owner.markup);
+        SCOPED_TRACE(margins);
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
             "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
             "body{margin:0}#result{font:20px/0 Ahem;writing-mode:%s;inline-size:200px}"
             "#probe,i{display:inline-block;inline-size:20px;block-size:20px}"
-            "#source{display:%s;flex-direction:column;font-size:30px;inline-size:40px;border:5px solid;padding:10px}"
+            "#source{display:%s;flex-direction:column;font-size:30px;inline-size:40px;border:5px solid;padding:10px;%s}"
             ".cell{block-size:30px}i{inline-size:30px;block-size:30px}"
             "table{border-spacing:0}td{padding:0}tr{vertical-align:baseline}"
             ".fragment i{inline-size:1em;block-size:1em}.small{font-size:10px}"
             "caption{margin:10px;block-size:20px}</style>"
-            "<div id=result><span id=probe></span>%s</div>", mode, owner.display, owner.markup);
+            "<div id=result><span id=probe></span>%s</div>", mode, owner.display,
+            margins ? "margin-left:6px;margin-right:14px" : "", owner.markup);
         DomElement* block = layout_script_source(source);
         ASSERT_NE(block, nullptr);
         DomElement* source_box = dom_find_element_by_id(block, "source");
@@ -1190,6 +1413,11 @@ TEST_F(RadiantTextQuery, VerticalSourceBaselineOriginsIncludePaddingOnce) {
             ASSERT_TRUE(dom_cssom_set_inline_property(source_box, "padding",
                 strcmp(selected, "last") == 0 ? "20px" : "10px"));
             ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            if (owner.markup == fragments) {
+                // four 30px glyph columns, two 20px captions with 10px margins, and the authored decoration.
+                float padding = strcmp(selected, "last") == 0 ? 20.0f : 10.0f;
+                EXPECT_FLOAT_EQ(source_box->width, 4.0f * 30.0f + 2.0f * 40.0f + 2.0f * (5.0f + padding));
+            }
             DomElement* item = dom_find_element_by_id(block, selected);
             ASSERT_NE(item, nullptr);
             float probe_x = 0.0f, item_x = 0.0f;
@@ -1317,6 +1545,534 @@ TEST_F(RadiantTextQuery, OrthogonalIntrinsicBaselinesIncludeFractionalFontLeadin
     }
 }
 
+TEST_F(RadiantTextQuery, PositionedVerticalLinesUseTheirOwnBaselinePolicy) {
+    for (const char* mode : {"vertical-rl", "vertical-lr"}) {
+        SCOPED_TRACE(mode);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#host{position:relative;width:200px;height:100px}"
+            "#result{position:absolute;writing-mode:%s;width:50%%}canvas{width:100%%}</style>"
+            "<div id=host><div id=result><canvas id=canvas width=1 height=1></canvas></div></div>", mode);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* host = dom_find_element_by_id(document->root->as_element(), "host");
+        ASSERT_NE(host, nullptr);
+        for (const char* width : {"200px", "300px", "200px"}) {
+            SCOPED_TRACE(width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(host, "width", width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float extent = host->width / 2.0f;
+            EXPECT_FLOAT_EQ(block->width, extent);
+            EXPECT_FLOAT_EQ(block->height, extent);
+            expect_box("canvas", 0.0f, 0.0f, extent, extent);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, WrappedVerticalAtomsRetainTheirSourceLineGeometry) {
+    for (const char* mode : {"vertical-rl", "vertical-lr"})
+        for (bool definite : {false, true}) for (float cross : {20.0f, 60.0f}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(definite);
+        SCOPED_TRACE(cross);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#host{font:20px/20px Ahem;width:300px;height:80px;overflow:hidden}"
+            "#result{writing-mode:%s;%s}i{display:inline-block;width:20px;height:20px}"
+            "#large{width:%gpx}</style><div id=host><div id=result>XXX "
+            "<i id=large></i><i id=small></i></div></div>", mode,
+            definite ? "inline-size:80px" : "", cross);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* host = dom_find_element_by_id(document->root->as_element(), "host");
+        DomElement* large = dom_find_element_by_id(block, "large");
+        DomElement* small = dom_find_element_by_id(block, "small");
+        ASSERT_NE(host, nullptr);
+        ASSERT_NE(large, nullptr);
+        ASSERT_NE(small, nullptr);
+        for (const char* size : {"80px", "160px", "80px"}) {
+            SCOPED_TRACE(size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(definite ? block : host,
+                definite ? "inline-size" : "height", size));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            bool wrapped = strcmp(size, "80px") == 0;
+            EXPECT_FLOAT_EQ(block->width, cross + (wrapped ? 20.0f : 0.0f));
+            EXPECT_FLOAT_EQ(block->height, wrapped ? 80.0f : definite ? 160.0f : 120.0f);
+            float root_x = 0.0f, root_y = 0.0f, large_x = 0.0f, large_y = 0.0f;
+            float small_x = 0.0f, small_y = 0.0f;
+            view_get_visual_bounds(block, &root_x, &root_y, nullptr, nullptr);
+            view_get_visual_bounds(large, &large_x, &large_y, nullptr, nullptr);
+            view_get_visual_bounds(small, &small_x, &small_y, nullptr, nullptr);
+            float line_start = wrapped && strcmp(mode, "vertical-lr") == 0 ? 20.0f : 0.0f;
+            EXPECT_FLOAT_EQ(large_x - root_x, line_start);
+            EXPECT_FLOAT_EQ(small_x - root_x, line_start + (cross - 20.0f) / 2.0f);
+            EXPECT_FLOAT_EQ(large_y - root_y, wrapped ? 0.0f : 80.0f);
+            EXPECT_FLOAT_EQ(small_y - root_y, wrapped ? 20.0f : 100.0f);
+            EXPECT_EQ(large->inline_line_number, wrapped ? 1 : 0);
+            EXPECT_EQ(small->inline_line_number, large->inline_line_number);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalFitContentUsesAtomicInlineContributions) {
+    for (const char* mode : {"vertical-rl", "vertical-lr"}) {
+        SCOPED_TRACE(mode);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#host{font:20px/20px Ahem;width:300px;height:80px;overflow:hidden}"
+            "#result{writing-mode:%s}i{display:inline-block;font-style:normal;"
+            "padding-inline:2px 4px;border-inline:1px solid;margin-inline:3px 5px}</style>"
+            "<div id=host><div id=result>XXX <i id=atom>X X</i></div></div>", mode);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* host = dom_find_element_by_id(document->root->as_element(), "host");
+        DomElement* atom = dom_find_element_by_id(block, "atom");
+        ASSERT_NE(host, nullptr);
+        ASSERT_NE(atom, nullptr);
+        for (const char* font_size : {"20px", "30px", "20px"}) {
+            SCOPED_TRACE(font_size);
+            ASSERT_TRUE(dom_cssom_set_inline_property(atom, "font-size", font_size));
+            float maximum = strcmp(font_size, "30px") == 0 ? 186.0f : 156.0f;
+            for (const char* available : {"40px", "80px", "200px", "80px"}) {
+                SCOPED_TRACE(available);
+                ASSERT_TRUE(dom_cssom_set_inline_property(host, "height", available));
+                ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+                EXPECT_FLOAT_EQ(block->height, min(maximum, max(60.0f, host->height)));
+                float atom_x = atom->x, atom_y = atom->y;
+                float atom_width = atom->width, atom_height = atom->height;
+                LayoutContext context = {};
+                LayoutPassScope pass(&context, document, &ui);
+                context.selected_view_tree = lam::up(document->view_tree.get());
+                context.root_font_size = 16.0f;
+                context.block.flow_box = lam::up(lam::view_as_block(block));
+                IntrinsicSizes sizes = {};
+                ASSERT_TRUE(layout_measure_direct_inline_intrinsics(
+                    &context, lam::view_as_block(block), &sizes));
+                EXPECT_FLOAT_EQ(sizes.min_content, 60.0f);
+                EXPECT_FLOAT_EQ(sizes.max_content, maximum);
+                EXPECT_FLOAT_EQ(atom->x, atom_x);
+                EXPECT_FLOAT_EQ(atom->y, atom_y);
+                EXPECT_FLOAT_EQ(atom->width, atom_width);
+                EXPECT_FLOAT_EQ(atom->height, atom_height);
+                EXPECT_EQ(context.block.flow_box.get(), lam::view_as_block(block));
+                EXPECT_EQ(context.view.get(), nullptr);
+                EXPECT_EQ(context.elmt.get(), nullptr);
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, AspectRatioDeterminesOrthogonalAutoInlineSize) {
+    for (const char* mode : {"vertical-rl", "vertical-lr"})
+        for (bool border_box : {false, true}) for (const char* text : {"", "X X X", "XXXXX"}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(border_box);
+        SCOPED_TRACE(text);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#host{font:20px/20px Ahem;width:300px;height:200px}"
+            "#result{writing-mode:%s;width:100px;aspect-ratio:2/1;box-sizing:%s;"
+            "padding:10px;border:2px solid}</style><div id=host><div id=result>%s</div></div>",
+            mode, border_box ? "border-box" : "content-box", text);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        for (const char* width : {"100px", "160px", "100px"}) {
+            SCOPED_TRACE(width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "width", width));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float css_width = strcmp(width, "160px") == 0 ? 160.0f : 100.0f;
+            float decoration = border_box ? 0.0f : 24.0f;
+            EXPECT_FLOAT_EQ(block->width, css_width + decoration);
+            // the ratio supplies the preferred size; the automatic minimum
+            // still retains a 100px unbreakable run plus its box decoration.
+            float minimum = strcmp(text, "XXXXX") == 0 ? 124.0f : 0.0f;
+            EXPECT_FLOAT_EQ(block->height, max(css_width / 2.0f + decoration, minimum));
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, GridTracksUseContainerAxesForReplacedContributions) {
+    struct State { const char* available; const char* natural_width; float inline_size; float width; };
+    const State states[] = {{"150px", "200", 150.0f, 200.0f}, {"250px", "200", 250.0f, 200.0f},
+        {"250px", "120", 250.0f, 120.0f}, {"150px", "120", 150.0f, 120.0f},
+        {"150px", "200", 150.0f, 200.0f}};
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"})
+        for (bool orthogonal : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(orthogonal);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        const char* child_mode = orthogonal ? (vertical ? "horizontal-tb" : "vertical-rl") : mode;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#host{writing-mode:%s;font:20px/20px Ahem;width:300px;height:400px}"
+            "#result{display:grid;inline-size:150px;border:1px solid}#cell{border:1px solid}"
+            "canvas{writing-mode:%s;vertical-align:top}</style><div id=host><div id=result>"
+            "<div id=cell><canvas id=canvas width=200 height=100></canvas></div></div></div>",
+            mode, child_mode);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* cell = dom_find_element_by_id(block, "cell");
+        DomElement* canvas = dom_find_element_by_id(block, "canvas");
+        ASSERT_NE(cell, nullptr);
+        ASSERT_NE(canvas, nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.available);
+            SCOPED_TRACE(state.natural_width);
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "inline-size", state.available));
+            ASSERT_TRUE(canvas->set_attribute("width", state.natural_width));
+            layout_html_doc(&ui, document, true);
+            float natural_inline = vertical ? 100.0f : state.width;
+            float natural_block = vertical ? state.width : 100.0f;
+            float item_inline = max(state.inline_size, natural_inline + 2.0f);
+            EXPECT_FLOAT_EQ(block->width, vertical ? natural_block + 4.0f : state.inline_size + 2.0f);
+            EXPECT_FLOAT_EQ(block->height, vertical ? state.inline_size + 2.0f : natural_block + 4.0f);
+            EXPECT_FLOAT_EQ(cell->width, vertical ? natural_block + 2.0f : item_inline);
+            EXPECT_FLOAT_EQ(cell->height, vertical ? item_inline : natural_block + 2.0f);
+            EXPECT_FLOAT_EQ(canvas->width, state.width);
+            EXPECT_FLOAT_EQ(canvas->height, 100.0f);
+            float root_x = 0.0f, root_y = 0.0f, cell_x = 0.0f, cell_y = 0.0f;
+            float canvas_x = 0.0f, canvas_y = 0.0f;
+            view_get_visual_bounds(block, &root_x, &root_y, nullptr, nullptr);
+            view_get_visual_bounds(cell, &cell_x, &cell_y, nullptr, nullptr);
+            view_get_visual_bounds(canvas, &canvas_x, &canvas_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(cell_x - root_x, 1.0f);
+            EXPECT_FLOAT_EQ(cell_y - root_y, 1.0f);
+            EXPECT_FLOAT_EQ(canvas_x - cell_x, 1.0f);
+            EXPECT_FLOAT_EQ(canvas_y - cell_y, 1.0f);
+            if (vertical) {
+                LayoutContext context = {};
+                LayoutPassScope pass(&context, document, &ui);
+                context.selected_view_tree = lam::up(document->view_tree.get());
+                context.root_font_size = 16.0f;
+                context.block.flow_box = lam::up(lam::view_as_block(block));
+                // physical width is the row extent of a vertical grid, not its column extent.
+                IntrinsicSizes sizes = measure_element_intrinsic_widths(&context, block);
+                EXPECT_FLOAT_EQ(sizes.min_content, state.width + 4.0f);
+                EXPECT_FLOAT_EQ(sizes.max_content, state.width + 4.0f);
+                EXPECT_FLOAT_EQ(block->width, state.width + 4.0f);
+                EXPECT_FLOAT_EQ(cell->width, state.width + 2.0f);
+                EXPECT_EQ(context.block.flow_box.get(), lam::view_as_block(block));
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, GridAreasAndSelfAlignmentFollowLogicalAxes) {
+    for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"})
+        for (bool rtl : {false, true}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(rtl);
+        bool vertical = strcmp(mode, "horizontal-tb") != 0;
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{writing-mode:%s;direction:%s;position:relative;"
+            "display:grid;inline-size:140px;block-size:100px;padding:2px 4px 6px 8px;border:1px solid;"
+            "grid-template-columns:40px 60px;grid-template-rows:30px 50px;gap:8px 10px;"
+            "justify-content:center;align-content:end}#a,#b{inline-size:20px;block-size:10px;"
+            "justify-self:end;align-self:center}#a{grid-area:1/1}#b{grid-area:2/2}"
+            "#auto{grid-area:2/1;justify-self:end;align-self:center;margin:5%%;font:10px/10px Ahem}"
+            "canvas{vertical-align:top}"
+            "#abs{position:absolute;inset:0;grid-column:2/3;grid-row:1/3}</style>"
+            "<div id=result><div id=a></div><div id=b></div>"
+            "<div id=auto><canvas width=20 height=30></canvas></div><div id=abs></div></div>",
+            mode, rtl ? "rtl" : "ltr");
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        for (bool distributed : {true, false, true}) {
+            SCOPED_TRACE(distributed);
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "justify-content", distributed ? "center" : "start"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "align-content", distributed ? "end" : "start"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float column_offset = distributed ? 15.0f : 0.0f;
+            float row_offset = distributed ? 12.0f : 0.0f;
+            struct Area { const char* id; float column; float row; float inline_size; float block_size; };
+            const Area areas[] = {{"a", column_offset + 20.0f, row_offset + 10.0f, 20.0f, 10.0f},
+                {"b", column_offset + 90.0f, row_offset + 58.0f, 20.0f, 10.0f},
+                {"auto", column_offset + 38.0f - (vertical ? 30.0f : 20.0f),
+                    row_offset + 38.0f + (50.0f - (vertical ? 20.0f : 30.0f)) / 2.0f,
+                    vertical ? 30.0f : 20.0f, vertical ? 20.0f : 30.0f},
+                {"abs", column_offset + 50.0f, row_offset, 60.0f, 88.0f}};
+            float root_x = 0.0f, root_y = 0.0f;
+            view_get_visual_bounds(block, &root_x, &root_y, nullptr, nullptr);
+            for (const Area& area : areas) {
+                SCOPED_TRACE(area.id);
+                DomElement* child = dom_find_element_by_id(block, area.id);
+                ASSERT_NE(child, nullptr);
+                float inline_start = rtl ? 140.0f - area.column - area.inline_size : area.column;
+                float block_start = strcmp(mode, "vertical-rl") == 0
+                    ? 100.0f - area.row - area.block_size : area.row;
+                float x = 0.0f, y = 0.0f;
+                view_get_visual_bounds(child, &x, &y, nullptr, nullptr);
+                EXPECT_FLOAT_EQ(x - root_x, 9.0f + (vertical ? block_start : inline_start));
+                EXPECT_FLOAT_EQ(y - root_y, 3.0f + (vertical ? inline_start : block_start));
+                EXPECT_FLOAT_EQ(child->width, vertical ? area.block_size : area.inline_size);
+                EXPECT_FLOAT_EQ(child->height, vertical ? area.inline_size : area.block_size);
+                if (strcmp(area.id, "auto") == 0) {
+                    // all sides use the 40px column area, independent of physical orientation.
+                    EXPECT_FLOAT_EQ(child->boundary()->margin.left, 2.0f);
+                    EXPECT_FLOAT_EQ(child->boundary()->margin.right, 2.0f);
+                    EXPECT_FLOAT_EQ(child->boundary()->margin.top, 2.0f);
+                    EXPECT_FLOAT_EQ(child->boundary()->margin.bottom, 2.0f);
+                }
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, GridAutomaticRatioBlockSizeRetainsItsContentMinimum) {
+    for (bool capped : {false, true}) for (bool auto_minimum : {true, false})
+        for (bool scrolls : {false, true}) {
+        SCOPED_TRACE(capped);
+        SCOPED_TRACE(auto_minimum);
+        SCOPED_TRACE(scrolls);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:grid;width:100px;"
+            "aspect-ratio:2/1;align-items:center;max-height:%s;min-height:%s;overflow:%s}"
+            "#child{width:100%%;height:20px}</style><div id=result><div id=child></div></div>",
+            capped ? "100px" : "none", auto_minimum ? "auto" : "0px", scrolls ? "hidden" : "visible");
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* child = dom_find_element_by_id(block, "child");
+        ASSERT_NE(child, nullptr);
+        for (float height : {20.0f, 200.0f, 20.0f}) {
+            SCOPED_TRACE(height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(child, "height", height == 20.0f ? "20px" : "200px"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            // the preferred ratio is a floor, and the automatic minimum is capped by max-height.
+            float expected = auto_minimum && !scrolls ? max(50.0f, height) : 50.0f;
+            if (capped) expected = min(expected, 100.0f);
+            EXPECT_FLOAT_EQ(block->width, 100.0f);
+            EXPECT_FLOAT_EQ(block->height, expected);
+            EXPECT_FLOAT_EQ(child->height, height);
+            EXPECT_FLOAT_EQ(child->y, (max(50.0f, height) - height) / 2.0f);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, GridReplacedBlockContributionsApplyIntrinsicMinMax) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}#result{display:grid;width:max-content}"
+        "canvas{display:block;width:max-content;height:0;min-height:max-content}</style>"
+        "<div id=result><canvas id=canvas width=50 height=50></canvas></div>");
+    DomElement* block = layout_script_source(source);
+    ASSERT_NE(block, nullptr);
+    DomElement* canvas = dom_find_element_by_id(block, "canvas");
+    ASSERT_NE(canvas, nullptr);
+    for (bool minimum : {true, false, true}) {
+        SCOPED_TRACE(minimum);
+        ASSERT_TRUE(dom_cssom_set_inline_property(canvas, "height", minimum ? "0px" : "100px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(canvas, "min-height", minimum ? "max-content" : "0px"));
+        ASSERT_TRUE(dom_cssom_set_inline_property(canvas, "max-height", minimum ? "none" : "max-content"));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        EXPECT_FLOAT_EQ(block->width, 50.0f);
+        EXPECT_FLOAT_EQ(block->height, 50.0f);
+        EXPECT_FLOAT_EQ(canvas->width, 50.0f);
+        EXPECT_FLOAT_EQ(canvas->height, 50.0f);
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalFlexBlockContentsRetainPhysicalContributions) {
+    struct State { const char* available; const char* width; const char* height; float child_width; float child_height; };
+    const State states[] = {{"280px", "40px", "30px", 40.0f, 30.0f},
+        {"360px", "40px", "30px", 40.0f, 30.0f}, {"360px", "25px", "45px", 25.0f, 45.0f},
+        {"280px", "25px", "45px", 25.0f, 45.0f}, {"280px", "40px", "30px", 40.0f, 30.0f}};
+    for (bool decorated : {false, true}) for (bool parallel_control : {true, false})
+        for (bool spaced : {false, true}) {
+        SCOPED_TRACE(decorated);
+        SCOPED_TRACE(parallel_control);
+        SCOPED_TRACE(spaced);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{display:flex;width:280px;font:10px/10px Ahem}"
+            ".item{padding:%s;border:%s}#htb{display:%s}#vrl{writing-mode:vertical-rl}#vlr{writing-mode:vertical-lr}"
+            ".child{width:40px;height:30px}#vrl .child,#vlr .child{margin-block-start:%s;margin-block-end:%s}"
+            "</style><div id=result>"
+            "<div class=item id=htb><div class=child></div><div class=child></div></div>"
+            "<div class=item id=vrl><div class=child></div><div class=child></div></div>"
+            "<div class=item id=vlr><div class=child></div><div class=child></div></div></div>",
+            decorated ? "2px 3px 4px 5px" : "0", decorated ? "1px solid" : "0",
+            parallel_control ? "block" : "none", spaced ? "6px" : "0", spaced ? "4px" : "0");
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        for (const State& state : states) {
+            SCOPED_TRACE(state.available);
+            SCOPED_TRACE(state.width);
+            SCOPED_TRACE(state.height);
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "width", state.available));
+            for (const char* id : {"htb", "vrl", "vlr"}) {
+                DomElement* item = dom_find_element_by_id(block, id);
+                ASSERT_NE(item, nullptr);
+                for (DomNode* child = item->first_child; child; child = child->next_sibling) {
+                    ASSERT_TRUE(child->is_element());
+                    ASSERT_TRUE(dom_cssom_set_inline_property(child->as_element(), "width", state.width));
+                    ASSERT_TRUE(dom_cssom_set_inline_property(child->as_element(), "height", state.height));
+                }
+            }
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            float decoration_x = decorated ? 10.0f : 0.0f;
+            float decoration_y = decorated ? 8.0f : 0.0f;
+            float item_x = 0.0f;
+            EXPECT_FLOAT_EQ(block->height, (parallel_control ? 2.0f : 1.0f) * state.child_height + decoration_y);
+            for (const char* id : {"htb", "vrl", "vlr"}) {
+                SCOPED_TRACE(id);
+                DomElement* item = dom_find_element_by_id(block, id);
+                bool vertical = strcmp(id, "htb") != 0;
+                if (!vertical && !parallel_control) continue;
+                float start_margin = spaced ? 6.0f : 0.0f;
+                float end_margin = spaced ? 4.0f : 0.0f;
+                float collapsed_gap = max(start_margin, end_margin);
+                float flow_width = 2.0f * state.child_width + start_margin + collapsed_gap + end_margin;
+                float expected_width = (vertical ? flow_width : state.child_width) + decoration_x;
+                EXPECT_FLOAT_EQ(item->x, item_x);
+                EXPECT_FLOAT_EQ(item->y, 0.0f);
+                EXPECT_FLOAT_EQ(item->width, expected_width);
+                EXPECT_FLOAT_EQ(item->height, block->height);
+                float child_index = 0.0f;
+                for (DomNode* child = item->first_child; child; child = child->next_sibling) {
+                    DomElement* element = child->as_element();
+                    float x = decorated ? 6.0f : 0.0f;
+                    float y = decorated ? 3.0f : 0.0f;
+                    if (vertical) {
+                        float offset = start_margin + child_index * (state.child_width + collapsed_gap);
+                        x += strcmp(id, "vrl") == 0 ? flow_width - offset - state.child_width : offset;
+                    }
+                    else y += child_index * state.child_height;
+                    EXPECT_FLOAT_EQ(element->x, x);
+                    EXPECT_FLOAT_EQ(element->y, y);
+                    EXPECT_FLOAT_EQ(element->width, state.child_width);
+                    EXPECT_FLOAT_EQ(element->height, state.child_height);
+                    child_index += 1.0f;
+                }
+                // flex bases consume physical width, including the item's block progression.
+                IntrinsicSizes sizes = measure_physical_widths(item, block);
+                EXPECT_FLOAT_EQ(sizes.min_content, expected_width);
+                EXPECT_FLOAT_EQ(sizes.max_content, expected_width);
+                EXPECT_FLOAT_EQ(item->width, expected_width);
+                item_x += expected_width;
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, OrthogonalFlowPreservesFlexAndGridAssignedWidths) {
+    for (bool grid : {false, true}) {
+        SCOPED_TRACE(grid);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}#result{%s;width:450px;font:10px/10px Ahem}"
+            ".item{%s;min-width:0}#vrl{writing-mode:vertical-rl}#vlr{writing-mode:vertical-lr}"
+            ".child{width:40px;height:30px}</style><div id=result>"
+            "<div class=item id=htb><div class=child></div><div class=child></div></div>"
+            "<div class=item id=vrl><div class=child></div><div class=child></div></div>"
+            "<div class=item id=vlr><div class=child></div><div class=child></div></div></div>",
+            grid ? "display:grid;grid-template-columns:repeat(3,minmax(0,1fr))" : "display:flex",
+            grid ? "" : "flex:1 1 0");
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        for (bool narrow : {false, true, false}) {
+            SCOPED_TRACE(narrow);
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "width", narrow ? "90px" : "450px"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            EXPECT_FLOAT_EQ(block->height, 60.0f);
+            float used_width = block->width / 3.0f;
+            float item_index = 0.0f;
+            for (const char* id : {"htb", "vrl", "vlr"}) {
+                SCOPED_TRACE(id);
+                DomElement* item = dom_find_element_by_id(block, id);
+                ASSERT_NE(item, nullptr);
+                EXPECT_FLOAT_EQ(item->width, used_width);
+                EXPECT_FLOAT_EQ(item->height, 60.0f);
+                EXPECT_FLOAT_EQ(item->x, item_index * used_width);
+                float child_index = 0.0f;
+                for (DomNode* child = item->first_child; child; child = child->next_sibling) {
+                    DomElement* element = child->as_element();
+                    ASSERT_NE(element, nullptr);
+                    float x = strcmp(id, "vrl") == 0 ? used_width - (child_index + 1.0f) * 40.0f
+                        : strcmp(id, "vlr") == 0 ? child_index * 40.0f : 0.0f;
+                    EXPECT_FLOAT_EQ(element->x, x);
+                    EXPECT_FLOAT_EQ(element->y, strcmp(id, "htb") == 0 ? child_index * 30.0f : 0.0f);
+                    EXPECT_FLOAT_EQ(element->width, 40.0f);
+                    EXPECT_FLOAT_EQ(element->height, 30.0f);
+                    child_index += 1.0f;
+                }
+                item_index += 1.0f;
+            }
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalFlexButtonLabelsUseCanonicalCentering) {
+    for (const char* mode : {"vertical-rl", "vertical-lr"}) {
+        SCOPED_TRACE(mode);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
+            "body{margin:0}#result{display:flex;width:300px;font:20px/20px Ahem}"
+            "button{font:inherit;line-height:inherit;text-align:center;margin:0;padding:0;border:0;"
+            "width:200px;height:100px;writing-mode:%s}</style>"
+            "<div id=result><button id=label>XXX</button></div>", mode);
+        DomElement* block = layout_script_source(source);
+        ASSERT_NE(block, nullptr);
+        DomElement* button = dom_find_element_by_id(block, "label");
+        ASSERT_NE(button, nullptr);
+        for (bool small : {false, true, false}) {
+            SCOPED_TRACE(small);
+            ASSERT_TRUE(dom_cssom_set_inline_property(button, "width", small ? "100px" : "200px"));
+            ASSERT_TRUE(dom_cssom_set_inline_property(button, "height", small ? "120px" : "100px"));
+            ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+            ASSERT_NE(button->first_child, nullptr);
+            ASSERT_TRUE(button->first_child->is_text());
+            float button_x = 0.0f, button_y = 0.0f, text_x = 0.0f, text_y = 0.0f;
+            float text_width = 0.0f, text_height = 0.0f;
+            view_get_visual_bounds(button, &button_x, &button_y, nullptr, nullptr);
+            view_get_visual_bounds(static_cast<View*>(button->first_child), &text_x, &text_y,
+                &text_width, &text_height);
+            EXPECT_FLOAT_EQ(text_x - button_x + text_width / 2.0f, button->width / 2.0f);
+            EXPECT_FLOAT_EQ(text_y - button_y + text_height / 2.0f, button->height / 2.0f);
+            LayoutTextRectBounds fragments = layout_text_rect_bounds(button->first_child->as_text()->rect);
+            ASSERT_TRUE(fragments.valid);
+            EXPECT_FLOAT_EQ((fragments.min_x + fragments.max_x) / 2.0f, button->width / 2.0f);
+            EXPECT_FLOAT_EQ((fragments.min_y + fragments.max_y) / 2.0f, button->height / 2.0f);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
 TEST_F(RadiantTextQuery, DominantTextEdgesAlignWithOrthogonalAtomicBoxes) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);
@@ -1334,8 +2090,10 @@ TEST_F(RadiantTextQuery, DominantTextEdgesAlignWithOrthogonalAtomicBoxes) {
         DomElement* atom = dom_find_element_by_id(block, "atom");
         ASSERT_NE(text, nullptr);
         ASSERT_NE(atom, nullptr);
-        for (const char* baseline : {"text-top", "text-bottom", "text-top"}) {
+        for (const char* leading : {"40px", "80px"}) for (const char* baseline : {"text-top", "text-bottom", "text-top"}) {
+            SCOPED_TRACE(leading);
             SCOPED_TRACE(baseline);
+            ASSERT_TRUE(dom_cssom_set_inline_property(block, "line-height", leading));
             ASSERT_TRUE(dom_cssom_set_inline_property(block, "dominant-baseline", baseline));
             ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
             float text_x = 0.0f, text_y = 0.0f, atom_x = 0.0f, atom_y = 0.0f;
@@ -1611,6 +2369,10 @@ TEST_F(RadiantTextQuery, VerticalTextareaSourcesAlignWithTheirEditableLines) {
             float baseline_x = control_x + (strcmp(mode, "vertical-rl") == 0
                 ? control->width - baseline : baseline);
             EXPECT_FLOAT_EQ(probe_x + probe->width / 2.0f, baseline_x);
+            // the probe can extend beyond the control's clamped baseline, but its internal scroll overflow cannot size the line.
+            float content_extent = max(control->width,
+                max(baseline + probe->width / 2.0f, control->width - baseline + probe->width / 2.0f));
+            EXPECT_FLOAT_EQ(block->width, content_extent + 2.0f * (10.0f + 3.0f));
         }
         ui.document = nullptr;
         free_document(document);

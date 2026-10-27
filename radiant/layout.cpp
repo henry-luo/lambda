@@ -1634,6 +1634,12 @@ bool layout_element_is_replaced(DomElement* element) {
         (view && view->form_control());
 }
 
+bool layout_element_is_css_replaced(DomElement* element) {
+    // button widgets contain a CSS formatting context; their UI role is not replaced content.
+    return layout_element_is_replaced(element) &&
+        (!is_form_control(element) || layout_tag_is_css_replaced(element->tag()));
+}
+
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
         LayoutContext* lycon, const CssValue* value) {
     LayoutBorderSpacingValue result = {0.0f, 0.0f, false, false};
@@ -3086,6 +3092,19 @@ float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block) {
     return extent;
 }
 
+float layout_inline_content_baseline(ViewBlock* parent, ViewBlock* block, float baseline) {
+    BoxEdges margin = layout_boundary_margin_edges(block ? block->bound : nullptr);
+    if (parent && block && layout_block_inline_axis_is_vertical(parent) &&
+        layout_block_inline_axis_is_vertical(block)) {
+        bool over_is_right = layout_element_css_writing_mode(parent->as_element()) != CSS_VALUE_SIDEWAYS_LR;
+        bool start_is_right = layout_block_writing_mode(block) == WM_VERTICAL_RL;
+        // exported baselines start at block-start; inline alignment starts at line-over.
+        if (over_is_right != start_is_right) baseline = block->width - baseline;
+        return baseline + (over_is_right ? margin.right : margin.left);
+    }
+    return baseline + margin.top;
+}
+
 float layout_synthesized_inline_baseline(ViewBlock* parent, float margin_extent) {
     // CSS Writing Modes 3 §4.3 synthesizes both baseline types from margin edges.
     return layout_dominant_baseline_position(parent, margin_extent, margin_extent);
@@ -3112,6 +3131,20 @@ void layout_apply_inline_edge_extents(float top_extent, float bottom_extent,
     *line_after = max(*line_after, top_extent - *line_before);
 }
 
+static bool layout_line_over_is_block_end(ViewBlock* block) {
+    return block && layout_block_writing_mode(block) == WM_VERTICAL_LR &&
+        layout_element_css_writing_mode(block->as_element()) != CSS_VALUE_SIDEWAYS_LR;
+}
+
+float layout_line_block_start_baseline(LayoutContext* lycon, float used_line_height) {
+    float baseline = lycon->line.max_ascender;
+    // line metrics start at line-over; exported block baselines start at block-start.
+    if (!layout_line_over_is_block_end(lycon->block.flow_box)) return baseline;
+    // retain the line's metric, including its empty-line sentinel, instead of synthesizing a strut baseline.
+    if (used_line_height < 0.0f) line_baseline_position(lycon, &used_line_height);
+    return used_line_height - baseline;
+}
+
 static float inline_content_box_y(LayoutContext* lycon, CssEnum align, float align_offset,
                                    float inline_height, float content_height, float content_baseline,
                                    float baseline_pos, float line_height) {
@@ -3120,8 +3153,7 @@ static float inline_content_box_y(LayoutContext* lycon, CssEnum align, float ali
     float vertical_offset = calculate_vertical_align_offset(lycon, align, inline_height,
         line_height, baseline_pos, content_baseline + half_leading, align_offset);
     ViewBlock* block = lycon->block.flow_box;
-    if (block && layout_block_writing_mode(block) == WM_VERTICAL_LR &&
-        layout_element_css_writing_mode(block->as_element()) != CSS_VALUE_SIDEWAYS_LR) {
+    if (layout_line_over_is_block_end(block)) {
         // CSS Writing Modes 3 §6.3: vertical-lr stacks rightward while line-over
         // remains right. Resolve that mapping in this line's finalized extent.
         vertical_offset = line_height - inline_height - vertical_offset;
@@ -3341,20 +3373,18 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 lycon, block, prefers_last);
             if (table_baseline >= 0.0f &&
                 !prefers_last) {
-                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    table_baseline;
+                item_baseline = layout_inline_content_baseline(inline_parent, block, table_baseline);
             } else {
                 item_baseline = layout_synthesized_inline_baseline(inline_parent, item_height);
                 if (table_baseline >= 0.0f) {
-                    item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                        table_baseline;
+                    item_baseline = layout_inline_content_baseline(inline_parent, block, table_baseline);
                 }
             }
         } else if (block->tag() == MARKUP_NAME_TEXTAREA &&
                    radiant::layout_uses_explicit_baseline_source(block)) {
             float control_baseline = radiant::layout_form_control_baseline_for_source(block);
             item_baseline = control_baseline > 0.0f
-                ? (block->bound ? block->boundary()->margin.top : 0.0f) + control_baseline
+                ? layout_inline_content_baseline(inline_parent, block, control_baseline)
                 : block->height + (block->bound ? block->boundary()->margin.top : 0.0f);
         } else if (block->tag() == MARKUP_NAME_TEXTAREA && overflow_visible) {
             item_baseline = block->height +
@@ -3380,16 +3410,15 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 block, block->block()->first_line_baseline,
                 block->block()->last_line_baseline, true, 0.0f);
             if (grid_baseline > 0.0f) {
-                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    grid_baseline;
+                item_baseline = layout_inline_content_baseline(inline_parent, block, grid_baseline);
             }
         } else if (is_inline_flex && block->embed && block->embedp()->flex) {
             float flex_baseline = radiant::layout_select_cached_baseline(
                 block, block->embedp()->flex->first_baseline,
                 block->embedp()->flex->last_baseline, false, 0.0f);
             if (flex_baseline > 0.0f) {
-                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    layout_block_start_content_offset(block) + flex_baseline;
+                item_baseline = layout_inline_content_baseline(inline_parent, block,
+                    layout_block_start_content_offset(block) + flex_baseline);
             }
         } else if (!is_inline_table &&
                    !layout_inline_box_is_orthogonal_to_parent(block)) {
@@ -3434,8 +3463,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     block, overflow_visible)) {
                 // CSS Inline 3 takes the last in-flow line box; Flexbox §8.5
                 // exports the last baseline of a direct flex child for that line.
-                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    content_baseline;
+                item_baseline = layout_inline_content_baseline(inline_parent, block, content_baseline);
             }
         }
         CssEnum align = block->in_line && block->inl()->vertical_align ?
@@ -3458,19 +3486,18 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, align_baseline_pos, item_baseline, valign_offset);
         ViewBlock* baseline_parent = layout_nearest_block_ancestor(block->parent_view());
-        bool parent_uses_text_top_baseline = baseline_parent && baseline_parent->blk &&
-            baseline_parent->block()->dominant_baseline == CSS_VALUE_TEXT_TOP;
-        bool baseline_source_context = baseline_parent &&
-            radiant::layout_inline_context_has_explicit_baseline_source(baseline_parent);
-        if (layout_inline_box_is_orthogonal_to_parent(block) &&
-            !vertical_inline_parent && parent_uses_text_top_baseline) {
-            block->y = lycon->block.advance_y;
-        } else if (!vertical_inline_parent || baseline_source_context) {
+        if (!vertical_inline_parent) {
             // native font-height and negative leading allow ink above the line's allocation.
             block->y = lycon->block.advance_y + (lycon->line.has_native_metrics ? vertical_offset : max(vertical_offset, 0.0f)) +
                 (block->bound ? block->boundary()->margin.top : 0);
         } else {
-            // horizontal baseline alignment must not replace it with a line
+            // retain this line's final block coordinate; physical publication only projects it.
+            float block_offset = layout_line_over_is_block_end(baseline_parent)
+                ? line_height - item_height - vertical_offset : vertical_offset;
+            BoxEdges margin = layout_boundary_margin_edges(block->bound);
+            float margin_start = layout_block_writing_mode(baseline_parent) == WM_VERTICAL_RL
+                ? margin.right : margin.left;
+            block->y = lycon->block.advance_y + block_offset + margin_start;
         }
         if (layout_zero_sized_atomic_in_vertical_lr(block)) {
             block->y = lycon->block.advance_y;

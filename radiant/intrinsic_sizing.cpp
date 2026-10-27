@@ -1169,7 +1169,7 @@ static bool intrinsic_resolve_vertical_margins(LayoutContext* lycon, DomElement*
                                                float inline_base, float* mt, float* mb) {
     if (!element || !element->specified_style || !mt || !mb) return false;
     LayoutCssBoxCandidates candidates = {};
-    candidates.collect(element->specified_style, true);
+    candidates.collect(element, true);
 
     bool resolved = false;
     if (candidates.sides[0].value && intrinsic_resolve_margin_value(
@@ -2495,6 +2495,25 @@ static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
         saw_child = true;
     }
     return saw_child;
+}
+
+static bool intrinsic_is_vertical_block_sequence(DomElement* element) {
+    ViewBlock* block = element ? lam::unsafe_view_block_element_storage(element) : nullptr;
+    if (!block || !layout_block_inline_axis_is_vertical(block) || is_multicol_container(block) ||
+        (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) ||
+        (is_inline_level_element(element) && !layout_intrinsic_element_is_atomic_inline(element))) return false;
+    bool has_block = false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_comment() || intrinsic_node_is_collapsible_space_only(child)) continue;
+        if (!child->is_element()) return false;
+        DomElement* child_element = child->as_element();
+        DisplayValue display = resolve_display_value(child_element);
+        if (layout_display_is_none(display) || layout_element_is_abs_or_fixed(child_element)) continue;
+        if (layout_element_is_floated(child_element) ||
+            (display.outer != CSS_VALUE_BLOCK && display.outer != CSS_VALUE_LIST_ITEM)) return false;
+        has_block = true;
+    }
+    return has_block;
 }
 
 static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
@@ -5402,6 +5421,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool explicit_box_decoration_inline =
         intrinsic_element_has_explicit_box_decoration_break(element);
     bool explicit_box_decoration_run_sizing = false;
+    bool vertical_block_sequence = intrinsic_is_vertical_block_sequence(element);
+    // intrinsic percentage-margin bases may differ from provisional used values (D4.5.1v4).
+    radiant::LayoutMeasureScope vertical_margin_scope(vertical_block_sequence ? lycon : nullptr, element);
+    IntrinsicSizes vertical_blocks = {};
+    ViewBlock* previous_vertical_block = nullptr;
     for (DomNode* child = intrinsic_children; child; child = child->next_sibling) {
         if (child->is_element() &&
             intrinsic_element_has_explicit_box_decoration_break(child->as_element())) {
@@ -5887,7 +5911,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // Orthogonal sizing resolves block-axis percentage margins
                     // against the containing block's inline size, not its width.
                     LayoutCssBoxCandidates margin_candidates = {};
-                    margin_candidates.collect(child_elem->specified_style, true);
+                    margin_candidates.collect(child_elem, true);
                     float child_inline_size = vertical_inline_basis;
                     if (child_inline_size <= 0.0f &&
                         (margin_candidates.sides[1].value ||
@@ -5896,6 +5920,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             lycon, child, child_sizes.max_content);
                     }
                     if (child_inline_size > 0.0f) {
+                        if (vertical_block_sequence)
+                            layout_reresolve_percentage_margins(
+                                lam::unsafe_view_block_element_storage(child_elem), child_inline_size, lycon);
                         if (margin_candidates.sides[1].value &&
                             layout_css_value_has_percentage(
                                 margin_candidates.sides[1].value)) {
@@ -5942,6 +5969,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 float_width_alongside_inline = max(float_width_alongside_inline, float_max_sum);
                 float_min_max = max(float_min_max, child_min_width);
             } else {
+                if (vertical_block_sequence) {
+                    ViewBlock* child_block = lam::unsafe_view_block_element_storage(child->as_element());
+                    // physical width is block progression here; reuse used-flow margin collapsing.
+                    float gap = layout_vertical_flow_block_gap(view_block, previous_vertical_block,
+                        child_block, layout_block_writing_mode(view_block));
+                    vertical_blocks.min_content += gap + child_sizes.min_content;
+                    vertical_blocks.max_content += gap + child_sizes.max_content;
+                    previous_vertical_block = child_block;
+                }
                 // Non-floated block child: flush any accumulated float run first
                 flush_float_run();
                 // A non-float block child creates a full-width line, separating
@@ -5958,6 +5994,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Flush any remaining float run after the child loop
     flush_float_run();
+    if (vertical_block_sequence && previous_vertical_block) {
+        float trailing = layout_vertical_flow_trailing_margin(view_block, previous_vertical_block);
+        sizes.min_content = max(vertical_blocks.min_content + trailing, 0.0f);
+        sizes.max_content = max(vertical_blocks.max_content + trailing, sizes.min_content);
+        has_inline_content = false;
+    }
 
     // Add gaps for row flex containers
     if (is_row_flex && flex_child_count > 1 && flex_gap > 0) {
@@ -6354,15 +6396,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                                   : (given_max_width + horiz_padding + horiz_border);
         // min/max values cannot make a border box smaller than its padding and border.
         max_border_box = layout_floor_border_box_axis(view_for_minmax, max_border_box, true);
-        if (min_border_box <= max_border_box) {
-            if (sizes.max_content > max_border_box) {
-                sizes.max_content = max_border_box;
-            }
-            // CSS Tables §4.1: Table content-box inline size is never smaller than its
-            // minimum content inline size, so don't clamp min_content for tables.
-            if (!is_table_display && sizes.min_content > max_border_box) {
-                sizes.min_content = max_border_box;
-            }
+        // an overlapping minimum raises the effective maximum; it does not discard the cap.
+        max_border_box = max(max_border_box, min_border_box);
+        if (sizes.max_content > max_border_box) {
+            sizes.max_content = max_border_box;
+        }
+        // CSS Tables §4.1: Table content-box inline size is never smaller than its
+        // minimum content inline size, so don't clamp min_content for tables.
+        if (!is_table_display && sizes.min_content > max_border_box) {
+            sizes.min_content = max_border_box;
         }
     }
 
@@ -6505,34 +6547,46 @@ static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* 
 
 
 
-static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
-                                         bool* pending_space, bool* has_content,
-                                         bool allow_inline_descendants) {
-    if (!output || !node || !pending_space || !has_content) return false;
-    if (node->is_text()) {
-        const char* data = reinterpret_cast<const char*>(node->text_data());
-        if (!data) return true;
-        CssEnum white_space = get_white_space_value(node);
-        bool collapse = layout_white_space_collapses(white_space);
-        bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
-        for (size_t i = 0; data[i] != '\0'; i++) {
-            char ch = data[i];
-            if (layout_text_is_segment_break(ch) && !collapse_newlines) {
-                strbuf_append_char(output, '\v');
-                *pending_space = false;
-                *has_content = true;
-            } else if (collapse && is_space((unsigned char)ch)) {
-                *pending_space = true;
-            } else {
-                if (*pending_space && output->length > 0 &&
-                    output->str[output->length - 1] != '\v') {
-                    strbuf_append_char(output, ' ');
-                }
-                strbuf_append_char(output, (char)layout_text_resolve_css_whitespace(ch));
-                *pending_space = false;
-                *has_content = true;
-            }
+struct IntrinsicInlineTextState {
+    bool pending_space = false;
+    bool has_line_content = false;
+};
+
+static void intrinsic_flush_inline_space(StrBuf* output, IntrinsicInlineTextState* state) {
+    if (state->pending_space && state->has_line_content) strbuf_append_char(output, ' ');
+    state->pending_space = false;
+}
+
+static void intrinsic_append_normalized_inline_text(StrBuf* output, DomNode* node,
+                                                    IntrinsicInlineTextState* state) {
+    const char* data = reinterpret_cast<const char*>(node->text_data());
+    if (!data) return;
+    CssEnum white_space = get_white_space_value(node);
+    bool collapse = layout_white_space_collapses(white_space);
+    bool collapse_newlines = layout_white_space_collapses_newlines(white_space);
+    for (size_t i = 0; data[i] != '\0'; i++) {
+        char ch = data[i];
+        if (layout_text_is_segment_break(ch) && !collapse_newlines) {
+            strbuf_append_char(output, '\v');
+            state->pending_space = false;
+            state->has_line_content = false;
+        } else if (collapse && is_space((unsigned char)ch)) {
+            state->pending_space = true;
+        } else {
+            intrinsic_flush_inline_space(output, state);
+            strbuf_append_char(output, (char)layout_text_resolve_css_whitespace(ch));
+            state->has_line_content = true;
         }
+    }
+}
+
+static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
+                                         IntrinsicInlineTextState* state,
+                                         bool allow_inline_descendants) {
+    if (!output || !node || !state) return false;
+    if (node->is_comment()) return true;
+    if (node->is_text()) {
+        intrinsic_append_normalized_inline_text(output, node, state);
         return true;
     }
     if (!node->is_element()) return false;
@@ -6543,8 +6597,8 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
     if (element->tag_id == MARKUP_NAME_BR) {
         // preserve a forced break without making it ordinary collapsible whitespace.
         strbuf_append_char(output, '\v');
-        *pending_space = false;
-        *has_content = true;
+        state->pending_space = false;
+        state->has_line_content = false;
         return true;
     }
 
@@ -6554,7 +6608,7 @@ static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
     }
     if (!allow_inline_descendants) return false;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (!intrinsic_append_inline_text(output, child, pending_space, has_content,
+        if (!intrinsic_append_inline_text(output, child, state,
                                           allow_inline_descendants)) {
             return false;
         }
@@ -6566,16 +6620,15 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
     if (!element) return nullptr;
     StrBuf* text = strbuf_new();
     if (!text) return nullptr;
-    bool has_content = false;
-    bool pending_space = false;
+    IntrinsicInlineTextState state;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (!intrinsic_append_inline_text(text, child, &pending_space, &has_content,
+        if (!intrinsic_append_inline_text(text, child, &state,
                                           allow_inline_descendants)) {
             strbuf_free(text);
             return nullptr;
         }
     }
-    if (!has_content || text->length == 0) {
+    if (text->length == 0) {
         strbuf_free(text);
         return nullptr;
     }
@@ -6583,13 +6636,8 @@ StrBuf* layout_collect_inline_text(DomElement* element, bool allow_inline_descen
     return text;
 }
 
-bool layout_measure_direct_inline_text_intrinsics(LayoutContext* lycon, ViewBlock* block,
-                                                   IntrinsicSizes* sizes) {
-    if (!lycon || !block || !sizes || !block->is_element()) return false;
-    StrBuf* text = layout_collect_inline_text(block->as_element(), false);
-    if (!text) return false;
-    IntrinsicFontScope font_scope(lycon, lycon->font);
-    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+static LayoutTextIntrinsicLineOptions intrinsic_inline_text_options(LayoutContext* lycon,
+                                                                    ViewBlock* block) {
     LayoutTextIntrinsicLineOptions options;
     options.text_transform = get_element_text_transform(block->as_element());
     options.font_variant = get_element_font_variant(block->as_element());
@@ -6603,11 +6651,207 @@ bool layout_measure_direct_inline_text_intrinsics(LayoutContext* lycon, ViewBloc
         if (block->block()->tab_size >= 0.0f) options.tab_size = block->block()->tab_size;
         options.tab_size_length = block->block()->tab_size_length;
     }
+    return options;
+}
+
+static bool intrinsic_measure_direct_text(LayoutContext* lycon, ViewBlock* block,
+                                           IntrinsicSizes* sizes) {
+    StrBuf* text = layout_collect_inline_text(block->as_element(), false);
+    if (!text) return false;
+    IntrinsicFontScope font_scope(lycon, lycon->font);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
     // keep glyph advances in the logical inline axis; physical width queries
     // additionally map vertical text into its column block extent.
-    *sizes = layout_measure_text_intrinsic_lines(lycon, text->str, text->length, options);
+    *sizes = layout_measure_text_intrinsic_lines(lycon, text->str, text->length,
+        intrinsic_inline_text_options(lycon, block));
     strbuf_free(text);
     return true;
+}
+
+struct IntrinsicInlineContentRun {
+    IntrinsicSizes sizes = {};
+    LayoutIntrinsicMinRun minimum;
+    float line_max = 0.0f;
+
+    void append(LayoutContext* lycon, DomNode* node, const IntrinsicSizes& contribution) {
+        if (contribution.has_forced_break) {
+            float first = line_max + contribution.first_line_max;
+            if (!sizes.has_forced_break) sizes.first_line_max = first;
+            sizes.has_forced_break = true;
+            sizes.max_content = max(sizes.max_content, max(first, contribution.max_content));
+            line_max = contribution.last_line_max;
+        } else {
+            line_max += contribution.max_content;
+        }
+        sizes.max_content = max(sizes.max_content, line_max);
+        layout_intrinsic_append_min_run(lycon, &minimum, node, contribution);
+    }
+
+    IntrinsicSizes finish() {
+        sizes.min_content = minimum.minimum;
+        sizes.first_segment_min = minimum.first;
+        sizes.last_segment_min = minimum.tail;
+        sizes.interior_min_content = minimum.interior;
+        sizes.has_min_content_break = minimum.has_break;
+        sizes.remaining_min_content = minimum.has_break
+            ? max(minimum.interior, minimum.tail) : 0.0f;
+        if (!sizes.has_forced_break) sizes.first_line_max = line_max;
+        sizes.last_line_max = line_max;
+        return sizes;
+    }
+};
+
+static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBlock* block,
+                                                      IntrinsicSizes* sizes);
+
+static bool intrinsic_measure_atomic_inline_contribution(LayoutContext* lycon, ViewBlock* atom,
+                                                          bool horizontal,
+                                                          IntrinsicSizes* sizes) {
+    LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    DomElement* element = atom->as_element();
+    // cyclic percentages and transferred orthogonal auto sizes need their own
+    // contribution algorithm; a resolved live size is not an intrinsic answer.
+    CssDeclaration* declarations[] = {
+        layout_specified_physical_size_declaration(element, horizontal),
+        layout_specified_physical_minmax_size_declaration(element, horizontal, true),
+        layout_specified_physical_minmax_size_declaration(element, horizontal, false),
+        layout_cascaded_physical_declaration(element, horizontal ? CSS_PROPERTY_PADDING_LEFT : CSS_PROPERTY_PADDING_TOP),
+        layout_cascaded_physical_declaration(element, horizontal ? CSS_PROPERTY_PADDING_RIGHT : CSS_PROPERTY_PADDING_BOTTOM),
+        layout_cascaded_physical_declaration(element, horizontal ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_MARGIN_TOP),
+        layout_cascaded_physical_declaration(element, horizontal ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_MARGIN_BOTTOM)
+    };
+    for (CssDeclaration* declaration : declarations) {
+        if (declaration && layout_css_value_has_percentage(declaration->value)) return false;
+    }
+    if (layout_intrinsic_min_size_keyword(atom, horizontal) != CSS_VALUE__UNDEF ||
+        layout_intrinsic_max_size_keyword(atom, horizontal) != CSS_VALUE__UNDEF ||
+        layout_axis_uses_stretch_size(atom->blk, axis)) return false;
+
+    CssEnum preferred_type = layout_axis_given_type(atom->blk, axis);
+    float given = layout_axis_given_size(atom->blk, axis);
+    if (given >= 0.0f && !layout_css_size_is_automatic(atom, horizontal) &&
+        !layout_axis_uses_intrinsic_size(atom->blk, axis)) {
+        float border_size = layout_apply_min_max_axis(atom, given, horizontal, false);
+        border_size = layout_used_border_box_size(atom, border_size, horizontal);
+        *sizes = {border_size, border_size};
+    } else {
+        if (horizontal == layout_block_inline_axis_is_vertical(atom) ||
+            layout_element_is_replaced(atom->as_element()) || layout_preferred_aspect_ratio(atom) > 0.0f ||
+            layout_block_has_size_containment_in_axis(atom, horizontal) ||
+            !intrinsic_measure_direct_inline_content(lycon, atom, sizes)) return false;
+        float decoration = layout_padding_border_axis(atom, horizontal);
+        float contributions[] = {sizes->min_content, sizes->max_content};
+        for (float& contribution : contributions) {
+            float border_size = contribution + decoration;
+            if (layout_axis_uses_intrinsic_size(atom->blk, axis)) {
+                if (preferred_type == CSS_VALUE_MIN_CONTENT) border_size = sizes->min_content + decoration;
+                else if (preferred_type == CSS_VALUE_MAX_CONTENT) border_size = sizes->max_content + decoration;
+                else return false;
+            }
+            contribution = layout_apply_min_max_axis(atom, border_size, horizontal, true);
+        }
+        *sizes = {contributions[0], contributions[1]};
+    }
+    BoxMetrics box = layout_box_metrics(atom);
+    float margins = horizontal ? box.margin_h : box.margin_v;
+    // atomic formatting contexts contribute their outer size, never descendant
+    // forced-break metadata or ink/scroll overflow, to the containing inline run.
+    *sizes = {sizes->min_content + margins, sizes->max_content + margins};
+    return true;
+}
+
+static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBlock* block,
+                                                      IntrinsicSizes* sizes) {
+    if ((block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) ||
+        is_multicol_container(block) || dom_element_has_before_content(block->as_element()) ||
+        dom_element_has_after_content(block->as_element())) return false;
+    if (intrinsic_measure_direct_text(lycon, block, sizes)) return true;
+
+    IntrinsicFontScope font_scope(lycon, lycon->font);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    StrBuf* text = strbuf_new();
+    if (!text) return false;
+    IntrinsicInlineTextState text_state;
+    IntrinsicInlineContentRun run;
+    DomNode* text_source = nullptr;
+    auto flush_text = [&]() {
+        if (!text->length) return;
+        LayoutTextIntrinsicLineOptions options = intrinsic_inline_text_options(lycon, block);
+        options.start_offset = run.line_max;
+        run.append(lycon, text_source,
+            layout_measure_text_intrinsic_lines(lycon, text->str, text->length, options));
+        strbuf_reset(text);
+    };
+    bool supported = true;
+    for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (child->is_comment()) continue;
+        if (child->is_text()) {
+            intrinsic_append_normalized_inline_text(text, child, &text_state);
+            text_source = child;
+            continue;
+        }
+        if (!child->is_element()) { supported = false; break; }
+        DomElement* element = child->as_element();
+        ViewBlock* atom = lam::unsafe_view_block_element_storage(element);
+        IntrinsicSizes contribution = {};
+        bool forced_break = element->tag() == MARKUP_NAME_BR;
+        bool soft_break = element->tag() == MARKUP_NAME_WBR;
+        {
+            BlockContextScope block_scope(lycon);
+            IntrinsicFontScope child_font_scope(lycon, lycon->font);
+            LayoutViewScope child_view_scope(lycon);
+            // style resolution resets the selected owner, so bind the child
+            // before materializing its contribution (D4.5.1v4).
+            lycon->view = lam::up(static_cast<View*>(element));
+            lycon->elmt = lam::up(child);
+            // provisional inlines need their computed box role before CSS can
+            // materialize block sizing properties; the measurement restores it.
+            ViewType role = layout_view_type_for_display(resolve_display_value(element),
+                layout_intrinsic_element_is_atomic_inline(element));
+            bool role_changed = element->view_type != role;
+            element->view_type = role;
+            if (role_changed || !element->styles_resolved() || element->needs_style_recompute() ||
+                element->measure_restyled())
+                dom_node_resolve_style(element, lycon);
+            if (layout_display_is_none(resolve_display_value(element)) ||
+                intrinsic_child_is_out_of_flow(element, atom)) continue;
+            if (layout_element_is_floated(element) || (!forced_break && !soft_break &&
+                (!layout_intrinsic_element_is_atomic_inline(element) ||
+                 !intrinsic_measure_atomic_inline_contribution(lycon, atom,
+                    !layout_block_inline_axis_is_vertical(block), &contribution)))) {
+                supported = false;
+                break;
+            }
+        }
+        if (forced_break) {
+            strbuf_append_char(text, '\v');
+            text_state = {};
+            text_source = child;
+            continue;
+        }
+        if (!soft_break) intrinsic_flush_inline_space(text, &text_state);
+        flush_text();
+        if (soft_break) layout_intrinsic_break_min_run(&run.minimum);
+        else {
+            run.append(lycon, child, contribution);
+            text_state.has_line_content = true;
+        }
+    }
+    flush_text();
+    strbuf_free(text);
+    if (supported) *sizes = run.finish();
+    return supported;
+}
+
+bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* block,
+                                              IntrinsicSizes* sizes) {
+    if (!lycon || !block || !sizes || !block->is_element()) return false;
+    if (intrinsic_measure_direct_text(lycon, block, sizes)) return true;
+    // D4.5.1v4 / D4.1.4v5: style-only descendant queries cannot publish
+    // speculative geometry or replace the caller's active flow/font state.
+    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    radiant::LayoutRunModeScope run_scope(lycon, radiant::RunMode::ComputeSize);
+    return intrinsic_measure_direct_inline_content(lycon, block, sizes);
 }
 
 static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,
@@ -7116,6 +7360,7 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
     // flex children form items even when every source child is an inline element.
     if (is_flex_container) has_only_inline_content = false;
     bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
+    bool vertical_block_sequence = is_block_flow && intrinsic_is_vertical_block_sequence(element);
     bool block_flow_has_prior_content = false;
 
     float block_flow_pad_top = 0.0f;
@@ -7397,6 +7642,14 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                 // this element's content box, not an outer measurement scope.
                 LayoutContainingBlockScope child_cb_scope(
                     lycon, LAYOUT_AXIS_X, content_w, content_w > 0.0f);
+                if (child->is_element() && layout_element_is_css_replaced(child->as_element())) {
+                    // CSS 2.1 §10.3.2/10.6.2: a replaced flow child owns its
+                    // used width; parent free space is not a ratio-transfer input.
+                    DomElement* child_element = child->as_element();
+                    IntrinsicSizes child_widths = layout_measure_intrinsic_widths(lycon, child_element);
+                    child_content_w = layout_content_size_from_border_box(
+                        lam::unsafe_view_block_element_storage(child_element), child_widths.max_content, true);
+                }
                 child_height = calculate_max_content_height(lycon, child, child_content_w);
             }
             bool cyclic_percentage_ratio_child = false;
@@ -7447,7 +7700,7 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                     mb = child_ve->boundary()->margin.bottom;
                 }
 
-                if (is_grid_container || is_flex_container) {
+                if (is_grid_container || is_flex_container || vertical_block_sequence) {
                     // Flex/grid: margins don't collapse, add full margins
                     child_height += mt + mb;
                 } else if (is_block_flow &&
@@ -7478,7 +7731,7 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                     has_orthogonal_baseline_child = true;
                 }
             }
-            if (is_grid_column_flow || is_flex_row || has_only_inline_content) {
+            if (is_grid_column_flow || is_flex_row || has_only_inline_content || vertical_block_sequence) {
                 // These layouts take the maximum block contribution among same-line children.
                 height = fmax(height, child_height);
             } else if (cyclic_percentage_ratio_child) {

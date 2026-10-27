@@ -7,6 +7,21 @@
 #include <math.h>
 #include <string.h>
 
+void LayoutCssBoxCandidates::collect(DomElement* element, bool margin) {
+    if (!element || !element->specified_style) return;
+    LayoutLogicalSides logical = layout_element_logical_sides(element);
+    for (int side = 0; side < 4; side++) {
+        CssBoxSide physical = static_cast<CssBoxSide>(side);
+        CssPropertyCode property = radiant_box_side_property(
+            margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING, physical);
+        // intrinsic and percentage consumers use the same logical-side cascade as computed CSS.
+        CssDeclaration* declaration = layout_cascaded_style_declaration(element->specified_style, property, logical);
+        const CssValue* value = declaration ? layout_box_component_value(
+            declaration->value, declaration->property_code, physical, logical) : nullptr;
+        css_consider_cascade_candidate(&sides[side], declaration, const_cast<CssValue*>(value));
+    }
+}
+
 static bool layout_css_value_has_percentage_impl(const CssValue* value, bool nonzero_only) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -96,7 +111,7 @@ static void layout_reresolve_percentage_spacing(ViewBlock* block, float inline_b
     if (!block || !block->bound || !block->specified_style || inline_base < 0.0f) return;
 
     LayoutCssBoxCandidates candidates = {};
-    if (!lycon) candidates.collect(block->specified_style, margin);
+    if (!lycon) candidates.collect(block->as_element(), margin);
     LayoutViewScope owner_scope(lycon);
     LayoutFontScope font_scope(lycon);
     if (lycon) {
@@ -128,6 +143,10 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base, Layout
     layout_reresolve_percentage_spacing(block, inline_base, true, lycon);
 }
 
+void layout_reresolve_percentage_margins(ViewBlock* block, float inline_base, LayoutContext* lycon) {
+    layout_reresolve_percentage_spacing(block, inline_base, true, lycon);
+}
+
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base) {
     layout_reresolve_percentage_box(block, inline_base, nullptr);
 }
@@ -138,7 +157,7 @@ static bool layout_element_has_percentage_spacing(ViewBlock* block) {
     for (int pass = 0; pass < 2; pass++) {
         bool margin = pass != 0;
         LayoutCssBoxCandidates candidates = {};
-        candidates.collect(block->specified_style, margin);
+        candidates.collect(block->as_element(), margin);
         if (candidates.has_percentage()) {
             return true;
         }

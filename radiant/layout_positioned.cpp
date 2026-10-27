@@ -2818,8 +2818,7 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     if (vertical_writing_abs && !is_flex_container && !is_grid_container &&
         !is_table_container) {
         layout_publish_vertical_flow_geometry(lycon, block, lycon->block.advance_y);
-        layout_publish_vertical_children(block, layout_block_writing_mode(block), false,
-            lycon->block.line_height, lycon->block.first_line_max_descender, true);
+        layout_publish_vertical_children(block, layout_block_writing_mode(block), false);
         layout_normalize_vertical_breaks(block);
         if (preserve_vertical_static_x) {
             // content-axis publication must not replace the outer positioned

@@ -73,6 +73,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->plaintext_paragraph = {};
     ctx->given_width = -1;
     ctx->given_height = -1;
+    ctx->used_size_owner = nullptr;
     ctx->initial_letter_exclusion_width = 0.0f;
     ctx->initial_letter_exclusion_right = 0.0f;
     ctx->initial_letter_exclusion_lines = 0;

@@ -63,8 +63,13 @@ static float grid_item_percentage_base_from_parent(LayoutContext* lycon, ViewBlo
         if (display.outer == CSS_VALUE_CONTENTS) continue;
         if (display.inner != CSS_VALUE_GRID) break;
         ViewBlock* grid_container = lam::view_as_block(ancestor->as_element());
+        bool horizontal = !layout_block_inline_axis_is_vertical(grid_container);
+        GridItemProp* gi = grid_item_prop(grid_item);
+        // after placement, the area's inline extent owns percentage box edges.
+        if (gi && gi->computed_grid_column_start > 0)
+            return horizontal ? gi->track_area_width : gi->track_area_height;
         return grid_container_content_size_for_item_percentages(
-            lycon, grid_container, true);
+            lycon, grid_container, horizontal);
     }
     return grid_item->width;
 }
@@ -297,7 +302,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     {
         GridContainerLayout* gl = lycon->grid_container;
         bool rows_changed = false;
-        bool definite_rows = !layout_block_has_automatic_height(grid_container);
+        LayoutAxis row_axis = layout_grid_track_axis(gl, false);
+        bool horizontal_rows = row_axis == LAYOUT_AXIS_X;
+        bool definite_rows = gl->has_explicit_height;
         for (int r = 0; r < gl->computed_row_count; r++) {
             const radiant::grid::EnhancedGridTrack& track = (*gl->computed_rows)[r];
             // CSS Grid §11.7: in a definite container an fr row takes its size
@@ -318,19 +325,21 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 int rs = gi->computed_grid_row_start - 1;
                 int re = gi->computed_grid_row_end - 1;
                 if (rs != r || re != r + 1) continue; // only single-row-span items
-                float h = item->content_height;
+                float h = horizontal_rows ? item->content_width : item->content_height;
                 // CSS Grid: if item has max-height, its contribution to the row is capped
-                if (item->blk && item->block_mut()->given_max_height >= 0) {
+                float maximum = layout_axis_given_max_size(item->blk, row_axis);
+                if (maximum >= 0.0f) {
                     float bb_max = layout_css_size_to_border_box(
-                        item->bound, layout_box_sizing(item), item->block()->given_max_height, false);
+                        item->bound, layout_box_sizing(item), maximum, horizontal_rows);
                     if (layout_uses_border_box(item)) {
-                        bb_max = layout_floor_border_box_axis(item, bb_max, false);
+                        bb_max = layout_floor_border_box_axis(item, bb_max, horizontal_rows);
                     }
                     if (h > bb_max) h = bb_max;
                 }
                 if (flexed) {
-                    bool scrolls = item->scroller && item->scroll()->overflow_y != CSS_VALUE_VISIBLE;
-                    h = radiant::grid_adapter::grid_item_minimum_contribution(item, false, h, h, scrolls);
+                    bool scrolls = item->scroller &&
+                        (horizontal_rows ? item->scroll()->overflow_x : item->scroll()->overflow_y) != CSS_VALUE_VISIBLE;
+                    h = radiant::grid_adapter::grid_item_minimum_contribution(item, horizontal_rows, h, h, scrolls);
                 }
                 if (h > max_content_h) max_content_h = h;
             }
@@ -376,112 +385,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     }
 
     log_info("=== GRID PASS 3 COMPLETE ===");
-    // Update container height based on actual item positions and sizes
-    // This is needed because content layout may cause items to exceed their
-    // track-allocated sizes (e.g., when item content is larger than track)
-    // Only do this for containers with auto height (no explicit height set)
     GridContainerLayout* grid_layout = lycon->grid_container;
-    // Size containment excludes in-flow grid items from the container's size;
-    // their overflowing tracks must not feed back into its intrinsic fallback.
-    bool has_explicit_height = !layout_block_has_automatic_height(grid_container) ||
-        layout_block_has_size_containment_in_axis(grid_container, false);
-    if (grid_layout && grid_layout->computed_row_count > 0 && !has_explicit_height) {
-        // final tracks replace the provisional intrinsic estimate, which may shrink after columns rewrap.
-        grid_container->height = layout_grid_row_border_box_extent(grid_container, grid_layout);
-    }
-    // A row with a fixed maximum establishes the auto grid block size;
-    // overflowing items must not feed back into that size.
-    bool has_non_definite_row = false;
-    if (grid_layout) {
-        for (int row = 0; row < grid_layout->computed_row_count; row++) {
-            if (radiant::grid::grid_track_allows_content_growth(
-                    (*grid_layout->computed_rows)[row])) {
-                has_non_definite_row = true;
-                break;
-            }
-        }
-    }
-
-    if (grid_layout && grid_layout->item_count > 0 && !has_explicit_height && has_non_definite_row) {
-        // Find the maximum extent of all grid items
-        float max_item_bottom = 0;
-        for (int i = 0; i < grid_layout->item_count; i++) {
-            ViewBlock* item = grid_layout->grid_items[i];
-            if (!item) continue;
-
-            float item_bottom = item->y + item->height;
-            if (item_bottom > max_item_bottom) {
-                max_item_bottom = item_bottom;
-            }
-        }
-
-        float required_height = max_item_bottom +
-            layout_axis_decoration_end(grid_container->bound, LAYOUT_AXIS_Y);
-        // Update container height if needed
-        if (required_height > grid_container->height) {
-            // When percentage row tracks overflow the intrinsic height, cap the
-            // container height at the intrinsic row height (items overflow the container)
-            if (grid_layout->row_intrinsic_height > 0.0f) {
-                float capped_height = grid_layout->row_intrinsic_height;
-                capped_height += layout_box_metrics(grid_container).pad_border_v;
-                if (capped_height > grid_container->height) {
-                    grid_container->height = capped_height;
-                }
-            } else {
-                grid_container->height = required_height;
-            }
-            // Also fix any item with negative y position (pushed above due to centering)
-            // by shifting all items down
-            float min_item_y = 0;
-            for (int i = 0; i < grid_layout->item_count; i++) {
-                ViewBlock* item = grid_layout->grid_items[i];
-                if (!item) continue;
-                if (item->y < min_item_y) {
-                    min_item_y = item->y;
-                }
-            }
-            if (min_item_y < 0) {
-                // Shift all items down by the negative offset
-                float shift = -min_item_y;
-                for (int i = 0; i < grid_layout->item_count; i++) {
-                    ViewBlock* item = grid_layout->grid_items[i];
-                    if (!item) continue;
-                    item->y += shift;
-                }
-                grid_container->height += shift;
-            }
-        }
-    }
-    // Fallback: also check row-based calculation for containers without items
-    // Only apply if container height is auto (not explicitly set)
-    if (grid_layout && grid_layout->computed_row_count > 0 && !has_explicit_height) {
-        float container_height = layout_grid_row_border_box_extent(grid_container, grid_layout);
-        // Only update if calculated height is greater (content overflow case)
-        if (container_height > grid_container->height) {
-            grid_container->height = container_height;
-        }
-    }
-    // Update container width based on grid content (for shrink-to-fit containers)
-    // NOTE: layout_grid_container (Pass 2) already sets the container width for
-    // shrink-to-fit grids using the correct first-pass intrinsic width (before
-    // percentage re-resolution). This secondary update is only needed as a
-    // fallback when layout_grid_container didn't handle it (e.g., empty grid).
-    // When percentage tracks exist, the container width must be the first-pass
-    // max-content width, NOT the sum of resolved column sizes (which would be
-    // smaller due to percentage clamping).
-    if (grid_layout && grid_layout->computed_column_count > 0) {
-        // Check if container is shrink-to-fit (inline-grid, or absolutely
-        // positioned with no explicit width)
-        if (layout_is_shrink_to_fit_width(grid_container) &&
-            grid_layout->is_shrink_to_fit_width) {
-            // layout_grid_container already set the correct width in Pass 2
-            // (including the first-pass intrinsic width for pct tracks).
-            // Use grid_layout->content_width which is already correct.
-            float container_width = (float)grid_layout->content_width;
-            container_width += layout_box_metrics(grid_container).pad_border_h;
-            grid_container->width = container_width;
-        }
-    }
+    layout_grid_resolve_container_size(grid_layout);
 
     for (int index = 0; grid_layout && index < grid_layout->item_count; index++) {
         ViewBlock* item = grid_layout->grid_items[index];
@@ -493,25 +398,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             item->y - gi->anonymous_text_origin_y);
     }
 
-    WritingMode grid_writing_mode = layout_block_writing_mode(grid_container);
-    if (grid_writing_mode == WM_VERTICAL_LR || grid_writing_mode == WM_VERTICAL_RL) {
-        bool preserve_surrogate_axes =
-            radiant::layout_inline_context_has_explicit_baseline_source(grid_container);
-        if (preserve_surrogate_axes) {
-            // Explicit baseline-source publication consumes the legacy surrogate
-            // track axes; retain that representation until the parent maps it.
-            float logical_width = grid_container->width;
-            float logical_height = grid_container->height;
-            grid_container->width = logical_height;
-            grid_container->height = logical_width;
-        }
-        LayoutContentBox grid_content = layout_content_box(grid_container);
-        grid_container->content_width = grid_content.width;
-        grid_container->content_height = grid_content.height;
-        layout_publish_vertical_children(grid_container, grid_writing_mode,
-            preserve_surrogate_axes,
-            lycon->block.line_height, lycon->block.first_line_max_descender);
-    }
+    // grid areas and item formatters publish physical boxes at their own boundary.
+    LayoutContentBox grid_content = layout_content_box(grid_container);
+    grid_container->content_width = grid_content.width;
+    grid_container->content_height = grid_content.height;
 
     grid_store_inline_baselines(lycon, lycon->grid_container, grid_container);
     // PASS 4: Absolute Positioned Children
@@ -552,8 +442,11 @@ IntrinsicSizes measure_grid_intrinsic_widths(LayoutContext* lycon, ViewBlock* co
         // stores each child's min/max pair on its GridItemProp; measuring again
         // for max-content doubles every descendant query at each nesting level.
         if (minimum) measure_grid_items(lycon, lycon->grid_container, true);
-        layout_grid_container(lycon, container, true);
-        float extent = lycon->grid_container->content_width;
+        bool horizontal_columns = !layout_block_inline_axis_is_vertical(container);
+        // physical width queries need row sizing when columns run vertically.
+        layout_grid_container(lycon, container, horizontal_columns);
+        float extent = horizontal_columns ? lycon->grid_container->content_width
+                                          : lycon->grid_container->content_height;
         if (minimum) result.min_content = extent;
         else result.max_content = extent;
     }
@@ -577,6 +470,8 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
 
     float container_content_height = grid_container_content_size_for_item_percentages(
         lycon, grid_container, false);
+    float container_inline_size = layout_block_inline_axis_is_vertical(grid_container)
+        ? max(container_content_height, 0.0f) : container_content_width;
     // style resolution must see the grid area as the containing block; the
     // scope restores the outer context after every grid-item setup pass.
     LayoutContainingBlockScope grid_parent_scope(
@@ -596,7 +491,7 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
             DomElement* elem = child->as_element();
             // Always resolve styles first (position:absolute may not be known until after cascade)
             init_grid_item_view(lycon, child);
-            layout_reresolve_percentage_box(lam::view_as_block(elem), container_content_width);
+            layout_reresolve_percentage_box(lam::view_as_block(elem), container_inline_size);
             // Re-check absolute positioning AFTER style resolution
             ViewBlock* elem_block = lam::view_as_block(elem);
             bool is_absolute = layout_view_is_abs_or_fixed(elem_block);
@@ -659,6 +554,13 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     // Resolve styles for this element (CSS cascade, inheritance, etc.)
     // This will now correctly apply padding/margin/border to elem->bound
     dom_node_resolve_style(child, lycon);
+    if (elem->blk && grid_item_prop(elem_block)) {
+        // cached computed CSS survives role initialization; project it into
+        // the grid item's per-pass alignment adapter (D4.5.1v4).
+        GridItemProp* gi = grid_item_prop(elem_block);
+        gi->justify_self = elem->block()->justify_self.value;
+        gi->align_self_grid = elem->block()->align_self.value;
+    }
 
 }
 // Pass 1: Content Measurement
@@ -674,6 +576,8 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
         lycon, container, true);
     float container_content_height = grid_container_content_size_for_item_percentages(
         lycon, container, false);
+    float container_inline_size = layout_block_inline_axis_is_vertical(container)
+        ? max(container_content_height, 0.0f) : container_content_width;
     // measurement uses the same percentage containing block as style setup;
     // keeping one scope prevents the two grid passes from diverging.
     LayoutContainingBlockScope grid_parent_scope(
@@ -689,25 +593,22 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout,
             bool is_absolute = layout_view_is_abs_or_fixed(item);
             if (!is_absolute && !layout_block_is_display_none(item)) {
                 // row contributions need final column widths; measure only widths in this pass.
-                IntrinsicSizes widths = layout_measure_intrinsic_widths(lycon, item);
-                if (item->blk && !layout_axis_size_is_percentage(item, true) &&
-                    item->block()->given_width > 0.0f) {
-                    float explicit_width = layout_css_size_to_border_box(
-                        item->bound, layout_box_sizing(item), item->block()->given_width, true);
-                    widths.min_content = widths.max_content =
-                        layout_floor_border_box_axis(item, explicit_width, true);
+                GridItemProp* gi = grid_item_prop(item);
+                if (gi) {
+                    gi->has_measured_size = false;
+                    gi->measured_min_height = gi->measured_max_height = 0.0f;
                 }
+                IntrinsicSizes widths = calculate_grid_item_intrinsic_sizes(lycon, item, false);
                 if (intrinsic_width_contribution) {
                     // intrinsic grid contributions retain the item's authored minimum, including zero.
                     layout_apply_grid_item_min_content_floor(lycon, item, &widths);
                 }
-                layout_reresolve_percentage_box(item, container_content_width);
+                layout_reresolve_percentage_box(item, container_inline_size);
                 // Store only WIDTH measurements in the item for later use
                 // HEIGHT measurements are intentionally NOT stored here because:
                 // - Heights depend on the actual column width (after column sizing)
                 // - Row sizing will calculate heights on-demand using item->width
                 // This follows CSS Grid spec §11.5 where row sizing happens after column sizing
-                GridItemProp* gi = grid_item_prop(item);
                 if (gi) {
                     gi->measured_min_width = widths.min_content;
                     gi->measured_max_width = widths.max_content;
@@ -808,16 +709,18 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         lycon->block.text_align = grid_item->block()->text_align;
         lycon->block.direction = grid_item->block()->direction;
     }
-    // Set up line formatting context
-    // Add a small subpixel tolerance to the right boundary to compensate for integer truncation
-    // of float track widths (e.g. 173.28px -> 173px causes 153.28px text to spuriously wrap).
-    // This only affects grid item layout, not float/normal flow layouts.
+    // nested formatting owners receive the actual floating-point content box.
     line_init(lycon, content_x_offset, content_x_offset + content_width);
-    lycon->line.right += 0.5f;
     // Check if this grid item is itself a grid or flex container (nested)
     if (layout_is_svg_viewport(grid_item->tag())) {
         // SVG children are not flow items; only foreignObject establishes HTML layout.
         layout_svg_foreign_objects(lycon, grid_item->as_element());
+        grid_item->content_width = content_width;
+        grid_item->content_height = content_height;
+        log_leave();
+        return;
+    } else if (layout_element_is_css_replaced(grid_item->as_element())) {
+        // replaced content has no CSS flow to finalize; grid already resolved its used box.
         grid_item->content_width = content_width;
         grid_item->content_height = content_height;
         log_leave();
@@ -868,9 +771,23 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         }
         layout_table_content(lycon, grid_item, grid_item->display);
     } else {
-        // Standard flow layout for grid item content
-        // finalize any pending line content
-        layout_flow_children(lycon, grid_item->first_child, true);
+        // the grid owns the used box; the shared formatter owns its internal
+        // lines, physical publication, overflow and exported baseline sets.
+        BlockContext flow_parent = lycon->block;
+        block_context_init(&lycon->block, grid_item, lycon->pool);
+        lycon->block.parent = lam::up(&flow_parent);
+        lycon->block.content_width = lycon->block.given_width = content_width;
+        lycon->block.content_height = lycon->block.given_height = content_height;
+        lycon->block.used_size_owner = lam::up(grid_item);
+        lycon->view = lam::up(grid_item);
+        lycon->elmt = lam::up(static_cast<DomNode*>(grid_item));
+        setup_line_height(lycon, grid_item);
+        layout_setup_block_font_metrics(lycon);
+        lycon->block.block_container_font = lam::up(lycon->font.style);
+        setup_inline(lycon, grid_item);
+        layout_block_inner_content(lycon, grid_item);
+        log_leave();
+        return;
     }
     // Update grid item content dimensions
     // Note: max_width and advance_y are relative to the content box
@@ -903,24 +820,13 @@ static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, Sc
     if (!grid_layout || !grid_layout->lycon) return nullptr;
     bool row_axis = axis == LAYOUT_AXIS_Y;
     int track_count = row_axis ? grid_layout->computed_row_count : grid_layout->computed_column_count;
-    radiant::grid::TrackArray* tracks = row_axis
-        ? grid_layout->computed_rows : grid_layout->computed_columns;
-    float gap = row_axis ? grid_layout->row_gap : grid_layout->column_gap;
     // We need (track_count + 1) positions for grid lines
     int line_count = track_count + 1;
     float* positions = scope->array_zero<float>((size_t)line_count);
     if (!positions) return nullptr;
 
-    float current_pos = container_offset;
-    for (int i = 0; i <= track_count; i++) {
-        positions[i] = current_pos;
-        if (i < track_count) {
-            current_pos += (*tracks)[i].base_size;
-            if (i < track_count - 1) {
-                current_pos += gap;
-            }
-        }
-    }
+    layout_grid_track_positions(grid_layout, !row_axis, positions);
+    for (int index = 0; index < line_count; index++) positions[index] += container_offset;
 
     *out_line_count = line_count;
     return positions;
@@ -947,10 +853,7 @@ static bool compute_grid_area_for_absolute(
         return false;
     }
 
-    LayoutAxisPair<float> offsets = {
-        layout_axis_decoration_start(container->bound, LAYOUT_AXIS_X),
-        layout_axis_decoration_start(container->bound, LAYOUT_AXIS_Y)
-    };
+    LayoutAxisPair<float> offsets = {};
     LayoutAxisPair<int> line_counts = {};
     LayoutAxisPair<float*> positions = {};
     ScratchScope scope(&grid_layout->lycon->scratch);
@@ -966,16 +869,17 @@ static bool compute_grid_area_for_absolute(
     // CSS Grid §9.1: For absolutely positioned items, when a start or end is auto,
     // the containing block extends to the outer edge of the padding box at that end.
     // This is the BORDER edge (not the content/padding), so it includes padding but not border.
-    BoxEdges border = layout_boundary_border_edges(container->bound);
-    float border_left = border.left;
-    float border_right = border.right;
-    float border_top = border.top;
-    float border_bottom = border.bottom;
-    // Padding-box outer edges in container border-box coordinates
-    float col_auto_start_pos = border_left;
-    float col_auto_end_pos   = (float)container->width  - border_right;
-    float row_auto_start_pos = border_top;
-    float row_auto_end_pos   = (float)container->height - border_bottom;
+    LayoutAxisPair<float> auto_start = {}, auto_end = {};
+    for (LayoutAxis track_axis : layout_axes()) {
+        bool columns = track_axis == LAYOUT_AXIS_X;
+        LayoutAxis physical = layout_grid_track_axis(grid_layout, columns);
+        bool forward = layout_logical_start_is_physical_start(container, physical);
+        float start_padding = layout_axis_padding_start(container->bound, physical);
+        float end_padding = layout_axis_padding_end(container->bound, physical);
+        auto_start[track_axis] = -(forward ? start_padding : end_padding);
+        auto_end[track_axis] = (columns ? grid_layout->content_width : grid_layout->content_height) +
+            (forward ? end_padding : start_padding);
+    }
     // Resolve explicit grid lines (1-based CSS to 0-based index into positions array)
     // Handle negative line numbers (count from end)
     LayoutAxisPair<bool> has_start = {has_col_start, has_row_start};
@@ -988,8 +892,6 @@ static bool compute_grid_area_for_absolute(
         has_col_end ? gi->grid_column_end : 0,
         has_row_end ? gi->grid_row_end : 0
     };
-    LayoutAxisPair<float> auto_start = {col_auto_start_pos, row_auto_start_pos};
-    LayoutAxisPair<float> auto_end = {col_auto_end_pos, row_auto_end_pos};
     LayoutAxisPair<float> start = {};
     LayoutAxisPair<float> end = {};
     for (int i = LAYOUT_AXIS_X; i <= LAYOUT_AXIS_Y; i++) {
@@ -1011,10 +913,11 @@ static bool compute_grid_area_for_absolute(
         }
     }
 
-    *out_x = start[LAYOUT_AXIS_X];
-    *out_y = start[LAYOUT_AXIS_Y];
-    *out_width = end[LAYOUT_AXIS_X] - start[LAYOUT_AXIS_X];
-    *out_height = end[LAYOUT_AXIS_Y] - start[LAYOUT_AXIS_Y];
+    Rect area = layout_grid_area_rect(grid_layout, start.x, start.y, end.x - start.x, end.y - start.y);
+    *out_x = area.x;
+    *out_y = area.y;
+    *out_width = area.width;
+    *out_height = area.height;
 
     return true;
 }
