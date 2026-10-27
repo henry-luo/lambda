@@ -21,6 +21,7 @@ struct Scene3dStats {
     uint32_t shadow_passes;      // shadow maps rendered since the viewport was created
     uint32_t shader_links;       // shader-material programs linked since the viewport was created
     uint32_t shader_programs;    // shader-material programs currently retained
+    uint32_t simulation_steps;   // GPU simulation steps since the viewport was created
     unsigned raster_width, raster_height;
     float camera_aspect;
 };

@@ -47,6 +47,10 @@ static constexpr unsigned SCENE_ENV_SIZE = 256, SCENE_ENV_LODS = 11, SCENE_ENV_L
 // short enough for its animation path `uniforms.<name>` to fit a playback binding.
 static constexpr unsigned SCENE_SHADER_UNIFORM_LIMIT = 32, SCENE_SHADER_SAMPLER_LIMIT = 8, SCENE_SHADER_VALUE_LIMIT = 256,
     SCENE_SHADER_NAME_LIMIT = 23, SCENE_SHADER_PROGRAM_LIMIT = 32, SCENE_INSTANCE_DATA_LIMIT = 6;
+// GPU simulations (SH5): per scene, variables per simulation, records per variable, and the fixed
+// steps one frame may take before a far-behind simulation resynchronizes with its time
+static constexpr unsigned SCENE_SIMULATION_LIMIT = 4, SCENE_VARIABLE_LIMIT = 4, SCENE_SIMULATION_RECORDS = 262144,
+    SCENE_SIMULATION_STEPS = 240;
 
 // Lanes a mesh does not use are trimmed from the end of its upload, so the
 // order matters: colors, then tangents, then deformation.
@@ -80,14 +84,38 @@ struct Scene3dMaterial {
     uint64_t texture_hash; // of its textures' sources and samplers
     struct Scene3dShader* shader; // a shader material's program inputs; null for the built-in models
 };
-// A shader-material uniform as authored: numbers (a float, vector, mat4 or an array of them; a color
-// string is three linear numbers) or the texture a sampler reads. `components` per element comes from
-// the linked program; uniforms a program does not use keep 0 and are never set.
+// A shader-material or simulation uniform as authored: numbers (a float, vector, mat4 or an array of
+// them; a color string is three linear numbers) or what a sampler reads: a texture, or a simulation
+// variable's latest records. `components` per element comes from the linked programs; uniforms no
+// program uses keep 0 and are never set.
 struct Scene3dShaderUniform {
     char name[SCENE_SHADER_NAME_LIMIT];
     float *authored, *values; // `values` restarts from `authored` each frame, then playback overrides it
     unsigned length, components;
     NativeGlResource texture;
+    struct Scene3dSimulation* simulation;
+    unsigned variable;
+};
+// SH5: one simulated quantity: a pair of exact float targets (one record per texel) and the pass
+// program that computes the next records from every variable's current ones
+struct Scene3dVariable {
+    char name[SCENE_SHADER_NAME_LIMIT];
+    NativeGlResource state[2], program;
+    float* initial; // width × height RGBA records, restored when the simulation resets
+};
+// A <simulation> belongs to the viewport, not a projection: it survives re-projections while its
+// structure (`key`) is unchanged, so uniform-only re-renders keep its state. `uniforms` and `source`
+// are refreshed by every projection that still declares it.
+struct Scene3dSimulation {
+    char id[128];
+    uint64_t key, generation;
+    unsigned width, height, variable_count, current; // state[current] holds the latest records
+    Scene3dVariable variables[SCENE_VARIABLE_LIMIT];
+    double clock, timestep; // simulated time, advanced in fixed steps toward the `time` uniform
+    bool started;
+    DomNodeRef source;
+    Scene3dShaderUniform* uniforms;
+    unsigned uniform_count;
 };
 struct Scene3dShader {
     const char *vertex, *fragment; // borrowed from the material element during projection only
@@ -218,6 +246,9 @@ struct Scene3dEntry {
     uint64_t shadow_keys[SCENE_SHADOW_LIMIT];
     Scene3dShaderProgram shader_programs[SCENE_SHADER_PROGRAM_LIMIT];
     unsigned shader_program_count;
+    Scene3dSimulation* simulations[SCENE_SIMULATION_LIMIT];
+    unsigned simulation_count;
+    NativeGlResource simulation_buffer, simulation_triangle; // one full-screen triangle for every pass
     Scene3dProjection projection;
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
@@ -257,6 +288,9 @@ struct Scene3dBuild {
     DomElement* mesh_source;
 };
 static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* world,bool* visible,bool authored=false);
+// simulation passes set uniforms ahead of the drawing code that defines this
+static bool scene3d_uniform(Scene3dEntry* entry, NativeGlResource program, const char* name, const float* values,
+    unsigned components, unsigned count);
 
 static void scene3d_retire_snapshot(Scene3dEntry* entry) {
     image_surface_bump_generation(entry->snapshot);
@@ -465,14 +499,17 @@ bool scene3d_uniform_numbers(DomElement* material, const char* name, float* valu
     if (!uniforms.isMap() || !uniforms.asMap().has(name)) return false;
     return scene3d_uniform_value(uniforms.asMap().get(name),values,capacity,count,color)==1;
 }
-// a GLSL identifier the host prefix does not already declare
-static bool scene3d_shader_name(const char* name) {
-    static const char* reserved[]={"position","normal","uv","color","tangent","instance_matrix",
+// a GLSL identifier the host prefix does not already declare: a shader material's vertex layout and
+// camera, or a simulation pass's grid size and step
+static bool scene3d_shader_name(const char* name, bool simulation=false) {
+    static const char* material_names[]={"position","normal","uv","color","tangent","instance_matrix",
         "model_matrix","view_matrix","projection_matrix","camera_position","fragment_color"};
+    static const char* simulation_names[]={"resolution","delta","fragment_color"};
     size_t length=name?strlen(name):0;
     if (!length || length>=SCENE_SHADER_NAME_LIMIT || !strncmp(name,"gl_",3) || isdigit((unsigned char)name[0])) return false;
     for (size_t i=0;i<length;i++) if (!isalnum((unsigned char)name[i]) && name[i]!='_') return false;
-    for (const char* word:reserved) if (!strcmp(name,word)) return false;
+    if (simulation) { for (const char* word:simulation_names) if (!strcmp(name,word)) return false; }
+    else for (const char* word:material_names) if (!strcmp(name,word)) return false;
     return true;
 }
 static bool scene3d_resource(Scene3dBuild* build, NativeGlResource resource) {
@@ -718,6 +755,60 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
     *cached=texture; build->entry->projection.texture_count++; return texture;
 }
 // SH1: GLSL bodies, the drawing state they need, and the values of the uniforms they declare
+// a simulation the projection under construction declares
+static Scene3dSimulation* scene3d_simulation_find(Scene3dEntry* entry, const char* id, size_t length) {
+    for (unsigned i=0;i<entry->simulation_count;i++) {
+        Scene3dSimulation* simulation=entry->simulations[i];
+        if (simulation->generation==entry->projection_generation+1 && strlen(simulation->id)==length &&
+            !strncmp(simulation->id,id,length)) return simulation;
+    }
+    return nullptr;
+}
+// SH1/SH5: a `uniforms` map of numbers, number arrays and "#rrggbb" colors. With `samplers`, any other
+// text names what a sampler reads: a simulation variable as "<simulation>.<variable>", or a texture ID.
+static bool scene3d_shader_uniforms(Scene3dBuild* build, DomElement* node, bool samplers,
+        Scene3dShaderUniform** result, unsigned* count, uint64_t* texture_hash) {
+    Pool* pool=build->entry->projection.pool;*result=nullptr;*count=0;
+    ItemReader uniforms=scene3d_value(node,"uniforms");
+    if (!uniforms.isNull() && (!uniforms.isMap() || uniforms.asMap().size()>SCENE_SHADER_UNIFORM_LIMIT))
+        return scene3d_fail(build->entry,"shader uniforms must be a map of at most 32 values");
+    // an empty map allocates nothing, which must not read as an allocation failure
+    if (uniforms.isNull() || !uniforms.asMap().size()) return true;
+    Scene3dShaderUniform* list=(Scene3dShaderUniform*)pool_calloc(pool,uniforms.asMap().size()*sizeof(Scene3dShaderUniform));
+    if (!list) return false;
+    unsigned used=0,bound=0;float values[SCENE_SHADER_VALUE_LIMIT];
+    MapReader map=uniforms.asMap();MapReader::EntryIterator entries=map.entries();
+    const char* name;ItemReader value;
+    while (entries.next(&name,&value)) {
+        Scene3dShaderUniform* u=&list[used++];
+        // only materials sample; simulations declare a different host prefix
+        if (!scene3d_shader_name(name,!samplers)) return scene3d_fail(build->entry,"invalid shader uniform name");
+        str_copy(u->name,sizeof(u->name),name,strlen(name));
+        bool color;int kind=scene3d_uniform_value(value,values,SCENE_SHADER_VALUE_LIMIT,&u->length,&color);
+        if (kind<0 || (kind==0 && !samplers)) return scene3d_fail(build->entry,"invalid shader uniform value");
+        if (kind==0) {
+            const char* reference=value.isString()?value.cstring():value.asSymbol()->chars;
+            if (++bound>SCENE_SHADER_SAMPLER_LIMIT) return scene3d_fail(build->entry,"shader sampler quota exceeded");
+            if (const char* dot=strchr(reference,'.')) {
+                // SH5: a simulation variable, sampled at its latest records each frame
+                u->simulation=scene3d_simulation_find(build->entry,reference,dot-reference);
+                while (u->simulation && u->variable<u->simulation->variable_count &&
+                    strcmp(u->simulation->variables[u->variable].name,dot+1)) u->variable++;
+                if (!u->simulation || u->variable==u->simulation->variable_count)
+                    return scene3d_fail(build->entry,"shader uniform names no simulation variable");
+                continue;
+            }
+            Scene3dDefinition* texture=scene3d_definition(build,nullptr,reference,"texture");
+            u->texture=scene3d_texture(build,texture);if (!u->texture.id) return false;
+            if (texture_hash) *texture_hash=hash_fnv1a_64_extend(*texture_hash,&texture->texture_hash,sizeof(uint64_t));
+            continue;
+        }
+        u->authored=(float*)pool_alloc(pool,u->length*sizeof(float));u->values=(float*)pool_alloc(pool,u->length*sizeof(float));
+        if (!u->authored || !u->values) return false;
+        memcpy(u->authored,values,u->length*sizeof(float));memcpy(u->values,values,u->length*sizeof(float));
+    }
+    *result=list;*count=used;return true;
+}
 static Scene3dMaterial* scene3d_shader_material(Scene3dBuild* build, Scene3dDefinition* definition, Scene3dMaterial* material) {
     DomElement* node=definition->source;Pool* pool=build->entry->projection.pool;
     Scene3dShader* shader=(Scene3dShader*)pool_calloc(pool,sizeof(Scene3dShader));if (!shader) return nullptr;
@@ -735,36 +826,7 @@ static Scene3dMaterial* scene3d_shader_material(Scene3dBuild* build, Scene3dDefi
     }
     material->side=side&&!strcmp(side,"double")?2:side&&!strcmp(side,"back")?1:0;
     material->transparent=material->source_transparent;
-    ItemReader uniforms=scene3d_value(node,"uniforms");
-    if (!uniforms.isNull() && (!uniforms.isMap() || uniforms.asMap().size()>SCENE_SHADER_UNIFORM_LIMIT)) {
-        scene3d_fail(build->entry,"shader uniforms must be a map of at most 32 values");return nullptr;
-    }
-    // an empty map allocates nothing, which must not read as an allocation failure
-    if (uniforms.isNull() || !uniforms.asMap().size()) { definition->material=material;return material; }
-    shader->uniforms=(Scene3dShaderUniform*)pool_calloc(pool,uniforms.asMap().size()*sizeof(Scene3dShaderUniform));
-    if (!shader->uniforms) return nullptr;
-    unsigned samplers=0;float values[SCENE_SHADER_VALUE_LIMIT];
-    MapReader map=uniforms.asMap();MapReader::EntryIterator entries=map.entries();
-    const char* name;ItemReader value;
-    while (entries.next(&name,&value)) {
-        Scene3dShaderUniform* u=&shader->uniforms[shader->uniform_count++];
-        if (!scene3d_shader_name(name)) { scene3d_fail(build->entry,"invalid shader uniform name");return nullptr; }
-        str_copy(u->name,sizeof(u->name),name,strlen(name));
-        bool color;int kind=scene3d_uniform_value(value,values,SCENE_SHADER_VALUE_LIMIT,&u->length,&color);
-        if (kind<0) { scene3d_fail(build->entry,"invalid shader uniform value");return nullptr; }
-        if (kind==0) {
-            // any other text names the texture a sampler reads
-            const char* reference=value.isString()?value.cstring():value.asSymbol()->chars;
-            if (++samplers>SCENE_SHADER_SAMPLER_LIMIT) { scene3d_fail(build->entry,"shader sampler quota exceeded");return nullptr; }
-            Scene3dDefinition* texture=scene3d_definition(build,nullptr,reference,"texture");
-            u->texture=scene3d_texture(build,texture);if (!u->texture.id) return nullptr;
-            material->texture_hash=hash_fnv1a_64_extend(material->texture_hash,&texture->texture_hash,sizeof(uint64_t));
-            continue;
-        }
-        u->authored=(float*)pool_alloc(pool,u->length*sizeof(float));u->values=(float*)pool_alloc(pool,u->length*sizeof(float));
-        if (!u->authored || !u->values) return nullptr;
-        memcpy(u->authored,values,u->length*sizeof(float));memcpy(u->values,values,u->length*sizeof(float));
-    }
+    if (!scene3d_shader_uniforms(build,node,true,&shader->uniforms,&shader->uniform_count,&material->texture_hash)) return nullptr;
     definition->material=material;return material;
 }
 // projection and retained pose refresh must read the same animated material values.
@@ -903,20 +965,23 @@ layout(location=14) in vec4 tangent;
 static constexpr unsigned SCENE_GL_FLOAT = 0x1406, SCENE_GL_VEC2 = 0x8B50, SCENE_GL_VEC3 = 0x8B51, SCENE_GL_VEC4 = 0x8B52,
     SCENE_GL_MAT4 = 0x8B5C, SCENE_GL_SAMPLER_2D = 0x8B5E;
 
-// every active uniform the program declares beyond the host's needs an authored value of its type
-static bool scene3d_shader_validate(Scene3dBuild* build, Scene3dShader* shader, NativeGlResource program) {
+// every active uniform the program declares beyond those the host binds (`host`) needs an authored value of its type
+static bool scene3d_shader_validate(Scene3dBuild* build, Scene3dShaderUniform* uniforms, unsigned uniform_count,
+        NativeGlResource program, const char* const* host, unsigned host_count) {
     NativeGlContext* graphics=build->entry->graphics;char message[160];
     for (unsigned i=0,count=native_gl_uniform_count(graphics,program);i<count;i++) {
         char name[64];unsigned type;int size;
         if (!native_gl_uniform_info(graphics,program,i,name,sizeof(name),&type,&size)) return scene3d_fail(build->entry,"shader uniform reflection failed");
         char* bracket=strchr(name,'[');if (bracket) *bracket=0;
-        if (!strncmp(name,"gl_",3) || !strcmp(name,"model_matrix") || !strcmp(name,"view_matrix") ||
-            !strcmp(name,"projection_matrix") || !strcmp(name,"camera_position")) continue;
+        bool bound=!strncmp(name,"gl_",3);
+        for (unsigned k=0;k<host_count && !bound;k++) bound=!strcmp(name,host[k]);
+        if (bound) continue;
         Scene3dShaderUniform* u=nullptr;
-        for (unsigned k=0;k<shader->uniform_count && !u;k++) if (!strcmp(shader->uniforms[k].name,name)) u=&shader->uniforms[k];
+        for (unsigned k=0;k<uniform_count && !u;k++) if (!strcmp(uniforms[k].name,name)) u=&uniforms[k];
         unsigned components=type==SCENE_GL_FLOAT?1:type==SCENE_GL_VEC2?2:type==SCENE_GL_VEC3?3:type==SCENE_GL_VEC4?4:type==SCENE_GL_MAT4?16:0;
-        const char* problem=!u?"has no value":type==SCENE_GL_SAMPLER_2D?(u->texture.id?nullptr:"needs a texture"):
-            !components?"has an unsupported type":u->texture.id||u->length!=components*(unsigned)size?"does not match its declared type":
+        bool sampled=u && (u->texture.id || u->simulation);
+        const char* problem=!u?"has no value":type==SCENE_GL_SAMPLER_2D?(sampled?nullptr:"needs a texture"):
+            !components?"has an unsupported type":sampled||u->length!=components*(unsigned)size?"does not match its declared type":
             u->components&&u->components!=components?"is declared differently by another program":nullptr;
         if (problem) { snprintf(message,sizeof(message),"shader uniform %s %s",name,problem);return scene3d_fail(build->entry,message); }
         if (components) u->components=components;
@@ -952,7 +1017,8 @@ static NativeGlResource scene3d_shader_program(Scene3dBuild* build, Scene3dShade
         }
     }
     strbuf_free(vertex);strbuf_free(fragment);
-    if (program.id && !scene3d_shader_validate(build,shader,program)) return {};
+    static const char* host[]={"model_matrix","view_matrix","projection_matrix","camera_position"};
+    if (program.id && !scene3d_shader_validate(build,shader->uniforms,shader->uniform_count,program,host,4)) return {};
     return program;
 }
 // programs the finished projection no longer uses are released; a failed one keeps them all
@@ -963,6 +1029,160 @@ static void scene3d_shader_prune(Scene3dEntry* entry) {
         else native_gl_release(entry->graphics,entry->shader_programs[i].program);
     }
     entry->shader_program_count=kept;entry->stats.shader_programs=kept;
+}
+
+// SH5: a simulation pass draws one full-screen triangle into each variable's next records
+static const char* scene3d_simulation_vertex = R"GLSL(#version 330 core
+layout(location=0) in vec3 position;
+void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
+)GLSL";
+static void scene3d_simulation_release(NativeGlContext* graphics, Scene3dSimulation* simulation) {
+    for (unsigned v=0;v<simulation->variable_count;v++) {
+        Scene3dVariable* variable=&simulation->variables[v];
+        // a lost context has already destroyed the GPU objects
+        if (graphics) for (NativeGlResource resource:{variable->state[0],variable->state[1],variable->program}) native_gl_release(graphics,resource);
+        if (variable->initial) mem_free(variable->initial);
+    }
+    mem_free(simulation);
+}
+// SH5/SH6: a <simulation> of one to four <variable>s, reused across projections while its structure is unchanged
+static bool scene3d_simulation(Scene3dBuild* build, DomElement* node) {
+    Scene3dEntry* entry=build->entry;Pool* pool=entry->projection.pool;
+    const char* id=scene3d_text(node,"id");float width,height,timestep;
+    if (!id || !*id || strlen(id)>=sizeof(Scene3dSimulation::id) || strchr(id,'.') ||
+        !scene3d_number(node,"width",0,&width) || !scene3d_number(node,"height",0,&height) ||
+        !scene3d_number(node,"timestep",1.0f/60,&timestep) || width<1 || height<1 || floorf(width)!=width ||
+        floorf(height)!=height || width*height>SCENE_SIMULATION_RECORDS || !(timestep>0 && timestep<=1))
+        return scene3d_fail(entry,"simulation requires an ID without dots, at most 262144 width × height records and a timestep in (0, 1]");
+    unsigned records=(unsigned)(width*height);
+    struct { const char *name,*shader; float* initial; unsigned length; } authored[SCENE_VARIABLE_LIMIT];
+    unsigned count=0;float shape[3]={width,height,timestep};
+    uint64_t key=hash_fnv1a_64_extend(hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS,id),shape,sizeof(shape));
+    for (DomNode* child=node->first_child;child;child=child->next_sibling) if (child->is_element()) {
+        DomElement* element=child->as_element();
+        if (!scene3d_tag(element,"variable") || count>=SCENE_VARIABLE_LIMIT || element->first_child)
+            return scene3d_fail(entry,"simulation requires one to four variable children");
+        auto& v=authored[count++];v.name=scene3d_text(element,"name");v.shader=scene3d_text(element,"shader");
+        if (!v.name || !scene3d_shader_name(v.name,true) ||
+            !v.shader || !*v.shader || !scene3d_numbers(element,"initial",pool,&v.initial,&v.length,records*4) ||
+            (v.length && v.length!=records*4))
+            return scene3d_fail(entry,"simulation variable requires a GLSL name, a shader and 4 initial numbers per record");
+        for (unsigned k=0;k+1<count;k++) if (!strcmp(authored[k].name,v.name)) return scene3d_fail(entry,"duplicate simulation variable");
+        key=hash_fnv1a_64_extend_cstr(hash_fnv1a_64_extend_cstr(key,v.name),v.shader);
+        if (v.length) key=hashmap_xxhash3(v.initial,v.length*sizeof(float),key,0);
+    }
+    if (!count) return scene3d_fail(entry,"simulation requires one to four variable children");
+    Scene3dShaderUniform* uniforms;unsigned uniform_count;bool timed=false;
+    if (!scene3d_shader_uniforms(build,node,false,&uniforms,&uniform_count,nullptr)) return false;
+    for (unsigned i=0;i<uniform_count;i++) {
+        timed=timed||(!strcmp(uniforms[i].name,"time")&&uniforms[i].length==1);
+        for (unsigned k=0;k<count;k++) if (!strcmp(uniforms[i].name,authored[k].name))
+            return scene3d_fail(entry,"simulation uniform repeats a variable name");
+    }
+    if (!timed) return scene3d_fail(entry,"simulation requires a numeric time uniform");
+    Scene3dSimulation* simulation=nullptr;
+    for (unsigned i=0;i<entry->simulation_count && !simulation;i++)
+        if (entry->simulations[i]->key==key && !strcmp(entry->simulations[i]->id,id)) simulation=entry->simulations[i];
+    if (!simulation) {
+        if (entry->simulation_count>=SCENE_SIMULATION_LIMIT) return scene3d_fail(entry,"simulation quota exceeded");
+        if (!entry->simulation_triangle.id) {
+            const float corners[]={-1,-1,0, 3,-1,0, -1,3,0};
+            if (!entry->simulation_buffer.id) entry->simulation_buffer=native_gl_buffer(entry->graphics,corners,sizeof(corners),false);
+            NativeGlAttribute attribute={entry->simulation_buffer,0,3,0,0,0};
+            if (entry->simulation_buffer.id) entry->simulation_triangle=native_gl_vertices(entry->graphics,&attribute,1,{});
+            if (!entry->simulation_triangle.id) return scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
+        }
+        simulation=(Scene3dSimulation*)mem_calloc(1,sizeof(Scene3dSimulation),MEM_CAT_RENDER);if (!simulation) return false;
+        str_copy(simulation->id,sizeof(simulation->id),id,strlen(id));simulation->key=key;simulation->timestep=timestep;
+        simulation->width=(unsigned)width;simulation->height=(unsigned)height;simulation->variable_count=count;
+        bool made=true;
+        for (unsigned v=0;v<count && made;v++) {
+            Scene3dVariable* variable=&simulation->variables[v];
+            str_copy(variable->name,sizeof(variable->name),authored[v].name,strlen(authored[v].name));
+            variable->initial=(float*)mem_calloc(records*4,sizeof(float),MEM_CAT_RENDER);
+            if (variable->initial && authored[v].length) memcpy(variable->initial,authored[v].initial,records*4*sizeof(float));
+            for (NativeGlResource& state:variable->state)
+                state=native_gl_float_target(entry->graphics,simulation->width,simulation->height,false,true);
+            // the host declares every variable's sampler, the grid size and the step ahead of the authored body
+            StrBuf* fragment=strbuf_new();strbuf_append_str(fragment,"#version 330 core\nuniform vec2 resolution;\nuniform float delta;\n");
+            for (unsigned k=0;k<count;k++) strbuf_append_format(fragment,"uniform sampler2D %s;\n",authored[k].name);
+            strbuf_append_str(fragment,"out vec4 fragment_color;\n#line 1\n");strbuf_append_str(fragment,authored[v].shader);
+            variable->program=native_gl_program(entry->graphics,scene3d_simulation_vertex,fragment->str);strbuf_free(fragment);
+            made=variable->initial && variable->state[0].id && variable->state[1].id && variable->program.id;
+        }
+        if (!made) {
+            char message[2048];snprintf(message,sizeof(message),"simulation %s: %s",id,native_gl_diagnostic(entry->graphics));
+            scene3d_simulation_release(entry->graphics,simulation);return scene3d_fail(entry,message);
+        }
+        entry->simulations[entry->simulation_count++]=simulation;
+    }
+    simulation->generation=entry->projection_generation+1;simulation->source=dom_node_ref(node);
+    simulation->uniforms=uniforms;simulation->uniform_count=uniform_count;
+    const char* host[2+SCENE_VARIABLE_LIMIT]={"resolution","delta"};
+    for (unsigned v=0;v<count;v++) host[2+v]=simulation->variables[v].name;
+    for (unsigned v=0;v<count;v++)
+        if (!scene3d_shader_validate(build,uniforms,uniform_count,simulation->variables[v].program,host,2+count)) return false;
+    return true;
+}
+// simulations come first, so material uniforms can name their variables
+static bool scene3d_build_simulations(Scene3dBuild* build) {
+    for (unsigned i=0;i<build->definition_count;i++)
+        if (scene3d_tag(build->definitions[i].source,"simulation") && !scene3d_simulation(build,build->definitions[i].source)) return false;
+    return true;
+}
+// simulations the finished projection no longer declares are released with their state
+static void scene3d_simulation_prune(Scene3dEntry* entry) {
+    unsigned kept=0;
+    for (unsigned i=0;i<entry->simulation_count;i++) {
+        Scene3dSimulation* simulation=entry->simulations[i];
+        if (simulation->generation==entry->projection_generation) entry->simulations[kept++]=simulation;
+        else scene3d_simulation_release(entry->graphics,simulation);
+    }
+    entry->simulation_count=kept;
+}
+// one fixed step: each variable's next records from every variable's current ones
+static bool scene3d_simulation_pass(Scene3dEntry* entry, Scene3dSimulation* simulation) {
+    NativeGlContext* graphics=entry->graphics;unsigned next=1-simulation->current;
+    float resolution[2]={(float)simulation->width,(float)simulation->height},delta=(float)simulation->timestep;
+    for (unsigned v=0;v<simulation->variable_count;v++) {
+        NativeGlResource program=simulation->variables[v].program;
+        if (!native_gl_begin_region(graphics,simulation->variables[v].state[next],0,0,simulation->width,simulation->height,nullptr) ||
+            !scene3d_uniform(entry,program,"resolution",resolution,2,1) || !scene3d_uniform(entry,program,"delta",&delta,1,1)) return false;
+        for (unsigned i=0;i<simulation->uniform_count;i++) {
+            const Scene3dShaderUniform* u=&simulation->uniforms[i];
+            if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
+        }
+        NativeGlDraw draw={program,entry->simulation_triangle,3,1,false,false,2,false};
+        for (unsigned k=0;k<simulation->variable_count;k++) {
+            const Scene3dVariable* variable=&simulation->variables[k];
+            draw.bindings[draw.binding_count++]={variable->name,variable->state[simulation->current],NATIVE_GL_BIND_FLOAT};
+        }
+        if (!native_gl_draw(graphics,&draw)) return false;
+    }
+    simulation->current=next;entry->stats.simulation_steps++;return true;
+}
+// SH5: each simulation advances in fixed steps up to its `time` uniform; time going back restarts it
+static bool scene3d_simulations_advance(Scene3dEntry* entry) {
+    for (unsigned i=0;i<entry->simulation_count;i++) {
+        Scene3dSimulation* simulation=entry->simulations[i];double now=0;
+        for (unsigned u=0;u<simulation->uniform_count;u++)
+            if (!strcmp(simulation->uniforms[u].name,"time")) now=simulation->uniforms[u].values[0];
+        // the clock may lead `now` by the step tolerance; only a real rewind restarts
+        if (!simulation->started || now+1e-3<simulation->clock) {
+            for (unsigned v=0;v<simulation->variable_count;v++)
+                if (!native_gl_float_target_update(entry->graphics,simulation->variables[v].state[simulation->current],
+                    simulation->variables[v].initial)) return false;
+            simulation->clock=0;simulation->started=true;
+        }
+        unsigned steps=0;
+        while (simulation->clock+simulation->timestep<=now+1e-4 && steps<SCENE_SIMULATION_STEPS) {
+            if (!scene3d_simulation_pass(entry,simulation)) return false;
+            simulation->clock+=simulation->timestep;steps++;
+        }
+        // far behind after a long seek: resynchronize rather than stall the frame
+        if (simulation->clock+simulation->timestep<=now) simulation->clock=now;
+    }
+    return true;
 }
 
 static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, Scene3dMaterial* material,
@@ -1266,7 +1486,8 @@ static bool scene3d_environment_image(Scene3dBuild* build, const char* source) {
     return true;
 }
 static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
-    if(scene3d_tag(node,"physics")||scene3d_tag(node,"collider")) return true;
+    // simulations are built before projection (scene3d_build_simulations) and draw nothing themselves
+    if(scene3d_tag(node,"physics")||scene3d_tag(node,"collider")||scene3d_tag(node,"simulation")) return true;
     if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
     Scene3dMatrix local; bool visible;
     if (!scene3d_local(node,&local,build->entry->animation) || !scene3d_animated_flag(build->entry,node,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
@@ -1329,6 +1550,8 @@ static void scene3d_projection_destroy(Scene3dEntry* entry) {
     Scene3dProjection* p=&entry->projection;
     for (int i=p->resource_count-1;i>=0;i--) native_gl_release(entry->graphics,p->resources[i]);
     mem_pool_destroy(p->pool); *p={};
+    // simulations outlive the projection, but its uniforms were allocated from the projection's pool
+    for (unsigned i=0;i<entry->simulation_count;i++) { entry->simulations[i]->uniforms=nullptr;entry->simulations[i]->uniform_count=0; }
 }
 static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* world,bool* visible,bool authored) {
     DomElement* ancestors[65];unsigned count=0;
@@ -1369,6 +1592,20 @@ static bool scene3d_refresh_dynamic(Scene3dEntry* entry,DomElement* root,bool ca
     }
     return p->camera_found;
 }
+// SH2: each numeric uniform restarts from its authored value, then takes a playing track's `uniforms.<name>`
+static bool scene3d_refresh_uniforms(Scene3dEntry* entry, DomElement* node, Scene3dShaderUniform* uniforms, unsigned count) {
+    for (unsigned u=0;u<count;u++) {
+        Scene3dShaderUniform* uniform=&uniforms[u];
+        if (!uniform->values) continue; // samplers carry no numbers
+        memcpy(uniform->values,uniform->authored,uniform->length*sizeof(float));
+        char property[32];snprintf(property,sizeof(property),"uniforms.%s",uniform->name);AnimationValue value={};
+        if (scene3d_animation_value(entry->animation,node,property,&value)) {
+            if (value.count!=uniform->length) return false;
+            for (unsigned c=0;c<value.count;c++) uniform->values[c]=(float)value.numbers[c];
+        }
+    }
+    return true;
+}
 static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
     Scene3dProjection* p=&entry->projection;
     // poses update retained draw records; geometry, indices, textures and VAOs keep their resource identities.
@@ -1398,24 +1635,22 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
             }
         }
         auto* material=mesh->material;DomNode* source=dom_node_ref_validate(root->doc,material->source);
-        // SH2: a uniform reads its authored value unless a playing track drives `uniforms.<name>`
-        if(source&&source->is_element()&&material->shader) for(unsigned u=0;u<material->shader->uniform_count;u++) {
-            Scene3dShaderUniform* uniform=&material->shader->uniforms[u];
-            if(uniform->texture.id) continue;
-            memcpy(uniform->values,uniform->authored,uniform->length*sizeof(float));
-            char property[32];snprintf(property,sizeof(property),"uniforms.%s",uniform->name);AnimationValue value={};
-            if(scene3d_animation_value(entry->animation,source->as_element(),property,&value)) {
-                if(value.count!=uniform->length) return false;
-                for(unsigned c=0;c<value.count;c++) uniform->values[c]=(float)value.numbers[c];
-            }
-        }
+        if(source&&source->is_element()&&material->shader&&
+            !scene3d_refresh_uniforms(entry,source->as_element(),material->shader->uniforms,material->shader->uniform_count)) return false;
         if(!source||!source->is_element()||!scene3d_material_values(entry,source->as_element(),material)) return false;
+    }
+    for(unsigned i=0;i<entry->simulation_count;i++) {
+        Scene3dSimulation* simulation=entry->simulations[i];
+        DomNode* source=dom_node_ref_validate(root->doc,simulation->source);
+        if(!source||!source->is_element()||
+            !scene3d_refresh_uniforms(entry,source->as_element(),simulation->uniforms,simulation->uniform_count)) return false;
     }
     return scene3d_refresh_dynamic(entry,root,false);
 }
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
     scene3d_physics_destroy(entry->physics);
     scene3d_animation_destroy(entry->animation);
+    for (unsigned i=0;i<entry->simulation_count;i++) scene3d_simulation_release(entry->graphics,entry->simulations[i]);
     scene3d_projection_destroy(entry); scene3d_retire_snapshot(entry);
     native_gl_destroy(entry->graphics); mem_free(entry->environment_path); mem_free(entry);
 }
@@ -1522,6 +1757,9 @@ void scene3d_context_lost(DomElement* root) {
     e->shadow_programs[0]={};e->shadow_programs[1]={};e->shadow_blank={};
     for (unsigned s=0;s<SCENE_SHADOW_LIMIT;s++) { e->shadow_maps[s]={};e->shadow_sizes[s]=0;e->shadow_cubes[s]=false;e->shadow_keys[s]=0; }
     e->shader_program_count=0;
+    // simulation state lived on the lost context; the next projection restarts from the initial records
+    for (unsigned i=0;i<e->simulation_count;i++) scene3d_simulation_release(nullptr,e->simulations[i]);
+    e->simulation_count=0;e->simulation_buffer={};e->simulation_triangle={};
     for (NativeGlResource& plane:e->environment_planes) plane={};
 }
 
@@ -2084,12 +2322,13 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     if (!scene3d_number(root,"environment-intensity",1,&p->environment_intensity) || !isfinite(p->environment_intensity) ||
         p->environment_intensity<0) { mem_free(build.definitions); return scene3d_fail(entry,"invalid environment intensity"); }
     bool valid=scene3d_color(root,"background","transparent",p->background) &&
-        scene3d_collect_definitions(&build,root,0) && scene3d_project_node(&build,root,scene3d_identity(),true);
+        scene3d_collect_definitions(&build,root,0) && scene3d_build_simulations(&build) &&
+        scene3d_project_node(&build,root,scene3d_identity(),true);
     mem_free(build.definitions);
     if (!valid) { if (!entry->diagnostic[0]) scene3d_fail(entry,"invalid scene description"); return false; }
     if (!p->camera_found) return scene3d_fail(entry,"active camera is missing");
     if (build.environment && !p->environment.address) return scene3d_fail(entry,"scene environment names no environment element");
-    entry->projection_generation++;scene3d_shader_prune(entry);return true;
+    entry->projection_generation++;scene3d_shader_prune(entry);scene3d_simulation_prune(entry);return true;
 }
 static int scene3d_draw_compare(const void* a, const void* b) {
     const Scene3dMesh* left=*(Scene3dMesh* const*)a;const Scene3dMesh* right=*(Scene3dMesh* const*)b;
@@ -2129,6 +2368,9 @@ static bool scene3d_draw_shader(Scene3dEntry* entry, const Scene3dPass& pass, Sc
     for (unsigned i=0;i<shader->uniform_count;i++) {
         const Scene3dShaderUniform* u=&shader->uniforms[i];
         if (u->texture.id) draw.bindings[draw.binding_count++]={u->name,u->texture,NATIVE_GL_BIND_TEXTURE};
+        // SH5: the variable's latest records, which change target with every simulation step
+        else if (u->simulation) draw.bindings[draw.binding_count++]={u->name,
+            u->simulation->variables[u->variable].state[u->simulation->current],NATIVE_GL_BIND_FLOAT};
         else if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
     }
     return native_gl_draw(entry->graphics,&draw);
@@ -2555,6 +2797,10 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         // camera-only refresh must preserve the same validation diagnostic as full projection.
         if (!entry->diagnostic[0]) scene3d_fail(entry,"invalid animated scene pose or detached binding");
         scene3d_retire_snapshot(entry);return nullptr;
+    }
+    // SH5: GPU simulations catch up with their (just refreshed) time before anything samples them
+    if (!scene3d_simulations_advance(entry)) {
+        scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr;
     }
     if (!entry->target.id || entry->stats.raster_width!=(unsigned)pixel_width || entry->stats.raster_height!=(unsigned)pixel_height) {
         native_gl_release(entry->graphics,entry->target);

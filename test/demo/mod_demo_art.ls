@@ -333,6 +333,7 @@ let GLYPHS = {
     dreamhome: "M3 11l9-7 9 7 M5 9.5V20h14V9.5 M10 20v-5h4v5 M9 11h2v2H9z",
     word: "M4 5l3 14 5-11 5 11 3-14",
     note: "M6 3h12v18H6z M6 7h12 M9 11h6 M9 15h6",
+    sheet: "M3 4h18v16H3z M3 9h18 M3 14h18 M8 4v16 M15 4v16",
     slides: "M3 4h18v12H3z M12 16v4 M8 20h8 M7 12l3-3 2 2 4-4",
     finder: "M3 6h6l2 2h10v11H3z M3 11h18",
     music: "M9 18V5l11-2v13 M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
@@ -363,7 +364,7 @@ let HUES = {hamster: ["#ddbf8e", "#aa744e"], aquarium: ["#78bda3", "#174c50"], c
     doom: ["#b91c1c", "#1f0707"], 'sentence-game': ["#fef08a", "#f59e0b", "#78350f"], 'photo-album': ["#fda4af", "#e11d48"],
     photo: ["#6ee7b7", "#047857"], photos: ["#67e8f9", "#0e7490"], draw: ["#fdba74", "#ea580c"],
     greetings: ["#f9a8d4", "#db2777"], dreamhome: ["#93c5fd", "#1d4ed8"], word: ["#60a5fa", "#1e40af"], note: ["#fef9c3", "#facc15", "#854d0e"],
-    slides: ["#fca5a5", "#b91c1c"], finder: ["#93c5fd", "#2563eb"], music: ["#fda4af", "#be123c"],
+    sheet: ["#86cba2", "#217346"], slides: ["#fca5a5", "#b91c1c"], finder: ["#93c5fd", "#2563eb"], music: ["#fda4af", "#be123c"],
     soundflow: ["#3f4448", "#0b0b0c", "#5cb8ad"],
     mail: ["#7dd3fc", "#0369a1"], book: ["#fdba74", "#c2410c"], archive: ["#d6d3d1", "#78716c"], readability: ["#5eead4", "#0f766e"]}
 
@@ -465,7 +466,7 @@ let LIVE = {procgen: procgen, tetris: tetris, superlambda: superlambda, doom: do
 let TONE_OF = {tetris: "arcade", 'marble-drop': "amber", 'sentence-game': "amber", superlambda: "sky", doom: "clay",
     procgen: "sage",
     hamster: "amber", aquarium: "sage", scene3d: "slate", cityscape: "night", 'photo-album': "rose", photo: "teal", photos: "cyan",
-    draw: "clay", word: "blue", note: "gold", slides: "rose", chart: "indigo",
+    draw: "clay", word: "blue", sheet: "sage", note: "gold", slides: "rose", chart: "indigo",
     finder: "blue", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose", dreamhome: "blue"}
 
 pub fn of(key) => (let t = TONES[TONE_OF[key]], if (LIVE[key] != null) LIVE[key](t) else shot(key, t))

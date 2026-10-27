@@ -35,7 +35,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.demo-tile').length===12"
+      "js": "document.querySelectorAll('.demo-tile').length===13"
     }
   ]
 }

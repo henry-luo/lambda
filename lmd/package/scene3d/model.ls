@@ -15,14 +15,16 @@ fn color(v) bool {
         contains([3, 4, 6, 8], len(hex)) and all([for (i in 0 to (len(hex) - 1)) contains("0123456789abcdefABCDEF", slice(hex, i, i + 1))])
     }
 }
-// shader materials (SH1): uniforms and instance attributes take GLSL names the host prefix leaves free
+// shader materials (SH1) and simulations (SH5): uniforms, instance attributes and variables take GLSL
+// names their host prefix leaves free
 let RESERVED = ["position", "normal", "uv", "color", "tangent", "instance_matrix", "model_matrix", "view_matrix",
     "projection_matrix", "camera_position", "fragment_color"]
+let SIMULATION_RESERVED = ["resolution", "delta", "fragment_color"]
 let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-fn glsl_name(k) bool {
+fn glsl_name(k, reserved = RESERVED) bool {
     let s = string(k)
     len(s) > 0 and len(s) < 23 and slice(s, 0, 3) != "gl_" and not contains("0123456789", slice(s, 0, 1)) and
-        all([for (i in 0 to (len(s) - 1)) contains(IDENT, slice(s, i, i + 1))]) and not contains(RESERVED, s)
+        all([for (i in 0 to (len(s) - 1)) contains(IDENT, slice(s, i, i + 1))]) and not contains(reserved, s)
 }
 // a uniform's playback type: a number, a vector, or a "#rrggbb" color; null for the texture a sampler reads
 fn uniform_type(v) => if (numeric(v)) 'number' else if (v is array) 'vector'
@@ -43,20 +45,50 @@ fn mesh_material(mesh, all_nodes) element^ {
     if (mesh.material != null) definition(all_nodes, mesh.material, 'material')^
     else if (len(held) != 1) raise fail("mesh requires material") else held[0]
 }
+// a `uniforms` map of at most 32 entries
+fn uniform_map(n) map^ {
+    let u = value(n.uniforms, {})
+    if (not (u is map) or len([for (k, v in u) k]) > 32) raise fail("shader uniforms must be a map of at most 32 values") else u
+}
+// a uniform: a GLSL name and numbers, up to 256-number arrays or a "#rrggbb" color; with `samplers`, other text
+fn check_uniform(k, v, samplers) bool^ =>
+    if (not glsl_name(k, if (samplers) RESERVED else SIMULATION_RESERVED)) raise fail("invalid shader uniform name")
+    else if ((uniform_type(v) == 'vector' and (len(v) < 1 or len(v) > 256 or not all([for (x in v) numeric(x)]))) or
+        (uniform_type(v) == 'color' and not color(v)) or (uniform_type(v) == null and (not samplers or not text(v))))
+        raise fail("invalid shader uniform value") else true
+// SH5: "<simulation>.<variable>" samples a simulation variable's records; other text names a texture
+fn check_sampler(all_nodes, v) bool^ {
+    let parts = split(string(v), ".")
+    if (len(parts) == 1) { let texture = definition(all_nodes, v, 'texture')^; true }
+    else if (len(parts) != 2 or not contains([for (c in content(definition(all_nodes, parts[0], 'simulation')^)) string(c.name)], parts[1]))
+        raise fail("shader uniform names no simulation variable") else true
+}
 fn check_shader(n, all_nodes) bool^ {
     let checked_sources = if (not text(n.vertex) or not text(n.fragment)) raise fail("shader material requires vertex and fragment sources")
     let checked_state = if ((n.side != null and not contains(['front', 'back', 'double'], n.side)) or
         any([for (key in ["transparent", "alpha-to-coverage"] where n[key] != null) not (n[key] is bool)]) or len(content(n)) != 0)
         raise fail("invalid shader material side, transparency or children")
-    let u = value(n.uniforms, {})
-    let checked_map = if (not (u is map) or len([for (k, v in u) k]) > 32) raise fail("shader uniforms must be a map of at most 32 values")
-    let checked_values = [for (k, v in u)
-        if (not glsl_name(k)) raise fail("invalid shader uniform name")
-        else if ((uniform_type(v) == 'vector' and (len(v) < 1 or len(v) > 256 or not all([for (x in v) numeric(x)]))) or
-            (uniform_type(v) == 'color' and not color(v)) or (uniform_type(v) == null and not text(v)))
-            raise fail("invalid shader uniform value")
-        else if (uniform_type(v) == null) definition(all_nodes, v, 'texture')^ else true]
+    let u = uniform_map(n)^
+    let checked_values = [for (k, v in u) if (check_uniform(k, v, true)^ and uniform_type(v) == null) check_sampler(all_nodes, v)^ else true]
     if (len([for (k, v in u where uniform_type(v) == null) k]) > 8) raise fail("shader sampler quota exceeded") else true
+}
+// SH5: a GPU simulation of one to four variables, stepped toward its numeric `time` uniform
+fn check_simulation(n) bool^ {
+    let w = n.width, h = n.height, step = value(n.timestep, 1.0 / 60.0)
+    let checked_shape = if (not text(n.id) or contains(string(n.id), ".") or not numeric(w) or not numeric(h) or w < 1 or h < 1 or
+        floor(w) != w or floor(h) != h or w * h > 262144 or not numeric(step) or step <= 0 or step > 1)
+        raise fail("simulation requires an ID without dots, at most 262144 width × height records and a timestep in (0, 1]")
+    let variables = content(n)
+    let names = [for (v in variables) string(v.name)]
+    let checked_variables = if (len(variables) < 1 or len(variables) > 4) raise fail("simulation requires one to four variable children")
+        else if (any([for (v in variables) not glsl_name(v.name, SIMULATION_RESERVED) or not text(v.shader) or
+            (v.initial != null and (not (v.initial is array) or len(v.initial) != w * h * 4 or not all([for (x in v.initial) numeric(x)])))]))
+            raise fail("simulation variable requires a GLSL name, a shader and 4 initial numbers per record")
+        else if (len(unique(names)) != len(names)) raise fail("duplicate simulation variable")
+    let u = uniform_map(n)^
+    let checked_values = [for (k, v in u) if (check_uniform(k, v, false)^ and contains(names, string(k)))
+        raise fail("simulation uniform repeats a variable name") else true]
+    if (not numeric(u.time)) raise fail("simulation requires a numeric time uniform") else true
 }
 fn check_geometry(n) bool^ {
     let checked_type = if (not contains(['box', 'plane', 'buffer'], n.type)) raise fail("unknown geometry type")
@@ -98,7 +130,7 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (kind == 'mesh') ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
@@ -123,7 +155,8 @@ fn check_node(n, all_nodes) bool^ {
     let checked_intensity = if (kind == 'scene3d' and n["environment-intensity"] != null and
         (not numeric(n["environment-intensity"]) or n["environment-intensity"] < 0)) raise fail("invalid environment intensity")
     let children = content(n)
-    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment']
+    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
+        else if (kind == 'simulation') ['variable']
         else if (kind == 'environment') ['group', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'material', 'texture', 'environment']
@@ -140,16 +173,16 @@ fn check_node(n, all_nodes) bool^ {
         else {
             let path = split(n.path, ".")
             let targets = [for (target in all_nodes where target.id != null and string(target.id) == path[0]) target]
-            // SH2: `<material>.uniforms.<name>` or `<mesh>.material.uniforms.<name>` drives a shader uniform
+            // SH2/SH5: `<material or simulation>.uniforms.<name>` or `<mesh>.material.uniforms.<name>` drives a uniform
             let uniform_at = if (len(path) == 3 and path[1] == "uniforms") 1
                 else if (len(path) == 4 and path[1] == "material" and path[2] == "uniforms") 2 else 0
             if (len(path) < 2 or len(path) > (if (uniform_at > 0) 4 else 3) or len(targets) != 1) raise fail("invalid animation target")
             else if (uniform_at > 0) {
                 let target = targets[0]
-                let material = if (uniform_at == 1) target else if (name(target) != 'mesh') raise fail("invalid material animation path")
+                let owner = if (uniform_at == 1) target else if (name(target) != 'mesh') raise fail("invalid material animation path")
                     else mesh_material(target, all_nodes)^
-                let authored = if (name(material) != 'material' or material.type != 'shader' or material.uniforms == null) null
-                    else material.uniforms[path[len(path) - 1]]
+                let uniforms_owner = name(owner) == 'simulation' or (name(owner) == 'material' and owner.type == 'shader')
+                let authored = if (not uniforms_owner or owner.uniforms == null) null else owner.uniforms[path[len(path) - 1]]
                 let expected = if (authored == null) null else uniform_type(authored)
                 let components = len(n.values) / len(n.times)
                 if (expected == null or n.type != expected or components > 16 or
@@ -211,6 +244,7 @@ fn check_node(n, all_nodes) bool^ {
         else true
     } else if (kind == 'geometry') check_geometry(n)^
     else if (kind == 'material' and n.type == 'shader') check_shader(n, all_nodes)^
+    else if (kind == 'simulation') check_simulation(n)^
     else if (kind == 'material') {
         let checked_type = if (not contains(['basic', 'lambert', 'standard'], n.type)) raise fail("unknown material type")
         let checked_pbr = [for (key in ["metalness", "roughness"] where n[key] != null)

@@ -22,6 +22,7 @@ its name:
 ./lambda demo aquarium
 ./lambda demo hamster
 ./lambda demo chart
+./lambda demo sheet
 ./lambda demo slides
 ./lambda demo archive
 ./lambda demo greetings

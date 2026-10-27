@@ -96,7 +96,11 @@ bool native_gl_begin_layer(NativeGlContext* context, NativeGlResource target, un
     const float background[4]);
 // An RGBA16F 2D texture drawn region by region and sampled linearly (an atlas such as
 // a prefiltered environment), with a depth buffer when `depth`.
-NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width, unsigned height, bool depth);
+NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width, unsigned height, bool depth,
+    bool exact = false);
+// `exact` targets hold RGBA32F records sampled nearest (GPU simulation state); this replaces
+// the whole color image with `width` × `height` RGBA float records.
+bool native_gl_float_target_update(NativeGlContext* context, NativeGlResource target, const float* rgba);
 // Begin drawing into one region of a float target: the viewport and scissor cover it,
 // and with a `background` the region's color (and depth) is cleared to it.
 bool native_gl_begin_region(NativeGlContext* context, NativeGlResource target, unsigned x, unsigned y,

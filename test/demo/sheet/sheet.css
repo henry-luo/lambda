@@ -1,0 +1,67 @@
+:root { --accent:#217346; --accent-soft:#e1eee6; --bg:#f5f7f5; --line:#dce3dd; --hover:#edf3ee; }
+.brand { color:#217346; }
+#workbook-title { width:440px; max-width:100%; height:24px; padding:2px 0; font-size:16px; border:1px solid transparent; background:transparent; color:var(--ink); }
+#workbook-title:hover { border-color:var(--line); }
+.title-actions #export { background:var(--accent); border-color:var(--accent); }
+.title-actions #export:hover { background:#185b36; }
+.tabs>.tool { font-size:12px; }
+.tab[aria-pressed=true] { color:#217346; background:#edf5ee; border-bottom-color:#217346; }
+.ribbon-shell { padding:5px 16px; }
+.editor-ribbon .ribbon-group { border-right:1px solid var(--line); }
+.editor-ribbon button.home-tool:hover { background:#edf5ee; border-color:#c4d8ca; }
+.editor-ribbon button.home-tool[aria-pressed=true] { background:#dceee1; border-color:#a4c8af; color:#185b36; }
+.editor-ribbon .group-tools { min-height:0; }
+.editor-ribbon .group-label { display:block; font-size:9px; letter-spacing:0; text-transform:none; margin-top:0; color:#7c887f; }
+.editor-ribbon .ribbon-group { height:78px; }
+.editor-ribbon .ribbon-group>.group-tools { min-height:0; }
+.editor-ribbon button { cursor:pointer; }
+.editor-ribbon .home-tool:disabled { opacity:.35; }
+.editor-ribbon select { border:1px solid var(--line); background:white; color:#334538; }
+#font { width:136px; } #size { width:46px; } #number-format { width:128px; text-transform:capitalize; }
+#fill,#color { width:71px; height:23px; }
+.ribbon-tip { max-width:330px; padding:0 15px; color:var(--muted); font-size:12px; line-height:23px; white-space:pre-line; }
+.formula-bar { display:flex; align-items:center; gap:5px; padding:5px 12px; flex-shrink:0; background:#f7f9f7; border-bottom:1px solid var(--line); }
+.formula-bar input { height:27px; border:1px solid var(--line); border-radius:4px; background:white; color:#263b30; padding:3px 9px; font-size:12px; }
+#name-box { width:94px; text-align:center; flex-shrink:0; }
+#formula-input { flex:1; min-width:0; font-family:"Helvetica Neue",Arial,sans-serif; }
+.formula-divider { height:20px; border-left:1px solid var(--line); margin:0 3px; }
+.fx { font-family:Georgia,serif; font-size:19px; font-style:italic; color:#5c7765; margin:0 10px 0 5px; }
+.formula-bar .tool { color:#718278; }
+.grid-scroll { flex:1; min-height:0; min-width:0; overflow:auto; background:#fff; }
+#sheet-grid { border-collapse:separate; border-spacing:0; table-layout:fixed; width:max-content; outline:none; background:#fff; }
+#sheet-grid th,#sheet-grid td { padding:0; border:0; border-right:1px solid #e4e9e5; border-bottom:1px solid #e4e9e5; }
+#sheet-grid thead th { position:sticky; top:0; z-index:4; background:#f0f3f0; height:26px; text-align:center; color:#64756a; font-weight:400; font-size:11px; cursor:pointer; }
+#sheet-grid tbody th { position:sticky; left:0; z-index:3; background:#f0f3f0; color:#728176; font-size:11px; text-align:center; font-weight:400; cursor:pointer; }
+#sheet-grid thead th.corner { position:sticky; left:0; z-index:5; background:#e6ece7; }
+#sheet-grid .heading-selected { background:#dcece1; color:#185b36; font-weight:600; }
+#sheet-grid td { position:relative; padding:4px 10px; cursor:cell; white-space:nowrap; user-select:none; touch-action:none; }
+.cell-text { display:block; overflow:hidden; text-overflow:clip; max-height:100%; line-height:18px; pointer-events:none; }
+.cell-text.spill { overflow:visible; width:max-content; position:relative; z-index:1; }
+#sheet-grid td.selected { background-image:linear-gradient(#21734612,#21734612); }
+#sheet-grid td.active { outline:2px solid #217346; outline-offset:-2px; z-index:2; background-image:none; }
+#sheet-grid td.active::after { content:""; position:absolute; width:5px; height:5px; right:-1px; bottom:-1px; background:#217346; border:1px solid white; }
+#sheet-grid td.cell-error { color:#b23c32 !important; }
+.formula-indicator { position:absolute; top:1px; left:1px; width:0; height:0; border-top:4px solid #439565; border-right:4px solid transparent; }
+#cell-editor { position:absolute; inset:0; z-index:3; width:100%; height:100%; border:2px solid #217346; border-radius:0; padding:2px 8px; background:#fff; color:#1d3526; font-size:13px; outline:none; }
+.hide-grid #sheet-grid td { border-color:transparent; }
+.sheet-tabs { display:flex; flex-shrink:0; align-items:stretch; height:37px; padding:0 15px; gap:3px; border-top:1px solid var(--line); background:#f6f8f6; }
+.sheet-nav { display:flex; align-items:center; padding:0 12px 0 3px; color:#7e8b82; }
+.sheet-tab { padding:0 20px; border:0; border-bottom:3px solid transparent; color:#69766d; background:transparent; font-size:12px; }
+.sheet-tab:hover { background:#edf2ee; }
+.sheet-tab.current { background:#fff; color:#217346; border-bottom-color:#217346; font-weight:700; }
+.sheet-tabs>.tool { align-self:center; margin-left:5px; color:#217346; }
+.sheet-hint { align-self:center; color:#8c978e; font-size:10px; }
+.statusbar { height:30px; padding:0 16px; background:#fbfcfb; }
+#selection-stats { margin-right:10px; }
+.dialog-backdrop { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; background:#172b2140; }
+#file-dialog { width:480px; max-width:90vw; padding:24px; border:1px solid var(--line); border-radius:10px; background:white; box-shadow:0 16px 60px #172b2130; }
+#file-dialog h2 { margin:0 0 20px; font-size:19px; }
+#file-dialog label { display:flex; flex-direction:column; gap:8px; }
+#file-path { width:100%; height:34px; border:1px solid var(--line); border-radius:4px; padding:6px 9px; }
+.dialog-hint { color:var(--muted); font-size:12px; line-height:19px; margin:14px 0 22px; }
+.dialog-actions { display:flex; justify-content:flex-end; gap:8px; }
+.dialog-actions .tool { border:1px solid var(--line); min-width:78px; }
+.dialog-actions .primary { background:#217346; color:white; border-color:#217346; }
+@media (max-width:1050px) { .sheet-hint { display:none; } .editor-ribbon { gap:6px; } .editor-ribbon .ribbon-group { padding-right:6px; } #font { width:100px; } .status-right { gap:3px; } }
+
+.dialog-error { color:#b23c32; font-size:12px; line-height:18px; }

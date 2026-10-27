@@ -718,19 +718,20 @@ NativeGlResource native_gl_cube_target(NativeGlContext* context, unsigned size, 
     return {};
 }
 
-NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width, unsigned height, bool depth) {
+NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width, unsigned height, bool depth, bool exact) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context);
     if (!scope.valid || !width || !height || width > GL_DIMENSION_LIMIT || height > GL_DIMENSION_LIMIT) {
         native_gl_error(context, "invalid float target dimensions"); return {};
     }
-    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, (size_t)width * height * (8u + (depth ? 4u : 0u)));
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, (size_t)width * height * ((exact ? 16u : 8u) + (depth ? 4u : 0u)));
     if (!slot) return {};
     slot->width = width; slot->height = height; slot->samples = 1; slot->levels = 1; slot->layered = NATIVE_GL_LAYERS_FLOAT;
     NativeGlFunctions& gl = context->gl;
+    GLenum filter = exact ? GL_NEAREST : GL_LINEAR;
     gl.GenTextures(1, &slot->texture); gl.BindTexture(GL_TEXTURE_2D, slot->texture);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
-    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, exact ? GL_RGBA32F : GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     gl.GenFramebuffers(1, &slot->name); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
     gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0);
@@ -746,6 +747,19 @@ NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width
     return {};
 }
 
+bool native_gl_float_target_update(NativeGlContext* context, NativeGlResource target, const float* rgba) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    if (!scope.valid || !slot || slot->layered != NATIVE_GL_LAYERS_FLOAT || !rgba) return false;
+    NativeGlFunctions& gl = context->gl;
+    gl.BindTexture(GL_TEXTURE_2D, slot->texture);
+    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4); gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, slot->width, slot->height, GL_RGBA, GL_FLOAT, rgba);
+    slot->initialized = native_gl_check(context, "float target update"); return slot->initialized;
+#else
+    return false;
+#endif
+}
 bool native_gl_begin_region(NativeGlContext* context, NativeGlResource target, unsigned x, unsigned y,
         unsigned width, unsigned height, const float* background) {
 #ifdef NATIVE_GL_ENABLED

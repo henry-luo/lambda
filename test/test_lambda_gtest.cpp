@@ -50,6 +50,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/scene3d/cellscope/tests",
     "test/demo/draw/tests",
     "test/demo/word/tests",
+    "test/demo/sheet/tests",
     "test/demo/finder/tests",
     "test/demo/photo-album/tests",
     "test/demo/note/tests",
