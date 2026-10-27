@@ -4,6 +4,7 @@
 // only the editor passes a selection, which adds the handles.
 import A: .mod_art
 import T: .mod_templates
+import E: .mod_effects
 
 fn px(v, s) => A.n(v * s) ++ "px"
 
@@ -48,24 +49,36 @@ fn handles(it) => if (it.kind == "text") [<span class:"handle h-rotate", 'data-h
 pub fn item(it, s, selected) {
     let cls = "item " ++ it.kind ++ (if (selected) " selected" else "")
     let body = if (it.kind == "text") [it.text]
-        else if (it.kind == "art") [<div class:"art-wrap" ++ (if (it.flip) " flip" else ""), A.art_svg(it.art, it.color)>]
+        else if (it.kind == "art") [<div class:"motion-art", <div class:"art-wrap" ++ (if (it.flip) " flip" else ""), A.art_svg(it.art, it.color)>>]
         else [photo_body(it, s)];
     <div class:cls, 'data-id':it.id, style:box_style(it, s) ++ (if (it.kind == "text") text_style(it, s) else ""),
         for (b in body) b;
         if (selected) for (h in handles(it)) h>
 }
 
-// opts: {uid, sel (an item id on this page or null), guides ({x, y} booleans or null)}
+// Particles share the card's scale; separate art wrappers preserve saved rotations and mirrors.
+fn particles(effect) => if (not contains(["confetti", "snow", "hearts", "twinkle"], effect)) null
+    else <div class:"effect-layer", 'aria-hidden':"true", for (i in 0 to 11)
+        <span class:"effect-particle", style:"left:" ++ string(3 + (i * 31) % 91) ++ "%;top:"
+            ++ (if (effect == "twinkle") string(8 + (i * 23) % 80) ++ "%" else "-10%")
+            ++ ";animation-delay:-" ++ A.n(i * .73) ++ "s;animation-duration:" ++ A.n(4.0 + (i % 4) * .9) ++ "s",
+            (A.art_svg(if (effect == "snow") "snowflake" else if (effect == "hearts") "heart" else if (effect == "twinkle") "sparkle" else "confetti",
+                if (effect == "snow") "#ffffff" else if (effect == "hearts") "#fb7185" else ["#fbbf24", "#f472b6", "#38bdf8"][i % 3]))>>
+
+// opts: {uid, sel, guides, animate}; print and editor calls stay still by default.
 pub fn page(card, key, s, opts = {}) {
     let f = T.format_of(card.format)
     let pg = card.pages[key]
     let uid = (if (opts.uid == null) "pg" else opts.uid) ++ "-" ++ key
     let pattern = if (pg.pattern == "none") null else A.pattern_layer(pg.pattern, pg.pattern_color, pg.pattern_alpha, uid, f.w, f.h)
-    let border = if (pg.border == "none") null else A.border_layer(pg.border, pg.border_color, f.w, f.h);
-    <div class:"card-page", 'data-page':key, style:"width:" ++ px(f.w, s) ++ ";height:" ++ px(f.h, s) ++ ";background:" ++ A.paper_of(pg.paper).bg,
+    let border = if (pg.border == "none") null else A.border_layer(pg.border, pg.border_color, f.w, f.h)
+    let effect = if (opts.animate == true) E.of(card).animation else "none";
+    <div class:"card-page motion-" ++ effect, 'data-page':key, 'data-animation':effect,
+        style:"width:" ++ px(f.w, s) ++ ";height:" ++ px(f.h, s) ++ ";background:" ++ A.paper_of(pg.paper).bg,
         if (pattern != null) pattern;
         if (border != null) border;
         for (it in pg.items) item(it, s, opts.sel == it.id);
+        (particles(effect));
         // a drag shows or hides the centre guides itself, so they exist while it runs
         if (opts.guides != null) <div class:"guide guide-x", style:"display:none">;
         if (opts.guides != null) <div class:"guide guide-y", style:"display:none">>

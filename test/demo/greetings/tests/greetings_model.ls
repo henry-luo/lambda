@@ -4,6 +4,7 @@ import A: ~~.mod_art
 import T: ~~.mod_templates
 import M: ~~.mod_model
 import R: ~~.mod_render
+import E: ~~.mod_effects
 
 let ART_KEYS = [for (a in A.ART) a.key]
 fn art_keys(items) => [for (it in items where it.kind == "art") it.art]
@@ -63,3 +64,22 @@ let fore_step = M.redo_step(back_step.history, back_step.card);
 {slug: M.slug("  Mr & Mrs: Golden Rings! "), empty: M.slug("!!"), valid: M.valid(card), invalid: M.valid({pages: {front: {}}})};
 "geometry the editor writes during a drag:";
 R.geometry(M.item_of(card, "front", "f2"), 2.0)
+
+"effects are known, optional and independent of the template:";
+{animations: len(E.ANIMATIONS), tunes: len(E.MUSIC),
+ invalid_templates: [for (t in T.TEMPLATES where t.effects != null and E.of(t) != t.effects) t.key],
+ animated: len([for (t in T.TEMPLATES where E.of(t).animation != "none") t]),
+ musical: len([for (t in T.TEMPLATES where E.of(t).music != "none") t]),
+ legacy: E.of({pages: card.pages}), unknown: E.of({effects: {animation: "missing", music: "missing"}}),
+ blank: E.of(T.blank("portrait"))};
+let animated = T.assemble(T.template_of("winter-wishes"), {})
+let silent = E.configure(animated, "music", "none")
+let restored = M.undo_step(M.record(M.history(), animated), silent);
+{animation_kept: E.of(silent).animation, music_removed: E.of(silent).music,
+ undo: E.of(restored.card), reshape: E.of(M.reformat(animated, "square")),
+ roundtrip: E.of(parse(format(animated, 'mark'), 'mark')^)};
+"only live pages animate; print pages stay still:";
+let live = format(R.page(animated, "front", 1.0, {animate: true}), 'html')
+let print_page = format(R.page(animated, "front", 3.0), 'html');
+{live_motion: contains(live, "motion-snow"), live_particles: contains(live, "effect-particle"),
+ print_still: contains(print_page, "motion-none"), print_no_particles: not contains(print_page, "effect-particle")}

@@ -1,0 +1,576 @@
+{
+  "name": "Greetings: design view effect buttons and right inspector editing on existing and plain cards",
+  "html": "test/demo/greetings/greetings.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "Existing card effects appear beside the page heading and open the matching right inspector."
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect.has-effect"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"animation\"]"
+      },
+      "attribute": "data-value",
+      "equals": "confetti"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "data-value",
+      "equals": "celebrate"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"music\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "attribute": "data-kind",
+      "equals": "music"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".inspector h2"
+      },
+      "equals": "Music"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-selected",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-panel",
+      "equals": "designs"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".panel .design"
+      },
+      "count": 28
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"celebrate\"]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "aria-expanded",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/inspector-music.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"sunshine\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "sunshine"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "data-value",
+      "equals": "sunshine"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"undo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "data-value",
+      "equals": "celebrate"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"celebrate\"]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"redo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "data-value",
+      "equals": "sunshine"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"none\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Add music"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect.add-effect"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"music\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"affection\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Edit music"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"animation\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".inspector h2"
+      },
+      "equals": "Animation"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".inspector [data-act=\"animation\"][data-arg=\"confetti\"]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"animation\"][data-arg=\"float\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"animation\"]"
+      },
+      "attribute": "data-value",
+      "equals": "float"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "affection"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"animation\"][data-arg=\"none\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"animation\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Add animation"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"effect-settings\"][data-arg=\"\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-effect-editor",
+      "equals": ""
+    },
+    {
+      "type": "log",
+      "message": "A plain template can acquire either effect; badges track edits, undo and redo."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"botanical-thanks\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect.has-effect"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect.add-effect"
+      },
+      "count": 2
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/inspector-plain.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"animation\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "attribute": "data-kind",
+      "equals": "animation"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"animation\"][data-arg=\"sway\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"animation\"]"
+      },
+      "attribute": "data-value",
+      "equals": "sway"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"animation\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Edit animation"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"music\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"winter\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect.has-effect"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".design[data-arg=\"botanical-thanks\"] .design-badge"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"undo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "data-value",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"animation\"]"
+      },
+      "attribute": "data-value",
+      "equals": "sway"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"redo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .canvas-effect[data-arg=\"music\"]"
+      },
+      "attribute": "data-value",
+      "equals": "winter"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/inspector-added.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "sway"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "log",
+      "message": "Card effects stay available on every page, and selecting an item restores its inspector."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"view\"][data-arg=\"inside\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"music\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "attribute": "data-kind",
+      "equals": "music"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".inspector [data-act=\"music\"][data-arg=\"winter\"]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"view\"][data-arg=\"back\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect.has-effect"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"view\"][data-arg=\"front\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas .item.text"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".inspector h2"
+      },
+      "equals": "Text"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"panel\"][data-arg=\"effects\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "attribute": "data-kind",
+      "equals": "animation"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".panel .design"
+      },
+      "count": 28
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"effect-settings\"][data-arg=\"\"]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "count": 0
+    }
+  ]
+}
