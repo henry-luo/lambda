@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27. **Status:** implementation started in worktree
 `temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
-M0–M3 are delivered with the aggregate limits below. M4–M7 remain planned.
+M0–M4 are delivered with the aggregate limits below. M5–M7 remain planned.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -127,8 +127,8 @@ geometry and the existing camera helpers before adding geometry or ray code.
   including old targets retained by consumers during replacement. Preserve the
   current **512 MiB context budget** and **4096-pixel raster-axis bound** until
   measurements justify a separately documented change.
-- Query device limits and build a checked sampler/attribute plan. The current
-  waist exposes 12 bindings; layered maps, transmission and four shadow casters
+- Query device limits and build a checked sampler/attribute plan. The original
+  waist exposed 12 bindings; M4 uses a checked active binding plan of at most 24 descriptions; layered maps, transmission and four shadow casters
   can exceed it. Do not silently drop maps or raise a constant without checking
   hardware and accounting. Preserve existing standard-material combinations;
   document and diagnose unsupported new combinations.
@@ -500,7 +500,8 @@ Keep the implementation checkpoint here short:
 | M1 | Multisampled HDR textures, resolved/per-sample target bindings, shared output triangle, per-sample tone/background conversion and after-tone-map transparency | Existing aggregate failures remain; the qualified profile is native macOS OpenGL 4.1 | 47/47 native units; 15 focused viewer cases; all 11 pinned Three.js cases pass the unchanged 99% gate (99.7864–99.9412%); Radiant baseline 6,383 passed / 8 failed / 141 partial / 2 skipped, detailed below | Continue with M2 |
 | M2 | Ordered bloom, directional FXAA and custom color passes; retained targets/programs, uniform tracks and template updates | Inherited Lambda/Radiant failures and external Node shutdown limit remain | 50/50 native units including 100 resize cycles and failed-projection recovery; 99/99 Scene3D/render cases; 21 package checks; all 11 pinned Three.js cases pass the unchanged 99% gate | Continue with M3 |
 | M3 | Per-map UV0/UV1 transforms, packed RGB/RGBA lanes, imported finite/infinite perspective and orthographic cameras, static glTF/GLB preservation | Higher UV sets, affine-shear export and compressed textures remain outside this profile | 55 native / 52 importer / 24 package cases and 99 scene replays pass; 11 Three.js images pass the unchanged gate; aggregate limits below | Continue with M4 |
-| M4–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M3 |
+| M4 | Clearcoat/sheen factors, all five layer maps, separate coat normal, lazy programs and glTF/GLB preservation | Recorded independent aggregate failures; remaining physical extensions stay separate | 57 native, 54 input, 100 scene replays; 16 Three.js images pass the unchanged gate; aggregate/cost record below | Continue with M5 |
+| M5–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M4 |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
@@ -637,3 +638,37 @@ reusing the unchanged **2,112/2,112** input results, yields **8,327/8,328 passin
 with only the inherited `tests_greetings_model` failure. Evidence:
 `m3-package-slice.log`, `m3-lambda-baseline.log`, `m3-lambda-recheck.log`.
 M3 is closed with the explicitly recorded independent aggregate limits.
+
+### M4 qualification record — 2026-10-28
+
+The delivered native profile adds clearcoat GGX and Charlie/Neubelt sheen with
+the pinned r186 energy handling, independent coat normals and per-map UVs.
+The shared map/factor descriptors serve native rendering, animation and glTF/GLB
+conversion. Numeric/color properties remain uniforms; map-presence variants link
+on demand and retain their programs. Descriptions/playback/ownership preserve
+**S12.1.1v3, D2.11.4, D4.5.1v4–D4.5.3v2 and D7.2.4v4**. No formal ruling changes.
+
+The checked GL binding plan queries device capacity and shares aliased texture
+units. The full case renders ten maps, an HDR environment, four shadow maps and
+a vertex skin palette, then survives 100 resize cycles and context recovery.
+Deferring otherwise-unused texture acquisition prevents eager sRGB copies of
+linear data maps. Numeric and exact-pixel glTF/GLB round trips preserve extension
+factors/maps; authored nonnumeric factors are rejected rather than defaulted.
+
+Focused acceptance passes 57 native units, 54 importer cases, 17 package checks
+and all 100 Scene3D/render replays. All sixteen Three.js comparisons pass the
+unchanged 99% channel gate. New direct/HDR/map cases range from **99.7075% to
+99.9409%**. Evidence: `m4-*.log` and `temp/pbr_oracle/` in this worktree. The release Radiant aggregate is **6,396 passed / 7 failed / 141 partial /
+2 skipped**: the inherited CSS-memory case and six WPT text/inline/sizing
+cases. Native scene units and shared WebGL/View controls pass. No references,
+assertions or budgets were weakened. The Lambda/input aggregate is **8,328/8,329 passing**; its only failure is
+the inherited `tests_greetings_model` mismatch already reproduced against the
+untouched binary in M2. The new physical package case and forced-GC sweep pass.
+
+An isolated paired release Dreamhome run on Apple M4 at 732 × 359 over 120
+camera frames measures M3 **71.084/74.493 ms** versus M4 **71.633/73.185 ms**
+p50/p95. This sample shows no material regression on that workload; it does
+not establish a universal performance claim. M4 retains 66 resources and
+56,792,540 GPU-accounted bytes (M3: 56,774,578), with zero steady-state
+CPU/GPU-byte, projection, environment and shadow growth. Evidence:
+`m4-paired-{m3,current}.json` and archived `m4/lambda.exe`.

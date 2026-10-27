@@ -11,6 +11,7 @@
 #include "../../lib/color.h"
 #include "../../lib/mesh_primitive.h"
 #include "../../lib/mesh_uv.h"
+#include "../../lib/scene3d_material.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -33,7 +34,7 @@ struct GltfExport {
     lam::ArrayList<GltfDefinition> definitions;
     lam::ArrayList<GltfCache> materials, textures, meshes;
     lam::ArrayList<GltfGeometry> geometries;
-    bool unlit = false, emissive_strength = false, lights_used = false, texture_transform = false;
+    bool unlit = false, emissive_strength = false, lights_used = false, texture_transform = false, physical_extensions = false;
     const char* error = nullptr;
     GltfExport() { for (auto& part : parts) part = strbuf_new(); }
     ~GltfExport() {
@@ -257,10 +258,11 @@ struct GltfExport {
     int material(ElementReader e) {
         for (auto& m : materials) if (m.first == e.element()) return m.index;
         const char* type = text(e, "type");
-        if (!type || (strcmp(type, "basic") && strcmp(type, "lambert") && strcmp(type, "standard"))) { fail("unknown material type"); return -1; }
+        if (!type || (strcmp(type, "basic") && strcmp(type, "lambert") && strcmp(type, "standard") && strcmp(type, "physical"))) { fail("unknown material type"); return -1; }
+        bool physical=!strcmp(type,"physical");
         // Lambert shading is a fully rough dielectric; a standard material carries its own factors
         double metalness = 0, roughness = 1;
-        if (!strcmp(type, "standard") && (!attr_number(e, "metalness", 0, &metalness) || !attr_number(e, "roughness", 1, &roughness))) return -1;
+        if ((!strcmp(type, "standard")||physical) && (!attr_number(e, "metalness", 0, &metalness) || !attr_number(e, "roughness", 1, &roughness))) return -1;
         if (e.get_attr("depth_only").isBool() && e.get_attr("depth_only").asBool()) { fail("depth-only materials are not exported"); return -1; }
         double rgba[4], opacity, emissive[4], intensity;
         if (!color(e, "color", "#ffffff", rgba) || !attr_number(e, "opacity", 1, &opacity) ||
@@ -272,14 +274,20 @@ struct GltfExport {
             if (!definition_element) { fail("unresolved texture reference"); return -1; }
             texture_index = texture(ElementReader((const Element*)definition_element));
         } else if (e.findChildElement("texture").isValid()) texture_index = texture(e.findChildElement("texture"));
-        // a standard material's maps, by the glTF textureInfo each becomes
-        const char* map_keys[] = {"metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"};
-        int maps[4] = {-1, -1, -1, -1};
-        for (unsigned k = 0; k < 4 && !error; k++) if (text(e, map_keys[k])) {
-            const void* definition_element = definition(text(e, map_keys[k]), "texture");
-            if (!definition_element) { fail("unresolved texture reference"); return -1; }
-            maps[k] = texture(ElementReader((const Element*)definition_element));
+        int maps[SCENE_MAP_COUNT];for(int& index:maps) index=-1;maps[SCENE_MAP_BASE]=texture_index;
+        for(unsigned slot=1;slot<SCENE_MAP_COUNT&&!error;slot++) {
+            const auto& spec=scene3d_map_specs[slot];const char* reference=text(e,spec.attribute);if(!reference) continue;
+            if(slot>=SCENE_MAP_CLEARCOAT&&!physical) {fail("extension maps require a physical material");return -1;}
+            const void* source=definition(reference,"texture");if(!source) {fail("unresolved texture reference");return -1;}
+            maps[slot]=texture(ElementReader((const Element*)source));
         }
+        double physical_values[SCENE_PHYSICAL_COUNT],sheen_color[4];
+        for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
+            const auto& spec=scene3d_physical_specs[i];double* value=&physical_values[i];
+            if((!physical&&!e.get_attr(spec.attribute).isNull())||!attr_number(e,spec.attribute,spec.fallback,value)||
+                (spec.unit_interval&&(*value<0||*value>1))) {fail("invalid physical material factor");return -1;}
+        }
+        if(!color(e,"sheen-color","#ffffff",sheen_color)) return -1;
         double normal_scale, occlusion_strength, cutoff;
         if (!attr_number(e, "normal-scale", 1, &normal_scale) || !attr_number(e, "occlusion-strength", 1, &occlusion_strength) ||
             !attr_number(e, "alpha-cutoff", .5, &cutoff)) return -1;
@@ -296,12 +304,12 @@ struct GltfExport {
         if (texture_index >= 0) {strbuf_append_str(m, ",\"baseColorTexture\":");if(!texture_info(m,texture_index)) return -1;}
         strbuf_append_str(m, ",\"metallicFactor\":"); number(m, metalness);
         strbuf_append_str(m, ",\"roughnessFactor\":"); number(m, roughness);
-        if (maps[0] >= 0) {strbuf_append_str(m, ",\"metallicRoughnessTexture\":");if(!texture_info(m,maps[0])) return -1;}
+        if (maps[SCENE_MAP_METAL_ROUGH] >= 0) {strbuf_append_str(m, ",\"metallicRoughnessTexture\":");if(!texture_info(m,maps[SCENE_MAP_METAL_ROUGH])) return -1;}
         strbuf_append_char(m, '}');
         const char* map_names[]={"normalTexture","occlusionTexture","emissiveTexture"};
         const char* extras[]={"scale","strength",nullptr};double values[]={normal_scale,occlusion_strength,0};
-        for(unsigned i=0;i<3;i++) if(maps[i+1]>=0) {
-            strbuf_append_format(m,",\"%s\":",map_names[i]);if(!texture_info(m,maps[i+1],extras[i],values[i])) return -1;
+        for(unsigned i=0;i<3;i++) if(maps[SCENE_MAP_NORMAL+i]>=0) {
+            strbuf_append_format(m,",\"%s\":",map_names[i]);if(!texture_info(m,maps[SCENE_MAP_NORMAL+i],extras[i],values[i])) return -1;
         }
         if (blend) strbuf_append_str(m, ",\"alphaMode\":\"BLEND\"");
         if (mask) { strbuf_append_str(m, ",\"alphaMode\":\"MASK\",\"alphaCutoff\":"); number(m, cutoff); }
@@ -314,10 +322,25 @@ struct GltfExport {
             strbuf_append_str(m, ",\"emissiveFactor\":"); numbers(m, factor, 3);
         }
         bool strength = emits && intensity > 1, is_unlit = !strcmp(type, "basic");
-        if (strength || is_unlit) {
+        if (strength || is_unlit || physical) {
             strbuf_append_str(m, ",\"extensions\":{");
             if (is_unlit) strbuf_append_str(m, "\"KHR_materials_unlit\":{}");
             if (strength) { strbuf_append_format(m, "%s\"KHR_materials_emissive_strength\":{\"emissiveStrength\":", is_unlit ? "," : ""); number(m, intensity); strbuf_append_char(m, '}'); }
+            if(physical) {
+                strbuf_append_format(m,"%s\"KHR_materials_clearcoat\":{\"clearcoatFactor\":",strength||is_unlit?",":"");number(m,physical_values[SCENE_COAT_FACTOR]);
+                strbuf_append_str(m,",\"clearcoatRoughnessFactor\":");number(m,physical_values[SCENE_COAT_ROUGHNESS]);
+                for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_SHEEN_COLOR;slot++) if(maps[slot]>=0) {
+                    strbuf_append_format(m,",\"%s\":",scene3d_map_specs[slot].gltf);
+                    if(!texture_info(m,maps[slot],slot==SCENE_MAP_CLEARCOAT_NORMAL?"scale":nullptr,physical_values[SCENE_COAT_NORMAL_SCALE])) return -1;
+                }
+                for(unsigned i=0;i<3;i++) sheen_color[i]*=physical_values[SCENE_SHEEN_FACTOR];
+                strbuf_append_str(m,"},\"KHR_materials_sheen\":{\"sheenColorFactor\":");numbers(m,sheen_color,3);
+                strbuf_append_str(m,",\"sheenRoughnessFactor\":");number(m,physical_values[SCENE_SHEEN_ROUGHNESS]);
+                for(unsigned slot=SCENE_MAP_SHEEN_COLOR;slot<SCENE_MAP_COUNT;slot++) if(maps[slot]>=0) {
+                    strbuf_append_format(m,",\"%s\":",scene3d_map_specs[slot].gltf);if(!texture_info(m,maps[slot])) return -1;
+                }
+                strbuf_append_char(m,'}');physical_extensions=true;
+            }
             strbuf_append_char(m, '}');
         }
         strbuf_append_char(m, '}');
@@ -527,7 +550,8 @@ struct GltfExport {
         if (error) return false;
         StrBuf* json = strbuf_new();
         strbuf_append_str(json, "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Lambda\"}");
-        const char* used[4]; unsigned used_count = 0;
+        const char* used[6]; unsigned used_count = 0;
+        if(physical_extensions) {used[used_count++]="KHR_materials_clearcoat";used[used_count++]="KHR_materials_sheen";}
         if (texture_transform) used[used_count++] = "KHR_texture_transform";
         if (unlit) used[used_count++] = "KHR_materials_unlit";
         if (emissive_strength) used[used_count++] = "KHR_materials_emissive_strength";

@@ -1221,3 +1221,43 @@ TEST_F(ModelInputTest, SceneAssetRejectsAbsentUvSetsAndInvalidCameras) {
         ASSERT_NE(invalid,nullptr);EXPECT_TRUE(invalid->parse_failed);
     }
 }
+
+TEST_F(ModelInputTest, PhysicalExtensionsPreserveFactorsMapsAndCoordinateSelectors) {
+    Input* source=load_scene_asset("test/scene3d/assets/fidelity/physical.gltf");ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    auto check=[&](Input* input) {
+        ElementReader root(input->root),material=root.findChildElement("resources").findChildElement("material");
+        EXPECT_STREQ(material.get_attr("type").cstring(),"physical");EXPECT_DOUBLE_EQ(material.get_attr("clearcoat").asFloat(),.75);
+        EXPECT_DOUBLE_EQ(material.get_attr("clearcoat-roughness").asFloat(),.25);EXPECT_DOUBLE_EQ(material.get_attr("clearcoat-normal-scale").asFloat(),.4);
+        EXPECT_STREQ(material.get_attr("sheen-color").cstring(),"#bc597c");EXPECT_DOUBLE_EQ(material.get_attr("sheen-roughness").asFloat(),.6);
+        lam::ArrayList<ElementReader> textures;model_elements(root,"texture",&textures);ASSERT_EQ(textures.size(),8u);
+        const char* keys[]={"clearcoat-texture","clearcoat-roughness-texture","clearcoat-normal-texture","sheen-color-texture","sheen-roughness-texture"};
+        for(const char* key:keys) {
+            const char* reference=material.get_attr(key).cstring();ASSERT_NE(reference,nullptr);bool found=false;
+            for(auto& texture:textures) if(!strcmp(texture.get_attr("id").cstring(),reference)) {
+                found=true;if(!strcmp(key,"clearcoat-roughness-texture")||!strcmp(key,"sheen-color-texture")) EXPECT_EQ(texture.get_attr("uv-set").asFloat(),1);
+            }
+            EXPECT_TRUE(found)<<key;
+        }
+    };
+    check(source);
+    for(bool binary:{false,true}) {
+        StrBuf* out=strbuf_new();const char* error=nullptr;ASSERT_TRUE(format_gltf_bytes(source->root,binary,out,&error))<<error;
+        Input* again=parse(out->str,"scene3d-asset",binary?"physical.glb":"physical.gltf",out->length);strbuf_free(out);
+        ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;check(again);
+    }
+}
+
+TEST_F(ModelInputTest, PhysicalExtensionsRejectMalformedFactorsAndMaps) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);Url* cwd=get_current_dir();
+    Input* file=input_from_url(builder.createString("test/scene3d/assets/fidelity/physical.gltf"),builder.createString("text"),nullptr,cwd);url_destroy(cwd);
+    ASSERT_NE(file,nullptr);const char* source=file->root.get_string()->chars;
+    struct Case {const char* from;const char* to;};
+    const Case cases[]={{"\"clearcoatFactor\": 0.75","\"clearcoatFactor\": 2"},{"\"sheenRoughnessFactor\": 0.6","\"sheenRoughnessFactor\": -1"},
+        {R"("scale": 0.4)",R"("scale": "large")"},{"\"index\": 2","\"index\": 99"},
+        {"\"sheenColorFactor\": [\n            0.5","\"sheenColorFactor\": [\n            \"red\""}};
+    for(const auto& c:cases) {
+        SCOPED_TRACE(c.from);const char* at=strstr(source,c.from);ASSERT_NE(at,nullptr);
+        StrBuf* changed=strbuf_new();strbuf_append_str_n(changed,source,at-source);strbuf_append_str(changed,c.to);strbuf_append_str(changed,at+strlen(c.from));
+        Input* bad=parse(changed->str,"scene3d-asset","invalid-physical.gltf");strbuf_free(changed);ASSERT_NE(bad,nullptr);EXPECT_TRUE(bad->parse_failed);
+    }
+}

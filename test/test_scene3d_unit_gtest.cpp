@@ -1447,10 +1447,12 @@ TEST_F(Scene3dTest, ImportedCamerasFrameTheSceneAndExplicitSelectionWins) {
 
 TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
     Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
-    Input* source=input_from_url(builder.createString("test/scene3d/assets/fidelity/model.gltf"),builder.createString("scene3d-asset"),nullptr,doc.url);
+    DomElement* ambient=element("light",root);attr(ambient,"type","ambient");DomElement* model=nullptr;
+    for(const char* path:{"test/scene3d/assets/fidelity/model.gltf","test/scene3d/assets/fidelity/physical.gltf"}) {
+    SCOPED_TRACE(path);if(model) root->remove_child(model);
+    Input* source=input_from_url(builder.createString(path),builder.createString("scene3d-asset"),nullptr,doc.url);
     ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
-    DomElement* ambient=element("light",root);attr(ambient,"type","ambient");
-    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
     ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
     unsigned center=64*image->pitch+64*4;
     EXPECT_GT(((const uint8_t*)image->pixels)[center]+((const uint8_t*)image->pixels)[center+1]+((const uint8_t*)image->pixels)[center+2],100u);
@@ -1462,4 +1464,71 @@ TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
         root->remove_child(model);model=build_dom_tree_from_element(again->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
         image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
     }
+    }
+}
+
+TEST_F(Scene3dTest, PhysicalZeroFactorsRecoverStandardAndFactorTracksKeepTheirProgram) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","3");
+    DomElement* object=mesh("box","#204060","standard"),*material=object->last_child->as_element();
+    attr(object,"id","surface");attr(object,"rotation",".2 .35 0");attr(material,"roughness",".65");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position",".3 .2 2");attr(sun,"intensity",".3");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t standard[128*128*4];memcpy(standard,image->pixels,sizeof(standard));
+    attr(material,"type","physical");image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_EQ(memcmp(standard,image->pixels,sizeof(standard)),0);
+    for (const char* mode:{"mask","blend"}) {
+        attr(material,"alpha-mode",mode);attr(material,"opacity",".6");attr(material,"type","standard");
+        image=snapshot();ASSERT_NE(image,nullptr);memcpy(standard,image->pixels,sizeof(standard));
+        attr(material,"type","physical");image=snapshot();ASSERT_NE(image,nullptr);
+        EXPECT_EQ(memcmp(standard,image->pixels,sizeof(standard)),0)<<mode;
+    }
+    attr(material,"alpha-mode","opaque");attr(material,"opacity","1");image=snapshot();ASSERT_NE(image,nullptr);memcpy(standard,image->pixels,sizeof(standard));
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(material,"clearcoat","1");attr(material,"clearcoat-roughness",".15");image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_NE(memcmp(standard,image->pixels,sizeof(standard)),0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.material_links,after.material_links);
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","coat");
+    DomElement* track=element("keyframe-track",clip);attr(track,"path","surface.material.clearcoat");attr(track,"type","number");attr(track,"times","0 1");attr(track,"values","0 1");
+    ASSERT_NE(snapshot(),nullptr);Scene3dAnimationState* state=scene3d_animations(root);ASSERT_NE(state,nullptr);
+    AnimationActionState* action=scene3d_animation_action(state,"coat");ASSERT_NE(action,nullptr);ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state,.5));ASSERT_TRUE(scene3d_stats(root,&before));image=snapshot();ASSERT_NE(image,nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.material_links,after.material_links);EXPECT_EQ(before.projection_generation,after.projection_generation);
+    AnimationValue value={};ASSERT_TRUE(scene3d_animation_value(state,material,"clearcoat",&value));EXPECT_NEAR(value.numbers[0],.5,1e-6);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+}
+
+TEST_F(Scene3dTest, PhysicalMapsFourShadowsAndSkinPaletteFitTheCheckedBindingPlan) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","3");
+    DomElement* object=buffer_quad("physical"),*g=object->first_child->as_element(),*m=object->last_child->as_element();
+    attr(g,"uvs","0 0 1 0 1 1 0 1");attr(g,"uvs1","0 1 1 1 1 0 0 0");
+    attr(g,"skin-indices","0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0");attr(g,"skin-weights","1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0");
+    DomElement* rig=element("skeleton",root);attr(rig,"id","rig");DomElement* bone=element("bone",rig);attr(bone,"id","bone");attr(object,"skeleton","rig");
+    const char* keys[]={"texture","metal-rough-texture","normal-texture","occlusion-texture","emissive-texture",
+        "clearcoat-texture","clearcoat-roughness-texture","clearcoat-normal-texture","sheen-color-texture","sheen-roughness-texture"};
+    for(unsigned i=0;i<10;i++) {
+        char id[24];snprintf(id,sizeof(id),"layer-%u",i);
+        DomElement* texture=map_texture(id,(i==2||i==7)?"test/scene3d/assets/fidelity/normal.png":"test/scene3d/assets/fidelity/colors.png");
+        attr(texture,"uv-set",i%2?"1":"0");attr(m,keys[i],id);
+    }
+    attr(m,"clearcoat",".7");attr(m,"sheen",".4");attr(m,"sheen-color","#cc3366");attr(m,"emissive","#333333");
+    DomElement* env=element("environment",root);attr(env,"id","studio");attr(env,"src","test/scene3d/assets/hdr/studio.hdr");attr(root,"environment","studio");
+    for(unsigned i=0;i<4;i++) {
+        DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position",i%2?"1 1 4":"-1 1 4");
+        attr(sun,"intensity",".2");attr(sun,"cast-shadow","true");attr(sun,"shadow-map-size","512");
+    }
+    ASSERT_NE(snapshot(),nullptr);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    EXPECT_EQ(before.textures,10u);EXPECT_EQ(before.shadow_passes,4u);
+    attr(m,"clearcoat",".4");attr(m,"sheen",".6");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(before.material_links,after.material_links);EXPECT_EQ(before.environment_builds,after.environment_builds);
+    EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
+    // only map presence changes the shader variant; returning to a prior mask reuses it.
+    ASSERT_TRUE(m->remove_attribute("sheen-roughness-texture"));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.material_links,before.material_links+1);
+    attr(m,"sheen-roughness-texture","layer-9");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.material_links,before.material_links+1);
+    for(unsigned i=0;i<100;i++) ASSERT_NE(snapshot(i%2?128:96,i%2?128:96),nullptr);
+    Scene3dStats settled;ASSERT_TRUE(scene3d_stats(root,&settled));EXPECT_EQ(after.graphics.resources,settled.graphics.resources);
+    EXPECT_EQ(after.graphics.gpu_bytes,settled.graphics.gpu_bytes);EXPECT_EQ(after.material_links,settled.material_links);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+    attr(m,"clearcoat-texture","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"texture reference"),nullptr);
 }

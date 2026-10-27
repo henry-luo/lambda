@@ -30,7 +30,7 @@ struct NativeGlBinding {
     NativeGlResource resource;
     NativeGlBindingKind kind;
 };
-static constexpr unsigned NATIVE_GL_BINDING_LIMIT = 12;
+static constexpr unsigned NATIVE_GL_BINDING_LIMIT = 24;
 struct NativeGlDraw {
     NativeGlResource program, vertices;
     unsigned count, instances;
@@ -40,9 +40,8 @@ struct NativeGlDraw {
     bool depth_only = false;
     // fragment alpha becomes multisample coverage: cut-out edges antialias without depth sorting
     bool alpha_to_coverage = false;
-    // Binding i takes texture unit i and sets its sampler to it. GL rejects a draw
-    // whose samplers of different types share a unit, so a program's samplers
-    // must all be bound; samplers it lacks are skipped.
+    // active samplers receive checked device texture units; aliases of the same image
+    // and target share a unit. A program's samplers must all be bound; absent ones are skipped.
     NativeGlBinding bindings[NATIVE_GL_BINDING_LIMIT] = {};
     unsigned binding_count = 0;
     bool depth_test = true;

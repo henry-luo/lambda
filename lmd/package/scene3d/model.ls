@@ -2,7 +2,10 @@ import t: .transform
 import animation: .animation
 
 // the texture maps a standard material may name, beside its base color `texture`
-let MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
+let STANDARD_MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
+let PHYSICAL_MAPS = ["clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture"]
+let MAPS = [*STANDARD_MAPS, *PHYSICAL_MAPS]
+let PHYSICAL_NUMBERS = ["clearcoat", "clearcoat-roughness", "clearcoat-normal-scale", "sheen", "sheen-roughness"]
 fn numeric(v) bool => t.numeric(v)
 fn value(v, fallback) => if (v == null) fallback else v
 fn fail(message) error => error("scene3d: " ++ message)
@@ -237,7 +240,13 @@ fn check_node(n, all_nodes) bool^ {
                 let checked_matrix = if (target.matrix != null and contains(["position", "scale", "quaternion"], property)) raise fail("cannot animate matrix node TRS")
                 let checked_material = if (nested and (name(target) != 'mesh' or path[1] != "material")) raise fail("invalid material animation path")
                 let kind = if (nested) 'material' else name(target)
-                let expected = if (contains(["position", "scale"], property)) 'vector'
+                let owner = if (nested) mesh_material(target, all_nodes)^ else target
+                let material_type = if (kind == 'material' and contains(["opacity", "color", "emissive"], property))
+                    (if (contains(["color", "emissive"], property)) 'color' else 'number')
+                    else if (kind == 'material' and contains(['standard', 'physical'], owner.type) and contains(["metalness", "roughness"], property)) 'number'
+                    else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_NUMBERS, property)) 'number'
+                    else if (kind == 'material' and owner.type == 'physical' and property == "sheen-color") 'color' else null
+                let expected = if (material_type != null) material_type else if (contains(["position", "scale"], property)) 'vector'
                     else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
                     else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
                     else if (property == "morph-weights" and kind == 'mesh') 'vector'
@@ -290,9 +299,13 @@ fn check_node(n, all_nodes) bool^ {
     else if (kind == 'material' and n.type == 'shader') check_shader(n, all_nodes)^
     else if (kind == 'simulation') check_simulation(n)^
     else if (kind == 'material') {
-        let checked_type = if (not contains(['basic', 'lambert', 'standard'], n.type)) raise fail("unknown material type")
+        let checked_type = if (not contains(['basic', 'lambert', 'standard', 'physical'], n.type)) raise fail("unknown material type")
         let checked_pbr = [for (key in ["metalness", "roughness"] where n[key] != null)
-            if (n.type != 'standard' or not numeric(n[key]) or n[key] < 0 or n[key] > 1) raise fail("invalid material metalness or roughness") else true]
+            if (not contains(['standard', 'physical'], n.type) or not numeric(n[key]) or n[key] < 0 or n[key] > 1) raise fail("invalid material metalness or roughness") else true]
+        let checked_physical = [for (key in PHYSICAL_NUMBERS where n[key] != null)
+            if (n.type != 'physical' or not numeric(n[key]) or (key != "clearcoat-normal-scale" and (n[key] < 0 or n[key] > 1)))
+                raise fail("invalid physical material factor") else true]
+        let checked_sheen_color = if (n["sheen-color"] != null and (n.type != 'physical' or not color(n["sheen-color"]))) raise fail("invalid sheen color")
         let checked_opacity = if (n.opacity != null and (not numeric(n.opacity) or n.opacity < 0 or n.opacity > 1)) raise fail("invalid material opacity")
         let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
         let checked_depth = if (n.depth_only!=null and (not (n.depth_only is bool) or n.depth_only and (n.transparent==true or n.opacity!=null and n.opacity!=1)))
@@ -302,7 +315,8 @@ fn check_node(n, all_nodes) bool^ {
             raise fail("invalid material alpha cutoff")
         // the maps of a standard material each name a texture
         let checked_maps = [for (key in MAPS where n[key] != null)
-            if (n.type != 'standard') raise fail("texture maps require a standard material") else definition(all_nodes, n[key], 'texture')^]
+            if (not contains(['standard', 'physical'], n.type)) raise fail("texture maps require a standard material")
+            else if (contains(PHYSICAL_MAPS, key) and n.type != 'physical') raise fail("extension maps require a physical material") else definition(all_nodes, n[key], 'texture')^]
         let checked_strengths = if ((n["normal-scale"] != null and not numeric(n["normal-scale"])) or
             (n["occlusion-strength"] != null and (not numeric(n["occlusion-strength"]) or n["occlusion-strength"] < 0 or n["occlusion-strength"] > 1)))
             raise fail("invalid material normal scale or occlusion strength")
@@ -376,7 +390,7 @@ fn check_node(n, all_nodes) bool^ {
         let drawn_geometry = if (n.geometry != null) definition(all_nodes, n.geometry, 'geometry')^ else geometries[0]
         // leave unsupported slots to material validation before resolving their UV streams.
         let map_textures = if (drawn_with.type == 'shader') [] else [
-            *[for (key in (if (drawn_with.type == 'standard') ["texture", *MAPS] else ["texture"]) where drawn_with[key] != null) definition(all_nodes, drawn_with[key], 'texture')^],
+            *[for (key in (if (drawn_with.type == 'physical') ["texture", *MAPS] else if (drawn_with.type == 'standard') ["texture", *STANDARD_MAPS] else ["texture"]) where drawn_with[key] != null) definition(all_nodes, drawn_with[key], 'texture')^],
             *[for (c in content(drawn_with) where name(c) == 'texture') c]]
         let checked_map_uv = [for (tex in map_textures, let set = value(tex["uv-set"], 0))
             if ((set == 1 and drawn_geometry.uvs1 == null) or

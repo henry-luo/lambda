@@ -19,7 +19,8 @@ struct Scene3dStats {
     uint32_t meshes, geometries, textures;
     uint32_t environment_builds; // environment captures and prefilters since the viewport was created
     uint32_t shadow_passes;      // shadow maps rendered since the viewport was created
-    uint32_t shader_links;       // shader-material programs linked since the viewport was created
+    uint32_t shader_links;       // custom GLSL programs linked since viewport creation
+    uint32_t material_links;     // retained built-in material programs linked
     uint32_t shader_programs;    // shader-material programs currently retained
     uint32_t simulation_steps;   // GPU simulation steps since the viewport was created
     uint32_t postprocess_passes; // color passes, excluding the common output conversion

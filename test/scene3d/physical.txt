@@ -1,0 +1,16 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <div
+      <button id: "polish",
+        "Clear coat">
+      <scene3d id: "scene", camera: "camera", width: 128, height: 128, background: "#000000", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 3>
+        <light type: 'directional', color: "#ffffff", intensity: 0.3, position: [0.3, 0.2, 2]>
+        <mesh rotation: [0.2, 0.35, 0],
+          <geometry type: 'box', size: [2, 2, 2]>
+          <material type: 'physical', color: "#204060", opacity: 1, id: "finish", roughness: 0.65, clearcoat: 0, clearcoat-roughness: 0.15>>
+        <animation-clip id: "polish", duration: 1,
+          <keyframe-track path: "finish.clearcoat", type: 'number', times: [0, 1], values: [0, 1]>>>>>>

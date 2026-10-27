@@ -5,3 +5,10 @@ independent map rotations/mirroring, texture-coordinate override and finite/
 infinite perspective plus orthographic cameras are deterministic test data.
 The two tiny PNGs were generated from explicit RGBA channel values; no external
 assets or codecs are required. The glTF images use nearest/clamp sampling.
+
+M4 adds `physical.gltf`: the same quad with clearcoat/sheen extensions,
+all five layer maps, separate UV selectors/transforms and coat normal scale.
+`layers.png` is a generated 2 × 2 RGBA map with independent R/G/A values.
+Both extension names are required so an unsupported importer cannot silently
+fall back to standard shading. Numeric and exact-pixel round trips check the
+encoded channels rather than accepting a rewritten visual golden.

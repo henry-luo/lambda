@@ -2379,6 +2379,17 @@ A texture's `color-space:'srgb'/'linear'` overrides that choice. Materials
 accept `alpha-mode:'opaque'/'blend'/'mask'`; mask discards below
 `alpha-cutoff` (default 0.5, greater than 0 and at most 1).
 
+`material('physical', options)` adds clearcoat and sheen to standard shading.
+Both factors default to 0 and accept [0,1]. `clearcoat-roughness` defaults to
+0, `sheen-roughness` to 1 (both [0,1]); `sheen-color` defaults to white.
+`clearcoat-texture` reads R, `clearcoat-roughness-texture` reads G and
+`clearcoat-normal-texture` has its own tangent-space normal and finite
+`clearcoat-normal-scale` (default 1). `sheen-color-texture` reads sRGB RGB;
+`sheen-roughness-texture` reads linear A. These maps use the same independent
+UV selectors/transforms as standard maps. Factor/color tracks reuse existing
+playback without relinking (**S12.1.1v3, D2.11.4**). See the
+[qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#physical-materials-m4-selected-profile).
+
 The scene's `tone-mapping` is `'none'` by default, or `'neutral'`/`'aces'`;
 `exposure` defaults to 1. Native light units retain Lambert's historical
 brightness. glTF punctual lights divide intensity by π on import and
@@ -2515,6 +2526,9 @@ These remain pure scene values (**S12.1.1v3, D7.2.4v4**).
 glTF imports standard factors, base-color/metal-rough/normal/occlusion/emissive
 maps, alpha masks, tangents, UV0/UV1, RGB/RGBA vertex colors and camera nodes.
 Each map preserves its own `KHR_texture_transform` and coordinate selection.
+`KHR_materials_clearcoat` and `KHR_materials_sheen` import/export their factors,
+maps and independent normal scale. A glTF sheen color folds the native sheen
+factor into its linear RGB value on static export.
 Explicit viewport `camera` selection wins over imported cameras; omitted
 perspective `zfar` uses `infinite-far:true`. Orthographic cameras permit near 0. MTL's `Pr`, `Pm`, `map_Pr`, `map_Pm` and `norm`
 select standard shading, independently of `illum` order. Scalar images read
@@ -2534,7 +2548,7 @@ and shadow settings are not encoded. See the
 [export profile](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export)
 for the precise mapping and refusals.
 
-Clearcoat/transmission/sheen, cascaded shadows, global illumination/SSAO and
+Transmission/volume, anisotropy, iridescence, dispersion, cascaded shadows, global illumination/SSAO and
 depth-dependent postprocessing remain follow-on scope. The
 [Dreamhome demo](../test/demo/dreamhome/README.md) combines the implemented
 PBR, room lighting and sun shadows. Its release frame measurement and

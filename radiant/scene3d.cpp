@@ -16,6 +16,8 @@
 #include "../lib/mem_factory.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/mesh_primitive.h"
+#include "../lib/scene3d_material.h"
+#include "scene3d_physical_shaders.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/hash.h"
@@ -39,7 +41,7 @@ static constexpr unsigned SCENE_TONE_CURVES = 3;
 // material model x tone curve x alpha mask x environment light x shadow layout (none, or which of
 // the four shadow slots are point-light cubes: 16 layouts)
 static constexpr unsigned SCENE_SHADOW_LAYOUTS = 17;
-static constexpr unsigned SCENE_PROGRAM_VARIANTS = 2 * SCENE_TONE_CURVES * 2 * 2 * SCENE_SHADOW_LAYOUTS;
+static constexpr unsigned SCENE_PROGRAM_VARIANTS = 2 * SCENE_TONE_CURVES * 2 * 2 * 2 * SCENE_SHADOW_LAYOUTS;
 // lights that cast shadows (SP5): each owns a depth map, sampled through its own texture unit
 static constexpr unsigned SCENE_SHADOW_LIMIT = 4;
 // A prefiltered environment is Three.js r186's PMREM cube-UV atlas: 256-texel faces, then
@@ -86,14 +88,14 @@ struct Scene3dMaterial {
     float color[4], emissive[3];   // emissive is linear color times its intensity
     float pbr[2];                  // standard materials: metalness, roughness
     // standard materials' maps (metalness in B and roughness in G; occlusion in R) and their strengths
-    NativeGlResource metal_rough, normal_map, occlusion, emissive_map;
+    NativeGlResource maps[SCENE_MAP_COUNT];
     float normal_scale, occlusion_strength;
     float alpha_cutoff;            // alpha-mode 'mask': fragments below it are discarded; 0 otherwise
     bool source_transparent;
-    bool lambert, standard, transparent, force_opaque, depth_only;
+    bool lambert, standard, physical, transparent, force_opaque, depth_only;
     int side;
-    NativeGlResource texture;
-    float uv_rows[5][6], uv_sets[5]; // base, metal-rough, normal, occlusion, emission
+    float physical_values[SCENE_PHYSICAL_COUNT], sheen_color[3];
+    float uv_rows[SCENE_MAP_COUNT][6], uv_sets[SCENE_MAP_COUNT]; // base, metal-rough, normal, occlusion, emission
     unsigned required_uvs;
     uint64_t texture_hash; // of its textures' sources and samplers
     struct Scene3dShader* shader; // a shader material's program inputs; null for the built-in models
@@ -247,6 +249,7 @@ struct Scene3dProjection {
     DomNodeRef* dynamic_objects;
     int dynamic_count, dynamic_capacity;
 };
+struct Scene3dMappedProgram { unsigned key; NativeGlResource program; uint64_t frame; };
 struct Scene3dEntry {
     Scene3dEntry* next;
     DomNodeRef root;
@@ -255,6 +258,8 @@ struct Scene3dEntry {
     // compiled on first use; `program_frame` marks the frame whose scene uniforms each holds
     NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, hdr_target, output_programs[SCENE_TONE_CURVES][2], white, dfg;
     uint64_t program_frame[SCENE_PROGRAM_VARIANTS], frame;
+    Scene3dMappedProgram* mapped_programs;
+    size_t mapped_count,mapped_capacity;
     NativeGlResource post_linear[2], post_blur[2], post_display[2], post_programs[4];
     unsigned post_width, post_height, post_needs;
 
@@ -566,12 +571,14 @@ static bool scene3d_collect_definitions(Scene3dBuild* build, DomElement* node, u
     if (depth > 64 || ++build->nodes > SCENE_NODE_LIMIT) return scene3d_fail(build->entry,"scene hierarchy quota exceeded");
     Scene3dDefinition* d = &build->definitions[build->definition_count++]; d->source = node;
     // malformed typed attributes must not fall through as absent defaults or inline resources.
-    const char* text_keys[]={"id","type","color","background","side","geometry","material","texture","src","camera","skeleton",
-        "metal-rough-texture","normal-texture","occlusion-texture","emissive-texture","color-space","alpha-mode","tone-mapping",
-        "environment","ground-color"};
+    const char* text_keys[]={"id","type","color","background","side","geometry","material","src","camera","skeleton",
+        "color-space","alpha-mode","tone-mapping",
+        "environment","ground-color","sheen-color"};
     for (const char* key:text_keys)
         if (!scene3d_value(node,key).isNull() && !scene3d_text(node,key))
             return scene3d_fail(build->entry,"scene text attribute requires a string or symbol");
+    for(const auto& spec:scene3d_map_specs) if(!scene3d_value(node,spec.attribute).isNull()&&!scene3d_text(node,spec.attribute))
+        return scene3d_fail(build->entry,"material texture reference requires a string or symbol");
     const char* id = scene3d_text(node,"id");
     if (id) {
         if (!*id || strlen(id) >= sizeof(d->id)) return scene3d_fail(build->entry,"invalid scene ID");
@@ -881,6 +888,15 @@ static bool scene3d_material_values(Scene3dEntry* entry,DomElement* node,Scene3d
         !scene3d_animated_number(entry,node,"roughness",1,&material->pbr[1])||
         !(material->pbr[0]>=0&&material->pbr[0]<=1)||!(material->pbr[1]>=0&&material->pbr[1]<=1)))
         return scene3d_fail(entry,"invalid material metalness or roughness");
+    if(material->physical) {
+        for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
+            const auto& property=scene3d_physical_specs[i];float* value=&material->physical_values[i];
+            if(!scene3d_animated_number(entry,node,property.attribute,property.fallback,value)||
+                (property.unit_interval&&(*value<0||*value>1))) return scene3d_fail(entry,"invalid physical material factor");
+        }
+        float color[4];if(!scene3d_animated_color(entry,node,color,"sheen-color","#ffffff")) return scene3d_fail(entry,"invalid sheen color");
+        memcpy(material->sheen_color,color,3*sizeof(float));
+    }
     float opacity;
     if(!scene3d_animated_color(entry,node,material->color)||
         !scene3d_animated_number(entry,node,"opacity",1,&opacity)||opacity<0||opacity>1)
@@ -915,10 +931,18 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     material->texture_hash=HASH_FNV1A_64_OFFSET_BASIS;
     const char* type=scene3d_text(node,"type");
     if (type && !strcmp(type,"shader")) return scene3d_shader_material(build,definition,material);
-    if (!type || (strcmp(type,"basic") && strcmp(type,"lambert") && strcmp(type,"standard"))) { scene3d_fail(build->entry,"unknown material type"); return nullptr; }
+    if (!type || (strcmp(type,"basic") && strcmp(type,"lambert") && strcmp(type,"standard") && strcmp(type,"physical"))) { scene3d_fail(build->entry,"unknown material type"); return nullptr; }
     for(auto& rows:material->uv_rows) {rows[0]=1;rows[4]=1;}
-    material->lambert=!strcmp(type,"lambert"); material->standard=!strcmp(type,"standard");
+    material->lambert=!strcmp(type,"lambert"); material->physical=!strcmp(type,"physical");material->standard=!strcmp(type,"standard")||material->physical;
     material->source=dom_node_ref(node);
+    if(!material->physical) {
+        for(const auto& spec:scene3d_physical_specs) if(node->has_attribute(spec.attribute)||!scene3d_value(node,spec.attribute).isNull()) {
+            scene3d_fail(build->entry,"physical factors require a physical material");return nullptr;
+        }
+        if(node->has_attribute("sheen-color")||!scene3d_value(node,"sheen-color").isNull()) {
+            scene3d_fail(build->entry,"sheen color requires a physical material");return nullptr;
+        }
+    }
     if (!scene3d_flag(node,"transparent",false,&material->transparent) ||
         !scene3d_flag(node,"depth_only",false,&material->depth_only)) {
         scene3d_fail(build->entry,"invalid material color or opacity"); return nullptr;
@@ -948,24 +972,23 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
         texture_definition=scene3d_definition(build,child->as_element(),nullptr,"texture");
     }
     if (texture || texture_definition) {
-        material->texture=scene3d_texture(build,texture_definition);
-        if (!material->texture.id||!scene3d_map_coordinates(build,texture_definition,material,0)) return nullptr;
+        material->maps[SCENE_MAP_BASE]=scene3d_texture(build,texture_definition);
+        if (!material->maps[SCENE_MAP_BASE].id||!scene3d_map_coordinates(build,texture_definition,material,0)) return nullptr;
         material->texture_hash=hash_fnv1a_64_extend(material->texture_hash,&texture_definition->texture_hash,sizeof(uint64_t));
         // image alpha participates in the same ordered transparent pass.
         material->transparent=material->transparent || texture_definition->texture_alpha;
         material->source_transparent=material->source_transparent||texture_definition->texture_alpha;
     }
-    // the maps a standard material reads; an absent one samples white, which leaves its factor as is
-    const char* map_keys[]={"metal-rough-texture","normal-texture","occlusion-texture","emissive-texture"};
-    NativeGlResource* maps[]={&material->metal_rough,&material->normal_map,&material->occlusion,&material->emissive_map};
-    for (unsigned i=0;i<4;i++) {
-        const char* reference=scene3d_text(node,map_keys[i]);
-        if (!reference) continue;
-        if (!material->standard) { scene3d_fail(build->entry,"texture maps require a standard material"); return nullptr; }
-        // emission is a color; the other maps hold data
+    // one shared descriptor table owns every built-in map's slot and color space.
+    for(unsigned slot=1;slot<SCENE_MAP_COUNT;slot++) {
+        const Scene3dMapSpec& spec=scene3d_map_specs[slot];const char* reference=scene3d_text(node,spec.attribute);
+        if(!reference) continue;
+        if(!material->standard||(slot>=SCENE_MAP_CLEARCOAT&&!material->physical)) {
+            scene3d_fail(build->entry,slot>=SCENE_MAP_CLEARCOAT?"extension maps require a physical material":"texture maps require a standard material");return nullptr;
+        }
         Scene3dDefinition* map=scene3d_definition(build,nullptr,reference,"texture");
-        *maps[i]=scene3d_texture(build,map,i==3);
-        if (!maps[i]->id||!scene3d_map_coordinates(build,map,material,i+1)) return nullptr;
+        material->maps[slot]=scene3d_texture(build,map,spec.srgb);
+        if(!material->maps[slot].id||!scene3d_map_coordinates(build,map,material,slot)) return nullptr;
         material->texture_hash=hash_fnv1a_64_extend(material->texture_hash,&map->texture_hash,sizeof(uint64_t));
     }
     if (!scene3d_number(node,"normal-scale",1,&material->normal_scale) || !isfinite(material->normal_scale) ||
@@ -1682,7 +1705,7 @@ static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Sc
                 return scene3d_fail(build->entry,"resources accept geometry, material, texture and environment definitions");
             if (scene3d_tag(element,"geometry")) { if (!scene3d_geometry(build,scene3d_definition(build,element,nullptr,"geometry"))) return false; }
             else if (scene3d_tag(element,"material")) { if (!scene3d_material(build,scene3d_definition(build,element,nullptr,"material"))) return false; }
-            else if (scene3d_tag(element,"texture")) { if (!scene3d_texture(build,scene3d_definition(build,element,nullptr,"texture")).id) return false; }
+            else if (scene3d_tag(element,"texture")) continue;
             else if (scene3d_tag(element,"animation-clip")||scene3d_tag(element,"motion-controller")) continue;
             else if (!scene3d_project_node(build,element,world,visible)) return false;
         }
@@ -1801,7 +1824,7 @@ static void scene3d_entry_destroy(Scene3dEntry* entry) {
     scene3d_animation_destroy(entry->animation);
     for (unsigned i=0;i<entry->simulation_count;i++) scene3d_simulation_release(entry->graphics,entry->simulations[i]);
     scene3d_projection_destroy(entry); scene3d_retire_snapshot(entry);
-    native_gl_destroy(entry->graphics); mem_free(entry->environment_path); mem_free(entry);
+    native_gl_destroy(entry->graphics);mem_free(entry->mapped_programs);mem_free(entry->environment_path);mem_free(entry);
 }
 static void scene3d_registry_destroy(DomDocumentResourceData* data) {
     Scene3dRegistry* registry=(Scene3dRegistry*)data;
@@ -1900,6 +1923,7 @@ void scene3d_context_lost(DomElement* root) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e) return;
     native_gl_lose(e->graphics); scene3d_projection_destroy(e); native_gl_destroy(e->graphics);e->graphics=nullptr;
     for (unsigned i=0;i<SCENE_PROGRAM_VARIANTS;i++) { e->programs[i]={};e->program_frame[i]=0; }
+    mem_free(e->mapped_programs);e->mapped_programs=nullptr;e->mapped_count=e->mapped_capacity=0;
     e->target={};e->hdr_target={};for (auto& variants:e->output_programs) for (auto& program:variants) program={};e->white={};e->dfg={};scene3d_retire_snapshot(e);e->mutation_epoch=UINT64_MAX;
     e->environment_atlas={};e->environment_pingpong={};e->environment_filter={};e->environment_key=0;
     e->environment_image={};e->environment_unwrap={};mem_free(e->environment_path);e->environment_path=nullptr;e->environment_image_hash=0;
@@ -1984,13 +2008,23 @@ void main() {
 // the same sampling coordinates drive color and alpha-tested shadow passes.
 static const char* scene3d_uv_fragment = R"GLSL(
 in vec2 texture_uv, texture_uv1;
-uniform vec3 uv_rows[10];
-uniform float uv_sets[5];
+uniform vec3 uv_rows[MAP_COUNT*2];
+uniform float uv_sets[MAP_COUNT];
 vec2 map_uv(int slot) {
     vec3 uv=vec3(uv_sets[slot]>0.5?texture_uv1:texture_uv,1.0);
     return vec2(dot(uv_rows[slot*2],uv),dot(uv_rows[slot*2+1],uv));
 }
 )GLSL";
+static void scene3d_append_uv_source(StrBuf* source,unsigned mapped=0) {
+    strbuf_append_format(source,"#define MAP_COUNT %u\n",(unsigned)SCENE_MAP_COUNT);
+    for(unsigned slot=0;slot<SCENE_MAP_COUNT;slot++) strbuf_append_format(source,"#define UV_%s %u\n",scene3d_map_specs[slot].sampler,slot);
+    for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) {
+        bool present=(mapped&(1u<<(slot-SCENE_MAP_CLEARCOAT)))!=0;const char* sampler=scene3d_map_specs[slot].sampler;
+        strbuf_append_format(source,"#define HAS_%s %u\n",sampler,present?1u:0u);
+        if(present) strbuf_append_format(source,"uniform sampler2D %s;\n",sampler);
+    }
+    strbuf_append_str(source,scene3d_uv_fragment);
+}
 static const char* scene3d_fragment_body = R"GLSL(
 in vec3 world_normal, world_position;
 in vec4 vertex_color;
@@ -2148,6 +2182,16 @@ mat3 tangent_frame(vec3 position, vec3 normal, vec2 uv) {
     float scale = det == 0.0 ? 0.0 : inversesqrt(det);
     return mat3(T*scale, B*scale, normal);
 }
+// both normal layers use the coordinates of their own map, including mirrored frames.
+vec3 mapped_normal(sampler2D map,int slot,float scale,vec3 n,float face,bool authored) {
+    mat3 tbn=authored?mat3(normalize(world_tangent),normalize(world_bitangent),n):tangent_frame(world_position,n,map_uv(slot));
+    tbn[0]*=face;tbn[1]*=face;
+    vec3 mapped=texture(map,map_uv(slot)).xyz*2.0-1.0;mapped.xy*=scale;
+    return normalize(tbn*mapped);
+}
+float specular_occlusion(float dotNV,float occlusion,float roughness) {
+    return clamp(pow(dotNV+occlusion,exp2(-16.0*roughness-1.0))-1.0+occlusion,0.0,1.0);
+}
 float D_GGX(float alpha, float dotNH) {
     float a2 = alpha*alpha; float denom = dotNH*dotNH*(a2-1.0)+1.0; return 0.3183098861837907*a2/(denom*denom);
 }
@@ -2157,23 +2201,24 @@ float V_GGX_SmithCorrelated(float alpha, float dotNL, float dotNV) {
     return 0.5/max(gv+gl,1e-6);
 }
 vec3 F_Schlick(vec3 f0, float dotVH) { float fresnel = exp2((-5.55473*dotVH-6.98316)*dotVH); return f0*(1.0-fresnel)+fresnel; }
-vec3 standard_light(vec3 base) {
+vec3 standard_light(vec3 base,vec3 emission) {
     float face = gl_FrontFacing ? 1.0 : -1.0;
     vec3 n = normalize(world_normal) * face;
+#ifdef PHYSICAL
+    vec3 coat_n=n;
+#if HAS_coat_normal_map
+    if(coat_normal_params.x>0.5) coat_n=mapped_normal(coat_normal_map,UV_coat_normal_map,coat_normal_params.y,coat_n,face,coat_normal_params.z>0.5);
+#endif
+#endif
     vec3 v = eye.w > 0.5 ? normalize(eye.xyz - world_position) : normalize(eye.xyz);
     // a surface that curves fast across a pixel gets a wider highlight, as in Three.js
     vec3 view_normal = normalize(mat3(view) * world_normal) * face;
     vec3 dxy = max(abs(dFdx(view_normal)), abs(dFdy(view_normal)));
-    if (maps.x > 0.5) {
-        mat3 tbn = maps.w > 0.5 ? mat3(normalize(world_tangent), normalize(world_bitangent), n) : tangent_frame(world_position, n, map_uv(2));
-        tbn[0] *= face; tbn[1] *= face;
-        vec3 mapped = texture(normal_map, map_uv(2)).xyz*2.0 - 1.0;
-        mapped.xy *= maps.y;
-        n = normalize(tbn*mapped);
-    }
-    vec4 texel = texture(metal_rough, map_uv(1));
+    if(maps.x>0.5) n=mapped_normal(normal_map,UV_normal_map,maps.y,n,face,maps.w>0.5);
+    float geometry_roughness=max(max(dxy.x,dxy.y),dxy.z);
+    vec4 texel = texture(metal_rough, map_uv(UV_metal_rough));
     float metalness = pbr.x*texel.b;
-    float roughness = min(max(pbr.y*texel.g,0.0525) + max(max(dxy.x,dxy.y),dxy.z), 1.0);
+    float roughness = min(max(pbr.y*texel.g,0.0525) + geometry_roughness, 1.0);
     float alpha = roughness*roughness;
     // the dielectric reflectance (0.04) and the metal-blended one the specular lobe uses
     vec3 diffuse = base*(1.0-metalness), dielectric = vec3(0.04), f0 = mix(dielectric,base,metalness);
@@ -2186,7 +2231,30 @@ vec3 standard_light(vec3 base) {
     vec3 average = dielectric + (1.0-dielectric)*0.047619;
     vec3 multiple = single*average/(1.0-lost*average)*lost;
     // native intensities carry the physical convention's π (SP1): π·I lights the Lambert term diffuse/π
-    vec3 indirect_diffuse = (ambient + hemisphere_light(n))*diffuse*(1.0-single-multiple), indirect_specular = vec3(0.0);
+    vec3 diffuse_irradiance=ambient+hemisphere_light(n);
+    vec3 indirect_diffuse=diffuse_irradiance*diffuse*(1.0-single-multiple),indirect_specular=vec3(0.0);
+#ifdef PHYSICAL
+    float coat=layer_params.x,coat_roughness=layer_params.y;
+#if HAS_coat_map
+    coat*=texture(coat_map,map_uv(UV_coat_map)).r;
+#endif
+#if HAS_coat_roughness_map
+    coat_roughness*=texture(coat_roughness_map,map_uv(UV_coat_roughness_map)).g;
+#endif
+    coat_roughness=min(max(coat_roughness,0.0525)+geometry_roughness,1.0);
+    float coat_alpha=coat_roughness*coat_roughness,coat_dotNV=clamp(dot(coat_n,v),0.0,1.0);
+    vec3 sheen=layer_params.z*sheen_color;float sheen_roughness=layer_params.w;
+#if HAS_sheen_color_map
+    sheen*=texture(sheen_color_map,map_uv(UV_sheen_color_map)).rgb;
+#endif
+#if HAS_sheen_roughness_map
+    sheen_roughness*=texture(sheen_roughness_map,map_uv(UV_sheen_roughness_map)).a;
+#endif
+    sheen_roughness=clamp(sheen_roughness,0.07,1.0);
+    float sheen_max=max(max(sheen.r,sheen.g),sheen.b),sheen_nv=sheen_albedo(dotNV,sheen_roughness);
+    float indirect_weight=1.0-sheen_max*sheen_nv;
+    vec3 coat_direct=vec3(0.0),coat_indirect=vec3(0.0),sheen_direct=vec3(0.0);
+#endif
 #ifdef ENVIRONMENT
     // environment light: the roughest level as irradiance, and the level of this roughness along
     // the reflection, weighted by the dielectric and metallic split-sum terms
@@ -2197,32 +2265,56 @@ vec3 standard_light(vec3 base) {
     vec3 multiple_metal = single_metal*average_metal/(1.0-lost*average_metal)*lost;
     indirect_specular = radiance*mix(single,single_metal,metalness) + mix(multiple,multiple_metal,metalness)*irradiance;
     indirect_diffuse += diffuse*(1.0-single-multiple)*irradiance;
+    diffuse_irradiance+=irradiance;
+#ifdef PHYSICAL
+    vec3 coat_reflected=normalize(mix(reflect(-v,coat_n),coat_n,pow(coat_roughness,4.0)));
+    vec3 coat_radiance=textureCubeUV(environment,coat_reflected,coat_roughness).rgb*environment_intensity;
+    vec2 coat_dfg=texture(dfg,vec2(coat_roughness,coat_dotNV)).rg;
+    coat_indirect=coat_radiance*(0.04*coat_dfg.x+coat_dfg.y);
+#endif
 #endif
     // occlusion darkens indirect light only, specular by Lagarde's approximation; direct light keeps its own visibility
-    float occluded = (texture(occlusion, map_uv(3)).r - 1.0)*maps.z + 1.0;
-    float specular_occlusion = clamp(pow(dotNV+occluded, exp2(-16.0*roughness-1.0)) - 1.0 + occluded, 0.0, 1.0);
-    vec3 color = indirect_diffuse*occluded + indirect_specular*specular_occlusion;
+    float occluded = (texture(occlusion, map_uv(UV_occlusion)).r - 1.0)*maps.z + 1.0;
+#ifdef PHYSICAL
+    indirect_diffuse*=indirect_weight;indirect_specular*=indirect_weight;
+    vec3 sheen_indirect=diffuse_irradiance*sheen*sheen_nv*occluded;
+    coat_indirect*=specular_occlusion(coat_dotNV,occluded,coat_roughness);
+#endif
+    vec3 color=indirect_diffuse*occluded+indirect_specular*specular_occlusion(dotNV,occluded,roughness);
     for (int i=0; i<8; i++) if (float(i)<light_count) {
         vec3 l; float falloff = light_falloff(i,l);
         vec3 h = normalize(l+v);
         float dotNL = clamp(dot(n,l),0.0,1.0), dotNH = clamp(dot(n,h),0.0,1.0), dotVH = clamp(dot(v,h),0.0,1.0);
-        vec3 irradiance = lights[i]*falloff*dotNL*light_shadow(i);
+        float visibility=light_shadow(i);
+        vec3 irradiance=lights[i]*falloff*dotNL*visibility;
+#ifdef PHYSICAL
+        float coat_dotNL=clamp(dot(coat_n,l),0.0,1.0),coat_dotNH=clamp(dot(coat_n,h),0.0,1.0);
+        coat_direct+=lights[i]*falloff*coat_dotNL*visibility*PI*F_Schlick(vec3(0.04),dotVH)*
+            V_GGX_SmithCorrelated(coat_alpha,coat_dotNL,coat_dotNV)*D_GGX(coat_alpha,coat_dotNH);
+        sheen_direct+=irradiance*PI*sheen*sheen_brdf(sheen_roughness,dotNH,dotNV,dotNL);
+        irradiance*=1.0-sheen_max*max(sheen_nv,sheen_albedo(dotNL,sheen_roughness));
+#endif
         vec3 specular = PI*F_Schlick(f0,dotVH)*(V_GGX_SmithCorrelated(alpha,dotNL,dotNV)*D_GGX(alpha,dotNH))*compensation;
         color += irradiance*(diffuse*(1.0-F_Schlick(dielectric,dotVH)) + specular);
     }
+    color+=emission;
+#ifdef PHYSICAL
+    color+=sheen_direct+sheen_indirect;
+    color=color*(1.0-coat*F_Schlick(vec3(0.04),coat_dotNV))+(coat_direct+coat_indirect)*coat;
+#endif
     return color;
 }
 #endif
 
 void main() {
     vec4 base = material * vertex_color;
-    if (textured > 0.5) base *= texture(image,map_uv(0));
+    if (textured > 0.5) base *= texture(image,map_uv(UV_image));
 #ifdef MASK
     if (base.a < alpha_cutoff) discard;
 #endif
     if (opaque > 0.5) base.a = 1.0;
 #ifdef STANDARD
-    vec3 color = standard_light(base.rgb) + emissive*texture(emissive_map, map_uv(4)).rgb;
+    vec3 color = standard_light(base.rgb,emissive*texture(emissive_map, map_uv(UV_emissive_map)).rgb);
 #else
     vec3 irradiance = vec3(1.0);
     if (lambert > 0.5) {
@@ -2471,26 +2563,39 @@ static NativeGlResource scene3d_dfg(Scene3dEntry* entry) {
 }
 
 // `shadows`: 0 without shadow maps, else 1 plus a bit per point-light (cube) slot
-static unsigned scene3d_variant(bool standard, unsigned tone, bool mask, bool environment, unsigned shadows) {
-    return tone+SCENE_TONE_CURVES*((standard?1:0)+(mask?2:0)+(environment?4:0)+8*shadows);
+static unsigned scene3d_variant(bool standard, unsigned tone, bool mask, bool environment, unsigned shadows, bool physical=false) {
+    return tone+SCENE_TONE_CURVES*((standard?1:0)+(mask?2:0)+(environment?4:0)+(physical?8:0)+shadows*16);
 }
-static NativeGlResource scene3d_program(Scene3dEntry* entry, unsigned variant) {
-    if (entry->programs[variant].id) return entry->programs[variant];
+static NativeGlResource scene3d_program(Scene3dEntry* entry,unsigned variant,unsigned mapped=0,uint64_t** frame=nullptr) {
+    unsigned key=variant+mapped*SCENE_PROGRAM_VARIANTS;
+    if(!mapped) {
+        if(frame) *frame=&entry->program_frame[variant];
+        if(entry->programs[variant].id) return entry->programs[variant];
+    } else for(size_t i=0;i<entry->mapped_count;i++) if(entry->mapped_programs[i].key==key) {
+        if(frame) *frame=&entry->mapped_programs[i].frame;return entry->mapped_programs[i].program;
+    }
     char header[224],shadows[64]="";
-    unsigned model=variant/SCENE_TONE_CURVES,layout=model/8;
-    if (layout) snprintf(shadows,sizeof(shadows),"#define SHADOWS\n#define SHADOW_CUBES %u\n",layout-1);
-    snprintf(header,sizeof(header),"#version 330 core\n%s%s%s%s#define TONE_MAPPING %u\n",
+    unsigned model=variant/SCENE_TONE_CURVES,layout=model/16;
+    if(layout) snprintf(shadows,sizeof(shadows),"#define SHADOWS\n#define SHADOW_CUBES %u\n",layout-1);
+    snprintf(header,sizeof(header),"#version 330 core\n%s%s%s%s%s#define TONE_MAPPING %u\n",
         model&1?"#define STANDARD\n":"",model&2?"#define MASK\n":"",model&4?"#define ENVIRONMENT\n":"",
-        shadows,variant%SCENE_TONE_CURVES);
+        model&8?"#define PHYSICAL\n":"",shadows,variant%SCENE_TONE_CURVES);
     StrBuf* vertex=strbuf_new();strbuf_append_str(vertex,header);strbuf_append_str(vertex,scene3d_vertex_body);
     StrBuf* source=strbuf_new();strbuf_append_str(source,header);
-    if (model&4) strbuf_append_str(source,scene3d_cube_uv);
-    strbuf_append_str(source,scene3d_tone_body);
-    strbuf_append_str(source,scene3d_uv_fragment);strbuf_append_str(source,scene3d_fragment_body);
-    entry->programs[variant]=native_gl_program(entry->graphics,vertex->str,source->str);
-    strbuf_free(source);strbuf_free(vertex);
-    if (!entry->programs[variant].id) scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
-    return entry->programs[variant];
+    if(model&4) strbuf_append_str(source,scene3d_cube_uv);
+    strbuf_append_str(source,scene3d_tone_body);scene3d_append_uv_source(source,mapped);
+    strbuf_append_str(source,scene3d_physical_fragment);strbuf_append_str(source,scene3d_fragment_body);
+    NativeGlResource program=native_gl_program(entry->graphics,vertex->str,source->str);strbuf_free(source);strbuf_free(vertex);
+    if(!program.id) {scene3d_fail(entry,native_gl_diagnostic(entry->graphics));return {};}
+    // only actually used map combinations consume cache storage and device samplers.
+    if(!mapped) entry->programs[variant]=program;
+    else {
+        if(!lam::mem_grow_array(&entry->mapped_programs,&entry->mapped_capacity,entry->mapped_count+1,(size_t)8,MEM_CAT_RENDER)) {
+            native_gl_release(entry->graphics,program);scene3d_fail(entry,"material program cache allocation failed");return {};
+        }
+        auto* cached=&entry->mapped_programs[entry->mapped_count++];*cached={key,program,0};if(frame) *frame=&cached->frame;
+    }
+    entry->stats.material_links++;return program;
 }
 
 static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui) {
@@ -2525,6 +2630,12 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     bool valid=scene3d_color(root,"background","transparent",p->background) &&
         scene3d_collect_definitions(&build,root,0) && scene3d_build_simulations(&build) && scene3d_build_effects(&build) &&
         scene3d_project_node(&build,root,scene3d_identity(),true);
+    // consumers choose the color space first; validate unused declarations without uploading an unused sRGB copy of data maps.
+    for (unsigned i=0;valid&&i<build.definition_count;i++) {
+        Scene3dDefinition* definition=&build.definitions[i];
+        if (scene3d_tag(definition->source,"texture")&&!definition->texture.id&&!definition->linear_texture.id)
+            valid=scene3d_texture(&build,definition).id!=0;
+    }
     mem_free(build.definitions);
     if (valid && !p->camera_found) valid=scene3d_fail(entry,"active camera is missing");
     if (valid && build.environment && !p->environment.address) valid=scene3d_fail(entry,"scene environment names no environment element");
@@ -2550,8 +2661,8 @@ static bool scene3d_uniform(Scene3dEntry* entry, NativeGlResource program, const
     return uniform.location<0 || native_gl_uniform_set(entry->graphics,uniform,values,components,count);
 }
 static bool scene3d_bind_uv(Scene3dEntry* entry,NativeGlResource program,const Scene3dMaterial* material,bool base_only=false) {
-    return scene3d_uniform(entry,program,"uv_rows[0]",material->uv_rows[0],3,base_only?2:10)&&
-        scene3d_uniform(entry,program,"uv_sets[0]",material->uv_sets,1,base_only?1:5);
+    return scene3d_uniform(entry,program,"uv_rows[0]",material->uv_rows[0],3,base_only?2:SCENE_MAP_COUNT*2)&&
+        scene3d_uniform(entry,program,"uv_sets[0]",material->uv_sets,1,base_only?1:SCENE_MAP_COUNT);
 }
 // One drawing pass: the view, or one face of an environment capture.
 struct Scene3dPass {
@@ -2578,6 +2689,10 @@ static bool scene3d_draw_shader(Scene3dEntry* entry, const Scene3dPass& pass, Sc
     if (!scene3d_bind_uniforms(entry,program,shader->uniforms,shader->uniform_count,&draw)) return false;
     return native_gl_draw(entry->graphics,&draw);
 }
+static bool scene3d_tangent_compatible(const Scene3dMesh* mesh,unsigned slot) {
+    const auto* material=mesh->material;const float* rows=material->uv_rows[slot];
+    return mesh->geometry->has_tangents&&material->uv_sets[slot]==0&&rows[0]==1&&rows[1]==0&&rows[3]==0&&rows[4]==1;
+}
 static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
     Scene3dMaterial* material=mesh->material;
     if (material->shader) return scene3d_draw_shader(entry,pass,mesh);
@@ -2588,10 +2703,13 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
         for (unsigned s=0;s<pass.shadows->count;s++) if (pass.shadows->slots[s].kind==1) layout|=1u<<s;
         layout++;
     }
-    unsigned variant=scene3d_variant(material->standard,pass.tone,material->alpha_cutoff>0,lit,layout);
-    NativeGlResource program=scene3d_program(entry,variant);
+    unsigned variant=scene3d_variant(material->standard,pass.tone,material->alpha_cutoff>0,lit,layout,material->physical);
+    unsigned mapped=0;
+    if(material->physical) for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++)
+        if(material->maps[slot].id) mapped|=1u<<(slot-SCENE_MAP_CLEARCOAT);
+    uint64_t* program_frame=nullptr;NativeGlResource program=scene3d_program(entry,variant,mapped,&program_frame);
     if (!program.id) return false;
-    if (entry->program_frame[variant]!=pass.frame) {
+    if (*program_frame!=pass.frame) {
         const Scene3dLights* l=pass.lights;float light_count=(float)l->count;
         if (!scene3d_uniform(entry,program,"projection",pass.projection.v,16) || !scene3d_uniform(entry,program,"ambient",l->ambient,3) ||
             !scene3d_uniform(entry,program,"directions[0]",l->directions[0],3,8) || !scene3d_uniform(entry,program,"lights[0]",l->lights[0],3,8) ||
@@ -2617,10 +2735,10 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
                 !scene3d_uniform(entry,program,"shadow_ranges[0]",ranges[0],2,SCENE_SHADOW_LIMIT) ||
                 !scene3d_uniform(entry,program,"light_shadows[0]",slots,1,8)) return false;
         }
-        entry->program_frame[variant]=pass.frame;
+        *program_frame=pass.frame;
     }
-    float lambert=material->lambert?1:0,textured=material->texture.id?1:0,opaque=material->force_opaque?1:0;
-    float maps[4]={material->normal_map.id?1.f:0.f,material->normal_scale,material->occlusion_strength,mesh->geometry->has_tangents&&material->uv_sets[2]==0&&material->uv_rows[2][0]==1&&material->uv_rows[2][1]==0&&material->uv_rows[2][3]==0&&material->uv_rows[2][4]==1?1.f:0.f};
+    float lambert=material->lambert?1:0,textured=material->maps[SCENE_MAP_BASE].id?1:0,opaque=material->force_opaque?1:0;
+    float maps[4]={material->maps[SCENE_MAP_NORMAL].id?1.f:0.f,material->normal_scale,material->occlusion_strength,scene3d_tangent_compatible(mesh,SCENE_MAP_NORMAL)?1.f:0.f};
     float skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0,receive=mesh->receive_shadow?1:0,back_side=material->side==1?1:0;
     if (!scene3d_bind_uv(entry,program,material) || !scene3d_uniform(entry,program,"model",mesh->world.v,16) || !scene3d_uniform(entry,program,"material",material->color,4) ||
         !scene3d_uniform(entry,program,"receive",&receive,1) || !scene3d_uniform(entry,program,"back_side",&back_side,1) ||
@@ -2630,21 +2748,27 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
         !scene3d_uniform(entry,program,"maps",maps,4) || !scene3d_uniform(entry,program,"skinned",&skinned,1) ||
         !scene3d_uniform(entry,program,"colored",&colored,1) || !scene3d_uniform(entry,program,"morph_weights",mesh->morph_weights,2))
         return false;
+    if(material->physical) {
+        const float* values=material->physical_values;
+        float layers[]={values[SCENE_COAT_FACTOR],values[SCENE_COAT_ROUGHNESS],values[SCENE_SHEEN_FACTOR],values[SCENE_SHEEN_ROUGHNESS]};
+        float normal[]={material->maps[SCENE_MAP_CLEARCOAT_NORMAL].id?1.f:0.f,values[SCENE_COAT_NORMAL_SCALE],scene3d_tangent_compatible(mesh,SCENE_MAP_CLEARCOAT_NORMAL)?1.f:0.f};
+        if(!scene3d_uniform(entry,program,"layer_params",layers,4)||!scene3d_uniform(entry,program,"coat_normal_params",normal,3)||
+            !scene3d_uniform(entry,program,"sheen_color",material->sheen_color,3)) return false;
+    }
     if (mesh->bone_count && !native_gl_data_texture_update(entry->graphics,mesh->palette,mesh->bone_matrices[0].v,mesh->bone_count)) return false;
     NativeGlDraw draw={program,mesh->vertices,
         mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
         mesh->geometry->index_count!=0,scene3d_transparent(mesh),material->side,mesh->clockwise};
     draw.depth_only=material->depth_only;
-    draw.bindings[draw.binding_count++]={"image",material->texture.id?material->texture:entry->white,NATIVE_GL_BIND_TEXTURE};
+    draw.bindings[draw.binding_count++]={"image",material->maps[SCENE_MAP_BASE].id?material->maps[SCENE_MAP_BASE]:entry->white,NATIVE_GL_BIND_TEXTURE};
     if (mesh->bone_count) draw.bindings[draw.binding_count++]={"palette",mesh->palette,NATIVE_GL_BIND_TEXTURE};
     if (material->standard) {
         NativeGlResource dfg=scene3d_dfg(entry);
         if (!dfg.id) return false;
         draw.bindings[draw.binding_count++]={"dfg",dfg,NATIVE_GL_BIND_TEXTURE};
-        // white leaves each factor as it is; the normal map is gated by `maps.x` instead
-        const char* samplers[]={"metal_rough","normal_map","occlusion","emissive_map"};
-        NativeGlResource textures[]={material->metal_rough,material->normal_map,material->occlusion,material->emissive_map};
-        for (unsigned m=0;m<4;m++) draw.bindings[draw.binding_count++]={samplers[m],textures[m].id?textures[m]:entry->white,NATIVE_GL_BIND_TEXTURE};
+        unsigned count=material->physical?SCENE_MAP_COUNT:SCENE_MAP_CLEARCOAT;
+        for(unsigned slot=1;slot<count;slot++) draw.bindings[draw.binding_count++]={scene3d_map_specs[slot].sampler,
+            material->maps[slot].id?material->maps[slot]:entry->white,NATIVE_GL_BIND_TEXTURE};
     }
     if (lit) draw.bindings[draw.binding_count++]={"environment",entry->environment_atlas,NATIVE_GL_BIND_FLOAT};
     if (shaded) {
@@ -2668,13 +2792,14 @@ static uint64_t scene3d_mesh_key(uint64_t key, const Scene3dMesh* mesh) {
     add(m->color,sizeof(m->color));add(m->emissive,sizeof(m->emissive));add(m->pbr,sizeof(m->pbr));
     add(&m->normal_scale,sizeof(float));add(&m->occlusion_strength,sizeof(float));add(&m->alpha_cutoff,sizeof(float));
     add(m->uv_rows,sizeof(m->uv_rows));add(m->uv_sets,sizeof(m->uv_sets));
-    add(&m->texture_hash,sizeof(uint64_t));add(&m->side,sizeof(int));
+    add(m->physical_values,sizeof(m->physical_values));add(m->sheen_color,sizeof(m->sheen_color));
+    add(&m->physical,sizeof(m->physical));add(&m->texture_hash,sizeof(uint64_t));add(&m->side,sizeof(int));
     if (m->shader) {
         add(&mesh->program.id,sizeof(uint64_t));
         for (unsigned i=0;i<m->shader->uniform_count;i++) if (m->shader->uniforms[i].values)
             add(m->shader->uniforms[i].values,m->shader->uniforms[i].length*sizeof(float));
     }
-    bool flags[]={m->lambert,m->standard,scene3d_transparent(mesh),m->force_opaque,m->depth_only,m->normal_map.id!=0,mesh->cast_shadow};
+    bool flags[]={m->lambert,m->standard,scene3d_transparent(mesh),m->force_opaque,m->depth_only,m->maps[SCENE_MAP_NORMAL].id!=0,mesh->cast_shadow};
     add(flags,sizeof(flags));
     return key;
 }
@@ -2893,7 +3018,7 @@ uniform float textured, alpha_cutoff;
 uniform sampler2D image;
 void main() {
 #ifdef MASK
-    float alpha = material.a * vertex_color.a * (textured > 0.5 ? texture(image, map_uv(0)).a : 1.0);
+    float alpha = material.a * vertex_color.a * (textured > 0.5 ? texture(image, map_uv(UV_image)).a : 1.0);
     if (alpha < alpha_cutoff) discard;
 #endif
 }
@@ -2911,7 +3036,7 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry) {
     for (unsigned mask=0;mask<2;mask++) if (!entry->shadow_programs[mask].id) {
         StrBuf* vertex=strbuf_new();strbuf_append_str(vertex,"#version 330 core\n");strbuf_append_str(vertex,scene3d_vertex_body);
         StrBuf* fragment=strbuf_new();strbuf_append_str(fragment,mask?"#version 330 core\n#define MASK\n":"#version 330 core\n");
-        strbuf_append_str(fragment,scene3d_uv_fragment);strbuf_append_str(fragment,scene3d_shadow_fragment);
+        scene3d_append_uv_source(fragment);strbuf_append_str(fragment,scene3d_shadow_fragment);
         entry->shadow_programs[mask]=native_gl_program(graphics,vertex->str,fragment->str);strbuf_free(vertex);strbuf_free(fragment);
         if (!entry->shadow_programs[mask].id) return scene3d_fail(entry,native_gl_diagnostic(graphics));
     }
@@ -2934,7 +3059,7 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry) {
                 Scene3dMesh* mesh=p->meshes[i];Scene3dMaterial* material=mesh->material;
                 if (!scene3d_casts(mesh)) continue;
                 NativeGlResource program=entry->shadow_programs[material->alpha_cutoff>0?1:0];
-                float textured=material->texture.id?1:0,skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0;
+                float textured=material->maps[SCENE_MAP_BASE].id?1:0,skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0;
                 if (!scene3d_bind_uv(entry,program,material,true) || !scene3d_uniform(entry,program,"projection",shadow->clip[face],16) || !scene3d_uniform(entry,program,"model",mesh->world.v,16) ||
                     !scene3d_uniform(entry,program,"material",material->color,4) || !scene3d_uniform(entry,program,"textured",&textured,1) ||
                     !scene3d_uniform(entry,program,"alpha_cutoff",&material->alpha_cutoff,1) || !scene3d_uniform(entry,program,"skinned",&skinned,1) ||
@@ -2945,7 +3070,7 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry) {
                 NativeGlDraw draw={program,mesh->vertices,
                     mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
                     mesh->geometry->index_count!=0,false,material->side==2?2:1-material->side,mesh->clockwise};
-                draw.bindings[draw.binding_count++]={"image",material->texture.id?material->texture:entry->white,NATIVE_GL_BIND_TEXTURE};
+                draw.bindings[draw.binding_count++]={"image",material->maps[SCENE_MAP_BASE].id?material->maps[SCENE_MAP_BASE]:entry->white,NATIVE_GL_BIND_TEXTURE};
                 if (mesh->bone_count) draw.bindings[draw.binding_count++]={"palette",mesh->palette,NATIVE_GL_BIND_TEXTURE};
                 if (!native_gl_draw(graphics,&draw)) return scene3d_fail(entry,native_gl_diagnostic(graphics));
             }

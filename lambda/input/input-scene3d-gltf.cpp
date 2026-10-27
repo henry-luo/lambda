@@ -2,6 +2,7 @@
 #include "input-parsers.h"
 #include "../../lib/base64.h"
 #include "../../lib/mesh_uv.h"
+#include "../../lib/scene3d_material.h"
 
 namespace lambda {
 namespace {
@@ -214,15 +215,44 @@ struct Gltf {
         return true;
     }
     bool factor(ItemReader object,const char* key,double fallback,double lo,double hi,double* value) {
-        *value=asset_number(asset_field(object,key),fallback);
+        auto field=asset_field(object,key);
+        // only an omitted factor takes its default; malformed authored values must fail validation.
+        *value=field.isNull()?fallback:asset_number(field);
         return (isfinite(*value)&&*value>=lo&&*value<=hi)||fail("invalid material factor");
+    }
+    bool load_physical(ItemReader coat,ItemReader sheen,Item material,unsigned& used_uvs) {
+        if((!coat.isNull()&&!coat.isMap())||(!sheen.isNull()&&!sheen.isMap())) return fail("invalid physical material extension");
+        if(!coat.isNull()) {
+            const char* keys[]={"clearcoatFactor","clearcoatRoughnessFactor"};
+            for(unsigned i=0;i<2;i++) {
+                double value;if(!factor(coat,keys[i],0,0,1,&value)) return false;
+                a.attr(material,scene3d_physical_specs[i].attribute,a.number(value));
+            }
+        }
+        if(!sheen.isNull()) {
+            auto color=asset_field(sheen,"sheenColorFactor");double rgb[3]={};
+            if(!color.isNull()&&asset_count(color)!=3) return fail("invalid sheenColorFactor");
+            for(unsigned i=0;i<3;i++) {rgb[i]=color.isNull()?0:asset_component(color,i);if(!isfinite(rgb[i])||rgb[i]<0||rgb[i]>1) return fail("invalid sheen color component");}
+            double roughness;if(!factor(sheen,"sheenRoughnessFactor",0,0,1,&roughness)) return false;
+            a.attr(material,"sheen",a.number(1));a.attr(material,"sheen-color",asset_color(a,rgb));a.attr(material,"sheen-roughness",a.number(roughness));
+        }
+        for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) {
+            const auto& spec=scene3d_map_specs[slot];auto info=asset_field(spec.owner==SCENE_MAP_COAT?coat:sheen,spec.gltf);
+            if(info.isNull()) continue;
+            if(!texture_ref(info,material,spec.attribute,used_uvs)) return false;
+            if(slot==SCENE_MAP_CLEARCOAT_NORMAL) {
+                double scale;if(!factor(info,"scale",1,-1e6,1e6,&scale)) return false;a.attr(material,"clearcoat-normal-scale",a.number(scale));
+            }
+        }
+        return true;
     }
     bool load_materials() {
         for(size_t i=0;i<asset_count(field("materials"));i++) {
             auto m=object("materials",i),pbr=asset_field(m,"pbrMetallicRoughness");
-            bool unlit=!asset_field(asset_field(m,"extensions"),"KHR_materials_unlit").isNull();
+            auto extensions=asset_field(m,"extensions"),coat=asset_field(extensions,"KHR_materials_clearcoat"),sheen=asset_field(extensions,"KHR_materials_sheen");
+            bool unlit=!asset_field(extensions,"KHR_materials_unlit").isNull(),physical=!unlit&&(!coat.isNull()||!sheen.isNull());
             // glTF metallic-roughness is the native standard material; unlit is basic
-            Item material=a.material("#ffffff",unlit?"basic":"standard");
+            Item material=a.material("#ffffff",unlit?"basic":physical?"physical":"standard");
             if(asset_field(m,"name").isString()) a.attr(material,"name",a.text(asset_field(m,"name").cstring()));
             auto color=asset_field(pbr,"baseColorFactor");
             double rgba[4]={1,1,1,1};if(!color.isNull()) {
@@ -248,16 +278,15 @@ struct Gltf {
                 double metalness,roughness;
                 if(!factor(pbr,"metallicFactor",1,0,1,&metalness)||!factor(pbr,"roughnessFactor",1,0,1,&roughness)) return false;
                 a.attr(material,"metalness",a.number(metalness));a.attr(material,"roughness",a.number(roughness));
-                const char* maps[][2]={{"metallicRoughnessTexture","metal-rough-texture"},{"normalTexture","normal-texture"},
-                    {"occlusionTexture","occlusion-texture"},{"emissiveTexture","emissive-texture"}};
-                for(auto& map:maps) {
-                    auto info=asset_field(map[0][0]=='m'?pbr:m,map[0]);
+                for(unsigned slot=1;slot<SCENE_MAP_CLEARCOAT;slot++) {
+                    const auto& spec=scene3d_map_specs[slot];auto info=asset_field(spec.owner==SCENE_MAP_PBR?pbr:m,spec.gltf);
                     if(info.isNull()) continue;
-                    if(!texture_ref(info,material,map[1],used_uvs)) return false;
+                    if(!texture_ref(info,material,spec.attribute,used_uvs)) return false;
                     double value;
-                    if(map[0][0]=='n') {if(!factor(info,"scale",1,-1e6,1e6,&value)) return false;a.attr(material,"normal-scale",a.number(value));}
-                    if(map[0][0]=='o') {if(!factor(info,"strength",1,0,1,&value)) return false;a.attr(material,"occlusion-strength",a.number(value));}
+                    if(slot==SCENE_MAP_NORMAL) {if(!factor(info,"scale",1,-1e6,1e6,&value)) return false;a.attr(material,"normal-scale",a.number(value));}
+                    if(slot==SCENE_MAP_OCCLUSION) {if(!factor(info,"strength",1,0,1,&value)) return false;a.attr(material,"occlusion-strength",a.number(value));}
                 }
+                if(physical&&!load_physical(coat,sheen,material,used_uvs)) return false;
             } else if(!asset_field(m,"emissiveTexture").isNull()||!asset_field(m,"normalTexture").isNull())
                 a.ctx.addWarning("scene3d asset: unlit materials omit their normal and emissive maps");
             if(!emissive(m,material)) return false;
@@ -593,7 +622,7 @@ bool asset_import_gltf(SceneAsset& asset,Item source,const uint8_t* binary,size_
     Gltf g(asset,source,binary,binary_length);const char* version=asset_field(asset_field(g.source,"asset"),"version").cstring();
     if(!asset_is(version,"2.0")) return g.fail("only glTF 2.0 is supported");
     static const char* supported[]={"KHR_mesh_quantization","KHR_materials_unlit","EXT_meshopt_compression",
-        "KHR_texture_transform","KHR_materials_emissive_strength","KHR_lights_punctual"};
+        "KHR_texture_transform","KHR_materials_emissive_strength","KHR_lights_punctual","KHR_materials_clearcoat","KHR_materials_sheen"};
     auto known=[&](const char* extension) {for(const char* name:supported) if(asset_is(extension,name)) return true;return false;};
     auto required=g.field("extensionsRequired");for(size_t i=0;i<asset_count(required);i++) {
         const char* extension=asset_at(required,i).cstring();

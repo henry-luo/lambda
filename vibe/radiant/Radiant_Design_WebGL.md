@@ -275,6 +275,39 @@ from the scene schema; CSS layout does not position individual meshes.
 HTML/SVG labels or overlays remain normal page siblings around the viewport;
 arbitrary HTML nested in the 3D subtree is not an initial feature.
 
+### Physical materials: M4 selected profile
+
+`material('physical', options)` extends standard shading with clearcoat and
+sheen; it does not imply the remaining Three.js physical extensions. The
+zero-extension defaults recover standard shading. Numeric/color properties
+use existing tracks and remain uniforms, with native ownership unchanged
+(**S12.1.1v3, D4.5.1v4, D7.2.4v4**).
+
+| Property | Default / range | Map channel |
+|---|---|---|
+| `clearcoat` | 0 / [0,1] | `clearcoat-texture`: R |
+| `clearcoat-roughness` | 0 / [0,1] | `clearcoat-roughness-texture`: G |
+| `clearcoat-normal-scale` | 1 / finite scalar | `clearcoat-normal-texture`: tangent-space XYZ |
+| `sheen` | 0 / [0,1] | Multiplies the sheen color |
+| `sheen-color` | white / sRGB color | `sheen-color-texture`: sRGB RGB |
+| `sheen-roughness` | 1 / [0,1] | `sheen-roughness-texture`: A |
+
+Each map reuses the per-map UV0/UV1 representation. Clearcoat has its own
+normal and a dielectric GGX lobe; sheen uses Charlie/Neubelt lobes and the
+pinned Three.js r186 energy handling. The same direct lights, shadows and
+HDR environment remain available. The graphics waist checks queried texture
+unit limits before binding; requested combinations are never silently dropped.
+Import/export covers `KHR_materials_clearcoat` and `KHR_materials_sheen`.
+Anisotropy, iridescence, dispersion, transmission and volume remain
+outside M4. Acceptance uses named direct/HDR/normal/map scenes against the
+pinned Three.js oracle: at least 99% RGB channel samples within 8/255, plus
+zero-factor identity, alpha, animation and resource/error checks.
+
+Layer-map presence selects a lazily retained program; numeric factors remain
+uniforms. Aliased textures share checked device units, and data-only texture
+declarations avoid an unused sRGB upload. The M4 acceptance record is in the
+[feature plan](../impl/Radiant_Impl_Scene3d_Three_Features.md#m4-qualification-record--2026-10-28).
+
 ## 5. Radiant scene renderer and shared native GL core
 
 ### Context provider and API mapping
@@ -859,7 +892,7 @@ section selects behavior and completion evidence.
 
 ### Further coverage after Phase III
 
-Advanced physical materials (clearcoat, transmission, sheen), cascaded
+Transmission/volume and remaining physical extensions, cascaded
 shadows, global illumination/SSAO, depth-dependent native postprocessing, advanced asset loaders, broader
 formats/UBOs/MRT/transform-feedback/query/sync coverage, comprehensive device
 reset recovery and additional platforms need separate scope and evidence.
@@ -1374,7 +1407,7 @@ component boundaries under **S2.6.4**. No new runtime value type is required.
 |---|---|---|
 | OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
 | MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. Explicit `Pr`, `Pm`, `map_Pr`, `map_Pm` or `norm` select standard shading independently of `illum` order. Factors are [0,1]; scalar-map R channels pack into linear G roughness/B metalness. A metallic map without an explicit factor uses 1; absent map channels stay white. Normal maps support `-bm` scale. | Scalar roughness/metalness images must share dimensions and wrap modes; incompatible inputs fail. Decode is bounded at 4096 pixels per axis and 64 MiB. Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Other specular, ambient, emissive and physical-extension properties retain warnings. |
-| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0/UV1, RGB/RGBA colors, perspective/orthographic cameras, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (independent per map, including its `texCoord` override), core `emissiveFactor` with `KHR_materials_emissive_strength`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. UV sets beyond 0/1, lines/points, Draco, Basis/KTX2 and advanced `KHR_materials_*` shading are unsupported. Unlit materials omit normal/emissive maps with a warning. Camera nodes keep stable occurrence IDs and node transforms; an explicit viewport camera ID overrides their default selection. Omitted perspective `zfar` remains infinite. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
+| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0/UV1, RGB/RGBA colors, perspective/orthographic cameras, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (independent per map, including its `texCoord` override), core `emissiveFactor` with `KHR_materials_emissive_strength`, `KHR_materials_clearcoat`, `KHR_materials_sheen`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. UV sets beyond 0/1, lines/points, Draco, Basis/KTX2 and other `KHR_materials_*` shading extensions are unsupported. Unlit materials omit normal/emissive maps with a warning. Camera nodes keep stable occurrence IDs and node transforms; an explicit viewport camera ID overrides their default selection. Omitted perspective `zfar` remains infinite. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
 | STL | Facet triangles with flat normals from their winding (stored facet normals are often zero or stale and are ignored); zero-area facets are dropped; the ASCII solid name becomes the group `name`. | Binary per-facet color conventions are not interpreted. Coordinates are used as authored; Z-up CAD parts need a `transform` rotation. |
 | PLY | `vertex` `x/y/z` with optional `nx/ny/nz` normals, `red/green/blue` (or `diffuse_*`, `r/g/b`) colors normalized by their unsigned type, and `s/t` (or `u/v`, `texture_u/v`) UVs; `face` `vertex_indices`/`vertex_index` polygons, triangulated and stripped of zero-area triangles; per-corner `texcoord` lists; a `comment TextureFile <image>` texture. Missing normals become area-weighted smooth normals. | Point clouds without faces, incomplete attribute groups, signed or mixed color types and out-of-range indices are errors. Vertex alpha is warned and ignored. Other elements and properties remain available through the raw mapping only. |
 | A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |
@@ -1464,8 +1497,9 @@ A3D quaternion actions use this engine's SLERP interpolation.
 | `<group>`, `<rigid-body>` | Nodes with TRS or `matrix`; Euler XYZ becomes a quaternion |
 | `<mesh>` and its geometry/material | Node with one mesh primitive (POSITION, NORMAL, TEXCOORD_0/1 flipped to top-origin, linear RGB/RGBA COLOR_0, optional TANGENT with handedness preserved, `uint16`/`uint32` indices); shared geometry/material pairs share a mesh |
 | `instances` | One child node per instance matrix |
-| Standard / Lambert / basic material | Standard `pbrMetallicRoughness` factors; Lambert exports metalness 0/roughness 1, basic also uses `KHR_materials_unlit`. Linear base color and opacity; `OPAQUE`, `BLEND` or `MASK` with cutoff; automatic transparency if no alpha mode is set |
+| Physical / standard / Lambert / basic material | Standard `pbrMetallicRoughness` factors; Lambert exports metalness 0/roughness 1, basic also uses `KHR_materials_unlit`. Linear base color and opacity; `OPAQUE`, `BLEND` or `MASK` with cutoff; automatic transparency if no alpha mode is set |
 | Standard material maps | `metallicRoughnessTexture`, `normalTexture` with scale, `occlusionTexture` with strength, `emissiveTexture`, alongside base color |
+| Physical clearcoat / sheen | `KHR_materials_clearcoat` / `KHR_materials_sheen`, factors and all five maps with their own UV coordinates; native sheen factor folds into linear sheen color |
 | `emissive` × `emissive-intensity` | `emissiveFactor`, with `KHR_materials_emissive_strength` above 1 |
 | `<texture>` | Image `uri` (the `src` as given), authored sampler, and per-map `texCoord` / `KHR_texture_transform`; affine shear is diagnosed because glTF texture transforms encode TRS |
 | `<camera>` | Perspective (`yfov` in radians, omitted `zfar` for `infinite-far`) or orthographic camera; a `target` becomes a look-at rotation |

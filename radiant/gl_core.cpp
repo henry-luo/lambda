@@ -222,6 +222,7 @@ struct NativeGlContext {
     GLFWwindow* window;
     pthread_t thread;
     NativeGlFunctions gl;
+    unsigned texture_units;
     NativeGlSlot slots[GL_RESOURCE_LIMIT];
 #endif
 };
@@ -315,6 +316,8 @@ NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacit
 #undef LOAD_GL
             if (loaded) {
                 NativeGlFunctions& gl = context->gl;
+                GLint units=0;gl.GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,&units);
+                context->texture_units=units>0?(unsigned)units:0;
                 str_copy(context->stats.driver, sizeof(context->stats.driver), (const char*)gl.GetString(GL_RENDERER), strlen((const char*)gl.GetString(GL_RENDERER)));
                 str_copy(context->stats.version, sizeof(context->stats.version), (const char*)gl.GetString(GL_VERSION), strlen((const char*)gl.GetString(GL_VERSION)));
                 str_copy(context->stats.shading_language, sizeof(context->stats.shading_language), (const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION), strlen((const char*)gl.GetString(GL_SHADING_LANGUAGE_VERSION)));
@@ -900,11 +903,22 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
             native_gl_error(context, "vertex or instance draw range exceeds upload"); return false;
         }
     }
-    NativeGlFunctions& gl = context->gl; gl.UseProgram(program->name); gl.BindVertexArray(vertices->name);
-    for (unsigned i = 0; i < draw->binding_count; i++) {
-        gl.ActiveTexture(GL_TEXTURE0 + i); gl.BindTexture(targets[i], names[i]);
-        GLint sampler = gl.GetUniformLocation(program->name, draw->bindings[i].sampler); if (sampler >= 0) gl.Uniform1i(sampler, i);
+    // validate and deduplicate the active binding plan before changing draw state.
+    NativeGlFunctions& gl=context->gl;
+    GLuint unit_names[NATIVE_GL_BINDING_LIMIT];GLenum unit_targets[NATIVE_GL_BINDING_LIMIT];
+    GLint locations[NATIVE_GL_BINDING_LIMIT];unsigned units[NATIVE_GL_BINDING_LIMIT],used=0;
+    for(unsigned i=0;i<draw->binding_count;i++) {
+        locations[i]=gl.GetUniformLocation(program->name,draw->bindings[i].sampler);if(locations[i]<0) continue;
+        unsigned unit=0;while(unit<used&&(unit_names[unit]!=names[i]||unit_targets[unit]!=targets[i])) unit++;
+        if(unit==used) {
+            if(used>=context->texture_units) {native_gl_error(context,"draw sampler combination exceeds device texture units");return false;}
+            unit_names[used]=names[i];unit_targets[used]=targets[i];used++;
+        }
+        units[i]=unit;
     }
+    gl.UseProgram(program->name);gl.BindVertexArray(vertices->name);
+    for(unsigned unit=0;unit<used;unit++) {gl.ActiveTexture(GL_TEXTURE0+unit);gl.BindTexture(unit_targets[unit],unit_names[unit]);}
+    for(unsigned i=0;i<draw->binding_count;i++) if(locations[i]>=0) gl.Uniform1i(locations[i],units[i]);
     gl.ActiveTexture(GL_TEXTURE0);
     if (draw->depth_test) gl.Enable(GL_DEPTH_TEST);else gl.Disable(GL_DEPTH_TEST);
     if (draw->transparent) { gl.Enable(GL_BLEND); gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); }

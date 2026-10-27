@@ -9,6 +9,7 @@
 #include "../lib/str.h"
 #include "../lib/hash.h"
 #include "../lib/log.h"
+#include "../lib/scene3d_material.h"
 
 struct Scene3dAnimationBinding {
     Scene3dAnimationBinding* next;
@@ -150,11 +151,18 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         value->type=color?ANIMATION_COLOR:count==1?ANIMATION_NUMBER:ANIMATION_VECTOR;value->count=count;
         for(unsigned i=0;i<count;i++) value->numbers[i]=numbers[i];return true;
     }
+    const char* material_type=scene3d_text(node,"type");
+    bool sheen_color=!strcmp(tag,"material")&&!strcmp(property,"sheen-color");
+    if(sheen_color&&(!material_type||strcmp(material_type,"physical"))) return false;
     bool emissive=!strcmp(tag,"material")&&!strcmp(property,"emissive");
-    if(emissive||(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light")))) {
+    if(emissive||sheen_color||(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light")))) {
         float color[4];if(!scene3d_color(node,property,emissive?"#000000":"#ffffff",color)) return false;
         value->type=ANIMATION_COLOR;value->count=3;
         for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
+    }
+    if(!strcmp(tag,"material")) for(const auto& field:scene3d_physical_specs) if(!strcmp(property,field.attribute)) {
+        float number;if(!material_type||strcmp(material_type,"physical")||!scene3d_number(node,property,field.fallback,&number)) return false;
+        value->numbers[0]=number;return true;
     }
     struct NumericProperty { const char* tag;const char* name;float fallback;bool standard=false; };
     static const NumericProperty numeric[]={
@@ -166,7 +174,7 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
     for(const auto& field:numeric) if(!strcmp(tag,field.tag)&&!strcmp(property,field.name)) {
         // PBR-only tracks obey the same material contract as authored factors.
         const char* type=scene3d_text(node,"type");
-        if(field.standard&&(!type||strcmp(type,"standard"))) return false;
+        if(field.standard&&(!type||(strcmp(type,"standard")&&strcmp(type,"physical")))) return false;
         if(!strcmp(tag,"effect")&&(!type||strcmp(type,"bloom"))) return false;
         float number;if(!scene3d_number(node,property,field.fallback,&number)) return false;
         value->numbers[0]=number;return true;

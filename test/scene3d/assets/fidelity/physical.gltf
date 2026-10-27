@@ -1,0 +1,313 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Lambda deterministic M3 acceptance fixture"
+  },
+  "extensionsUsed": [
+    "KHR_texture_transform",
+    "KHR_materials_clearcoat",
+    "KHR_materials_sheen"
+  ],
+  "buffers": [
+    {
+      "byteLength": 236,
+      "uri": "data:application/octet-stream;base64,AACAvwAAgL8AAAAAAACAPwAAgL8AAAAAAACAPwAAgD8AAAAAAACAvwAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAAAAAAEA/AACAPgAAQD8AAIA+AABAPwAAgD4AAEA/AACAPgAAgD8AAIA/AACAPwAAAD8AAIA/AACAPwAAgD8AAAA/AACAPwAAgD8AAIA/AAAAPwAAgD8AAIA/AACAPwAAAD8AAAEAAgAAAAIAAwA="
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 48,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 96,
+      "byteLength": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 128,
+      "byteLength": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 160,
+      "byteLength": 64
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 224,
+      "byteLength": 12
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5123,
+      "count": 6,
+      "type": "SCALAR"
+    }
+  ],
+  "images": [
+    {
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBgAAEnICff5q7YNAAAAAElFTkSuQmCC"
+    },
+    {
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP43/D/PwAIfgN+VfwVfQAAAABJRU5ErkJggg=="
+    },
+    {
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGUlEQVR4nGP478CgwPAfCBsaGBr+H2C4AwA9wwd5dR7wFgAAAABJRU5ErkJggg=="
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9728,
+      "minFilter": 9728,
+      "wrapS": 33071,
+      "wrapT": 33071
+    }
+  ],
+  "textures": [
+    {
+      "source": 0,
+      "sampler": 0
+    },
+    {
+      "source": 1,
+      "sampler": 0
+    },
+    {
+      "source": 2,
+      "sampler": 0
+    }
+  ],
+  "materials": [
+    {
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          1,
+          1,
+          1,
+          0.5
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 1,
+        "baseColorTexture": {
+          "index": 0,
+          "extensions": {
+            "KHR_texture_transform": {
+              "rotation": 1.5707963267948966,
+              "offset": [
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      "normalTexture": {
+        "index": 1,
+        "extensions": {
+          "KHR_texture_transform": {
+            "rotation": -1.5707963267948966,
+            "scale": [
+              -1,
+              1
+            ],
+            "offset": [
+              0,
+              1
+            ]
+          }
+        }
+      },
+      "occlusionTexture": {
+        "index": 0,
+        "texCoord": 0,
+        "extensions": {
+          "KHR_texture_transform": {
+            "texCoord": 1
+          }
+        },
+        "strength": 0.5
+      },
+      "extensions": {
+        "KHR_materials_clearcoat": {
+          "clearcoatFactor": 0.75,
+          "clearcoatRoughnessFactor": 0.25,
+          "clearcoatTexture": {
+            "index": 2,
+            "extensions": {
+              "KHR_texture_transform": {
+                "offset": [
+                  0.1,
+                  0.2
+                ],
+                "scale": [
+                  0.8,
+                  0.6
+                ],
+                "rotation": 0.2
+              }
+            }
+          },
+          "clearcoatRoughnessTexture": {
+            "index": 2,
+            "texCoord": 1
+          },
+          "clearcoatNormalTexture": {
+            "index": 1,
+            "scale": 0.4,
+            "extensions": {
+              "KHR_texture_transform": {
+                "rotation": -0.35,
+                "scale": [
+                  -1,
+                  1
+                ]
+              }
+            }
+          }
+        },
+        "KHR_materials_sheen": {
+          "sheenColorFactor": [
+            0.5,
+            0.1,
+            0.2
+          ],
+          "sheenRoughnessFactor": 0.6,
+          "sheenColorTexture": {
+            "index": 0,
+            "texCoord": 1
+          },
+          "sheenRoughnessTexture": {
+            "index": 2
+          }
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2,
+            "TEXCOORD_1": 3,
+            "COLOR_0": 4
+          },
+          "indices": 5,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "type": "perspective",
+      "perspective": {
+        "yfov": 1.5707963267948966,
+        "znear": 0.1,
+        "zfar": 100
+      }
+    },
+    {
+      "type": "orthographic",
+      "orthographic": {
+        "xmag": 2,
+        "ymag": 2,
+        "znear": 0,
+        "zfar": 100
+      }
+    },
+    {
+      "type": "perspective",
+      "perspective": {
+        "yfov": 1.5707963267948966,
+        "znear": 0.1
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0
+    },
+    {
+      "camera": 0,
+      "translation": [
+        0,
+        0,
+        4
+      ]
+    },
+    {
+      "camera": 1,
+      "translation": [
+        0,
+        0,
+        4
+      ]
+    },
+    {
+      "camera": 2,
+      "translation": [
+        0,
+        0,
+        20000
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "scene": 0,
+  "extensionsRequired": [
+    "KHR_materials_clearcoat",
+    "KHR_materials_sheen"
+  ]
+}
