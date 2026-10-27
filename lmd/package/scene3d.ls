@@ -3,6 +3,8 @@ import model: lambda.scene3d.model
 import transforms: lambda.scene3d.transform
 import clips: lambda.scene3d.animation
 import assets: lambda.scene3d.asset
+import shapes: lambda.scene3d.shape
+import environments: lambda.scene3d.environment
 
 pub type Vector3 = [number, number, number]
 pub type Matrix4 = number[]
@@ -16,6 +18,17 @@ pub fn light(kind, options = {}) element => <light type: kind, color: "#ffffff",
 pub fn box(size = [1.0, 1.0, 1.0], options = {}) element => <geometry type: 'box', size: size, *: options>
 pub fn plane(size = [1.0, 1.0, 1.0], options = {}) element => <geometry type: 'plane', size: size, *: options>
 pub fn geometry(positions, options = {}) element => <geometry type: 'buffer', positions: positions, *: options>
+// a unit-diameter sphere of `rings` bands and `segments` around, with normals and uvs
+pub fn sphere(rings = 16, segments = 32, options = {}) element =>
+    (let b = shapes.sphere(rings, segments), <geometry type: 'buffer', positions: b.positions, normals: b.normals,
+        uvs: b.uvs, indices: b.indices, *: options>)
+// a ready environment, 'room' (Three.js RoomEnvironment) or 'sky'; the scene names it by id
+// (`environment` defaults to the kind) to take image-based light from it
+pub fn environment(kind, options = {}) element^ {
+    if (kind == 'room') environments.room(options)^
+    else if (kind == 'sky') environments.sky(options)^
+    else raise error("scene3d: unknown environment kind")
+}
 pub fn material(kind = 'basic', options = {}) element => <material type: kind, color: "#ffffff", opacity: 1.0, *: options>
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
 pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geometry, material]>

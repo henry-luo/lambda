@@ -64,21 +64,9 @@ pub fn place(card, it) => (let f = T.format_of(card.format), let w = min(it.w, f
     {*:it, w: w, h: if (it.kind == "text") it.h else it.h * w / it.w, x: (f.w - w) / 2.0,
         y: if (it.kind == "text") f.h * .42 else (f.h - it.h * w / it.w) / 2.0})
 
-// ---- history ------------------------------------------------------------------
-
-let HISTORY_LIMIT = 60
-pub fn history() => {past: [], future: []}
-pub fn record(h, before) => (let past = [*h.past, before],
-    {past: if (len(past) > HISTORY_LIMIT) slice(past, 1, len(past)) else past, future: []})
-pub fn undo_step(h, current) => if (len(h.past) == 0) null
-    else {card: h.past[len(h.past) - 1], history: {past: slice(h.past, 0, len(h.past) - 1), future: [current, *h.future]}}
-pub fn redo_step(h, current) => if (len(h.future) == 0) null
-    else {card: h.future[0], history: {past: [*h.past, current], future: slice(h.future, 1, len(h.future))}}
-
 // ---- files ----------------------------------------------------------------------
+// the undo history and file names are shared with Dreamhome (../mod_document.ls)
 
 // a file is a card when it carries the four pages; anything else is refused
 pub fn valid(card) => card is map and card.pages is map and
     all([for (k in ["front", "left", "right", "back"]) card.pages[k] is map and card.pages[k].items is array])
-pub fn slug(title) => (let s = join([for (ch in split(lower(trim(title)), "")) if (contains("abcdefghijklmnopqrstuvwxyz0123456789", ch)) ch else "-"], ""),
-    let parts = [for (p in split(s, "-") where p != "") p], if (len(parts) == 0) "card" else join(parts, "-"))

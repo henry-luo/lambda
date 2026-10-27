@@ -1,10 +1,13 @@
 // D7.2.4: the loader returns ordinary scene values; playback is owned by Radiant.
 fn prefixed(value, prefix) => prefix ++ "-" ++ string(value)
+// the attributes that name another scene resource by id, and so take the prefix too
+let REFERENCES = ["id", "geometry", "material", "texture", "skeleton",
+    "metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
 // shared with lambda.scene3d.motion, which compiles a character's body the same way
 pub fn rewrite(n, prefix, options) element {
     let kind = name(n)
     let attrs = map([for (k, v in n where k is string or k is symbol)
-        (string(k), if (contains(["id", "geometry", "material", "texture", "skeleton"], string(k))) prefixed(v, prefix)
+        (string(k), if (contains(REFERENCES, string(k))) prefixed(v, prefix)
             else if (kind == 'keyframe-track' and string(k) == "path") prefixed(v, prefix) else v)])
     // `lights: false` drops imported punctual lights so the caller's scene lighting stands alone.
     let children = [for (child in content(n) where options.lights != false or name(child) != 'light') rewrite(child, prefix, options)]

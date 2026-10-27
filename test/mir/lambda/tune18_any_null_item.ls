@@ -1,5 +1,5 @@
-// Tune18 regression: an erased `any` value must not use the raw ItemNull
-// comparison unless its runtime carrier is proven to be a boxed Item.
+// S1.6 / D2.4: an erased value must be boxed through MirValue before
+// a null-tag comparison; preserve the guarded Type-value equality fallback.
 
 pn make_any_chain18(length: int) any {
     if (length == 0) {

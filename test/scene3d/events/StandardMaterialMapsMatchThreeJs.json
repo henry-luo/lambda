@@ -1,0 +1,33 @@
+{
+  "name": "StandardMaterialMapsMatchThreeJs",
+  "viewport": {"width": 560, "height": 380},
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "two points on each map sphere (base color, metal-rough, derivative normals, tangent normals, occlusion with emission, mask) and a hole the mask cuts, where native and Three.js r186 agree within one level (test/scene3d/oracle/)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#spheres",
+      "width": 560,
+      "height": 380,
+      "pixels": [
+        [154, 127, 215, 161, 86, 255, 3],
+        [129, 147, 163, 117, 47, 255, 3],
+        [262, 113, 222, 216, 208, 255, 3],
+        [295, 139, 77, 73, 68, 255, 3],
+        [387, 113, 187, 136, 63, 255, 3],
+        [380, 147, 131, 92, 27, 255, 3],
+        [154, 252, 226, 169, 93, 255, 3],
+        [129, 272, 203, 149, 72, 255, 3],
+        [280, 252, 246, 200, 161, 255, 3],
+        [255, 272, 153, 149, 143, 255, 3],
+        [405, 252, 64, 144, 54, 255, 3],
+        [380, 272, 32, 36, 40, 255, 3]
+      ]
+    }
+  ]
+}

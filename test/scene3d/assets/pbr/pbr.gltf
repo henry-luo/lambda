@@ -1,0 +1,302 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "test/scene3d/assets/pbr/_generate.py"
+ },
+ "extensionsUsed": [
+  "KHR_texture_transform"
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0,
+    1,
+    2
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "translation": [
+    -2.5,
+    0,
+    0
+   ]
+  },
+  {
+   "mesh": 1,
+   "translation": [
+    0.0,
+    0,
+    0
+   ]
+  },
+  {
+   "mesh": 2,
+   "translation": [
+    2.5,
+    0,
+    0
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1,
+      "TEXCOORD_0": 2,
+      "TANGENT": 3
+     },
+     "indices": 4,
+     "material": 0
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1,
+      "TEXCOORD_0": 2,
+      "TANGENT": 3
+     },
+     "indices": 4,
+     "material": 1
+    }
+   ]
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1,
+      "TEXCOORD_0": 2,
+      "TANGENT": 3
+     },
+     "indices": 4,
+     "material": 2
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "panel",
+   "doubleSided": true,
+   "alphaMode": "MASK",
+   "alphaCutoff": 0.3,
+   "emissiveFactor": [
+    1,
+    0.5,
+    0.2
+   ],
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0,
+     "extensions": {
+      "KHR_texture_transform": {
+       "scale": [
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "metallicFactor": 0.9,
+    "roughnessFactor": 0.7,
+    "metallicRoughnessTexture": {
+     "index": 1,
+     "extensions": {
+      "KHR_texture_transform": {
+       "scale": [
+        2,
+        2
+       ]
+      }
+     }
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "scale": 0.8,
+    "extensions": {
+     "KHR_texture_transform": {
+      "scale": [
+       2,
+       2
+      ]
+     }
+    }
+   },
+   "occlusionTexture": {
+    "index": 3,
+    "strength": 0.6,
+    "extensions": {
+     "KHR_texture_transform": {
+      "scale": [
+       2,
+       2
+      ]
+     }
+    }
+   },
+   "emissiveTexture": {
+    "index": 4,
+    "extensions": {
+     "KHR_texture_transform": {
+      "scale": [
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "plain"
+  },
+  {
+   "name": "mixed",
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0,
+     "extensions": {
+      "KHR_texture_transform": {
+       "scale": [
+        2,
+        2
+       ]
+      }
+     }
+    }
+   },
+   "normalTexture": {
+    "index": 2,
+    "extensions": {
+     "KHR_texture_transform": {
+      "offset": [
+       0.5,
+       0
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "textures": [
+  {
+   "source": 0
+  },
+  {
+   "source": 1
+  },
+  {
+   "source": 2
+  },
+  {
+   "source": 3
+  },
+  {
+   "source": 4
+  }
+ ],
+ "images": [
+  {
+   "uri": "checker.png"
+  },
+  {
+   "uri": "metal_rough.png"
+  },
+  {
+   "uri": "normal.png"
+  },
+  {
+   "uri": "occlusion.png"
+  },
+  {
+   "uri": "emissive.png"
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 204,
+   "uri": "data:application/octet-stream;base64,AACAvwAAgL8AAAAAAACAPwAAgL8AAAAAAACAPwAAgD8AAAAAAACAvwAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/AAABAAIAAAACAAMA"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 48
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 48,
+   "byteLength": 48
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 96,
+   "byteLength": 32
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 128,
+   "byteLength": 64
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 192,
+   "byteLength": 12
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC3",
+   "min": [
+    -1,
+    -1,
+    0
+   ],
+   "max": [
+    1,
+    1,
+    0
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 3,
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 4,
+   "componentType": 5123,
+   "count": 6,
+   "type": "SCALAR"
+  }
+ ]
+}

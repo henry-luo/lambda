@@ -56,6 +56,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/archive/tests",
     "test/demo/mail/tests",
     "test/demo/greetings/tests",
+    "test/demo/dreamhome/tests",
     "test/demo/marble-drop/tests",
     "test/demo/soundflow/tests",
     "test/demo/procgen/tests",
@@ -107,6 +108,8 @@ TEST(ProcgenTests, KeyedNoiseIsExactAcrossTiers) {
         test_lambda_script_against_file("test/lambda/procgen/extensions.ls", "test/lambda/procgen/extensions.txt", false, tier);
         test_lambda_script_against_file("test/lambda/transpose_singleton.ls", "test/lambda/transpose_singleton.txt", false, tier);
         test_lambda_script_against_file("test/lambda/interp_ndim_return.ls", "test/lambda/interp_ndim_return.txt", false, tier);
+        test_lambda_script_against_file("test/mir/lambda/u64_bitwise_native.ls", "test/mir/lambda/u64_bitwise_native.txt", false, tier);
+        test_lambda_script_against_file("test/mir/lambda/null_item_comparison.ls", "test/mir/lambda/null_item_comparison.txt", false, tier);
         test_lambda_script_against_file("test/lambda/procgen/terrain.ls", "test/lambda/procgen/terrain.txt", false, tier);
     }
 }

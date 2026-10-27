@@ -1,0 +1,105 @@
+{
+  "name": "SpotShadowsMatchThreeJs",
+  "viewport": {
+    "width": 560,
+    "height": 420
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "shadowed and lit points under a casting spot light where native and Three.js r186 agree within one level (test/scene3d/oracle/)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420,
+      "pixels": [
+        [
+          140,
+          225,
+          0,
+          0,
+          0,
+          255,
+          3
+        ],
+        [
+          245,
+          235,
+          61,
+          59,
+          57,
+          255,
+          3
+        ],
+        [
+          335,
+          195,
+          122,
+          118,
+          111,
+          255,
+          3
+        ],
+        [
+          400,
+          237,
+          61,
+          59,
+          57,
+          255,
+          3
+        ],
+        [
+          470,
+          215,
+          61,
+          59,
+          57,
+          255,
+          3
+        ],
+        [
+          235,
+          190,
+          168,
+          193,
+          212,
+          255,
+          3
+        ],
+        [
+          323,
+          165,
+          235,
+          223,
+          205,
+          255,
+          3
+        ],
+        [
+          280,
+          330,
+          190,
+          176,
+          155,
+          255,
+          3
+        ],
+        [
+          520,
+          120,
+          32,
+          36,
+          40,
+          255,
+          3
+        ]
+      ]
+    }
+  ]
+}

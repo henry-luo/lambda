@@ -1,0 +1,735 @@
+{
+ "name": "Dreamhome demo: catalog, pieces with undo, room and wall tools, walk-through, 3D picking, save and open",
+ "html": "test/demo/dreamhome/dreamhome.ls",
+ "viewport": {
+  "width": 1280,
+  "height": 800
+ },
+ "events": [
+  {
+   "type": "log",
+   "message": "the planner opens on the furnished city apartment, in plan and 3D"
+  },
+  {
+   "type": "wait",
+   "ms": 300
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".doc-name"
+   },
+   "equals": "City apartment"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .room"
+   },
+   "count": 5
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .wall"
+   },
+   "count": 8
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "scene3d #cam"
+   },
+   "count": 1
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".tiles .tile"
+   },
+   "count": 9
+  },
+  {
+   "type": "log",
+   "message": "the catalog searches by name, and lists a category's pieces"
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#query"
+   },
+   "text": "lamp",
+   "clear": true
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".tiles .tile"
+   },
+   "count": 3
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#query"
+   },
+   "text": "",
+   "clear": true
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"cat\"][data-arg=\"bedroom\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": ".tiles .tile"
+   },
+   "count": 5
+  },
+  {
+   "type": "log",
+   "message": "a piece lands in a room, selected; R turns it and undo, redo step through the turn"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"cat\"][data-arg=\"decor\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"add\"][data-arg=\"plant\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-selected",
+   "equals": "i75"
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".inspector h2"
+   },
+   "equals": "Potted plant"
+  },
+  {
+   "type": "key_press",
+   "key": "r"
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".readout"
+   },
+   "equals": "90°"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"undo\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".readout"
+   },
+   "equals": "0°"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"redo\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".readout"
+   },
+   "equals": "90°"
+  },
+  {
+   "type": "log",
+   "message": "dragging moves it in one step; Delete removes it"
+  },
+  {
+   "type": "mouse_down",
+   "target": {
+    "selector": "#plan [data-id=\"i75\"] > rect"
+   }
+  },
+  {
+   "type": "mouse_move",
+   "target": {
+    "selector": "#plan [data-id=\"i75\"] > rect",
+    "offset_x": 20,
+    "offset_y": 5
+   }
+  },
+  {
+   "type": "mouse_move",
+   "target": {
+    "selector": "#plan [data-id=\"i75\"] > rect",
+    "offset_x": 40,
+    "offset_y": 10
+   }
+  },
+  {
+   "type": "mouse_up",
+   "target": {
+    "selector": "#plan [data-id=\"i75\"] > rect",
+    "offset_x": 40,
+    "offset_y": 10
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".status"
+   },
+   "equals": "Moved."
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-selected",
+   "equals": "i75"
+  },
+  {
+   "type": "key_press",
+   "key": "Delete"
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan [data-id=\"i75\"]"
+   },
+   "count": 0
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-selected",
+   "equals": ""
+  },
+  {
+   "type": "log",
+   "message": "the room tool drags out a room with its four walls; it is named and floored in the inspector"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"tool\"][data-arg=\"room\"]"
+   }
+  },
+  {
+   "type": "mouse_down",
+   "x": 840,
+   "y": 120
+  },
+  {
+   "type": "mouse_move",
+   "x": 880,
+   "y": 163
+  },
+  {
+   "type": "mouse_move",
+   "x": 920,
+   "y": 206
+  },
+  {
+   "type": "mouse_move",
+   "x": 960,
+   "y": 250
+  },
+  {
+   "type": "mouse_up",
+   "x": 960,
+   "y": 250
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .room"
+   },
+   "count": 6
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .wall"
+   },
+   "count": 12
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-selected",
+   "equals": "r76"
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#room-name"
+   },
+   "text": "Sunroom",
+   "clear": true
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#plan .room-labels"
+   },
+   "contains": "Sunroom"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"floor\"][data-arg=\"slate\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "[data-act=\"floor\"][data-arg=\"slate\"]"
+   },
+   "attribute": "class",
+   "equals": "floor-tile on"
+  },
+  {
+   "type": "key_press",
+   "key": "Escape"
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-selected",
+   "equals": ""
+  },
+  {
+   "type": "log",
+   "message": "the wall tool draws a wall; dimensions can be hidden"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"tool\"][data-arg=\"wall\"]"
+   }
+  },
+  {
+   "type": "mouse_down",
+   "x": 850,
+   "y": 320
+  },
+  {
+   "type": "mouse_move",
+   "x": 893,
+   "y": 320
+  },
+  {
+   "type": "mouse_move",
+   "x": 936,
+   "y": 320
+  },
+  {
+   "type": "mouse_move",
+   "x": 980,
+   "y": 320
+  },
+  {
+   "type": "mouse_up",
+   "x": 980,
+   "y": 320
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .wall"
+   },
+   "count": 13
+  },
+  {
+   "type": "key_press",
+   "key": "Escape"
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .dim"
+   },
+   "count": 13
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dims\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .dim"
+   },
+   "count": 0
+  },
+  {
+   "type": "log",
+   "message": "the 3D view walks through the home at eye height and lights its lamps in the evening"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"mode3d\"][data-arg=\"walk\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-mode3d",
+   "equals": "walk"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#walker"
+   },
+   "count": 1
+  },
+  {
+   "type": "key_press",
+   "key": "w"
+  },
+  {
+   "type": "key_press",
+   "key": "w"
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"evening\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "[data-act=\"evening\"]"
+   },
+   "attribute": "aria-pressed",
+   "equals": "true"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"mode3d\"][data-arg=\"orbit\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#walker"
+   },
+   "count": 0
+  },
+  {
+   "type": "log",
+   "message": "in 3D alone, a click picks what is under it"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"layout\"][data-arg=\"3d\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan"
+   },
+   "count": 0
+  },
+  {
+   "type": "click",
+   "x": 640,
+   "y": 470
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_attribute",
+   "target": {
+    "selector": "#planner"
+   },
+   "attribute": "data-selected",
+   "equals": "i51"
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".inspector h2"
+   },
+   "equals": "Bookcase"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"layout\"][data-arg=\"split\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan"
+   },
+   "count": 1
+  },
+  {
+   "type": "log",
+   "message": "the home saves as a .mark file, another home replaces it, and Open brings it back"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog\"][data-arg=\"export\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#file-path"
+   },
+   "text": "temp/dreamhome_ui",
+   "clear": true
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"export\"][data-arg=\"mark\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_file",
+   "path": "temp/dreamhome_ui/city-apartment.mark"
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".dialog-note"
+   },
+   "equals": "Saved temp/dreamhome_ui/city-apartment.mark"
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog-close\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog\"][data-arg=\"homes\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"template\"][data-arg=\"studio\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".doc-name"
+   },
+   "equals": "Garden studio"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .room"
+   },
+   "count": 2
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"dialog\"][data-arg=\"open\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "type",
+   "target": {
+    "selector": "#file-path"
+   },
+   "text": "temp/dreamhome_ui/city-apartment.mark",
+   "clear": true
+  },
+  {
+   "type": "click",
+   "target": {
+    "selector": "[data-act=\"open\"]"
+   }
+  },
+  {
+   "type": "wait",
+   "ms": 150
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": ".doc-name"
+   },
+   "equals": "City apartment"
+  },
+  {
+   "type": "assert_count",
+   "target": {
+    "selector": "#plan .room"
+   },
+   "count": 6
+  },
+  {
+   "type": "assert_text",
+   "target": {
+    "selector": "#plan .room-labels"
+   },
+   "contains": "Sunroom"
+  }
+ ]
+}

@@ -44,6 +44,8 @@ let DEMOS = [
      blurb: "Shapes and connectors, inspired by draw.io."},
     {name: "greetings", title: "Greetings", cat: "design", sub: "Card designer",
      blurb: "Design a greeting card, preview it open, print and fold."},
+    {name: "dreamhome", title: "Dreamhome", cat: "design", sub: "Home planner",
+     blurb: "Draw rooms, furnish them, then walk through your home in 3D."},
     {name: "word", title: "Word", cat: "productivity", sub: "Word processor",
      blurb: "A word processor with ribbon, tables and equations."},
     {name: "note", title: "Notes", cat: "productivity", sub: "Notes",
@@ -71,7 +73,7 @@ let CATEGORIES = [
     {key: "games", title: "Games", blurb: "Arcade classics, brass puzzle machines and a word game, all native."},
     {key: "productivity", title: "Productivity", blurb: "Write, plan and present in full editors."},
     {key: "photography", title: "Photography", blurb: "Browse a library, grade a photo, stack layers."},
-    {key: "design", title: "Design", blurb: "Diagrams and greeting cards, ready to print."},
+    {key: "design", title: "Design", blurb: "Diagrams, greeting cards and homes, ready to print or walk through."},
     {key: "science", title: "Data & Science", blurb: "Charts, graphs and interactive 3D worlds."},
     {key: "media", title: "Books & Media", blurb: "Classics to read, scores that play, an instrument you draw, and a city's history as a 3D film."},
     {key: "utilities", title: "Utilities", blurb: "Files, mail and the web, kept tidy."}

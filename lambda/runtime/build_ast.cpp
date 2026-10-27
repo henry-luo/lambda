@@ -10154,6 +10154,13 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             call->argument, call->argument ? call->argument->next : NULL);
         if (bitwise_type) {
             call->type = bitwise_type;
+            if (info->fn == SYSFUNC_USHR) {
+                int64_t count;
+                // a dynamic/negative count can return error; dropping that arm
+                // let inferred u64 returns decode ItemError as zero (S7.8.1).
+                if (!ast_constant_integer_value(tp, call->argument->next, &count) || count < 0)
+                    call->type = lambda_type_union_normalized(tp->pool, bitwise_type, &TYPE_ERROR);
+            }
         }
     } else if (TypeFunc* type = effective
             ? lambda_type_func_signature(effective->type) : NULL) {

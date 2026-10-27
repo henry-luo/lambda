@@ -5705,6 +5705,7 @@ Item fn_input2(Item target_item, Item type) {
     virtual_error_reporter = [](Item error) {
         if (context) eval_context_set_last_error(context, it2err(error));
     };
+#ifndef LAMBDA_IME_RESOURCE_IO
     ZipLimits limits = zip_default_limits();
     ZipError zip_error = {};
     if (get_type_id(type) == LMD_TYPE_MAP) {
@@ -5717,6 +5718,10 @@ Item fn_input2(Item target_item, Item type) {
     }
     InputZipLimitsScope zip_scope(&limits);
     bool fs_target = fs_node_is(target_item);
+#else
+    // The IME reads only local signed resources and its own JSON overlay.
+    bool fs_target = false;
+#endif
 
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
@@ -5839,6 +5844,7 @@ Item fn_input2(Item target_item, Item type) {
         return ItemError;
     }
 
+#ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_target) {
         Item result = fs_node_input(input_target_root.get(), type_str, flavor_str);
         if (get_type_id(result) == LMD_TYPE_ERROR) {
@@ -5847,6 +5853,7 @@ Item fn_input2(Item target_item, Item type) {
         }
         return schema_type ? lambda_type_check(result, schema_type, "input schema") : result;
     }
+#endif
 
     // Pre-register exact schema fields before parsing so known Input names hit
     // the retained static/dynamic parent; parser-only misses stay id-less per
@@ -6337,6 +6344,7 @@ extern "C" Input* input_from_source_with_positions(const char* source, Url* url,
 // the next call's `prescan`.
 // ---------------------------------------------------------------------------
 
+#ifndef LAMBDA_IME_RESOURCE_IO
 struct HighlightLineSource {
     Array* chunks = nullptr;          // array of arrays of strings
     Array* flat = nullptr;            // array of strings
@@ -6551,6 +6559,7 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
     array_push(result.get(), {.array = labels.get()});
     return {.array = result.get()};
 }
+#endif
 
 // latex/tex options for the TeX expansion engine (Lambda_Design_TeX_Engine): the
 // names stay owned by the caller's map for the duration of the parse
@@ -6784,16 +6793,22 @@ Item fn_parse2(Item str_item, Item type) {
     }
 
     if (highlight_spans) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+        set_runtime_error(ERR_INVALID_OPERATION, "parse: highlighting is unavailable in this build");
+        return ItemError;
+#else
         bool html = type_str && strcmp(type_str->chars, "html") == 0;
         if (!html && (!type_str || strcmp(type_str->chars, "markdown") != 0)) {
             set_runtime_error(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports types 'markdown' and 'html'");
             return ItemError;
         }
         return fn_parse_highlight_spans(html, str_item, window_item, prescan_item);
+#endif
     }
 
     str_item = parse_source_root.get();
     // captured ZIP members are values: parsing them never reacquires their source (S12.4.1v2).
+#ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(str_item)) {
         Item result = fs_node_input(str_item, type_str, flavor_str);
         arraylist_free(adapter_names);
@@ -6801,6 +6816,7 @@ Item fn_parse2(Item str_item, Item type) {
         arraylist_free(chaptered_names);
         return result;
     }
+#endif
 
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_BINARY) {
@@ -6866,6 +6882,11 @@ Item fn_parse1(Item str_item) {
 }
 
 Item fn_parse_html_fragment1(Item str_item) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+    (void)str_item;
+    set_runtime_error(ERR_INVALID_OPERATION, "parse_html_fragment is unavailable in this build");
+    return ItemError;
+#else
     GUARD_ERROR1(str_item);
 
     // HTML fragment parsing is non-admissive: null is reserved for a valid
@@ -6919,6 +6940,7 @@ Item fn_parse_html_fragment1(Item str_item) {
         return ItemError;
     }
     return input->root;
+#endif
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
@@ -7050,6 +7072,10 @@ Item fn_format2(Item item, Item type) {
     }
     const char* type_name = rooted_type.get() ? rooted_type.get()->chars : nullptr;
     if (type_name && (!strcmp(type_name, "gltf") || !strcmp(type_name, "glb"))) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+        set_runtime_error(ERR_FORMAT_ERROR, "format: glTF is unavailable in this build");
+        return ItemError;
+#else
         // GLB is bytes, and an unsupported scene construct deserves its own message.
         StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
         bool binary = !strcmp(type_name, "glb");
@@ -7059,6 +7085,7 @@ Item fn_format2(Item item, Item type) {
         else if (binary) output = (Item){.item = x2it(heap_binary_from_bytes(bytes->str, (int64_t)bytes->length))};
         else output = (Item){.item = s2it(heap_strcpy(bytes->str, bytes->length))};
         strbuf_free(bytes); return output;
+#endif
     }
     String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
@@ -7972,7 +7999,9 @@ extern "C" int64_t fn_len_s(String* str) {
 // writes should pass through to the element is deliberately left open.
 Item fn_content(Item item) {
     GUARD_ERROR1(item);
+#ifndef LAMBDA_IME_RESOURCE_IO
     if (fs_node_is(item)) return fs_node_content(item);
+#endif
     if (get_type_id(item) == LMD_TYPE_VELMT) {
         Item error = virtual_content_error(item);
         if (get_type_id(error) == LMD_TYPE_ERROR) return error;

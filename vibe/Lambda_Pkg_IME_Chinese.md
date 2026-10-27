@@ -15,8 +15,13 @@
 > failures remain. M0 retained-heap attribution and the
 > provisional performance targets remain open. IME-O1, IME-O2 and
 > IME-O4 are resolved and IME-O7 is deferred (data stays uncommitted).
-> M5, a macOS-wide InputMethodKit host with a Lambda-runtime-only build
-> profile, is designed in §8.5–§8.8 and has not been implemented or installed.
+> M5 has a native InputMethodKit host, CLI-derived `macos-ime` profile,
+> bundled packs, local installer and native settings/editor as of 2026-10-27.
+> It builds in debug and release and the signed release app boots. The local
+> registration call succeeds, but macOS has not listed the new input source in
+> this login session. The source/link closure now passes the dedicated audit;
+> installed-app interaction and provisional performance gates remain open;
+> see §8.16 of the implementation record (IME14–IME16).
 > Evidence and remaining gates: [implementation record](impl/Lambda_Impl_IME_Chinese.md).
 > **Package:** `lambda.ime.chinese`.
 > **Scope:** a shipped, data-driven pinyin input method that converts typed
@@ -1028,6 +1033,16 @@ developer's Mac, sign the bundle and nested code with Developer ID, enable
 Hardened Runtime and notarize it. MIR JIT needs its macOS execution-memory
 path tested under that signature and the narrow JIT entitlement; interpreter
 fallback is tested separately, not assumed to meet the latency target.
+
+On macOS 26.5.2, the ad-hoc development bundle passed code-signature
+verification but failed Gatekeeper assessment and did not appear in TIS, even
+though `TISRegisterInputSource` returned success (IME15). The local build
+remains a package smoke fixture. The install acceptance path uses a fresh
+bundle/source ID, Developer ID signing, notarization and a stapled ticket;
+`spctl --assess` and actual TIS enumeration must pass before the host is
+called registered. The staged development app and installed app must not leave
+duplicate Launch Services records under the same ID. A login refresh may be
+needed for the input-source picker, but it cannot stand in for discovery.
 
 ### 8.8 Candidate presentation and settings (M5)
 

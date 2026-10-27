@@ -1,0 +1,1072 @@
+{
+  "name": "Greetings: animation, original music, badges, preview controls and saved effects",
+  "html": "test/demo/greetings/greetings.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "Gallery badges describe the template; editing stays still and silent."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".zoom"
+      },
+      "contains": "103%"
+    },
+    {
+      "type": "resize",
+      "width": 1280,
+      "height": 820
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".zoom"
+      },
+      "contains": "91%"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".zoom"
+      },
+      "contains": "103%"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".designs .design"
+      },
+      "count": 28
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".animation-badge"
+      },
+      "count": 10
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".music-badge"
+      },
+      "count": 9
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-arg=\"snow-day\"] .animation-badge"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-arg=\"snow-day\"] .music-badge"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-arg=\"botanical-thanks\"] .design-badge"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "none"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-gallery.png"
+    },
+    {
+      "type": "log",
+      "message": "Preview animates, starts real native audio, pauses motion and mutes music independently."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound-count",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-clock"
+      },
+      "attribute": "data-running",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "confetti"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview .face-front .effect-particle"
+      },
+      "count": 12
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .motion-art"
+      },
+      "property": "animation-name",
+      "equals": "greeting-float"
+    },
+    {
+      "type": "advance_time",
+      "ms": 750,
+      "steps": 15
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-confetti.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 650,
+      "steps": 13
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-confetti-next.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"motion-toggle\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview"
+      },
+      "attribute": "class",
+      "equals": "preview effects-paused"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .motion-art"
+      },
+      "property": "animation-play-state",
+      "equals": "paused"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-paused.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 650,
+      "steps": 13
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-paused-next.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"music-toggle\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "muted"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-clock"
+      },
+      "attribute": "data-running",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"music-toggle\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound-count",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound-count",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"motion-toggle\"]"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .motion-art"
+      },
+      "property": "animation-play-state",
+      "equals": "running"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-clock"
+      },
+      "attribute": "data-running",
+      "equals": "false"
+    },
+    {
+      "type": "log",
+      "message": "All new designs have working effects; the silent design never opens a voice."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"birthday-parade\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "confetti"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "celebrate"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "confetti"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-birthday-parade.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"winter-wishes\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "snow"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "winter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "snow"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-winter-wishes.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"heart-song\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "hearts"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "affection"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "hearts"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-heart-song.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"moonlight-lullaby\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "float"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "lullaby"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "float"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-moonlight-lullaby.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"golden-moment\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "twinkle"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "celebrate"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "twinkle"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-golden-moment.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"blooming-gratitude\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "sway"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "sunshine"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "sway"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-blooming-gratitude.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"pocket-sunshine\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "float"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "sunshine"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "float"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-pocket-sunshine.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"snow-day\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "snow"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .face-front .card-page"
+      },
+      "attribute": "data-animation",
+      "equals": "snow"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "advance_time",
+      "ms": 600,
+      "steps": 12
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-snow-day.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "log",
+      "message": "Effects can be added to a still template, undone, saved and opened again."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"botanical-thanks\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"panel\"][data-arg=\"effects\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"animation\"][data-arg=\"hearts\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"effect-settings\"][data-arg=\"music\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"music\"][data-arg=\"affection\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "hearts"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "affection"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"undo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "hearts"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"redo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "affection"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/effects-panel.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"dialog\"][data-arg=\"export\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/greetings_effects",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"export\"][data-arg=\"mark\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".dialog-note"
+      },
+      "equals": "Saved temp/greetings_effects/botanical.mark"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"dialog-close\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"panel\"][data-arg=\"designs\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"snow-day\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"dialog\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/greetings_effects/botanical.mark",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".dialog [data-act=\"open\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-animation",
+      "equals": "hearts"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-music",
+      "equals": "affection"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-clock"
+      },
+      "attribute": "data-running",
+      "equals": "false"
+    }
+  ]
+}

@@ -104,19 +104,25 @@ pub fn perlin3(p, x: float, y: float, z: float) float {
 }
 
 // --- simplex noise (Gustavson, "Simplex noise demystified"; the patent expired in 2022) ---
-// the twelve cube-edge gradients, indexed by hash % 12.
-fn sgrad(g: int) array => [[1.0, 1.0, 0.0], [-1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, -1.0, 0.0],
-    [1.0, 0.0, 1.0], [-1.0, 0.0, 1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, -1.0],
-    [0.0, 1.0, 1.0], [0.0, -1.0, 1.0], [0.0, 1.0, -1.0], [0.0, -1.0, -1.0]][g % 12]
+// the twelve cube-edge gradients, decoded into scalar coefficients instead of row views.
+fn simplex_dot(g: int, x: float, y: float, z: float, dimensions: int) float {
+    let h = g % 12
+    let a = if (h < 8) (if (band(h, 1) == 0) 1.0 else -1.0) else 0.0
+    let b = if (h < 4) (if (band(h, 2) == 0) 1.0 else -1.0)
+        else if (h >= 8) (if (band(h, 1) == 0) 1.0 else -1.0) else 0.0
+    let xy = a * x + b * y;
+    // retain zero products and left-to-right sums for exact signed-zero parity (PG2).
+    if (dimensions == 2) xy else (let c = if (h < 4) 0.0 else (if (band(h, 2) == 0) 1.0 else -1.0), xy + c * z)
+}
 
 fn corner2(g: int, x: float, y: float) float {
     let t = 0.5 - x * x - y * y;
-    if (t < 0.0) 0.0 else (let d = sgrad(g), t * t * t * t * (d[0] * x + d[1] * y))
+    if (t < 0.0) 0.0 else t * t * t * t * simplex_dot(g, x, y, 0.0, 2)
 }
 
 fn corner3(g: int, x: float, y: float, z: float) float {
     let t = 0.6 - x * x - y * y - z * z;
-    if (t < 0.0) 0.0 else (let d = sgrad(g), t * t * t * t * (d[0] * x + d[1] * y + d[2] * z))
+    if (t < 0.0) 0.0 else t * t * t * t * simplex_dot(g, x, y, z, 3)
 }
 
 // F2 = (sqrt(3) - 1) / 2 and G2 = (3 - sqrt(3)) / 6, as their binary64 values.
@@ -261,16 +267,26 @@ pub fn make(k: u64, spec = {}) map^ {
 }
 
 fn octaves2(gen, x: float, y: float) float {
-    if (gen.fractal == 'none') base2(gen, gen.tables[0], x * gen.frequencies[0], y * gen.frequencies[0])
+    let fractal = gen.fractal
+    let tables = gen.tables
+    let frequencies = gen.frequencies
+    let amplitudes = gen.amplitudes
+    let total = gen.total;
+    if (fractal == 'none') base2(gen, tables[0], x * frequencies[0], y * frequencies[0])
     else sum([for (o in 0 to (gen.octaves - 1))
-        gen.amplitudes[o] * fold_octave(gen.fractal, base2(gen, gen.tables[o], x * gen.frequencies[o], y * gen.frequencies[o]))]) /
-        gen.total
+        amplitudes[o] * fold_octave(fractal, base2(gen, tables[o], x * frequencies[o], y * frequencies[o]))]) /
+        total
 }
 
 fn octaves3(gen, x: float, y: float, z: float) float {
-    if (gen.fractal == 'none') base3(gen, gen.tables[0], x * gen.frequencies[0], y * gen.frequencies[0], z * gen.frequencies[0])
-    else sum([for (o in 0 to (gen.octaves - 1)) gen.amplitudes[o] * fold_octave(gen.fractal,
-        base3(gen, gen.tables[o], x * gen.frequencies[o], y * gen.frequencies[o], z * gen.frequencies[o]))]) / gen.total
+    let fractal = gen.fractal
+    let tables = gen.tables
+    let frequencies = gen.frequencies
+    let amplitudes = gen.amplitudes
+    let total = gen.total;
+    if (fractal == 'none') base3(gen, tables[0], x * frequencies[0], y * frequencies[0], z * frequencies[0])
+    else sum([for (o in 0 to (gen.octaves - 1)) amplitudes[o] * fold_octave(fractal,
+        base3(gen, tables[o], x * frequencies[o], y * frequencies[o], z * frequencies[o]))]) / total
 }
 
 // domain warp: offset the sample point by simplex noise before evaluating the generator.
@@ -306,6 +322,25 @@ pub fn sample(gen, x: float, y: float) float =>
 pub fn sample3(gen, x: float, y: float, z: float) float =>
     if (gen.period == null) sample3_raw(gen, x, y, z) else periodic(gen, [x, y, z], 3)
 
-// the field-builder unit a native kernel replaces (PG10): rows of `width` samples at integer points.
+// prepare each octave's table once per row, then reduce along the octave axis.
+// sum(..., 0) preserves each point's octave order and bounds scratch to one row.
+fn octave_row(gen, p, width: int, y: float, frequency: float, amplitude: float, fractal, weighted: bool) array =>
+    [for (x in 0 to (width - 1)) (let n = base2(gen, p, float(x) * frequency, y * frequency),
+        if (weighted) amplitude * fold_octave(fractal, n) else n)]
+
+fn field_row(gen, width: int, y: float) array {
+    let tables = gen.tables
+    let frequencies = gen.frequencies
+    let amplitudes = gen.amplitudes
+    let fractal = gen.fractal;
+    if (fractal == 'none') octave_row(gen, tables[0], width, y, float(frequencies[0]), 1.0, fractal, false)
+    else (let layers = [for (o in 0 to (gen.octaves - 1))
+        octave_row(gen, tables[o], width, y, float(frequencies[o]), float(amplitudes[o]), fractal, true)],
+        sum(layers, 0) / gen.total)
+}
+
+// warp and periodic blending retain the point sampler; ordinary fields batch each row (PG5).
 pub fn field(gen, width: int, height: int) array =>
-    [for (y in 0 to (height - 1)) [for (x in 0 to (width - 1)) sample(gen, float(x), float(y))]]
+    if (gen.warp == null and gen.period == null and width > 0 and height > 0)
+        [for (y in 0 to (height - 1)) field_row(gen, width, float(y))]
+    else [for (y in 0 to (height - 1)) [for (x in 0 to (width - 1)) sample(gen, float(x), float(y))]]

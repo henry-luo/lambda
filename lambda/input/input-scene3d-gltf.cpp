@@ -177,11 +177,52 @@ struct Gltf {
         }
         auto name=asset_field(in,"name");if(name.isString()) a.attr(out,"name",a.text(name.cstring()));return true;
     }
+    // A textureInfo as a scene texture reference set on `material` under `key`: its
+    // image (an embedded one becomes a data: URI), its sampler, and its UV transform.
+    // A material has one set of UVs, so every map shares the first map's transform.
+    bool texture_ref(ItemReader tex,Item material,const char* key,GltfUvTransform& uv,bool& transform_set) {
+        auto extensions=asset_field(tex,"extensions"),transform=asset_field(extensions,"KHR_texture_transform");
+        bool other_extension=extensions.isMap()&&extensions.asMap().size()>(transform.isNull()?0:1);
+        if(integer(tex,"texCoord",0)!=0||other_extension||integer(transform,"texCoord",0)!=0) return fail("only TEXCOORD_0 textures are supported");
+        GltfUvTransform own;if(!transform.isNull()&&!texture_transform(transform,own)) return false;
+        if(!transform_set) {uv=own;transform_set=true;}
+        else if(own.present!=uv.present||memcmp(own.m,uv.m,sizeof(own.m))) a.ctx.addWarning("scene3d asset: a material's maps share its first map's texture transform");
+        int ti=integer(tex,"index");if(ti<0||(size_t)ti>=asset_count(field("textures"))) return fail("texture index out of bounds");
+        auto texture=object("textures",ti);int image=integer(texture,"source");
+        if(image<0||(size_t)image>=asset_count(field("images"))) return fail("image index out of bounds");
+        int sampler=integer(texture,"sampler");
+        if(sampler>=0&&(size_t)sampler>=asset_count(field("samplers"))) return fail("sampler index out of bounds");
+        auto sampling=sampler<0?ItemReader():object("samplers",sampler);
+        int wrap_s=integer(sampling,"wrapS",10497),wrap_t=integer(sampling,"wrapT",10497);
+        int min_filter=integer(sampling,"minFilter",9987),mag_filter=integer(sampling,"magFilter",9729);
+        if((wrap_s!=10497&&wrap_s!=33071&&wrap_s!=33648)||(wrap_t!=10497&&wrap_t!=33071&&wrap_t!=33648)||
+            (min_filter!=9728&&min_filter!=9729&&(min_filter<9984||min_filter>9987))||
+            (mag_filter!=9728&&mag_filter!=9729)) return fail("invalid texture sampler");
+        auto im=object("images",image);const char* uri=asset_field(im,"uri").cstring();
+        if(!uri) {
+            int vi=integer(im,"bufferView");auto v=object("bufferViews",vi);int length=integer(v,"byteLength");const uint8_t* bytes;
+            const char* mime=asset_field(im,"mimeType").cstring();
+            if(!mime||(!asset_is(mime,"image/png")&&!asset_is(mime,"image/jpeg"))||length<=0||!view(vi,0,1,length,length,&bytes)) return fail("invalid embedded image");
+            char* encoded=base64_encode_alloc(bytes,length,BASE64_STD);if(!encoded) return fail("image encoding allocation failed");
+            StrBuf* data=strbuf_new();strbuf_append_str(data,"data:");strbuf_append_str(data,mime);strbuf_append_str(data,";base64,");strbuf_append_str(data,encoded);
+            uri=a.ctx.builder.createString(data->str)->chars;strbuf_free(data);mem_free(encoded);
+        }
+        Item texture_node=ItemNull;Item texture_id=a.texture(uri,nullptr,&texture_node);if(get_type_id(texture_node)==LMD_TYPE_NULL) return false;
+        a.attr(material,key,texture_id);
+        a.attr(texture_node,"wrap-s",a.number(wrap_s));a.attr(texture_node,"wrap-t",a.number(wrap_t));
+        a.attr(texture_node,"min-filter",a.number(min_filter));a.attr(texture_node,"mag-filter",a.number(mag_filter));
+        return true;
+    }
+    bool factor(ItemReader object,const char* key,double fallback,double lo,double hi,double* value) {
+        *value=asset_number(asset_field(object,key),fallback);
+        return (isfinite(*value)&&*value>=lo&&*value<=hi)||fail("invalid material factor");
+    }
     bool load_materials() {
         for(size_t i=0;i<asset_count(field("materials"));i++) {
             auto m=object("materials",i),pbr=asset_field(m,"pbrMetallicRoughness");
             bool unlit=!asset_field(asset_field(m,"extensions"),"KHR_materials_unlit").isNull();
-            Item material=a.material("#ffffff",unlit?"basic":"lambert");
+            // glTF metallic-roughness is the native standard material; unlit is basic
+            Item material=a.material("#ffffff",unlit?"basic":"standard");
             if(asset_field(m,"name").isString()) a.attr(material,"name",a.text(asset_field(m,"name").cstring()));
             auto color=asset_field(pbr,"baseColorFactor");
             double rgba[4]={1,1,1,1};if(!color.isNull()) {
@@ -190,45 +231,35 @@ struct Gltf {
             }
             a.attr(material,"color",asset_color(a,rgba));
             const char* alpha=asset_field(m,"alphaMode").cstring();
-            if(alpha&&!asset_is(alpha,"OPAQUE")&&!asset_is(alpha,"BLEND")) return fail("alpha MASK materials are not supported");
-            a.attr(material,"alpha-mode",a.symbol(asset_is(alpha,"BLEND")?"blend":"opaque"));
+            if(alpha&&!asset_is(alpha,"OPAQUE")&&!asset_is(alpha,"BLEND")&&!asset_is(alpha,"MASK")) return fail("invalid alphaMode");
+            a.attr(material,"alpha-mode",a.symbol(asset_is(alpha,"BLEND")?"blend":asset_is(alpha,"MASK")?"mask":"opaque"));
             a.attr(material,"opacity",a.number(asset_is(alpha,"BLEND")?rgba[3]:1));
-            a.attr(material,"side",a.symbol(asset_field(m,"doubleSided").asBool()?"double":"front"));
-            auto tex=asset_field(pbr,"baseColorTexture");
-            GltfUvTransform uv;
-            if(!tex.isNull()) {
-                auto extensions=asset_field(tex,"extensions"),transform=asset_field(extensions,"KHR_texture_transform");
-                bool other_extension=extensions.isMap()&&extensions.asMap().size()>(transform.isNull()?0:1);
-                if(integer(tex,"texCoord",0)!=0||other_extension||integer(transform,"texCoord",0)!=0) return fail("only TEXCOORD_0 textures are supported");
-                if(!transform.isNull()&&!texture_transform(transform,uv)) return false;
-                int ti=integer(tex,"index");if(ti<0||(size_t)ti>=asset_count(field("textures"))) return fail("texture index out of bounds");
-                auto texture=object("textures",ti);int image=integer(texture,"source");
-                if(image<0||(size_t)image>=asset_count(field("images"))) return fail("image index out of bounds");
-                int sampler=integer(texture,"sampler");
-                if(sampler>=0&&(size_t)sampler>=asset_count(field("samplers"))) return fail("sampler index out of bounds");
-                auto sampling=sampler<0?ItemReader():object("samplers",sampler);
-                int wrap_s=integer(sampling,"wrapS",10497),wrap_t=integer(sampling,"wrapT",10497);
-                int min_filter=integer(sampling,"minFilter",9987),mag_filter=integer(sampling,"magFilter",9729);
-                if((wrap_s!=10497&&wrap_s!=33071&&wrap_s!=33648)||(wrap_t!=10497&&wrap_t!=33071&&wrap_t!=33648)||
-                    (min_filter!=9728&&min_filter!=9729&&(min_filter<9984||min_filter>9987))||
-                    (mag_filter!=9728&&mag_filter!=9729)) return fail("invalid texture sampler");
-                auto im=object("images",image);const char* uri=asset_field(im,"uri").cstring();
-                if(!uri) {
-                    int vi=integer(im,"bufferView");auto v=object("bufferViews",vi);int length=integer(v,"byteLength");const uint8_t* bytes;
-                    const char* mime=asset_field(im,"mimeType").cstring();
-                    if(!mime||(!asset_is(mime,"image/png")&&!asset_is(mime,"image/jpeg"))||length<=0||!view(vi,0,1,length,length,&bytes)) return fail("invalid embedded image");
-                    char* encoded=base64_encode_alloc(bytes,length,BASE64_STD);if(!encoded) return fail("image encoding allocation failed");
-                    StrBuf* data=strbuf_new();strbuf_append_str(data,"data:");strbuf_append_str(data,mime);strbuf_append_str(data,";base64,");strbuf_append_str(data,encoded);
-                    uri=a.ctx.builder.createString(data->str)->chars;strbuf_free(data);mem_free(encoded);
-                }
-                Item texture_node=ItemNull;Item texture_id=a.texture(uri,nullptr,&texture_node);if(get_type_id(texture_node)==LMD_TYPE_NULL) return false;
-                a.attr(material,"texture",texture_id);
-                a.attr(texture_node,"wrap-s",a.number(wrap_s));a.attr(texture_node,"wrap-t",a.number(wrap_t));
-                a.attr(texture_node,"min-filter",a.number(min_filter));a.attr(texture_node,"mag-filter",a.number(mag_filter));
+            if(asset_is(alpha,"MASK")) {
+                double cutoff;if(!factor(m,"alphaCutoff",.5,0,1,&cutoff)) return false;
+                // a zero cutoff keeps every fragment, which the native mask expresses as opaque
+                if(cutoff>0) a.attr(material,"alpha-cutoff",a.number(cutoff));
+                else a.attr(material,"alpha-mode",a.symbol("opaque"));
             }
-            if(!unlit) a.ctx.addWarning("scene3d asset: glTF metallic/roughness shading is approximated by Lambert base color");
-            if(!asset_field(m,"normalTexture").isNull()||!asset_field(m,"occlusionTexture").isNull()||!asset_field(m,"emissiveTexture").isNull()||
-                !asset_field(pbr,"metallicRoughnessTexture").isNull()) a.ctx.addWarning("scene3d asset: secondary PBR texture maps are not rendered");
+            a.attr(material,"side",a.symbol(asset_field(m,"doubleSided").asBool()?"double":"front"));
+            GltfUvTransform uv;bool transform_set=false;
+            auto base=asset_field(pbr,"baseColorTexture");
+            if(!base.isNull()&&!texture_ref(base,material,"texture",uv,transform_set)) return false;
+            if(!unlit) {
+                double metalness,roughness;
+                if(!factor(pbr,"metallicFactor",1,0,1,&metalness)||!factor(pbr,"roughnessFactor",1,0,1,&roughness)) return false;
+                a.attr(material,"metalness",a.number(metalness));a.attr(material,"roughness",a.number(roughness));
+                const char* maps[][2]={{"metallicRoughnessTexture","metal-rough-texture"},{"normalTexture","normal-texture"},
+                    {"occlusionTexture","occlusion-texture"},{"emissiveTexture","emissive-texture"}};
+                for(auto& map:maps) {
+                    auto info=asset_field(map[0][0]=='m'?pbr:m,map[0]);
+                    if(info.isNull()) continue;
+                    if(!texture_ref(info,material,map[1],uv,transform_set)) return false;
+                    double value;
+                    if(map[0][0]=='n') {if(!factor(info,"scale",1,-1e6,1e6,&value)) return false;a.attr(material,"normal-scale",a.number(value));}
+                    if(map[0][0]=='o') {if(!factor(info,"strength",1,0,1,&value)) return false;a.attr(material,"occlusion-strength",a.number(value));}
+                }
+            } else if(!asset_field(m,"emissiveTexture").isNull()||!asset_field(m,"normalTexture").isNull())
+                a.ctx.addWarning("scene3d asset: unlit materials omit their normal and emissive maps");
             if(!emissive(m,material)) return false;
             materials.append(material);uv_transforms.append(uv);
         }
@@ -254,8 +285,9 @@ struct Gltf {
         double rgb[3];if(asset_count(factor)!=3) return fail("invalid emissiveFactor");
         for(unsigned c=0;c<3;c++) {rgb[c]=asset_component(factor,c);if(!isfinite(rgb[c])||rgb[c]<0||rgb[c]>1) return fail("invalid emissive component");}
         if(!rgb[0]&&!rgb[1]&&!rgb[2]) return true;
-        // the factor only scales the unrendered emissive map; applying it alone would wash the surface out.
-        if(!asset_field(m,"emissiveTexture").isNull()) {a.ctx.addWarning("scene3d asset: textured emission is omitted");return true;}
+        // an unlit material has no emissive map to scale; the factor alone would wash the surface out
+        if(!asset_field(m,"emissiveTexture").isNull()&&!asset_field(asset_field(m,"extensions"),"KHR_materials_unlit").isNull())
+            {a.ctx.addWarning("scene3d asset: textured emission is omitted");return true;}
         auto strength=asset_field(asset_field(asset_field(m,"extensions"),"KHR_materials_emissive_strength"),"emissiveStrength");
         double intensity=asset_number(strength,1);if(!isfinite(intensity)||intensity<0) return fail("invalid emissiveStrength");
         a.attr(material,"emissive",asset_color(a,rgb));a.attr(material,"emissive-intensity",a.number(intensity));return true;
@@ -276,7 +308,9 @@ struct Gltf {
         if(!isfinite(intensity)||intensity<0||!isfinite(range)||range<0||(!asset_field(source,"range").isNull()&&range<=0)) return fail("invalid light intensity or range");
         Item out=a.element("light");a.attr(out,"id",a.id("light",node_index));a.attr(out,"type",a.symbol(type));
         auto label=asset_field(source,"name");if(label.isString()) a.attr(out,"name",a.text(label.cstring()));
-        a.attr(out,"color",asset_color(a,rgb));a.attr(out,"intensity",a.number(intensity));
+        // glTF intensities are physical (lux, candela); a native light of intensity I lights a white
+        // Lambert surface to I, which is π times the physical response, so it arrives divided by π (SP1)
+        a.attr(out,"color",asset_color(a,rgb));a.attr(out,"intensity",a.number(intensity/M_PI));
         double origin[3]={0,0,0},forward[3]={0,0,-1};a.attr(out,"position",a.array(origin,3));
         if(!point) a.attr(out,"target",a.array(forward,3));
         if(range>0&&!asset_is(type,"directional")) a.attr(out,"distance",a.number(range));
@@ -344,18 +378,23 @@ struct Gltf {
         AssetColumn columns[ASSET_COLUMN_COUNT];columns[0].name="positions";columns[0].width=3;
         columns[0].values=static_cast<lam::ArrayList<double>&&>(positions);
         a.attr(out,"id",a.id("mesh",a.serial++));a.attr(geometry,"type",a.symbol("buffer"));
-        const char* keys[]={"NORMAL","TEXCOORD_0","COLOR_0","JOINTS_0","WEIGHTS_0"};const char* attrs[]={"normals","uvs","colors","skin-indices","skin-weights"};
+        const char* keys[]={"NORMAL","TEXCOORD_0","COLOR_0","JOINTS_0","WEIGHTS_0","TANGENT"};
+        const char* attrs[]={"normals","uvs","colors","skin-indices","skin-weights","tangents"};
         int si=integer(node,"skin");if(si>=0&&(size_t)si>=skins.size()) return fail("skin index out of bounds");
         bool has_joints=!asset_field(attributes,"JOINTS_0").isNull(),has_weights=!asset_field(attributes,"WEIGHTS_0").isNull();
         if(has_joints!=has_weights||(has_joints&&si<0)) return fail("joint/weight attributes require a skin");
         int mi=integer(primitive,"material",materials.size()-1);if(mi<0||(size_t)mi>=materials.size()) return fail("material index out of bounds");
         if(!asset_field(attributes,"JOINTS_1").isNull()||!asset_field(attributes,"WEIGHTS_1").isNull()) return fail("more than four skin influences are not supported");
-        for(unsigned k=0;k<5;k++) if(!asset_field(attributes,keys[k]).isNull()) {
+        // glTF 2.0 §3.7.2.1: without normals, flat normals are computed and tangents ignored
+        bool has_normals=!asset_field(attributes,"NORMAL").isNull();
+        for(unsigned k=0;k<6;k++) if(!asset_field(attributes,keys[k]).isNull()&&(k!=5||has_normals)) {
             lam::ArrayList<double> data;unsigned c,ct;if(!accessor(integer(attributes,keys[k]),data,&c,&ct)) return false;
             unsigned expected=k==1?2:k<3?3:4;
             bool normalized=asset_field(object("accessors",integer(attributes,keys[k])),"normalized").asBool();
-            if((k<2&&!attribute_encoding(keys[k],ct,normalized))||(k==3&&normalized)||
-                (k>=2&&k!=3&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
+            // quantized tangents are signed normalized (KHR_mesh_quantization)
+            bool tangent_encoding=ct==5126||(quantization&&(ct==5120||ct==5122)&&normalized);
+            if((k<2&&!attribute_encoding(keys[k],ct,normalized))||(k==3&&normalized)||(k==5&&!tangent_encoding)||
+                (k>=2&&k!=3&&k!=5&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
             if((c!=expected&&!(k==2&&c==4))||data.size()!=vertices*c) return fail("vertex attribute size mismatch");
             if(k==1&&uv_transforms[mi].present) for(size_t v=0;v<vertices;v++) {
                 const double* m=uv_transforms[mi].m;double u=data[v*2],t=data[v*2+1];
@@ -374,6 +413,12 @@ struct Gltf {
             if(k==4) for(size_t v=0;v<vertices;v++) {
                 double sum=0;for(unsigned n=0;n<4;n++) {double w=data[v*4+n];if(w<0||w>1) return fail("invalid skin weight");sum+=w;}
                 if(sum<=0) return fail("vertex has zero total skin weight");for(unsigned n=0;n<4;n++) data[v*4+n]/=sum;
+            }
+            // a unit direction and a handedness of exactly ±1, as decoding may leave them slightly off
+            if(k==5) for(size_t v=0;v<vertices;v++) {
+                double* t=&data[v*4];double length=sqrt(t[0]*t[0]+t[1]*t[1]+t[2]*t[2]);
+                if(!(length>1e-6)) return fail("degenerate vertex tangent");
+                for(unsigned n=0;n<3;n++) t[n]/=length;t[3]=t[3]<0?-1:1;
             }
             if(k==2) {
                 lam::ArrayList<double> rgb;

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "description": "S5.1.5 / D2.4: erased parameters, indexed values and local bindings compare with null through a guarded Item-tag test; Type values retain the equality fallback and errors preserve their payload.",
+  "checks": [
+    {
+      "in_func": "_equals_null_#",
+      "expect": [
+        "ursh\t{{r}},",
+        "bne\t",
+        "eq\t{{r}}, {{r}}, 1"
+      ]
+    },
+    {
+      "in_func": "_differs_null_#",
+      "expect": [
+        "ursh\t{{r}},",
+        "bne\t",
+        "ne\t{{r}}, {{r}}, 1"
+      ]
+    },
+    {
+      "in_func": "_indexed_#",
+      "expect": [
+        "ursh\t{{r}},",
+        "bne\t",
+        "ne\t{{r}}, {{r}}, 1"
+      ]
+    },
+    {
+      "in_func": "_local_#",
+      "expect": [
+        "ursh\t{{r}},",
+        "bne\t",
+        "eq\t{{r}}, {{r}}, 1"
+      ]
+    }
+  ]
+}

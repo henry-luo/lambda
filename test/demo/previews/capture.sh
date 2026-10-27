@@ -26,6 +26,7 @@ photo 0 0 1280 687
 photos 0 0 1100 590
 draw 0 0 1280 687
 greetings 0 0 1040 558
+dreamhome 150 40 1040 558
 word 0 0 1040 558
 note 0 0 960 516
 slides 0 0 1040 558

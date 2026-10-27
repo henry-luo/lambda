@@ -99,6 +99,11 @@
       "tags": ["greetings"]
     },
     {
+      "name": "dreamhome",
+      "globs": ["test/ui/dreamhome/*.json"],
+      "tags": ["dreamhome"]
+    },
+    {
       "name": "book",
       "globs": ["test/ui/book/*.json"],
       "tags": ["book"]

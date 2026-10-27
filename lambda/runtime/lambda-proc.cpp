@@ -185,6 +185,10 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     const char* extension = file_path_ext(file_path);
     bool zip = format_str ? !strcmp(format_str, "zip") : extension && !str_icmp_cstr(extension, ".zip");
     if (zip) {
+#ifdef LAMBDA_IME_RESOURCE_IO
+        strbuf_free(path_buf);
+        return io_fs_error(ERR_INVALID_OPERATION, "output: ZIP is unavailable in this build");
+#else
         if (append) {
             strbuf_free(path_buf);
             return io_fs_error(ERR_INVALID_OPERATION, "output: ZIP append is unsupported");
@@ -200,6 +204,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         strbuf_free(path_buf);
         return ok ? (Item){.item = i2it((int64_t)size)}
             : io_fs_error(ERR_FILE_WRITE_ERROR, "output ZIP: %s", error.message[0] ? error.message : "atomic write failed");
+#endif
     }
 
     // handle error source: report and return error
@@ -389,6 +394,7 @@ static bool get_map_bool_field(Map* map, const char* field_name, bool default_va
 //   atomic: bool - write to temp file first, then rename (default: false)
 // Returns: bytes written on success, error on failure
 Item pn_output3(Item source, Item target_item, Item options_item) {
+#ifndef LAMBDA_IME_RESOURCE_IO
     ZipWriteOptions zip_options = zip_default_write_options();
     ZipLimits limits = zip_options.limits;
     ZipError zip_error = {};
@@ -399,6 +405,7 @@ Item pn_output3(Item source, Item target_item, Item options_item) {
     }
     if (!fs_zip_options(options_item, &limits, &zip_options, &zip_error))
         return io_fs_error(ERR_TYPE_MISMATCH, "output: %s", zip_error.message);
+#endif
     const char* format_str = NULL;
     bool append = false;
     bool atomic = false;
@@ -430,7 +437,11 @@ Item pn_output3(Item source, Item target_item, Item options_item) {
         return ItemError;
     }
 
+#ifdef LAMBDA_IME_RESOURCE_IO
+    return pn_output_internal(source, target_item, format_str, append, atomic);
+#else
     return pn_output_internal(source, target_item, format_str, append, atomic, &zip_options);
+#endif
 }
 
 // 2-parameter append wrapper: used by |>> pipe operator
@@ -450,6 +461,7 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item);
 // on the task's own stack between parks, never a message the runtime sends.
 // ---------------------------------------------------------------------------
 
+#ifndef LAMBDA_NO_NETWORK
 #define FETCH_DEFAULT_USER_AGENT "Lambda/0.1"
 #define FETCH_LOCAL_CHUNK ((size_t)256 * 1024)
 
@@ -1057,6 +1069,7 @@ static Item fetch_to_file(const char* url, size_t url_len, const char* dst_path)
     fetch_job_free(job);
     return result;
 }
+#endif
 
 // Helper function to escape shell arguments for safety
 String* escape_shell_arg(String* arg) {
@@ -1321,6 +1334,11 @@ Item pn_io_copy(Item src_item, Item dst_item) {
 
     // Handle remote source: the io.fetch transfer, streamed to disk (AR-E3v2)
     if (target_is_remote(src_target)) {
+#ifdef LAMBDA_NO_NETWORK
+        target_free(src_target);
+        strbuf_free(dst_buf);
+        return io_fs_error(ERR_NOT_IMPLEMENTED, "io.copy: network sources are unavailable in this build");
+#else
         log_debug("io.copy: fetching remote source to %s", dst_path);
         StrBuf* url_buf = strbuf_new();
         target_to_url_string(src_target, url_buf);
@@ -1335,6 +1353,7 @@ Item pn_io_copy(Item src_item, Item dst_item) {
         strbuf_free(url_buf);
         strbuf_free(dst_buf);
         return get_type_id(fetched) == LMD_TYPE_ERROR ? fetched : ItemNull;
+#endif
     }
 
     // Local source - get local path
@@ -1593,6 +1612,7 @@ Item pn_io_rename(Item old_item, Item new_item) {
 }
 
 // io.fetch(target) - Fetch content from URL or local file (1-arg version)
+#ifndef LAMBDA_NO_NETWORK
 Item pn_io_fetch1(Item target_item) {
     return pn_fetch(target_item, ItemNull);
 }
@@ -1601,3 +1621,4 @@ Item pn_io_fetch1(Item target_item) {
 Item pn_io_fetch2(Item target_item, Item options_item) {
     return pn_fetch(target_item, options_item);
 }
+#endif

@@ -940,7 +940,8 @@ TEST_F(ModelInputTest, SceneAssetBakesTextureTransformsAndMapsEmissionAndPunctua
     EXPECT_DOUBLE_EQ(material.get_attr("emissive-intensity").asFloat(), 3);
     ASSERT_EQ(light_count, 3u);
     EXPECT_STREQ(lights[0].get_attr("type").cstring(), "directional");
-    EXPECT_DOUBLE_EQ(lights[0].get_attr("intensity").asFloat(), 2);
+    // physical glTF intensities arrive divided by π: native units carry the physical response's π (SP1)
+    EXPECT_DOUBLE_EQ(lights[0].get_attr("intensity").asFloat(), 2 / M_PI);
     EXPECT_EQ(lights[0].get_attr("target").asArray().get(2).asFloat(), -1);
     EXPECT_STREQ(lights[1].get_attr("color").cstring(), "#ff0000");
     EXPECT_DOUBLE_EQ(lights[1].get_attr("distance").asFloat(), 5);
@@ -950,14 +951,18 @@ TEST_F(ModelInputTest, SceneAssetBakesTextureTransformsAndMapsEmissionAndPunctua
     EXPECT_DOUBLE_EQ(lights[2].get_attr("penumbra").asFloat(), .5);
 }
 
-TEST_F(ModelInputTest, SceneAssetOmitsTexturedEmissionAndRejectsInvalidExtensionValues) {
+TEST_F(ModelInputTest, SceneAssetMapsTexturedEmissionAndRejectsInvalidExtensionValues) {
     StrBuf* source = strbuf_new(); strbuf_append_str(source, textured_extension_model);
     char* factor = strstr(source->str, "\"emissiveFactor\""); ASSERT_NE(factor, nullptr);
     StrBuf* textured = strbuf_new(); strbuf_append_str_n(textured, source->str, factor - source->str);
     strbuf_append_str(textured, "\"emissiveTexture\":{\"index\":0},"); strbuf_append_str(textured, factor);
     Input* input = parse(textured->str, "scene3d-asset", "textured-emission.gltf");
     ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed) << input->parse_error_message;
-    EXPECT_TRUE(ElementReader(input->root).findChildElement("resources").findChildElement("material").get_attr("emissive").isNull());
+    // a standard material's emission is its factor times its emissive map
+    ElementReader material = ElementReader(input->root).findChildElement("resources").findChildElement("material");
+    EXPECT_STREQ(material.get_attr("type").cstring(), "standard");
+    EXPECT_STREQ(material.get_attr("emissive").cstring(), "#ff0000");
+    EXPECT_FALSE(material.get_attr("emissive-texture").isNull());
     const char* replacements[][2] = {{"\"outerConeAngle\":0.4", "\"outerConeAngle\":0.1"}, {"\"range\":5", "\"range\":0"},
         {"\"scale\":[2,2]", "\"scale\":[2]"}, {"\"type\":\"point\"", "\"type\":\"area\""}, {"\"light\":2", "\"light\":9"}};
     for (auto& r : replacements) {
