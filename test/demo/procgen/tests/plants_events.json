@@ -1,0 +1,470 @@
+{
+  "name": "Procedural botany: growth, organs, species, resize and terrain navigation",
+  "html": "test/demo/procgen/plants.ls",
+  "viewport": {
+    "width": 1240,
+    "height": 1120
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "The glasshouse"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".generator-nav a"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".species-tabs button"
+      },
+      "count": 11
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#growth"
+      },
+      "equals": "4 / 5"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#angle"
+      },
+      "equals": "25\u00b0"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".stem"
+      },
+      "count": 41
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 8
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom ellipse"
+      },
+      "count": 64
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".leaf"
+      },
+      "min": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/flowers-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=next]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2027"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=previous]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".stem"
+      },
+      "count": 41
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=leaves]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".leaf"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".stem"
+      },
+      "count": 41
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=blooms]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#flowers"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".bud"
+      },
+      "count": 8
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/skeleton-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=leaves]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=blooms]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=grow]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#growth"
+      },
+      "equals": "5 / 5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=grow]"
+      },
+      "attribute": "disabled",
+      "equals": "disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=prune]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#growth"
+      },
+      "equals": "4 / 5"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=wider]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#angle"
+      },
+      "equals": "30\u00b0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=narrower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#angle"
+      },
+      "equals": "25\u00b0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=fern]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Woodland fern"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=fern]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".leaf"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#flowers"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/fern-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=herb]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Meadow herb"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".leaf"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 0
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/herb-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=flower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "count": 8
+    },
+    {
+      "type": "resize",
+      "width": 760,
+      "height": 1060
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.specimen-card').getBoundingClientRect().right <= window.innerWidth && document.querySelector('.botanical-controls').getBoundingClientRect().top >= document.querySelector('.specimen-card').getBoundingClientRect().bottom"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/flowers-tablet.png"
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Wild cosmos"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.specimen-card').getBoundingClientRect().right <= window.innerWidth && document.querySelector('.species-tabs').getBoundingClientRect().right <= window.innerWidth"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/flowers-mobile.png"
+    },
+    {
+      "type": "resize",
+      "width": 1240,
+      "height": 1120
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".generator-nav a[href=\"world.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Oakesterly",
+      "assert_timeout": 60000,
+      "assert_interval": 250
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".map"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".generator-nav a[href=\"plants.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "The glasshouse",
+      "assert_timeout": 10000,
+      "assert_interval": 100
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=next]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2027"
+    }
+  ]
+}

@@ -1,0 +1,736 @@
+{
+  "name": "Eleven botanical forms: solid pixels, retained orbit, growth and mobile views",
+  "html": "test/demo/procgen/plants.ls",
+  "viewport": {
+    "width": 1240,
+    "height": 1250
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".species-tabs button"
+      },
+      "count": 11
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=cactus]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Desert cactus"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "svg .spine"
+      },
+      "min": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/cactus-illustration.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=fungus]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Woodland mushrooms"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "svg .cap"
+      },
+      "min": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/fungus-illustration.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=sunflower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Golden sunflower"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blossom"
+      },
+      "min": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/sunflower-illustration.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=lavender]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".specimen-caption h2"
+      },
+      "equals": "Wild lavender"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "svg .flower"
+      },
+      "min": 1
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/lavender-illustration.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=view3d]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.mesh=document.querySelector('#botanical-model mesh');globalThis.homePose=document.getElementById('botanical-camera').getAttribute('position')"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "before-orbit",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#botanical-scene",
+        "offset_x": 80,
+        "offset_y": 80
+      },
+      "dx": 110,
+      "dy": 35,
+      "steps": 4
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('botanical-camera').getAttribute('position')!==homePose && document.querySelector('#botanical-model mesh')===mesh"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "reference": "before-orbit",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('botanical-camera').getAttribute('position')===homePose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=in]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('botanical-camera').getAttribute('position')!==homePose && document.querySelector('#botanical-model mesh')===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=left]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('botanical-camera').getAttribute('position')!==homePose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=fern]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/fern-3d.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=herb]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/herb-3d.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=flower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/flower-3d.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=sunflower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/sunflower-3d.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=lavender]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/lavender-3d.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=cactus]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/cactus-3d.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=fungus]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/fungus-3d.png"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=cap]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=gill]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=leaves]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=spot]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=cap]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=leaves]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=spot]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=next]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2027"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=previous]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seed"
+      },
+      "equals": "seed 2026"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=grow]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#growth"
+      },
+      "equals": "5 / 5"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('[data-organ=cap]')).reduce((n,e)=>n+Number(e.getAttribute('data-count')),0)===6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=prune]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#growth"
+      },
+      "equals": "4 / 5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=cactus]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=leaves]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=spine]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=rib]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=leaves]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=spine]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=blooms]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=flower]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=spine]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=blooms]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "[data-organ=flower]"
+      },
+      "min": 1
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.specimen-card').getBoundingClientRect().right<=window.innerWidth && document.querySelector('#botanical-scene').getBoundingClientRect().width>300"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#botanical-scene",
+      "width": 360,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 800
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/cactus-3d-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=view2d]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#botanical-scene"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "svg .spine"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=fungus]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "svg .cap"
+      },
+      "count": 5
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#flowers"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procgen/fungus-illustration-mobile.png"
+    }
+  ]
+}

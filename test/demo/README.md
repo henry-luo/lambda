@@ -23,7 +23,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `aquarium` | `aquarium/aquarium.ls` | [Aquarium builder](aquarium/README.md) |
 | `hamster` | `hamster/hamster.ls` | [Hamlet hamster habitat studio](hamster/README.md) |
 | `chart` | `chart/index.html` | [Chart collection](chart/README.md) |
-| `procgen` | `procgen/world.ls` | [World generator](procgen/README.md) |
+| `procgen` | `procgen/world.ls` | [Procedural generation workshops](procgen/README.md) |
 | `cityscape` | `cityscape/cityscape.ls` | [The Rings of a City](cityscape/README.md) |
 | `photo-album` | `photo-album/photo-album.ls` | [Photo album](photo-album/README.md) |
 | `slides` | `slides/slides.ls` | [Slides](slides/README.md) |
