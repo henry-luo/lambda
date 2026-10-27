@@ -1,6 +1,6 @@
 {
   "name": "Eleven botanical forms: solid pixels, retained orbit, growth and mobile views",
-  "html": "test/demo/procgen/plants.ls",
+  "html": "test/demo/procart/plants.ls",
   "viewport": {
     "width": 1240,
     "height": 1250
@@ -39,7 +39,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/cactus-illustration.png"
+      "file": "temp/procart/cactus-illustration.png"
     },
     {
       "type": "click",
@@ -65,7 +65,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/fungus-illustration.png"
+      "file": "temp/procart/fungus-illustration.png"
     },
     {
       "type": "click",
@@ -91,7 +91,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/sunflower-illustration.png"
+      "file": "temp/procart/sunflower-illustration.png"
     },
     {
       "type": "click",
@@ -117,7 +117,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/lavender-illustration.png"
+      "file": "temp/procart/lavender-illustration.png"
     },
     {
       "type": "click",
@@ -264,7 +264,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/fern-3d.png"
+      "file": "temp/procart/fern-3d.png"
     },
     {
       "type": "click",
@@ -297,7 +297,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/herb-3d.png"
+      "file": "temp/procart/herb-3d.png"
     },
     {
       "type": "click",
@@ -330,7 +330,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/flower-3d.png"
+      "file": "temp/procart/flower-3d.png"
     },
     {
       "type": "click",
@@ -363,7 +363,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/sunflower-3d.png"
+      "file": "temp/procart/sunflower-3d.png"
     },
     {
       "type": "click",
@@ -396,7 +396,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/lavender-3d.png"
+      "file": "temp/procart/lavender-3d.png"
     },
     {
       "type": "click",
@@ -429,7 +429,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/cactus-3d.png"
+      "file": "temp/procart/cactus-3d.png"
     },
     {
       "type": "click",
@@ -462,7 +462,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/fungus-3d.png"
+      "file": "temp/procart/fungus-3d.png"
     },
     {
       "type": "assert_count",
@@ -683,7 +683,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/cactus-3d-mobile.png"
+      "file": "temp/procart/cactus-3d-mobile.png"
     },
     {
       "type": "click",
@@ -730,7 +730,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/fungus-illustration-mobile.png"
+      "file": "temp/procart/fungus-illustration-mobile.png"
     }
   ]
 }

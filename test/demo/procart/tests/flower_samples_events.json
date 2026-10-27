@@ -1,6 +1,6 @@
 {
   "name": "Reference flower families: eleven samples, layered blooms, petals, stamens and pond leaves",
-  "html": "test/demo/procgen/plants.ls",
+  "html": "test/demo/procart/plants.ls",
   "viewport": {
     "width": 1240,
     "height": 1400
@@ -53,7 +53,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/ref-lupin-2d.png"
+      "file": "temp/procart/ref-lupin-2d.png"
     },
     {
       "type": "click",
@@ -96,7 +96,7 @@
       "target": "#botanical-scene",
       "width": 800,
       "height": 700,
-      "file": "temp/procgen/ref-lupin-3d.png"
+      "file": "temp/procart/ref-lupin-3d.png"
     },
     {
       "type": "click",
@@ -136,7 +136,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/ref-bluecrown-2d.png"
+      "file": "temp/procart/ref-bluecrown-2d.png"
     },
     {
       "type": "click",
@@ -179,7 +179,7 @@
       "target": "#botanical-scene",
       "width": 800,
       "height": 700,
-      "file": "temp/procgen/ref-bluecrown-3d.png"
+      "file": "temp/procart/ref-bluecrown-3d.png"
     },
     {
       "type": "click",
@@ -219,7 +219,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/ref-rosette-2d.png"
+      "file": "temp/procart/ref-rosette-2d.png"
     },
     {
       "type": "click",
@@ -262,7 +262,7 @@
       "target": "#botanical-scene",
       "width": 800,
       "height": 700,
-      "file": "temp/procgen/ref-rosette-3d.png"
+      "file": "temp/procart/ref-rosette-3d.png"
     },
     {
       "type": "click",
@@ -302,7 +302,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/ref-lotus-2d.png"
+      "file": "temp/procart/ref-lotus-2d.png"
     },
     {
       "type": "click",
@@ -345,7 +345,7 @@
       "target": "#botanical-scene",
       "width": 800,
       "height": 700,
-      "file": "temp/procgen/ref-lotus-3d.png"
+      "file": "temp/procart/ref-lotus-3d.png"
     },
     {
       "type": "click",
@@ -610,7 +610,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/reference-flowers-mobile.png"
+      "file": "temp/procart/reference-flowers-mobile.png"
     },
     {
       "type": "click",

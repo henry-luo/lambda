@@ -1,4 +1,4 @@
-// Run: ./lambda.exe view test/demo/procgen/patterns.ls
+// Run: ./lambda.exe view test/demo/procart/patterns.ls
 import workshop: .mod_workshop
 import patterns: .mod_patterns
 

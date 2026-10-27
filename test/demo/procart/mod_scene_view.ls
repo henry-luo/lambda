@@ -8,6 +8,14 @@ import solids: .mod_plant_solids
 
 pub fn pose(position=[6.8,4.8,8.2]) map => camera.prepare({position:position,target:[0.0,2.0,0.0],fov:38.0})
 
+// batch shared shapes across a composition while retaining semantic category selectors.
+pub fn meshes(parts,options={}) array => [
+    for (p in parts group by ((p.category or "")++"/"++p.shape++"/"++p.color++"/"++p.role) as batch into group)
+        <mesh *:options,geometry:group[0].shape,'data-organ':group[0].role,'data-kind':group[0].category,'data-count':string(len(group)),
+            instances:[for (part in group) solids.matrix(part)],
+            s.material('lambert',{color:group[0].color,side:'double'})>
+]
+
 pub fn viewport(parts,resources,options) element {
     let box = solids.bounds(if (options.fit != null) options.fit else parts)
     let center = [(box.lo[0]+box.hi[0])/2.0,box.lo[1],(box.lo[2]+box.hi[2])/2.0]
@@ -19,12 +27,7 @@ pub fn viewport(parts,resources,options) element {
         s.light('directional',{position:[5.0,4.0,-5.0],color:"#c4d9d5",intensity:0.45}),
         s.resources([geometry.sphere("round",10,16),geometry.sphere("plinth",8,48),*resources]),
         <mesh geometry:"plinth",position:[0.0,-0.09,0.0],scale:[2.4,0.09,2.4],s.material('lambert',{color:"#d8d6bb"})>,
-        s.group([s.group([
-            for (p in parts group by (p.shape++"/"++p.color++"/"++p.role) as batch into group)
-                <mesh geometry:group[0].shape,'data-organ':group[0].role,'data-count':string(len(group)),
-                    instances:[for (part in group) solids.matrix(part)],
-                    s.material('lambert',{color:group[0].color,side:'double'})>
-        ],{position:[for (v in center) -v]})],{id:options.model_id,scale:[box.scale,box.scale,box.scale]})
+        s.group([s.group(meshes(parts),{position:[for (v in center) -v]})],{id:options.model_id,scale:[box.scale,box.scale,box.scale]})
     ],{id:options.id,camera:options.camera_id,width:760,height:540,viewBox:"0 0 760 540",background:"#f4f3e7",
         tabindex:"0",role:"img",'aria-label':options.label,style:"display:block;width:100%;height:auto;touch-action:none"})
 }
@@ -36,13 +39,16 @@ pn publish(owner,next) {
 }
 fn moved(current,action,reset_pose) map {
     let delta = camera.subtract(current.position,current.target)
-    let distance = sqrt(camera.dot(delta,delta));
+    let distance = sqrt(camera.dot(delta,delta))
+    let home_delta = camera.subtract(reset_pose.position,reset_pose.target)
+    let home_distance = sqrt(camera.dot(home_delta,home_delta));
     if (action == "reset") reset_pose
     else if (action == "left" or action == "right") camera.control(current,{type:"orbit",yaw:if (action == "left") -0.28 else 0.28})
-    else camera.control(current,{type:"zoom",factor:max(5.0,min(20.0,distance*(if (action == "in") 0.88 else 1.0/0.88)))/distance})
+    // zoom bounds follow the scene's home scale, including world-sized compositions.
+    else camera.control(current,{type:"zoom",factor:max(home_distance*0.4,min(home_distance*1.8,distance*(if (action == "in") 0.88 else 1.0/0.88)))/distance})
 }
 
-view <orbit> state current:pose(),drag:null { ~.rendered }
+view <orbit> state current:~.camera,drag:null { ~.rendered }
 on render(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     current = publish(evt.target,~.camera)

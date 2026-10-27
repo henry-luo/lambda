@@ -1,6 +1,6 @@
 {
   "name": "All procedural workshops open from their navigation and generate real content",
-  "html": "test/demo/procgen/world.ls",
+  "html": "test/demo/procart/world.ls",
   "viewport": {
     "width": 1240,
     "height": 1200
@@ -10,7 +10,7 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "document.querySelectorAll('.generator-nav a').length===5"
+      "js": "document.querySelectorAll('.generator-nav a').length===6 && document.querySelector('.generator-nav a[href=\"meadow.ls\"]')!==null"
     },
     {
       "type": "click",
@@ -272,7 +272,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen-navigation/rocks.png"
+      "file": "temp/procart-navigation/rocks.png"
     },
     {
       "type": "resize",
@@ -290,7 +290,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen-navigation/rocks-mobile.png"
+      "file": "temp/procart-navigation/rocks-mobile.png"
     },
     {
       "type": "resize",
@@ -531,7 +531,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen-navigation/textures.png"
+      "file": "temp/procart-navigation/textures.png"
     },
     {
       "type": "resize",
@@ -549,7 +549,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen-navigation/textures-mobile.png"
+      "file": "temp/procart-navigation/textures-mobile.png"
     },
     {
       "type": "resize",
@@ -778,7 +778,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen-navigation/patterns.png"
+      "file": "temp/procart-navigation/patterns.png"
     },
     {
       "type": "resize",
@@ -796,7 +796,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen-navigation/patterns-mobile.png"
+      "file": "temp/procart-navigation/patterns-mobile.png"
     },
     {
       "type": "resize",

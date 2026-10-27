@@ -1,4 +1,4 @@
-// Run: ./lambda.exe view test/demo/procgen/world.ls
+// Run: ./lambda.exe view test/demo/procart/world.ls
 // A world from one seed, built with lambda.procgen: eroded terrain, rivers and
 // biomes; towns placed by Poisson sampling and named by a Markov model; a line of
 // lore from a Tracery-style grammar; an emblem grown by a stochastic L-system; and
@@ -54,5 +54,5 @@ on click(evt) {
 }
 
 <html lang:"en",
-    <head <meta charset:"UTF-8"><title "World — lambda.procgen"><style CSS>>
+    <head <meta charset:"UTF-8"><title "World — Procart"><style CSS>>
     apply(<world_app>)>

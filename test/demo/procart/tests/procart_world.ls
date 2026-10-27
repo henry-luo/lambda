@@ -1,4 +1,4 @@
-// The procgen showcase's world model (test/demo/procgen/mod_world.ls): one seed fixes everything.
+// The procart showcase's world model (test/demo/procart/mod_world.ls): one seed fixes everything.
 import W: ~~.mod_world
 import geometry: lambda.chart.geometry
 

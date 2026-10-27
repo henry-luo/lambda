@@ -1,6 +1,6 @@
 {
-  "name": "procgen resize preserves world geometry and controls",
-  "html": "test/demo/procgen/world.ls",
+  "name": "procart resize preserves world geometry and controls",
+  "html": "test/demo/procart/world.ls",
   "viewport": {
     "width": 1240,
     "height": 860

@@ -1,4 +1,4 @@
-// The world behind the procgen showcase: everything here is a pure function of one
+// The world behind the procart showcase: everything here is a pure function of one
 // seed, built from lambda.procgen (vibe/Lambda_Pkg_Proc_Gen.md §7). Each part draws
 // from its own derived key, so turning erosion off changes the land, not the names.
 import rng: lambda.procgen.rng

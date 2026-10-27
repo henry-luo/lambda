@@ -114,14 +114,15 @@ pub fn lavender(k,recipe,order,angle) map {
      solids:[*stalks,*leaves,*flowers],petal:recipe.petal}
 }
 
-fn spatial(x,y,turn,scale) array => [x*cos(turn)*scale,y*scale,-x*sin(turn)*scale]
+pub fn spatial(x,y,turn,scale) array => [x*cos(turn)*scale,y*scale,-x*sin(turn)*scale]
+
+pub fn branch_scale(plant) float => 3.8/(max([for (s in plant.segments) max(s[1],s[3])])+3.0)
 
 pub fn whorls(plant) int => if (plant.solids == null) 3 else 1
 
 // whorls grow around the Y axis; stems, leaves and flowers have real depth.
 fn branches(plant,show_leaves,show_blooms) array {
-    let height = max([for (s in plant.segments) max(s[1],s[3])])
-    let scale = 3.8/(height+3.0);
+    let scale = branch_scale(plant);
     [for (whorl in 0 to (whorls(plant)-1),let turn = float(whorl)*2.0*math.pi/float(whorls(plant)))
         *[*[for (s in plant.segments where whorl == 0 or s[4] > 0)
             stem(spatial(s[0],s[1],turn,scale),spatial(s[2],s[3],turn,scale),max(0.014,s[5]*0.09*scale),plant.recipe.stem)],

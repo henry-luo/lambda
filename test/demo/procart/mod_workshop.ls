@@ -64,6 +64,6 @@ on click(evt) {
 
 pub fn page(config) element => <html lang:"en",
     <head <meta charset:"UTF-8"> <meta name:"viewport",content:"width=device-width,initial-scale=1">
-        <title config.title++" — lambda.procgen"> <link rel:"stylesheet",href:"world.css">
+        <title config.title++" — Procart"> <link rel:"stylesheet",href:"world.css">
         <link rel:"stylesheet",href:"plants.css">>
     apply(<workshop config:config>)>

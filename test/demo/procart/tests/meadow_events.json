@@ -1,0 +1,398 @@
+{
+  "name": "Semantic Meadow: native pixels, layers, seeded replay, retained orbit and mobile layout",
+  "html": "test/demo/procart/meadow.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Procart"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".generator-nav a[aria-current=page]"
+      },
+      "equals": "Meadow"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#meadow-scene"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".meadow-layer"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seed-value"
+      },
+      "equals": "2026"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=flower]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=tree]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=stone]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=grass]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 12000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-meadow/meadow-desktop.png"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "home-meadow",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280
+    },
+    {
+      "type": "script",
+      "js": "globalThis.mesh=document.querySelector('#meadow-model mesh')"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#meadow-scene",
+        "offset_x": 130,
+        "offset_y": 100
+      },
+      "dx": 90,
+      "dy": 25,
+      "steps": 4
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-meadow",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#meadow-model mesh')===mesh"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-camera=reset]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-meadow",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=grass]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=grass]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=grass]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=grass]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=grass]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=flower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=flower]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=flower]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=flower]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=flower]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=tree]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=tree]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=tree]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=tree]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=tree]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=stone]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=stone]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "[data-act=stone]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=stone]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "mesh[data-kind=stone]"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-meadow",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=next]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seed-value"
+      },
+      "equals": "2027"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-meadow",
+      "count": {
+        "min": 500
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=previous]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#seed-value"
+      },
+      "equals": "2026"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "reference": "home-meadow",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "resize",
+      "width": 390,
+      "height": 1100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.meadow-stage').getBoundingClientRect().right<=window.innerWidth && document.getElementById('meadow-scene').getBoundingClientRect().width>300"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#meadow-scene",
+      "width": 400,
+      "height": 280,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 12000
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/procart-meadow/meadow-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".generator-nav a[href=\"plants.ls\"]"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "The glasshouse"
+    }
+  ]
+}

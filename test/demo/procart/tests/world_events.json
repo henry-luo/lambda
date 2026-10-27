@@ -1,6 +1,6 @@
 {
-  "name": "procgen world: seed, districts, rivers and climate",
-  "html": "test/demo/procgen/world.ls",
+  "name": "procart world: seed, districts, rivers and climate",
+  "html": "test/demo/procart/world.ls",
   "viewport": {
     "width": 1240,
     "height": 860

@@ -3,7 +3,7 @@
 > **Status:** P0 (`rng`, `noise`, `field`, `adapt`), P1 (`sample`, `geom`), P2 (`grid`), P3 (`lsystem`, `text`), P4 (`wfc`) and P5 (`terrain`, showcase demo) have core implementations (2026-10-26), with remaining features listed in the [implementation record §6](impl/Lambda_Impl_Proc_Gen.md#6-residue). The 2026-10-27 continuation fills the remaining field, periodic-noise, density-sampling, adapter, width and climate features, registers the showcase, and delivers all three measured P6 batch kernels (WFC, Delaunay and hydraulic erosion). A further Lambda-side performance continuation preserves exact values (S1.6, PG2), reducing the 512² noise benchmark to 1.014 s and the full Poisson–Voronoi pipeline to 3.853 s, including conservative cell-coverage certificates and direct polygon output. Their 1 s / 2 s targets, cross-platform qualification and explicitly later features remain open. Progress and verification are in the [implementation record](impl/Lambda_Impl_Proc_Gen.md). The package name `lambda.procgen` (PG1), the `math.*` surface for native kernels (PG7.4), fresh, unvendored C kernels (PG7.5), the initial tolerance-tier membership (PG2), `float64` fields in the API (PG5), the timing of shared geometry (PG9), PRNG migration (PG3) and the 3D/4D scope (§8) were accepted by the user on 2026-10-26. Every §9 open item is resolved.
 > **Scope:** a shipped script package of deterministic procedural-generation algorithms: keyed randomness, noise, scalar fields, point sampling, Delaunay/Voronoi, grid and dungeon generators, mazes, wave function collapse, L-systems, text grammars and terrain. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
 > **Spec linkage:** D7.2.4v4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D7.1.1 (static-library layering), D6.4.1–D6.4.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
-> **Authority:** package design ledger PG1–PG10, open items PG-O1–PG-O8. The `PG` series is new; no other vibe record uses it.
+> **Authority:** package design ledger PG1–PG10, open items PG-O1–PG-O8. The user accepted semantic scene composition on 2026-10-28; [PG11.1–PG11.8](Lambda_Design_Procart.md) records the first Meadow profile and the remaining generalization work.
 
 ## 1. Purpose and scope
 
@@ -127,6 +127,10 @@ Where Lambda already has an algorithm, the package takes ownership of it and the
 
 Each noise and sampling family has two levels: a **point function** (`noise.simplex2(table, x, y)`, over a permutation table from `noise.table(key)`), which is the reference and the composable primitive, and a **field builder** (`noise.field(gen, w, h)`, over a generator from `noise.make(key, spec)`), which evaluates a spec over a grid. The field builder is the unit a native kernel replaces (PG7.4). User code that composes point functions keeps working unchanged, just at Lambda speed.
 
+### PG11 — Stored procedural art
+
+[Semantic procedural scenes](Lambda_Design_Procart.md) stores versioned recipes and seeded `flower`, `tree`, `stone` and `grass` objects in literal Mark, recursively composed through groups. The first `meadow` profile is implemented in Procart, reusing existing generators, transforms, resources and native Scene3D instancing while preserving S12.1.1v3 and PG4. The [implementation record](impl/Lambda_Impl_Procart_Meadow.md) distinguishes delivered behavior, verification and remaining work.
+
 ## 4. Module map
 
 | Module | Contents | Reuses | Tier | Native candidate |
@@ -223,7 +227,7 @@ text.expand(tale, rng.key(3))
 | 64×64 overlapping WFC (N = 3) | ≤ 5 s |
 | 256×256 hydraulic erosion, 50k droplets | ≤ 5 s |
 
-**Showcase.** A `test/demo/procgen/` demo builds a world map from one seed: terrain, biomes, rivers, a placed town (Voronoi districts), a dungeon and generated names. It exercises the whole package and gives the benchmarks a realistic workload.
+**Showcase.** A `test/demo/procart/` demo builds a world map from one seed: terrain, biomes, rivers, a placed town (Voronoi districts), a dungeon and generated names. It exercises the whole package and gives the benchmarks a realistic workload.
 
 ## 8. Phasing
 

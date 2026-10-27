@@ -8,11 +8,11 @@ import foliage: .mod_foliage
 
 pub let GARDEN = [
     {id:"fern",title:"Woodland fern",tag:"01 / FRONDS",note:"Repeated branches unfold into fine, feathered fronds.",
-        rules:{X:"F[+X][-X]FX",F:"FF"},stem:"#527341",leaf:"#72914e",petals:0},
+        rules:{X:"F[+X][-X]FX",F:"FF"},stem:"#527341",leaf:"#72914e",petals:0,leaf_mode:"all",leaf_size:0.24},
     {id:"herb",title:"Meadow herb",tag:"02 / BRANCHES",note:"A branching herb, with broad leaves along each new shoot.",
         rules:{X:[[1,"F[+X]F[-X]X"],[1,"F[-X]F[+X]X"]],F:"FF"},stem:"#4f704e",leaf:"#65936d",petals:0},
     {id:"flower",title:"Wild cosmos",tag:"03 / BLOSSOMS",note:"Forking stems carry radial flowers at their growing tips.",
-        rules:{X:[[2,"F[+X][-X]"],[1,"F[+X]FX"]],F:"FF"},stem:"#557b55",leaf:"#7d9c67",petals:8},
+        rules:{X:[[2,"F[+X][-X]"],[1,"F[+X]FX"]],F:"FF"},stem:"#557b55",leaf:"#7d9c67",petals:8,leaf_size:0.55},
     {id:"sunflower",title:"Golden sunflower",tag:"04 / SUN SEEKERS",note:"Golden rays surround dark seed heads on leafy, forking stalks.",
         rules:{X:"FF[+X][-X]",F:"F"},stem:"#608249",leaf:"#78934c",petals:16,petal:"#e8b93d",center:"#6a492e"},
     {id:"lavender",title:"Wild lavender",tag:"05 / FLOWER SPIKES",note:"Slender stems rise above silvery foliage into separated, tapering violet spikes.",
@@ -45,14 +45,13 @@ pub fn species(id) map => [for (s in SPECIES where s.id == id) s][0]
 // an endpoint is a growing tip only when no segment continues from it.
 fn point_key(x, y) string => string(x) ++ "," ++ string(y)
 
-pub fn generate(seed, id, order, angle) map^ {
-    let recipe = species(id)
-    let k = rng.derive(rng.key(seed), id)
+// data-authored recipes share the catalogue's generators without a species lookup.
+pub fn grow(k: u64, recipe: map, order: int, angle) map^ {
     let generators = {cactus:solids.cactus,fungus:solids.fungus,lavender:solids.lavender,layered:flowers.layered,lupin:flowers.lupin,foliage:foliage.generate}
     let grow = generators[recipe.kind];
     if (grow != null) grow(k,recipe,order,angle)
     else {
-    let sequence = lsystem.expand("X", recipe.rules, order, rng.derive(k,"branches"))^
+    let sequence = lsystem.expand(if (recipe.axiom != null) recipe.axiom else "X", recipe.rules, order, rng.derive(k,"branches"))^
     let heading = 90.0 + rng.between(rng.derive(k,"lean"), -5.0, 5.0)
     let turtle = lsystem.turtle(sequence, {angle:float(angle),heading:heading,width:3.6,width_decay:0.72})^
     let segments = turtle.segments
@@ -60,15 +59,17 @@ pub fn generate(seed, id, order, angle) map^ {
     let tips = [for (i, s in segments where starts[point_key(s[2],s[3])] == null)
         {x:s[2],y:s[3],phase:rng.between(rng.at(rng.derive(k,"petals"),i),0.0,360.0),
          bloom:bloom.profile(rng.at(rng.derive(k,"bloom-form"),i),recipe.petals)}]
-    let leaves = [for (i, s in segments where s[4] > 0 and (id == "fern" or i % 2 == 0))
+    let leaves = [for (i, s in segments where s[4] > 0 and (recipe.leaf_mode == "all" or i % 2 == 0))
         {x:(s[0]+s[2])/2.0,y:(s[1]+s[3])/2.0,
          angle: -math.atan2(s[3]-s[1],s[2]-s[0])*180.0/math.pi + (if (i % 2 == 0) -42.0 else 42.0),
-         size:(if (recipe.leaf_size != null) recipe.leaf_size else if (id == "fern") 0.24 else if (id == "flower") 0.55 else 0.5) *
+         size:(if (recipe.leaf_size != null) recipe.leaf_size else 0.5) *
              rng.between(rng.at(rng.derive(k,"leaves"),i),0.85,1.15)}];
     {recipe:recipe,sequence:sequence,segments:segments,tips:tips,leaves:leaves,
      petal:if (recipe.petal != null) recipe.petal else rng.pick(rng.derive(k,"color"),["#c8657e","#bd6a9c","#d58c75","#ad82b6"])}
     }
 }
+
+pub fn generate(seed, id, order, angle) map^ => grow(rng.derive(rng.key(seed),id),species(id),order,angle)^
 
 pub fn initial() map => {seed:2026,id:"flower",section:"garden",order:4,angle:25,leaves:true,blooms:true,mode:"2d",
     plant:generate(2026,"flower",4,25)^}

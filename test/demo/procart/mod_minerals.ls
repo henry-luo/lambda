@@ -33,7 +33,7 @@ fn prism(flat,k) map {
     faceted(if (flat) "column" else "crystal",points,indices,k)
 }
 
-fn rock(k,detail,id) map {
+pub fn rock(k,detail,id) map {
     let rows = 3+detail
     let columns = 6+detail
     let globe = geometry.sphere("source",rows,columns)

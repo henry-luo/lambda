@@ -317,7 +317,7 @@ fn photo_album(t) => window("photo-album", t, <g
 
 // Strokes on a 24-unit grid: the app glyphs, then the sidebar's category glyphs.
 let GLYPHS = {
-    procgen: "M2 5l6-2 8 3 6-2v16l-6 2-8-3-6 2z M8 3v16 M16 6v16",
+    procart: "M2 5l6-2 8 3 6-2v16l-6 2-8-3-6 2z M8 3v16 M16 6v16",
     hamster: "M5 10a7 7 0 0 0 14 0 M5 10a3 3 0 1 1 4-4 M19 10a3 3 0 1 0-4-4 M9 11h.01 M15 11h.01 M10 15l2 2 2-2 M3 21h18",
     aquarium: "M3 5h18v15H3z M7 12c3-4 6-4 9 0-3 4-6 4-9 0z M16 12l3-3v6z M5 17q2-2 4 0t4 0t4 0",
     chart: "M4 20v-8 M9.3 20V6 M14.6 20v-9 M20 20V4",
@@ -360,7 +360,7 @@ pub fn glyph(key) => <svg class:"line-glyph", viewBox:"0 0 24 24", 'aria-hidden'
 
 // each icon's hue, top to bottom, and the ink its glyph draws in
 let HUES = {hamster: ["#ddbf8e", "#aa744e"], aquarium: ["#78bda3", "#174c50"], chart: ["#a5b4fc", "#4f46e5"], scene3d: ["#64748b", "#0f172a"], cityscape: ["#1e3a8a", "#0b1229", "#fcd34d"],
-    procgen: ["#9cba76", "#285453"],
+    procart: ["#9cba76", "#285453"],
     tetris: ["#8b5cf6", "#3b0764"], 'marble-drop': ["#e8c27a", "#9a6a24"], superlambda: ["#bae6fd", "#38bdf8"],
     doom: ["#b91c1c", "#1f0707"], 'sentence-game': ["#fef08a", "#f59e0b", "#78350f"], 'photo-album': ["#fda4af", "#e11d48"],
     photo: ["#6ee7b7", "#047857"], photos: ["#67e8f9", "#0e7490"], draw: ["#fdba74", "#ea580c"], sketch: ["#b3a0ed", "#65518f"],
@@ -453,7 +453,7 @@ pub fn emblem() => <svg class:"emblem", viewBox:"0 0 320 320", 'aria-hidden':"tr
 
 // ---- catalog -------------------------------------------------------------
 
-fn procgen(t) => window("procgen", t, <g
+fn procart(t) => window("procart", t, <g
     <rect x:26, y:22, width:320, height:172, fill:"#536f91">;
     <path d:"M45 130L70 70 130 42 210 60 290 120 245 185 130 195 70 170Z", fill:"#b7bd86">;
     <path d:"M80 128L110 75 170 62 230 95 210 155 150 170Z", fill:"#6e965a">;
@@ -462,10 +462,10 @@ fn procgen(t) => window("procgen", t, <g
     <circle cx:175, cy:143, r:5, fill:"#b85042">;
     (text(185, 148, 12, "#263d32", "One seed. A world."))>)
 
-let LIVE = {procgen: procgen, tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
+let LIVE = {procart: procart, tetris: tetris, superlambda: superlambda, doom: doom, cityscape: cityscape, 'photo-album': photo_album}
 
 let TONE_OF = {tetris: "arcade", 'marble-drop': "amber", 'sentence-game': "amber", superlambda: "sky", doom: "clay",
-    procgen: "sage",
+    procart: "sage",
     hamster: "amber", aquarium: "sage", scene3d: "slate", cityscape: "night", 'photo-album': "rose", photo: "teal", photos: "cyan",
     draw: "clay", sketch: "violet", word: "blue", sheet: "sage", note: "gold", slides: "rose", chart: "indigo",
     finder: "blue", mail: "cyan", book: "amber", music: "violet", soundflow: "teal", archive: "slate", readability: "sage", greetings: "rose", dreamhome: "blue"}

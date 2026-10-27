@@ -1,4 +1,4 @@
-// Run: ./lambda.exe view test/demo/procgen/textures.ls
+// Run: ./lambda.exe view test/demo/procart/textures.ls
 import workshop: .mod_workshop
 import textures: .mod_textures
 

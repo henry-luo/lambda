@@ -26,8 +26,10 @@ fn surface(kind) element {
          indices:geometry.grid_indices(along,across)})
 }
 
+pub fn resources() array => [dome(),*[for (kind in ["petal","round-petal","pad","oak-leaf","fan-leaf"]) surface(kind)]]
+
 pub fn viewport(plant,show_leaves,show_blooms) element => viewer.viewport(
-    solids.pieces(plant,show_leaves,show_blooms),[dome(),*[for (kind in ["petal","round-petal","pad","oak-leaf","fan-leaf"]) surface(kind)]],
+    solids.pieces(plant,show_leaves,show_blooms),resources(),
     {id:"botanical-scene",camera_id:"botanical-camera",model_id:"botanical-model",camera:home(plant),
      label:plant.recipe.title++" in 3D. Drag to orbit, scroll to zoom, R to reset.",fit:solids.pieces(plant)})
 

@@ -1,4 +1,4 @@
-// Run: ./lambda.exe view test/demo/procgen/rocks.ls
+// Run: ./lambda.exe view test/demo/procart/rocks.ls
 import workshop: .mod_workshop
 import rocks: .mod_minerals
 

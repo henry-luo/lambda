@@ -1,4 +1,4 @@
-// Run: ./lambda.exe view test/demo/procgen/plants.ls
+// Run: ./lambda.exe view test/demo/procart/plants.ls
 import dom
 import ui: .mod_ui
 import botany: .mod_plants
@@ -73,6 +73,6 @@ on click(evt) {
 
 <html lang:"en",
     <head <meta charset:"UTF-8"> <meta name:"viewport",content:"width=device-width,initial-scale=1">
-        <title "The glasshouse — lambda.procgen">
+        <title "The glasshouse — Procart">
         <link rel:"stylesheet",href:"world.css"> <link rel:"stylesheet",href:"plants.css">>
     apply(<plant_app>)>

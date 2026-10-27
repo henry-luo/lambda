@@ -1,6 +1,6 @@
 {
   "name": "Procedural botany: growth, organs, species, resize and terrain navigation",
-  "html": "test/demo/procgen/plants.ls",
+  "html": "test/demo/procart/plants.ls",
   "viewport": {
     "width": 1240,
     "height": 1120
@@ -81,7 +81,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/flowers-desktop.png"
+      "file": "temp/procart/flowers-desktop.png"
     },
     {
       "type": "click",
@@ -177,7 +177,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/skeleton-desktop.png"
+      "file": "temp/procart/skeleton-desktop.png"
     },
     {
       "type": "click",
@@ -310,7 +310,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/fern-desktop.png"
+      "file": "temp/procart/fern-desktop.png"
     },
     {
       "type": "click",
@@ -343,7 +343,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/herb-desktop.png"
+      "file": "temp/procart/herb-desktop.png"
     },
     {
       "type": "click",
@@ -378,7 +378,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/flowers-tablet.png"
+      "file": "temp/procart/flowers-tablet.png"
     },
     {
       "type": "resize",
@@ -399,7 +399,7 @@
     {
       "type": "capture_surface",
       "source": "page",
-      "file": "temp/procgen/flowers-mobile.png"
+      "file": "temp/procart/flowers-mobile.png"
     },
     {
       "type": "resize",

@@ -1,0 +1,62 @@
+/* the landscape keeps its own wide canvas, with field notes alongside it. */
+.meadow-app { background: #f5f3e9; color: #344535; }
+.meadow-app .bar { background: #2e4435; padding: 15px 28px 11px; }
+.meadow-app .title h1 { font-size: 22px; }
+.meadow-app .seed { color: #c3cbb3; }
+.meadow-app .generator-nav a { color: #d2dac5; }
+.meadow-app .generator-nav a[aria-current="page"] { background: #52654a; }
+.meadow-app .step { background: #3d5540; border-color: #75836a; }
+.meadow-app .step.primary { background: #dce3be; color: #324735; border-color: #dce3be; }
+.meadow-intro { display: flex; justify-content: space-between; gap: 30px; align-items: center; padding: 32px 32px 25px; }
+.meadow-intro h2 { font-size: 34px; font-weight: 400; margin: 0 0 10px; letter-spacing: -.02em; }
+.meadow-intro p:not(.eyebrow) { max-width: 680px; margin: 0; color: #7b806c; line-height: 1.7; }
+.meadow-seal { display: flex; flex-direction: column; align-items: center; gap: 7px; flex: none; padding: 8px 28px; border-left: 1px solid #d6dcc9; }
+.meadow-seal strong { font: italic 23px Georgia, serif; font-weight: 400; }
+.meadow-seal span { font: 8px -apple-system, "Helvetica Neue", Arial, sans-serif; letter-spacing: .16em; color: #8e9579; }
+.meadow-body { display: flex; align-items: flex-start; gap: 22px; padding: 0 32px; }
+.meadow-stage { flex: 1; min-width: 0; overflow: hidden; border: 1px solid #d2d9c4; border-radius: 8px; background: #e5e9d7; }
+.meadow-stage-label { display: flex; justify-content: space-between; padding: 18px 22px 0; color: #78866a;
+    font: 9px -apple-system, "Helvetica Neue", Arial, sans-serif; letter-spacing: .12em; }
+.meadow-stage .camera-toolbar { padding-top: 2px; }
+.meadow-stage .camera-toolbar button { background: #f3f5e9; }
+.meadow-caption { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 19px 22px;
+    border-top: 1px solid #d4dcc6; background: #f9faf0; }
+.meadow-caption h3 { font-size: 20px; font-weight: 400; margin: 0 0 6px; }
+.meadow-caption p { color: #7e846e; margin: 0; font-size: 12px; line-height: 1.5; }
+.meadow-controls { width: 268px; }
+.meadow-controls .botanical-card { padding: 22px; background: #faf9f1; border-color: #d7dccb; }
+.meadow-layers { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.meadow-layer { display: flex; align-items: center; width: 100%; gap: 10px; padding: 12px 9px; text-align: left;
+    border: 1px solid #e1e5d5; border-radius: 5px; background: #f7f7ef; color: #647058; cursor: pointer; opacity: .55; }
+.meadow-layer.on { border-color: #cad6ba; background: #edf2e2; opacity: 1; }
+.layer-dot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: #95a474; }
+.layer-dot[data-layer="flower"] { background: #d5999a; }
+.layer-dot[data-layer="tree"] { background: #6c8755; }
+.layer-dot[data-layer="stone"] { background: #989b8c; }
+.layer-dot[data-layer="grass"] { background: #a3ae68; }
+.layer-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.layer-copy strong { font-size: 12px; font-weight: 500; }
+.layer-copy small { font: 9px -apple-system, "Helvetica Neue", Arial, sans-serif; color: #8c957c; }
+.layer-count { font: 18px Georgia, serif; color: #5b7350; }
+.meadow-notes p { font-size: 12px; }
+.meadow-record { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e2e5d6; padding: 10px 0 0; margin-top: 10px;
+    font: 11px -apple-system, "Helvetica Neue", Arial, sans-serif; color: #8c947c; }
+.meadow-record output { color: #5c7350; }
+@media (max-width: 900px) {
+    .meadow-intro { padding: 24px 18px 20px; }
+    .meadow-seal { display: none; }
+    .meadow-body { flex-direction: column; padding: 0 18px; }
+    .meadow-stage { width: 100%; box-sizing: border-box; }
+    .meadow-controls { width: 100%; flex-direction: row; }
+    .meadow-controls .botanical-card { flex: 1; min-width: 0; }
+}
+@media (max-width: 520px) {
+    .meadow-app .bar { padding: 14px; }
+    .meadow-app .title { flex-basis: 100%; }
+    .meadow-intro h2 { font-size: 29px; }
+    .meadow-controls { flex-direction: column; }
+    .meadow-caption { flex-wrap: wrap; }
+    .meadow-stage-label { padding: 14px 13px 0; font-size: 8px; }
+    .meadow-app .generator-nav { gap: 2px; }
+    .meadow-app .generator-nav a { font-size: 11px; padding: 7px; }
+}

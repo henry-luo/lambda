@@ -961,6 +961,21 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 <a id="lr07-48"></a>**LR07-48 · A pattern type named from another module resolves against the importer's type list (S11.1.2v4) · OPEN (found 2026-10-21, while porting Readability.js)**
 With `pub type ws = \("\s" | "\u00A0")` in `pat.ls`, an importer's `"\u00A0" is ws` is `false` and logs `const_pattern: invalid index 2` on both tiers; `find(s, ws)` and passing `ws` as a value fail the same way. A pattern reference compiles to `const_pattern_with_tl(pattern_index, <current module's type_list>)` (`transpile-mir.cpp:10539`; T0 `interp.cpp:5777`, `:6337`), but an imported definition's `pattern_index` indexes its own module's list. Composing the name inside a local island (`\(ws+)`) works, because the island recompiles the regex in the importer. `ensure_pattern_compiled` also appends an imported, not-yet-compiled definition to the importer's list, so the index's meaning depends on compile order. A qualified name is not accepted inside an island (`\(p.ws+)` is a parse error). Fix: resolve an imported pattern through its defining module (its type list, or the stable `TypePattern*` itself). Workaround in use: `lmd/package/doc/readability/text.ls` ([Lambda_Pkg_Readability.md](Lambda_Pkg_Readability.md) RD-O2).
 
+<a id="lr07-50"></a>**LR07-50 · Seeded foliage replay changes after JIT execution (S1.6 / S12.1.1v3) · OPEN (verified 2026-10-28)**
+
+`test/demo/procart/tests/procart_foliage.ls` compares two calls with identical
+seed, species, growth and angle. The shared generator extraction for Meadow
+exposes mismatching frond/berry organ scales on AUTO; the same fixture passes
+on the interpreter. Running the saved pre-extraction `mod_plants` source on
+forced JIT also fails the berry-spray replay, confirming an existing JIT replay
+defect rather than a new random algorithm. First-difference evidence includes
+identical fern-frond positions but different blade scales, well beyond rounding
+tolerance. The runtime cause is unresolved; no backend override, assertion or
+golden was changed to conceal it. Rechecked in the working tree based on
+`7c7ebfc81`; evidence and source-isolated comparison are in
+`temp/procart-meadow/foliage-{diff,before,before-jit}.log`. See the
+[Meadow implementation record](impl/Lambda_Impl_Procart_Meadow.md).
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -1541,6 +1556,20 @@ A map keeps a `null` field (`len({a: null})` is 1), and the validator admits it 
 
 <a id="lr13-16"></a>**LR13-16 · A literal-type mismatch names the literal's kind: "Expected type 'string', but got 'string'" · OPEN (found 2026-09-30, site snippet pass)**
 With `type LogLevel = "debug" | "info" | "warn" | "error"` as a field type, `log_level: verbose` in YAML fails validation correctly, but the first error reads `[TYPE_MISMATCH] Expected type 'string', but got 'string' at .log_level|1`. `add_type_mismatch_error_ex` (`lambda/validator/validate_helpers.cpp:60`) names the expected type with `type_to_string`, which gives a literal type's kind. A range contract already gets its own name from `lambda_type_format_contract_name` (`:74`); a literal arm needs the same, so the message can read `Expected "debug", got "verbose"`. The union summary that follows it is right.
+
+<a id="lr13-17"></a>**LR13-17 · CLI schema imports dereference a null runtime · OPEN (verified 2026-10-28)**
+
+Passing an implementation module with imports to `lambda validate -s` crashes
+while loading its schema, before data validation. The schema compiler has no
+`Runtime`; the import path reaches `lambda_script_cache_request` in
+`runtime/runner.cpp:1359` and dereferences `runtime->static_warning` with
+`runtime == nullptr` (LLDB confirmed). This prevents safely composing imported
+schema definitions through that CLI path; contract checking is the concern of
+**S11.4.1v3**. The Meadow deliverable has a standalone type-only schema, which
+validates successfully; importing the application resolver is not its schema
+entry point. A general fix needs proper compiler/runtime ownership for schema
+imports, rather than suppressing the fault. Evidence:
+`temp/procart-meadow/schema-backtrace.log`, working tree based on `7c7ebfc81`.
 
 ## 13.1 Ledger hygiene observations (not issues)
 

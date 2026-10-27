@@ -2512,7 +2512,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"aquarium", "test/demo/aquarium/aquarium.ls"},
     {"hamster", "test/demo/hamster/hamster.ls"},
     {"chart", "test/demo/chart/index.html"},
-    {"procgen", "test/demo/procgen/world.ls"},
+    {"procart", "test/demo/procart/world.ls"},
     {"cityscape", "test/demo/cityscape/cityscape.ls"},
     {"photo-album", "test/demo/photo-album/photo-album.ls"},
     {"slides", "test/demo/slides/slides.ls"},

@@ -1,7 +1,7 @@
-# Procedural generation workshops
+# Procart — procedural art workshops
 
 ```sh
-./lambda.exe demo procgen
+./lambda.exe demo procart
 ```
 
 The header links Terrain, Plants & foliage, Rocks & crystals, Textures & materials,
@@ -9,13 +9,40 @@ and Decorative patterns. Every destination has its own page:
 
 | Workshop | Direct entry | Presets |
 | --- | --- | --- |
-| Terrain | `test/demo/procgen/world.ls` | Islands, rivers, districts, towns and ruins |
-| Plants & foliage | `test/demo/procgen/plants.ls` | Eleven garden forms and seven foliage studies, in illustration and 3D |
-| Rocks & crystals | `test/demo/procgen/rocks.ls` | Granite boulders, basalt columns, quartz clusters and amethyst geodes |
-| Textures & materials | `test/demo/procgen/textures.ls` | Wood, marble, granite, brick, linen and ceramic |
-| Decorative patterns | `test/demo/procgen/patterns.ls` | Mandalas, stars, Truchet paths, ribbon weave, Voronoi mosaics and golden spirals |
+| Terrain | `test/demo/procart/world.ls` | Islands, rivers, districts, towns and ruins |
+| Meadow | `test/demo/procart/meadow.ls` | A composed 3D clearing with flower patches, a tree grove, granite and two grass varieties |
+| Plants & foliage | `test/demo/procart/plants.ls` | Eleven garden forms and seven foliage studies, in illustration and 3D |
+| Rocks & crystals | `test/demo/procart/rocks.ls` | Granite boulders, basalt columns, quartz clusters and amethyst geodes |
+| Textures & materials | `test/demo/procart/textures.ls` | Wood, marble, granite, brick, linen and ceramic |
+| Decorative patterns | `test/demo/procart/patterns.ls` | Mandalas, stars, Truchet paths, ribbon weave, Voronoi mosaics and golden spirals |
 
-The three workshops share seed, detail, colorway and inspection controls through
+The meadow loads [meadow.mark](meadow.mark): a literal data document containing
+versioned recipes and nested `group`, `flower`, `tree`, `stone` and `grass`
+elements. Groups compose transforms and can scatter repeated objects. Recipe
+settings override defaults; named random streams keep siblings independent.
+The model reuses the existing plants, stone facets and terrain, with new curved
+grass blades instanced across seeded clumps. Generation remains pure
+(**S12.1.1v3**, **PG11**).
+
+```sh
+./lambda.exe view test/demo/procart/meadow.ls
+./lambda.exe validate test/demo/procart/meadow.mark -s test/demo/procart/mod_composition_schema.ls -f mark
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/meadow.ls --headless --event-file test/demo/procart/tests/meadow_events.json --event-result temp/procart-meadow/meadow-events.json
+```
+
+**New meadow / Previous** replay seeds; the four landscape layers toggle without
+regenerating model data. Drag to orbit, zoom or reset the camera. The native UI
+replay checks real pixels, retained camera interaction, layers, seed replay and
+mobile layout. `tests/procart_meadow.ls` and `tests/procart_grass.ls` check saved
+data/model replay, transforms, settings, named keys, bounds and scene validation.
+The standalone schema checks structural shape; the resolver also checks recipe
+references, supported versions, settings, transforms and expansion limits.
+The [semantic scene design](../../../vibe/Lambda_Design_Procart.md) describes the
+format and currently supported generator profiles. Qualification, including the
+existing foliage replay issue exposed by generator extraction, is recorded in
+the [implementation record](../../../vibe/impl/Lambda_Impl_Procart_Meadow.md).
+
+The three mineral/texture/pattern workshops share seed, detail, colorway and inspection controls through
 `mod_workshop.ls`. Generation is pure (**S12.1.1v3**). Rocks use the native 3D
 viewer; textures encode generated pixels as PNG data URIs; patterns build SVG
 graphics. **More / Less** changes the form complexity or texture scale; **Change
@@ -27,13 +54,13 @@ The navigation replay opens all three from the header, exercises all sixteen
 presets, checks seed replay and controls, and captures the rendered pages:
 
 ```sh
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procgen/world.ls --headless --event-file test/demo/procgen/tests/workshop_navigation_events.json --event-result temp/procgen-navigation/navigation-result.json
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/world.ls --headless --event-file test/demo/procart/tests/workshop_navigation_events.json --event-result temp/procart-navigation/navigation-result.json
 ```
 
 Open the botanical page directly with:
 
 ```sh
-./lambda.exe view test/demo/procgen/plants.ls
+./lambda.exe view test/demo/procart/plants.ls
 ```
 
 The **glasshouse** has eighteen samples in two collections. **Garden plants &
@@ -103,45 +130,45 @@ camera interaction between plants and minerals. `mod_minerals.ls`,
 `mod_textures.ls` and `mod_patterns.ls` own the new workshop generators. The layout
 stacks controls beneath the specimen on smaller windows. The model goldens check
 seed replay, growth, terminal-tip placement, control bounds, finite 3D transforms,
-depth and scene validation for every sample. `tests/procgen_flower_form.ls` checks
+depth and scene validation for every sample. `tests/procart_flower_form.ls` checks
 raised and cupped petals, size variation, finite unit normals and separated,
-slender lavender spikes. `tests/procgen_flower_samples.ls` checks the four new
+slender lavender spikes. `tests/procart_flower_samples.ls` checks the four new
 architectures, growth, replay, stamens, petal tiers, leaf bounds and normals.
-`tests/procgen_foliage.ls` checks the foliage models, collection switching and
-curved-surface normals. `tests/procgen_workshops.ls` checks mineral geometry,
+`tests/procart_foliage.ls` checks the foliage models, collection switching and
+curved-surface normals. `tests/procart_workshops.ls` checks mineral geometry,
 all six pattern families, encoded texture pixels, periodic seams and controls.
 The illustration replay checks
 organs, growth, angle, resize and terrain navigation:
 
 ```sh
-./lambda.exe view test/demo/procgen/plants.ls --headless --event-file test/demo/procgen/tests/plants_events.json --event-result temp/procgen/plants-events.json
+./lambda.exe view test/demo/procart/plants.ls --headless --event-file test/demo/procart/tests/plants_events.json --event-result temp/procart/plants-events.json
 ```
 
 The native replay requires macOS graphics access and a hidden GLFW window. It
 checks pixels for the original seven specimens, physical orbit with retained meshes,
 camera reset/zoom, growth, seed replay, spines, spots, flowers and mobile layout.
-Both replays save PNGs under `temp/procgen/`:
+Both replays save PNGs under `temp/procart/`:
 
 ```sh
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procgen/plants.ls --headless --event-file test/demo/procgen/tests/plants_3d_events.json --event-result temp/procgen/plants-3d-events.json
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procgen/plants.ls --headless --event-file test/demo/procgen/tests/flower_samples_events.json --event-result temp/procgen/flower-samples-events.json
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procgen/plants.ls --headless --event-file test/demo/procgen/tests/foliage_events.json --event-result temp/procgen/foliage-events.json
-./test/test_lambda_gtest.exe --gtest_filter='*tests_procgen*'
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/plants.ls --headless --event-file test/demo/procart/tests/plants_3d_events.json --event-result temp/procart/plants-3d-events.json
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/plants.ls --headless --event-file test/demo/procart/tests/flower_samples_events.json --event-result temp/procart/flower-samples-events.json
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/procart/plants.ls --headless --event-file test/demo/procart/tests/foliage_events.json --event-result temp/procart/foliage-events.json
+./test/test_lambda_gtest.exe --gtest_filter='*tests_procart*'
 ```
 
 The reference-family replay checks both views for all four flowers, real pixels,
 custom camera reset, growth, petal opening, seed changes, leaf/flower toggles and
 the 390px layout. It saves the `ref-*-2d.png` and `ref-*-3d.png` previews under
-`temp/procgen/`.
+`temp/procart/`.
 
 The foliage replay checks all seven studies in both views, actual 3D pixels,
 growth, angle, fruit/leaf toggles, seed replay and the 390px layout. Workshop
 navigation also checks mineral camera retention and all three mobile layouts.
 
-Current qualification: all 353 UI assertions and all eight focused model/noise
+Pre-Meadow qualification: all 353 UI assertions and all eight focused model/noise
 goldens pass on the default backend; the eight goldens also pass with
 `LAMBDA_EXEC_BACKEND=interp`. Forced JIT passes seven of eight goldens: exact seed
-replay in `procgen_foliage.ls` still fails for palm fronds and berry sprays. The
+replay in `procart_foliage.ls` still fails for palm fronds and berry sprays. The
 regression remains enabled; its root cause is unresolved. The broader Lambda
 baseline reports a separate greetings-model failure and four sandbox-blocked
 HTTP cases; those four HTTP cases pass with local networking access.
@@ -156,10 +183,10 @@ One seed builds a whole world with [lambda.procgen](../../../doc/Lambda_Packages
 
 **New world** and **Previous** step the seed. **Rivers** hides or shows the rivers, **Erosion** rebuilds the land without erosion, and **Climate** switches the biomes to latitude and altitude temperature. Every part draws from its own key derived from the seed, so the names, lore, emblem and ruin stay the same when erosion is switched off.
 
-The world model is in `mod_world.ls` and the SVG drawings are in `mod_map.ls`. `tests/procgen_world.ls` pins the model for seed 2026, district coverage and climate behavior. `tests/world_events.json` replays the buttons headlessly:
+The world model is in `mod_world.ls` and the SVG drawings are in `mod_map.ls`. `tests/procart_world.ls` pins the model for seed 2026, district coverage and climate behavior. `tests/world_events.json` replays the buttons headlessly:
 
 ```sh
-./lambda.exe view test/demo/procgen/world.ls --headless --event-file test/demo/procgen/tests/world_events.json --event-result temp/procgen-world.json
+./lambda.exe view test/demo/procart/world.ls --headless --event-file test/demo/procart/tests/world_events.json --event-result temp/procart-world.json
 ```
 
 The demo also appears in the `lambda demo` gallery. The event replay checks eight assertions, including district drawing and climate toggles.
@@ -167,5 +194,5 @@ The demo also appears in the `lambda demo` gallery. The event replay checks eigh
 `tests/resize_events.json` checks twenty-one assertions across six window sizes, including stable map and sidebar dimensions, seed and working controls after resizing:
 
 ```sh
-./lambda.exe view test/demo/procgen/world.ls --headless --event-file test/demo/procgen/tests/resize_events.json --event-result temp/procgen-resize.json
+./lambda.exe view test/demo/procart/world.ls --headless --event-file test/demo/procart/tests/resize_events.json --event-result temp/procart-resize.json
 ```
