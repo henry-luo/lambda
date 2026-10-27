@@ -63,7 +63,7 @@
     },
     {
       "type": "assert_script",
-      "js": "[...document.querySelectorAll('.font-picker-row')].every(n=>{let label=n.querySelector('.font-picker-readable');return label.textContent===n.getAttribute('data-font-family')&&getComputedStyle(label).fontFamily===getComputedStyle(document.body).fontFamily})"
+      "js": "[...document.querySelectorAll('.font-picker-row')].every(n=>n.textContent===n.getAttribute('data-font-family')&&n.getAttribute('aria-label')===n.getAttribute('data-font-family'))"
     },
     {
       "type": "assert_script",

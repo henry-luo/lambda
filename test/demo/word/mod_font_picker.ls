@@ -2,7 +2,7 @@
 import dom
 import context: ~~.mod_context_menu
 
-pub let row_height = 40
+pub let row_height = 32
 pub let visible_rows = 8
 pub let overscan = 2
 pub let preview_batch = 2
@@ -101,9 +101,7 @@ view <font_scrollport> {
                     ["data-font-preview"]:string(preview),title:entry.label,
                     ["aria-label"]:entry.label,
                     style:"top:" ++ string(i*row_height) ++ "px;" ++
-                        (if (preview) font_style(entry.value) else ""),
-                    <span class:"font-picker-preview",["aria-hidden"]:"true",entry.label>;
-                    <span class:"font-picker-readable",["aria-hidden"]:"true",entry.label>>
+                        (if (preview) font_style(entry.value) else ""),entry.label>
             }]>>
 }
 on scroll(evt) {
