@@ -14,6 +14,7 @@ pub fn rewrite(n, prefix, options) element {
     let children = [for (child in content(n) where options.lights != false or name(child) != 'light') rewrite(child, prefix, options)]
     // Lambda tags are static; share attribute/reference traversal across tag constructors.
     if (kind == 'group') <group *: attrs, *children>
+    else if (kind == 'lod') <lod *: attrs, *children>
     else if (kind == 'mesh') <mesh *: attrs, *children>
     else if (kind == 'points') <points *: attrs, *children>
     else if (kind == 'sprite') <sprite *: attrs, *children>

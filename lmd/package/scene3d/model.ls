@@ -28,7 +28,7 @@ let RESERVED = ["position", "normal", "uv", "uv1", "color", "tangent", "instance
 let SIMULATION_RESERVED = ["resolution", "delta", "fragment_color"]
 let POST_RESERVED = ["color_input", "resolution", "fragment_color", "pass_color", "effect_main"]
 let DRAWABLES = ['mesh', 'points', 'sprite', 'line', 'line-segments']
-let OBJECT_CHILDREN = ['group', 'skeleton', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture',
+let OBJECT_CHILDREN = ['group', 'lod', 'skeleton', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture',
     'animation-clip', 'rigid-body', 'collider', 'physics', 'joint', 'motion-controller', 'environment', 'simulation']
 let IDENT = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 fn glsl_name(k, reserved = RESERVED) bool {
@@ -167,7 +167,7 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'lod', 'skeleton', 'bone', 'camera', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint', 'motion-controller', 'motion-state', 'environment', 'simulation', 'variable', 'postprocessing', 'effect'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera", "environment"] else if (contains(DRAWABLES, kind)) ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture", *MAPS] else []) where n[key] != null)
@@ -185,6 +185,9 @@ fn check_node(n, all_nodes) bool^ {
     let checked_color = if ((contains(['scene3d', 'environment', 'material', 'light'], kind) and n[color_key] != null and not color(n[color_key])) or
         (kind == 'light' and n["ground-color"] != null and not color(n["ground-color"]))) raise fail("invalid color")
     let checked_visible = if (n.visible != null and not (n.visible is bool)) raise fail("invalid visibility")
+    let checked_culling = if ((kind == 'scene3d' or contains(DRAWABLES,kind)) and n["frustum-culling"] != null and not (n["frustum-culling"] is bool)) raise fail("invalid frustum-culling flag")
+    let checked_bounds = if (contains(DRAWABLES,kind) and n.bounds != null and
+        (not t.vector(n.bounds,6) or any([for (i in 0 to 2) n.bounds[i] > n.bounds[i+3]]))) raise fail("bounds requires six ordered finite numbers")
     let checked_tone = if (kind == 'scene3d' and ((n["tone-mapping"] != null and not contains(['none', 'neutral', 'aces'], n["tone-mapping"])) or
         (n.exposure != null and (not numeric(n.exposure) or n.exposure <= 0)))) raise fail("invalid tone mapping or exposure")
     // the environment that lights the scene is an <environment> named by id
@@ -194,14 +197,24 @@ fn check_node(n, all_nodes) bool^ {
     let children = content(n)
     let allowed = if (kind == 'scene3d') ['postprocessing', *OBJECT_CHILDREN]
         else if (kind == 'group' or kind == 'rigid-body') OBJECT_CHILDREN
+        else if (kind == 'lod') ['group']
         else if (kind == 'postprocessing') ['effect']
         else if (kind == 'simulation') ['variable']
-        else if (kind == 'environment') ['group', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture']
+        else if (kind == 'environment') ['group', 'lod', 'light', *DRAWABLES, 'resources', 'geometry', 'material', 'texture']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'material', 'texture', 'environment']
         else if (kind == 'animation-clip') ['keyframe-track'] else if (kind == 'motion-controller') ['motion-state']
         else if (contains(DRAWABLES, kind)) ['geometry', 'material'] else if (kind == 'material') ['texture'] else []
     let checked_children = if (any([for (child in children) not (child is element) or not contains(allowed, name(child))])) raise fail("invalid scene child")
+    let checked_lod = if (kind == 'lod') {
+        let distances=n.distances, hysteresis=value(n.hysteresis,0.1)
+        let checked_distances=if (not (distances is array) or len(distances)<1 or len(distances)>16 or len(distances)!=len(children) or
+            not all([for (d in distances) numeric(d)]) or distances[0]!=0 or
+            any([for (i in 1 to (len(distances)-1)) distances[i]<=distances[i-1]])) raise fail("LOD requires ordered distances starting at zero, matching its groups")
+        let checked_hysteresis=if (not numeric(hysteresis) or hysteresis<0 or hysteresis>=0.5) raise fail("LOD hysteresis must be in [0,0.5)")
+        let checked_content=if (any([for (child in nodes(n)^) not contains(['lod','group','resources','geometry','material','texture',*DRAWABLES],name(child))])) raise fail("LOD levels accept geometric content only")
+        true
+    }
     let checked_uv = if (kind == 'texture' and
         ((n["uv-set"] != null and (not numeric(n["uv-set"]) or not contains([0, 1], n["uv-set"]))) or
          (n["uv-transform"] != null and not t.vector(n["uv-transform"], 6))))
@@ -469,6 +482,7 @@ fn normalized(n) element {
     let children = [for (c in content(n)) normalized(c)]
     if (kind == 'scene3d') <scene3d *: attrs, *children>
     else if (kind == 'group') <group *: attrs, *children>
+    else if (kind == 'lod') <lod *: attrs, *children>
     else if (kind == 'camera') <camera *: attrs>
     else if (kind == 'mesh') <mesh *: attrs, *children>
     else if (kind == 'points') <points *: attrs, *children>

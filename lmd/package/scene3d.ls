@@ -14,6 +14,7 @@ pub type Scene = <scene3d>
 
 pub fn scene(children, options = {}) element => <scene3d *: options, *children>
 pub fn group(children, options = {}) element => <group *: options, *children>
+pub fn lod(levels, distances, options = {}) element => <lod distances:distances, hysteresis:0.1, *:options, *levels>
 pub fn camera(options = {}) element => <camera type: 'perspective', fov: 50.0, near: 0.1,
     far: 1000.0, position: [0.0, 0.0, 4.0], target: [0.0, 0.0, 0.0], *: options>
 pub fn light(kind, options = {}) element => <light type: kind, color: "#ffffff", intensity: 1.0, *: options>

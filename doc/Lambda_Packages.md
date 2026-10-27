@@ -2348,6 +2348,7 @@ degrees. CSS determines the viewport size; `viewBox` and
 | Helper | Result |
 |---|---|
 | `scene(children, options?)`, `group(children, options?)` | Scene root or transform hierarchy |
+| `lod(levels, distances, options?)` | Distance-selected group levels with retained resources and hysteresis |
 | `camera(options?)`, `light(kind, options?)` | Perspective/orthographic camera; ambient, hemisphere, directional, point or spot light |
 | `box(size?, options?)`, `plane(size?, options?)` | Primitive geometry |
 | `sphere(rings?, segments?, options?)` | Unit-diameter buffer sphere with normals, UVs and indices; defaults 16 × 32 |
@@ -2384,6 +2385,29 @@ camera/ray/triangle helpers and tests point radii, anchors and clipped ribbons;
 texture alpha and scene occlusion are outside this query. See the
 [profile and return fields](../vibe/radiant/Radiant_Design_WebGL.md#points-sprites-and-lines-m6-selected-profile).
 Construction and picking retain **S12.1.1v3 / D7.2.4v4**.
+
+### Visibility and object LOD
+
+Scenes and drawables default to `frustum-culling:true`. Static bounds include
+hierarchy/instance transforms and marker/line extents. Skinned, morphed or
+custom-shader objects stay drawable unless they provide a conservative local
+`bounds:[minX,minY,minZ,maxX,maxY,maxZ]` covering every deformation. Culling
+retains resources, and each shadow/environment view makes its own decision.
+
+`lod([group0,group1,group2],[0,10,30],{hysteresis:0.1})` retains every level
+and chooses one by world distance from its origin to the camera. Thresholds
+start at 0 and strictly increase; 1–16 group levels are accepted. Moving away
+crosses the next threshold × (1+h); moving nearer crosses the current
+threshold × (1−h). Hysteresis accepts [0,0.5), defaults to 0.1 and survives
+context recovery and corresponding template edits. Nested LODs and inactive
+level poses are retained. Put lights, rigs, physics, simulations and clips
+outside the geometric level groups.
+
+Shadows use level 0; environment captures select by capture-origin distance.
+LOD selection is not exported to glTF. See the
+[qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#conservative-visibility-and-object-lod-m7-selected-profile)
+for bounds, counters and limits (**S12.1.1v3 / D4.5.2 / D7.2.4v4**).
+The interactive fixture is [test/scene3d/lod.ls](../test/scene3d/lod.ls).
 
 ### Materials and lighting
 

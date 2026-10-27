@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27. **Status:** implementation started in worktree
 `temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
-M0–M6 are delivered with the aggregate limits below. M7 remains planned.
+M0–M7 are delivered with the selected profiles and aggregate limits below. F1–F10 remain separate follow-on work.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -503,7 +503,7 @@ Keep the implementation checkpoint here short:
 | M4 | Clearcoat/sheen factors, all five layer maps, separate coat normal, lazy programs and glTF/GLB preservation | Recorded independent aggregate failures; remaining physical extensions stay separate | 57 native, 54 input, 100 scene replays; 16 Three.js images pass the unchanged gate; aggregate/cost record below | Continue with M5 |
 | M5 | Shared opaque capture, refractive/absorbing physical materials and transmission/IOR/volume import/export | Documented overlap/coverage approximations and independent aggregate failures | 60 native, 56 input, 21 package checks; 101 scene replays and 16 existing image gates pass; aggregates/cost below | Continue with M6 |
 | M6 | Dedicated discs, anchored sprites, clipped bevel ribbons, source-UV glTF modes 0/1/3 and pure source-ID picking | Unlit profile; no dashes, deformation, loop mode or styling export | 66 native / 57 importer / 102 scene replays and 16 old image gates pass; aggregate qualification below | Continue with M7 |
-| M7 | None under this plan | Planned culling and LOD milestone | No implementation qualification | Continue after M6 |
+| M7 | Conservative per-view culling, authored deformation envelopes, nested distance LOD and document-owned hysteresis | Whole-batch bounds, highest-detail shadows and explicit static export boundary | 74 native, 57 input, 19 new package checks; 103 viewer replays and 16 established image comparisons pass; aggregate/cost record below | Closed; F1–F10 remain separate backlog |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
@@ -766,7 +766,7 @@ measures **1.532/2.009 ms**, retaining 16 resources and 6,309,866 GPU bytes.
 Its 120 frames make exactly 360 draws and 120 readbacks, with no program,
 projection, target, environment, shadow or retained-byte growth.
 
-The release Radiant aggregate records **6,407 passed / 8 failed / 141 partial /
+The release Radiant aggregate records **6,407 passed / 8 failed / 140 partial /
 2 skipped**. Seven failures retain the known CSS-memory and six WPT layout
 classification. The eighth is the Node 24.7 concurrent baseline compiler
 shutdown stall: all 211 rendering cases printed PASS before the process
@@ -780,3 +780,92 @@ before its final completion marker at the suite timeout. The same Hotwire
 case passes an isolated replay in 7.896 seconds; no server/runtime code was
 changed. The new package fixtures and forced-GC lane pass. M6 is closed with
 these aggregate limits recorded.
+
+
+### M7 qualification record — 2026-10-28
+
+Each view uses conservative transformed bounds, retaining whole-instance
+batches and extending billboard/ribbon bounds by their style. Unknown skin,
+morph or shader displacement stays drawable without an authored local
+envelope. Main-camera rejection never decides visibility for a shadow or
+capture face. Nested distance levels retain their geometry/programs and
+inactive poses. Presentation selection uses symmetric threshold hysteresis;
+level 0 casts shadows, and captures select by their own origin. No source
+visibility attributes are mutated. The selected profile retains
+**S12.1.1v3, D4.5.1v4/D4.5.2, D7.2.4v4 and D7.3.5**.
+
+Review found that projection-owned hysteresis would reset selection during
+context loss or an unrelated template edit inside a threshold band. Selection
+now belongs to the document-owned viewport, follows corresponding DOM nodes,
+resets when threshold configuration changes and retires when its LOD node is
+removed. Native and UI cases pin recovery inside the deadband, nested levels,
+inactive animation and metadata retirement. Projection reserves all needed
+presentation programs before camera movement, with no geometry/target rebuild or simulation reset.
+
+The focused feature checks pass **73 native units, 57 importer cases, 19 new
+package checks, 103 scene/render replays and all 16 established Three.js image
+comparisons**. Native checks cover exact culling-on/off pixels, draw reduction,
+frustum-edge markers/lines, anchored sprites, mirrored instances, infinite
+projection, authored/unknown deformation bounds, off-camera and far-LOD
+casters, threshold jumps/jitter and 100 camera cycles. The new 39-event replay
+passes 32 assertions across camera movement, template/context replacement,
+culling toggles and removal/recreation of selection state.
+
+Release measurements use the existing Dreamhome scene and a 200-object grid
+with high/medium/low sphere buffers (8,385/561/45 source vertices and
+49,152/3,072/192 indices). Culling-on/off captures are byte-identical for both
+high and low detail. Across 120 changed 256 × 256 frames, culling rejects
+16,320 candidates and reduces draws from **24,120 to 7,800** (201 to 65 per
+frame). All configurations retain one readback per frame and zero program,
+projection, target, CPU/GPU-byte or selection-state growth. LOD keeps all
+three geometry levels resident and rejects 48,000 inactive candidates over
+those frames; it does not stream them out.
+
+Comparing buffer sizes exposed an existing accounting error: a vertex upload
+without a retained CPU copy still had its length subtracted from GPU bytes
+and added to CPU bytes. The counter now checks whether the CPU copy actually
+exists. A dedicated upload/retained-copy/release test qualifies the correction;
+rendering is unaffected. Older M0–M6 CPU/GPU splits use the previous accounting
+and should not be compared directly; total owned allocations are unchanged.
+The renderer's release Radiant aggregate is **6,415 passed / 7 failed /
+141 partial / 2 skipped**, retaining the CSS-memory and six WPT layout failures;
+all 211 rendering cases pass and Node exits normally. This aggregate preceded
+the isolated accounting correction. All **74 native checks** pass after that
+correction; all **103 viewer replays** also pass again against the corrected counters.
+The earlier unchanged Three.js image gates remain qualified because this
+correction changes accounting only.
+
+Corrected release Apple M4 measurements, 120 changed 256 × 256 frames:
+
+| Grid configuration | Frame p50 / p95 (ms) | Draws/frame | Resources | GPU-accounted bytes | Projection live / reserved bytes |
+|---|---:|---:|---:|---:|---:|
+| High detail, culling off | 4.344 / 4.530 | 201 | 11 | 6,525,478 | 2,066,816 / 2,081,792 |
+| High detail, culling on | 2.204 / 3.296 | 65 | 11 | 6,525,478 | 2,066,816 / 2,081,792 |
+| Low LOD, culling off | 3.141 / 3.338 | 201 | 17 | 6,557,926 | 2,328,916 / 4,637,696 |
+| Low LOD, culling on | 2.447 / 2.679 | 65 | 17 | 6,557,926 | 2,328,916 / 4,637,696 |
+
+Both culling pairs still have byte-identical captures. LOD keeps 600 draw
+records and 40 bytes of selection history, versus 200 records without it;
+its smaller geometry does not improve the median once culling is active in
+this workload. The extra 32,448 GPU bytes exactly match the retained medium/
+low vertex and index uploads. Graphics-owned CPU storage is 3,051,272 bytes
+without LOD and 3,064,328 with it; snapshots are 262,144 bytes. Projection,
+graphics CPU/GPU and selection metadata all show zero growth over the frames.
+Driver-private allocations are outside these owned-byte counters.
+
+The reversed paired Dreamhome sample at 732 × 359 is M6 **60.993/62.386 ms**
+versus M7 **60.922/65.281 ms** p50/p95. Both retain 66 resources and exactly
+56,876,870 total graphics-owned allocated bytes; the corrected M7 GPU/CPU
+split is 56,876,582 / 2,854,952. Main-view draws fall from 49,080 to 48,152
+across 120 frames, with no environment/shadow rebuild, program link or memory
+growth. Absolute timings vary across runs; these paired samples establish
+no universal speedup. Evidence: `m7-{paired,grid}-*.json/png`,
+`m7-native-accounting-all.log`, `m7-accounting-replays.log`, `m7-*.log` and
+archived corrected `m7/lambda.exe` under `temp/scene3d-three-features/`.
+
+The final Lambda/input aggregate is **8,332/8,333 passing**, with only the
+inherited `tests_greetings_model` mismatch. Hotwire passes in the aggregate;
+the new package fixture and forced-GC lane pass. Lint and document path/
+whitespace checks pass. M7 is closed with the recorded independent aggregate
+limits. M0–M7 deliver the finite roadmap; F1–F10 remain separate follow-on
+profiles rather than unfinished acceptance conditions for this delivery.

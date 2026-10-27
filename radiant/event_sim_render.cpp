@@ -245,6 +245,8 @@ static bool read_metrics(EventSimContext* context, UiContext* ui, MapReader& arg
         METRIC(projection_bytes); METRIC(projection_reserved_bytes); METRIC(snapshot_bytes);
         METRIC(meshes); METRIC(geometries); METRIC(textures); METRIC(environment_builds); METRIC(shadow_passes);
         METRIC(shader_links); METRIC(material_links); METRIC(shader_programs); METRIC(simulation_steps); METRIC(transmission_captures); METRIC(postprocess_passes);
+        METRIC(visibility_tests); METRIC(culled_draws); METRIC(lod_skips);
+        METRIC(lods); METRIC(lod_state_bytes);
         METRIC(raster_width); METRIC(raster_height); METRIC(camera_aspect);
 #undef METRIC
         metrics->put("animation_id", (uintptr_t)scene3d_animations(element));
@@ -625,6 +627,15 @@ static bool measure_frames(EventSimContext* context, UiContext* ui, MapReader& a
             metrics.put("shadow_passes_growth", (double)scene_after.shadow_passes - scene_before.shadow_passes);
             metrics.put("material_links_growth", (double)scene_after.material_links - scene_before.material_links);
             metrics.put("transmission_captures_growth", (double)scene_after.transmission_captures - scene_before.transmission_captures);
+            metrics.put("visibility_tests_growth", (double)scene_after.visibility_tests - scene_before.visibility_tests);
+            metrics.put("culled_draws_growth", (double)scene_after.culled_draws - scene_before.culled_draws);
+            metrics.put("lod_skips_growth", (double)scene_after.lod_skips - scene_before.lod_skips);
+            metrics.put("lod_state_bytes_growth", (double)scene_after.lod_state_bytes - scene_before.lod_state_bytes);
+            metrics.put("lod_state_bytes", scene_after.lod_state_bytes);
+            metrics.put("projection_bytes", scene_after.projection_bytes);
+            metrics.put("projection_reserved_bytes", scene_after.projection_reserved_bytes);
+            metrics.put("snapshot_bytes", scene_after.snapshot_bytes);
+            metrics.put("projection_bytes_growth", (double)scene_after.projection_bytes - scene_before.projection_bytes);
             metrics.put("postprocess_passes_growth", (double)scene_after.postprocess_passes - scene_before.postprocess_passes);
         }
         if (args.has("fields")) passed &= compare_metrics(context, args, metrics);

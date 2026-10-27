@@ -400,6 +400,61 @@ segment with `object`, `source_index`, `primitive_index`, `position` and ray
 radii, sprite anchors and clipped bevel ribbons, without texture-alpha tests,
 scene occlusion or an automatic DOM/animation pose resolver. Callers supply
 the sampled final matrix for each instance.
+### Conservative visibility and object LOD: M7 selected profile
+
+`frustum-culling` defaults to true on the scene and each drawable. Either may
+disable rejection. Static local AABBs include hierarchy transforms, mirrors,
+shear and all instances in a batch. Camera-facing drawables conservatively
+include their screen/world extent and anchor. Tests use the actual perspective,
+infinite-perspective or orthographic lens, including `viewBox` fitting; invalid
+or overflowed computed bounds stay drawable. Whole-batch bounds can overdraw
+when separated instances straddle the frustum. This profile does not compact
+instances, stream resources or perform occlusion queries.
+
+Skinned, morphed and custom-shader geometry stays uncullable unless the drawable
+provides `bounds:[minX,minY,minZ,maxX,maxY,maxZ]`: six finite ordered local
+coordinates. This is the author's conservative envelope for all sampled
+deformations, before the model/world transform. Custom shader bounds must
+include every shader/simulation placement, including custom instance placement;
+shaders that ignore the model transform cannot use this contract. The renderer
+does not infer a safe bound from undeformed geometry. The same extent helper
+supplies shadow fitting. Each environment/shadow face tests its own frustum;
+main-camera rejection never removes a shadow caster or capture object.
+
+`lod(levels,distances,options?)` constructs `<lod>` with 1–16 group children and
+matching strictly increasing distances starting at 0. Distances are world
+units from the LOD origin to the presentation camera, independent of object
+scale, camera zoom and projection type. All levels validate and retain their
+geometry, materials and poses. Nested LODs are supported. Level content is
+geometric: groups, LODs, drawables and resource/inline geometry/material/texture
+definitions. Lights, rigs, physics, simulations and animation clips live
+outside the level groups; referenced deformed drawables may use an outside rig.
+glTF export refuses view-dependent LOD selection. Picking still takes an
+explicit drawable; automatic active-level/ray traversal is outside this profile.
+
+`hysteresis` defaults to 0.1 and accepts [0,0.5). Initial selection uses the
+last threshold at or below the distance. A farther level starts at its
+threshold × (1+h); returning nearer crosses the current threshold × (1−h).
+Large moves may cross multiple levels. Selection history is document-owned,
+surviving context loss and corresponding template replacement; changing the
+thresholds/hysteresis resets it, and removing the node retires it. Hidden
+levels keep animation poses and shared simulation ownership. Programs for all
+declared presentation levels are reserved before camera movement reveals them.
+
+Shadows use level 0 independently of the presentation selection; environment
+captures select by capture-origin distance without presentation hysteresis.
+This keeps camera-only environment/shadow caches valid and preserves detailed
+off-camera casters, at the cost of highest-detail shadow geometry. It is an
+explicit profile choice, rather than a claim of complete
+[Three.js LOD](https://threejs.org/docs/pages/LOD.html) equivalence.
+
+`visibility_tests` and `culled_draws` count conservative frustum decisions
+across main/capture/shadow views. `lod_skips` counts rejected presentation and
+capture candidates; `lods` and `lod_state_bytes` expose current nodes and
+retained selection metadata. Unchanged cached frames do no visibility, draw
+or readback work. These choices retain **S12.1.1v3, D4.5.1v4/D4.5.2,
+D7.2.4v4 and D7.3.5**; no formal ruling changes are introduced.
+
 ## 5. Radiant scene renderer and shared native GL core
 
 ### Context provider and API mapping
@@ -1499,7 +1554,7 @@ component boundaries under **S2.6.4**. No new runtime value type is required.
 |---|---|---|
 | OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
 | MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. Explicit `Pr`, `Pm`, `map_Pr`, `map_Pm` or `norm` select standard shading independently of `illum` order. Factors are [0,1]; scalar-map R channels pack into linear G roughness/B metalness. A metallic map without an explicit factor uses 1; absent map channels stay white. Normal maps support `-bm` scale. | Scalar roughness/metalness images must share dimensions and wrap modes; incompatible inputs fail. Decode is bounded at 4096 pixels per axis and 64 MiB. Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Other specular, ambient, emissive and physical-extension properties retain warnings. |
-| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0/UV1, RGB/RGBA colors, perspective/orthographic cameras, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (independent per map, including its `texCoord` override), core `emissiveFactor` with `KHR_materials_emissive_strength`, `KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_transmission`, `KHR_materials_ior` (IOR ≥1), `KHR_materials_volume`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. UV sets beyond 0/1, lines/points, Draco, Basis/KTX2 and other `KHR_materials_*` shading extensions are unsupported. Unlit materials omit normal/emissive maps with a warning. Camera nodes keep stable occurrence IDs and node transforms; an explicit viewport camera ID overrides their default selection. Omitted perspective `zfar` remains infinite. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
+| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans and selected unlit point/line modes 0/1/3, normals, UV0/UV1, RGB/RGBA colors, perspective/orthographic cameras, standard metallic-roughness factors (glTF defaults both to 1), base-color/metal-rough/normal/occlusion/emissive maps, normal scale, occlusion strength, opaque/blended/masked alpha with cutoff, tangents, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. Extensions: `KHR_mesh_quantization`, `KHR_materials_unlit` (basic), `EXT_meshopt_compression`, `KHR_texture_transform` (independent per map, including its `texCoord` override), core `emissiveFactor` with `KHR_materials_emissive_strength`, `KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_transmission`, `KHR_materials_ior` (IOR ≥1), `KHR_materials_volume`, and `KHR_lights_punctual` (intensity divided by π). | Other required extensions are rejected; other optional extensions use the core fallback with warnings. UV sets beyond 0/1, line loops and point/line deformation, Draco, Basis/KTX2 and other `KHR_materials_*` shading extensions are unsupported. Unlit materials omit normal/emissive maps with a warning. Camera nodes keep stable occurrence IDs and node transforms; an explicit viewport camera ID overrides their default selection. Omitted perspective `zfar` remains infinite. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
 | STL | Facet triangles with flat normals from their winding (stored facet normals are often zero or stale and are ignored); zero-area facets are dropped; the ASCII solid name becomes the group `name`. | Binary per-facet color conventions are not interpreted. Coordinates are used as authored; Z-up CAD parts need a `transform` rotation. |
 | PLY | `vertex` `x/y/z` with optional `nx/ny/nz` normals, `red/green/blue` (or `diffuse_*`, `r/g/b`) colors normalized by their unsigned type, and `s/t` (or `u/v`, `texture_u/v`) UVs; `face` `vertex_indices`/`vertex_index` polygons, triangulated and stripped of zero-area triangles; per-corner `texcoord` lists; a `comment TextureFile <image>` texture. Missing normals become area-weighted smooth normals. | Point clouds without faces, incomplete attribute groups, signed or mixed color types and out-of-range indices are errors. Vertex alpha is warned and ignored. Other elements and properties remain available through the raw mapping only. |
 | A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |

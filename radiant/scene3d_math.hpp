@@ -49,6 +49,32 @@ inline Scene3dVec scene3d_point(const Scene3dMatrix& m, Scene3dVec p, float w = 
         m.v[1]*p.x+m.v[5]*p.y+m.v[9]*p.z+m.v[13]*w,
         m.v[2]*p.x+m.v[6]*p.y+m.v[10]*p.z+m.v[14]*w};
 }
+inline void scene3d_include(Scene3dVec point,Scene3dVec* lo,Scene3dVec* hi) {
+    *lo={fminf(lo->x,point.x),fminf(lo->y,point.y),fminf(lo->z,point.z)};
+    *hi={fmaxf(hi->x,point.x),fmaxf(hi->y,point.y),fmaxf(hi->z,point.z)};
+}
+// an enclosing AABB may overdraw; uncertain/overflowed bounds must never remove visible geometry.
+inline bool scene3d_clip_bounds(const Scene3dMatrix& lens,Scene3dVec lo,Scene3dVec hi,float margin_x=0,float margin_y=0) {
+    if(!isfinite(lo.x)||!isfinite(lo.y)||!isfinite(lo.z)||!isfinite(hi.x)||!isfinite(hi.y)||!isfinite(hi.z)||
+        lo.x>hi.x||lo.y>hi.y||lo.z>hi.z||!isfinite(margin_x)||!isfinite(margin_y)) return true;
+    unsigned intersects=0;
+    for(unsigned corner=0;corner<8;corner++) {
+        double p[]={corner&1?hi.x:lo.x,corner&2?hi.y:lo.y,corner&4?hi.z:lo.z,1},clip[4]={};
+        for(unsigned r=0;r<4;r++) for(unsigned c=0;c<4;c++) clip[r]+=(double)lens.v[c*4+r]*p[c];
+        double x=clip[0],y=clip[1],z=clip[2],w=clip[3],scale=fmax(1,fmax(fmax(fabs(x),fabs(y)),fmax(fabs(z),fabs(w))));
+        if(!isfinite(scale)||!isfinite(x)||!isfinite(y)||!isfinite(z)||!isfinite(w)) return true;
+        double planes[]={w+x+margin_x*fabs(w),w-x+margin_x*fabs(w),w+y+margin_y*fabs(w),w-y+margin_y*fabs(w),w+z,w-z};
+        for(unsigned plane=0;plane<6;plane++) if(planes[plane]>=-1e-6*scale) intersects|=1u<<plane;
+    }
+    return intersects==63;
+}
+inline unsigned scene3d_lod_level(const float* distances,unsigned count,float hysteresis,double distance,unsigned previous,bool initialized) {
+    unsigned level=initialized?previous:0;
+    if(!initialized) {while(level+1<count&&distance>=distances[level+1]) level++;return level;}
+    while(level+1<count&&distance>=(double)distances[level+1]*(1.0+hysteresis)) level++;
+    while(level&&distance<(double)distances[level]*(1.0-hysteresis)) level--;
+    return level;
+}
 inline Scene3dMatrix scene3d_transform(Scene3dVec position, Scene3dVec rotation, Scene3dVec scale) {
     float cx = cosf(rotation.x), sx = sinf(rotation.x), cy = cosf(rotation.y), sy = sinf(rotation.y);
     float cz = cosf(rotation.z), sz = sinf(rotation.z);

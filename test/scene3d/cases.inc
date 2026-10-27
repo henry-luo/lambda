@@ -91,3 +91,4 @@
 {"PhysicalFactorsAnimateAndTemplateEditsRetainMaterialPrograms", "test/scene3d/physical.ls", "test/scene3d/events/PhysicalFactorsAnimateAndTemplateEditsRetainMaterialPrograms.json", 20},
 {"TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture", "test/scene3d/transmission.ls", "test/scene3d/events/TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture.json", 20},
 {"DrawableStylesAnimateAndRetainTopologyResources", "test/scene3d/drawables.ls", "test/scene3d/events/DrawableStylesAnimateAndRetainTopologyResources.json", 20},
+{"LodAndCullingKeepCameraResourcesAndHysteresisAcrossRecovery", "test/scene3d/lod.ls", "test/scene3d/events/LodAndCullingKeepCameraResourcesAndHysteresisAcrossRecovery.json", 39},

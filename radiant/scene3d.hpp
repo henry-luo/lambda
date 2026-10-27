@@ -25,6 +25,9 @@ struct Scene3dStats {
     uint32_t simulation_steps;   // GPU simulation steps since the viewport was created
     uint32_t transmission_captures; // one shared opaque image per changed glass frame
     uint32_t postprocess_passes; // color passes, excluding the common output conversion
+    uint64_t visibility_tests,culled_draws,lod_skips; // decisions across presentation, capture and shadow views
+    uint64_t lod_state_bytes; // document-owned hysteresis, separate from the disposable projection
+    uint32_t lods;
     unsigned raster_width, raster_height;
     float camera_aspect;
 };

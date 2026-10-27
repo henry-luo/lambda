@@ -1716,3 +1716,148 @@ TEST_F(Scene3dTest, ImportedFaceFreePointAndLinePrimitivesRenderAndRetireTheirUp
     root->remove_child(model);doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
     EXPECT_EQ(after.geometries,0u);EXPECT_LT(after.graphics.gpu_bytes,before.graphics.gpu_bytes);
 }
+
+TEST(Scene3dMath, FrustumBoundsAndLodThresholdsAreConservativeAndStable) {
+    auto lens=scene3d_perspective(90,1,1,10);
+    EXPECT_TRUE(scene3d_clip_bounds(lens,{-1,-1,-3},{1,1,-2}));
+    EXPECT_FALSE(scene3d_clip_bounds(lens,{5,0,-3},{6,1,-2}));
+    EXPECT_FALSE(scene3d_clip_bounds(lens,{0,0,1},{1,1,2}));
+    EXPECT_FALSE(scene3d_clip_bounds(lens,{0,0,-20},{1,1,-15}));
+    EXPECT_TRUE(scene3d_clip_bounds(scene3d_perspective(90,1,1,INFINITY),{0,0,-1e10f},{1,1,-1e9f}));
+    EXPECT_TRUE(scene3d_clip_bounds(lens,{NAN,0,0},{1,1,1}));
+    EXPECT_TRUE(scene3d_clip_bounds(scene3d_orthographic(4,1,0,10),{2.125f,0,-2},{2.125f,0,-2},.125f,.125f));
+    const float distances[]={0,10,30};
+    EXPECT_EQ(scene3d_lod_level(distances,3,.1f,10.5,0,true),0u);
+    EXPECT_EQ(scene3d_lod_level(distances,3,.1f,11.1,0,true),1u);
+    EXPECT_EQ(scene3d_lod_level(distances,3,.1f,9.5,1,true),1u);
+    EXPECT_EQ(scene3d_lod_level(distances,3,.1f,8.9,1,true),0u);
+    EXPECT_EQ(scene3d_lod_level(distances,3,.1f,50,0,true),2u);
+    EXPECT_EQ(scene3d_lod_level(distances,3,.1f,2,2,true),0u);
+}
+
+TEST_F(Scene3dTest, FrustumCullingPreservesPixelsDropsDrawsAndKeepsCameraResources) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    for(unsigned i=0;i<25;i++) {
+        DomElement* object=mesh("plane","#ff0000",i==1?"standard":"basic");
+        char position[40];snprintf(position,sizeof(position),"%u 0 0",i*4);attr(object,"position",position);
+    }
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,64,64,255,0,0);
+    uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));Scene3dStats on,off,after;ASSERT_TRUE(scene3d_stats(root,&on));
+    EXPECT_EQ(on.graphics.draws,2u);EXPECT_EQ(on.culled_draws,24u);EXPECT_EQ(on.material_links,2u);
+    attr(root,"frustum-culling","false");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected,image->pixels,sizeof(expected)),0);
+    ASSERT_TRUE(scene3d_stats(root,&off));EXPECT_EQ(off.graphics.draws-on.graphics.draws,26u);
+    attr(root,"frustum-culling","true");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&on));
+    attr(camera,"position","4 0 4");attr(camera,"target","4 0 0");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(on.material_links,after.material_links);EXPECT_EQ(on.projection_generation,after.projection_generation);
+    attr(camera,"target","0 0 0");
+    for(unsigned i=0;i<100;i++) {attr(camera,"position",i%2?"0 0 4":".1 0 4");ASSERT_NE(snapshot(),nullptr);}
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(on.graphics.gpu_bytes,after.graphics.gpu_bytes);EXPECT_EQ(on.graphics.resources,after.graphics.resources);
+    EXPECT_EQ(on.material_links,after.material_links);EXPECT_EQ(on.projection_generation,after.projection_generation);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+}
+
+TEST_F(Scene3dTest, FrustumBoundsIncludeWideEdgesAnchorsAndMirroredInstanceUnions) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* cloud=drawable("points","2.125 .5 0"),*line=drawable("line-segments","2.0625 -1 0 2.0625 0 0","#00ff00");
+    attr(cloud,"size","16");attr(line,"width","8");
+    DomElement* marker=drawable("sprite","-2.25 1 0","#0000ff");attr(marker,"size","1 .5");attr(marker,"center","0 .5");
+    DomElement* batch=mesh();attr(batch,"instances","-1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0 1 0 0 0 0 1 0 10 0 0 1");
+    for(float density:{1.f,2.f}) {
+        ImageSurface* image=snapshot(128,128,density);ASSERT_NE(image,nullptr);pixel(image,(unsigned)(127*density),(unsigned)(48*density),255,0,0);
+        unsigned bytes=(unsigned)image->pitch*(unsigned)image->height;lam::Temp<uint8_t> expected((uint8_t*)mem_alloc(bytes,MEM_CAT_RENDER));memcpy(expected.get(),image->pixels,bytes);
+        attr(root,"frustum-culling","false");image=snapshot(128,128,density);ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(expected.get(),image->pixels,bytes),0);
+        attr(root,"frustum-culling","true");
+    }
+    attr(root,"viewBox","0 0 256 128");ASSERT_NE(snapshot(),nullptr);
+    attr(camera,"type","perspective");attr(camera,"infinite-far","true");ASSERT_NE(snapshot(),nullptr);
+    attr(cloud,"frustum-culling","false");attr(cloud,"position","100 0 0");ASSERT_NE(snapshot(),nullptr);
+}
+
+TEST_F(Scene3dTest, DeformedAndShaderGeometryUsesAuthoredEnvelopesOrStaysUnculled) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* object=drawable("mesh","-1 -1 0 1 -1 0 0 1 0"),*g=object->first_child->as_element(),*m=object->last_child->as_element();
+    attr(object,"position","10 0 0");attr(object,"morph-weights","1");attr(g,"morph-positions","-10 0 0 -10 0 0 -10 0 0");
+    pixel(snapshot(),64,64,255,0,0);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.visibility_tests,0u);
+    attr(object,"bounds","-11 -1 0 1 1 0");pixel(snapshot(),64,64,255,0,0);
+    ASSERT_TRUE(g->remove_attribute("morph-positions"));ASSERT_TRUE(object->remove_attribute("morph-weights"));ASSERT_TRUE(object->remove_attribute("bounds"));doc.mutation_epoch++;
+    attr(m,"type","shader");attr(m,"vertex","void main(){gl_Position=projection_matrix*view_matrix*model_matrix*vec4(position+vec3(-10,0,0),1);}");
+    attr(m,"fragment","void main(){fragment_color=vec4(1,0,0,1);}");pixel(snapshot(),64,64,255,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&before));attr(camera,"position","30 0 4");attr(camera,"target","30 0 0");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.visibility_tests,after.visibility_tests);EXPECT_EQ(after.graphics.draws-before.graphics.draws,2u);
+    attr(object,"bounds","-11 -1 0 -9 1 0");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(camera,"position","31 0 4");attr(camera,"target","31 0 0");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.culled_draws-before.culled_draws,1u);EXPECT_EQ(after.graphics.draws-before.graphics.draws,1u);
+    attr(object,"bounds","1 0 0 -1 1 1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"bounds"),nullptr);
+}
+
+TEST_F(Scene3dTest, OffCameraCastersKeepTheirShadowWhenPresentationIsCulled) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* receiver=mesh("plane","#ffffff","lambert");attr(receiver->first_child->as_element(),"size","4 4 1");
+    DomElement* caster=mesh("box","#ffffff","lambert");attr(caster->first_child->as_element(),"size",".5 .5 .5");attr(caster,"position","3 0 1.5");
+    DomElement* sun=element("light",root);attr(sun,"type","directional");attr(sun,"position","4 0 4");attr(sun,"cast-shadow","true");attr(sun,"shadow-size","256");attr(sun,"shadow-normal-bias","0");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t shadowed[128*128*4];memcpy(shadowed,image->pixels,sizeof(shadowed));
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_GE(before.culled_draws,1u);
+    attr(root,"frustum-culling","false");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(shadowed,image->pixels,sizeof(shadowed)),0);
+    attr(root,"frustum-culling","true");attr(caster,"cast-shadow","false");image=snapshot();ASSERT_NE(image,nullptr);
+    unsigned changed=0;for(unsigned i=0;i<sizeof(shadowed);i++) changed+=((uint8_t*)image->pixels)[i]!=shadowed[i];EXPECT_GT(changed,100u);
+    ASSERT_TRUE(scene3d_stats(root,&before));attr(camera,"position",".1 0 4");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.shadow_passes,after.shadow_passes);
+    // a distant presentation may choose an empty level; its highest-detail caster still shadows.
+    attr(camera,"position","0 0 4");attr(caster,"cast-shadow","true");
+    DomElement* lod=element("lod",root);attr(lod,"distances","0 1");DomElement* high=element("group",lod);element("group",lod);
+    ASSERT_TRUE(root->remove_child(caster));ASSERT_TRUE(high->append_child(caster));doc.mutation_epoch++;
+    image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(shadowed,image->pixels,sizeof(shadowed)),0);
+    ASSERT_TRUE(root->remove_child(lod));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.lod_state_bytes,0u);
+}
+
+TEST_F(Scene3dTest, LodSwitchesBothWaysWithHysteresisAndRetainsEveryLevel) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* lod=element("lod",root);attr(lod,"distances","0 10 30");
+    const char* tags[]={"mesh","sprite","points"},*colors[]={"#ff0000","#00ff00","#0000ff"};
+    for(unsigned level=0;level<3;level++) {
+        DomElement* group=element("group",lod),*object=mesh(level?"buffer":"plane",colors[level],"basic",group,tags[level]);
+        if(level) {attr(object->first_child->as_element(),"positions","0 0 0");attr(object,"size-mode","screen");attr(object,"size",level==1?"32 32":"24");}
+    }
+    pixel(snapshot(),64,64,255,0,0);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.geometries,3u);EXPECT_EQ(before.lod_skips,2u);
+    const char* positions[]={"0 0 10.5","0 0 11.1","0 0 10.1","0 0 9.5","0 0 8.9","0 0 40","0 0 28","0 0 26","0 0 4"};
+    const unsigned levels[]={0,1,1,1,0,2,2,1,0};
+    for(unsigned i=0;i<9;i++) {attr(camera,"position",positions[i]);pixel(snapshot(),64,64,levels[i]==0?255:0,levels[i]==1?255:0,levels[i]==2?255:0);}
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.material_links,after.material_links);
+    EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);EXPECT_EQ(after.graphics.draws-before.graphics.draws,18u);
+    for(unsigned i=0;i<100;i++) {attr(camera,"position",i%2?"0 0 10.2":"0 0 9.8");pixel(snapshot(),64,64,255,0,0);}
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.material_links,after.material_links);EXPECT_EQ(before.graphics.resources,after.graphics.resources);
+    scene3d_context_lost(root);pixel(snapshot(),64,64,255,0,0);
+    attr(root,"frustum-culling","false");pixel(snapshot(),64,64,255,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.lod_state_bytes,after.lod_state_bytes);
+    attr(lod,"distances","0 10 10");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"increase"),nullptr);
+}
+
+TEST_F(Scene3dTest, NestedLodKeepsInactiveAnimationAndRetiresItsSelectionState) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* lod=element("lod",root);attr(lod,"distances","0 10");
+    DomElement* near=element("group",lod);mesh("plane","#ff0000","basic",near);
+    DomElement* far=element("group",lod);attr(far,"id","far-level");
+    DomElement* nested=element("lod",far);attr(nested,"distances","0");DomElement* level=element("group",nested);
+    DomElement* green=mesh("plane","#00ff00","basic",level);attr(green->first_child->as_element(),"size","1 1 1");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","move-hidden");DomElement* track=element("keyframe-track",clip);
+    attr(track,"path","far-level.position");attr(track,"type","vector");attr(track,"times","0 1");attr(track,"values","0 0 0 1 0 0");
+    pixel(snapshot(),64,64,255,0,0);auto* state=scene3d_animations(root);auto* action=scene3d_animation_action(state,"move-hidden");ASSERT_NE(action,nullptr);
+    action->loop=ANIMATION_LOOP_ONCE;action->clamp=true;ASSERT_TRUE(animation_action_play(action));ASSERT_TRUE(scene3d_animation_seek(state,1));pixel(snapshot(),64,64,255,0,0);
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.lods,2u);
+    attr(camera,"position","0 0 12");ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,96,64,0,255,0);pixel(image,64,64,0,0,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
+    ASSERT_TRUE(root->remove_child(lod));doc.mutation_epoch++;
+    // retire the disconnected binding before validating the reduced scene.
+    ASSERT_TRUE(root->remove_child(clip));doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.lods,0u);EXPECT_EQ(after.lod_state_bytes,0u);
+}
+
+TEST_F(Scene3dTest, BufferAccountingCountsCpuCopiesOnlyWhenTheyAreRetained) {
+    char diagnostic[256];auto* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    NativeGlStats base,upload,copied,retired;ASSERT_TRUE(native_gl_stats(graphics,&base));const float values[]={0,1,2,3};
+    auto vertex=native_gl_buffer(graphics,values,sizeof(values),false);ASSERT_NE(vertex.id,0u);ASSERT_TRUE(native_gl_stats(graphics,&upload));
+    EXPECT_EQ(upload.gpu_bytes-base.gpu_bytes,sizeof(values));EXPECT_EQ(upload.cpu_bytes,base.cpu_bytes);
+    auto index=native_gl_buffer(graphics,values,sizeof(values),true);ASSERT_NE(index.id,0u);ASSERT_TRUE(native_gl_stats(graphics,&copied));
+    EXPECT_EQ(copied.gpu_bytes-upload.gpu_bytes,sizeof(values));EXPECT_EQ(copied.cpu_bytes-upload.cpu_bytes,sizeof(values));
+    native_gl_release(graphics,vertex);native_gl_release(graphics,index);ASSERT_TRUE(native_gl_stats(graphics,&retired));
+    EXPECT_EQ(retired.gpu_bytes,base.gpu_bytes);EXPECT_EQ(retired.cpu_bytes,base.cpu_bytes);EXPECT_EQ(retired.resources,base.resources);native_gl_destroy(graphics);
+}

@@ -340,7 +340,8 @@ bool native_gl_stats(NativeGlContext* context, NativeGlStats* stats) {
 #ifdef NATIVE_GL_ENABLED
     // driver-private allocations are not observable; separate owned upload shadows from GPU storage.
     for (const NativeGlSlot& slot:context->slots) if (slot.id) {
-        size_t shadow=slot.kind==NATIVE_GL_BUFFER?slot.length:slot.kind==NATIVE_GL_SHADER?slot.bytes:0;
+        // vertex uploads may record a length without retaining a CPU copy.
+        size_t shadow=slot.kind==NATIVE_GL_BUFFER&&slot.data?slot.length:slot.kind==NATIVE_GL_SHADER?slot.bytes:0;
         stats->cpu_bytes+=shadow+(slot.kind==NATIVE_GL_TEXTURE&&slot.data?sizeof(WebGlTextureStorage):0);stats->gpu_bytes+=slot.bytes-shadow;
     }
 #endif
