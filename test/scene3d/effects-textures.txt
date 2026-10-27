@@ -1,0 +1,68 @@
+<html
+  <head
+    <style
+      "html,body{margin:0;background:#000}">>
+  <body
+    <scene3d id: "file-svg", width: 96, height: 48, camera: "camera", background: "#000000", style: "display:block",
+      <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 2>
+      <resources
+        <texture src: "assets/effects-quadrants.svg", id: "art", max-size: 32, min-filter: 9728, mag-filter: 9728>>
+      <mesh
+        <geometry type: 'plane', size: [4, 2, 1]>
+        <material side: 'double', transparent: true, type: 'shader', vertex: "out vec2 surface_uv;\nvoid main() {\n    surface_uv = uv;\n    gl_Position = projection_matrix * view_matrix * model_matrix * instance_matrix * vec4(position, 1.0);\n}", fragment: "in vec2 surface_uv;\nuniform sampler2D source_image;\nuniform float phase, amount, rotation, aspect;\nuniform vec3 tint;\nconst float TAU = 6.28318530718;\nvec4 sample_image(vec2 p) {\n    if (any(lessThan(p, vec2(0.0))) || any(greaterThan(p, vec2(1.0)))) return vec4(0.0);\n    vec4 c = texture(source_image, p);\n    return vec4(c.rgb * tint * c.a, c.a);\n}\nvec2 direction() { return vec2(cos(rotation) / aspect, sin(rotation)); }\nvoid main() {\n    vec2 d = direction() * amount * (0.55 + 0.45 * sin(TAU * phase));\n    vec4 r = sample_image(surface_uv + d), g = sample_image(surface_uv), b = sample_image(surface_uv - d);\n    fragment_color = vec4(r.r, g.g, b.b, max(r.a, max(g.a, b.a)));\n}", uniforms: {
+            phase: 0,
+            amount: 0,
+            rotation: 0,
+            aspect: 2,
+            tint: "#ffffff",
+            source_image: "art"
+          }>>>
+    <scene3d id: "value-svg", width: 96, height: 48, camera: "camera", background: "#000000", style: "display:block",
+      <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 2>
+      <resources
+        <texture id: "art", width: 128, height: 64, max-size: 32, min-filter: 9728, mag-filter: 9728, src: "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2264%22%20height%3D%2232%22%3E%3Cpath%20d%3D%22M0%200h32v16H0z%22%20fill%3D%22%23ff0000%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M32%200h32v16H32z%22%20fill%3D%22%2300ff00%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M0%2016h32v16H0z%22%20fill%3D%22%230000ff%22%3E%3C%2Fpath%3E%3Cpath%20d%3D%22M32%2016h32v16H32z%22%20fill%3D%22%23ffffff%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E">>
+      <mesh
+        <geometry type: 'plane', size: [4, 2, 1]>
+        <material side: 'double', transparent: true, type: 'shader', vertex: "out vec2 surface_uv;\nvoid main() {\n    surface_uv = uv;\n    gl_Position = projection_matrix * view_matrix * model_matrix * instance_matrix * vec4(position, 1.0);\n}", fragment: "in vec2 surface_uv;\nuniform sampler2D source_image;\nuniform float phase, amount, rotation, aspect;\nuniform vec3 tint;\nconst float TAU = 6.28318530718;\nvec4 sample_image(vec2 p) {\n    if (any(lessThan(p, vec2(0.0))) || any(greaterThan(p, vec2(1.0)))) return vec4(0.0);\n    vec4 c = texture(source_image, p);\n    return vec4(c.rgb * tint * c.a, c.a);\n}\nvec2 direction() { return vec2(cos(rotation) / aspect, sin(rotation)); }\nvoid main() {\n    vec2 d = direction() * amount * (0.55 + 0.45 * sin(TAU * phase));\n    vec4 r = sample_image(surface_uv + d), g = sample_image(surface_uv), b = sample_image(surface_uv - d);\n    fragment_color = vec4(r.r, g.g, b.b, max(r.a, max(g.a, b.a)));\n}", uniforms: {
+            phase: 0,
+            amount: 0,
+            rotation: 0,
+            aspect: 2,
+            tint: "#ffffff",
+            source_image: "art"
+          }>>>
+    <scene3d id: "raster", width: 96, height: 48, camera: "camera", background: "#000000", style: "display:block",
+      <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 2>
+      <resources
+        <texture src: "quadrants.png", id: "art", min-filter: 9728, mag-filter: 9728>>
+      <mesh
+        <geometry type: 'plane', size: [4, 2, 1]>
+        <material side: 'double', transparent: true, type: 'shader', vertex: "out vec2 surface_uv;\nvoid main() {\n    surface_uv = uv;\n    gl_Position = projection_matrix * view_matrix * model_matrix * instance_matrix * vec4(position, 1.0);\n}", fragment: "in vec2 surface_uv;\nuniform sampler2D source_image;\nuniform float phase, amount, rotation, aspect;\nuniform vec3 tint;\nconst float TAU = 6.28318530718;\nvec4 sample_image(vec2 p) {\n    if (any(lessThan(p, vec2(0.0))) || any(greaterThan(p, vec2(1.0)))) return vec4(0.0);\n    vec4 c = texture(source_image, p);\n    return vec4(c.rgb * tint * c.a, c.a);\n}\nvec2 direction() { return vec2(cos(rotation) / aspect, sin(rotation)); }\nvoid main() {\n    vec2 d = direction() * amount * (0.55 + 0.45 * sin(TAU * phase));\n    vec4 r = sample_image(surface_uv + d), g = sample_image(surface_uv), b = sample_image(surface_uv - d);\n    fragment_color = vec4(r.r, g.g, b.b, max(r.a, max(g.a, b.a)));\n}", uniforms: {
+            phase: 0,
+            amount: 0,
+            rotation: 0,
+            aspect: 2,
+            tint: "#ffffff",
+            source_image: "art"
+          }>>>
+    <scene3d id: "basic-svg", width: 96, height: 48, camera: "camera", background: "#000000", style: "display:block",
+      <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 2>
+      <resources
+        <texture src: "assets/effects-quadrants.svg", id: "art", min-filter: 9728, mag-filter: 9728>>
+      <mesh
+        <geometry type: 'plane', size: [4, 2, 1]>
+        <material type: 'basic', color: "#ffffff", opacity: 1, texture: "art">>>
+    <scene3d id: "alpha-svg", width: 96, height: 48, camera: "camera", background: "#000000", style: "display:block",
+      <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 2>
+      <resources
+        <texture id: "art", src: "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2264%22%20height%3D%2232%22%3E%3Cpath%20d%3D%22M0%200h64v32H0z%22%20fill%3D%22%23ff0000%22%20opacity%3D%220.5%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E">>
+      <mesh
+        <geometry type: 'plane', size: [4, 2, 1]>
+        <material side: 'double', transparent: true, type: 'shader', vertex: "out vec2 surface_uv;\nvoid main() {\n    surface_uv = uv;\n    gl_Position = projection_matrix * view_matrix * model_matrix * instance_matrix * vec4(position, 1.0);\n}", fragment: "in vec2 surface_uv;\nuniform sampler2D source_image;\nuniform float phase, amount, rotation, aspect;\nuniform vec3 tint;\nconst float TAU = 6.28318530718;\nvec4 sample_image(vec2 p) {\n    if (any(lessThan(p, vec2(0.0))) || any(greaterThan(p, vec2(1.0)))) return vec4(0.0);\n    vec4 c = texture(source_image, p);\n    return vec4(c.rgb * tint * c.a, c.a);\n}\nvec2 direction() { return vec2(cos(rotation) / aspect, sin(rotation)); }\nvoid main() {\n    vec2 d = direction() * amount * (0.55 + 0.45 * sin(TAU * phase));\n    vec4 r = sample_image(surface_uv + d), g = sample_image(surface_uv), b = sample_image(surface_uv - d);\n    fragment_color = vec4(r.r, g.g, b.b, max(r.a, max(g.a, b.a)));\n}", uniforms: {
+            phase: 0,
+            amount: 0,
+            rotation: 0,
+            aspect: 2,
+            tint: "#ffffff",
+            source_image: "art"
+          }>>>>>

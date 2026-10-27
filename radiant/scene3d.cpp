@@ -653,14 +653,6 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
     if (definition->source->first_child) { scene3d_fail(build->entry,"texture cannot have children"); return {}; }
     const char* source=scene3d_text(definition->source,"src");
     if (!source || !*source) { scene3d_fail(build->entry,"texture requires a local image source"); return {}; }
-    ImageSurface* image=load_document_image(build->root->doc,build->ui,source);
-    if (image && (image->width<=0 || image->height<=0 || image->width>4096 || image->height>4096)) {
-        scene3d_fail(build->entry,"texture dimensions exceed quota");return {};
-    }
-    if (image && image->format!=IMAGE_FORMAT_SVG) image_surface_ensure_decoded(image,image->width,image->height);
-    if (!image || !image->pixels || image->format==IMAGE_FORMAT_SVG || image->alpha_mode!=IMAGE_ALPHA_STRAIGHT) {
-        scene3d_fail(build->entry,"texture acquisition or format failed"); return {};
-    }
     NativeGlSampler sampler;unsigned* fields[]={&sampler.wrap_s,&sampler.wrap_t,&sampler.min_filter,&sampler.mag_filter};
     const char* keys[]={"wrap-s","wrap-t","min-filter","mag-filter"};
     for(unsigned i=0;i<4;i++) {
@@ -673,9 +665,50 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
         scene3d_fail(build->entry,"texture max-size must be an integer in 1..4096");return {};
     }
     sampler.max_size=(unsigned)max_size;sampler.srgb=srgb;
+    ImageSurface* image=load_document_image(build->root->doc,build->ui,source);
+    if (!image || image->width<=0 || image->height<=0) {
+        scene3d_fail(build->entry,"texture acquisition or format failed");return {};
+    }
+    ImageSurface raster={};lam::Temp<uint32_t> straight;
+    if (image->format==IMAGE_FORMAT_SVG) {
+        float width,height;
+        if (!scene3d_number(definition->source,"width",image->width,&width) ||
+            !scene3d_number(definition->source,"height",image->height,&height) ||
+            !isfinite(width) || !isfinite(height) || width<1 || height<1 ||
+            floorf(width)!=width || floorf(height)!=height) {
+            scene3d_fail(build->entry,"invalid SVG texture dimensions");return {};
+        }
+        float scale=fminf(1.0f,max_size/fmaxf(width,height));
+        raster.width=(int)fmaxf(1,floorf(width*scale)); // INT_CAST_OK: bounded SVG raster pixel extent.
+        raster.height=(int)fmaxf(1,floorf(height*scale)); // INT_CAST_OK: bounded SVG raster pixel extent.
+        if (!render_media_rasterize_svg_picture(image,raster.width,raster.height)) {
+            scene3d_fail(build->entry,"SVG texture rasterization failed");return {};
+        }
+        // keep the document's premultiplied SVG cache intact; GPU sampling needs straight sRGB.
+        straight.reset((uint32_t*)mem_alloc((size_t)raster.width*raster.height*4,MEM_CAT_RENDER));
+        if (!straight) return {};
+        for (unsigned y=0;y<(unsigned)raster.height;y++) {
+            const uint32_t* row=(const uint32_t*)((const uint8_t*)image->pixels+(size_t)y*image->pitch);
+            for (unsigned x=0;x<(unsigned)raster.width;x++)
+                straight.get()[(size_t)y*raster.width+x]=render_pixel_unpremultiply_abgr(row[x]);
+        }
+        raster.pixels=straight.get();raster.pitch=raster.width*4;raster.alpha_mode=IMAGE_ALPHA_STRAIGHT;
+        image=&raster;
+    } else {
+        if (image->width>4096 || image->height>4096) {
+            scene3d_fail(build->entry,"texture dimensions exceed quota");return {};
+        }
+        image_surface_ensure_decoded(image,image->width,image->height);
+    }
+    if (!image->pixels || image->alpha_mode!=IMAGE_ALPHA_STRAIGHT) {
+        scene3d_fail(build->entry,"texture acquisition or format failed");return {};
+    }
     // what an environment capture's key records of the texture: its source and sampling, in either color space
     NativeGlSampler key=sampler;key.srgb=false;
     definition->texture_hash=hash_fnv1a_64_extend(hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS,source),&key,sizeof(key));
+    // SVG raster dimensions change its sampled content even when the source URL is unchanged.
+    unsigned extent[]={(unsigned)image->width,(unsigned)image->height};
+    definition->texture_hash=hash_fnv1a_64_extend(definition->texture_hash,extent,sizeof(extent));
     NativeGlResource texture=native_gl_texture(build->entry->graphics,image,sampler);
     if (!scene3d_resource(build,texture)) return {};
     for (unsigned y=0;y<(unsigned)image->height && !definition->texture_alpha;y++)

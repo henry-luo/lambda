@@ -1,0 +1,41 @@
+{
+  "name": "EffectsMobileControlsAndNavigation",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.effect-card, .workbench, scene3d')).every(e=>{const r=e.getBoundingClientRect();return r.width>250&&r.right<=390&&r.left>=0})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-svg"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#original-image').getAttribute('src')==='assets/graphic.svg'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-effects/gallery-mobile.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".scene3d-breadcrumbs a"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.demo-tile').length===12"
+    }
+  ]
+}

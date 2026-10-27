@@ -16,6 +16,7 @@ uses one CLI catalog entry; individual pages can still be opened with `view`.
 
 | Tile | Entry point | What to explore |
 | --- | --- | --- |
+| [Make waves](effects/README.md) | `effects/effects.ls` | Five animated GLSL effects applied to text, SVG artwork or raster images |
 | [CellScope](cellscope/README.md) | `cellscope/cellscope.ls` | Cell models, organelle information, and synchronized comparison |
 | [Domino circuit](physics/README.md) | `physics/domino.ls` | A 32-tile cascade and a counter-nudge |
 | [Salvage bay](physics/README.md) | `physics/salvage.ls` | Compound assemblies, impulses, and weightlessness |

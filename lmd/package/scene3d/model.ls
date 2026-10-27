@@ -260,6 +260,8 @@ fn check_node(n, all_nodes) bool^ {
         else true
     } else if (kind == 'texture') {
         let checked_source = if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source")
+        let checked_raster_size = [for (key in ["width", "height"] where n[key] != null)
+            if (not numeric(n[key]) or n[key] < 1 or floor(n[key]) != n[key]) raise fail("invalid SVG texture dimensions") else true]
         let checked_space = if (n["color-space"] != null and not contains(['srgb', 'linear'], n["color-space"])) raise fail("invalid texture color space")
         let checked_size = if (n["max-size"] != null and ((not numeric(n["max-size"]) or floor(n["max-size"]) != n["max-size"]) or n["max-size"] < 1 or n["max-size"] > 4096))
             raise fail("texture max-size must be an integer in 1..4096")

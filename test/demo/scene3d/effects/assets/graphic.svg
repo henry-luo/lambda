@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480">
+  <defs><linearGradient id="petal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffcf85"/><stop offset="1" stop-color="#ff715b"/></linearGradient></defs>
+  <g transform="translate(480 240)" fill="url(#petal)">
+    <ellipse cy="-77" rx="47" ry="104"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(45)"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(90)"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(135)"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(180)"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(225)"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(270)"/>
+    <ellipse cy="-77" rx="47" ry="104" transform="rotate(315)"/>
+    <circle r="56" fill="#142c39"/><circle r="27" fill="#a7dfcf"/>
+    <g fill="none" stroke="#a7dfcf" stroke-width="2" opacity="0.65"><circle r="207"/><path d="M-295 0h45m500 0h45M0-225v-15M0 225v15"/></g>
+  </g>
+</svg>

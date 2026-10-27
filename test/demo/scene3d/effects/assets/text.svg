@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480">
+  <g fill="#f7f2e9" font-family="Arial, sans-serif" font-weight="900" text-anchor="middle">
+    <text x="480" y="235" font-size="142" letter-spacing="-8">MAKE</text>
+    <text x="480" y="365" font-size="142" letter-spacing="-8">WAVES.</text>
+  </g>
+  <path d="M330 122h300" stroke="#ff775c" stroke-width="5"/>
+</svg>

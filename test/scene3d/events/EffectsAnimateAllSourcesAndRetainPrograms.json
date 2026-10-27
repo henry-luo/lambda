@@ -1,0 +1,1600 @@
+{
+  "name": "EffectsAnimateAllSourcesAndRetainPrograms",
+  "viewport": {
+    "width": 1168,
+    "height": 1600
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('scene3d').length===5 && document.querySelectorAll('.effect-card').length===5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#play').getAttribute('aria-pressed')==='false'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-text"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#source-text').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "name": "text-channel-split"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "text-channel-split",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "text-channel-split",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "name": "text-liquid-distort"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "text-liquid-distort",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "text-liquid-distort",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "name": "text-rolling-distort"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "text-rolling-distort",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "text-rolling-distort",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "name": "text-sliding-door"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "text-sliding-door",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "text-sliding-door",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "name": "text-flies"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "text-flies",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "text-flies",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#flies",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 480,
+      "height": 240,
+      "file": "temp/scene3d-effects/effects-preview.png"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-effects/gallery-text.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-svg"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#source-svg').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "name": "svg-channel-split"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-channel-split",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-channel-split",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "name": "svg-liquid-distort"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-liquid-distort",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-liquid-distort",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "name": "svg-rolling-distort"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-rolling-distort",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-rolling-distort",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "name": "svg-sliding-door"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-sliding-door",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-sliding-door",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "name": "svg-flies"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-flies",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "svg-flies",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#flies",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-effects/gallery-svg.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#source-raster"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#source-raster').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "name": "raster-channel-split"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-channel-split",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-channel-split",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "name": "raster-liquid-distort"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-liquid-distort",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-liquid-distort",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "name": "raster-rolling-distort"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-rolling-distort",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-rolling-distort",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "name": "raster-sliding-door"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-sliding-door",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-sliding-door",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "name": "raster-flies"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-flies",
+      "count": {
+        "min": 20
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 8
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "raster-flies",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#flies",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 2
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-effects/gallery-raster.png"
+    },
+    {
+      "type": "script",
+      "js": "const input=document.getElementById('strength'); input.value='0'; input.dispatchEvent(new Event('input',{bubbles:true}));"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#strength-value').textContent==='0%' && document.querySelector('#gallery').getAttribute('data-strength')==='0'"
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "name": "zero-channel-split"
+    },
+    {
+      "type": "scene3d",
+      "target": "#channel-split",
+      "op": "seek",
+      "seconds": 3
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "width": 240,
+      "height": 120,
+      "reference": "zero-channel-split",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#channel-split",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "name": "zero-liquid-distort"
+    },
+    {
+      "type": "scene3d",
+      "target": "#liquid-distort",
+      "op": "seek",
+      "seconds": 3
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "zero-liquid-distort",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "name": "zero-rolling-distort"
+    },
+    {
+      "type": "scene3d",
+      "target": "#rolling-distort",
+      "op": "seek",
+      "seconds": 3
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "width": 240,
+      "height": 120,
+      "reference": "zero-rolling-distort",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#rolling-distort",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "name": "zero-sliding-door"
+    },
+    {
+      "type": "scene3d",
+      "target": "#sliding-door",
+      "op": "seek",
+      "seconds": 3
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "width": 240,
+      "height": 120,
+      "reference": "zero-sliding-door",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#sliding-door",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "name": "zero-flies"
+    },
+    {
+      "type": "scene3d",
+      "target": "#flies",
+      "op": "seek",
+      "seconds": 3
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#flies",
+      "width": 240,
+      "height": 120,
+      "reference": "zero-flies",
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#flies",
+      "fields": {
+        "shader_links": {
+          "eq": 1
+        },
+        "shader_programs": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restart"
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#channel-split",
+      "clip": "effect-cycle",
+      "fields": {
+        "time": {
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#play').textContent==='Pause' && document.querySelector('#play').getAttribute('aria-pressed')==='true'"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 0.25
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#channel-split",
+      "clip": "effect-cycle",
+      "fields": {
+        "time": {
+          "min": 0.1
+        }
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#channel-split",
+      "clip": "effect-cycle",
+      "name": "paused"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 0.25
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#channel-split",
+      "clip": "effect-cycle",
+      "fields": {
+        "time": {
+          "baseline": "paused",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#liquid-distort",
+      "width": 480,
+      "height": 240,
+      "file": "temp/scene3d-effects/preview.png"
+    }
+  ]
+}

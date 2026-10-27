@@ -1,0 +1,214 @@
+{
+  "name": "EffectsTexturesSvgRasterAndAlpha",
+  "viewport": {
+    "width": 320,
+    "height": 300
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#file-svg",
+      "width": 96,
+      "height": 48,
+      "pixels": [
+        [
+          24,
+          12,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          72,
+          12,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          24,
+          36,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          72,
+          36,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#value-svg",
+      "width": 96,
+      "height": 48,
+      "pixels": [
+        [
+          24,
+          12,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          72,
+          12,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          24,
+          36,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          72,
+          36,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#raster",
+      "width": 96,
+      "height": 48,
+      "pixels": [
+        [
+          24,
+          12,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          72,
+          12,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          24,
+          36,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          72,
+          36,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#basic-svg",
+      "width": 96,
+      "height": 48,
+      "pixels": [
+        [
+          24,
+          12,
+          255,
+          0,
+          0,
+          255,
+          2
+        ],
+        [
+          72,
+          12,
+          0,
+          255,
+          0,
+          255,
+          2
+        ],
+        [
+          24,
+          36,
+          0,
+          0,
+          255,
+          255,
+          2
+        ],
+        [
+          72,
+          36,
+          255,
+          255,
+          255,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#alpha-svg",
+      "width": 96,
+      "height": 48,
+      "pixels": [
+        [
+          48,
+          24,
+          188,
+          0,
+          0,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d-effects/texture-sources.png"
+    }
+  ]
+}

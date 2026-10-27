@@ -5,6 +5,7 @@ import clips: lambda.scene3d.animation
 import assets: lambda.scene3d.asset
 import shapes: lambda.scene3d.shape
 import environments: lambda.scene3d.environment
+import effects: lambda.scene3d.effects
 
 pub type Vector3 = [number, number, number]
 pub type Matrix4 = number[]
@@ -35,6 +36,7 @@ pub fn material(kind = 'basic', options = {}) element => <material type: kind, c
 // SH1: GLSL bodies behind the host prefix, and the values of the uniforms they declare
 pub fn shader_material(vertex, fragment, uniforms = {}, options = {}) element =>
     <material type: 'shader', vertex: vertex, fragment: fragment, uniforms: uniforms, *: options>
+pub fn effect_material(kind, texture, uniforms = {}, options = {}) element^ => effects.material(kind, texture, uniforms, options)^
 pub fn texture(source, options = {}) element => <texture src: source, *: options>
 pub fn mesh(geometry, material, options = {}) element => <mesh *: options, *[geometry, material]>
 pub fn resources(children) element => <resources *children>
