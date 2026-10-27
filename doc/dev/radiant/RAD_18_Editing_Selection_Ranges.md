@@ -137,6 +137,15 @@ to another surface's text (D7.2.5/D7.5.3).
 
 `event.hpp` / `clipboard.cpp` is a global multi-MIME store serving both the synchronous DOM clipboard-event path and the async `navigator.clipboard` API. A `ClipboardItem` is a set of alternative `ClipboardEntry` representations (for example `text/plain` plus `text/html`) of one payload. The store writes/reads text, MIME, HTML, and full multi-MIME item lists, gated by `ClipboardPermission` state. The first contenteditable gate exposes the event payload but intentionally does not perform a general native cut, paste, or drop mutation; a selected editor or template action owns those operations. Form controls retain their value-specific paste action.
 
+The macOS adapter (`clipboard_mac.mm`) resolves a single copied file URL before
+reading image flavors: Finder can publish a PNG/TIFF file icon beside that URL.
+It decodes the referenced file's pixels and never falls back to that icon for an
+unreadable, non-image or multiple-file copy. With no file URLs, direct PNG and
+TIFF/JPEG bitmap clipboard content remains available. `clipboard_mac_read_items`
+returns an owned snapshot; package paste policy stays outside the adapter
+(**D7.2.5**). `test_clipboard_mac_cases.mm` checks source dimensions and pixels
+against conflicting icon previews without using the general pasteboard.
+
 ---
 
 ## 9. Canonical boundaries and presentation geometry
@@ -149,7 +158,7 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 
 1. **`dom_range.cpp` is a 4551-line monolith.** It mixes lifecycle, boundary comparison, mutation envelopes, extract/clone/surround, selectAll/triple-click, `Selection.modify`, and stringification. It is the single largest file in the area and the prime split candidate — a natural fission is (a) range/selection core + comparison, (b) mutation envelopes + §5.5 mutators, (c) modify/selectAll/word-breaking, (d) stringification.
 2. **Text-control target range is a StaticRange hack.** `compute_text_control_target_ranges` synthesizes a boundary over the control *element* carrying UTF-16 `selectionStart`/`End`, until form values can be promoted to concrete DOM text nodes. The document-vs-text-control distinction remains intentionally unified by the `EditingSelection` facade.
-3. **Incomplete OS clipboard backends.** Only in-memory and GLFW plain-text backends exist; NSPasteboard/Win32/X11 rich-MIME backends are unimplemented, and `clipboard_store_sanitize` is a near-no-op. Rich copy/paste (`text/html`, images) round-trips only within the process.
+3. **Incomplete OS clipboard backends.** macOS uses NSPasteboard for text, HTML, images and single image-file copies. Win32/X11 rich-MIME adapters remain unimplemented; the fallback GLFW backend is plain-text-only, and `clipboard_store_sanitize` is a near-no-op.
 4. **Pattern-regex validation TODO (F5).** Form constraint validation `te_validate` cannot enforce `pattern="..."` without a lazy-compiled regex. (Detail belongs to [RAD_19](RAD_19_Form_Controls.md), noted here because it is a spec-coverage gap in the editing surface.)
 5. **`Selection.modify` fidelity.** All accepted argument families are implemented, including bidi-aware visual left/right character and word movement. Word segmentation remains a simple alphanumeric classifier, while sentence and some layout-free line fallbacks are structural approximations; locale-sensitive and complex-script results can diverge from a browser. This is a bounded Selection-API conformance limit, not a general contenteditable-support gap; see [§6](#6-dom-range-mutation-selection-modify-stringification).
 6. **Single-range selection.** `DOM_SELECTION_MAX_RANGES == 1`; extra `addRange()` calls are silently ignored, as required by the Selection API. This is not a conformance gap.

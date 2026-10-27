@@ -57,6 +57,8 @@ void clipboard_items_free(ArrayList* items);
 ClipboardEntry* clipboard_items_find(ArrayList* items, const char* mime);
 // paste takes one owned snapshot so a subsequent read cannot invalidate it.
 bool clipboard_store_read_paste(char** html, char** text);
+// the optional image representation is independent of any HTML alternative.
+bool clipboard_store_read_snapshot(char** html, char** text, char** image);
 bool clipboard_store_write_image(const char* data_uri, const char* html, const char* text);
 
 // Built-in backends.

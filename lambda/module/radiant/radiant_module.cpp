@@ -23,6 +23,7 @@
 #include "../../../radiant/geomap_style.hpp"
 #include "../../../lib/color.h"
 #include "../../../radiant/event.hpp"
+#include "../../../radiant/clipboard.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
 #include "../../../radiant/speech.hpp"
@@ -3165,6 +3166,23 @@ RADIANT_C_API Item fn_radiant_clipboard_text() {
     return radiant_string_item(clip);
 }
 
+RADIANT_C_API Item fn_radiant_clipboard_read() {
+    char* html = nullptr;
+    char* text = nullptr;
+    char* image = nullptr;
+    clipboard_store_read_snapshot(&html, &text, &image);
+    // one owned platform snapshot; root the result across string allocations (D5.3.3).
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "html", html ? radiant_string_item(html) : ItemNull);
+    radiant_rooted_obj_set(result, "text", text ? radiant_string_item(text) : ItemNull);
+    radiant_rooted_obj_set(result, "image", image ? radiant_string_item(image) : ItemNull);
+    mem_free(html);
+    mem_free(text);
+    mem_free(image);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_clipboard_write(Item text) {
     if (get_type_id(text) != LMD_TYPE_STRING) return (Item){.item = b2it(0)};
     // the platform clipboard consumes terminated text; reject embedded NUL instead of truncating.
@@ -5647,6 +5665,7 @@ RADIANT_PROVIDE_ENGINE_3(ime_popup, fn_radiant_ime_popup)
 RADIANT_PROVIDE_ENGINE_2(set_chinese_ime, fn_radiant_set_chinese_ime)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_0(clipboard_read, fn_radiant_clipboard_read)
 RADIANT_PROVIDE_ENGINE_1(clipboard_write, fn_radiant_clipboard_write)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_text, fn_radiant_dom_edit_selection_text)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_html, fn_radiant_dom_edit_selection_html)

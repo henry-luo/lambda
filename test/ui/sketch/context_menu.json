@@ -1,0 +1,856 @@
+{
+  "name": "Sketch canvas context menu, vector clipboard, keyboard and window edges",
+  "html": "test/demo/sketch/sketch.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-rect"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 250,
+        "offset_y": 220
+      },
+      "pointerType": "mouse",
+      "dx": 80,
+      "dy": 60,
+      "steps": 3
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 430,
+        "offset_y": 250
+      },
+      "pointerType": "mouse",
+      "dx": 100,
+      "dy": 70,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-select"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 280,
+        "offset_y": 250
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-undo"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-paste[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/context-selection.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-copy"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-clipboard",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 500,
+        "offset_y": 420
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "0"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-copy[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-paste-here:not([disabled])"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "var el=document.getElementById('context-paste-here');!el.disabled&&!el.matches(':disabled')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-paste-here"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "2"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-marquee"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 490,
+        "offset_y": 400
+      },
+      "pointerType": "mouse",
+      "dx": 310,
+      "dy": 130,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-select"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 530,
+        "offset_y": 450
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-cut"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-clipboard",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "5"
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "6"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 545,
+        "offset_y": 465
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-back"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-l1 > #object-o6:first-child"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "7"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 545,
+        "offset_y": 465
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-front"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-l1 > #object-o7:last-child"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 545,
+        "offset_y": 465
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-delete"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 700,
+        "offset_y": 600
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "8"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 700,
+        "offset_y": 600
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#context-select-all"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "8"
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-clipboard",
+      "equals": "4"
+    },
+    {
+      "type": "key_combo",
+      "key": "x",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "0"
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "4"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "10"
+    },
+    {
+      "type": "key_combo",
+      "key": "f10",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "4"
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-fit"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "up"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-deselect"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 700,
+        "offset_y": 600
+      },
+      "button": 1
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 700,
+        "offset_y": 600
+      },
+      "button": 1
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 700,
+        "offset_y": 600
+      },
+      "button": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dock-tab-layers"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#dock-tab-layers"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock-l1"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 280,
+        "offset_y": 250
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selection-count",
+      "equals": "0"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-copy[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#context-paste[disabled]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock-l1"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 700,
+        "offset_y": 600
+      },
+      "button": 1
+    },
+    {
+      "type": "resize",
+      "width": 760,
+      "height": 400
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 470,
+        "offset_y": 190
+      },
+      "button": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "true"
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.getElementById('sketch-context-menu').getBoundingClientRect();b.x>=0&&b.y>=0&&b.x+b.width<=760&&b.y+b.height<=400"
+    },
+    {
+      "type": "key_press",
+      "key": "end"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#context-fit"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "var b=document.getElementById('sketch-context-menu').getBoundingClientRect();var item=document.getElementById('context-fit').getBoundingClientRect();item.y>=b.y&&item.y+item.height<=b.y+b.height"
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/context-compact.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-context",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

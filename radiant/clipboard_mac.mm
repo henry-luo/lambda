@@ -1,7 +1,7 @@
 // NSPasteboard is a byte transport; the editing package chooses what to copy (D7.2.5).
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
-#include "clipboard.hpp"
+#include "clipboard_mac.hpp"
 #include <string.h>
 
 static NSString* clipboard_mac_type(const char* mime) {
@@ -36,9 +36,8 @@ static void clipboard_mac_write(ClipboardBackend*, ArrayList* items) {
     }
 }
 
-static ArrayList* clipboard_mac_read(ClipboardBackend*) {
+ArrayList* clipboard_mac_read_items(NSPasteboard* board) {
     @autoreleasepool {
-        NSPasteboard* board = [NSPasteboard generalPasteboard];
         ArrayList* items = arraylist_new(1);
         ClipboardItem* item = clipboard_item_new();
         const char* mimes[] = {"text/plain", "text/html"};
@@ -46,22 +45,30 @@ static ArrayList* clipboard_mac_read(ClipboardBackend*) {
             NSData* data = [board dataForType:clipboard_mac_type(mime)];
             if (data) clipboard_item_add(item, mime, [data bytes], [data length]);
         }
-        NSData* png = [board dataForType:NSPasteboardTypePNG];
-        if (!png) {
-            // screenshots and Preview commonly publish TIFF rather than PNG.
-            NSData* source = [board dataForType:NSPasteboardTypeTIFF] ?: [board dataForType:@"public.jpeg"];
-            if (!source) {
-                NSArray* files = [board readObjectsForClasses:@[[NSURL class]]
-                    options:@{NSPasteboardURLReadingFileURLsOnlyKey:@YES}];
-                if ([files count]==1) source = [NSData dataWithContentsOfURL:[files firstObject]];
-            }
-            NSBitmapImageRep* image = source ? [NSBitmapImageRep imageRepWithData:source] : nil;
+        NSArray* files = [board readObjectsForClasses:@[[NSURL class]]
+            options:@{NSPasteboardURLReadingFileURLsOnlyKey:@YES}];
+        NSData* png = nil;
+        NSData* source = nil;
+        if ([files count]>0) {
+            // Finder's PNG/TIFF alternatives can be file icons, so resolve the file before image flavors.
+            if ([files count]==1) source = [NSData dataWithContentsOfURL:[files firstObject]];
+        } else {
+            png = [board dataForType:NSPasteboardTypePNG];
+            if (!png) source = [board dataForType:NSPasteboardTypeTIFF];
+            if (!png && !source) source = [board dataForType:@"public.jpeg"];
+        }
+        if (source) {
+            NSBitmapImageRep* image = [NSBitmapImageRep imageRepWithData:source];
             png = [image representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
         }
         if (png) clipboard_item_add(item, "image/png", [png bytes], [png length]);
         arraylist_append(items, item);
         return items;
     }
+}
+
+static ArrayList* clipboard_mac_read(ClipboardBackend*) {
+    return clipboard_mac_read_items([NSPasteboard generalPasteboard]);
 }
 
 static void clipboard_mac_clear(ClipboardBackend*) {

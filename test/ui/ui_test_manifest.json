@@ -74,6 +74,11 @@
       "tags": ["draw", "baseline"]
     },
     {
+      "name": "sketch",
+      "globs": ["test/ui/sketch/*.json"],
+      "tags": ["sketch", "baseline"]
+    },
+    {
       "name": "finder",
       "globs": ["test/ui/finder/*.json"],
       "tags": ["finder"]

@@ -2503,6 +2503,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"photo", "test/demo/photo/photo.ls"},
     {"photos", "test/demo/photos/photos.ls"},
     {"draw", "test/demo/draw/draw.ls"},
+    {"sketch", "test/demo/sketch/sketch.ls"},
     {"word", "test/demo/word/word.ls"},
     {"sheet", "test/demo/sheet/sheet.ls"},
     {"finder", "test/demo/finder/finder.ls"},

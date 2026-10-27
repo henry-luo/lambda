@@ -1301,6 +1301,7 @@ use `pn` APIs (**S12.1.1v3**).
 | `fn selection_boundaries(s: any) -> map` | Read selection endpoints. |
 | `pn set_attribute(n: any, name: string, value: string) -> null` | Write an attribute and run its reflection hooks. |
 | `pn focus_set(n: any, from_keyboard: bool) -> bool` | Move focus. |
+| `pn clipboard_read() -> map` | Read one owned native clipboard snapshot as `{html, text, image}` (nullable strings). `image` is an embedded raster data URI, independent of the HTML alternative. Image-only clipboards also become HTML with an embedded image. Packages choose paste policy (**D7.2.5**, **D7.4.6**). |
 | `pn scroll_into_view(n: any) -> bool` | Change scroll position. |
 | `pn check_validity(form: any) -> bool` | Run validation, which can dispatch `invalid` events. |
 

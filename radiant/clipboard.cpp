@@ -144,35 +144,47 @@ bool clipboard_store_write_image(const char* uri, const char* html, const char* 
     return true;
 }
 
-bool clipboard_store_read_paste(char** html, char** text) {
+bool clipboard_store_read_snapshot(char** html, char** text, char** image) {
     if (!html || !text) return false;
     *html = nullptr;
     *text = nullptr;
+    if (image) *image = nullptr;
     ArrayList* items = clipboard_store_read_items();
     ClipboardEntry* markup = clipboard_items_find(items, "text/html");
     ClipboardEntry* plain = clipboard_items_find(items, "text/plain");
     if (markup && markup->data_len) *html = mem_strdup(markup->data, MEM_CAT_TEMP);
     if (plain) *text = mem_strdup(plain->data, MEM_CAT_TEMP);
-    // image bytes use a self-contained HTML representation on the existing rich-paste waist.
-    const char* image_mimes[] = {"image/png", "image/jpeg", "image/tiff"};
+    // keep binary images available even when the HTML alternative references a remote URL.
+    const char* image_mimes[] = {"image/png", "image/jpeg", "image/tiff", "image/webp", "image/avif", "image/gif", "image/bmp"};
     for (const char* mime : image_mimes) {
         ClipboardEntry* entry = clipboard_items_find(items, mime);
-        if (*html || !entry || !entry->data_len) continue;
+        if ((*html && !image) || !entry || !entry->data_len) continue;
         char* encoded = base64_encode_alloc(entry->data, entry->data_len, BASE64_STD);
         if (encoded) {
-            StrBuf* value = strbuf_create("<img src=\"data:");
+            StrBuf* value = strbuf_create("data:");
             strbuf_append_str(value, mime);
             strbuf_append_str(value, ";base64,");
             strbuf_append_str(value, encoded);
-            strbuf_append_str(value, "\" alt=\"\">");
-            *html = mem_strdup(value->str, MEM_CAT_TEMP);
+            if (image) *image = mem_strdup(value->str, MEM_CAT_TEMP);
+            if (!*html) {
+                StrBuf* markup_value = strbuf_create("<img src=\"");
+                strbuf_append_str(markup_value, value->str);
+                strbuf_append_str(markup_value, "\" alt=\"\">");
+                *html = mem_strdup(markup_value->str, MEM_CAT_TEMP);
+                strbuf_free(markup_value);
+            }
             strbuf_free(value);
             mem_free(encoded);
+            break;
         }
     }
-    bool available = (*html && **html) || (*text && **text);
+    bool available = (*html && **html) || (*text && **text) || (image && *image && **image);
     items_free(items);
     return available;
+}
+
+bool clipboard_store_read_paste(char** html, char** text) {
+    return clipboard_store_read_snapshot(html, text, nullptr);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,400 @@
+{
+  "html": "test/demo/sketch/sketch.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "name": "layers",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dock-tab-properties"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#dock-panel-layers"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dock-tab-layers"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dock-tab-layers"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#dock-panel-properties"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#dock-panel-layers"
+      },
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "key_press",
+      "key": "home"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dock-tab-properties"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#dock-tab-properties"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "arrowright"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dock-tab-layers"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#dock-tab-layers"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-history",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dock-tab",
+      "equals": "layers"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#layer-add"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-active",
+      "equals": "l2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-rect"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 300,
+        "offset_y": 250
+      },
+      "pointerType": "mouse",
+      "dx": 120,
+      "dy": 90,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible-l2"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-o3"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selected",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible-l2"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#object-o3"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock-l2"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 500,
+        "offset_y": 350
+      },
+      "pointerType": "mouse",
+      "dx": 70,
+      "dy": 50,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-drag",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#lock-l2"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 500,
+        "offset_y": 350
+      },
+      "pointerType": "mouse",
+      "dx": 70,
+      "dy": 50,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#layer-down"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-eraser"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 330,
+        "offset_y": 275
+      },
+      "pointerType": "mouse",
+      "dx": 20,
+      "dy": 10,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dock-tab-properties"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dock-tab-properties"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#dock-panel-layers"
+      },
+      "property": "display",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grid"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#grid"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-pan"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 250,
+        "offset_y": 250
+      },
+      "pointerType": "mouse",
+      "dx": 50,
+      "dy": 30,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-drag",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fit"
+      }
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/layers.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

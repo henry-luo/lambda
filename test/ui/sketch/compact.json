@@ -1,0 +1,118 @@
+{
+  "html": "test/demo/sketch/sketch.ls",
+  "viewport": {
+    "width": 760,
+    "height": 720
+  },
+  "name": "compact",
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "13"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-brush"
+      }
+    },
+    {
+      "type": "pointer_drag",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 130,
+        "offset_y": 180
+      },
+      "pointerType": "touch",
+      "dx": 70,
+      "dy": 60,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-objects",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-pen"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 160,
+        "offset_y": 260
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-pen",
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-pen",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/compact.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    }
+  ]
+}

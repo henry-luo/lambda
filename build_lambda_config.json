@@ -4833,6 +4833,14 @@
             "additional_sources": [
               "radiant/clipboard.cpp"
             ],
+            "macos": {
+              "additional_sources": [
+                "radiant/clipboard.cpp",
+                "radiant/clipboard_mac.mm",
+                "test/test_clipboard_mac_cases.mm"
+              ],
+              "libraries": ["Cocoa"]
+            },
             "binary": "test_clipboard_store_gtest.exe",
             "icon": "\ud83d\udccb"
           },
