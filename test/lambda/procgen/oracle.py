@@ -550,6 +550,10 @@ def main():
     sample_lines = (here / "sample.txt").read_text().splitlines()
     k7 = key(7)
     bad += check("poisson", lambda_line(sample_lines[1]), poisson(k7, 30.0, 20.0, 6.0))
+    at7 = sample_lines.index('"7 coverage certificates preserve keyed samples"')
+    bad += check("poisson coverage", lambda_line(sample_lines[at7 + 1]),
+                 [poisson(key(seed), w, h, r, attempts) for seed in [0, 17]
+                  for w, h, r in [(4.5, 3.0, 1.0), (0.3, 7.0, 1.0), (6.0, 4.0, 0.75)] for attempts in [1, 20]])
     bad += check("jitter", lambda_line(sample_lines[2]), jitter(k7, 3.0, 2.0, 1.0, 0.5))
     bad += check("halton", lambda_line(sample_lines[3]), halton(k7, 3, 1.0, 1.0))
     bad += check("r2", lambda_line(sample_lines[4]), r2seq(k7, 3, 1.0, 1.0))

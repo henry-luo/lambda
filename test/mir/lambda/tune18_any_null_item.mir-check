@@ -1,11 +1,13 @@
 {
   "schema_version": 1,
-  "description": "Erased any values retain the generic null equality kernel until their Item representation is proven.",
+  "description": "S1.6 / D2.4.1\u2013D2.4.3: erased values are boxed through MirValue before a guarded null-tag comparison; the runtime equality fallback remains for Type values.",
   "checks": [
     {
       "in_func": "_walk_any_chain18_#",
       "expect": [
-        "call\tfn_ne_p, fn_ne"
+        "ursh\t{{r}},",
+        "ne\t{{r}}, {{r}}, 1",
+        "call\tfn_ne_value_p, fn_ne_value"
       ]
     }
   ]

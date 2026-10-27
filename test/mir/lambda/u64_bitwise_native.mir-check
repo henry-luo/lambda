@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "description": "S4.4.4 / D2.4.1–D2.4.3: raw u64 bitwise trees and nonnegative literal ushr counts retain their word carrier; dynamic, erased and nullable operands retain checked runtime fallbacks. A proven raw u64 return crosses its identity boundary without allocating a number home.",
+  "checks": [
+    {
+      "in_func": "_lane_#",
+      "expect": [
+        "xor\t%r",
+        "or\t%r",
+        "and\t%r"
+      ],
+      "forbid": [
+        "call\tfn_bxor_item_p, fn_bxor_item",
+        "call\tfn_band_item_p, fn_band_item",
+        "call\tfn_bor_item_p, fn_bor_item",
+        "call\tit2u_p, it2u"
+      ],
+      "count": {
+        "call\tbox_uint64_value_p, box_uint64_value": 0
+      }
+    },
+    {
+      "in_func": "_logical_#",
+      "expect": [
+        "ursh\t%r"
+      ],
+      "forbid": [
+        "call\tfn_ushr_item_p, fn_ushr_item",
+        "call\tit2u_p, it2u"
+      ],
+      "count": {
+        "call\tbox_uint64_value_p, box_uint64_value": 0
+      }
+    },
+    {
+      "in_func": "_widths_#",
+      "forbid": [
+        "call\tfn_ushr_item_p, fn_ushr_item"
+      ]
+    },
+    {
+      "in_func": "_dynamic_shift_#",
+      "expect": [
+        "call\tfn_ushr_item_p, fn_ushr_item"
+      ]
+    },
+    {
+      "in_func": "_erased_#",
+      "expect": [
+        "call\tfn_bxor_item_p, fn_bxor_item"
+      ]
+    }
+  ]
+}
