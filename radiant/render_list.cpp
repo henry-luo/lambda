@@ -176,7 +176,9 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
         case CSS_VALUE_UPPER_LATIN:
         case CSS_VALUE_LOWER_GREEK:
         case CSS_VALUE_ARMENIAN:
-        case CSS_VALUE_GEORGIAN: {
+        case CSS_VALUE_GEORGIAN:
+        case CSS_VALUE_JAPANESE_INFORMAL:
+        case CSS_VALUE_CJK_DECIMAL: {
             if (marker_prop->text_content && *marker_prop->text_content && font_box_handle(marker_font)) {
                 Color previous_color = rdcon->color;
                 rdcon->color = color;

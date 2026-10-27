@@ -67,6 +67,8 @@ static int local_face_compare(void* left, void* right) {
 #ifdef __APPLE__
 #include <CoreText/CoreText.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 #endif
 
 #ifdef _WIN32
@@ -158,11 +160,11 @@ static void add_macos_dirs(FontDatabase* db) {
     }
 }
 
-static int collection_face_index_macos(CFURLRef url, CFStringRef postscript_name) {
-    if (!url || !postscript_name) return 0;
+static int collection_face_index_macos(CFURLRef url, CTFontRef font) {
+    if (!url || !font) return -1;
 
     char path[1024];
-    if (!CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path))) return 0;
+    if (!CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path))) return -1;
 
     size_t path_len = strlen(path);
     bool is_collection = (path_len > 4 &&
@@ -170,26 +172,39 @@ static int collection_face_index_macos(CFURLRef url, CFStringRef postscript_name
          strcasecmp(path + path_len - 4, ".otc") == 0));
     if (!is_collection) return 0;
 
-    CFArrayRef descriptors = CTFontManagerCreateFontDescriptorsFromURL(url);
-    if (!descriptors) return 0;
-
-    int face_index = 0;
-    CFIndex count = CFArrayGetCount(descriptors);
-    for (CFIndex i = 0; i < count; i++) {
-        CTFontDescriptorRef descriptor =
-            (CTFontDescriptorRef)CFArrayGetValueAtIndex(descriptors, i);
-        CFStringRef face_name =
-            (CFStringRef)CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute);
-        if (face_name) {
-            if (CFStringCompare(face_name, postscript_name, 0) == kCFCompareEqualTo) {
-                face_index = (int)i;
-                CFRelease(face_name);
-                break;
-            }
-            CFRelease(face_name);
-        }
+    // CoreText enumerates named variable instances too; descriptor ordinals are
+    // not TTC indexes. Match the selected font's original name table instead.
+    CFDataRef names = CTFontCopyTable(font, kCTFontTableName, kCTFontTableOptionNoOptions);
+    if (!names) return -1;
+    int fd = open(path, O_RDONLY);
+    struct stat st;
+    if (fd < 0 || fstat(fd, &st) != 0 || st.st_size <= 0) {
+        if (fd >= 0) close(fd);
+        CFRelease(names);
+        return -1;
     }
-    CFRelease(descriptors);
+    size_t length = (size_t)st.st_size;
+    const uint8_t* bytes = mmap(NULL, length, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (bytes == MAP_FAILED) { CFRelease(names); return -1; }
+
+    int face_index = -1;
+    Pool* pool = pool_create();
+    if (pool) {
+        int count = font_tables_get_face_count(bytes, length);
+        for (int i = 0; i < count; i++) {
+            FontTables* tables = font_tables_open_face(bytes, length, i, pool);
+            uint32_t name_length = 0;
+            const uint8_t* raw = font_tables_find(tables, FONT_TAG('n','a','m','e'), &name_length);
+            bool matches = raw && (CFIndex)name_length == CFDataGetLength(names) &&
+                memcmp(raw, CFDataGetBytePtr(names), name_length) == 0;
+            font_tables_close(tables, pool);
+            if (matches) { face_index = i; break; }
+        }
+        pool_destroy(pool);
+    }
+    munmap((void*)bytes, length);
+    CFRelease(names);
     return face_index;
 }
 
@@ -248,20 +263,20 @@ static char* find_font_path_macos(const char* font_name, int* out_face_index) {
     }
 
     CFURLRef url = (CFURLRef)CTFontCopyAttribute(ct_font, kCTFontURLAttribute);
-    CFStringRef postscript_name = CTFontCopyPostScriptName(ct_font);
-    if (out_face_index && url && postscript_name) {
+    int face_index = 0;
+    if (url) {
         // retain the CoreText-selected family member for TTC/OTC loading.
-        *out_face_index = collection_face_index_macos(url, postscript_name);
+        face_index = collection_face_index_macos(url, ct_font);
     }
     CFRelease(ct_font);
-    if (postscript_name) CFRelease(postscript_name);
     if (!url) return NULL;
 
     char path[1024];
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
     CFRelease(url);
 
-    if (ok) {
+    if (ok && face_index >= 0) {
+        if (out_face_index) *out_face_index = face_index;
         return mem_strdup(path, MEM_CAT_FONT); // caller frees with mem_free()
     }
     return NULL;
@@ -687,12 +702,10 @@ char* font_platform_find_codepoint_font(void* base_font_ref, uint32_t codepoint,
 
     if (!fallback) return NULL;
 
-    // get the font URL and PostScript name from the fallback font
+    // get the font URL while keeping the selected face alive for table lookup.
     CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
-    CFStringRef ps_name = CTFontCopyPostScriptName(fallback);
     if (!desc) {
         CFRelease(fallback);
-        if (ps_name) CFRelease(ps_name);
         return NULL;
     }
 
@@ -700,19 +713,18 @@ char* font_platform_find_codepoint_font(void* base_font_ref, uint32_t codepoint,
     CFRelease(desc);
     if (!url) {
         CFRelease(fallback);
-        if (ps_name) CFRelease(ps_name);
         return NULL;
     }
 
     char path[1024];
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
 
-    if (ok && path[0] && out_face_index && ps_name) {
-        *out_face_index = collection_face_index_macos(url, ps_name);
+    if (ok && path[0] && out_face_index) {
+        *out_face_index = collection_face_index_macos(url, fallback);
+        ok = *out_face_index >= 0;
     }
 
     CFRelease(url);
-    if (ps_name) CFRelease(ps_name);
 
     if (ok && path[0]) {
         if (out_font_ref) *out_font_ref = (void*)fallback;
@@ -753,29 +765,29 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
     if (!fallback) return NULL;
 
     CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
-    CFStringRef ps_name = CTFontCopyPostScriptName(fallback);
-    CFRelease(fallback);
     if (!desc) {
-        if (ps_name) CFRelease(ps_name);
+        CFRelease(fallback);
         return NULL;
     }
 
     CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
     CFRelease(desc);
     if (!url) {
-        if (ps_name) CFRelease(ps_name);
+        CFRelease(fallback);
         return NULL;
     }
 
     char path[1024];
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
 
-    if (ok && path[0] && out_face_index && ps_name) {
-        *out_face_index = collection_face_index_macos(url, ps_name);
+    if (ok && path[0] && out_face_index) {
+        *out_face_index = collection_face_index_macos(url, fallback);
+        ok = *out_face_index >= 0;
     }
 
     CFRelease(url);
-    if (ps_name) CFRelease(ps_name);
+    // table-based collection lookup borrows fallback until it has resolved the face.
+    CFRelease(fallback);
 
     if (ok && path[0]) {
         log_debug("font_platform_emoji: codepoint U+%04X → '%s' (face %d)",

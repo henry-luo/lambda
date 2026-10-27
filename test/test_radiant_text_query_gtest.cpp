@@ -37,6 +37,80 @@ void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
 
 
+#ifdef __APPLE__
+// CoreText's legacy Rect type conflicts with Radiant's geometry type.
+#define Rect MacOSRect
+#include <CoreText/CoreText.h>
+#undef Rect
+
+TEST(FontCollections, LookupUsesPhysicalFaces) {
+    FontContextConfig config = {};
+    FontContext* context = font_context_create(&config);
+    ASSERT_NE(context, nullptr);
+    const char* families[] = {"PingFang HK", "PingFang SC", "PingFang TC", "PingFang MO", "Avenir Next", "Songti SC"};
+    int tested = 0;
+    for (const char* family : families) {
+        CFStringRef family_name = CFStringCreateWithCString(nullptr, family, kCFStringEncodingUTF8);
+        CTFontRef selected = CTFontCreateWithNameAndOptions(family_name, 16.0, nullptr, kCTFontOptionsPreventAutoDownload);
+        CFStringRef installed = CTFontCopyFamilyName(selected);
+        bool available = installed && CFEqual(installed, family_name);
+        if (installed) CFRelease(installed);
+        CFRelease(selected);
+        CFRelease(family_name);
+        if (!available) continue;
+        int index = -1;
+        char* path = font_platform_find_fallback(family, &index);
+        ASSERT_NE(path, nullptr) << family;
+        tested++;
+        FontHandle* handle = font_load_face_internal(context, path, index, 16.0f, 16.0f,
+            FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL);
+        ASSERT_NE(handle, nullptr) << family;
+        int count = font_tables_get_face_count(handle->memory_buffer, handle->memory_buffer_size);
+        EXPECT_GE(index, 0) << family;
+        EXPECT_LT(index, count) << family << " at " << path;
+        EXPECT_NE(handle->tables, nullptr) << family;
+        if (handle->tables) {
+            NameTable* name = font_tables_get_name(handle->tables);
+            ASSERT_NE(name, nullptr);
+            EXPECT_STREQ(name->family_name, family);
+            CFStringRef expected = CFStringCreateWithCString(nullptr, name->postscript_name, kCFStringEncodingUTF8);
+            ASSERT_NE(handle->ct_raster_ref, nullptr);
+            CFStringRef actual = CTFontCopyPostScriptName((CTFontRef)handle->ct_raster_ref);
+            EXPECT_TRUE(CFEqual(expected, actual)) << family;
+            CFRelease(actual);
+            CFRelease(expected);
+        }
+        log_info("font_collection_test: family=%s physical_index=%d count=%d path=%s", family, index, count, path);
+        font_handle_release(handle);
+        mem_free(path);
+    }
+    font_context_destroy(context);
+    if (!tested) GTEST_SKIP() << "regression font collections are not installed";
+}
+
+TEST(FontCollections, EmojiLookupRetainsTheSelectedNativeFace) {
+    FontContextConfig config = {};
+    FontContext* context = font_context_create(&config);
+    ASSERT_NE(context, nullptr);
+    int index = -1;
+    char* path = font_platform_find_emoji_font(0x1F600, &index);
+    ASSERT_NE(path, nullptr);
+    FontHandle* handle = font_load_face_internal(context, path, index, 16.0f, 16.0f,
+        FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL);
+    ASSERT_NE(handle, nullptr);
+    EXPECT_NE(handle->tables, nullptr);
+    EXPECT_GT(font_get_glyph_index(handle, 0x1F600), 0u);
+    const GlyphBitmap* bitmap = font_render_glyph(handle, 0x1F600, GLYPH_RENDER_NORMAL);
+    ASSERT_NE(bitmap, nullptr);
+    EXPECT_NE(bitmap->buffer, nullptr);
+    EXPECT_GT(bitmap->width, 0);
+    font_handle_release(handle);
+    mem_free(path);
+    font_context_destroy(context);
+}
+
+#endif
+
 TEST(FontLocalMetadata, LocalFontMetadataIsOwnedSortedAndUnique) {
     ArrayList* faces = font_query_local_fonts(nullptr);
     ASSERT_NE(faces, nullptr);
@@ -441,6 +515,60 @@ protected:
         return result;
     }
 };
+
+TEST(CounterFormatting, JapaneseInformalAndCjkDecimal) {
+    const struct { int value; const char* expected; } cases[] = {
+        {0,"〇"}, {1,"一"}, {10,"十"}, {11,"十一"}, {20,"二十"}, {99,"九十九"},
+        {100,"百"}, {101,"百一"}, {1000,"千"}, {6001,"六千一"}, {9999,"九千九百九十九"},
+        {-12,"マイナス十二"}, {10000,"一〇〇〇〇"}, {-10000,"-一〇〇〇〇"}
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.value);
+        char buffer[64];
+        EXPECT_EQ(counter_format_value(entry.value, CSS_VALUE_JAPANESE_INFORMAL, buffer, sizeof(buffer)), strlen(entry.expected));
+        EXPECT_STREQ(buffer, entry.expected);
+    }
+    char buffer[64];
+    counter_format_value(101, CSS_VALUE_CJK_DECIMAL, buffer, sizeof(buffer));
+    EXPECT_STREQ(buffer, "一〇一");
+    counter_format_value(INT32_MIN, CSS_VALUE_CJK_DECIMAL, buffer, sizeof(buffer));
+    EXPECT_STREQ(buffer, "-二一四七四八三六四八");
+    char short_buffer[4];
+    EXPECT_EQ(counter_format_value(123, CSS_VALUE_CJK_DECIMAL, short_buffer, sizeof(short_buffer)), 9);
+    EXPECT_STREQ(short_buffer, "一");
+    EXPECT_STREQ(counter_style_suffix(CSS_VALUE_JAPANESE_INFORMAL), "、");
+    EXPECT_STREQ(counter_style_suffix(CSS_VALUE_CJK_DECIMAL), "、");
+    EXPECT_STREQ(counter_style_suffix(CSS_VALUE_DECIMAL), ". ");
+}
+
+TEST_F(RadiantTextQuery, JapaneseListMarkersRetainStyleAndRenumberAfterStartChanges) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>ol{list-style-type:japanese-informal}"
+        "#digits{list-style-type:cjk-decimal}</style>"
+        "<ol id=result start=9><li id=first>First</li><li id=second>Second</li></ol>"
+        "<ol id=digits start=101><li id=third>Third</li></ol>");
+    DomElement* list = layout_script_source(source);
+    ASSERT_NE(list, nullptr);
+    const struct { const char* id; const char* expected; } cases[] = {
+        {"first","九、"}, {"second","十、"}, {"third","一〇一、"}
+    };
+    for (const auto& entry : cases) {
+        DomElement* item = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(item, nullptr);
+        ASSERT_NE(item->pseudo.get(), nullptr);
+        ASSERT_NE(item->pseudo->marker.get(), nullptr);
+        MarkerProp* marker = item->pseudo->marker->marker_prop();
+        ASSERT_NE(marker, nullptr);
+        EXPECT_STREQ(marker->text_content.get(), entry.expected);
+        EXPECT_GT(marker->width, 0.0f);
+    }
+    ASSERT_TRUE(list->set_attribute("start", "99"));
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, list, list->parent);
+    layout_html_doc(&ui, document, true);
+    DomElement* second = dom_find_element_by_id(document->root->as_element(), "second");
+    EXPECT_STREQ(second->pseudo->marker->marker_prop()->text_content.get(), "百、");
+}
 
 TEST_F(RadiantTextQuery, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrViewportSpace) {
     const struct { const char* mode; const char* parent_height; const char* text; float width, height; } cases[] = {

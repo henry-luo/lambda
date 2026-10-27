@@ -1,0 +1,196 @@
+{
+  "name": "Windowed font previews, search, keyboard selection and cancellation",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Font preview test"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".font-picker-row"
+      },
+      "count": 0
+    },
+    {
+      "type": "script",
+      "js": "var p=document.getElementById('font-family');window.fontTestFamily=Array.from(p.options).find(o=>o.value!==p.value).value"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font-family-trigger"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-font-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#font-family option').length>=document.querySelectorAll('.font-picker-row').length&&document.querySelectorAll('#font-family option[style]').length===0&&document.querySelectorAll('.font-picker-row').length<=12",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll('.font-picker-row')].every(n=>n.getAttribute('data-font-preview')==='true'&&getComputedStyle(n).fontFamily.includes(n.getAttribute('data-font-family')))",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll('.font-picker-row')].every(n=>{let label=n.querySelector('.font-picker-readable');return label.textContent===n.getAttribute('data-font-family')&&getComputedStyle(label).fontFamily===getComputedStyle(document.body).fontFamily})"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{let m=document.getElementById('word-font-menu').getBoundingClientRect();return document.elementFromPoint(m.left+20,m.top+20).id==='word-font-search'})()"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-font-picker/open.png"
+    },
+    {
+      "type": "script",
+      "js": "var q=document.getElementById('word-font-search');q.value=fontTestFamily;q.dispatchEvent(new Event('input',{bubbles:true}));"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.font-picker-row').length>0&&[...document.querySelectorAll('.font-picker-row')].every(n=>n.textContent.toLowerCase().includes(fontTestFamily.toLowerCase()))",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-font-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('font-family').value===fontTestFamily&&getComputedStyle(document.querySelector('#edit-surface span:not(.word-text-run)')).fontFamily.includes(fontTestFamily)",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font-family-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
+      },
+      "text": "zznotafontfamilyzz",
+      "clear": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".font-picker-row"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".font-picker-count"
+      },
+      "contains": "No matching"
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-font-menu"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#font-family-trigger"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-font-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.font-picker-row[aria-selected=true]').getAttribute('aria-posinset')===document.getElementById('word-font-picker').getAttribute('data-total')&&document.querySelectorAll('.font-picker-row').length<=12",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.font-picker-row[aria-selected=true]').getAttribute('aria-posinset')==='1'&&document.getElementById('word-font-picker').getAttribute('data-window-start')==='0'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_press",
+      "key": "PageDown"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.font-picker-row[aria-selected=true]').getAttribute('aria-posinset')==='9'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".font-picker-row"
+      },
+      "count": 0
+    }
+  ]
+}

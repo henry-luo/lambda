@@ -2076,6 +2076,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"nesw-resize", 11, CSS_VALUE_NESW_RESIZE, CSS_VALUE_GROUP_CURSOR},
     {"ew-resize", 9, CSS_VALUE_EW_RESIZE, CSS_VALUE_GROUP_CURSOR},
     {"ns-resize", 9, CSS_VALUE_NS_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"japanese-informal", 17, CSS_VALUE_JAPANESE_INFORMAL, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
+    {"cjk-decimal", 11, CSS_VALUE_CJK_DECIMAL, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

@@ -10,6 +10,8 @@ import fields: lambda.edit.files
 import document: .mod_document
 import model: .mod_model
 import storage: .mod_io
+import picker: .mod_file_picker
+import opening: .mod_open
 import page: .mod_page
 import print: .mod_print
 import columns: .mod_columns
@@ -38,12 +40,14 @@ import home: .mod_home
 import math_edit: .mod_math_edit
 import lookup: .mod_lookup
 import spelling: lambda.edit.spelling
+import font_picker: .mod_font_picker
 
 pub let default_settings = {show_ribbon_group_labels:false}
 pub fn initial(settings=default_settings) => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
+    import_warnings:[],
     show_ribbon_group_labels:settings.show_ribbon_group_labels==true,
-    fonts:sort(unique([for (face in (dom.query_local_fonts(null) ^ {[]})) face.family]),(family)=>lower(family)),
-    tab:"Home",math:null,home:{*:home.defaults,painter:null,marks:false},equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
+    fonts:font_picker.families,
+    tab:"Home",math:null,home:{*:home.defaults,painter:null,marks:false},equation_edit:null,shape_pane:false,shape_draft:null,selection_pane:false,object_picks:[],table_pen:table_design.pen,table_gridlines:false,dialog:null,open_seq:0,open_task:null,context:null,mini_hidden:false,pending:"",status:"Ready to write",query:"",replace_text:"",search_mode:null,match_case:false,match_index:-1,
     zoom:1.0,nav:true,nav_tab:"headings",nav_target:null,ruler_focus:null,layout:"print",read_only:false,focused:false,review:false,show_resolved:false,revisions:false,show_changes:true,lookup:null}
 pub let mounted = controller.mount
 pub pn field(node,id) { fields.field_value(node,id) }
@@ -115,14 +119,17 @@ pub pn finish(st,node,restore_selection=true) {
     dom.set_window_title(node,(if (dirty) "● " else "") ++ st.file_state.envelope.title ++ " — Word")
 }
 pn continued(st,id,node) {
-    if (id == "file.open") { return {*:st,pending:"",dialog:{kind:"open",path:""}} }
+    if (id == "file.open") {
+        picker.request(node)
+        return {*:st,pending:"",dialog:picker.initial(st.file_state.path,st.open_folder)}
+    }
     if (id == "file.close") {
         dom.set_close_guard(node,false)
         dom.request_window_close(node)
         return {*:st,pending:"",dialog:null}
     }
     let doc = if (id == "file.new") document.blank() else document.sample()
-    let next = {*:st,editor:replaced_editor(st.editor,model.open_editor(doc)),object_picks:[],pending:"",dialog:null,query:"",match_index:-1,
+    let next = {*:st,editor:replaced_editor(st.editor,model.open_editor(doc)),import_warnings:[],object_picks:[],pending:"",dialog:null,query:"",match_index:-1,
         status:"Ready to write",file_state:storage.new_session(doc,
             if (id == "file.new") "Untitled document" else "The Open Studio Handbook")}
     spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
@@ -180,9 +187,49 @@ pn equation_apply(st,node,values,close=false,selection=null) {
         values:equation.settings(image.selected(next.editor).node),error:null,
         selection:selection or equation_edit.source_range(node,values.source),focus:"equation-editor-source"}}
 }
+pn opened(st,path,node) {
+    let seq = st.open_seq+1
+    let task = start(opening.run,[dom.root_node(node),{path:path,seq:seq}],{owner:'document'})
+    picker.request(node)
+    return {*:st,open_seq:seq,open_task:task,status:"Opening " ++ session.basename(path) ++ "…",
+        dialog:{*:st.dialog,loading:true,seq:seq,error:null,open_path:null}}
+}
+pub pn open_finished(st,detail,node) {
+    // a canceled request or an earlier conversion cannot replace a later document.
+    if (not opening.accepts(st.dialog,detail)) { return st }
+    let current = {*:st,open_task:null,dialog:{*:st.dialog,loading:false}}
+    if (detail.reply.error is string) {
+        picker.request(node)
+        return {*:current,status:detail.reply.error,dialog:{*:current.dialog,error:detail.reply.error}}
+    }
+    let loaded = storage.restore_reply(detail.reply) ^ {
+        picker.request(node)
+        return {*:current,status:^.message,dialog:{*:current.dialog,error:^.message}}
+    }
+    picker.request(node,"word_picker_closed")
+    let next = {*:st,editor:replaced_editor(st.editor,loaded.editor),object_picks:[],file_state:loaded.session,
+        status:loaded.status,import_warnings:loaded.warnings,dialog:null,open_task:null,query:"",match_index:-1}
+    spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
+    return next
+}
+pn picker_command(st,action,params,node) {
+    if (action=="cancel") {
+        if (st.open_task!=null) cancel(st.open_task)
+        // restore focus after the modal's focused control has been retired by the template patch.
+        picker.request(node,"word_picker_closed")
+        return {*:st,dialog:null,pending:"",open_task:null,open_seq:st.open_seq+1,status:if (st.dialog.loading==true) "Opening cancelled" else st.status}
+    }
+    if (st.dialog.loading==true) { return st }
+    let dialog = picker.command(st.dialog,action,params)
+    let next = {*:st,dialog:dialog,open_folder:dialog.browser.path}
+    if (dialog.open_path!=null) { return opened(next,dialog.open_path,node) }
+    if (contains(["navigate","back","forward","up","refresh","go","location","mode","move","activate","open"],action)) picker.request(node)
+    return next
+}
 pn dialog_command(st,action,node) {
     if (action == "cancel") { focus_document(node); return {*:st,dialog:null,pending:""} }
     if (action == "discard") { return continued(st,st.pending,node) }
+    if (st.dialog.kind=="open" and action=="confirm") { return picker_command(st,"open",{},node) }
     if (action=="object_layout") {
         let values = {wrap:field(node,"object-wrap"),side:field(node,"object-side"),distance:field(node,"object-distance"),
             x:field(node,"object-x"),y:field(node,"object-y")}
@@ -327,13 +374,6 @@ pn dialog_command(st,action,node) {
     }
     let path = if (action == "overwrite") st.dialog.path else trim(field(node,"word-file-path"))
     let kind = if (action == "overwrite") st.dialog.action else st.dialog.kind
-    if (kind == "open") {
-        let opened = storage.read_document(path) ^ { return {*:st,status:^.message} }
-        focus_document(node)
-        let next = {*:st,editor:replaced_editor(st.editor,opened.editor),object_picks:[],file_state:opened.session,status:opened.status,dialog:null,query:"",match_index:-1}
-        spelling.update(node,"word",next.editor.doc,false,next.editor.model_revision,true)
-        return next
-    }
     if (kind == "save") { return saved(st,path,node,action == "overwrite") }
     if (kind == "print") {
         let target = if (action == "overwrite") st.dialog.path else trim(field(node,"print-path"))
@@ -409,6 +449,7 @@ pn lookup_command(st,id,params,node) {
     return {*:next,lookup:{*:pane,selection:null},status:"Translation inserted"}
 }
 pub pn command(st,id,params,node,retain_focus=false) {
+    if (starts_with(id,"picker.") and st.dialog.kind=="open") { return picker_command(st,slice(id,7),params,node) }
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
     if (id=="ui.dictionary" or id=="ui.translate" or starts_with(id,"ui.lookup")) { return lookup_command(st,id,params,node) }
     // auto-opened comments follow Review instead of staying latched across ribbon changes.

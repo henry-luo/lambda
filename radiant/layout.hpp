@@ -1569,6 +1569,7 @@ struct CounterCheckpoint {
 };
 void counter_get_all_values(CounterContext* ctx, const char* name, int** values, int* count);
 int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_size);
+const char* counter_style_suffix(uint32_t style);
 struct CounterSnapshotEntry { const char* name; int value; };
 struct CounterSnapshot { CounterSnapshotEntry* entries; size_t count; };
 CounterSnapshot* counter_snapshot_create(CounterContext* context, Pool* pool);

@@ -14,6 +14,12 @@
       "scroll_into_view": true
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      }
+    },
+    {
       "type": "type",
       "target": {
         "selector": "#word-file-path"
@@ -27,6 +33,14 @@
         "selector": ".edit-dialog-confirm"
       },
       "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0,
+      "assert_timeout": 30000
     },
     {
       "type": "click",
@@ -214,11 +228,22 @@
       "js": "document.activeElement.id==='shape-pane-text'"
     },
     {
-      "type": "select_option",
+      "type": "click",
       "target": {
-        "selector": "#shape-pane-font"
+        "selector": "#shape-pane-font-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
       },
-      "value": "Georgia"
+      "text": "Georgia",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
     },
     {
       "type": "assert_script",

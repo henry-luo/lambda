@@ -21,13 +21,25 @@
     {
       "type": "click",
       "target": {
-        "selector": "#font-family"
+        "selector": "#font-family-trigger"
       }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-font-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#word-font-list .font-picker-row').length<=12",
+      "assert_timeout": 8000
     },
     {
       "type": "scroll",
       "target": {
-        "selector": "#font-family",
+        "selector": "#word-font-list",
         "offset_x": 30,
         "offset_y": 40
       },
@@ -35,12 +47,13 @@
       "dy": 999
     },
     {
-      "type": "assert_state_store",
-      "target": {
-        "selector": "#font-family"
-      },
-      "open_dropdown": true,
-      "dropdown_scroll_y": 0
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('word-font-picker').getAttribute('data-window-start')==='0'&&[...document.querySelectorAll('#word-font-list .font-picker-row')].every(n=>n.getAttribute('data-font-preview')==='true')",
+      "assert_timeout": 8000
     },
     {
       "type": "capture_surface",
@@ -50,7 +63,7 @@
     {
       "type": "scroll",
       "target": {
-        "selector": "#font-family",
+        "selector": "#word-font-list",
         "offset_x": 30,
         "offset_y": 40
       },
@@ -58,16 +71,24 @@
       "dy": -999
     },
     {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#word-font-list .font-picker-row:last-child').getAttribute('data-font-family')===document.querySelector('#font-family option:last-child').value",
+      "assert_timeout": 8000
+    },
+    {
       "type": "click",
       "target": {
-        "selector": "#font-family",
-        "offset_x": 30,
-        "offset_y": 30
+        "selector": "#word-font-list .font-picker-row:last-child"
       }
     },
     {
       "type": "assert_script",
-      "js": "var picker=document.getElementById('font-family');picker.value===picker.options[picker.options.length-10].value"
+      "js": "var picker=document.getElementById('font-family');picker.value===picker.options[picker.options.length-1].value",
+      "assert_timeout": 8000
     },
     {
       "type": "click",
@@ -136,8 +157,12 @@
     {
       "type": "click",
       "target": {
-        "selector": "#mini-font-family"
+        "selector": "#mini-font-family-trigger"
       }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('word-font-list').getBoundingClientRect().width>=document.getElementById('word-font-menu').getBoundingClientRect().width-24"
     },
     {
       "type": "capture_surface",
@@ -147,12 +172,16 @@
     {
       "type": "scroll",
       "target": {
-        "selector": "#mini-font-family",
+        "selector": "#word-font-list",
         "offset_x": 30,
         "offset_y": 40
       },
       "dx": 0,
       "dy": -999
+    },
+    {
+      "type": "wait",
+      "ms": 100
     },
     {
       "type": "capture_surface",
@@ -166,14 +195,12 @@
     {
       "type": "click",
       "target": {
-        "selector": "#mini-font-family",
-        "offset_x": 30,
-        "offset_y": 30
+        "selector": "#word-font-list .font-picker-row:last-child"
       }
     },
     {
       "type": "assert_script",
-      "js": "var picker=document.getElementById('mini-font-family');window.nativeFontFamily=picker.options[picker.options.length-10].value;picker.value===nativeFontFamily&&Array.from(document.querySelectorAll('#edit-surface span:not(.word-text-run)')).some(function(span){return getComputedStyle(span).fontFamily.includes(nativeFontFamily)})"
+      "js": "var picker=document.getElementById('mini-font-family');window.nativeFontFamily=picker.options[picker.options.length-1].value;picker.value===nativeFontFamily&&Array.from(document.querySelectorAll('#edit-surface span:not(.word-text-run)')).some(function(span){return getComputedStyle(span).fontFamily.includes(nativeFontFamily)})"
     },
     {
       "type": "key_press",
@@ -200,8 +227,46 @@
       "js": "var values=Array.from(document.querySelectorAll('#art-font option')).map(function(o){return o.value});nativeFontFaces.every(function(f){return values.includes(f.family)})"
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#art-font-trigger"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-font-menu"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog.edit-dialog-wordart"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#art-font-trigger"
+      }
+    },
+    {
+      "type": "script",
+      "js": "var q=document.getElementById('word-font-search');q.value=nativeFontFamily;q.dispatchEvent(new Event('input',{bubbles:true}));"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
       "type": "assert_script",
-      "js": "document.getElementById('art-font').value=nativeFontFamily;true"
+      "js": "document.getElementById('art-font').value===nativeFontFamily&&document.getElementById('art-font-trigger').textContent.includes(nativeFontFamily)"
     },
     {
       "type": "click",

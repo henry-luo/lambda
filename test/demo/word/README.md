@@ -27,6 +27,38 @@ The studio handbook is editable. Start a blank document with **New**, or return
 to the example with **Studio example**. Select text to format it; formatting
 at a caret sets the marks for subsequent typing.
 
+Open uses a Finder-style file selector with Home, Desktop, Documents, Downloads,
+Project, and Computer favorites. Browse folders with double-click or Open; use
+breadcrumbs, Back/Forward, or the enclosing-folder button to navigate. Search
+filters the current folder, and icon/list views share sorting and selection.
+Unsupported files stay visible and disabled. Select a document and choose Open,
+double-click a document, or use arrow keys and Enter. Go to Folder (⌘/Ctrl⇧G)
+accepts paths, including `~`; the file-name field also accepts a path relative to
+the current folder. Escape or Cancel returns to the current document. Folder
+and import errors remain in the picker so another file can be chosen.
+
+Open displays an **Opening…** state and keeps Cancel available while conversion
+runs in a child process. A document-owned task waits for the result; cancellation
+stops the request and late replies cannot replace the current document
+(**S13.3.1v2**, **S13.1.3v2**). Recoverable DOCX conversion issues open the
+editable copy with a yellow notice above the document. The notice is separate
+from document content, word counts, saved snapshots, and exports. Invalid ZIP/XML,
+missing required parts, and style cycles remain errors in the picker. DOCX
+bookmarks survive as editable HTML anchors; other view-only embedded markup is
+flattened to editable text with an explicit warning. The `file_open` replay covers
+warnings, Japanese numbering, fatal errors, retry, and cancellation.
+
+DOCX `japaneseCounting` uses automatic `japanese-informal` list counters, including
+nested lists, start overrides, and continuation. Radiant renders the Kanji markers
+and ideographic comma, and renumbers them after edits. Values from 0 through 9999
+match this mapping; values outside that range produce a warning because CSS's
+negative/fallback representation can differ from Word's.
+
+The selector reuses Finder's filesystem snapshots, path helpers, ordering,
+selection, history, and icons; Word retains its import and unsaved-change flow
+(**S12.1.3**, **D7.2.5**). The `file_picker` native replay and
+`word_file_picker_test.ls` golden cover this flow.
+
 The interface follows photo-album's white panels, cool gray sidebar, blue
 accents, rounded controls, and system typography. Both demos use the shared
 outline SVG icons in `../mod_icons.ls`. Word's `mod_ribbon_icons.ls` adds bright
@@ -112,11 +144,22 @@ applies to citation insertion and bibliography updates.
   emphasis, highlighting, text color, and paragraph alignment. It preserves the
   selected range through repeated formatting, follows scrolling and zoom, and
   stays within the document viewport. Escape or using another pane dismisses it.
-  Ribbon, floating-toolbar and Word Art font pickers discover installed native
-  families when the workspace opens, through `dom.query_local_fonts`. A document's
-  requested family remains selectable when it is missing locally. Long native
-  menus show a draggable scrollbar, accept wheel scrolling, and keep the current
-  keyboard choice visible without scrolling the document.
+  Ribbon, floating-toolbar, shape-pane and Word Art font pickers share a searchable
+  preview menu. Each name renders in its own family; a document's requested family
+  remains selectable when missing locally. Each preview also has an interface-font
+  label, so symbol and diagnostic fonts such as Ahem remain identifiable. The
+  closed selector uses the readable label. The installed-font catalog is metadata
+  from one `dom.query_local_fonts` snapshot. The popup creates at most twelve rows
+  (eight visible plus overscan), activates two new previews per frame, retains
+  active previews shared by the next window, and cancels stale work when searching,
+  changing windows, or closing. Until
+  activated, a row uses the interface font. Font files and glyphs reuse Radiant's
+  existing 64-face LRU cache. Search reads names only; it does not load matching
+  fonts. The native select remains a hidden value/change adapter.
+  Wheel scrolling, arrows, Page Up/Down, Home/End, Enter and Escape are supported.
+  Popup placement is measured after initial layout rather than during rendering.
+  The `font_picker` and `native_fonts` replays cover bounded rows, per-family
+  styles, filtering, pointer/keyboard selection, modal focus, and scrolling.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.
@@ -286,6 +329,11 @@ applies to citation insertion and bibliography updates.
   Comments and page settings survive editable snapshots and exported HTML imports.
 - Dictionary and Translate: Review → Dictionary (or Look Up in the context menu) defines the selected word, or the word at the caret, through the [Free Dictionary API](https://dictionaryapi.dev) (`GET https://api.dictionaryapi.dev/api/v2/entries/en/<word>`). The pane lists the phonetic spelling, then each part of speech with up to four definitions and examples, plus synonyms that look themselves up on click. A speaker button beside the headword reads it aloud through `dom.speak` (en-US); clicking it again, or closing the pane, stops the reading, and `speechend`/`speecherror` reset the button. Review → Translate (or Translate in the context menu) sends the selection, or the caret's paragraph, to Google Translate's keyless web endpoint (`translate.googleapis.com/translate_a/single?client=gtx`), detecting the source language and targeting one of 13 languages. Copy puts the translation on the clipboard, and Insert replaces the source text in one undoable step. If the document changed since the request, Insert replaces the current selection instead. Each request runs in a document-owned task (`start(…,{owner:'document'})` → `io.fetch`), which reports back through a `word_lookup` event, so the window keeps responding while it waits. A newer search drops an older one's late answer. Enter searches in the Dictionary field; Ctrl/⌘ Enter translates. Lookups also work in Read Mode. The pane takes the right-hand slot from Comments and Changes. dictionaryapi.dev ignores case, but its Cloudflare edge caches each spelling separately and can hold a stale HTML 404 page for a valid word ("evening", "happy"). An HTML 404 therefore retries the capitalized spelling. Only the API's own JSON `No Definitions Found` reads as an unknown word; other failures read as a temporary outage.
 - Spelling: red wavy underlines appear directly beneath possible English (US) misspellings, including words split by inline formatting. The first check starts when each document opens; later checks run after a short typing pause in a document-owned task and isolated process (**S13.1.3v2**, **S13.3.1v2**). Existing underlines stay visible while an edit is pending, then the latest result replaces them. A newer edit cancels the old check and discards its result. IME composition defers checking. The checker reads the prepared dictionary and its line-offset index; full dictionary validation remains an explicit preparation step. Underlines use source-mapped range geometry outside the document and its undo history (**D7.2.5**, **S2.5.8**). It excludes code, math, deleted text, `spellcheck=false`, and non-English regions. Correction suggestions and grammar checks are future work.
+
+  Underlines follow the document when scrolling and clip at the document
+  scrollport. The `spelling_scroll` native replay checks italic “Tefillin” in
+  Chinese text, movement with the text, clipping, and scrolling back.
+
 - Tracked text changes: author settings, insertion/deletion marks, a Changes
   pane, Go to text, individual or all-change accept/reject, and a Show markup
   toggle. Consecutive typing shares a revision; deleting pending inserted text

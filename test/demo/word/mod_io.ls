@@ -85,27 +85,69 @@ pub fn picture_source(path) string^ {
     else media.data_uri(input(path,'binary')^,mime)^
 }
 
+pub fn supported_path(path) => (ends_with(lower(path),".word.json") or
+    contains(["html","htm","md","markdown","txt","docx"],lower(split(path,".")[last]))) ^ { false }
+
+// DOCX bookmarks are empty spans; other view-only markup becomes editable text with a warning.
+fn editable_office(n) {
+    if (is_text(n)) {doc:n,warnings:[]}
+    else if (contains(['raw_html','html_block'],n.tag)) {
+        let source = helpers.attr_get(n,'source')
+        let bookmark = type(source)==element and name(source)=='span' and source.id is string and len(content(source))==0;
+        if (bookmark) {doc:node_attrs('span',[{name:'id',value:source.id}],[]),warnings:[]}
+        else {doc:if (n.tag=='html_block') document.paragraph(helpers.plain_text(source)) else text(helpers.plain_text(source)),
+            warnings:[{severity:"warning",code:"editable-content",part:null,
+                message:"Some embedded content was imported as editable text; its original layout could not be retained."}]}
+    }
+    else {
+        let children = [for (child in n.content) editable_office(child)];
+        {doc:{*:n,content:[for (child in children) child.doc]},warnings:[for (child in children) for (warning in child.warnings) warning]}
+    }
+}
+
 pub fn read_document(path) map^ {
     if (not (path is string) or trim(path)=="") raise error("Word: enter a file path")
     else if (ends_with(lower(path),".word.json")) {
         let source = input(path,'text')^
         if (len(source)>4000000) raise error("Word: editable files are limited to 4 MB") else {
             let loaded = import_text(source)^;
-            {editor:model.open_editor(loaded.doc),session:session.new_session(path,descriptor,source,loaded),status:"Opened " ++ session.basename(path)}
+            {editor:model.open_editor(loaded.doc),session:session.new_session(path,descriptor,source,loaded),warnings:[],status:"Opened " ++ session.basename(path)}
         }
     }
     else {
         let extension = lower(split(path,".")[last])
-        let source = if (extension == "docx") docx.to_html(path,{unsupported:"error"})^ else input(path,'text')^
+        // conversion diagnostics describe partial fidelity; malformed packages still raise fatal errors.
+        let converted = if (extension == "docx") docx.convert(path,{unsupported:"warn"})^ else null
+        let source = if (converted != null) converted.html else input(path,'text')^
         let loaded = if (contains(["html","htm"],extension)) {doc:import_html_document(source)^}
             else if (extension=="docx") html.import_text(source)^
             else if (contains(["md","markdown"],extension)) markdown.import_text(source)^
             else if (extension == "txt") {doc:node('doc',[for (line in split(source,"\n")) document.paragraph(line)])}
             else raise error("Word: open .word.json, .html, .md, .txt, or .docx")
-        let imported = if (len(loaded.doc.content)==0) document.blank() else restored(loaded.doc)^
+        let office = if (extension=="docx") editable_office(loaded.doc) else {doc:loaded.doc,warnings:[]}
+        let imported = if (len(office.doc.content)==0) document.blank() else restored(office.doc)^
         let doc = imported;
         {editor:model.open_editor(doc),session:new_session(doc,session.basename(path)),
+            warnings:unique((converted.diagnostics or []) ++ office.warnings),
             status:"Imported " ++ session.basename(path) ++ "; save an editable copy."}
+    }
+}
+// process replies contain data only; editor functions and native handles stay in their owning evaluator.
+pub fn open_reply(path) map^ {
+    let loaded = read_document(path)^;
+    {snapshot:archive(loaded.editor.doc,loaded.session.envelope.title),path:loaded.session.path,
+        disk_text:loaded.session.disk_text,status:loaded.status,warnings:loaded.warnings}
+}
+pub fn restore_reply(value) map^ {
+    if (not (value is map) or not (value.path is string) or not (value.status is string) or
+        not (value.disk_text==null or value.disk_text is string) or
+        (value.warnings!=null and (not (value.warnings is array) or
+            not all([for (warning in value.warnings) warning is map and warning.message is string]))))
+        raise error("Word: invalid document converter reply")
+    else {
+        let loaded = restore(value.snapshot)^;
+        {editor:model.open_editor(loaded.doc),session:session.new_session(value.path,descriptor,value.disk_text,
+            {doc:loaded.doc,envelope:{title:loaded.title}}),status:value.status,warnings:value.warnings or []}
     }
 }
 let metadata_names = ['data-word-page','data-word-columns','data-word-comments','data-word-comment-seq','data-word-stories','data-word-tracking','data-word-change-seq','data-word-references']

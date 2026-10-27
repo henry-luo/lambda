@@ -39,19 +39,33 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
 
     CTFontRef ct_font = NULL;
 
-    // for TTC/OTC collections, CGFontCreateWithDataProvider always picks face 0.
-    // Use CTFontManagerCreateFontDescriptorsFromData to select the correct face.
-    if (face_index > 0) {
-        CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromData(cf_data);
-        if (descs && CFArrayGetCount(descs) > face_index) {
-            CTFontDescriptorRef desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, face_index);
-            ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
+    bool collection = len >= 4 && memcmp(data, "ttcf", 4) == 0;
+    if (collection) {
+        // descriptor lists include variable instances; select by the physical
+        // face's PostScript name rather than treating its TTC index as an ordinal.
+        Pool* pool = pool_create();
+        FontTables* tables = pool ? font_tables_open_face(data, len, face_index, pool) : NULL;
+        NameTable* name = font_tables_get_name(tables);
+        CFStringRef wanted = name && name->postscript_name
+            ? CFStringCreateWithCString(NULL, name->postscript_name, kCFStringEncodingUTF8) : NULL;
+        CFArrayRef descs = wanted ? CTFontManagerCreateFontDescriptorsFromData(cf_data) : NULL;
+        CFIndex count = descs ? CFArrayGetCount(descs) : 0;
+        for (CFIndex i = 0; i < count && !ct_font; i++) {
+            CTFontDescriptorRef desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, i);
+            CFStringRef actual = CTFontDescriptorCopyAttribute(desc, kCTFontNameAttribute);
+            if (actual && CFEqual(wanted, actual)) {
+                ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
+            }
+            if (actual) CFRelease(actual);
         }
         if (descs) CFRelease(descs);
+        if (wanted) CFRelease(wanted);
+        font_tables_close(tables, pool);
+        if (pool) pool_destroy(pool);
     }
 
-    // face 0 or fallback: use CGFont path (faster, no collection lookup)
-    if (!ct_font) {
+    // a failed collection selection must not silently substitute face zero.
+    if (!collection) {
         CGDataProviderRef provider = CGDataProviderCreateWithCFData(cf_data);
         if (provider) {
             CGFontRef cg_font = CGFontCreateWithDataProvider(provider);

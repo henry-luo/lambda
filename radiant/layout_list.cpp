@@ -503,11 +503,11 @@ static void refresh_marker_content(LayoutContext* lycon, DomElement* parent_elem
     } else if (!is_bullet_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
         char marker_text[64];
         int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
-        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
-            marker_text[marker_len] = '.';
-            marker_text[marker_len + 1] = ' ';
-            marker_text[marker_len + 2] = '\0';
-            marker_len += 2;
+        const char* suffix = counter_style_suffix(marker_style);
+        size_t suffix_length = strlen(suffix);
+        // the selected counter style owns marker punctuation, including the CJK comma.
+        if (marker_len > 0 && (size_t)marker_len + suffix_length < sizeof(marker_text)) {
+            str_copy(marker_text + marker_len, sizeof(marker_text) - marker_len, suffix, suffix_length);
 
             radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_text));
         }

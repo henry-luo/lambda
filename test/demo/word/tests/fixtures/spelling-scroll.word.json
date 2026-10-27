@@ -1,0 +1,51 @@
+{
+  "format": "lambda-word",
+  "version": 1,
+  "title": "拼写与滚动",
+  "document": {
+    "kind": "node",
+    "tag": "doc",
+    "attrs": [],
+    "content": [
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "犹太人称为“",
+            "marks": []
+          },
+          {
+            "kind": "text",
+            "text": "Tefillin",
+            "marks": [
+              {
+                "name": "em",
+                "value": true
+              }
+            ]
+          },
+          {
+            "kind": "text",
+            "text": "”。我们继续阅读这段经文。",
+            "marks": []
+          }
+        ]
+      },
+      {
+        "kind": "node",
+        "tag": "p",
+        "attrs": [],
+        "content": [
+          {
+            "kind": "text",
+            "text": "这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。这是下一段。",
+            "marks": []
+          }
+        ]
+      }
+    ]
+  }
+}

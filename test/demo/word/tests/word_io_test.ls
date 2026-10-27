@@ -26,7 +26,8 @@ all([for (opened in imported) files.restore(files.archive(opened.editor.doc,"Imp
 let office = files.read_document("test/input/docx/minimal.docx")^
 model.plain_text(office.editor.doc) == "Hello, DOCX!"
 office.session.path == ""
-files.read_document("test/input/docx/reference/single-paragraph.docx") ^ { contains(^.message,"raw_html") } ~ { false }
+let bookmarked = files.read_document("test/input/docx/reference/single-paragraph.docx")^
+contains(files.html_document(bookmarked.editor.doc,"Bookmark")^,"id=\"_GoBack\"") and len(bookmarked.warnings)==0
 let picture_src = files.picture_source("test/demo/word/tests/picture.svg")^
 starts_with(picture_src,"data:image/svg+xml;base64,")
 let picture = model.execute(model.open_editor(doc),"insert.picture",{src:picture_src,alt:"Embedded picture",width:240,height:120})^

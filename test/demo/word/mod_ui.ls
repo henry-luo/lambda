@@ -4,6 +4,7 @@ import lambda.editor.mod_step
 import model: .mod_model
 import document: .mod_document
 import files: lambda.edit.files
+import picker: .mod_file_picker
 import page: .mod_page
 import columns: .mod_columns
 import review: .mod_review
@@ -41,6 +42,7 @@ import equation_ui: .mod_equation_ui
 import home: .mod_home
 import home_ui: .mod_home_ui
 import text_format: ~~.mod_text_format
+import font_picker: .mod_font_picker
 import ribbon: ~~.mod_ribbon
 
 pub let icon = icons.icon
@@ -238,9 +240,11 @@ fn shape_field(id,label,value,property,disabled=false,draft={}) => <label class:
     apply(<control.input id:id,class:"ribbon-select",type:"text",label:label,
         value:if (draft[symbol(property)]==null) value else draft[symbol(property)],disabled:disabled,
         on_change:{action:"ui.shapeField",params:{property:property},param:"value"}>)>
-fn shape_select(id,label,values,value,property,disabled=false) => <label class:"shape-field",<span label>
-    apply(<control.select id:id,class:"ribbon-select",label:label,options:values,value:string(value),disabled:disabled,
-        on_change:{action:"ui.shapeField",params:{property:property},param:"value"}>)>
+fn shape_select(id,label,values,value,property,disabled=false) {
+    let control = apply(<control.select id:id,class:"ribbon-select",label:label,options:values,value:string(value),disabled:disabled,
+        on_change:{action:"ui.shapeField",params:{property:property},param:"value"}>);
+    <label class:"shape-field",<span label>;if (property=="font") font_picker.wrap(control,id,value,disabled) else control>
+}
 fn shape_format_ribbon(editor,read_only,opened,picks,draft) {
     let item = shape_format.describe(model.current_node(editor,'img').node)
     let p = item.values
@@ -391,9 +395,11 @@ fn group(label:string,items) => ribbon.group(label,items,
         <span class:"group-chevron",icon("down",10)>>)
 fn large(id,action,label,graphic,params={},pressed=false,disabled=false,title=null) =>
     button(id,action,label,graphic,params,pressed,disabled,"ribbon-large",title)
-fn selector(id,command,values,current,css="",param="value",disabled=false) =>
-    apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
-        options:values,value:current,disabled:disabled,on_change:{action:command,param:param}>)
+fn selector(id,command,values,current,css="",param="value",disabled=false) {
+    let control = apply(<control.select id:id,class:"ribbon-select " ++ css,label:model.spec(command).label,
+        options:values,value:current,disabled:disabled,on_change:{action:command,param:param}>);
+    if (command=="format.font") font_picker.wrap(control,id,current,disabled) else control
+}
 fn pen_selector(property,label,values,current,disabled) => <label class:"table-pen-field",<span label>
     apply(<control.select id:"table-pen-" ++ property,class:"ribbon-select",label:label,options:values,value:current,disabled:disabled,
         on_change:{action:"ui.tablePen",params:{property:property},param:"value"}>)>
@@ -724,9 +730,11 @@ pub fn lookup_pane(st) {
 fn dialog_field(id,label,value,numeric=false,min=0,max=2000,step=1) => <label class:"dialog-field",
     <span label> <input id:id, class:"edit-dialog-field", type:if (numeric) "number" else "text",
         value:string(value), *:if (numeric) {min:string(min),max:string(max),step:string(step)} else {}>>
-fn dialog_select(id,label,values,current) => <label class:"dialog-field", <span label>
-    <select id:id, class:"edit-dialog-field", ["aria-label"]:label,
-        *[for (entry in values) <option value:string(entry.value), *:if (string(entry.value)==string(current)) {selected:""} else {}, entry.label>]>>
+fn dialog_select(id,label,values,current,font=false) {
+    let control = <select id:id, class:"edit-dialog-field", ["aria-label"]:label,
+        *[for (entry in values) <option value:string(entry.value), *:if (string(entry.value)==string(current)) {selected:""} else {}, entry.label>]>;
+    <label class:"dialog-field", <span label>;if (font) font_picker.wrap(control,id,current) else control>
+}
 fn form_dialog(d:map,title:string,description:string,fields:array,action:string,label:string) => files.dialog_frame(string(d.kind),title,description,
     [if (d.error is null) null else <p id:"dialog-error",role:"alert",d.error>,*fields],
     [files.dialog_button("cancel","Cancel",false),files.dialog_button(action,label,true)])
@@ -844,6 +852,7 @@ fn print_dialog(d:map,editor:map) {
 }
 
 pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (dialog == null) null
+    else if (dialog.kind=="open") picker.dialog(dialog)
     else if (dialog.kind=="print") print_dialog(dialog,editor)
     else if (dialog.kind=="object_layout") form_dialog(dialog,"Object layout","Floating positions are measured from the object's paragraph. Objects move with their text.",[
         dialog_select("object-wrap","Text wrapping",[for (w in object_layout.wraps) {value:w.id,label:w.label}],dialog.values.wrap),
@@ -964,7 +973,7 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
         <div class:"dialog-grid",
             dialog_select("art-style","Style",[for (s in wordart.styles) {value:s,label:s}],dialog.values.style)
             dialog_select("art-transform","Transform",[for (s in wordart.transforms) {value:s,label:s}],dialog.values.transform)
-            dialog_select("art-font","Font",font_options(font_families,dialog.values.font),dialog.values.font)
+            dialog_select("art-font","Font",font_options(font_families,dialog.values.font),dialog.values.font,true)
             dialog_field("art-size","Font size (px)",dialog.values.size,true,12,120)
             dialog_field("art-width","Width (px)",dialog.values.width,true,80,650)
             dialog_field("art-height","Height (px)",dialog.values.height,true,40,400)
@@ -1018,9 +1027,8 @@ pub fn dialog(dialog,file,editor=null,read_only=false,font_families=[]) => if (d
                 dialog_field("picture-height","Height (px, optional)",dialog.values.height,true,16,2000)>,
             dialog_field("picture-rotation","Rotation (degrees)",dialog.values.rotation,true,-180,180)],"picture",if (dialog.kind=="picture") "Insert picture" else "Apply")
     else files.dialog_frame(dialog.kind,
-        if (dialog.kind == "open") "Open document" else if (dialog.kind == "export") "Export document" else "Save editable document",
-        if (dialog.kind == "open") "Open .word.json, HTML, Markdown, text, or a supported DOCX. Imports create an editable copy."
-        else if (dialog.kind == "export") "Choose .html, .txt, or .pdf. PDF uses this document's page setup."
+        if (dialog.kind == "export") "Export document" else "Save editable document",
+        if (dialog.kind == "export") "Choose .html, .txt, or .pdf. PDF uses this document's page setup."
         else "The .word.json format preserves the document and its formatting.",
-        [files.field("word-file-path",dialog.path,if (dialog.kind == "open") "path/to/document" else "temp/word/document.word.json")],
-        [files.dialog_button("cancel","Cancel",false),files.dialog_button("confirm",if (dialog.kind == "open") "Open" else if (dialog.kind == "export") "Export" else "Save",true)])
+        [files.field("word-file-path",dialog.path,"temp/word/document.word.json")],
+        [files.dialog_button("cancel","Cancel",false),files.dialog_button("confirm",if (dialog.kind == "export") "Export" else "Save",true)])

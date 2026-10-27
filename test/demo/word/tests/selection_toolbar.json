@@ -139,11 +139,22 @@
       "count": 1
     },
     {
-      "type": "select_option",
+      "type": "click",
       "target": {
-        "selector": "#mini-font-family"
+        "selector": "#mini-font-family-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
       },
-      "value": "Arial"
+      "text": "Arial",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
     },
     {
       "type": "assert_value",

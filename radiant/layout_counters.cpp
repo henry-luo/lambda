@@ -687,6 +687,44 @@ static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
     return len;
 }
 
+static int format_cjk_counter(int value, char* buffer, size_t buffer_size, bool japanese) {
+    static const char* digits[] = {"〇", "一", "二", "三", "四", "五", "六", "七", "八", "九"};
+    static const char* units[] = {"千", "百", "十", ""};
+    const char* pieces[12] = {};
+    size_t count = 0;
+    // CSS Counter Styles 3 §7.1.1: additive Kanji omits one before units and falls back outside this range.
+    if (japanese && value >= -9999 && value <= 9999) {
+        if (value < 0) pieces[count++] = "マイナス";
+        int remainder = value < 0 ? -value : value;
+        if (!remainder) pieces[count++] = digits[0];
+        for (int divisor = 1000, place = 0; divisor; divisor /= 10, place++) {
+            int digit = remainder / divisor;
+            remainder %= divisor;
+            if (!digit) continue;
+            if (digit != 1 || divisor == 1) pieces[count++] = digits[digit];
+            if (divisor != 1) pieces[count++] = units[place];
+        }
+    } else {
+        // positional conversion also handles INT_MIN without negating a signed integer.
+        char decimal[16];
+        snprintf(decimal, sizeof(decimal), "%d", value);
+        for (const char* digit = decimal; *digit; digit++)
+            pieces[count++] = *digit == '-' ? "-" : digits[*digit - '0'];
+    }
+    size_t length = 0;
+    buffer[0] = '\0';
+    for (size_t i = 0; i < count; i++) {
+        size_t bytes = strlen(pieces[i]);
+        if (length < buffer_size) str_copy(buffer + length, buffer_size - length, pieces[i], bytes);
+        length += bytes;
+    }
+    return static_cast<int>(length); // INT_CAST_OK: an int counter needs at most 36 UTF-8 bytes.
+}
+
+const char* counter_style_suffix(uint32_t style) {
+    return style == CSS_VALUE_JAPANESE_INFORMAL || style == CSS_VALUE_CJK_DECIMAL ? "、" : ". ";
+}
+
 static int format_bullet_counter(uint32_t style, char* buffer, size_t buffer_size) {
     static const unsigned char bullets[][3] = {
         {0xE2, 0x80, 0xA2}, // disc
@@ -739,6 +777,10 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
 
         case CSS_VALUE_GEORGIAN:
             return int_to_georgian(value, buffer, buffer_size);
+
+        case CSS_VALUE_JAPANESE_INFORMAL:
+        case CSS_VALUE_CJK_DECIMAL:
+            return format_cjk_counter(value, buffer, buffer_size, style == CSS_VALUE_JAPANESE_INFORMAL);
 
         case CSS_VALUE_DECIMAL:
         default:

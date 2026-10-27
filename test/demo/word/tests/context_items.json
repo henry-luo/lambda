@@ -17,6 +17,12 @@
       "scroll_into_view": true
     },
     {
+      "type": "click",
+      "target": {
+        "selector": "#word-picker-place-project"
+      }
+    },
+    {
       "type": "type",
       "target": {
         "selector": "#word-file-path"
@@ -33,6 +39,14 @@
       },
       "button": 0,
       "scroll_into_view": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#word-file-picker"
+      },
+      "count": 0,
+      "assert_timeout": 30000
     },
     {
       "type": "set_editing_selection",

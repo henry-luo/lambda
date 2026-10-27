@@ -32,6 +32,8 @@ import print: .mod_print
 import lookup: .mod_lookup
 import spelling: lambda.edit.spelling
 import ribbon_overflow: .mod_ribbon_overflow
+import picker: .mod_file_picker
+import font_picker: .mod_font_picker
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -84,6 +86,9 @@ fn workspace(st) {
                 ui.navigation(st.editor,st.query,st.match_index,st.match_case,st.replace_text,st.search_mode,st.read_only,st.nav_tab)>
             ruler.workspace(st.editor,st.zoom,st.read_only,st.dialog!=null,
                     <section id:"stage",class:"stage",["aria-label"]:"Document pages",
+                        if (len(st.import_warnings)>0) <aside id:"word-import-warnings",role:"status",
+                            <strong "Imported with warnings">;
+                            <ul *[for (warning in st.import_warnings) <li warning.message>]>> else null;
                         handles.workspace(st.editor,st.zoom,st.read_only,st.dialog!=null,surface.surface(st.editor,st.zoom,st.read_only,layout),layout,
                             math_edit.caret(st));
                         <div class:"canvas-footer", "A little room for your next idea.">>)
@@ -134,7 +139,8 @@ on render(evt) {
         spelling.reposition(evt.target,"word")
         if (st.dialog!=null) {
             let dialog = dom.query_selector(evt.target,".edit-dialog")
-            let controls = if (dialog==null) [] else dom.query_selector_all(dialog,"input,textarea,select,button")
+            // custom focusable controls, including the picker's listbox, must retain focus across renders.
+            let controls = if (dialog==null) [] else dom.query_selector_all(dialog,"input,textarea,select,button:not([disabled]),[tabindex='0']")
             // native caret paints last; moving focus into the modal hides it without losing the saved range.
             if (len(controls)>0 and not any([for (control in controls) dom.focused(control)])) dom.focus_set(controls[0],false)
         }
@@ -204,6 +210,8 @@ on word_equation_ready(evt) { equation_edit.focus(st,evt.target); return 'pass' 
 on word_ruler_end(evt) { app.refresh_toolbar(st,evt.target); return 'pass' }
 on word_viewport_changed(evt) {
     ruler.position(st.editor,evt.target,st.zoom)
+    // the scrollport consumes scroll events and forwards this notification to viewport overlays.
+    spelling.reposition(evt.target,"word")
     if (st.layout=="web" and not st.read_only) {
         handles.fit_surface(evt.target)
         handles.position(st.editor,evt.target,st.zoom)
@@ -221,6 +229,7 @@ on resize(evt) {
         dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_viewport_changed")
     if (mini.visible(st)) mini.refresh(evt.target)
     spelling.reposition(evt.target,"word")
+    font_picker.reposition(evt.target)
     return 'pass'
 }
 on scroll(evt) { spelling.reposition(evt.target,"word"); return 'pass' }
@@ -412,6 +421,16 @@ on edit_dialog(req) {
     st = app.command(st,"dialog." ++ req.action,{},req.node)
     app.finish(st,req.node)
 }
+on word_picker_ready(evt) {
+    if (st.dialog.kind=="open") picker.focus(st.dialog,evt.target)
+}
+on word_picker_closed(evt) {
+    if (st.dialog==null) { app.focus_document(evt.target); app.finish(st,evt.target) }
+}
+on word_open(evt) {
+    let next = app.open_finished(st,evt.detail,evt.target)
+    if (next!=st) { st = next; app.finish(st,evt.target) }
+}
 on control_change(req) {
     if (dom.closest(req.node,"#selection-toolbar")==null) { st = app.hide_toolbar(st) }
     if (req.action=="find.query") { st = {*:st,query:req.value,match_index:-1,nav_tab:"results"} }
@@ -423,6 +442,9 @@ on control_change(req) {
     }
 }
 on keydown(evt) {
+    if (dom.closest(evt.target,"#word-font-picker")!=null) { return 'pass' }
+    // the picker owns navigation and text-field shortcuts while its modal is open.
+    if (st.dialog.kind=="open" and dom.closest(evt.target,"#word-file-picker")!=null) { return 'pass' }
     if (evt.key=="Escape" and st.context==null) {
         let opened = dom.query_selector(dom.root_node(evt.target),".ribbon-group[data-open=true]")
         if (opened!=null) {
@@ -523,4 +545,4 @@ on closerequest(evt) {
 
 // keep spelling chrome beside the edit view so async results cannot reconcile the ribbon during typing.
 <html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ surface.print_css ++ changes.css ++ spelling.css>>
-    apply(<word_app>,{mode:"edit"}); spelling.widget("word")>
+    apply(<word_app>,{mode:"edit"}); spelling.widget("word"); font_picker.widget()>
