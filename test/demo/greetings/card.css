@@ -12,6 +12,28 @@
 .photo-clip { width: 100%; height: 100%; overflow: hidden; border-radius: inherit; }
 .photo-img { width: 100%; height: 100%; background-position: center; background-size: cover; background-repeat: no-repeat; }
 
+/* Each cut-paper plane shares the flat illustration, then rises from its bottom hinge. */
+.popup-scene { position: absolute; left: 9%; top: 14%; width: 82%; height: 68%; pointer-events: none; }
+.popup-plane { position: absolute; inset: 0; transform-origin: center 88%; }
+.popup-art { display: block; width: 100%; height: 100%; }
+.popup-ground { position: absolute; left: 5%; bottom: 5%; width: 90%; height: 11%; border-radius: 50%; box-shadow: 0 8px 14px rgba(40,20,30,.15); }
+.popup-tab { position: absolute; bottom: 12%; left: 38%; width: 24%; height: 10%; transform-origin: center bottom; transform: rotateX(45deg); border: 1px solid rgba(255,255,255,.6); }
+.popup-flat .popup-tab { display: none; }
+.popup-page-live, .popup-live, .popup-live .popup-plane { transform-style: preserve-3d; }
+.popup-page-live { overflow: visible; }
+.popup-live .popup-plane { opacity: 0; transform: translateZ(0px) rotateX(-88deg); transition: transform 1.1s ease, opacity .6s ease; }
+.book.open .popup-live .popup-plane { opacity: 1; transform: translateZ(var(--popup-z)) rotateX(-12deg); }
+.book.half .popup-live .popup-plane { opacity: 1; transform: translateZ(calc(var(--popup-z) * .5)) rotateX(-48deg); }
+.book.back .popup-live { visibility: hidden; }
+.popup-live .popup-art { filter: drop-shadow(0 4px 3px rgba(45,20,35,.18)); }
+@media (prefers-reduced-motion: reduce) {
+    .popup-live .popup-plane { transition: none; }
+}
+@media print {
+    .popup-live .popup-plane { opacity: 1 !important; transform: none !important; }
+    .popup-tab { display: none; }
+}
+
 /* Motion belongs to preview wrappers, leaving editable geometry and print pages stable. */
 @keyframes greeting-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7%); } }
 @keyframes greeting-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }

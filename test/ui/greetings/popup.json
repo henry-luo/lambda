@@ -1,0 +1,1079 @@
+{
+  "name": "Greetings: pop-up scenes, paper layers, fold preview, inspector, print layout and save/open",
+  "html": "test/demo/greetings/greetings.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "The catalog identifies all four pop-up cards; ordinary cards can add a pop-up."
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".popup-badge"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .canvas-effect"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Add pop-up"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"occasion\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".designs .design"
+      },
+      "count": 4
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-gallery.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"popup-birthday\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "cake"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Edit pop-up"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#effect-settings"
+      },
+      "attribute": "data-kind",
+      "equals": "popup"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".inspector h2"
+      },
+      "equals": "Pop-up"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-view",
+      "equals": "inside"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-page",
+      "equals": "left"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-flat"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-plane"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".spread"
+      },
+      "x": 404,
+      "width": 720,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#canvas [data-page=\"left\"]"
+      },
+      "x": 404,
+      "width": 346,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#canvas [data-page=\"right\"]"
+      },
+      "x": 778,
+      "width": 346,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-design\"][data-arg=\"cake\"]"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-editor.png"
+    },
+    {
+      "type": "log",
+      "message": "Layered paper folds shut, lifts in the opening preview and is hidden on the back."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".book"
+      },
+      "attribute": "class",
+      "equals": "book closed popup-book"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview .face-inside .popup-live"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "0",
+      "animated": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "playing"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-closed.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".book"
+      },
+      "attribute": "class",
+      "equals": "book open popup-book"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "transform",
+      "contains": "matrix3d",
+      "animated": true
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-open.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"half\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".book"
+      },
+      "attribute": "class",
+      "equals": "book half popup-book"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-half.png"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "resize",
+      "width": 1120,
+      "height": 740
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-compact.png"
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"back\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .face-inside .popup-live"
+      },
+      "property": "visibility",
+      "equals": "hidden"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "0",
+      "animated": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-sound",
+      "equals": "off"
+    },
+    {
+      "type": "log",
+      "message": "Depth and colour are independent editable choices with undo and redo."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-depth\"][data-arg=\"high\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-depth",
+      "equals": "high"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-color\"][data-arg=\"#0ea5e9\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-color",
+      "equals": "#0ea5e9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"undo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-color",
+      "equals": "#f472b6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-depth",
+      "equals": "high"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"redo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-color",
+      "equals": "#0ea5e9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-design\"][data-arg=\"none\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-scene"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Add pop-up"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"undo\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "cake"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-depth",
+      "equals": "high"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-color",
+      "equals": "#0ea5e9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"half\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-high-depth.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "log",
+      "message": "Each scene opens in 3D without replacing the message or music."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"popup-love\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "hearts"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-plane"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .popup-scene"
+      },
+      "attribute": "data-popup",
+      "equals": "hearts"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-hearts.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"popup-garden\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "garden"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-plane"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .popup-scene"
+      },
+      "attribute": "data-popup",
+      "equals": "garden"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-garden.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"popup-winter\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "winter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-plane"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .popup-scene"
+      },
+      "attribute": "data-popup",
+      "equals": "winter"
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-winter.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "log",
+      "message": "A plain card gains a pop-up, keeps its verse and stores it through save/open and reshaping."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"occasion\"][data-arg=\"all\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"botanical-thanks\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-design\"][data-arg=\"garden\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-depth\"][data-arg=\"high\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".inspector [data-act=\"popup-color\"][data-arg=\"#0ea5e9\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "garden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      },
+      "attribute": "aria-label",
+      "equals": "Edit pop-up"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#canvas [data-page=\"right\"] [data-id=\"r1\"]"
+      },
+      "contains": "Your kindness meant more"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"panel\"][data-arg=\"card\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"format\"][data-arg=\"landscape\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-depth",
+      "equals": "high"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-color",
+      "equals": "#0ea5e9"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#canvas .popup-flat"
+      },
+      "count": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/popup-landscape.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"dialog\"][data-arg=\"export\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/greetings_popup",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"export\"][data-arg=\"mark\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".dialog-note"
+      },
+      "equals": "Saved temp/greetings_popup/botanical.mark"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"dialog-close\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"panel\"][data-arg=\"designs\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"balloon-party\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"dialog\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/greetings_popup/botanical.mark",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".dialog [data-act=\"open\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup",
+      "equals": "garden"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-depth",
+      "equals": "high"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#studio"
+      },
+      "attribute": "data-popup-color",
+      "equals": "#0ea5e9"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#canvas [data-act=\"effect-settings\"][data-arg=\"popup\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 1400,
+      "steps": 28
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".preview .popup-scene"
+      },
+      "attribute": "data-popup",
+      "equals": "garden"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "property": "opacity",
+      "equals": "1",
+      "animated": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".preview"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-clock"
+      },
+      "attribute": "data-running",
+      "equals": "false"
+    }
+  ]
+}

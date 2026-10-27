@@ -1,0 +1,944 @@
+{
+  "name": "Greetings: whole-card turn fits compact, narrow and landscape viewports",
+  "html": "test/demo/greetings/greetings.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"balloon-party\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"motion-toggle\"]"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 513,
+      "height": 580
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 220,
+      "steps": 11
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-fit-513.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 580,
+      "steps": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "resize",
+      "width": 320,
+      "height": 480
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 220,
+      "steps": 11
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-fit-320.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 580,
+      "steps": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 500
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 2
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 220,
+      "steps": 11
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-fit-900.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 580,
+      "steps": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"template\"][data-arg=\"popup-love\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"panel\"][data-arg=\"card\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"format\"][data-arg=\"landscape\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"motion-toggle\"]"
+      }
+    },
+    {
+      "type": "resize",
+      "width": 700,
+      "height": 500
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"open\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 120,
+      "steps": 6
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "resize",
+      "width": 420,
+      "height": 540
+    },
+    {
+      "type": "advance_time",
+      "ms": 30,
+      "steps": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .popup-plane-2"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/greetings/page-turn-fit-popup.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".preview [data-act=\"preview\"][data-arg=\"closed\"]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 580,
+      "steps": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#greetings-preview"
+      },
+      "attribute": "data-turning",
+      "equals": "false"
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .cover"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview .leaf-right"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "assert_position",
+      "element_a": {
+        "selector": ".preview-bar-host"
+      },
+      "element_b": {
+        "selector": ".preview"
+      },
+      "relation": "inside",
+      "tolerance": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-act=\"preview-done\"]"
+      }
+    }
+  ]
+}
