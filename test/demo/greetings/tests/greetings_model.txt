@@ -1,6 +1,6 @@
 "catalog:"
 {
-  templates: 28,
+  templates: 32,
   occasions: 10,
   art: 32,
   fonts: 16,
@@ -139,8 +139,8 @@
   animations: 7,
   tunes: 6,
   invalid_templates: [],
-  animated: 10,
-  musical: 9,
+  animated: 14,
+  musical: 13,
   legacy: {
     animation: "none",
     music: "none"
@@ -176,4 +176,65 @@
   live_particles: true,
   print_still: true,
   print_no_particles: true
+}
+"pop-up catalogs, legacy defaults and validation:"
+{
+  designs: 5,
+  depths: 3,
+  templates: 4,
+  invalid_templates: [],
+  invalid_art: [],
+  legacy: {
+    design: "none",
+    color: "#e11d48",
+    depth: "classic"
+  },
+  blank: {
+    design: "none",
+    color: "#e11d48",
+    depth: "classic"
+  },
+  unknown: {
+    design: "none",
+    color: "#e11d48",
+    depth: "classic"
+  }
+}
+"pop-ups preserve messages, effects, history and file/format roundtrips:"
+{
+  configured: {
+    design: "cake",
+    color: "#0ea5e9",
+    depth: "high"
+  },
+  removed: "none",
+  undo: {
+    design: "cake",
+    color: "#0ea5e9",
+    depth: "high"
+  },
+  redo: "none",
+  verse_untouched: true,
+  effects_untouched: true,
+  roundtrip: {
+    design: "cake",
+    color: "#0ea5e9",
+    depth: "high"
+  },
+  reshape: {
+    design: "cake",
+    color: "#0ea5e9",
+    depth: "high"
+  },
+  invalid_color: "#f472b6"
+}
+"one illustration is flat in the editor/print and hinged only in live preview:"
+{
+  flat: true,
+  print_has_art: true,
+  print_has_no_live_planes: true,
+  live: true,
+  planes: true,
+  no_front_popup: true,
+  no_plain_popup: true
 }
