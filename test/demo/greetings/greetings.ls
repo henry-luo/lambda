@@ -11,6 +11,8 @@ import T: .mod_templates
 import M: .mod_model
 import R: .mod_render
 import ui: .mod_ui
+import E: .mod_effects
+import music: .mod_music
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
 let CSS = input(url_resolve(BASE, "greetings.css"), 'text')^
@@ -24,6 +26,7 @@ let GALLERY = [for (t in T.TEMPLATES) {t: t, card: T.assemble(t, PHOTOS)}]
 
 fn initial() => {card: GALLERY[0].card, hist: M.history(), view: "front", page: "front", sel: null,
     panel: "designs", occasion: "all", drag: null, preview: null, dialog: null, note: "", typing: false,
+    sound: music.initial(), motion_paused: false, effect_editor: null,
     status: "Pick a design on the left, or start changing this one.", vp: {width: 1280.0, height: 820.0},
     path: "temp/greetings", open_path: "temp/greetings/balloon-party.mark", photo_path: ""}
 
@@ -42,7 +45,7 @@ fn toggle(st, field) => (let it = sel_item(st), if (it == null) st else patch_se
 fn add_item(st, it, placed = true) {
     let id = M.fresh_id(st.card)
     let item = {*:(if (placed) M.place(st.card, it) else it), id: id};
-    {*:record_edit(st, M.add(st.card, st.page, item), "Added to the " ++ lower(T.page_name(st.page)) ++ " page."), sel: id}
+    {*:record_edit(st, M.add(st.card, st.page, item), "Added to the " ++ lower(T.page_name(st.page)) ++ " page."), sel: id, effect_editor: null}
 }
 fn add_text(st, key) => (let t = [for (x in ui.TEXT_STYLES where x.key == key) x][0],
     add_item(st, T.text(t.text, 0, 0, t.w, t.size, t.font, ink(st))))
@@ -82,12 +85,17 @@ fn use_design(st, key) => (let g = [for (x in GALLERY where x.t.key == key) x][0
     {*:record_edit(st, g.card, "Started from " ++ g.t.name ++ ". Undo goes back to your previous card."), view: "front", page: "front", sel: null})
 
 fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
-    else if (verb == "panel") {*:st, panel: arg}
+    else if (verb == "panel") (if (arg == "effects") {*:st, effect_editor: "animation", sel: null}
+        else {*:st, panel: arg, effect_editor: null})
+    else if (verb == "effect-settings") {*:st, effect_editor: if (contains(["animation", "music"], arg)) arg else null, sel: null}
     else if (verb == "occasion") {*:st, occasion: arg}
     else if (verb == "template") use_design(st, arg)
     else if (verb == "blank") {*:record_edit(st, T.blank(st.card.format), "A blank card. Add text, art and photos from the left."), view: "front", page: "front", sel: null}
     else if (verb == "format") record_edit(st, M.reformat(st.card, arg), "The card is now " ++ lower(T.format_of(arg).name) ++ ".")
     else if (verb == "card-occasion") record_edit(st, {*:st.card, occasion: arg})
+    else if (verb == "animation" or verb == "music") record_edit(st, E.configure(st.card, verb, arg), "Updated the card's " ++ verb ++ ". Preview to play it.")
+    else if (verb == "motion-toggle") {*:st, motion_paused: not st.motion_paused}
+    else if (verb == "music-toggle") {*:st, sound: {*:st.sound, muted: if (st.sound.failed) false else not st.sound.muted, failed: false}}
     else if (verb == "add-text") add_text(st, arg)
     else if (verb == "verse") verse(st, arg)
     else if (verb == "add-art") add_art(st, arg)
@@ -99,8 +107,8 @@ fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
     else if (verb == "border") set_page(st, {border: arg})
     else if (verb == "border-color") set_page(st, {border_color: arg})
     else if (verb == "backdrop-all") backdrop_all(st)
-    else if (verb == "select") {*:st, sel: arg}
-    else if (verb == "deselect") {*:st, sel: null}
+    else if (verb == "select") {*:st, sel: arg, effect_editor: null}
+    else if (verb == "deselect") {*:st, sel: null, effect_editor: null}
     else if (verb == "font") patch_sel(st, {font: arg})
     else if (verb == "color") patch_sel(st, {color: arg})
     else if (verb == "align") patch_sel(st, {align: arg})
@@ -118,7 +126,7 @@ fn change(st, verb, arg) => if (verb == "view") show_view(st, arg)
         (let id = M.fresh_id(st.card), {*:record_edit(st, M.duplicate(st.card, st.page, st.sel, id), "Duplicated."), sel: id})
     else if (verb == "delete" and st.sel != null) {*:record_edit(st, M.remove(st.card, st.page, st.sel), "Deleted. Undo brings it back."), sel: null}
     else if (verb == "undo" or verb == "redo") history_step(st, verb == "redo")
-    else if (verb == "preview") {*:st, preview: arg, sel: null}
+    else if (verb == "preview") {*:st, preview: arg, sel: null, motion_paused: if (st.preview == null) false else st.motion_paused}
     else if (verb == "preview-done") {*:st, preview: null}
     else if (verb == "dialog") {*:st, dialog: arg, note: ""}
     else if (verb == "dialog-close") {*:st, dialog: null}
@@ -279,24 +287,38 @@ pn publish_drag(root, d, it, guides) {
 }
 fn travelled(d, evt) => abs(evt.clientX - d.x) + abs(evt.clientY - d.y) >= 3
 fn typing_target(evt) => dom.closest(evt.target, "input, textarea, select") != null
+fn audio_owner(evt) => dom.get_element_by_id(dom.root_node(evt.target), "greetings-clock")
+pn audible(evt, next) {
+    return {*:next, sound: music.follow(audio_owner(evt), next.sound, next.card, next.preview, BASE)}
+}
+pn publish_size(evt) {
+    let root = dom.root_node(evt.target)
+    let size = dom.viewport_size(root)
+    if (size != null) dom.dispatch(dom.get_element_by_id(root, "studio"), {type: "studiosize", detail: size})
+    return null
+}
 
 view <greetings_app> state st: initial() {
-    <body ui.studio(st, GALLERY, SAMPLES)>
+    ui.studio(st, GALLERY, SAMPLES)
 }
-on load(evt) {
-    let size = dom.viewport_size(dom.root_node(evt.target))
+on studiosize(evt) {
+    let size = evt.detail
     if (size != null) { st = {*:st, vp: {width: float(size.width), height: float(size.height)}} }
-    return 'pass'
-}
-on resize(evt) {
-    let size = dom.viewport_size(dom.root_node(evt.target))
-    if (size != null) { st = {*:st, vp: {width: float(size.width), height: float(size.height)}} }
-    return 'pass'
+    return 'handled'
 }
 on click(evt) {
     let btn = dom.closest(evt.target, "[data-act]")
     if (btn == null or dom.has_attribute(btn, "disabled")) { return 'pass' }
-    st = command(st, dom.get_attribute(btn, "data-act"), dom.get_attribute(btn, "data-arg") or "")
+    st = audible(evt, command(st, dom.get_attribute(btn, "data-act"), dom.get_attribute(btn, "data-arg") or ""))
+    return 'handled'
+}
+on musictick(evt) {
+    let next = music.tick(audio_owner(evt), st.sound)
+    if (next != st.sound) { st = {*:st, sound: next} }
+    return 'handled'
+}
+on musicclose(evt) {
+    st = {*:st, sound: music.stop(audio_owner(evt), st.sound)}
     return 'handled'
 }
 on control_change(req) {
@@ -320,13 +342,13 @@ on pointerdown(evt) {
     let key = dom.get_attribute(page, "data-page")
     let el = dom.closest(evt.target, "[data-id]")
     if (el == null) {
-        st = {*:st, page: key, sel: null, typing: false}
+        st = {*:st, page: key, sel: null, typing: false, effect_editor: null}
         return 'prevent-default'
     }
     let id = dom.get_attribute(el, "data-id")
     let handle = dom.closest(evt.target, "[data-handle]")
     let box = dom.bounding_box(el)
-    st = {*:st, page: key, sel: id, typing: false,
+    st = {*:st, page: key, sel: id, typing: false, effect_editor: null,
         drag: {mode: if (handle == null) "move" else dom.get_attribute(handle, "data-handle"), key: key, id: id,
             start: M.item_of(st.card, key, id), before: st.card, x: evt.clientX, y: evt.clientY,
             cx: box.x + box.width / 2.0, cy: box.y + box.height / 2.0, scale: ui.scale_for(st)}}
@@ -364,7 +386,7 @@ on pointercancel(evt) {
 }
 on keydown(evt) {
     if (st.dialog != null or st.preview != null) {
-        if (evt.key == "Escape") { st = {*:st, dialog: null, preview: null}; return 'prevent-default' }
+        if (evt.key == "Escape") { st = audible(evt, {*:st, dialog: null, preview: null}); return 'prevent-default' }
         return 'pass'
     }
     if (typing_target(evt)) { return 'pass' }
@@ -382,10 +404,41 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if (action == null) { return 'pass' }
-    st = if (action == "forward" or action == "backward") command(st, "order", action) else command(st, action, "")
+    st = audible(evt, if (action == "forward" or action == "backward") command(st, "order", action) else command(st, action, ""))
     return 'prevent-default'
+}
+
+// The audio owner survives studio redraws; only an active preview requests frames.
+view <greetings_shell> {
+    <body apply(<greetings_app>); <div id:"greetings-clock", 'aria-hidden':"true", 'data-running':"false">>
+}
+on load(evt) {
+    publish_size(evt)
+    return 'pass'
+}
+on resize(evt) {
+    publish_size(evt)
+    return 'pass'
+}
+on keydown(evt) {
+    let studio = dom.get_element_by_id(dom.root_node(evt.target), "studio")
+    // Removing a dialog can return focus to body, outside the studio's view boundary.
+    if (dom.contains(studio, evt.target)) { return 'pass' }
+    dom.dispatch(studio, {type: "keydown", key: evt.key, shiftKey: evt.shiftKey,
+        metaKey: evt.metaKey, ctrlKey: evt.ctrlKey, altKey: evt.altKey})
+    return 'prevent-default'
+}
+on greetingframe(evt) {
+    if (dom.get_attribute(evt.target, "data-running") != "true") { return 'handled' }
+    dom.dispatch(dom.get_element_by_id(dom.root_node(evt.target), "studio"), "musictick")
+    if (dom.get_attribute(evt.target, "data-running") == "true") music.schedule(evt.target)
+    return 'handled'
+}
+on closerequest(evt) {
+    dom.dispatch(dom.get_element_by_id(dom.root_node(evt.target), "studio"), "musicclose")
+    return 'pass'
 }
 
 <html lang:"en",
     <head <meta charset:"UTF-8"><title "Greetings — Lambda"><style CARD_CSS ++ CSS>>
-    apply(<greetings_app>)>
+    apply(<greetings_shell>)>

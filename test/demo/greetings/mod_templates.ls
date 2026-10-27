@@ -1,7 +1,8 @@
-// The template catalog: occasions, their verses, and twenty designed cards.
+// The template catalog: occasions, their verses, and designed cards with optional effects.
 // A template lays out its front; `assemble` adds the inside spread and back
 // from the template's inside style, so every card opens with a verse.
 import A: .mod_art
+import E: .mod_effects
 
 pub let FORMATS = [
     {key: "portrait", name: "Portrait", size: "5 × 7 in", w: 500, h: 700},
@@ -87,7 +88,7 @@ pub fn page(paper, items = [], more = {}) => {paper: paper, pattern: "none", pat
 // Photos name a sample by key; `assemble` resolves it against the demo's assets.
 
 pub let TEMPLATES = [
-    {key: "balloon-party", name: "Balloon party", occasion: "birthday", format: "portrait",
+    {key: "balloon-party", name: "Balloon party", occasion: "birthday", format: "portrait", effects: {animation: "confetti", music: "celebrate"},
      front: page("sunshine", [
         art("balloons", 150, 46, 200),
         text("Happy\nBirthday", 20, 318, 460, 84, "roundhand", "#9d174d", {line: 1.0}),
@@ -95,7 +96,7 @@ pub let TEMPLATES = [
         art("confetti", 330, 582, 140), art("confetti", 30, 582, 140, null, {flip: true})],
         {pattern: "confetti", pattern_color: "#f472b6", pattern_alpha: .16}),
      inside: {paper: "cream", font: "georgia", color: "#7c2d12", sign: "bradley"}},
-    {key: "candlelight-cake", name: "Night of candles", occasion: "birthday", format: "portrait",
+    {key: "candlelight-cake", name: "Night of candles", occasion: "birthday", format: "portrait", effects: {animation: "twinkle", music: "celebrate"},
      front: page("navy", [
         text("it's your", 50, 84, 400, 40, "chancery", "#f8e7b9"),
         text("BIRTHDAY", 20, 138, 460, 70, "didot", "#f5d27a", {spacing: 6.0}),
@@ -240,7 +241,77 @@ pub let TEMPLATES = [
         text("Hello,\nsunshine", 30, 296, 440, 76, "chancery", "#9a3412", {line: 1.05}),
         text("just thinking of you", 60, 506, 380, 20, "avenir", "#c2410c")],
         {pattern: "polka", pattern_color: "#fb923c", pattern_alpha: .1}),
-     inside: {paper: "white", font: "avenir", color: "#9a3412", sign: "chancery"}}
+     inside: {paper: "white", font: "avenir", color: "#9a3412", sign: "chancery"}},
+    {key: "birthday-parade", name: "Birthday parade", occasion: "birthday", format: "portrait",
+     effects: {animation: "confetti", music: "celebrate"},
+     front: page("blush", [
+        text("HOORAY, IT'S YOUR DAY", 45, 68, 410, 18, "avenir", "#9d174d", {spacing: 4.0}),
+        art("balloons", 162, 138, 176),
+        text("Let's\ncelebrate!", 20, 368, 460, 72, "roundhand", "#be185d", {line: 1.0}),
+        text("a whole lot of happy, just for you", 35, 578, 430, 21, "baskerville", "#9d174d"),
+        art("confetti", 28, 244, 98), art("confetti", 374, 284, 98)],
+        {border: "dots", border_color: "#fb7185"}),
+     inside: {paper: "blush", font: "baskerville", color: "#9d174d", sign: "roundhand"}},
+    {key: "winter-wishes", name: "Winter wishes", occasion: "holidays", format: "portrait",
+     effects: {animation: "snow", music: "winter"},
+     front: page("navy", [
+        art("snowflake", 56, 64, 72, "#bfdbfe"), art("snowflake", 384, 126, 50, "#ffffff"),
+        art("tree", 160, 166, 180, "#86bda0"),
+        text("Winter\nwishes", 25, 398, 450, 68, "roundhand", "#f8e7b9", {line: 1.0}),
+        text("MAY YOUR DAYS BE MERRY & BRIGHT", 35, 598, 430, 14, "avenir", "#bfdbfe", {spacing: 2.0})],
+        {border: "line", border_color: "#7292b2"}),
+     inside: {paper: "cream", font: "baskerville", color: "#1e2c56", sign: "roundhand"}},
+    {key: "heart-song", name: "Heart song", occasion: "love", format: "portrait",
+     effects: {animation: "hearts", music: "affection"},
+     front: page("berry", [
+        text("FOR MY FAVOURITE PERSON", 40, 76, 420, 16, "avenir", "#fbcfe8", {spacing: 3.0}),
+        art("hearts", 150, 182, 200, "#f9a8d4"),
+        text("You make\nmy heart sing", 25, 392, 450, 66, "savoye", "#fff1f2", {line: 1.1}),
+        art("flourish", 150, 590, 200, "#f9a8d4")], {border: "line", border_color: "#f472b6"}),
+     inside: {paper: "blush", font: "baskerville", color: "#9d174d", sign: "savoye"}},
+    {key: "moonlight-lullaby", name: "Moonlight lullaby", occasion: "baby", format: "portrait",
+     effects: {animation: "float", music: "lullaby"},
+     front: page("night", [
+        art("moon", 172, 96, 156, "#fde68a"),
+        art("star", 72, 220, 46, "#f8e7b9"), art("star", 376, 160, 48, "#f8e7b9"),
+        text("Dream big,\nlittle one", 25, 342, 450, 64, "roundhand", "#ede9fe", {line: 1.12}),
+        text("you are loved beyond the stars", 45, 558, 410, 22, "baskerville", "#c4b5fd")],
+        {pattern: "stars", pattern_color: "#c4b5fd", pattern_alpha: .18}),
+     inside: {paper: "lavender", font: "baskerville", color: "#5b21b6", sign: "roundhand"}},
+    {key: "golden-moment", name: "Golden moment", occasion: "congrats", format: "portrait",
+     effects: {animation: "twinkle", music: "celebrate"},
+     front: page("charcoal", [
+        art("crown", 172, 110, 156, "#f5c542"),
+        text("This is\nyour moment", 25, 302, 450, 64, "didot", "#fde68a", {line: 1.1}),
+        art("flourish", 140, 484, 220, "#d4a017"),
+        text("AND YOU HAVE EARNED EVERY BIT OF IT", 40, 566, 420, 14, "avenir", "#f5ecd7", {spacing: 1.5})],
+        {border: "corners", border_color: "#d4a017"}),
+     inside: {paper: "cream", font: "didot", color: "#57534e", sign: "roundhand"}},
+    {key: "blooming-gratitude", name: "Blooming gratitude", occasion: "thanks", format: "portrait",
+     effects: {animation: "sway", music: "sunshine"},
+     front: page("cream", [
+        art("flower", 74, 108, 118, "#fb7185"), art("tulip", 222, 90, 76, "#f59e0b"),
+        art("flower", 314, 132, 104, "#a78bfa"),
+        text("Thanks\na bunch", 25, 360, 450, 78, "roundhand", "#166534", {line: 1.0}),
+        text("your kindness keeps on growing", 45, 574, 410, 21, "baskerville", "#4d7c0f")],
+        {border: "double", border_color: "#a3b18a"}),
+     inside: {paper: "cream", font: "baskerville", color: "#166534", sign: "roundhand"}},
+    {key: "pocket-sunshine", name: "Pocket sunshine", occasion: "hello", format: "portrait",
+     effects: {animation: "float", music: "sunshine"},
+     front: page("sky", [
+        art("sun", 160, 86, 180), art("bird", 348, 280, 78, "#0e7490"),
+        text("A little\nsunshine", 25, 362, 450, 74, "bradley", "#1e3a8a", {line: 1.05}),
+        text("sent with a smile, just because", 40, 586, 420, 21, "avenir", "#0e7490")],
+        {border: "stitch", border_color: "#38bdf8"}),
+     inside: {paper: "white", font: "bradley", color: "#1e3a8a", sign: "bradley"}},
+    {key: "snow-day", name: "Snow day", occasion: "holidays", format: "portrait",
+     effects: {animation: "snow", music: "none"},
+     front: page("mint", [
+        art("snowflake", 166, 106, 168, "#0e7490"),
+        text("Let it snow", 20, 360, 460, 72, "roundhand", "#166534"),
+        text("quiet moments, warm hearts", 40, 492, 420, 24, "baskerville", "#0e7490", {italic: true})],
+        {border: "dots", border_color: "#6b8f71"}),
+     inside: {paper: "white", font: "baskerville", color: "#166534", sign: "roundhand"}}
 ]
 pub fn template_of(key) => (let hit = [for (t in TEMPLATES where t.key == key) t], if (len(hit) == 0) TEMPLATES[0] else hit[0])
 
@@ -266,9 +337,10 @@ pub fn inside_pages(t, f, verse) => (let ins = t.inside, let box = verse_box(f),
         text("MADE WITH LAMBDA GREETINGS", f.w * .1, f.h - 84, f.w * .8, 11, "avenir", ink, {spacing: 3.0, opacity: .7})], "b", {}))})
 
 pub fn assemble(t, photos) => (let f = format_of(t.format), let inside = inside_pages(t, f, VERSES[t.occasion][0]),
-    {version: 1, title: t.name, template: t.key, occasion: t.occasion, format: t.format,
+    {version: 1, title: t.name, template: t.key, occasion: t.occasion, format: t.format, effects: E.of(t),
      pages: {front: {*:t.front, items: with_ids(t.front.items, "f", photos)}, left: inside.left, right: inside.right, back: inside.back}})
 
 // a fresh card with nothing on it but paper
 pub fn blank(fmt) => {version: 1, title: "Untitled card", template: "", occasion: "hello", format: fmt,
+    effects: {animation: "none", music: "none"},
     pages: {front: page("white"), left: page("white"), right: page("white"), back: page("white")}}
