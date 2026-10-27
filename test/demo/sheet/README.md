@@ -16,6 +16,8 @@ cancels the draft. The formula bar edits the active cell, and the address box
 accepts a cell or range such as `C5` or `C5:E10`. Drag across cells to select a
 rectangle; Shift-click and Shift-arrow extend a selection. Escape during a drag
 restores the previous selection. Row and column headers select a whole row or column.
+Drag the small rectangle at the bottom-right corner to grow or shrink the selected range.
+The pointer becomes “+” over the corner and stays “+” throughout the drag.
 
 Home provides undo/redo, plain-text clipboard copy/cut/paste, font and fill colors,
 type size, emphasis, alignment, wrapping, borders, number/currency/percent formats,
@@ -77,6 +79,8 @@ Verification:
   --event-file test/ui/sheet_ribbon.json
 ./lambda.exe view test/demo/sheet/sheet.ls --headless \
   --event-file test/ui/sheet_selection.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_handle.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
 
 # Refresh the demo index's actual app screenshot.

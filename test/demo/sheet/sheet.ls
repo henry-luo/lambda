@@ -106,6 +106,7 @@ on click(evt) {
 }
 on dblclick(evt) {
     if (st.dialog!="") { return 'pass' }
+    if (dom.closest(evt.target,"[data-selection-handle]")!=null) { return 'prevent-default' }
     let cell=dom.closest(evt.target,"td[data-row]")
     if (cell==null) { return 'pass' }
     st=app.begin_edit(m.select(st,int(dom.get_attribute(cell,"data-row")),int(dom.get_attribute(cell,"data-col"))))

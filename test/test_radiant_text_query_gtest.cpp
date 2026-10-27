@@ -8063,6 +8063,38 @@ TEST_F(RadiantTextQuery, TableCellsMeasurePositionedInlineBoxesAndTheirRootStrut
     }
 }
 
+TEST_F(RadiantTextQuery, TableCellAbsoluteChildrenUseFinalRowHeight) {
+    ASSERT_NE(load("test/html/layout_table_absolute_corner.html"), nullptr);
+    ui.viewport_width = ui.window_width = 600;
+    ui.viewport_height = ui.window_height = 400;
+    process_document_font_faces(&ui, document);
+    struct Case { const char* cell; const char* handle; } cases[] = {
+        {"natural", "natural-handle"}, {"grown", "grown-handle"},
+        {"spanning", "spanning-handle"}
+    };
+    for (int pass = 0; pass < 3; pass++) {
+        layout_html_doc(&ui, document, pass > 0);
+        for (const Case& entry : cases) {
+            SCOPED_TRACE(entry.cell);
+            DomElement* cell = dom_find_element_by_id(document->root->as_element(), entry.cell);
+            DomElement* handle = dom_find_element_by_id(document->root->as_element(), entry.handle);
+            ASSERT_NE(cell, nullptr); ASSERT_NE(handle, nullptr);
+            float x = 0, y = 0, width = 0, height = 0;
+            view_get_visual_bounds(cell, &x, &y, &width, &height);
+            // negative end insets extend five pixels beyond the finalized padding box.
+            expect_box(entry.handle, x + width - 9.0f, y + height - 9.0f, 14.0f, 14.0f);
+        }
+        DomElement* stretch = dom_find_element_by_id(document->root->as_element(), "stretch-cell");
+        ASSERT_NE(stretch, nullptr);
+        float x = 0, y = 0, width = 0, height = 0;
+        view_get_visual_bounds(stretch, &x, &y, &width, &height);
+        expect_box("stretch", x + 2.0f, y + 2.0f, width - 4.0f, height - 4.0f);
+        DomElement* row = dom_find_element_by_id(document->root->as_element(), "growing-row");
+        ASSERT_NE(row, nullptr);
+        ASSERT_TRUE(row->set_attribute("style", pass % 2 == 0 ? "height:80px" : "height:60px"));
+    }
+}
+
 TEST_F(RadiantTextQuery, IntrinsicGridRowsRespectForcedBreaksWithoutSoftWrapping) {
     ASSERT_NE(load("test/html/layout_intrinsic_text_wrap.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
