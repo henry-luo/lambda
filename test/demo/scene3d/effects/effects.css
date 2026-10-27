@@ -27,7 +27,7 @@ output { color: #f7f2e9; font-size: 11px; }
 .card-heading h2 { font-size: 14px; font-weight: 400; margin: 0; }
 .card-heading span { color: #77939f; font-size: 10px; letter-spacing: 1px; }
 scene3d, .original-stage { display: block; width: 100%; height: auto; aspect-ratio: 2; background: #12232e; }
-.original-stage img { display: block; width: 100%; height: auto; }
+.original-stage img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .card-caption { margin: 8px 0 0; color: #8ea7b2; font-size: 11px; line-height: 1.5; }
 .page-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 26px; color: #77939f; font-size: 10px; }
 .page-footer a { color: #a7dfcf; text-decoration: none; }

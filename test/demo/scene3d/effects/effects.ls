@@ -3,16 +3,25 @@ import s: lambda.scene3d
 import fx: lambda.scene3d.effects
 import navigation: ~~._navigation
 
-fn source_image(selected) => if (selected == "svg") "assets/graphic.svg"
-    else if (selected == "raster") "assets/landscape.png" else "assets/text.svg"
-fn stage(effect, selected, strength) element => s.scene([
+let SOURCES = [
+    {id: "text", label: "Typography", src: "assets/text.svg", width: 960.0, height: 480.0},
+    {id: "svg", label: "SVG artwork", src: "assets/graphic.svg", width: 960.0, height: 480.0},
+    {id: "raster", label: "Raster image", src: "../../photo/assets/coast.jpg", width: 1600.0, height: 1064.0}
+]
+fn source_image(selected) => [for (source in SOURCES where source.id == selected) source][0]
+fn stage(effect, selected, strength) element {
+    let source = source_image(selected)
+    let aspect = source.width / source.height;
+    s.scene([
     s.camera({id: "camera", type: 'orthographic', view_height: 2.0}),
-    s.resources([s.texture(source_image(selected), {id: "artwork", 'max-size': 1024})]),
-    s.mesh(s.plane([4.0, 2.0, 1.0]), fx.material(effect.id, "artwork",
-        {amount: strength * 0.003}, {id: "effect"})^),
+    s.resources([s.texture(source.src, {id: "artwork", 'max-size': 1024})]),
+    // the source's natural proportions keep the photograph undistorted before effects are applied.
+    s.mesh(s.plane([2.0 * aspect, 2.0, 1.0]), fx.material(effect.id, "artwork",
+        {amount: strength * 0.003, aspect: aspect}, {id: "effect"})^),
     fx.animate("effect", 8.0)^
 ], {id: string(effect.id), width: 480, height: 240, camera: "camera", background: "#12232e",
     role: "img", 'aria-label': effect.title ++ " applied to the selected artwork"})
+}
 
 // typed shader maps stay Lambda values when a control rebuilds the gallery (D7.5.3v2).
 view <gallery> state selected: "text", strength: 40 {
@@ -20,7 +29,7 @@ view <gallery> state selected: "text", strength: 40 {
         <section class: "workbench", 'aria-label': "Effect controls",
             <div class: "source-controls", <span class: "control-label", "01 / SOURCE">
                 <div class: "button-group", role: "group", 'aria-label': "Source image",
-                    for (choice in [{id: "text", label: "Typography"}, {id: "svg", label: "SVG artwork"}, {id: "raster", label: "Raster image"}])
+                    for (choice in SOURCES)
                         <button id: "source-" ++ choice.id, type: "button", 'data-source': choice.id,
                             'aria-pressed': string(selected == choice.id), choice.label>>>
             <div class: "strength-controls", <label class: "control-label", for: "strength", "02 / INTENSITY">
@@ -35,7 +44,7 @@ view <gallery> state selected: "text", strength: 40 {
             <article class: "source-card",
                 <div class: "card-heading", <div <h2 "The original">
                     <p class: "card-caption", "The same artwork, before it starts to move.">> <span "SOURCE">>
-                <div class: "original-stage", <img id: "original-image", src: source_image(selected), width: 480, height: 240, alt: "Original source without an effect">>>>>
+                <div class: "original-stage", <img id: "original-image", src: source_image(selected).src, width: 480, height: 240, alt: "Original source without an effect">>>>>
 }
 on click(evt) {
     let choice = dom.get_attribute(evt.target, "data-source")

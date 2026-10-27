@@ -877,7 +877,7 @@
     },
     {
       "type": "assert_script",
-      "js": "document.querySelector('#source-raster').getAttribute('aria-pressed')==='true'"
+      "js": "document.querySelector('#source-raster').getAttribute('aria-pressed')==='true' && document.querySelector('#original-image').getAttribute('src')==='../../photo/assets/coast.jpg' && Array.from(document.querySelectorAll('scene3d texture')).every(t=>t.getAttribute('src')==='../../photo/assets/coast.jpg')"
     },
     {
       "type": "scene3d",

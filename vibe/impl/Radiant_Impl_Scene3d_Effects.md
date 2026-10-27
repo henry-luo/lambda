@@ -73,8 +73,11 @@ Focused cases:
 - `EffectsMobileControlsAndNavigation`: mobile bounds, source switching and
   breadcrumb return. Existing collection routing cases also visit the new tile.
 
-The gallery's three source artworks are original, bundled CC0 assets. Its PNG
-generator uses only Python's standard library. Effects are independently
+The gallery's SVG sources are original CC0 artwork. Its raster source reuses
+the Photos demo's bundled beach photograph (`test/demo/photo/assets/coast.jpg`);
+its [attribution](../../test/demo/photo/assets/ATTRIBUTION.md) applies. Source
+dimensions preserve the photograph's proportions in the plane and shader, and
+the original preview contains the image in the same frame. Effects are independently
 implemented and inspired by [Blotter](https://blotter.js.org/#/materials), with
 no Blotter dependency or API/pixel-compatibility claim.
 
