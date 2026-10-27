@@ -3,13 +3,17 @@ import ribbon: ~~.mod_ribbon
 import icons: ~~.word.mod_ribbon_icons
 import text_format: ~~.mod_text_format
 import presets: ~~.mod_shape_presets
+import font_picker: ~~.word.mod_font_picker
 
 fn tool(id,label,graphic,cls="",action=null) => ribbon.tool(id,label,graphic,cls,action)
 fn menu(id,label,graphic,cls="") => ribbon.menu(id,label,graphic,cls,id in ["font-color","text-highlight","shape-fill","shape-outline"])
 fn row(children) => ribbon.row(children)
 fn stack(children) => ribbon.stack(children)
-fn selector(id,label,items,property) => <select id:id,class:"home-select",title:label,'aria-label':label,'data-property':"home-" ++ property,
-    for (item in items) <option value:item.value,item.label>>
+fn selector(id,label,items,property) {
+    let control = <select id:id,class:"home-select",title:label,'aria-label':label,'data-property':"home-" ++ property,
+        for (item in items) <option value:item.value,item.label>>;
+    if (property=="font-family") font_picker.field(control,id,"Arial, sans-serif",true) else control
+}
 pub fn tree(fonts=[]) => <div class:"home-ribbon editor-ribbon",
     ribbon.group("Undo",ribbon.history_tools((action,label,graphic)=>tool("home-" ++ action,label,graphic,"icon-only",action)));
     ribbon.group("Clipboard",[row([

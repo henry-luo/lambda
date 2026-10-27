@@ -544,5 +544,5 @@ on closerequest(evt) {
 }
 
 // keep spelling chrome beside the edit view so async results cannot reconcile the ribbon during typing.
-<html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ surface.print_css ++ changes.css ++ spelling.css>>
+<html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ surface.print_css ++ changes.css ++ spelling.css ++ font_picker.css>>
     apply(<word_app>,{mode:"edit"}); spelling.widget("word"); font_picker.widget()>

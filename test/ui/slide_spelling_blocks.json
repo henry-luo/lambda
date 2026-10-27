@@ -1,0 +1,72 @@
+{
+  "name": "Slides spelling separates card blocks, preserves inline words and omits excluded regions",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "script",
+      "js": "window.spellingPreviousSeq=Number(document.getElementById('spelling-slides-canvas').getAttribute('data-spelling-seq'))"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide=\"1\"]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 8000,
+      "js": "var s=document.getElementById('spelling-slides-canvas');s.getAttribute('data-spelling-state')==='ready'&&Number(s.getAttribute('data-spelling-seq'))>spellingPreviousSeq"
+    },
+    {
+      "type": "assert_script",
+      "js": "var cards=document.querySelector('#slide-render [data-slide-object=hero]').getBoundingClientRect();[...document.querySelectorAll('#spelling-slides-canvas .spelling-underline')].every(n=>{let r=n.getBoundingClientRect();return r.right<=cards.left||r.left>=cards.right||r.bottom<=cards.top||r.top>=cards.bottom})"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides-spelling/blocks.png"
+    },
+    {
+      "type": "script",
+      "js": "var s=document.getElementById('spelling-slides-canvas');window.spellingBaseIssues=Number(s.getAttribute('data-spelling-count'));window.spellingPreviousSeq=Number(s.getAttribute('data-spelling-seq'));var blocks=document.querySelector('#slide-render [data-slide-object=focus]').querySelectorAll('div');var p=blocks[blocks.length-1];p.id='spelling-inline-sample';p.innerHTML='<span>te</span><b>h</b> <i>spe</i><span>ling</span><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"30\" height=\"20\"><text>zzsvgnonwordzz</text></svg><span spellcheck=\"false\">zzignorednonwordzz</span><span lang=\"fr\">zzforeignnonwordzz</span>';s.dispatchEvent(new CustomEvent('spelling_canvas_refresh',{detail:{skip:null,paused:false,opened:true}}))"
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 8000,
+      "js": "var s=document.getElementById('spelling-slides-canvas');s.getAttribute('data-spelling-state')==='ready'&&Number(s.getAttribute('data-spelling-seq'))>spellingPreviousSeq"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('spelling-slides-canvas').getAttribute('data-spelling-count'))===spellingBaseIssues+2"
+    },
+    {
+      "type": "assert_script",
+      "js": "['teh','speling'].every(w=>document.querySelectorAll('#spelling-slides-canvas .spelling-underline[data-spelling-word='+w+']').length===2)"
+    },
+    {
+      "type": "assert_script",
+      "js": "var p=document.querySelector('#slide-render [data-slide-object=focus]').getBoundingClientRect();[...document.querySelectorAll('#spelling-slides-canvas .spelling-underline')].filter(n=>['teh','speling'].includes(n.getAttribute('data-spelling-word'))).every(n=>{let r=n.getBoundingClientRect();return r.width>1&&r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=p.bottom})"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides-spelling/inline.png"
+    }
+  ]
+}
