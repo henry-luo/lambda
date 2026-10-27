@@ -28,6 +28,9 @@ visible during a pending edit, then the latest result replaces them. New edits c
 checks. Underlines are geometry overlays outside the deck and its undo history
 (**D7.2.5**, **S2.5.8**). Rendered regions with `spellcheck=false` and
 non-English `lang` are excluded. Correction suggestions are not yet available.
+Spelling checks preserve heading and paragraph boundaries and join words split
+across inline formatting. The `slide_spelling_blocks` replay checks
+Northstar's strategy cards, split inline typos, and excluded SVG/language regions.
 
 On every ribbon tab, groups collapse into icon menus while the window is resized;
 the command row stays visible without a horizontal scrollbar. The native
@@ -48,8 +51,14 @@ The **Home** ribbon groups its commands like a desktop presentation editor:
 Home formatting applies to the selected text box or shape. Disabled controls
 follow the selected object kind; pressed buttons show the current formatting,
 and color commands preview the current color. Menus support arrow keys and
-Escape. The native font list keeps an imported deck's uninstalled family as an
-option. Lists remain editable as text, including when vertically aligned.
+Escape. The font dropdown uses Word's shared searchable preview picker. Each name
+renders in its own font, with eight visible rows, at most twelve mounted rows,
+and two new previews activated per frame. It keeps an imported deck's uninstalled
+family as an option and preserves CSS fallback stacks. Font choices participate
+in undo/redo and commit active text edits before opening the picker. The
+`slide_font_picker` replay covers previews, search, keyboard/pointer selection,
+imported families, and inline editing. Lists remain editable as text, including
+when vertically aligned.
 These edits participate in undo/redo and the existing `.slides` save/present path.
 
 - Select objects on the canvas or in the Format selection list, including

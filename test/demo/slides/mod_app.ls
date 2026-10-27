@@ -25,6 +25,7 @@ import splitter: ~~.mod_splitter
 import exports: ~~.mod_export
 import inline_text: .mod_inline
 import spelling: lambda.edit.spelling
+import font_picker: ~~.word.mod_font_picker
 import text_offsets: lambda.dom.edit_history
 import slide_drag: .mod_slide_drag
 
@@ -202,7 +203,7 @@ pn sync_home(owner,st) {
     let text = obj.tag == 'text'
     let inserted_shape = insert_model.settings(obj.source)
     let shape = obj.tag == 'shape' or inserted_shape.kind == "shape"
-    for (id in ["home-font-family","home-font-size","grow-font","shrink-font","change-case","clear-format","bold","italic","underline","strike","subscript","superscript",
+    for (id in ["home-font-family","home-font-family-trigger","home-font-size","grow-font","shrink-font","change-case","clear-format","bold","italic","underline","strike","subscript","superscript",
         "character-spacing","text-highlight","font-color","bullets","numbering","list-options","indent","outdent","line-spacing","align-left","align-center","align-right","align-justify","vertical-align"])
         disable(node(owner,id),not text)
     for (id in ["shape-outline","quick-styles"]) disable(node(owner,id),not shape)
@@ -231,6 +232,7 @@ pn sync_home(owner,st) {
         for (option in dom.child_nodes(fragment)) dom.append_child(control,option)
     }
     value(owner,"home-font-family",family,st.editing.target)
+    font_picker.sync(owner,"home-font-family")
     value(owner,"home-font-size",c.value(obj.font_size,st.plan.palette.body_size),st.editing.target)
 }
 pn checked(owner,id,enabled) {

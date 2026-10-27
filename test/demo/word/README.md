@@ -146,9 +146,8 @@ applies to citation insertion and bibliography updates.
   stays within the document viewport. Escape or using another pane dismisses it.
   Ribbon, floating-toolbar, shape-pane and Word Art font pickers share a searchable
   preview menu. Each name renders in its own family; a document's requested family
-  remains selectable when missing locally. Each preview also has an interface-font
-  label, so symbol and diagnostic fonts such as Ahem remain identifiable. The
-  closed selector uses the readable label. The installed-font catalog is metadata
+  remains selectable when missing locally. Each row shows only the font-rendered
+  name, with a tooltip and accessible name. The installed-font catalog is metadata
   from one `dom.query_local_fonts` snapshot. The popup creates at most twelve rows
   (eight visible plus overscan), activates two new previews per frame, retains
   active previews shared by the next window, and cancels stale work when searching,
@@ -160,6 +159,9 @@ applies to citation insertion and bibliography updates.
   Popup placement is measured after initial layout rather than during rendering.
   The `font_picker` and `native_fonts` replays cover bounded rows, per-family
   styles, filtering, pointer/keyboard selection, modal focus, and scrolling.
+  Slides reuses the same picker behavior and stylesheet, with an imperative
+  ribbon adapter; native option values preserve the selected family even when
+  imported options have a different ordering.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.

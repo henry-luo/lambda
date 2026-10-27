@@ -98,9 +98,26 @@ static GridContentDistribution grid_content_distribution(int32_t alignment,
     return result;
 }
 
+void layout_grid_track_positions(GridContainerLayout* grid, bool columns, float* positions) {
+    if (!grid || !positions) return;
+    radiant::grid::TrackArray* tracks = columns ? grid->computed_columns : grid->computed_rows;
+    int count = columns ? grid->computed_column_count : grid->computed_row_count;
+    if (!tracks) return;
+    float gap = columns ? grid->column_gap : grid->row_gap;
+    float content = columns ? grid->content_width : grid->content_height;
+    int32_t alignment = columns ? grid->justify_content : grid->align_content;
+    float total = radiant::grid::spanned_tracks_size(*tracks, 0, count, gap);
+    GridContentDistribution distribution = grid_content_distribution(alignment, content - total,
+        radiant::grid::grid_live_track_count(*tracks, 0, count));
+    grid_track_positions(tracks, count, gap, distribution.offset, distribution.spacing,
+        radiant::alignment_is_space_distribution(alignment), positions, columns ? "column" : "row");
+}
+
 // Position grid items based on computed track sizes
 void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ScratchArena* sa) {
     if (!grid_layout || !container) return;
+    // row growth changes the auto block extent before reversed-axis areas are mapped.
+    layout_grid_resolve_container_size(grid_layout);
 
     // guard against zero-track grids — items cannot be positioned (fuzzer-found)
     if (grid_layout->computed_row_count <= 0 || grid_layout->computed_column_count <= 0) {
@@ -114,37 +131,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     float* row_positions = scope.array_zero<float>((size_t)grid_layout->computed_row_count + 1);
     float* column_positions = scope.array_zero<float>((size_t)grid_layout->computed_column_count + 1);
 
-    // First, calculate the total grid content size (all tracks + gaps)
-    float total_row_size = radiant::grid::spanned_tracks_size(
-        *grid_layout->computed_rows, 0, grid_layout->computed_row_count, grid_layout->row_gap);
-    float total_column_size = radiant::grid::spanned_tracks_size(
-        *grid_layout->computed_columns, 0, grid_layout->computed_column_count,
-        grid_layout->column_gap);
-
-
-    // Calculate both track-axis distributions with the same Box Alignment rule.
-    float extra_column_space = grid_layout->content_width - total_column_size;
-    GridContentDistribution justify_distribution = grid_content_distribution(
-        grid_layout->justify_content, extra_column_space,
-        radiant::grid::grid_live_track_count(*grid_layout->computed_columns, 0,
-                                            grid_layout->computed_column_count));
-
-    float extra_row_space = grid_layout->content_height - total_row_size;
-    GridContentDistribution align_distribution = grid_content_distribution(
-        grid_layout->align_content, extra_row_space,
-        radiant::grid::grid_live_track_count(*grid_layout->computed_rows, 0,
-                                            grid_layout->computed_row_count));
-
-    grid_track_positions(
-        grid_layout->computed_rows.get(), grid_layout->computed_row_count, grid_layout->row_gap,
-        align_distribution.offset, align_distribution.spacing,
-        radiant::alignment_is_space_distribution(grid_layout->align_content),
-        row_positions, "row");
-    grid_track_positions(
-        grid_layout->computed_columns.get(), grid_layout->computed_column_count,
-        grid_layout->column_gap, justify_distribution.offset, justify_distribution.spacing,
-        radiant::alignment_is_space_distribution(grid_layout->justify_content),
-        column_positions, "column");
+    layout_grid_track_positions(grid_layout, false, row_positions);
+    layout_grid_track_positions(grid_layout, true, column_positions);
 
     // Position each grid item
     for (int i = 0; i < grid_layout->item_count; i++) {
@@ -165,25 +153,22 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         col_end = fmax(col_start + 1, fmin(col_end, grid_layout->computed_column_count));
 
         // Calculate item position and size
-        float item_x = column_positions[col_start];
-        float item_y = row_positions[row_start];
+        float column_start = column_positions[col_start];
+        float row_start_position = row_positions[row_start];
 
         float track_width = radiant::grid::spanned_tracks_size(
             *grid_layout->computed_columns, col_start, col_end - col_start, grid_layout->column_gap);
         float track_height = radiant::grid::spanned_tracks_size(
             *grid_layout->computed_rows, row_start, row_end - row_start, grid_layout->row_gap);
 
-        // a grid area's final size is the containing block for stretch min/max.
-        // Resolving during intrinsic track sizing incorrectly turns the keyword into 0.
+        Rect area = layout_grid_area_rect(grid_layout, column_start, row_start_position,
+            track_width, track_height);
+        track_width = area.width;
+        track_height = area.height;
         layout_resolve_stretch_minmax_axis(item, track_width, true, true);
         layout_resolve_stretch_minmax_axis(item, track_height, true, false);
-
-        // Store track area dimensions and base position for alignment phase
         gi->track_area_width = track_width;
         gi->track_area_height = track_height;
-
-        // Determine item dimensions - use CSS-specified size if available,
-        // otherwise default to track size (will be adjusted during alignment)
         float item_width = track_width;
         float item_height = track_height;
 
@@ -201,23 +186,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             item_height = layout_apply_min_max_border_box_axis(item, item_height, false);
         }
 
-        // Apply container offset (borders and padding)
-        float container_offset_x = 0;
-        float container_offset_y = 0;
-
-        if (container->bound) {
-            container_offset_x += container->boundary()->padding.left;
-            container_offset_y += container->boundary()->padding.top;
-        }
-
-        if (container->bound && container->boundary_mut()->border) {
-            container_offset_x += container->boundary()->border->width.left;
-            container_offset_y += container->boundary()->border->width.top;
-        }
-
-        // Set item position and size (relative to parent's border box, per Radiant coordinate system)
-        float new_x = container_offset_x + item_x;
-        float new_y = container_offset_y + item_y;
+        float new_x = area.x;
+        float new_y = area.y;
 
         // Store base track position (before alignment) for later re-alignment
         gi->track_base_x = new_x;
@@ -304,7 +274,7 @@ static float compute_grid_item_baseline_alignment_height(GridContainerLayout* gr
     if (item->blk && item->block_mut()->given_height >= 0.0f) return item->height;
 
     IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
-        grid_layout->lycon, item, true);
+        grid_layout->lycon, item, layout_grid_track_axis(grid_layout, false) == LAYOUT_AXIS_Y);
     float intrinsic_height = sizes.max_content;
     if (item->content_height > intrinsic_height) {
         intrinsic_height = item->content_height;
@@ -521,18 +491,20 @@ static CssSelfAlignment resolve_grid_item_self_alignment_detail(
     CssSelfAlignment result = {};
     if (!item || !grid_item) return result;
 
+    bool inline_axis = layout_axis_is_inline_for_block(container,
+        horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
     // GridItemProp keeps the effective keyword for track sizing; style storage
     // preserves the safe/unsafe modifier needed by the final positioning pass.
-    result = horizontal ? item->block()->justify_self : item->block()->align_self;
-    CssEnum requested = horizontal ? (CssEnum)grid_item->justify_self
+    result = inline_axis ? item->block()->justify_self : item->block()->align_self;
+    CssEnum requested = inline_axis ? (CssEnum)grid_item->justify_self
                                    : (CssEnum)grid_item->align_self_grid;
-    if (horizontal && (requested == CSS_VALUE_AUTO || requested == CSS_VALUE__UNDEF) &&
+    if (inline_axis && (requested == CSS_VALUE_AUTO || requested == CSS_VALUE__UNDEF) &&
         container && container->embed && container->embedp()->grid) {
         result = container->embedp()->grid->justify_items_detail;
     }
     result.value = requested;
     int resolved = resolve_grid_item_self_alignment(
-        item, grid_item, container_alignment, horizontal);
+        item, grid_item, container_alignment, inline_axis);
     result.value = static_cast<CssEnum>(resolved);
 
     if ((result.value == CSS_VALUE_SELF_START || result.value == CSS_VALUE_SELF_END) &&
@@ -554,7 +526,8 @@ static float grid_item_intrinsic_minimum_size(GridContainerLayout* grid_layout,
     CssEnum keyword = layout_intrinsic_min_size_keyword(item, horizontal);
     if (keyword != CSS_VALUE_MIN_CONTENT && keyword != CSS_VALUE_MAX_CONTENT) return 0.0f;
 
-    if (horizontal && grid_item->has_measured_size) {
+    if (layout_grid_track_axis(grid_layout, true) == (horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) &&
+        grid_item->has_measured_size) {
         return keyword == CSS_VALUE_MIN_CONTENT ? grid_item->measured_min_width
                                                 : grid_item->measured_max_width;
     }
@@ -563,7 +536,8 @@ static float grid_item_intrinsic_minimum_size(GridContainerLayout* grid_layout,
     // Row measurements are deferred until column tracks have their final widths,
     // so an intrinsic min-height cannot use the width-only pass-one cache.
     IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
-        grid_layout->lycon, item, !horizontal);
+        grid_layout->lycon, item, layout_grid_track_axis(grid_layout, false) ==
+            (horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y));
     return keyword == CSS_VALUE_MIN_CONTENT ? sizes.min_content : sizes.max_content;
 }
 
@@ -618,15 +592,17 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // CSS Grid §8.1: fixed (non-auto) margins reduce the usable grid area for alignment.
     // The item's alignment box = grid area minus fixed margins.  Auto margins are handled
     // separately (they consume the remaining free space after fixed-margin reduction).
-    // Percentage margins are resolved against the actual track width (CSS §11.4).
-    float margin_left   = resolve_margin_side(item, CSS_BOX_SIDE_LEFT, available_width);
-    float margin_right  = resolve_margin_side(item, CSS_BOX_SIDE_RIGHT, available_width);
-    float margin_top    = resolve_margin_side(item, CSS_BOX_SIDE_TOP, available_width);
-    float margin_bottom = resolve_margin_side(item, CSS_BOX_SIDE_BOTTOM, available_width);
+    // all percentage margins use the grid area's logical inline size (CSS Grid §6.4).
+    float margin_basis = layout_grid_track_axis(grid_layout, true) == LAYOUT_AXIS_X
+        ? available_width : available_height;
+    float margin_left   = resolve_margin_side(item, CSS_BOX_SIDE_LEFT, margin_basis);
+    float margin_right  = resolve_margin_side(item, CSS_BOX_SIDE_RIGHT, margin_basis);
+    float margin_top    = resolve_margin_side(item, CSS_BOX_SIDE_TOP, margin_basis);
+    float margin_bottom = resolve_margin_side(item, CSS_BOX_SIDE_BOTTOM, margin_basis);
 
     // CSS Box 4 §3.2 margin-trim for grid containers: trim margins of items
     // adjacent to the container edges.
-    ViewBlock* grid_container = item->parent && item->parent->is_block() ? lam::view_require_block(item->parent) : NULL;
+    ViewBlock* grid_container = grid_layout->container;
     uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->block()->margin_trim : 0;
     if (grid_margin_trim) {
         const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
@@ -700,10 +676,13 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         max_width = gi->track_area_width * item->block()->given_max_width_percent / 100.0f;
     }
 
+    bool horizontal_columns = layout_grid_track_axis(grid_layout, true) == LAYOUT_AXIS_X;
+    int x_alignment = horizontal_columns ? grid_layout->justify_items : grid_layout->align_items;
+    int y_alignment = horizontal_columns ? grid_layout->align_items : grid_layout->justify_items;
     bool inline_stretches_ratio = grid_axis_stretches_aspect_ratio(
-        gi->justify_self, grid_layout->justify_items);
+        horizontal_columns ? gi->justify_self : gi->align_self_grid, x_alignment);
     bool block_stretches_ratio = grid_axis_stretches_aspect_ratio(
-        gi->align_self_grid, grid_layout->align_items);
+        horizontal_columns ? gi->align_self_grid : gi->justify_self, y_alignment);
     // A stretch axis combined with a definite opposite axis determines both
     // used sizes, so CSS Sizing §4.2 does not apply the preferred ratio.
     bool ratio_is_ignored = (inline_stretches_ratio && block_stretches_ratio) ||
@@ -781,7 +760,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     }
     if (item->blk && is_intrinsic_keyword(item->block()->given_width_type)) {
         IntrinsicSizes intrinsic_width = calculate_grid_item_intrinsic_sizes(
-            grid_layout->lycon, item, false);
+            grid_layout->lycon, item, layout_grid_track_axis(grid_layout, false) == LAYOUT_AXIS_X);
         CssEnum width_keyword = item->block()->given_width_type;
         float preferred_width = layout_resolve_intrinsic_size_keyword(
             width_keyword, intrinsic_width.min_content, intrinsic_width.max_content,
@@ -793,7 +772,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     if (!has_explicit_height && has_intrinsic_height_constraint &&
         !cyclic_replaced_percentage_height) {
         IntrinsicSizes intrinsic_height = calculate_grid_item_intrinsic_sizes(
-            grid_layout->lycon, item, true);
+            grid_layout->lycon, item, layout_grid_track_axis(grid_layout, false) == LAYOUT_AXIS_Y);
         // A constrained intrinsic block size must replace the provisional CSS
         // height before non-stretch alignment preserves that provisional value.
         if (intrinsic_height.max_content > 0.0f) {
@@ -839,16 +818,19 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // Apply justify-self (horizontal alignment)
     // Using unified resolve function from layout_alignment.hpp
     CssSelfAlignment justify_alignment = resolve_grid_item_self_alignment_detail(
-        item, gi, grid_container, grid_layout->justify_items, true);
+        item, gi, grid_container, x_alignment, true);
     int justify = justify_alignment.value;
 
     // For non-stretch alignment, an auto-sized grid item uses fit-content sizing.
     // Its max-content width is capped by the grid area but never below min-content.
     float actual_width = item->width;
     if (!applied_horiz_auto && justify != CSS_VALUE_STRETCH && !has_explicit_width) {
-        if (gi->has_measured_size) {
-            actual_width = fmaxf(gi->measured_min_width,
-                                 fminf(gi->measured_max_width, available_width));
+        if (grid_layout->lycon) {
+            // the pass-one cache stores columns, which may be physical height.
+            IntrinsicSizes intrinsic = calculate_grid_item_intrinsic_sizes(
+                grid_layout->lycon, item, !horizontal_columns);
+            actual_width = fmaxf(intrinsic.min_content,
+                                 fminf(intrinsic.max_content, available_width));
             actual_width = layout_apply_min_max_border_box_axis(
                 item, actual_width, true,
                 grid_item_ignores_percentage_max_width(item, grid_layout));
@@ -898,7 +880,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // Apply align-self (vertical alignment)
     // Using unified resolve function from layout_alignment.hpp
     CssSelfAlignment align_alignment = resolve_grid_item_self_alignment_detail(
-        item, gi, grid_container, grid_layout->align_items, false);
+        item, gi, grid_container, y_alignment, false);
     int align = align_alignment.value;
 
     // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
@@ -916,7 +898,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             // Empty replaced items bypass flow measurement; retaining the track size
             // here makes an auto-sized item fill a finite row despite start alignment.
             IntrinsicSizes intrinsic_height = calculate_grid_item_intrinsic_sizes(
-                grid_layout->lycon, item, true);
+                grid_layout->lycon, item, layout_grid_track_axis(grid_layout, false) == LAYOUT_AXIS_Y);
             if (intrinsic_height.max_content > 0.0f) {
                 actual_height = intrinsic_height.max_content;
                 item->height = actual_height;

@@ -17,6 +17,7 @@ With no name, `lambda demo` opens the demo index (`index.ls`), laid out like an 
 | `photos` | `photos/photos.ls` | [Layered Photos editor](photos/README.md) |
 | `draw` | `draw/draw.ls` | [Draw](draw/README.md) |
 | `word` | `word/word.ls` | [Word](word/README.md) |
+| `sheet` | `sheet/sheet.ls` | [Sheet](sheet/README.md) |
 | `finder` | `finder/finder.ls` | [Finder](finder/README.md) |
 | `note` | `note/note.ls` | [Notes](note/README.md) |
 | `scene3d` | `scene3d/index.html` | [Scene3D collection](scene3d/README.md) |

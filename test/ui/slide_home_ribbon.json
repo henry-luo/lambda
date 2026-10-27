@@ -41,11 +41,22 @@
       "value": "s1-o1"
     },
     {
-      "type": "select_option",
+      "type": "click",
       "target": {
-        "selector": "#home-font-family"
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
       },
-      "value": "Arial, sans-serif"
+      "text": "Arial, sans-serif",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
     },
     {
       "type": "type",

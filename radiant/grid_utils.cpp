@@ -48,19 +48,6 @@ bool grid_serialize_used_tracks(StringBuf* output, const GridContainerLayout* gr
     return output->length > 0;
 }
 
-static bool grid_text_has_in_flow_content(DomNode* node) {
-    const char* text = node ? (const char*)node->text_data() : nullptr;
-    if (!text) return false;
-    for (const char* p = text; *p; p++) {
-        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') return true;
-    }
-    return false;
-}
-
-static bool grid_item_has_in_flow_content(ViewBlock* item) {
-    return layout_element_has_in_flow_content(item, grid_text_has_in_flow_content);
-}
-
 // line identity is a set of decoded names at a line, including repeat-boundary unions.
 bool grid_add_track_line_name(Pool* pool, ScratchArena* scratch, GridLineNames* names,
                               const char* name, int line_index) {
@@ -396,231 +383,115 @@ bool copy_grid_template_areas(Pool* pool, GridProp* target, const GridProp* sour
     return true;
 }
 
-// Calculate intrinsic sizes for grid items using unified intrinsic sizing API
-IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis) {
-    IntrinsicSizes sizes = {0};
+LayoutAxis layout_grid_track_axis(const GridContainerLayout* grid, bool columns) {
+    bool vertical = grid && grid->container &&
+        layout_block_inline_axis_is_vertical(grid->container);
+    return columns != vertical ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+}
 
-    if (!item) return sizes;
-
-    // First, check if we have pre-computed measurements from Pass 1 (layout_grid_multipass.cpp)
-    // These measurements were calculated with proper width constraints for height calculation
-    GridItemProp* gi = grid_item_prop(item);
-    if (gi) {
-        if (is_row_axis) {
-            // Use pre-computed height measurements if available
-            if (gi->has_measured_size && (gi->measured_min_height > 0 || gi->measured_max_height > 0)) {
-                sizes.min_content = gi->measured_min_height;
-                sizes.max_content = gi->measured_max_height;
-
-                // Don't force minimum height - empty items should have 0 height
-                if (sizes.max_content < sizes.min_content) {
-                    sizes.max_content = sizes.min_content;
-                }
-
-
-                layout_apply_positive_min_max_contribution(item, false,
-                    &sizes.min_content, &sizes.max_content);
-                return sizes;
-            }
-        } else {
-            // Use pre-computed width measurements if available
-            // has_measured_size=true means measurement ran; 0 is valid for empty items.
-            if (gi->has_measured_size) {
-                sizes.min_content = gi->measured_min_width;
-                sizes.max_content = gi->measured_max_width;
-
-                // Don't force minimum width - empty items should have 0 width
-                if (sizes.max_content < sizes.min_content) {
-                    sizes.max_content = sizes.min_content;
-                }
-
-
-                layout_apply_positive_min_max_contribution(item, true,
-                    &sizes.min_content, &sizes.max_content);
-                return sizes;
-            }
-        }
+Rect layout_grid_area_rect(const GridContainerLayout* grid, float column_start,
+        float row_start, float column_size, float row_size) {
+    Rect area = {};
+    if (!grid || !grid->container) return area;
+    LayoutAxis column_axis = layout_grid_track_axis(grid, true);
+    LayoutAxisPair<float> starts = {}, sizes = {}, content = {};
+    starts[column_axis] = column_start;
+    sizes[column_axis] = column_size;
+    content[column_axis] = grid->content_width;
+    LayoutAxis row_axis = layout_grid_track_axis(grid, false);
+    starts[row_axis] = row_start;
+    sizes[row_axis] = row_size;
+    content[row_axis] = grid->content_height;
+    for (LayoutAxis axis : layout_axes()) {
+        if (!layout_logical_start_is_physical_start(grid->container, axis))
+            starts[axis] = content[axis] - starts[axis] - sizes[axis];
+        starts[axis] += layout_axis_decoration_start(grid->container->bound, axis);
     }
+    return {starts.x, starts.y, sizes.x, sizes.y};
+}
 
-    if (is_row_axis && gi && gi->anonymous_text_runs && lycon) {
-        GridContainerLayout* grid = lycon->grid_container;
-        float width = item->width;
-        if (grid && grid->computed_columns) {
-            // Grid §11.5: wrapping contributions use the resolved column area.
-            int start = gi->computed_grid_column_start - 1;
-            int end = gi->computed_grid_column_end - 1;
-            if (start >= 0 && end > start && end <= grid->computed_column_count) {
-                width = radiant::grid::spanned_tracks_size(
-                    *grid->computed_columns, start, end - start, grid->column_gap);
-            }
-        }
+static float grid_item_column_span_size(GridContainerLayout* grid, GridItemProp* item) {
+    if (!grid || !item || !grid->computed_columns) return -1.0f;
+    int start = item->computed_grid_column_start - 1;
+    int end = item->computed_grid_column_end - 1;
+    if (start < 0 || end <= start || end > grid->computed_column_count) return -1.0f;
+    return radiant::grid::spanned_tracks_size(
+        *grid->computed_columns, start, end - start, grid->column_gap);
+}
+
+// grid tracks select the physical query axis; cached width/height slots are columns/rows.
+IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis) {
+    IntrinsicSizes sizes = {};
+    if (!item) return sizes;
+    GridContainerLayout* grid = lycon ? lycon->grid_container.get() : nullptr;
+    LayoutAxis axis = layout_grid_track_axis(grid, !is_row_axis);
+    bool horizontal = axis == LAYOUT_AXIS_X;
+    GridItemProp* gi = grid_item_prop(item);
+    if (gi && gi->has_measured_size && (!is_row_axis ||
+        gi->measured_min_height > 0.0f || gi->measured_max_height > 0.0f)) {
+        sizes = is_row_axis
+            ? IntrinsicSizes{gi->measured_min_height, gi->measured_max_height}
+            : IntrinsicSizes{gi->measured_min_width, gi->measured_max_width};
+        layout_apply_positive_min_max_contribution(item, horizontal, &sizes.min_content, &sizes.max_content);
+        return sizes;
+    }
+    float column_span = grid_item_column_span_size(grid, gi);
+    if (gi && gi->anonymous_text_runs && lycon) {
         radiant::SizeF measured = layout_measure_anonymous_text(
-            lycon, item, gi->anonymous_text_runs, width);
+            lycon, item, gi->anonymous_text_runs, max(column_span, 0.0f));
         sizes.min_content = sizes.max_content = measured.height;
         return sizes;
     }
+    if (!lycon) return {0.0f, layout_axis_size(item, axis)};
 
-    if (is_row_axis &&
-        (!item->blk || item->block()->given_height < 0.0f) &&
-        item->display.inner != RDT_DISPLAY_REPLACED &&
-        !grid_item_has_in_flow_content(item) &&
-        layout_used_preferred_aspect_ratio(item) <= 0.0f) {
-        BoxMetrics box = layout_box_metrics(item);
-        sizes.min_content = box.pad_border_v;
-        sizes.max_content = box.pad_border_v;
-        return sizes;
-    }
-
-    // Fallback: Use unified intrinsic sizing API if layout context is available
-    if (lycon) {
-        // Determine available space for measurement
-        AvailableSpace available;
-
-        if (is_row_axis) {
-            // For row axis (height measurement), we need to determine the width constraint
-            // Height depends on width due to text wrapping
-            float width = 200; // Default fallback
-
-            bool has_definite_inline_size = item->blk &&
-                item->block()->given_width >= 0.0f &&
-                isnan(item->block()->given_width_percent) &&
-                item->block()->given_width_type != CSS_VALUE_AUTO &&
-                item->block()->given_width_type != CSS_VALUE_MIN_CONTENT &&
-                item->block()->given_width_type != CSS_VALUE_MAX_CONTENT &&
-                item->block()->given_width_type != CSS_VALUE_FIT_CONTENT;
-            if (has_definite_inline_size) {
-                // A definite item width wins over the stretched grid area; otherwise
-                // a ratio-dependent height would incorrectly inherit the track width.
-                width = layout_css_size_to_content_box(item->bound, layout_box_sizing(item),
-                                                       item->block()->given_width, true);
-            } else if (item->width > 0) {
-                // Item already has a width (e.g., from previous layout pass)
-                width = item->width;
-            } else if (gi && lycon->grid_container) {
-                // Calculate width from computed column tracks
-                GridContainerLayout* grid = lycon->grid_container;
-                int col_start = gi->computed_grid_column_start - 1;
-                int col_end = gi->computed_grid_column_end - 1;
-
-                // Clamp to valid ranges
-                if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
-                    int span_width = 0;
-                    bool has_unsized_fr_track = false;
-
-                    for (int c = col_start; c < col_end; c++) {
-                        int track_size = (int)(*grid->computed_columns)[c].base_size; // INT_CAST_OK: legacy intrinsic width accumulator
-                        if (track_size > 0) {
-                            span_width += track_size;
-                            if (c < col_end - 1) {
-                                span_width += (int)grid->column_gap; // INT_CAST_OK: grid gap accumulation
-                            }
-                        } else {
-                            // Track has size 0 - might be FR track not yet sized
-                            has_unsized_fr_track = true;
-                        }
-                    }
-
-                    if (span_width > 0 && !has_unsized_fr_track) {
-                        // All tracks are sized, use actual span width
-                        int box_adjustment = 0;
-                        if (item->bound) {
-                            box_adjustment = (int)layout_boundary_metrics(item->bound).pad_border_h; // INT_CAST_OK: integer track sizing adjustment
-                        }
-                        width = (float)(span_width - box_adjustment);
-                        // Add a small subpixel margin to compensate for integer truncation
-                        // of track sizes: if a track was 173.28px→173, content becomes 153px,
-                        // but text measured at 153.28px would spuriously wrap. The +0.5px
-                        // tolerance avoids false wrapping due to float→int rounding loss.
-                        if (width > 10) width += 0.5f;
-                        if (width < 10) width = 10;
-                    } else if (grid->content_width > 0) {
-                        // FR tracks not sized yet - estimate from container width
-                        int col_count = grid->computed_column_count > 0 ? grid->computed_column_count : 1;
-                        int total_gaps = (col_count - 1) * (int)grid->column_gap; // INT_CAST_OK: grid gap accumulation
-                        int span_cols = col_end - col_start;
-                        width = (float)((grid->content_width - total_gaps) * span_cols) / col_count;
-
-                        // Subtract item's own padding/border
-                        if (item->bound) {
-                            width -= layout_boundary_metrics(item->bound).pad_border_h;
-                        }
-                        if (width < 10) width = 10;
-                    }
-                }
-            }
-
-            // Create available space with definite width for height calculation
-            available = AvailableSpace::make_width_definite(width);
-        } else {
-            // For column axis (width measurement), use max-content
-            available = AvailableSpace::make_max_content();
-        }
-
-        // grid track queries consume one axis; measuring the other can recursively
-        // enter nested grids and repeat the entire subtree for an unused result.
-        bool override_parent = is_row_axis && lycon->grid_container &&
-                               lycon->grid_container->content_width > 0;
-        {
-            LayoutContainingBlockScope grid_parent_scope(lycon, LAYOUT_AXIS_X,
-                override_parent ? lycon->grid_container->content_width : 0.0f, override_parent);
-            if (is_row_axis) {
-                float height = calculate_max_content_height(lycon, item, available.width.value);
-                sizes = {height, height};
-            } else {
-                sizes = calculate_node_intrinsic_widths(lycon, item);
-            }
-        }
-
-        // Ensure max >= min
-        if (sizes.max_content < sizes.min_content) {
-            sizes.max_content = sizes.min_content;
-        }
+    bool explicit_size = layout_axis_has_given_size(item, horizontal) &&
+        !layout_axis_size_is_percentage(item, horizontal) && !layout_css_size_is_automatic(item, horizontal);
+    bool intrinsic_constraint = layout_intrinsic_min_size_keyword(item, horizontal) != CSS_VALUE__UNDEF ||
+        layout_intrinsic_max_size_keyword(item, horizontal) != CSS_VALUE__UNDEF;
+    if (explicit_size && !intrinsic_constraint) {
+        float preferred = layout_axis_given_size(item->blk, axis);
+        float extent = layout_css_size_to_border_box(item->bound, layout_box_sizing(item), preferred, horizontal);
+        extent = layout_floor_border_box_axis(item, extent, horizontal);
+        sizes = {extent, extent};
+    } else if (horizontal) {
+        // vertical rows are queried after columns supply the child's physical inline height.
+        LayoutContainingBlockScope column_scope(lycon, LAYOUT_AXIS_Y,
+            max(column_span, 0.0f), is_row_axis && column_span >= 0.0f);
+        sizes = layout_measure_intrinsic_widths(lycon, item);
+    } else if (!explicit_size && !is_row_axis && layout_block_inline_axis_is_vertical(item) &&
+               layout_measure_direct_inline_intrinsics(lycon, item, &sizes)) {
+        float decoration = layout_padding_border_axis(item, false);
+        sizes.min_content += decoration;
+        sizes.max_content += decoration;
     } else {
-        // Fallback: use item dimensions if no layout context
-        // Empty items should have 0 height/width - the grid algorithm handles min track sizes
-        if (is_row_axis) {
-            sizes.min_content = 0;
-            sizes.max_content = item->height > 0 ? item->height : 0;
+        // a block-axis query wraps at the solved column area; an unsolved or
+        // orthogonal area uses the item's intrinsic width, never a guessed width.
+        float width = -1.0f;
+        if (layout_axis_has_given_size(item, true) && !layout_css_size_is_automatic(item, true)) {
+            width = layout_content_size_if_border_box(item, item->block()->given_width, true);
+        } else if (is_row_axis && column_span >= 0.0f) {
+            width = layout_content_size_from_border_box(item, column_span, true);
         } else {
-            sizes.min_content = 0;
-            sizes.max_content = item->width > 0 ? item->width : 0;
+            IntrinsicSizes widths = layout_measure_intrinsic_widths(lycon, item);
+            width = layout_content_size_from_border_box(item, widths.max_content, true);
+        }
+        bool has_parent_basis = grid && layout_grid_track_axis(grid, true) == LAYOUT_AXIS_X;
+        LayoutContainingBlockScope parent_scope(lycon, LAYOUT_AXIS_X,
+            has_parent_basis ? grid->content_width : 0.0f, has_parent_basis);
+        float height = calculate_max_content_height(lycon, item, max(width, 0.0f));
+        sizes = {height, height};
+    }
+    // non-replaced auto items can transfer the solved inline area through an authored ratio.
+    if (is_row_axis && column_span >= 0.0f && !layout_element_is_css_replaced(item->as_element()) &&
+        layout_css_size_is_automatic(item, true) && layout_css_size_is_automatic(item, false)) {
+        float ratio = layout_used_preferred_aspect_ratio(item);
+        if (ratio > 0.0f) {
+            float transferred = layout_ratio_transfer_axis(item, column_span, !horizontal, ratio,
+                true, true, layout_uses_border_box(item) && !layout_aspect_ratio_uses_content_box(item));
+            if (transferred >= 0.0f) sizes = {transferred, transferred};
         }
     }
-
-    layout_apply_positive_min_max_contribution(item, !is_row_axis,
-        &sizes.min_content, &sizes.max_content);
-
-    // CSS Grid §6.4: transfer the final column size only when both axes are
-    // auto; a definite inline size already determines the block contribution.
-    if (is_row_axis && item->specified_style) {
-        bool has_explicit_height = (item->blk && item->block_mut()->given_height > 0);
-        bool has_explicit_width = (item->blk && item->block_mut()->given_width > 0);
-        if (!has_explicit_width && !has_explicit_height) {
-            float aspect_ratio = layout_used_preferred_aspect_ratio(item);
-            if (aspect_ratio > 0.0f) {
-                // Compute the effective track width (after column sizing)
-                float track_width = 0.0f;
-                GridItemProp* gi = grid_item_prop(item);
-                if (gi && lycon && lycon->grid_container) {
-                    GridContainerLayout* grid = lycon->grid_container;
-                    int col_start = gi->computed_grid_column_start - 1;
-                    int col_end   = gi->computed_grid_column_end   - 1;
-                    if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
-                        for (int c = col_start; c < col_end; c++) {
-                            track_width += (*grid->computed_columns)[c].base_size;
-                            if (c < col_end - 1) track_width += grid->column_gap;
-                        }
-                    }
-                }
-                if (track_width <= 0.0f) track_width = (float)(item->width > 0 ? item->width : 0);
-                if (track_width > 0.0f) {
-                    float h_from_ratio = track_width / aspect_ratio;
-                    sizes.min_content = h_from_ratio;
-                    sizes.max_content = h_from_ratio;
-                }
-            }
-        }
-    }
-
+    sizes.max_content = max(sizes.max_content, sizes.min_content);
+    layout_apply_positive_min_max_contribution(item, horizontal, &sizes.min_content, &sizes.max_content);
     return sizes;
 }

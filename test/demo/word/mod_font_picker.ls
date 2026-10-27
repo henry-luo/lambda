@@ -1,8 +1,32 @@
 // Keep font discovery as metadata; only the windowed popup creates font previews.
 import dom
 import context: ~~.mod_context_menu
+import publish: ~~.mod_publish
 
-pub let row_height = 40
+pub let css = "
+.font-picker-trigger { display:inline-flex; width:143px; min-width:0; }
+.font-picker-native { display:none; }
+.font-picker-trigger>.font-picker-button { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; height:26px;
+  padding:0 8px; border:1px solid #d5deeb; border-radius:5px; background:#fff; color:var(--ink,#1d1d1f); font-size:13px; text-align:left; }
+.font-picker-value { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.font-picker-chevron { flex-shrink:0; font:12px var(--font,Arial,sans-serif); }
+.dialog-field .font-picker-trigger,.shape-field .font-picker-trigger { display:flex; width:100%; }
+.font-picker-layer { position:fixed; inset:0; z-index:120; pointer-events:none; font-family:var(--font,Arial,sans-serif); }
+.font-picker-backdrop { position:absolute; inset:0; z-index:0; pointer-events:auto; }
+.font-picker-menu { display:block; position:absolute; width:320px; max-width:calc(100vw - 16px); padding:10px; border:1px solid #cbd5e1;
+  z-index:1; border-radius:8px; background:#fff; color:var(--ink,#1d1d1f); box-shadow:0 8px 28px #17274330; pointer-events:auto; }
+.font-picker-search { display:block; width:100%; height:30px; padding:4px 8px; margin-bottom:8px; border:1px solid #cbd5e1; border-radius:5px; }
+.font-picker-list { display:block; width:100%; height:min(256px,calc(100vh - 110px)); overflow:auto; overscroll-behavior:contain; }
+.font-picker-space { position:relative; width:100%; }
+.font-picker-row { position:absolute; left:0; width:100%; height:32px; padding:0 9px; border:0; border-radius:4px;
+  text-align:left; font-size:16px; font-weight:400; line-height:32px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:#fff; color:var(--ink,#1d1d1f); }
+.font-picker-row:hover { background:#f0f6ff; }
+.font-picker-row[aria-selected=true] { background:#e4efff; color:#155da8; }
+.font-picker-count { margin-top:7px; color:var(--muted,#6e6e73); font-size:11px; line-height:16px; }
+.font-picker-search:focus,.font-picker-button:focus { outline:none; border-color:#0a84ff; }
+"
+
+pub let row_height = 32
 pub let visible_rows = 8
 pub let overscan = 2
 pub let preview_batch = 2
@@ -33,7 +57,8 @@ pub fn revealed_y(index,y,height=visible_rows*row_height) => if (index*row_heigh
     else if ((index+1)*row_height>y+height) (index+1)*row_height-height else y
 fn option_id(index) => "word-font-option-" ++ string(index)
 fn trigger_id(id) => id ++ "-trigger"
-fn font_style(family) => "font-family:" ++ format(family,'json')^ ++ ",sans-serif;"
+// Native names are literal families; authored values can already be CSS fallback stacks.
+fn font_style(family) => "font-family:" ++ (if (contains(families,family)) format(family,'json')^ else family) ++ ",sans-serif;"
 fn owner(node) => dom.get_element_by_id(dom.root_node(node),"word-font-picker")
 pub pn reposition(node) {
     let target = owner(node)
@@ -49,20 +74,40 @@ pn preview_window(node,previous,current,rows,first,ready) {
     let kept = retained(ready,entries)
     return {ready:kept,frame:schedule(node,previous,len(kept)<len(entries))}
 }
-pn request(node,id,query="") {
+pub pn show(node,id,query="") {
     let target = owner(node)
     if (target!=null) dom.dispatch(target,{type:"word_font_open",bubbles:false,
         detail:{id:id,query:query}})
 }
+pub fn field(control,id,label,disabled=false) => <span class:"font-picker-trigger",
+    <span class:"font-picker-native",["aria-hidden"]:"true",control>;
+    <button id:trigger_id(id),type:"button",class:"font-picker-button",["data-font-picker"]:id,["aria-label"]:"Font: " ++ label,
+        ["aria-haspopup"]:"listbox",["aria-expanded"]:"false",["aria-controls"]:"word-font-list",
+        *:if (disabled) {disabled:""} else {},
+        <span id:id ++ "-value",class:"font-picker-value",label>; <span class:"font-picker-chevron",["aria-hidden"]:"true","▾">>>
+// Imperative ribbon hosts update the adapter and its visible field together.
+pub pn sync(node,id) {
+    let root = dom.root_node(node)
+    let control = dom.get_element_by_id(root,id)
+    let trigger = dom.get_element_by_id(root,trigger_id(id))
+    if (control==null or trigger==null) { return }
+    let value = dom.get_state(control,"value")
+    publish.text(root,id ++ "-value",value)
+    publish.attr(trigger,"aria-label","Font: " ++ value)
+}
+pub fn opens_with(evt) => not (evt.metaKey or evt.ctrlKey or evt.altKey) and
+    (evt.key in ["ArrowDown","ArrowUp","Enter"," "] or len(evt.key)==1)
+pub pn trigger_key(node,id,evt,disabled=false) {
+    if (not disabled and opens_with(evt)) {
+        show(node,id,if (len(evt.key)==1 and evt.key!=" ") evt.key else "")
+        return 'prevent-default'
+    }
+    return 'pass'
+}
 // A hidden native select retains the existing form/change contract without activating a second popup.
 view <font_trigger> state seen:null, shown:null {
     let label = if (seen==~.current and shown!=null) shown else ~.current;
-    <span class:"font-picker-trigger",
-        <span class:"font-picker-native",["aria-hidden"]:"true",~.control>;
-        <button id:trigger_id(~.id),type:"button",class:"font-picker-button",["aria-label"]:"Font: " ++ label,
-            ["aria-haspopup"]:"listbox",["aria-expanded"]:"false",["aria-controls"]:"word-font-list",
-            *:if (~.disabled) {disabled:""} else {},
-            <span class:"font-picker-value",label>; <span class:"font-picker-chevron",["aria-hidden"]:"true","▾">>>
+    field(~.control,~.id,label,~.disabled)
 }
 on render(evt) {
     if (evt.event_phase==2 and seen!=~.current) { seen = ~.current; shown = ~.current }
@@ -75,17 +120,10 @@ on change(evt) {
 }
 on mousedown() { return 'prevent-default' }
 on click(evt) {
-    if (not ~.disabled) request(evt.target,~.id)
+    if (not ~.disabled) show(evt.target,~.id)
     return 'prevent-default'
 }
-on keydown(evt) {
-    if (~.disabled or evt.metaKey or evt.ctrlKey or evt.altKey) { return 'pass' }
-    if (evt.key in ["ArrowDown","ArrowUp","Enter"," "] or len(evt.key)==1) {
-        request(evt.target,~.id,if (len(evt.key)==1 and evt.key!=" ") evt.key else "")
-        return 'prevent-default'
-    }
-    return 'pass'
-}
+on keydown(evt) { return trigger_key(evt.target,~.id,evt,~.disabled) }
 pub fn wrap(control,id,current,disabled=false) =>
     apply(<font_trigger control:control,id:id,current:current,disabled:disabled>)
 
@@ -101,9 +139,7 @@ view <font_scrollport> {
                     ["data-font-preview"]:string(preview),title:entry.label,
                     ["aria-label"]:entry.label,
                     style:"top:" ++ string(i*row_height) ++ "px;" ++
-                        (if (preview) font_style(entry.value) else ""),
-                    <span class:"font-picker-preview",["aria-hidden"]:"true",entry.label>;
-                    <span class:"font-picker-readable",["aria-hidden"]:"true",entry.label>>
+                        (if (preview) font_style(entry.value) else ""),entry.label>
             }]>>
 }
 on scroll(evt) {
@@ -111,12 +147,14 @@ on scroll(evt) {
     return 'handled'
 }
 
-pn choose(node,id,index) {
+pn choose(node,id,value) {
     // closing can retire the clicked row; retain its document before dismissing the popup.
     let root = dom.root_node(node)
     dom.dispatch(owner(node),{type:"word_font_close",bubbles:false})
     let control = dom.get_element_by_id(root,id)
     if (control!=null) {
+        // Native hosts may retain extra options or append an imported family out of order.
+        let index = [for (i,option in dom.query_selector_all(control,"option") where dom.get_attribute(option,"value")==value) i][0]
         if (index==null or index==dom.selected_index(control)) { return }
         dom.set_selected_index(control,index)
         dom.dispatch(control,{type:"change",bubbles:true})
@@ -146,8 +184,7 @@ on word_font_open(evt) {
     query = evt.detail.query
     let available = choices(current)
     rows = matching(available,query)
-    let selected = if (query=="") dom.selected_index(control) else
-        [for (i,index in rows where available[index].value==current) i][0]
+    let selected = [for (i,index in rows where available[index].value==current) i][0]
     active = if (len(rows)==0) -1 else selected or 0
     scroll_y = max(0,(active-visible_rows/2)*row_height)
     first = window_start(len(rows),scroll_y)
@@ -161,7 +198,7 @@ on word_font_open(evt) {
     return 'handled'
 }
 on word_font_layout(evt) {
-    if (opened) context.fit(evt.target,"word-font-menu","word")
+    if (opened) context.fit(evt.target,"word-font-menu",~.host)
     return 'handled'
 }
 on word_font_preview(evt) {
@@ -169,7 +206,7 @@ on word_font_preview(evt) {
     frame = null
     if (focus_pending) {
         // measure after the popup's initial layout, never from its render notification.
-        context.fit(evt.target,"word-font-menu","word")
+        context.fit(evt.target,"word-font-menu",~.host)
         dom.set_scroll_state(dom.get_element_by_id(dom.root_node(evt.target),"word-font-list"),0,scroll_y)
         dom.focus_set(dom.get_element_by_id(dom.root_node(evt.target),"word-font-search"),false)
         focus_pending = false
@@ -220,7 +257,7 @@ on word_font_close(evt) {
 on mousedown(evt) { return if (dom.closest(evt.target,"[data-font-index]")!=null) 'prevent-default' else 'pass' }
 on click(evt) {
     let row = dom.closest(evt.target,"[data-font-index]")
-    if (row!=null) choose(evt.target,source_id,rows[int(dom.get_attribute(row,"data-font-index"))])
+    if (row!=null) choose(evt.target,source_id,choices(current)[rows[int(dom.get_attribute(row,"data-font-index"))]].value)
     else if (dom.get_attribute(evt.target,"id")=="word-font-backdrop")
         dom.dispatch(evt.target,{type:"word_font_close",bubbles:false})
     return 'handled'
@@ -231,7 +268,7 @@ on keydown(evt) {
         return if (evt.key=="Escape") 'prevent-default' else 'pass'
     }
     if (evt.key=="Enter") {
-        if (active>=0) choose(evt.target,source_id,rows[active])
+        if (active>=0) choose(evt.target,source_id,choices(current)[rows[active]].value)
         return 'prevent-default'
     }
     if (evt.key in ["ArrowUp","ArrowDown","PageUp","PageDown","Home","End"]) {
@@ -253,4 +290,4 @@ on keydown(evt) {
     return 'pass'
 }
 let menu = <font_menu>
-pub fn widget() => apply(menu)
+pub fn widget(host="word") => apply(menu,{host:host})
