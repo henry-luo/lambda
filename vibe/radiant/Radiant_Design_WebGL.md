@@ -320,12 +320,23 @@ intensity-1 head-on light yields white at 1.0. glTF punctual lights divide by
 π on import and multiply by π on export (SP1), keeping authored physical units
 at that boundary.
 
-Shade in linear light, apply exposure and the selected tone curve, then use
-the existing sRGB framebuffer conversion. Tone mapping defaults to `'none'`
-even when standard materials are present (SP4); adding a PBR mesh does not
-change the rest of the scene's colors. Transparent surfaces blend after tone
-mapping. Basic/Lambert output with no new features remains the compatibility
-guard. Instancing, skeletal poses and morph weights share the native draw path.
+Shade opaque/masked geometry into a multisampled linear RGBA16F target, then
+retain its individual coverage samples and apply exposure and the selected
+tone curve to each sample in one output pass before the display resolve.
+Resolved HDR color remains available to later image passes. Resolving radiance
+before nonlinear output would brighten antialiased silhouettes. The native
+macOS profile uses OpenGL 4.1's per-sample fragment evaluation for this step.
+Composite the authored background after that conversion so its
+display color is preserved. Transfer opaque depth to the display target and
+draw transparent surfaces there, retaining the existing after-tone-map blend
+contract. The display target uses the existing sRGB framebuffer conversion and
+premultiplied snapshot publication (**D4.5.1v4 / D4.5.2**). Tone mapping defaults
+to `'none'` even when standard materials are present (SP4); adding a PBR mesh
+does not change the rest of the scene's colors. Basic/Lambert output with no
+new features remains the compatibility guard. Instancing, skeletal poses and
+morph weights share the native draw path. The target/pass continuation and its
+qualification are recorded in
+[the Three.js feature plan](../impl/Radiant_Impl_Scene3d_Three_Features.md).
 
 Environments are captured into a linear RGBA16F cube-UV atlas and
 GGX-prefiltered in the r186 PMREM layout. Standard materials sample diffuse

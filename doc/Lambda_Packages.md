@@ -2386,6 +2386,13 @@ multiply by π on export (SP1 in the [PBR record](../vibe/impl/Radiant_Scene3d_P
 There are at most eight directional/point/spot lights, plus ambient and one
 hemisphere light per scene/environment.
 
+Opaque and masked geometry retain linear HDR radiance until an output pass
+tone-maps each antialiasing sample. The authored background keeps its display
+color, and transparent surfaces blend afterward against the opaque depth.
+Rendering still publishes one document-owned image per changed frame
+(**D4.5.1v4 / D4.5.2**); repeated fixed-time captures reuse that frame
+(**D2.11.4**).
+
 ### Shader materials and GPU simulations
 
 Lambda describes the scene and its GLSL; the GPU does per-frame work such as vertex deformation and particle simulation ([plan](../vibe/impl/Radiant_Impl_Scene3d_Shaders.md)). `shader_material(vertex, fragment, uniforms?, options?)` takes GLSL 330 bodies. The host declares the vertex inputs `position`, `normal`, `uv`, `color`, `tangent` and `instance_matrix`, the uniforms `model_matrix`, `view_matrix`, `projection_matrix` and `camera_position`, and the output `fragment_color` (linear; premultiplied when `transparent`). The `uniforms` map gives every other uniform the shader declares: numbers, number arrays, `#rrggbb` colors (linear), a texture ID for a `sampler2D`, or `"<simulation>.<variable>"`. A missing value or a type mismatch is a scene diagnostic. Options include `side`, `transparent` and `alpha-to-coverage`. A keyframe track on `<material id>.uniforms.<name>` animates a uniform, and re-renders that change only uniform values keep the linked program.

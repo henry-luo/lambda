@@ -227,7 +227,7 @@ struct Scene3dEntry {
     NativeGlContext* graphics;
     // one shader variant per material model (basic/Lambert, standard) and tone-mapping curve,
     // compiled on first use; `program_frame` marks the frame whose scene uniforms each holds
-    NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, white, dfg;
+    NativeGlResource programs[SCENE_PROGRAM_VARIANTS], target, hdr_target, output_programs[SCENE_TONE_CURVES], white, dfg;
     uint64_t program_frame[SCENE_PROGRAM_VARIANTS], frame;
     // the prefiltered environment atlas, the ping-pong target its filter passes go through, the
     // filter program and one quad set per atlas level; rebuilt only when `environment_key` changes
@@ -248,7 +248,7 @@ struct Scene3dEntry {
     unsigned shader_program_count;
     Scene3dSimulation* simulations[SCENE_SIMULATION_LIMIT];
     unsigned simulation_count;
-    NativeGlResource simulation_buffer, simulation_triangle; // one full-screen triangle for every pass
+    NativeGlResource fullscreen_buffer, fullscreen_triangle; // one full-screen triangle for every pass
     Scene3dProjection projection;
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
@@ -1031,11 +1031,25 @@ static void scene3d_shader_prune(Scene3dEntry* entry) {
     entry->shader_program_count=kept;entry->stats.shader_programs=kept;
 }
 
+// one retained triangle serves simulation, postprocessing and output without duplicated uploads.
+static bool scene3d_fullscreen(Scene3dEntry* entry) {
+    if (entry->fullscreen_triangle.id) return true;
+    const float corners[]={-1,-1,0, 3,-1,0, -1,3,0};
+    if (!entry->fullscreen_buffer.id) entry->fullscreen_buffer=native_gl_buffer(entry->graphics,corners,sizeof(corners),false);
+    NativeGlAttribute attribute={entry->fullscreen_buffer,0,3,0,0,0};
+    if (entry->fullscreen_buffer.id) entry->fullscreen_triangle=native_gl_vertices(entry->graphics,&attribute,1,{});
+    return entry->fullscreen_triangle.id || scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
+}
+
 // SH5: a simulation pass draws one full-screen triangle into each variable's next records
-static const char* scene3d_simulation_vertex = R"GLSL(#version 330 core
+static const char* scene3d_fullscreen_vertex = R"GLSL(
 layout(location=0) in vec3 position;
 void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
 )GLSL";
+static NativeGlResource scene3d_fullscreen_program(Scene3dEntry* entry, const char* fragment, const char* version) {
+    StrBuf* vertex=strbuf_create(version);strbuf_append_str(vertex,scene3d_fullscreen_vertex);
+    NativeGlResource program=native_gl_program(entry->graphics,vertex->str,fragment);strbuf_free(vertex);return program;
+}
 static void scene3d_simulation_release(NativeGlContext* graphics, Scene3dSimulation* simulation) {
     for (unsigned v=0;v<simulation->variable_count;v++) {
         Scene3dVariable* variable=&simulation->variables[v];
@@ -1085,13 +1099,7 @@ static bool scene3d_simulation(Scene3dBuild* build, DomElement* node) {
         if (entry->simulations[i]->key==key && !strcmp(entry->simulations[i]->id,id)) simulation=entry->simulations[i];
     if (!simulation) {
         if (entry->simulation_count>=SCENE_SIMULATION_LIMIT) return scene3d_fail(entry,"simulation quota exceeded");
-        if (!entry->simulation_triangle.id) {
-            const float corners[]={-1,-1,0, 3,-1,0, -1,3,0};
-            if (!entry->simulation_buffer.id) entry->simulation_buffer=native_gl_buffer(entry->graphics,corners,sizeof(corners),false);
-            NativeGlAttribute attribute={entry->simulation_buffer,0,3,0,0,0};
-            if (entry->simulation_buffer.id) entry->simulation_triangle=native_gl_vertices(entry->graphics,&attribute,1,{});
-            if (!entry->simulation_triangle.id) return scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
-        }
+        if (!scene3d_fullscreen(entry)) return false;
         simulation=(Scene3dSimulation*)mem_calloc(1,sizeof(Scene3dSimulation),MEM_CAT_RENDER);if (!simulation) return false;
         str_copy(simulation->id,sizeof(simulation->id),id,strlen(id));simulation->key=key;simulation->timestep=timestep;
         simulation->width=(unsigned)width;simulation->height=(unsigned)height;simulation->variable_count=count;
@@ -1107,7 +1115,7 @@ static bool scene3d_simulation(Scene3dBuild* build, DomElement* node) {
             StrBuf* fragment=strbuf_new();strbuf_append_str(fragment,"#version 330 core\nuniform vec2 resolution;\nuniform float delta;\n");
             for (unsigned k=0;k<count;k++) strbuf_append_format(fragment,"uniform sampler2D %s;\n",authored[k].name);
             strbuf_append_str(fragment,"out vec4 fragment_color;\n#line 1\n");strbuf_append_str(fragment,authored[v].shader);
-            variable->program=native_gl_program(entry->graphics,scene3d_simulation_vertex,fragment->str);strbuf_free(fragment);
+            variable->program=scene3d_fullscreen_program(entry,fragment->str,"#version 330 core\n");strbuf_free(fragment);
             made=variable->initial && variable->state[0].id && variable->state[1].id && variable->program.id;
         }
         if (!made) {
@@ -1152,7 +1160,7 @@ static bool scene3d_simulation_pass(Scene3dEntry* entry, Scene3dSimulation* simu
             const Scene3dShaderUniform* u=&simulation->uniforms[i];
             if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
         }
-        NativeGlDraw draw={program,entry->simulation_triangle,3,1,false,false,2,false};
+        NativeGlDraw draw={program,entry->fullscreen_triangle,3,1,false,false,2,false};
         for (unsigned k=0;k<simulation->variable_count;k++) {
             const Scene3dVariable* variable=&simulation->variables[k];
             draw.bindings[draw.binding_count++]={variable->name,variable->state[simulation->current],NATIVE_GL_BIND_FLOAT};
@@ -1751,7 +1759,7 @@ void scene3d_context_lost(DomElement* root) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e) return;
     native_gl_lose(e->graphics); scene3d_projection_destroy(e); native_gl_destroy(e->graphics);e->graphics=nullptr;
     for (unsigned i=0;i<SCENE_PROGRAM_VARIANTS;i++) { e->programs[i]={};e->program_frame[i]=0; }
-    e->target={};e->white={};e->dfg={};scene3d_retire_snapshot(e);e->mutation_epoch=UINT64_MAX;
+    e->target={};e->hdr_target={};for (auto& program:e->output_programs) program={};e->white={};e->dfg={};scene3d_retire_snapshot(e);e->mutation_epoch=UINT64_MAX;
     e->environment_atlas={};e->environment_pingpong={};e->environment_filter={};e->environment_key=0;
     e->environment_image={};e->environment_unwrap={};mem_free(e->environment_path);e->environment_path=nullptr;e->environment_image_hash=0;
     e->shadow_programs[0]={};e->shadow_programs[1]={};e->shadow_blank={};
@@ -1759,7 +1767,7 @@ void scene3d_context_lost(DomElement* root) {
     e->shader_program_count=0;
     // simulation state lived on the lost context; the next projection restarts from the initial records
     for (unsigned i=0;i<e->simulation_count;i++) scene3d_simulation_release(nullptr,e->simulations[i]);
-    e->simulation_count=0;e->simulation_buffer={};e->simulation_triangle={};
+    e->simulation_count=0;e->fullscreen_buffer={};e->fullscreen_triangle={};
     for (NativeGlResource& plane:e->environment_planes) plane={};
 }
 
@@ -2048,6 +2056,40 @@ vec3 standard_light(vec3 base) {
     return color;
 }
 #endif
+
+void main() {
+    vec4 base = material * vec4(vertex_color,1.0);
+    if (textured > 0.5) base *= texture(image,texture_uv);
+#ifdef MASK
+    if (base.a < alpha_cutoff) discard;
+#endif
+    if (opaque > 0.5) base.a = 1.0;
+#ifdef STANDARD
+    vec3 color = standard_light(base.rgb) + emissive*texture(emissive_map, texture_uv).rgb;
+#else
+    vec3 irradiance = vec3(1.0);
+    if (lambert > 0.5) {
+        vec3 n = normalize(world_normal) * (gl_FrontFacing ? 1.0 : -1.0);
+        irradiance = ambient + hemisphere_light(n);
+#ifdef ENVIRONMENT
+        irradiance += textureCubeUV(environment, n, 1.0).rgb*environment_intensity;
+#endif
+        for (int i=0; i<8; i++) if (float(i)<light_count) {
+            vec3 l; float falloff = light_falloff(i,l);
+            irradiance += lights[i] * falloff * max(dot(n,l),0.0) * light_shadow(i);
+        }
+    }
+    vec3 color = base.rgb * irradiance + emissive;
+#endif
+#if TONE_MAPPING > 0
+    color = tone_map(color);
+#endif
+    fragment = vec4(color * base.a, base.a);
+}
+)GLSL";
+
+// tone mapping follows composition in HDR; the background remains an unlit display color.
+static const char* scene3d_tone_body = R"GLSL(
 #if TONE_MAPPING > 0
 uniform float exposure;
 #endif
@@ -2078,34 +2120,19 @@ vec3 tone_map(vec3 color) {
     return clamp(color, 0.0, 1.0);
 }
 #endif
+)GLSL";
+static const char* scene3d_output_fragment = R"GLSL(
+uniform sampler2DMS color_input;
+uniform vec4 background;
+out vec4 fragment;
 void main() {
-    vec4 base = material * vec4(vertex_color,1.0);
-    if (textured > 0.5) base *= texture(image,texture_uv);
-#ifdef MASK
-    if (base.a < alpha_cutoff) discard;
-#endif
-    if (opaque > 0.5) base.a = 1.0;
-#ifdef STANDARD
-    vec3 color = standard_light(base.rgb) + emissive*texture(emissive_map, texture_uv).rgb;
-#else
-    vec3 irradiance = vec3(1.0);
-    if (lambert > 0.5) {
-        vec3 n = normalize(world_normal) * (gl_FrontFacing ? 1.0 : -1.0);
-        irradiance = ambient + hemisphere_light(n);
-#ifdef ENVIRONMENT
-        irradiance += textureCubeUV(environment, n, 1.0).rgb*environment_intensity;
-#endif
-        for (int i=0; i<8; i++) if (float(i)<light_count) {
-            vec3 l; float falloff = light_falloff(i,l);
-            irradiance += lights[i] * falloff * max(dot(n,l),0.0) * light_shadow(i);
-        }
-    }
-    vec3 color = base.rgb * irradiance + emissive;
-#endif
+    vec4 scene = texelFetch(color_input, ivec2(gl_FragCoord.xy), gl_SampleID);
+    vec3 color = scene.a > 0.0 ? scene.rgb / scene.a : vec3(0.0);
 #if TONE_MAPPING > 0
     color = tone_map(color);
 #endif
-    fragment = vec4(color * base.a, base.a);
+    fragment = vec4(color * scene.a + background.rgb * background.a * (1.0-scene.a),
+        scene.a + background.a * (1.0-scene.a));
 }
 )GLSL";
 
@@ -2288,6 +2315,7 @@ static NativeGlResource scene3d_program(Scene3dEntry* entry, unsigned variant) {
     StrBuf* vertex=strbuf_new();strbuf_append_str(vertex,header);strbuf_append_str(vertex,scene3d_vertex_body);
     StrBuf* source=strbuf_new();strbuf_append_str(source,header);
     if (model&4) strbuf_append_str(source,scene3d_cube_uv);
+    strbuf_append_str(source,scene3d_tone_body);
     strbuf_append_str(source,scene3d_fragment_body);
     entry->programs[variant]=native_gl_program(entry->graphics,vertex->str,source->str);
     strbuf_free(source);strbuf_free(vertex);
@@ -2750,6 +2778,25 @@ static bool scene3d_shadow_passes(Scene3dEntry* entry) {
     }
     return true;
 }
+// the only display conversion: resolve linear radiance, tone-map straight color, then composite the background.
+static bool scene3d_output(Scene3dEntry* entry, Scene3dProjection* projection) {
+    unsigned tone=(unsigned)projection->tone_mapping;
+    NativeGlResource& program=entry->output_programs[tone];
+    if (!program.id) {
+        StrBuf* source=strbuf_new();strbuf_append_format(source,"#version 400 core\n#define TONE_MAPPING %u\n",tone);
+        strbuf_append_str(source,scene3d_tone_body);strbuf_append_str(source,scene3d_output_fragment);
+        program=scene3d_fullscreen_program(entry,source->str,"#version 400 core\n");strbuf_free(source);
+        if (!program.id) return scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
+    }
+    const float clear[4]={0,0,0,0};
+    if (!scene3d_fullscreen(entry) || !native_gl_begin(entry->graphics,entry->target,clear) ||
+        !scene3d_uniform(entry,program,"background",projection->background,4) ||
+        !scene3d_uniform(entry,program,"exposure",&projection->exposure,1)) return false;
+    NativeGlDraw draw={program,entry->fullscreen_triangle,3,1,false,false,2,false};
+    draw.depth_test=false;draw.bindings[draw.binding_count++]={"color_input",entry->hdr_target,NATIVE_GL_BIND_MULTISAMPLE};
+    return native_gl_draw(entry->graphics,&draw);
+}
+
 ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, float height, float raster_scale) {
     if (!root || !ui) return nullptr;
     scene3d_collect(root->doc); Scene3dEntry* entry=scene3d_entry(root,true); if (!entry) return nullptr;
@@ -2757,7 +2804,8 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     if (!vb.has_viewbox) vb=svg_parse_viewbox(scene3d_text(root,"viewbox"));
     if (!isfinite(width) || !isfinite(height) || !isfinite(raster_scale) || width<=0 || height<=0 || raster_scale<=0 ||
         (vb.has_viewbox && (vb.width==0 || vb.height==0))) {
-        scene3d_retire_snapshot(entry);native_gl_release(entry->graphics,entry->target);entry->target={};return nullptr;
+        scene3d_retire_snapshot(entry);native_gl_release(entry->graphics,entry->target);entry->target={};
+        native_gl_release(entry->graphics,entry->hdr_target);entry->hdr_target={};return nullptr;
     }
     float pixel_width=ceilf(width*raster_scale),pixel_height=ceilf(height*raster_scale);
     if (!isfinite(pixel_width) || !isfinite(pixel_height) || pixel_width>4096 || pixel_height>4096)
@@ -2803,9 +2851,14 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr;
     }
     if (!entry->target.id || entry->stats.raster_width!=(unsigned)pixel_width || entry->stats.raster_height!=(unsigned)pixel_height) {
-        native_gl_release(entry->graphics,entry->target);
-        entry->target=native_gl_target(entry->graphics,(unsigned)pixel_width,(unsigned)pixel_height);
-        if (!entry->target.id) { scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr; }
+        // stage both buffers before retiring the previous size, including their peak live bytes.
+        NativeGlResource hdr=native_gl_target(entry->graphics,(unsigned)pixel_width,(unsigned)pixel_height,4,true);
+        NativeGlResource output=hdr.id?native_gl_target(entry->graphics,(unsigned)pixel_width,(unsigned)pixel_height,4):NativeGlResource{};
+        if (!output.id) {
+            native_gl_release(entry->graphics,hdr);scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr;
+        }
+        native_gl_release(entry->graphics,entry->target);native_gl_release(entry->graphics,entry->hdr_target);
+        entry->target=output;entry->hdr_target=hdr;
     }
     float aspect=p->aspect>0?p->aspect:vb.has_viewbox?vb.width/vb.height:width/height;
     Scene3dVec eye=scene3d_point(p->camera_world,{});
@@ -2834,10 +2887,19 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     Scene3dVec toward=scene3d_sub(eye,target);scene3d_normalize(&toward);
     Scene3dPass pass={&p->lights,projection,view,
         {p->orthographic?toward.x:eye.x,p->orthographic?toward.y:eye.y,p->orthographic?toward.z:eye.z,p->orthographic?0.f:1.f},
-        p->exposure,p->environment_intensity,(unsigned)p->tone_mapping,p->environment.address!=nullptr,&p->shadows,++entry->frame,lens};
-    bool rendered=native_gl_begin(entry->graphics,entry->target,p->background);
+        p->exposure,p->environment_intensity,0,p->environment.address!=nullptr,&p->shadows,++entry->frame,lens};
+    const float clear[4]={0,0,0,0};
+    bool rendered=native_gl_begin(entry->graphics,entry->hdr_target,clear);
     for (int i=0;rendered && i<p->mesh_count;i++)
-        if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE) rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
+        if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE && !p->meshes[i]->material->transparent)
+            rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
+    if (rendered) rendered=scene3d_output(entry,p);
+    // preserve the existing after-tone-map blend contract and opaque depth for transparent surfaces.
+    if (rendered) rendered=native_gl_copy_depth(entry->graphics,entry->hdr_target,entry->target);
+    pass.tone=(unsigned)p->tone_mapping;pass.frame=++entry->frame;
+    for (int i=0;rendered && i<p->mesh_count;i++)
+        if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE && p->meshes[i]->material->transparent)
+            rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
     ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,entry->target):nullptr;
     if (!snapshot) { scene3d_fail(entry,native_gl_diagnostic(entry->graphics));scene3d_retire_snapshot(entry);return nullptr; }
     // retire the generation while leases keep old pixels available to in-flight/retained consumers.

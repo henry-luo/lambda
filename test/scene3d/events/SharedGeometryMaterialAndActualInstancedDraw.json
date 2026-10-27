@@ -44,7 +44,7 @@
       "target": "#scene",
       "fields": {
         "geometries": 1,
-        "graphics.draws": 1
+        "graphics.draws": 2
       }
     }
   ]

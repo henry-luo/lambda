@@ -23,7 +23,8 @@ struct NativeGlAttribute {
 // What a draw samples: a texture (native_gl_texture or native_gl_data_texture), the
 // color cube of a cube target, the depth of a depth target read through a
 // comparison sampler (sampler2DShadow / samplerCubeShadow), or the color of a float target.
-enum NativeGlBindingKind { NATIVE_GL_BIND_TEXTURE, NATIVE_GL_BIND_CUBE, NATIVE_GL_BIND_SHADOW, NATIVE_GL_BIND_FLOAT };
+enum NativeGlBindingKind { NATIVE_GL_BIND_TEXTURE, NATIVE_GL_BIND_CUBE, NATIVE_GL_BIND_SHADOW, NATIVE_GL_BIND_FLOAT,
+    NATIVE_GL_BIND_TARGET, NATIVE_GL_BIND_MULTISAMPLE }; // resolved or per-sample drawing-buffer color
 struct NativeGlBinding {
     const char* sampler; // the shader's sampler uniform; a static string
     NativeGlResource resource;
@@ -44,6 +45,7 @@ struct NativeGlDraw {
     // must all be bound; samplers it lacks are skipped.
     NativeGlBinding bindings[NATIVE_GL_BINDING_LIMIT] = {};
     unsigned binding_count = 0;
+    bool depth_test = true;
 };
 struct NativeGlUniform { NativeGlResource program; int location; uint64_t generation; };
 
@@ -81,8 +83,10 @@ NativeGlUniform native_gl_uniform(NativeGlContext* context, NativeGlResource pro
 bool native_gl_uniform_set(NativeGlContext* context, NativeGlUniform uniform,
     const float* values, unsigned components, unsigned count = 1);
 NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsigned height,
-    unsigned samples = 4);
+    unsigned samples = 4, bool hdr = false);
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]);
+// transfer opaque visibility to the display target before forward transparent draws.
+bool native_gl_copy_depth(NativeGlContext* context, NativeGlResource source, NativeGlResource target);
 // A depth texture to render shadow casters into: `size` square, or six faces when
 // `cube`. It samples with depth comparison; outside its edges it reads as lit.
 NativeGlResource native_gl_depth_target(NativeGlContext* context, unsigned size, bool cube);

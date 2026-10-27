@@ -993,6 +993,64 @@ TEST_F(Scene3dTest, FloatTargetsDrawRegionByRegionAndKeepHdrValues) {
     native_gl_destroy(graphics);
 }
 
+TEST_F(Scene3dTest, MultisampledHdrTargetsResolveUnclippedRadianceAndRejectFeedback) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));
+    ASSERT_NE(graphics,nullptr)<<diagnostic;
+    NativeGlResource hdr=native_gl_target(graphics,8,4,4,true),output=native_gl_target(graphics,8,4,1);
+    ASSERT_NE(hdr.id,0u);ASSERT_NE(output.id,0u);
+    NativeGlResource program=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nin vec2 uv;uniform sampler2D source;out vec4 result;"
+        "void main(){result=vec4(texture(source,uv).rgb/4.,1.);}");
+    NativeGlDraw sample={program,quad_vertices(graphics),6,1,false,false,2,false};
+    sample.bindings[sample.binding_count++]={"source",hdr,NATIVE_GL_BIND_TARGET};
+    const float clear[]={0,0,0,0},radiance[]={4,1,.25f,1};
+    ASSERT_TRUE(native_gl_begin(graphics,hdr,radiance));
+    EXPECT_EQ(native_gl_snapshot(graphics,hdr),nullptr);
+    EXPECT_FALSE(native_gl_draw(graphics,&sample));
+    ASSERT_TRUE(native_gl_begin(graphics,output,clear));ASSERT_TRUE(native_gl_draw(graphics,&sample));
+    ImageSurface* image=native_gl_snapshot(graphics,output);
+    pixel(image,4,2,255,srgb_byte(.25f),srgb_byte(.0625f));image_surface_destroy(image);
+    // another producer frame invalidates the resolve, rather than sampling the prior frame.
+    const float next[]={1,0,0,1};ASSERT_TRUE(native_gl_begin(graphics,hdr,next));
+    ASSERT_TRUE(native_gl_begin(graphics,output,clear));ASSERT_TRUE(native_gl_draw(graphics,&sample));
+    image=native_gl_snapshot(graphics,output);pixel(image,4,2,srgb_byte(.25f),0,0);image_surface_destroy(image);
+    native_gl_release(graphics,hdr);EXPECT_FALSE(native_gl_draw(graphics,&sample));
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, HdrOutputPreservesAlphaBackgroundAndSteadyResources) {
+    DomElement* plane=mesh("plane","#ff0000");DomElement* material=plane->last_child->as_element();
+    attr(material,"opacity","0.5");pixel(snapshot(),64,64,128,0,0,128);
+    attr(root,"background","#00ff00");pixel(snapshot(),64,64,188,188,0);
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    for (unsigned i=0;i<100;i++) {
+        attr(camera,"fov",i%2?"90":"91");ASSERT_NE(snapshot(),nullptr);
+    }
+    ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(before.projection_generation,after.projection_generation);
+    EXPECT_EQ(before.graphics.resources,after.graphics.resources);
+    EXPECT_EQ(before.graphics.allocated_bytes,after.graphics.allocated_bytes);
+    EXPECT_EQ(after.snapshot_generation-before.snapshot_generation,100u);
+    attr(material,"opacity","1");attr(material,"color","#000000");
+    attr(material,"emissive","#ffffff");attr(material,"emissive-intensity","4");attr(root,"tone-mapping","neutral");
+    pixel(snapshot(),64,64,253,253,253,255,2);
+    // the final tone-map stage leaves the authored background in its display-color domain.
+    pixel(snapshot(),0,0,0,255,0);
+    scene3d_context_lost(root);pixel(snapshot(),64,64,253,253,253,255,2);
+}
+
+TEST_F(Scene3dTest, HdrOutputToneMapsEachCoveredSampleBeforeDisplayResolve) {
+    DomElement* plane=mesh("plane","#fdfdfd");attr(plane,"rotation","0 0 0.3");
+    attr(root,"background","#202428");ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);
+    uint8_t expected[128*128*4];memcpy(expected,image->pixels,sizeof(expected));
+    DomElement* material=plane->last_child->as_element();attr(material,"color","#000000");
+    attr(material,"emissive","#ffffff");attr(material,"emissive-intensity","4");attr(root,"tone-mapping","neutral");
+    image=snapshot();ASSERT_NE(image,nullptr);
+    // resolving HDR coverage before nonlinear output conversion brightens silhouette pixels.
+    for (unsigned i=0;i<sizeof(expected);i++)
+        EXPECT_NEAR(((const uint8_t*)image->pixels)[i],expected[i],2)<<"byte "<<i;
+}
+
 TEST(Scene3dMath, DfgTableMatchesThreeJsSplitSumIntegration) {
     // {row (n·v), column (roughness), scale, bias} from the DATA table of Three.js r186 (three.module.js)
     const struct { unsigned row, col; float scale, bias; } three[]={
