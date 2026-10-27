@@ -37,6 +37,8 @@ struct NativeGlDraw {
     int side; // 0 front, 1 back, 2 double
     bool clockwise;
     bool depth_only = false;
+    // fragment alpha becomes multisample coverage: cut-out edges antialias without depth sorting
+    bool alpha_to_coverage = false;
     // Binding i takes texture unit i and sets its sampler to it. GL rejects a draw
     // whose samplers of different types share a unit, so a program's samplers
     // must all be bound; samplers it lacks are skipped.

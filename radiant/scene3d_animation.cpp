@@ -143,6 +143,13 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         if(strlen(name)>=sizeof(value->text)) return false;
         str_copy(value->text,sizeof(value->text),name,strlen(name));value->type=ANIMATION_STRING;return true;
     }
+    // SH2: a shader material's numeric uniform, animated like any other material value
+    if(!strcmp(tag,"material")&&!strncmp(property,"uniforms.",9)) {
+        float numbers[ANIMATION_VALUE_COMPONENTS];unsigned count;bool color;
+        if(!scene3d_uniform_numbers(node,property+9,numbers,ANIMATION_VALUE_COMPONENTS,&count,&color)) return false;
+        value->type=color?ANIMATION_COLOR:count==1?ANIMATION_NUMBER:ANIMATION_VECTOR;value->count=count;
+        for(unsigned i=0;i<count;i++) value->numbers[i]=numbers[i];return true;
+    }
     if(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light"))) {
         float color[4];if(!scene3d_color(node,"color","#ffffff",color)) return false;
         value->type=ANIMATION_COLOR;value->count=3;

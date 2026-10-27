@@ -19,6 +19,7 @@
 #include "../lib/str.h"
 #include "../lib/hash.h"
 #include "../lib/hashmap.h"
+#include <ctype.h>
 #include <float.h>
 
 static constexpr unsigned SCENE_NODE_LIMIT = 8192;
@@ -36,6 +37,10 @@ static constexpr unsigned SCENE_SHADOW_LIMIT = 4;
 // A prefiltered environment is Three.js r186's PMREM cube-UV atlas: 256-texel faces, then
 // halving levels down to 16 texels and six more 16-texel levels of rising roughness.
 static constexpr unsigned SCENE_ENV_SIZE = 256, SCENE_ENV_LODS = 11, SCENE_ENV_LOD_MAX = 8, SCENE_ENV_LOD_MIN = 4;
+// Shader materials (SH1–SH3): Lambda-authored GLSL bodies behind a host prefix. A uniform name stays
+// short enough for its animation path `uniforms.<name>` to fit a playback binding.
+static constexpr unsigned SCENE_SHADER_UNIFORM_LIMIT = 32, SCENE_SHADER_SAMPLER_LIMIT = 8, SCENE_SHADER_VALUE_LIMIT = 256,
+    SCENE_SHADER_NAME_LIMIT = 23, SCENE_SHADER_PROGRAM_LIMIT = 32, SCENE_INSTANCE_DATA_LIMIT = 6;
 
 // Lanes a mesh does not use are trimmed from the end of its upload, so the
 // order matters: colors, then tangents, then deformation.
@@ -67,6 +72,34 @@ struct Scene3dMaterial {
     int side;
     NativeGlResource texture;
     uint64_t texture_hash; // of its textures' sources and samplers
+    struct Scene3dShader* shader; // a shader material's program inputs; null for the built-in models
+};
+// A shader-material uniform as authored: numbers (a float, vector, mat4 or an array of them; a color
+// string is three linear numbers) or the texture a sampler reads. `components` per element comes from
+// the linked program; uniforms a program does not use keep 0 and are never set.
+struct Scene3dShaderUniform {
+    char name[SCENE_SHADER_NAME_LIMIT];
+    float *authored, *values; // `values` restarts from `authored` each frame, then playback overrides it
+    unsigned length, components;
+    NativeGlResource texture;
+};
+struct Scene3dShader {
+    const char *vertex, *fragment; // borrowed from the material element during projection only
+    Scene3dShaderUniform* uniforms;
+    unsigned uniform_count;
+    bool alpha_to_coverage;
+};
+// a named per-instance attribute of a shader mesh: `components` floats per instance, at location 8 + its index
+struct Scene3dInstanceData {
+    char name[SCENE_SHADER_NAME_LIMIT];
+    const float* values;
+    unsigned components;
+};
+// a linked shader-material program; it outlives re-projections while the projection built in
+// `generation` still uses it, so a re-render that changes only uniforms never recompiles
+struct Scene3dShaderProgram {
+    uint64_t key, generation;
+    NativeGlResource program;
 };
 struct Scene3dMesh {
     DomNodeRef source;
@@ -93,6 +126,7 @@ struct Scene3dMesh {
     // the bone matrices, one RGBA32F row of four texels per bone
     NativeGlResource palette;
     float morph_weights[2], morph_base_weights[2];
+    NativeGlResource program; // a shader material's program, linked for this mesh's instance attributes
 };
 enum { SCENE_LAYER_SCENE, SCENE_LAYER_ENVIRONMENT, SCENE_LAYER_UNUSED };
 // The lights of one layer: ambient and hemisphere light outside the quota of 8 others
@@ -164,6 +198,8 @@ struct Scene3dEntry {
     NativeGlResource shadow_maps[SCENE_SHADOW_LIMIT], shadow_programs[2], shadow_blank;
     unsigned shadow_sizes[SCENE_SHADOW_LIMIT];
     uint64_t shadow_keys[SCENE_SHADOW_LIMIT];
+    Scene3dShaderProgram shader_programs[SCENE_SHADER_PROGRAM_LIMIT];
+    unsigned shader_program_count;
     Scene3dProjection projection;
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
@@ -346,6 +382,42 @@ bool scene3d_color(DomElement* node, const char* key, const char* fallback, floa
     if (!color_parse_hex(text,&r,&g,&b,&a)) return false;
     color[0]=scene3d_linear(r/255.0f); color[1]=scene3d_linear(g/255.0f);
     color[2]=scene3d_linear(b/255.0f); color[3]=a/255.0f; return true;
+}
+// 1 for numbers (or a color) written to `values`, 0 for any other text (a texture reference), -1 when malformed
+static int scene3d_uniform_value(ItemReader value, float* values, unsigned capacity, unsigned* count, bool* color) {
+    *count=0;*color=false;
+    if (value.isString() || value.isSymbol()) {
+        const char* text=value.isString()?value.cstring():value.asSymbol()->chars;
+        if (!text || text[0]!='#') return 0;
+        uint8_t r,g,b,a;
+        if (capacity<3 || !color_parse_hex(text,&r,&g,&b,&a)) return -1;
+        values[0]=scene3d_linear(r/255.0f);values[1]=scene3d_linear(g/255.0f);values[2]=scene3d_linear(b/255.0f);
+        *count=3;*color=true;return 1;
+    }
+    if (value.isArray()) {
+        ArrayReader array=value.asArray();int64_t length=array.length();
+        if (length<1 || (uint64_t)length>capacity) return -1;
+        for (int64_t i=0;i<length;i++) if (!scene3d_scalar(array.get(i),&values[i])) return -1;
+        *count=(unsigned)length;return 1;
+    }
+    if (capacity<1 || !scene3d_scalar(value,&values[0])) return -1;
+    *count=1;return 1;
+}
+bool scene3d_uniform_numbers(DomElement* material, const char* name, float* values, unsigned capacity,
+        unsigned* count, bool* color) {
+    ItemReader uniforms=scene3d_value(material,"uniforms");
+    if (!uniforms.isMap() || !uniforms.asMap().has(name)) return false;
+    return scene3d_uniform_value(uniforms.asMap().get(name),values,capacity,count,color)==1;
+}
+// a GLSL identifier the host prefix does not already declare
+static bool scene3d_shader_name(const char* name) {
+    static const char* reserved[]={"position","normal","uv","color","tangent","instance_matrix",
+        "model_matrix","view_matrix","projection_matrix","camera_position","fragment_color"};
+    size_t length=name?strlen(name):0;
+    if (!length || length>=SCENE_SHADER_NAME_LIMIT || !strncmp(name,"gl_",3) || isdigit((unsigned char)name[0])) return false;
+    for (size_t i=0;i<length;i++) if (!isalnum((unsigned char)name[i]) && name[i]!='_') return false;
+    for (const char* word:reserved) if (!strcmp(name,word)) return false;
+    return true;
 }
 static bool scene3d_resource(Scene3dBuild* build, NativeGlResource resource) {
     if (!resource.id) return scene3d_fail(build->entry, native_gl_diagnostic(build->entry->graphics));
@@ -556,6 +628,56 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
             if (((const uint8_t*)image->pixels)[y*image->pitch+x*4+3]!=255) { definition->texture_alpha=true;break; }
     *cached=texture; build->entry->projection.texture_count++; return texture;
 }
+// SH1: GLSL bodies, the drawing state they need, and the values of the uniforms they declare
+static Scene3dMaterial* scene3d_shader_material(Scene3dBuild* build, Scene3dDefinition* definition, Scene3dMaterial* material) {
+    DomElement* node=definition->source;Pool* pool=build->entry->projection.pool;
+    Scene3dShader* shader=(Scene3dShader*)pool_calloc(pool,sizeof(Scene3dShader));if (!shader) return nullptr;
+    shader->vertex=scene3d_text(node,"vertex");shader->fragment=scene3d_text(node,"fragment");
+    if (!shader->vertex || !shader->fragment || !*shader->vertex || !*shader->fragment) {
+        scene3d_fail(build->entry,"shader material requires vertex and fragment sources");return nullptr;
+    }
+    material->shader=shader;material->source=dom_node_ref(node);
+    for (unsigned c=0;c<4;c++) material->color[c]=1;
+    const char* side=scene3d_text(node,"side");
+    if ((side && strcmp(side,"front") && strcmp(side,"back") && strcmp(side,"double")) ||
+        !scene3d_flag(node,"transparent",false,&material->source_transparent) ||
+        !scene3d_flag(node,"alpha-to-coverage",false,&shader->alpha_to_coverage) || node->first_child) {
+        scene3d_fail(build->entry,"invalid shader material side, transparency or children");return nullptr;
+    }
+    material->side=side&&!strcmp(side,"double")?2:side&&!strcmp(side,"back")?1:0;
+    material->transparent=material->source_transparent;
+    ItemReader uniforms=scene3d_value(node,"uniforms");
+    if (!uniforms.isNull() && (!uniforms.isMap() || uniforms.asMap().size()>SCENE_SHADER_UNIFORM_LIMIT)) {
+        scene3d_fail(build->entry,"shader uniforms must be a map of at most 32 values");return nullptr;
+    }
+    // an empty map allocates nothing, which must not read as an allocation failure
+    if (uniforms.isNull() || !uniforms.asMap().size()) { definition->material=material;return material; }
+    shader->uniforms=(Scene3dShaderUniform*)pool_calloc(pool,uniforms.asMap().size()*sizeof(Scene3dShaderUniform));
+    if (!shader->uniforms) return nullptr;
+    unsigned samplers=0;float values[SCENE_SHADER_VALUE_LIMIT];
+    MapReader map=uniforms.asMap();MapReader::EntryIterator entries=map.entries();
+    const char* name;ItemReader value;
+    while (entries.next(&name,&value)) {
+        Scene3dShaderUniform* u=&shader->uniforms[shader->uniform_count++];
+        if (!scene3d_shader_name(name)) { scene3d_fail(build->entry,"invalid shader uniform name");return nullptr; }
+        str_copy(u->name,sizeof(u->name),name,strlen(name));
+        bool color;int kind=scene3d_uniform_value(value,values,SCENE_SHADER_VALUE_LIMIT,&u->length,&color);
+        if (kind<0) { scene3d_fail(build->entry,"invalid shader uniform value");return nullptr; }
+        if (kind==0) {
+            // any other text names the texture a sampler reads
+            const char* reference=value.isString()?value.cstring():value.asSymbol()->chars;
+            if (++samplers>SCENE_SHADER_SAMPLER_LIMIT) { scene3d_fail(build->entry,"shader sampler quota exceeded");return nullptr; }
+            Scene3dDefinition* texture=scene3d_definition(build,nullptr,reference,"texture");
+            u->texture=scene3d_texture(build,texture);if (!u->texture.id) return nullptr;
+            material->texture_hash=hash_fnv1a_64_extend(material->texture_hash,&texture->texture_hash,sizeof(uint64_t));
+            continue;
+        }
+        u->authored=(float*)pool_alloc(pool,u->length*sizeof(float));u->values=(float*)pool_alloc(pool,u->length*sizeof(float));
+        if (!u->authored || !u->values) return nullptr;
+        memcpy(u->authored,values,u->length*sizeof(float));memcpy(u->values,values,u->length*sizeof(float));
+    }
+    definition->material=material;return material;
+}
 static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition* definition) {
     if (!definition) { scene3d_fail(build->entry,"missing material reference"); return nullptr; }
     if (definition->material) return definition->material;
@@ -563,6 +685,7 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     Scene3dMaterial* material=(Scene3dMaterial*)pool_calloc(p->pool,sizeof(Scene3dMaterial)); if (!material) return nullptr;
     material->texture_hash=HASH_FNV1A_64_OFFSET_BASIS;
     const char* type=scene3d_text(node,"type");
+    if (type && !strcmp(type,"shader")) return scene3d_shader_material(build,definition,material);
     if (!type || (strcmp(type,"basic") && strcmp(type,"lambert") && strcmp(type,"standard"))) { scene3d_fail(build->entry,"unknown material type"); return nullptr; }
     material->lambert=!strcmp(type,"lambert"); material->standard=!strcmp(type,"standard"); float opacity;
     // glTF metallic-roughness: a dielectric by default, fully rough as in glTF
@@ -667,16 +790,101 @@ static bool scene3d_collect_bones(Scene3dBuild* build,Scene3dMesh* mesh,DomEleme
     return true;
 }
 
+// SH1: what the host declares ahead of a shader material's GLSL: the built-in vertex layout and the
+// camera. `#line 1` makes driver diagnostics count lines from the authored body.
+static const char* scene3d_shader_common = R"GLSL(#version 330 core
+uniform mat4 model_matrix, view_matrix, projection_matrix;
+uniform vec3 camera_position;
+)GLSL";
+static const char* scene3d_shader_inputs = R"GLSL(layout(location=0) in vec3 position;
+layout(location=1) in vec3 normal;
+layout(location=2) in vec2 uv;
+layout(location=3) in vec3 color;
+layout(location=4) in mat4 instance_matrix;
+layout(location=14) in vec4 tangent;
+)GLSL";
+// GL uniform types a shader material may declare (glGetActiveUniform)
+static constexpr unsigned SCENE_GL_FLOAT = 0x1406, SCENE_GL_VEC2 = 0x8B50, SCENE_GL_VEC3 = 0x8B51, SCENE_GL_VEC4 = 0x8B52,
+    SCENE_GL_MAT4 = 0x8B5C, SCENE_GL_SAMPLER_2D = 0x8B5E;
+
+// every active uniform the program declares beyond the host's needs an authored value of its type
+static bool scene3d_shader_validate(Scene3dBuild* build, Scene3dShader* shader, NativeGlResource program) {
+    NativeGlContext* graphics=build->entry->graphics;char message[160];
+    for (unsigned i=0,count=native_gl_uniform_count(graphics,program);i<count;i++) {
+        char name[64];unsigned type;int size;
+        if (!native_gl_uniform_info(graphics,program,i,name,sizeof(name),&type,&size)) return scene3d_fail(build->entry,"shader uniform reflection failed");
+        char* bracket=strchr(name,'[');if (bracket) *bracket=0;
+        if (!strncmp(name,"gl_",3) || !strcmp(name,"model_matrix") || !strcmp(name,"view_matrix") ||
+            !strcmp(name,"projection_matrix") || !strcmp(name,"camera_position")) continue;
+        Scene3dShaderUniform* u=nullptr;
+        for (unsigned k=0;k<shader->uniform_count && !u;k++) if (!strcmp(shader->uniforms[k].name,name)) u=&shader->uniforms[k];
+        unsigned components=type==SCENE_GL_FLOAT?1:type==SCENE_GL_VEC2?2:type==SCENE_GL_VEC3?3:type==SCENE_GL_VEC4?4:type==SCENE_GL_MAT4?16:0;
+        const char* problem=!u?"has no value":type==SCENE_GL_SAMPLER_2D?(u->texture.id?nullptr:"needs a texture"):
+            !components?"has an unsupported type":u->texture.id||u->length!=components*(unsigned)size?"does not match its declared type":
+            u->components&&u->components!=components?"is declared differently by another program":nullptr;
+        if (problem) { snprintf(message,sizeof(message),"shader uniform %s %s",name,problem);return scene3d_fail(build->entry,message); }
+        if (components) u->components=components;
+    }
+    return true;
+}
+// SH6: the projection under construction reuses a program linked by an earlier one
+static NativeGlResource scene3d_shader_program(Scene3dBuild* build, Scene3dShader* shader,
+        const Scene3dInstanceData* data, unsigned data_count) {
+    Scene3dEntry* entry=build->entry;
+    static const char* types[]={"float","vec2","vec3","vec4"};
+    StrBuf* vertex=strbuf_new();strbuf_append_str(vertex,scene3d_shader_common);strbuf_append_str(vertex,scene3d_shader_inputs);
+    for (unsigned i=0;i<data_count;i++)
+        strbuf_append_format(vertex,"layout(location=%u) in %s %s;\n",8+i,types[data[i].components-1],data[i].name);
+    strbuf_append_str(vertex,"#line 1\n");strbuf_append_str(vertex,shader->vertex);
+    StrBuf* fragment=strbuf_new();strbuf_append_str(fragment,scene3d_shader_common);
+    strbuf_append_str(fragment,"out vec4 fragment_color;\n#line 1\n");strbuf_append_str(fragment,shader->fragment);
+    uint64_t key=hash_fnv1a_64_extend_cstr(hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS,vertex->str),fragment->str);
+    NativeGlResource program={};
+    for (unsigned i=0;i<entry->shader_program_count && !program.id;i++) if (entry->shader_programs[i].key==key) {
+        entry->shader_programs[i].generation=entry->projection_generation+1;program=entry->shader_programs[i].program;
+    }
+    if (!program.id && entry->shader_program_count>=SCENE_SHADER_PROGRAM_LIMIT) scene3d_fail(entry,"shader program quota exceeded");
+    else if (!program.id) {
+        program=native_gl_program(entry->graphics,vertex->str,fragment->str);
+        if (program.id) {
+            entry->shader_programs[entry->shader_program_count++]={key,entry->projection_generation+1,program};
+            entry->stats.shader_links++;
+        }
+        else {
+            char message[2048];snprintf(message,sizeof(message),"shader material: %s",native_gl_diagnostic(entry->graphics));
+            scene3d_fail(entry,message);
+        }
+    }
+    strbuf_free(vertex);strbuf_free(fragment);
+    if (program.id && !scene3d_shader_validate(build,shader,program)) return {};
+    return program;
+}
+// programs the finished projection no longer uses are released; a failed one keeps them all
+static void scene3d_shader_prune(Scene3dEntry* entry) {
+    unsigned kept=0;
+    for (unsigned i=0;i<entry->shader_program_count;i++) {
+        if (entry->shader_programs[i].generation==entry->projection_generation) entry->shader_programs[kept++]=entry->shader_programs[i];
+        else native_gl_release(entry->graphics,entry->shader_programs[i].program);
+    }
+    entry->shader_program_count=kept;entry->stats.shader_programs=kept;
+}
+
 static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, Scene3dMaterial* material,
     const Scene3dMatrix& world, const float* matrices, unsigned count, bool clockwise,
-    const Scene3dMatrix& local_instance=scene3d_identity()) {
+    const Scene3dMatrix& local_instance=scene3d_identity(), const Scene3dInstanceData* data=nullptr, unsigned data_count=0) {
     Scene3dProjection* p=&build->entry->projection;
     if (p->mesh_count>=SCENE_NODE_LIMIT) return scene3d_fail(build->entry,"draw record quota exceeded");
     Scene3dMesh* mesh=(Scene3dMesh*)pool_calloc(p->pool,sizeof(Scene3dMesh)); if (!mesh) return false;
     mesh->geometry=geometry;mesh->material=material;mesh->world=world;mesh->clockwise=clockwise;mesh->instance_count=count;
     mesh->source=dom_node_ref(build->mesh_source);mesh->local_instance=local_instance;mesh->visible=true;
     mesh->layer=build->layer;mesh->instance_hash=matrices?hashmap_xxhash3(matrices,count*16*sizeof(float),count,0):0;
+    for (unsigned i=0;i<data_count;i++)
+        mesh->instance_hash=hashmap_xxhash3(data[i].values,count*data[i].components*sizeof(float),mesh->instance_hash,0);
     mesh->instance_matrices=matrices;
+    bool shaded=material->shader!=nullptr;
+    // the host prefix declares no deformation lanes; the vertex shader owns every displacement
+    if (shaded && (geometry->bone_index_count || geometry->morph_count || scene3d_text(build->mesh_source,"skeleton")))
+        return scene3d_fail(build->entry,"shader materials cannot draw skinned or morphed geometry");
     // SP3: meshes cast and receive unless they opt out; it matters only once a light casts
     if (!scene3d_flag(build->mesh_source,"cast-shadow",true,&mesh->cast_shadow) ||
         !scene3d_flag(build->mesh_source,"receive-shadow",true,&mesh->receive_shadow))
@@ -710,7 +918,7 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
         if(!scene3d_resource(build,mesh->palette)) return false;
     }
     bool unit=!matrices;
-    if (unit && geometry->unit_vertices.id) mesh->vertices=geometry->unit_vertices;
+    if (unit && !shaded && geometry->unit_vertices.id) mesh->vertices=geometry->unit_vertices;
     else {
         if (unit && !p->identity.id) {
             Scene3dMatrix identity=scene3d_identity();
@@ -725,7 +933,14 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
             attributes[attribute_count++]={geometry->vertices,i,components[i],geometry->vertex_stride,offsets[i],0};
         if(geometry->has_tangents)
             attributes[attribute_count++]={geometry->vertices,14,4,geometry->vertex_stride,(unsigned)offsetof(Scene3dVertex,tangent),0};
-        for(unsigned i=0;i<4;i++) attributes[attribute_count++]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),1};
+        // SH3: `instance-count` instances without matrices all read the one identity matrix
+        unsigned divisor=unit&&count>1?count:1;
+        for(unsigned i=0;i<4;i++) attributes[attribute_count++]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),divisor};
+        for(unsigned i=0;i<data_count;i++) {
+            NativeGlResource buffer=native_gl_buffer(build->entry->graphics,data[i].values,count*data[i].components*sizeof(float),false);
+            if (!scene3d_resource(build,buffer)) return false;
+            attributes[attribute_count++]={buffer,8+i,data[i].components,0,0,1};
+        }
         if(geometry->bone_index_count||geometry->morph_count) {
             const unsigned deformation_offsets[]={offsetof(Scene3dVertex,skin_indices),offsetof(Scene3dVertex,skin_weights),
                 offsetof(Scene3dVertex,morph_positions),offsetof(Scene3dVertex,morph_positions)+3*sizeof(float),
@@ -734,8 +949,9 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
         }
         mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,attribute_count,geometry->indices);
         if (!scene3d_resource(build,mesh->vertices)) return false;
-        if (unit) geometry->unit_vertices=mesh->vertices;
+        if (unit && !shaded) geometry->unit_vertices=mesh->vertices;
     }
+    if (shaded && !(mesh->program=scene3d_shader_program(build,material->shader,data,data_count)).id) return false;
     if (!lam::pool_grow_array(p->pool,&p->meshes,&p->mesh_capacity,p->mesh_count+1,16)) return false;
     mesh->order=p->mesh_count;p->meshes[p->mesh_count++]=mesh;return true;
 }
@@ -771,7 +987,36 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
         }
     } else if (!scene3d_numbers(node,"instances",p->pool,&matrices,&count,SCENE_INSTANCE_LIMIT*16))
         return scene3d_fail(build->entry,"invalid instance data");
+    Scene3dInstanceData data[SCENE_INSTANCE_DATA_LIMIT];unsigned data_count=0,instances=0;
+    if (material->shader) {
+        // SH3: `instance-count` draws instances the vertex shader places itself, beside optional matrices
+        float requested;bool counted=node->has_attribute("instance-count")||!scene3d_value(node,"instance-count").isNull();
+        if (!scene3d_number(node,"instance-count",1,&requested) || requested<1 || requested>SCENE_INSTANCE_LIMIT ||
+            floorf(requested)!=requested || (counted && count) || count%16)
+            return scene3d_fail(build->entry,"instance-count must be an integer in 1..16384 without instance matrices");
+        instances=count?count/16:(unsigned)requested;
+        ItemReader authored=scene3d_value(node,"instance-data");
+        if (!authored.isNull()) {
+            if (!authored.isMap() || authored.asMap().size()>SCENE_INSTANCE_DATA_LIMIT)
+                return scene3d_fail(build->entry,"instance-data must be a map of at most 6 attributes");
+            // the iterator points at its reader, which must outlive it
+            MapReader map=authored.asMap();MapReader::EntryIterator entries=map.entries();const char* name;ItemReader value;
+            while (entries.next(&name,&value)) {
+                Scene3dInstanceData* d=&data[data_count++];
+                int64_t length=value.isArray()?value.asArray().length():-1;
+                if (!scene3d_shader_name(name) || length<instances || length>4*(int64_t)instances || length%instances)
+                    return scene3d_fail(build->entry,"instance data needs 1 to 4 numbers per instance under a GLSL name");
+                float* values=(float*)pool_alloc(p->pool,length*sizeof(float));if (!values) return false;
+                for (int64_t i=0;i<length;i++) if (!scene3d_scalar(value.asArray().get(i),&values[i]))
+                    return scene3d_fail(build->entry,"invalid instance data value");
+                str_copy(d->name,sizeof(d->name),name,strlen(name));d->values=values;d->components=(unsigned)(length/instances);
+            }
+        }
+    } else if (node->has_attribute("instance-count") || !scene3d_value(node,"instance-count").isNull() ||
+        !scene3d_value(node,"instance-data").isNull())
+        return scene3d_fail(build->entry,"instance-count and instance-data require a shader material");
     Scene3dMatrix identity=scene3d_identity();
+    bool authored_matrices=count!=0;
     if (!count) { matrices=identity.v; count=16; }
     if (count%16) return scene3d_fail(build->entry,"instances require 16-component matrices");
     for (unsigned i=0;i<count;i+=16) {
@@ -786,6 +1031,9 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
         float combined_det=scene3d_determinant(combined.v);
         if (!isfinite(combined_det) || combined_det==0) return scene3d_fail(build->entry,"mesh normal transform is singular or overflows");
     }
+    // the GPU places shader instances, so they stay one batch: neither sorted nor split by winding
+    if (material->shader) return scene3d_mesh_record(build,geometry,material,world,authored_matrices?matrices:nullptr,instances,
+        scene3d_determinant(world.v)<0,scene3d_identity(),data,data_count);
     // transparent instances need individual world bounds for global back-to-front ordering.
     // mirrored opaque instances share each winding batch so culling stays correct.
     if (count==16 || material->transparent) {
@@ -991,6 +1239,17 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
             }
         }
         auto* material=mesh->material;DomNode* source=dom_node_ref_validate(root->doc,material->source);float opacity;
+        // SH2: a uniform reads its authored value unless a playing track drives `uniforms.<name>`
+        if(source&&source->is_element()&&material->shader) for(unsigned u=0;u<material->shader->uniform_count;u++) {
+            Scene3dShaderUniform* uniform=&material->shader->uniforms[u];
+            if(uniform->texture.id) continue;
+            memcpy(uniform->values,uniform->authored,uniform->length*sizeof(float));
+            char property[32];snprintf(property,sizeof(property),"uniforms.%s",uniform->name);AnimationValue value={};
+            if(scene3d_animation_value(entry->animation,source->as_element(),property,&value)) {
+                if(value.count!=uniform->length) return false;
+                for(unsigned c=0;c<value.count;c++) uniform->values[c]=(float)value.numbers[c];
+            }
+        }
         if(!source||!source->is_element()||!scene3d_animated_color(entry,source->as_element(),material->color)||
             !scene3d_animated_number(entry,source->as_element(),"opacity",1,&opacity)||opacity<0||opacity>1) return false;
         material->color[3]*=opacity;material->transparent=!material->force_opaque&&(material->source_transparent||material->color[3]<1);
@@ -1121,6 +1380,7 @@ void scene3d_context_lost(DomElement* root) {
     e->environment_atlas={};e->environment_pingpong={};e->environment_filter={};e->environment_key=0;
     e->shadow_programs[0]={};e->shadow_programs[1]={};e->shadow_blank={};
     for (unsigned s=0;s<SCENE_SHADOW_LIMIT;s++) { e->shadow_maps[s]={};e->shadow_sizes[s]=0;e->shadow_keys[s]=0; }
+    e->shader_program_count=0;
     for (NativeGlResource& plane:e->environment_planes) plane={};
 }
 
@@ -1611,7 +1871,7 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
     if (!valid) { if (!entry->diagnostic[0]) scene3d_fail(entry,"invalid scene description"); return false; }
     if (!p->camera_found) return scene3d_fail(entry,"active camera is missing");
     if (build.environment && !p->environment.address) return scene3d_fail(entry,"scene environment names no environment element");
-    entry->projection_generation++; return true;
+    entry->projection_generation++;scene3d_shader_prune(entry);return true;
 }
 static int scene3d_draw_compare(const void* a, const void* b) {
     const Scene3dMesh* left=*(Scene3dMesh* const*)a;const Scene3dMesh* right=*(Scene3dMesh* const*)b;
@@ -1635,9 +1895,29 @@ struct Scene3dPass {
     bool environment; // standard and Lambert materials take light from the prefiltered environment
     const Scene3dShadows* shadows; // the casting lights whose maps standard and Lambert materials read, if any
     uint64_t frame;   // the pass's scene uniforms are set once per variant per frame
+    Scene3dMatrix clip; // the lens alone (`projection` is clip × view), for shader materials
 };
+// SH1: a shader material sees the camera as separate view and projection matrices, then its own uniforms
+static bool scene3d_draw_shader(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
+    const Scene3dShader* shader=mesh->material->shader;NativeGlResource program=mesh->program;
+    Scene3dMatrix camera;if (!scene3d_inverse_affine(pass.view,&camera)) return false;
+    if (!scene3d_uniform(entry,program,"model_matrix",mesh->world.v,16) || !scene3d_uniform(entry,program,"view_matrix",pass.view.v,16) ||
+        !scene3d_uniform(entry,program,"projection_matrix",pass.clip.v,16) || !scene3d_uniform(entry,program,"camera_position",camera.v+12,3))
+        return false;
+    NativeGlDraw draw={program,mesh->vertices,
+        mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
+        mesh->geometry->index_count!=0,mesh->material->transparent,mesh->material->side,mesh->clockwise};
+    draw.alpha_to_coverage=shader->alpha_to_coverage;
+    for (unsigned i=0;i<shader->uniform_count;i++) {
+        const Scene3dShaderUniform* u=&shader->uniforms[i];
+        if (u->texture.id) draw.bindings[draw.binding_count++]={u->name,u->texture,NATIVE_GL_BIND_TEXTURE};
+        else if (u->components && !scene3d_uniform(entry,program,u->name,u->values,u->components,u->length/u->components)) return false;
+    }
+    return native_gl_draw(entry->graphics,&draw);
+}
 static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
     Scene3dMaterial* material=mesh->material;
+    if (material->shader) return scene3d_draw_shader(entry,pass,mesh);
     bool lit=pass.environment&&(material->standard||material->lambert);
     bool shaded=pass.shadows&&pass.shadows->count&&(material->standard||material->lambert);
     unsigned variant=scene3d_variant(material->standard,pass.tone,material->alpha_cutoff>0,lit,shaded);
@@ -1719,6 +1999,11 @@ static uint64_t scene3d_mesh_key(uint64_t key, const Scene3dMesh* mesh) {
     add(m->color,sizeof(m->color));add(m->emissive,sizeof(m->emissive));add(m->pbr,sizeof(m->pbr));
     add(&m->normal_scale,sizeof(float));add(&m->occlusion_strength,sizeof(float));add(&m->alpha_cutoff,sizeof(float));
     add(&m->texture_hash,sizeof(uint64_t));add(&m->side,sizeof(int));
+    if (m->shader) {
+        add(&mesh->program.id,sizeof(uint64_t));
+        for (unsigned i=0;i<m->shader->uniform_count;i++) if (m->shader->uniforms[i].values)
+            add(m->shader->uniforms[i].values,m->shader->uniforms[i].length*sizeof(float));
+    }
     bool flags[]={m->lambert,m->standard,m->transparent,m->force_opaque,m->depth_only,m->normal_map.id!=0,mesh->cast_shadow};
     add(flags,sizeof(flags));
     return key;
@@ -1802,7 +2087,7 @@ static bool scene3d_environment_capture(Scene3dEntry* entry, DomElement* root) {
         Scene3dPass pass={&p->environment_lights,{},{},{origin.x,origin.y,origin.z,1},1,0,0,false,nullptr,++entry->frame};
         if (!scene3d_camera(origin,{origin.x+forward.x,origin.y+forward.y,origin.z+forward.z},up,&pass.view))
             return scene3d_fail(entry,"degenerate environment capture camera");
-        pass.projection=scene3d_multiply(lens,pass.view);
+        pass.projection=scene3d_multiply(lens,pass.view);pass.clip=lens;
         if (!native_gl_begin_region(graphics,entry->environment_atlas,column*SCENE_ENV_SIZE,face>2?SCENE_ENV_SIZE:0,
             SCENE_ENV_SIZE,SCENE_ENV_SIZE,p->environment_background)) return scene3d_fail(entry,native_gl_diagnostic(graphics));
         for (int i=0;i<p->mesh_count;i++) {
@@ -1849,8 +2134,9 @@ static void scene3d_mesh_bounds(const Scene3dMesh* mesh, const Scene3dMatrix& vi
     }
 }
 static bool scene3d_casts(const Scene3dMesh* mesh) {
-    // blended (glass) and depth-only surfaces cast nothing
-    return mesh->layer==SCENE_LAYER_SCENE && mesh->visible && mesh->cast_shadow && !mesh->material->transparent && !mesh->material->depth_only;
+    // blended (glass) and depth-only surfaces cast nothing; the depth pass cannot run a shader material's vertex stage
+    return mesh->layer==SCENE_LAYER_SCENE && mesh->visible && mesh->cast_shadow && !mesh->material->transparent &&
+        !mesh->material->depth_only && !mesh->material->shader;
 }
 // Fit a casting light's camera as Three.js r186 places it (at the light, looking at its target, up
 // +y), its frustum around the casters and receivers unless the light gives an extent or reach.
@@ -1999,9 +2285,8 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     Scene3dVec up=p->camera_has_target?p->camera_up:scene3d_point(p->camera_world,{0,1,0},0);
     Scene3dMatrix view;
     if (!scene3d_camera(eye,target,up,&view)) { scene3d_fail(entry,"camera orientation is degenerate");scene3d_retire_snapshot(entry);return nullptr; }
-    Scene3dMatrix projection=scene3d_multiply(p->orthographic?
-        scene3d_orthographic(p->view_height,aspect,p->near_plane,p->far_plane):
-        scene3d_perspective(p->fov,aspect,p->near_plane,p->far_plane),view);
+    Scene3dMatrix lens=p->orthographic?scene3d_orthographic(p->view_height,aspect,p->near_plane,p->far_plane):
+        scene3d_perspective(p->fov,aspect,p->near_plane,p->far_plane);
     if (vb.has_viewbox) {
         RdtMatrix fit=svg_viewbox_transform(&vb,width,height,scene3d_text(root,"preserveAspectRatio"));
         if (!scene3d_text(root,"preserveAspectRatio")) fit=svg_viewbox_transform(&vb,width,height,scene3d_text(root,"preserveaspectratio"));
@@ -2009,8 +2294,9 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         frame.v[0]=fit.e11*vb.width/width;frame.v[5]=fit.e22*vb.height/height;
         frame.v[12]=fit.e11*vb.width/width+2*fit.e13/width-1;
         frame.v[13]=1-fit.e22*vb.height/height-2*fit.e23/height;
-        projection=scene3d_multiply(frame,projection);
+        lens=scene3d_multiply(frame,lens);
     }
+    Scene3dMatrix projection=scene3d_multiply(lens,view);
     // the environment capture and shadow maps first: the capture reuses the draw-record order, which
     // the view pass then re-sorts
     if (!scene3d_environment_capture(entry,root) || !scene3d_shadow_passes(entry)) { scene3d_retire_snapshot(entry);return nullptr; }
@@ -2020,7 +2306,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     Scene3dVec toward=scene3d_sub(eye,target);scene3d_normalize(&toward);
     Scene3dPass pass={&p->lights,projection,view,
         {p->orthographic?toward.x:eye.x,p->orthographic?toward.y:eye.y,p->orthographic?toward.z:eye.z,p->orthographic?0.f:1.f},
-        p->exposure,p->environment_intensity,(unsigned)p->tone_mapping,p->environment.address!=nullptr,&p->shadows,++entry->frame};
+        p->exposure,p->environment_intensity,(unsigned)p->tone_mapping,p->environment.address!=nullptr,&p->shadows,++entry->frame,lens};
     bool rendered=native_gl_begin(entry->graphics,entry->target,p->background);
     for (int i=0;rendered && i<p->mesh_count;i++)
         if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE) rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);

@@ -39,6 +39,7 @@
 {"MotionControllerCrossfadesChainsAndReplays", "test/scene3d/motion-control.ls", "test/scene3d/events/MotionControllerCrossfadesChainsAndReplays.json", 33},
 {"MotionControllerRejectsInvalidStates", "test/scene3d/motion-control-invalid.ls", "test/scene3d/events/MotionControllerRejectsInvalidStates.json", 8},
 {"PhysicsWorldReconcilesAuthoredEditsAcrossTemplateRerenders", "test/scene3d/physics-rerender.ls", "test/scene3d/events/PhysicsWorldReconcilesAuthoredEditsAcrossTemplateRerenders.json", 35},
+{"ShaderMaterialPlacesInstancesAnimatesUniformsAndKeepsItsProgram", "test/scene3d/shader-material.ls", "test/scene3d/events/ShaderMaterialPlacesInstancesAnimatesUniformsAndKeepsItsProgram.json", 24},
 {"TransparentSceneCompositesOverSvgAndAntialiasesEdges", "test/scene3d/events/TransparentSceneCompositesOverSvgAndAntialiasesEdges.html", "test/scene3d/events/TransparentSceneCompositesOverSvgAndAntialiasesEdges.json", 5},
 {"OpaqueDepthCullingAndBufferVertexColorsDeterminePixels", "test/scene3d/events/OpaqueDepthCullingAndBufferVertexColorsDeterminePixels.html", "test/scene3d/events/OpaqueDepthCullingAndBufferVertexColorsDeterminePixels.json", 9},
 {"TypedTextAttributesCannotSilentlyUseDefaultMaterialColor", "test/scene3d/events/TypedTextAttributesCannotSilentlyUseDefaultMaterialColor.ls", "test/scene3d/events/TypedTextAttributesCannotSilentlyUseDefaultMaterialColor.json", 1},
