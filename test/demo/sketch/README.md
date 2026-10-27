@@ -122,8 +122,11 @@ width/height edits. Object opacity and layer visibility, locking, opacity,
 renaming, ordering and deletion work as usual. Fill, stroke and text controls
 do not change raster pixels. Each insertion or completed edit is undoable.
 
-Images are decoded and embedded as PNG data, preserving transparency and
-normalizing source orientation. The original file can move or disappear after
+Images are decoded for validation and embedded as PNG data, preserving transparency.
+Existing PNG bytes and color profiles are retained, so screenshots copied from
+Preview or the macOS screenshot thumbnail can be placed without entering the
+sRGB-only painting compositor. Other supported formats are converted to PNG and
+their source orientation normalized. The original file can move or disappear after
 import: project files and exported SVGs contain the image bytes. PNG, JPEG
 and other still formats supported by `lambda.image` can be imported. Animated
 images are rejected. Limits are 16 million decoded pixels, 32 MB per encoded

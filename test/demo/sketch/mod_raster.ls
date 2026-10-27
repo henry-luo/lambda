@@ -14,7 +14,8 @@ fn still(bytes) any^ {
 }
 pub fn from_bytes(bytes,label="Image") any^ {
     let decoded = still(bytes)^
-    let png = image.encode(decoded,{format:'png'})^
+    // PNG is already an embeddable asset; keep its profile instead of compositing unknown-color samples.
+    let png = if (image.assets(decoded)[0].format=="png") bytes else image.encode(decoded,{format:'png'})^
     let checked_png = if (len(png)>MAX_SOURCE) raise error("Sketch: the decoded image is too large to embed.")
     {src:media.data_uri(png,"image/png")^,image_width:decoded.width,image_height:decoded.height,image_name:label}
 }

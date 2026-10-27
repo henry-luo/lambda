@@ -1,0 +1,256 @@
+{
+  "name": "Sketch pastes screenshot PNG profiles, preserves pixels and exports embedded data",
+  "html": "test/demo/sketch/sketch.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-select"
+      }
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#stage"
+      }
+    },
+    {
+      "type": "paste_image",
+      "file": "test/ui/sketch/fixtures/profiled.png"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-selected",
+      "equals": "o3"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#object-o3 image"
+      },
+      "attribute": "width",
+      "equals": "128"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#object-o3 image"
+      },
+      "attribute": "height",
+      "equals": "96"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage"
+      },
+      "min_r": 230,
+      "max_r": 245,
+      "min_g": 130,
+      "max_g": 160,
+      "min_b": 135,
+      "max_b": 165
+    },
+    {
+      "type": "key_combo",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "key_combo",
+      "key": "v",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-layers",
+      "equals": "3"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "clear": true,
+      "text": "temp/sketch/profiled.sketch"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "clear": true,
+      "text": "temp/sketch/profiled.svg"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "clear": true,
+      "text": "temp/sketch/profiled.sketch"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#artwork image"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sketch"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "render",
+      "file": "temp/sketch/profiled.png"
+    }
+  ]
+}
