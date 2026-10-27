@@ -2758,7 +2758,8 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         lycon->block.line_number >= lycon->block.line_clamp &&
         !lycon->block.line_clamped;
     // CSS 2.1 10.8.1: Track last line's baseline offset for inline-block baseline alignment.
-    lycon->block.last_line_ascender = lycon->block.advance_y - used_line_height + lycon->line.max_ascender;
+    lycon->block.last_line_ascender = lycon->block.advance_y - used_line_height +
+        layout_line_block_start_baseline(lycon, used_line_height);
     // CSS Flexbox §9.4: Track first line's baseline offset for flex baseline alignment.
     if (lycon->block.first_line_ascender == 0) {
         lycon->block.first_line_ascender = lycon->block.last_line_ascender;

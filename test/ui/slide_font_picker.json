@@ -1,0 +1,307 @@
+{
+  "name": "Slides shared font previews, keyboard and pointer selection, undo and inline editing",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-font-family-trigger').disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.getElementById('home-font-family-trigger').disabled"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#word-font-search"
+      }
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 8000,
+      "js": "document.querySelectorAll('.font-picker-row').length>0&&document.querySelectorAll('.font-picker-row').length<=12&&[...document.querySelectorAll('.font-picker-row')].every(n=>n.getAttribute('data-font-preview')==='true'&&getComputedStyle(n).fontFamily.includes(n.getAttribute('data-font-family')))"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides-font-picker/open.png"
+    },
+    {
+      "type": "assert_script",
+      "js": "[...document.querySelectorAll('.font-picker-row')].every(n=>n.textContent===n.getAttribute('data-font-family'))",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
+      },
+      "text": "Georgia",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_script",
+      "assert_timeout": 8000,
+      "js": "document.getElementById('home-font-family').value==='Georgia'&&document.getElementById('home-font-family-trigger').textContent.includes('Georgia')&&getComputedStyle(document.querySelector('#slide-render [data-slide-object=headline] .slide-text')).fontFamily.includes('Georgia')"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides-font-picker/applied.png"
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "count": 1
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-font-family').value==='Arial, sans-serif'&&document.getElementById('home-font-family-trigger').textContent.includes('Arial, sans-serif')",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_combo",
+      "key": "y",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"home-font-family\").value===\"Georgia\"&&document.getElementById(\"home-font-family-trigger\").textContent.includes(\"Georgia\")&&getComputedStyle(document.querySelector(\"#slide-render [data-slide-object=headline] .slide-text\")).fontFamily.includes(\"Georgia\")",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
+      },
+      "text": "Courier New",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".font-picker-row[data-font-family=\"Courier New\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"home-font-family\").value===\"Courier New\"&&document.getElementById(\"home-font-family-trigger\").textContent.includes(\"Courier New\")&&getComputedStyle(document.querySelector(\"#slide-render [data-slide-object=headline] .slide-text\")).fontFamily.includes(\"Courier New\")",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-style"
+      },
+      "text": "font-family:Missing Preview Face;",
+      "clear": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-font-family').value==='Missing Preview Face'&&document.getElementById('home-font-family-trigger').textContent.includes('Missing Preview Face')",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.font-picker-row[aria-selected=true]').getAttribute('data-font-family')==='Missing Preview Face'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
+      },
+      "text": "Georgia",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"home-font-family\").value===\"Georgia\"&&document.getElementById(\"home-font-family-trigger\").textContent.includes(\"Georgia\")&&getComputedStyle(document.querySelector(\"#slide-render [data-slide-object=headline] .slide-text\")).fontFamily.includes(\"Georgia\")",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
+      },
+      "text": "zznotafontzz",
+      "clear": true
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".font-picker-row"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.font-picker-row[aria-selected=true]').getAttribute('aria-posinset')===document.getElementById('word-font-picker').getAttribute('data-total')&&document.querySelectorAll('.font-picker-row').length<=12",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.font-picker-row[aria-selected=true]').getAttribute('aria-posinset')==='1'",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#canvas-text"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#canvas-text"
+      },
+      "text": "Edited with the font picker",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-font-family-trigger"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-font-search"
+      },
+      "text": "Arial",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".font-picker-row[data-font-family=\"Arial\"]"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"home-font-family\").value===\"Arial\"&&document.getElementById(\"home-font-family-trigger\").textContent.includes(\"Arial\")&&getComputedStyle(document.querySelector(\"#slide-render [data-slide-object=headline] .slide-text\")).fontFamily.includes(\"Arial\")",
+      "assert_timeout": 8000
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render [data-slide-object=headline]"
+      },
+      "contains": "Edited with the font picker"
+    },
+    {
+      "type": "render",
+      "file": "temp/slides-font-picker/edited.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 4,
+        "offset_y": 4
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('home-font-family-trigger').disabled",
+      "assert_timeout": 8000
+    }
+  ]
+}

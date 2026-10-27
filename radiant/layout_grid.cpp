@@ -100,8 +100,36 @@ float layout_grid_row_border_box_extent(ViewBlock* container,
     if (grid_layout->row_intrinsic_height > 0.0f) {
         content_extent = grid_layout->row_intrinsic_height;
     }
-    return content_extent + layout_axis_box_metrics(container, LAYOUT_AXIS_Y).pad_border;
+    return content_extent + layout_axis_box_metrics(
+        container, layout_grid_track_axis(grid_layout, false)).pad_border;
 }
+void layout_grid_resolve_container_size(GridContainerLayout* grid) {
+    if (!grid || !grid->container) return;
+    ViewBlock* container = grid->container;
+    if (grid->is_shrink_to_fit_width || grid->is_min_content_width || grid->is_max_content_width) {
+        LayoutAxis axis = layout_grid_track_axis(grid, true);
+        float extent = layout_border_size_from_content_box(container, grid->content_width, axis == LAYOUT_AXIS_X);
+        layout_axis_set_size(container, axis, extent);
+        grid->container_width = extent;
+    }
+    LayoutAxis axis = layout_grid_track_axis(grid, false);
+    bool ratio_auto_block = axis == LAYOUT_AXIS_Y && container->blk &&
+        container->block()->aspect_ratio_auto_height &&
+        layout_explicit_min_axis_or(container, false, -1.0f) < 0.0f &&
+        layout_intrinsic_min_size_keyword(container, false) == CSS_VALUE__UNDEF &&
+        (!container->scroller ||
+         !layout_overflow_establishes_scroll_container(container->scroll()->overflow_y));
+    bool assigned_block = grid->lycon && grid->lycon->block.used_size_owner.get() == container;
+    if ((!grid->has_explicit_height || ratio_auto_block) && !assigned_block &&
+        !layout_block_has_size_containment_in_axis(container, axis == LAYOUT_AXIS_X)) {
+        float extent = layout_grid_row_border_box_extent(container, grid);
+        extent = layout_apply_min_max_axis(container, extent, axis == LAYOUT_AXIS_X, true);
+        layout_axis_set_size(container, axis, extent);
+        grid->container_height = extent;
+        grid->content_height = layout_content_size_from_border_box(container, extent, axis == LAYOUT_AXIS_X);
+    }
+}
+
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (!lycon || !container) return;
@@ -134,6 +162,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->row_gap = 0;
         grid->column_gap = 0;
     }
+    grid->container = lam::up(container);
     // Pass-local mutations must never alias the persistent CSS GridProp graph;
     // clone every area and name into this container's scratch lifetime.
     GridArea* source_areas = grid->grid_areas;
@@ -274,34 +303,47 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container, bool intr
     }
 
     GridContainerLayout* grid_layout = lycon->grid_container;
+    LayoutAxis column_axis = layout_grid_track_axis(grid_layout, true);
+    LayoutAxis row_axis = layout_grid_track_axis(grid_layout, false);
+    bool inline_horizontal = column_axis == LAYOUT_AXIS_X;
     // Check if container is shrink-to-fit (absolutely positioned with no explicit width,
     // or inline-grid which uses shrink-to-fit sizing)
-    bool is_shrink_to_fit_width = layout_is_shrink_to_fit_width(container);
+    bool is_shrink_to_fit_width = layout_is_shrink_to_fit_axis(container, column_axis);
     grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
     // An intrinsic width keyword constrains track sizing itself; treating its
     // post-layout used width as definite incorrectly lets auto tracks consume free space.
     bool contain_size_has_inline_fallback =
-        layout_block_has_size_containment_in_axis(container, true) &&
-        container->block()->contain_intrinsic_width >= 0.0f;
+        layout_block_has_size_containment_in_axis(container, inline_horizontal) &&
+        (inline_horizontal ? container->block()->contain_intrinsic_width
+                           : container->block()->contain_intrinsic_height) >= 0.0f;
     // Size containment resolves an intrinsic width keyword to its intrinsic-size
     // fallback before grid sizing; tracks then use that definite available width.
     grid_layout->is_min_content_width = !contain_size_has_inline_fallback &&
-        (lycon->available_space.is_width_min_content() ||
-         (container->blk && container->block()->given_width_type == CSS_VALUE_MIN_CONTENT));
+        ((inline_horizontal ? lycon->available_space.width : lycon->available_space.height).is_min_content() ||
+         layout_axis_given_type(container->blk, column_axis) == CSS_VALUE_MIN_CONTENT);
     grid_layout->is_max_content_width = !contain_size_has_inline_fallback &&
-        (lycon->available_space.is_width_max_content() ||
-         (container->blk && container->block()->given_width_type == CSS_VALUE_MAX_CONTENT));
+        ((inline_horizontal ? lycon->available_space.width : lycon->available_space.height).is_max_content() ||
+         layout_axis_given_type(container->blk, column_axis) == CSS_VALUE_MAX_CONTENT);
     grid_layout->row_intrinsic_height = -1.0f;
     // Set container dimensions
-    grid_layout->container_width = container->width;
-    grid_layout->container_height = container->height;
+    grid_layout->container_width = layout_axis_size(container, column_axis);
+    grid_layout->container_height = layout_axis_size(container, row_axis);
     // Determine if container has an explicit height (not auto)
     // This affects whether auto row tracks should stretch to fill the container
-    grid_layout->has_explicit_height = (container->blk && container->block_mut()->given_height >= 0);
+    // ratio/inset/containment transfers are definite for tracks; a ratio-derived
+    // automatic block size still takes its content minimum during publication.
+    grid_layout->has_explicit_height = layout_axis_has_given_size(container, row_axis == LAYOUT_AXIS_X) ||
+        lycon->block.used_size_owner.get() == container;
     // Calculate content dimensions (excluding borders and padding)
     LayoutContentBox container_content = layout_content_box(container);
-    grid_layout->content_width = container_content.width;
-    grid_layout->content_height = container_content.height;
+    grid_layout->content_width = inline_horizontal ? container_content.width : container_content.height;
+    grid_layout->content_height = inline_horizontal ? container_content.height : container_content.width;
+    if (!grid_layout->has_explicit_height) {
+        // provisional normal-flow space does not make an automatic grid block size definite.
+        float minimum = layout_explicit_min_axis_or(container, !inline_horizontal, 0.0f);
+        grid_layout->content_height = layout_content_size_if_border_box(
+            container, minimum, !inline_horizontal);
+    }
     // Resolve percentage gaps against the container dimensions.
     // For definite containers, resolve immediately. For indefinite (shrink-to-fit),
     // the enhanced adapter handles the two-pass resolution.
@@ -335,13 +377,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container, bool intr
         determine_grid_size(grid_layout);
         resolve_track_sizes_enhanced(grid_layout, container, intrinsic_width_only);
         if (grid_layout->storage_failed) return;
-        // Update container height from explicit row heights + padding (mirroring the shrink-to-fit path)
-        if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
-            float new_h = layout_grid_row_border_box_extent(container, grid_layout);
-            if (new_h > (float)container->height) {
-                container->height = new_h;
-            }
-        }
+        layout_grid_resolve_container_size(grid_layout);
         return;
     }
     // Phase 2: Resolve grid template areas
@@ -419,7 +455,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container, bool intr
         int neg_row_offset = grid_layout->negative_implicit_row_count;
         int explicit_row_start = neg_row_offset;
 
-        for (int idx = 0; idx < item_count; idx++) {
+        for (int idx = 0; column_axis == LAYOUT_AXIS_X && idx < item_count; idx++) {
             ViewBlock* item = items[idx];
             GridItemProp* gi = grid_item_prop(item);
             if (!item || !gi || !gi->has_measured_size) continue;
@@ -542,17 +578,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container, bool intr
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     resolve_track_sizes_enhanced(grid_layout, container, intrinsic_width_only);
     if (grid_layout->storage_failed) return;
-    // An intrinsic width constraint is resolved by the track-sizing result, just like
-    // shrink-to-fit; retaining the provisional width makes auto tracks visibly too wide.
-    if ((grid_layout->is_shrink_to_fit_width || grid_layout->is_min_content_width ||
-         grid_layout->is_max_content_width) && grid_layout->computed_column_count > 0) {
-        float total_column_width = grid_layout->content_width;
-
-        container->width = layout_border_size_from_content_box(
-            container, total_column_width, true);
-        grid_layout->container_width = container->width;
-    }
-    // an intrinsic inline contribution ends at column sizing, before row geometry and alignment.
+    layout_grid_resolve_container_size(grid_layout);
+    // an intrinsic inline query ends before content and physical placement.
     if (intrinsic_width_only) return;
     // Phase 6: Position grid items
     position_grid_items(grid_layout, container, &lycon->scratch);

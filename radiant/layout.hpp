@@ -668,8 +668,8 @@ struct LayoutTextIntrinsicLineOptions {
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
     const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
     float* vertical_text_extent = nullptr);
-bool layout_measure_direct_inline_text_intrinsics(LayoutContext* lycon, ViewBlock* block,
-                                                   IntrinsicSizes* sizes);
+bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* block,
+                                              IntrinsicSizes* sizes);
 float layout_orthogonal_inline_basis(LayoutContext* lycon, ViewBlock* block);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
@@ -1298,68 +1298,7 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
 struct LayoutCssBoxCandidates {
     CssCascadeCandidate sides[4];
 
-    void collect(StyleTree* style, bool margin) {
-        if (!style) return;
-
-        CssPropertyCode physical[4] = {
-            margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP,
-            margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT,
-            margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM,
-            margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT
-        };
-        CssDeclaration* decl = style_tree_get_declaration(
-            style, margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING);
-        if (decl && decl->value) {
-            for (int side = 0; side < 4; side++) {
-                css_consider_cascade_candidate(
-                    &sides[side], decl,
-                    (CssValue*)css_box_shorthand_side_value(decl->value, side));
-            }
-        }
-        for (int side = 0; side < 4; side++) {
-            decl = style_tree_get_declaration(style, physical[side]);
-            css_consider_cascade_candidate(
-                &sides[side], decl, decl ? decl->value : nullptr);
-        }
-
-        CssPropertyCode inline_prop = margin
-            ? CSS_PROPERTY_MARGIN_INLINE : CSS_PROPERTY_PADDING_INLINE;
-        decl = style_tree_get_declaration(style, inline_prop);
-        if (decl && decl->value) {
-            css_consider_cascade_candidate(&sides[3], decl,
-                css_pair_side_value(decl->value, false));
-            css_consider_cascade_candidate(&sides[1], decl,
-                css_pair_side_value(decl->value, true));
-        }
-        CssPropertyCode inline_properties[2] = {
-            margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START,
-            margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END
-        };
-        for (int side = 0; side < 2; side++) {
-            decl = style_tree_get_declaration(style, inline_properties[side]);
-            css_consider_cascade_candidate(
-                &sides[side == 0 ? 3 : 1], decl, decl ? decl->value : nullptr);
-        }
-
-        CssPropertyCode block_prop = margin
-            ? CSS_PROPERTY_MARGIN_BLOCK : CSS_PROPERTY_PADDING_BLOCK;
-        decl = style_tree_get_declaration(style, block_prop);
-        if (decl && decl->value) {
-            css_consider_cascade_candidate(&sides[0], decl,
-                css_pair_side_value(decl->value, false));
-            css_consider_cascade_candidate(&sides[2], decl,
-                css_pair_side_value(decl->value, true));
-        }
-        CssPropertyCode block_properties[2] = {
-            margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START,
-            margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END
-        };
-        for (int side = 0; side < 2; side++) {
-            decl = style_tree_get_declaration(style, block_properties[side]);
-            css_consider_cascade_candidate(
-                &sides[side * 2], decl, decl ? decl->value : nullptr);
-        }
-    }
+    void collect(DomElement* element, bool margin);
 
     bool has_percentage() const {
         for (int side = 0; side < 4; side++) {
@@ -2426,6 +2365,7 @@ typedef struct BlockContext {
     lam::Up<FontProp> block_container_font;
     float given_width;
     float given_height;
+    lam::Up<ViewBlock> used_size_owner; // the parent algorithm resolved this box's physical used dimensions
     float first_line_ascender;
     float last_line_ascender;
     // CSS Inline 3 §5: line box metrics for text-box-trim calculation.
@@ -3195,10 +3135,11 @@ inline bool layout_axis_is_horizontal(LayoutAxis axis) {
     return axis == LAYOUT_AXIS_X;
 }
 
-inline bool layout_is_shrink_to_fit_width(ViewBlock* block) {
+inline bool layout_is_shrink_to_fit_axis(ViewBlock* block, LayoutAxis selected) {
     if (!block) return false;
+    LayoutAxisRefs axis(block->blk, selected);
     if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
-        (!block->blk || block->block()->given_width < 0.0f)) {
+        (!axis.given || *axis.given < 0.0f)) {
         return true;
     }
     if (!block->position ||
@@ -3206,9 +3147,15 @@ inline bool layout_is_shrink_to_fit_width(ViewBlock* block) {
          block->positionp()->position != CSS_VALUE_FIXED)) {
         return false;
     }
-    bool has_explicit_width = block->blk && block->block()->given_width > 0.0f;
-    bool has_left_right = block->positionp()->has_left && block->positionp()->has_right;
-    return !has_explicit_width && !has_left_right;
+    bool has_explicit_size = axis.given && *axis.given > 0.0f;
+    bool has_both_insets = selected == LAYOUT_AXIS_X
+        ? block->positionp()->has_left && block->positionp()->has_right
+        : block->positionp()->has_top && block->positionp()->has_bottom;
+    return !has_explicit_size && !has_both_insets;
+}
+
+inline bool layout_is_shrink_to_fit_width(ViewBlock* block) {
+    return layout_is_shrink_to_fit_axis(block, LAYOUT_AXIS_X);
 }
 
 typedef struct LayoutAxisBoxMetrics {
@@ -3776,6 +3723,7 @@ typedef struct GridLineName {
 } GridLineName;
 // tier-3: layout-transient, valid within pass
 typedef struct GridContainerLayout : GridProp {
+    lam::Up<ViewBlock> container;
     int computed_row_count;
     int computed_column_count;
     lam::Up<radiant::grid::TrackArray> computed_rows;
@@ -3793,6 +3741,7 @@ typedef struct GridContainerLayout : GridProp {
     int implicit_column_count;
     int negative_implicit_row_count;
     int negative_implicit_column_count;
+    // track-space width/height mean inline/block extents; views stay physical.
     float container_width;
     float container_height;
     float content_width;
@@ -3811,6 +3760,12 @@ typedef struct GridContainerLayout : GridProp {
     // pass-local grid state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } GridContainerLayout;
+
+LayoutAxis layout_grid_track_axis(const GridContainerLayout* grid, bool columns);
+Rect layout_grid_area_rect(const GridContainerLayout* grid, float column_start,
+    float row_start, float column_size, float row_size);
+void layout_grid_resolve_container_size(GridContainerLayout* grid);
+void layout_grid_track_positions(GridContainerLayout* grid, bool columns, float* positions);
 
 int layout_grid_auto_repeat_count(GridTrackList* tracks, int repeat_index,
                                   float available_size, float gap, bool definite_size);
@@ -4140,12 +4095,12 @@ inline bool layout_text_rect_is_visible(ViewText* text, TextRect* rect) {
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_effective_margin(ViewBlock* block, WritingMode mode, bool start);
+float layout_vertical_flow_block_gap(ViewBlock* parent, ViewBlock* previous,
+                                    ViewBlock* child, WritingMode mode);
+float layout_vertical_flow_trailing_margin(ViewBlock* parent, ViewBlock* last);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
 void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
-                                      bool swap_dimensions,
-                                      float line_height = 0.0f,
-                                      float line_block_start = 0.0f,
-                                      bool publish_atomic_lines = false);
+                                      bool swap_dimensions);
 void layout_normalize_vertical_breaks(ViewBlock* block);
 float layout_compute_in_flow_child_width_extent(
     ViewBlock* parent, bool include_margin_box = false);
@@ -4183,6 +4138,8 @@ inline float layout_vertical_item_baseline_from_content_edges(ViewBlock* contain
         : item_center - content_start;
 }
 float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block);
+// convert an exported border-box block-start baseline into its parent margin-box line-over coordinate.
+float layout_inline_content_baseline(ViewBlock* parent, ViewBlock* block, float baseline);
 float layout_synthesized_inline_baseline(ViewBlock* parent, float margin_extent);
 bool layout_replaced_inline_synthesizes_baseline(ViewBlock* block);
 void layout_include_inline_baseline(LayoutContext* lycon, float margin_extent, float baseline);
@@ -4195,6 +4152,7 @@ float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float i
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 // a context also re-evaluates percentage-bearing math at the supplied inline basis.
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base, LayoutContext* lycon);
+void layout_reresolve_percentage_margins(ViewBlock* block, float inline_base, LayoutContext* lycon);
 bool layout_view_tree_has_percentage_spacing(View* root);
 // Table Captions
 
@@ -5286,6 +5244,7 @@ void layout_shift_view_children(View* view, float offset_x, float offset_y);
 void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y);
 void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
+float layout_line_block_start_baseline(LayoutContext* lycon, float used_line_height = -1.0f);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
@@ -5312,6 +5271,7 @@ bool layout_quirky_container_ignores_child_margin_bottom(
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
 bool layout_object_uses_default_size(DomElement* element);
 bool layout_element_is_replaced(DomElement* element);
+bool layout_element_is_css_replaced(DomElement* element);
 bool is_form_control(DomElement* element);
 
 struct LayoutBorderSpacingValue {

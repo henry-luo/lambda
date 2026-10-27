@@ -159,6 +159,9 @@ applies to citation insertion and bibliography updates.
   Popup placement is measured after initial layout rather than during rendering.
   The `font_picker` and `native_fonts` replays cover bounded rows, per-family
   styles, filtering, pointer/keyboard selection, modal focus, and scrolling.
+  Slides reuses the same picker behavior and stylesheet, with an imperative
+  ribbon adapter; native option values preserve the selected family even when
+  imported options have a different ordering.
 - Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
   embedded local pictures with dimensions and alternative text, editable links,
   link removal, and horizontal rules. Picture settings resize existing images.

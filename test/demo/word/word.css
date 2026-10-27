@@ -53,7 +53,6 @@
 .equation-current-preview img { max-width:100%; max-height:150px; width:auto; height:auto; }
 .equation-editor-source { width:100%; min-height:170px; resize:vertical; padding:10px; border:1px solid var(--line); border-radius:6px;
   font-family:'SFMono-Regular',Menlo,monospace; font-size:12px; line-height:1.6; color:var(--ink); background:#fff; }
-.equation-editor-source:focus { outline:2px solid var(--accent); outline-offset:1px; }
 .equation-editor-error { font-size:11px; line-height:1.5; color:#a43a4b; background:#fff0f2; padding:8px; border-radius:6px; }
 .equation-editor-actions { display:flex; gap:7px; margin:14px 0; }
 .equation-apply { background:var(--accent-soft); color:var(--accent); border-color:#b7d7ff; }
@@ -141,25 +140,6 @@
 .home-ribbon .group-font .group-tools,.home-ribbon .group-paragraph .group-tools { display:flex; flex-direction:column; justify-content:center; gap:5px; }
 .ribbon-select { height:25px; border:1px solid #d6dfeb; background:#fff; border-radius:5px; padding:2px 6px; color:var(--ink); }
 .font-family { width:143px; }.font-size { width:50px; }
-.font-picker-trigger { display:inline-flex; width:143px; min-width:0; }
-.font-picker-native { display:none; }
-.font-picker-button { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; height:26px;
-  padding:0 8px; border:1px solid #d5deeb; border-radius:5px; background:#fff; color:var(--ink); font-size:13px; text-align:left; }
-.font-picker-value { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-.font-picker-chevron { flex-shrink:0; font:12px var(--font); }
-.dialog-field .font-picker-trigger,.shape-field .font-picker-trigger { display:flex; width:100%; }
-.font-picker-layer { position:fixed; inset:0; z-index:120; pointer-events:none; font-family:var(--font); }
-.font-picker-backdrop { position:absolute; inset:0; z-index:0; pointer-events:auto; }
-.font-picker-menu { display:block; position:absolute; width:320px; max-width:calc(100vw - 16px); padding:10px; border:1px solid #cbd5e1;
-  z-index:1; border-radius:8px; background:#fff; color:var(--ink); box-shadow:0 8px 28px #17274330; pointer-events:auto; }
-.font-picker-search { display:block; width:100%; height:30px; padding:4px 8px; margin-bottom:8px; border:1px solid #cbd5e1; border-radius:5px; }
-.font-picker-list { display:block; width:100%; height:min(256px,calc(100vh - 110px)); overflow:auto; overscroll-behavior:contain; }
-.font-picker-space { position:relative; width:100%; }
-.font-picker-row { position:absolute; left:0; width:100%; height:32px; padding:0 9px; border:0; border-radius:4px;
-  text-align:left; font-size:16px; font-weight:400; line-height:32px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:#fff; color:var(--ink); }
-.font-picker-row:hover { background:#f0f6ff; }
-.font-picker-row[aria-selected=true] { background:#e4efff; color:#155da8; }
-.font-picker-count { margin-top:7px; color:var(--muted); font-size:11px; line-height:16px; }
 .home-ribbon .font-selects .tool,.font-tools .tool { min-width:25px; height:25px; padding:3px 4px; }
 .ribbon-divider { width:1px; height:18px; background:#e0e5ed; margin:0 2px; }
 .split-tool { display:flex; align-items:center; }

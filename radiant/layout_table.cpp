@@ -976,12 +976,11 @@ static float table_vertical_text_block_extent(ViewTableCell* tcell) {
 static float measure_cell_content_block_extent(ViewTableCell* tcell) {
     if (!tcell) return 0.0f;
     float generic_extent = layout_compute_in_flow_child_width_extent(tcell);
-    float extent = 0.0f;
-    bool has_extent = layout_compute_vertical_in_flow_child_inline_extent(tcell, &extent);
     // block-flow children already expose their physical block extent; only an
     // inline-only cell needs the line-box calculation for forced-break columns.
-    if (!layout_vertical_parent_has_block_flow_child(tcell) && has_extent) {
-        return max(extent, 0.0f);
+    if (!layout_vertical_parent_has_block_flow_child(tcell) && generic_extent > 0.0f) {
+        // content_height still owns the complete surrogate block advance before table axis publication.
+        return max(generic_extent - layout_box_metrics(tcell).pad_border_h, tcell->content_height);
     }
     if (!layout_vertical_parent_has_block_flow_child(tcell) && generic_extent <= 0.0f) {
         // Vertical table rows size their block axis from the inline text's
@@ -5192,6 +5191,7 @@ static void table_publish_vertical_cell_content(LayoutContext* lycon,
                                                 ViewTableCell* cell) {
     if (!lycon || !cell || !cell->is_element()) return;
     LayoutContextScope context_scope(lycon);
+    lycon->block.flow_box = lam::up(cell);
     if (cell->font) setup_font(lycon->ui_context, &lycon->font, cell->font);
     setup_line_height(lycon, cell);
     BoxMetrics box = layout_box_metrics(cell);
@@ -5234,8 +5234,7 @@ static void table_publish_vertical_cell_content(LayoutContext* lycon,
         surrogate_block_origin, physical_block_origin, false,
         reverse_inline);
     if (cell->blk) {
-        layout_publish_vertical_children(cell, mode, false,
-            lycon->block.line_height, lycon->block.first_line_max_descender);
+        layout_publish_vertical_children(cell, mode, false);
     }
     layout_normalize_vertical_breaks(cell);
 }
@@ -6040,6 +6039,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     if (!tcell) return;
     LayoutContextScope context_scope(lycon);
     LayoutViewScope view_scope(lycon);
+    lycon->block.flow_box = lam::up(cell);
     lycon->table_cell_first_row_layout =
         content_pass == TABLE_CELL_CONTENT_LAYOUT_FIRST_ROW;
     lycon->block.first_line_ascender = 0.0f;
