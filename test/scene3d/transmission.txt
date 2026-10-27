@@ -1,0 +1,21 @@
+<html
+  <head
+    <style
+      "html,body{margin:0}">>
+  <body
+    <div
+      <button id: "glass-change",
+        "Glass">
+      <scene3d id: "scene", camera: "camera", width: 128, height: 128, background: "#000000", style: "display:block",
+        <camera type: 'orthographic', fov: 50, near: 0.1, far: 1000, position: [0, 0, 4], target: [0, 0, 0], id: "camera", view_height: 3>
+        <light type: 'directional', color: "#ffffff", intensity: 0.3, position: [0.3, 0.2, 2]>
+        <resources
+          <texture src: "assets/pbr/checker.png", id: "checker">>
+        <mesh position: [0, 0, -1],
+          <geometry type: 'plane', size: [6, 6, 1]>
+          <material type: 'basic', color: "#ffffff", opacity: 1, texture: "checker">>
+        <mesh rotation: [0.2, 0.35, 0],
+          <geometry type: 'box', size: [1.7, 1.7, 0.4]>
+          <material type: 'physical', color: "#ffffff", opacity: 1, id: "finish", roughness: 0.08, transmission: 0, ior: 1.5, thickness: 0.4>>
+        <animation-clip id: "glass-change", duration: 1,
+          <keyframe-track path: "finish.transmission", type: 'number', times: [0, 1], values: [0, 1]>>>>>>

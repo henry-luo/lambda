@@ -220,24 +220,33 @@ struct Gltf {
         *value=field.isNull()?fallback:asset_number(field);
         return (isfinite(*value)&&*value>=lo&&*value<=hi)||fail("invalid material factor");
     }
-    bool load_physical(ItemReader coat,ItemReader sheen,Item material,unsigned& used_uvs) {
-        if((!coat.isNull()&&!coat.isMap())||(!sheen.isNull()&&!sheen.isMap())) return fail("invalid physical material extension");
-        if(!coat.isNull()) {
-            const char* keys[]={"clearcoatFactor","clearcoatRoughnessFactor"};
-            for(unsigned i=0;i<2;i++) {
-                double value;if(!factor(coat,keys[i],0,0,1,&value)) return false;
-                a.attr(material,scene3d_physical_specs[i].attribute,a.number(value));
-            }
+    bool load_physical(ItemReader extensions,Item material,unsigned& used_uvs) {
+        ItemReader owners[SCENE_EXTENSION_COUNT];
+        for(unsigned i=0;i<SCENE_EXTENSION_COUNT;i++) {
+            owners[i]=asset_field(extensions,scene3d_extension_specs[i].name);
+            if(!owners[i].isNull()&&!owners[i].isMap()) return fail("invalid physical material extension");
         }
-        if(!sheen.isNull()) {
-            auto color=asset_field(sheen,"sheenColorFactor");double rgb[3]={};
-            if(!color.isNull()&&asset_count(color)!=3) return fail("invalid sheenColorFactor");
-            for(unsigned i=0;i<3;i++) {rgb[i]=color.isNull()?0:asset_component(color,i);if(!isfinite(rgb[i])||rgb[i]<0||rgb[i]>1) return fail("invalid sheen color component");}
-            double roughness;if(!factor(sheen,"sheenRoughnessFactor",0,0,1,&roughness)) return false;
-            a.attr(material,"sheen",a.number(1));a.attr(material,"sheen-color",asset_color(a,rgb));a.attr(material,"sheen-roughness",a.number(roughness));
+        for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
+            const auto& spec=scene3d_physical_specs[i];auto owner=owners[spec.owner-SCENE_MAP_COAT];
+            if(!spec.gltf||owner.isNull()) continue;
+            auto field=asset_field(owner,spec.gltf);bool authored=!field.isNull();
+            double value=authored?asset_number(field):spec.gltf_fallback;
+            if(!isfinite(value)||!scene3d_physical_valid(spec,value,authored)) return fail("invalid physical material factor");
+            if(spec.range!=SCENE_DISTANCE||authored) a.attr(material,spec.attribute,a.number(value));
+        }
+        for(const auto& spec:scene3d_physical_colors) {
+            auto owner=owners[spec.owner-SCENE_MAP_COAT];if(owner.isNull()) continue;
+            auto color=asset_field(owner,spec.gltf);double rgb[3];
+            if(!color.isNull()&&asset_count(color)!=3) return fail("invalid physical material color");
+            for(unsigned i=0;i<3;i++) {
+                rgb[i]=color.isNull()?spec.gltf_fallback:asset_component(color,i);
+                if(!isfinite(rgb[i])||rgb[i]<0||rgb[i]>1) return fail("invalid physical material color component");
+            }
+            a.attr(material,spec.attribute,asset_color(a,rgb));
+            if(spec.factor>=0) a.attr(material,scene3d_physical_specs[spec.factor].attribute,a.number(1));
         }
         for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) {
-            const auto& spec=scene3d_map_specs[slot];auto info=asset_field(spec.owner==SCENE_MAP_COAT?coat:sheen,spec.gltf);
+            const auto& spec=scene3d_map_specs[slot];auto info=asset_field(owners[spec.owner-SCENE_MAP_COAT],spec.gltf);
             if(info.isNull()) continue;
             if(!texture_ref(info,material,spec.attribute,used_uvs)) return false;
             if(slot==SCENE_MAP_CLEARCOAT_NORMAL) {
@@ -249,8 +258,9 @@ struct Gltf {
     bool load_materials() {
         for(size_t i=0;i<asset_count(field("materials"));i++) {
             auto m=object("materials",i),pbr=asset_field(m,"pbrMetallicRoughness");
-            auto extensions=asset_field(m,"extensions"),coat=asset_field(extensions,"KHR_materials_clearcoat"),sheen=asset_field(extensions,"KHR_materials_sheen");
-            bool unlit=!asset_field(extensions,"KHR_materials_unlit").isNull(),physical=!unlit&&(!coat.isNull()||!sheen.isNull());
+            auto extensions=asset_field(m,"extensions");
+            bool unlit=!asset_field(extensions,"KHR_materials_unlit").isNull(),physical=false;
+            for(const auto& spec:scene3d_extension_specs) physical|=!unlit&&!asset_field(extensions,spec.name).isNull();
             // glTF metallic-roughness is the native standard material; unlit is basic
             Item material=a.material("#ffffff",unlit?"basic":physical?"physical":"standard");
             if(asset_field(m,"name").isString()) a.attr(material,"name",a.text(asset_field(m,"name").cstring()));
@@ -286,7 +296,7 @@ struct Gltf {
                     if(slot==SCENE_MAP_NORMAL) {if(!factor(info,"scale",1,-1e6,1e6,&value)) return false;a.attr(material,"normal-scale",a.number(value));}
                     if(slot==SCENE_MAP_OCCLUSION) {if(!factor(info,"strength",1,0,1,&value)) return false;a.attr(material,"occlusion-strength",a.number(value));}
                 }
-                if(physical&&!load_physical(coat,sheen,material,used_uvs)) return false;
+                if(physical&&!load_physical(extensions,material,used_uvs)) return false;
             } else if(!asset_field(m,"emissiveTexture").isNull()||!asset_field(m,"normalTexture").isNull())
                 a.ctx.addWarning("scene3d asset: unlit materials omit their normal and emissive maps");
             if(!emissive(m,material)) return false;
@@ -622,8 +632,11 @@ bool asset_import_gltf(SceneAsset& asset,Item source,const uint8_t* binary,size_
     Gltf g(asset,source,binary,binary_length);const char* version=asset_field(asset_field(g.source,"asset"),"version").cstring();
     if(!asset_is(version,"2.0")) return g.fail("only glTF 2.0 is supported");
     static const char* supported[]={"KHR_mesh_quantization","KHR_materials_unlit","EXT_meshopt_compression",
-        "KHR_texture_transform","KHR_materials_emissive_strength","KHR_lights_punctual","KHR_materials_clearcoat","KHR_materials_sheen"};
-    auto known=[&](const char* extension) {for(const char* name:supported) if(asset_is(extension,name)) return true;return false;};
+        "KHR_texture_transform","KHR_materials_emissive_strength","KHR_lights_punctual"};
+    auto known=[&](const char* extension) {
+        for(const char* name:supported) if(asset_is(extension,name)) return true;
+        for(const auto& spec:scene3d_extension_specs) if(asset_is(extension,spec.name)) return true;return false;
+    };
     auto required=g.field("extensionsRequired");for(size_t i=0;i<asset_count(required);i++) {
         const char* extension=asset_at(required,i).cstring();
         if(!known(extension)) return g.fail("unsupported required glTF extension");

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27. **Status:** implementation started in worktree
 `temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
-M0–M4 are delivered with the aggregate limits below. M5–M7 remain planned.
+M0–M5 are delivered with the aggregate limits below. M6/M7 remain planned.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -501,7 +501,8 @@ Keep the implementation checkpoint here short:
 | M2 | Ordered bloom, directional FXAA and custom color passes; retained targets/programs, uniform tracks and template updates | Inherited Lambda/Radiant failures and external Node shutdown limit remain | 50/50 native units including 100 resize cycles and failed-projection recovery; 99/99 Scene3D/render cases; 21 package checks; all 11 pinned Three.js cases pass the unchanged 99% gate | Continue with M3 |
 | M3 | Per-map UV0/UV1 transforms, packed RGB/RGBA lanes, imported finite/infinite perspective and orthographic cameras, static glTF/GLB preservation | Higher UV sets, affine-shear export and compressed textures remain outside this profile | 55 native / 52 importer / 24 package cases and 99 scene replays pass; 11 Three.js images pass the unchanged gate; aggregate limits below | Continue with M4 |
 | M4 | Clearcoat/sheen factors, all five layer maps, separate coat normal, lazy programs and glTF/GLB preservation | Recorded independent aggregate failures; remaining physical extensions stay separate | 57 native, 54 input, 100 scene replays; 16 Three.js images pass the unchanged gate; aggregate/cost record below | Continue with M5 |
-| M5–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M4 |
+| M5 | Shared opaque capture, refractive/absorbing physical materials and transmission/IOR/volume import/export | Documented overlap/coverage approximations and independent aggregate failures | 60 native, 56 input, 21 package checks; 101 scene replays and 16 existing image gates pass; aggregates/cost below | Continue with M6 |
+| M6–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M5 |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
@@ -672,3 +673,47 @@ not establish a universal performance claim. M4 retains 66 resources and
 56,792,540 GPU-accounted bytes (M3: 56,774,578), with zero steady-state
 CPU/GPU-byte, projection, environment and shadow growth. Evidence:
 `m4-paired-{m3,current}.json` and archived `m4/lambda.exe`.
+
+### M5 qualification record — 2026-10-28
+
+Transmission uses one shared linear opaque capture before the glass draw,
+output conversion and ordinary blending. The existing fullscreen path copies
+color; the checked GL waist resumes HDR without clearing its samples/depth.
+IOR changes dielectric reflectance and the refracted endpoint; world-scaled
+mesh thickness drives Beer absorption. Maps reuse M3 coordinates, while shared
+extension descriptors drive import/export. Declared tracks reserve the shader
+feature before playback, so numeric changes retain programs and targets.
+This preserves **S12.1.1v3, D2.11.4, D4.5.1v4–D4.5.3v2 and D7.2.4v4**.
+
+The selected profile is documented in the scene design: opaque/masked coverage,
+bounded nine-tap rough filtering, environment/background fallback and one
+opaque image shared by overlapping glass. Alpha-blended transmission, nested
+interfaces, caustics and the glTF IOR 0 legacy mode remain unsupported.
+The profile does not claim full Three.js transmission pixel parity.
+
+All 60 native units, 56 importer cases and 21 package checks pass. Native cases
+cover exact zero recovery, analytic IOR-1 transmission/absorption probes, IOR/
+thickness/map mutations, masked coverage, 1×/2× output, 100 resize cycles,
+context recovery, unstarted tracks and invalid sampled absorption. Glass plus
+bloom/FXAA still shares one opaque capture and takes one readback. Static
+glTF/GLB round trips retain independent map data and byte-identical nonempty
+pixels. All 101 scene/render replays and all 16 established Three.js images
+pass unchanged. Visual captures are `m5-{opaque,glass}.png`.
+
+Isolated release Apple M4, 120 camera frames: Dreamhome at 732 × 359 measures
+M4 **72.248/77.221 ms** versus M5 **71.894/73.341 ms** p50/p95, with 66 resources
+and 56,803,672 GPU-accounted bytes. This sample establishes no causal speedup.
+The two-mesh glass fixture at 128 × 128 measures **0.710/1.142 ms** with factor 0
+versus **0.795/1.054 ms** with factor 1; its 19 resources and 1,758,469 GPU bytes
+are unchanged because declared transmission prewarms the capture target. The
+active run adds exactly 120 captures and 120 draws across 120 frames; both runs
+take exactly 120 readbacks, with no program links, target/CPU/GPU-byte growth
+or projection/environment/shadow rebuilds. Evidence: `m5-*.log`,
+`m5-paired-*.json`, `m5-glass-cost-*.json` and archived `m5/lambda.exe`.
+
+The release Radiant aggregate is **6,400 passed / 7 failed / 141 partial /
+2 skipped**. The failures retain the M4 CSS-memory and six WPT layout
+classification; native scenes and shared graphics controls pass. The
+Lambda/input aggregate is **8,329/8,330 passing**, with only the inherited
+`tests_greetings_model` mismatch. The transmission package case and forced-GC
+lane pass. M5 is closed with those independent aggregate limits.

@@ -13,6 +13,8 @@
 #include "../lambda/format/format.h"
 #include <zlib.h>
 
+struct ModelMutation { const char *from,*to; };
+
 class ModelInputTest : public ::testing::Test {
 protected:
     void SetUp() override { log_init(nullptr); }
@@ -32,6 +34,21 @@ protected:
         return input;
     }
 
+    template<typename Check> void static_roundtrips(Input* source,Check check) {
+        check(source);
+        for(bool binary:{false,true}) {
+            StrBuf* bytes=strbuf_new();const char* error=nullptr;ASSERT_TRUE(format_gltf_bytes(source->root,binary,bytes,&error))<<error;
+            Input* again=parse(bytes->str,"scene3d-asset",binary?"roundtrip.glb":"roundtrip.gltf",bytes->length);strbuf_free(bytes);
+            ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;check(again);
+        }
+    }
+    template<size_t N> void invalid_mutations(const char* source,const ModelMutation (&cases)[N]) {
+        for(const auto& c:cases) {
+            SCOPED_TRACE(c.from);const char* at=strstr(source,c.from);ASSERT_NE(at,nullptr);
+            StrBuf* changed=strbuf_new();strbuf_append_str_n(changed,source,at-source);strbuf_append_str(changed,c.to);strbuf_append_str(changed,at+strlen(c.from));
+            Input* bad=parse(changed->str,"scene3d-asset","invalid-material.gltf");strbuf_free(changed);ASSERT_NE(bad,nullptr);EXPECT_TRUE(bad->parse_failed);
+        }
+    }
     ElementReader parsed(const char* source, const char* type) {
         Input* input = parse(source, type);
         EXPECT_NE(input, nullptr);
@@ -306,9 +323,9 @@ static void model_elements(ElementReader root,const char* tag,lam::ArrayList<Ele
     for(int64_t i=0;i<root.childCount();i++) if(root.childAt(i).isElement()) model_elements(root.childAt(i).asElement(),tag,out);
 }
 
-static Input* load_scene_asset(const char* path) {
+static Input* load_scene_asset(const char* path,const char* format="scene3d-asset") {
     Input* owner=InputManager::create_input(nullptr);MarkBuilder b(owner);
-    Url* cwd=get_current_dir();Input* result=input_from_url(b.createString(path),b.createString("scene3d-asset"),nullptr,cwd);
+    Url* cwd=get_current_dir();Input* result=input_from_url(b.createString(path),b.createString(format),nullptr,cwd);
     url_destroy(cwd);return result;
 }
 
@@ -1194,12 +1211,7 @@ TEST_F(ModelInputTest, SceneAssetKeepsIndependentUvsRgbaCamerasAndStaticRoundTri
         EXPECT_STREQ(cameras[1].get_attr("type").cstring(),"orthographic");EXPECT_NEAR(cameras[1].get_attr("near").asFloat(),0,1e-6);
         EXPECT_NEAR(cameras[1].get_attr("view_height").asFloat(),4,1e-6);EXPECT_TRUE(cameras[2].get_attr("infinite-far").asBool());
     };
-    check(input);
-    for(bool binary:{false,true}) {
-        StrBuf* bytes=strbuf_new();const char* error=nullptr;ASSERT_TRUE(format_gltf_bytes(input->root,binary,bytes,&error))<<error;
-        Input* again=parse(bytes->str,"scene3d-asset",binary?"again.glb":"again.gltf",bytes->length);strbuf_free(bytes);
-        ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;check(again);
-    }
+    static_roundtrips(input,check);
 }
 
 TEST_F(ModelInputTest, SceneAssetRejectsAbsentUvSetsAndInvalidCameras) {
@@ -1211,15 +1223,9 @@ TEST_F(ModelInputTest, SceneAssetRejectsAbsentUvSetsAndInvalidCameras) {
     Input* mask=parse(masked->str,"scene3d-asset","mask.gltf");strbuf_free(masked);ASSERT_NE(mask,nullptr);ASSERT_FALSE(mask->parse_failed)<<mask->parse_error_message;
     ElementReader material=ElementReader(mask->root).findChildElement("resources").findChildElement("material");
     EXPECT_DOUBLE_EQ(material.get_attr("opacity").asFloat(),.5);EXPECT_DOUBLE_EQ(material.get_attr("alpha-cutoff").asFloat(),.4);
-    struct Case {const char* from;const char* to;};
-    const Case cases[]={{"\"TEXCOORD_1\": 3","\"TEXCOORD_2\": 3"},{"\"texCoord\": 1","\"texCoord\": 2"},
+    const ModelMutation cases[]={{"\"TEXCOORD_1\": 3","\"TEXCOORD_2\": 3"},{"\"texCoord\": 1","\"texCoord\": 2"},
         {"\"ymag\": 2","\"ymag\": 0"},{"\"yfov\": 1.5707963267948966","\"yfov\": 0"}};
-    for(const auto& c:cases) {
-        SCOPED_TRACE(c.from);const char* found=strstr(source,c.from);ASSERT_NE(found,nullptr);
-        StrBuf* changed=strbuf_new();strbuf_append_str_n(changed,source,found-source);strbuf_append_str(changed,c.to);strbuf_append_str(changed,found+strlen(c.from));
-        Input* invalid=parse(changed->str,"scene3d-asset","test/scene3d/assets/fidelity/bad.gltf");strbuf_free(changed);
-        ASSERT_NE(invalid,nullptr);EXPECT_TRUE(invalid->parse_failed);
-    }
+    invalid_mutations(source,cases);
 }
 
 TEST_F(ModelInputTest, PhysicalExtensionsPreserveFactorsMapsAndCoordinateSelectors) {
@@ -1239,25 +1245,45 @@ TEST_F(ModelInputTest, PhysicalExtensionsPreserveFactorsMapsAndCoordinateSelecto
             EXPECT_TRUE(found)<<key;
         }
     };
-    check(source);
-    for(bool binary:{false,true}) {
-        StrBuf* out=strbuf_new();const char* error=nullptr;ASSERT_TRUE(format_gltf_bytes(source->root,binary,out,&error))<<error;
-        Input* again=parse(out->str,"scene3d-asset",binary?"physical.glb":"physical.gltf",out->length);strbuf_free(out);
-        ASSERT_NE(again,nullptr);ASSERT_FALSE(again->parse_failed)<<again->parse_error_message;check(again);
-    }
+    static_roundtrips(source,check);
 }
 
 TEST_F(ModelInputTest, PhysicalExtensionsRejectMalformedFactorsAndMaps) {
-    Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);Url* cwd=get_current_dir();
-    Input* file=input_from_url(builder.createString("test/scene3d/assets/fidelity/physical.gltf"),builder.createString("text"),nullptr,cwd);url_destroy(cwd);
+    Input* file=load_scene_asset("test/scene3d/assets/fidelity/physical.gltf","text");
     ASSERT_NE(file,nullptr);const char* source=file->root.get_string()->chars;
-    struct Case {const char* from;const char* to;};
-    const Case cases[]={{"\"clearcoatFactor\": 0.75","\"clearcoatFactor\": 2"},{"\"sheenRoughnessFactor\": 0.6","\"sheenRoughnessFactor\": -1"},
+    const ModelMutation cases[]={{"\"clearcoatFactor\": 0.75","\"clearcoatFactor\": 2"},{"\"sheenRoughnessFactor\": 0.6","\"sheenRoughnessFactor\": -1"},
         {R"("scale": 0.4)",R"("scale": "large")"},{"\"index\": 2","\"index\": 99"},
         {"\"sheenColorFactor\": [\n            0.5","\"sheenColorFactor\": [\n            \"red\""}};
-    for(const auto& c:cases) {
-        SCOPED_TRACE(c.from);const char* at=strstr(source,c.from);ASSERT_NE(at,nullptr);
-        StrBuf* changed=strbuf_new();strbuf_append_str_n(changed,source,at-source);strbuf_append_str(changed,c.to);strbuf_append_str(changed,at+strlen(c.from));
-        Input* bad=parse(changed->str,"scene3d-asset","invalid-physical.gltf");strbuf_free(changed);ASSERT_NE(bad,nullptr);EXPECT_TRUE(bad->parse_failed);
-    }
+    invalid_mutations(source,cases);
+}
+
+TEST_F(ModelInputTest, TransmissionVolumeAndIorPreserveTheirFactorsAndIndependentMaps) {
+    Input* source=load_scene_asset("test/scene3d/assets/fidelity/glass.gltf");ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    auto check=[&](Input* input) {
+        ElementReader root(input->root),m=root.findChildElement("resources").findChildElement("material");
+        EXPECT_STREQ(m.get_attr("type").cstring(),"physical");EXPECT_DOUBLE_EQ(m.get_attr("transmission").asFloat(),.4);
+        EXPECT_DOUBLE_EQ(m.get_attr("ior").asFloat(),1.4);EXPECT_DOUBLE_EQ(m.get_attr("thickness").asFloat(),.75);
+        EXPECT_DOUBLE_EQ(m.get_attr("attenuation-distance").asFloat(),2);EXPECT_STREQ(m.get_attr("attenuation-color").cstring(),"#e7cb95");
+        lam::ArrayList<ElementReader> textures;model_elements(root,"texture",&textures);EXPECT_EQ(textures.size(),10u);
+        const char* keys[]={"transmission-texture","thickness-texture"};
+        for(unsigned i=0;i<2;i++) {
+            const char* id=m.get_attr(keys[i]).cstring();ASSERT_NE(id,nullptr);bool found=false;
+            for(auto& texture:textures) if(!strcmp(texture.get_attr("id").cstring(),id)) {
+                found=true;EXPECT_EQ(texture.get_attr("uv-set").asFloat(),i?0:1);EXPECT_EQ(texture.get_attr("uv-transform").asArray().length(),6);
+            }
+            EXPECT_TRUE(found);
+        }
+    };
+    static_roundtrips(source,check);
+}
+
+TEST_F(ModelInputTest, TransmissionRejectsMalformedVolumeIorAndTextureProperties) {
+    Input* file=load_scene_asset("test/scene3d/assets/fidelity/glass.gltf","text");ASSERT_NE(file,nullptr);
+    const ModelMutation cases[]={
+        {R"("transmissionFactor": 0.4)",R"("transmissionFactor": 1.1)"},
+        {R"("ior": 1.4)",R"("ior": 0)"},{R"("ior": 1.4)",R"("ior": "glass")"},
+        {R"("thicknessFactor": 0.75)",R"("thicknessFactor": -1)"},
+        {R"("attenuationDistance": 2.0)",R"("attenuationDistance": 0)"},
+        {R"("index": 2)",R"("index": 99)"}};
+    invalid_mutations(file->root.get_string()->chars,cases);
 }

@@ -1,0 +1,171 @@
+{
+  "name": "TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "plain"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "plain"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#glass-change"
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "reference": "plain",
+      "count": {
+        "min": 10
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "coated"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "material_links": {
+          "baseline": "plain",
+          "eq": 0
+        },
+        "transmission_captures": {
+          "baseline": "plain",
+          "min": 1
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#scene",
+      "op": "configure",
+      "clip": "glass-change",
+      "once": true,
+      "clamp": true
+    },
+    {
+      "type": "scene3d",
+      "target": "#scene",
+      "op": "play",
+      "clip": "glass-change"
+    },
+    {
+      "type": "scene3d",
+      "target": "#scene",
+      "op": "seek",
+      "seconds": 0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "reference": "plain",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "playing"
+    },
+    {
+      "type": "scene3d",
+      "target": "#scene",
+      "op": "seek",
+      "seconds": 1
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "reference": "coated",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "material_links": {
+          "baseline": "playing",
+          "eq": 0
+        },
+        "projection_generation": {
+          "baseline": "playing",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "target": "#scene",
+      "op": "stop",
+      "clip": "glass-change"
+    },
+    {
+      "type": "scene3d",
+      "target": "#scene",
+      "op": "lose_context"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "reference": "coated",
+      "count": {
+        "max": 0
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "settled"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "repeat"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "material_links": {
+          "baseline": "settled",
+          "eq": 0
+        },
+        "snapshot_generation": {
+          "baseline": "settled",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

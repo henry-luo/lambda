@@ -34,7 +34,8 @@ struct GltfExport {
     lam::ArrayList<GltfDefinition> definitions;
     lam::ArrayList<GltfCache> materials, textures, meshes;
     lam::ArrayList<GltfGeometry> geometries;
-    bool unlit = false, emissive_strength = false, lights_used = false, texture_transform = false, physical_extensions = false;
+    bool unlit = false, emissive_strength = false, lights_used = false, texture_transform = false;
+    bool physical_extensions[SCENE_EXTENSION_COUNT]={};
     const char* error = nullptr;
     GltfExport() { for (auto& part : parts) part = strbuf_new(); }
     ~GltfExport() {
@@ -281,13 +282,16 @@ struct GltfExport {
             const void* source=definition(reference,"texture");if(!source) {fail("unresolved texture reference");return -1;}
             maps[slot]=texture(ElementReader((const Element*)source));
         }
-        double physical_values[SCENE_PHYSICAL_COUNT],sheen_color[4];
+        double physical_values[SCENE_PHYSICAL_COUNT],physical_colors[SCENE_PHYSICAL_COLORS][4];
         for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
             const auto& spec=scene3d_physical_specs[i];double* value=&physical_values[i];
             if((!physical&&!e.get_attr(spec.attribute).isNull())||!attr_number(e,spec.attribute,spec.fallback,value)||
-                (spec.unit_interval&&(*value<0||*value>1))) {fail("invalid physical material factor");return -1;}
+                !scene3d_physical_valid(spec,*value,!e.get_attr(spec.attribute).isNull())) {fail("invalid physical material factor");return -1;}
         }
-        if(!color(e,"sheen-color","#ffffff",sheen_color)) return -1;
+        for(unsigned i=0;i<SCENE_PHYSICAL_COLORS;i++) {
+            const auto& spec=scene3d_physical_colors[i];
+            if((!physical&&!e.get_attr(spec.attribute).isNull())||!color(e,spec.attribute,spec.fallback,physical_colors[i])) {fail("invalid physical material color");return -1;}
+        }
         double normal_scale, occlusion_strength, cutoff;
         if (!attr_number(e, "normal-scale", 1, &normal_scale) || !attr_number(e, "occlusion-strength", 1, &occlusion_strength) ||
             !attr_number(e, "alpha-cutoff", .5, &cutoff)) return -1;
@@ -296,6 +300,9 @@ struct GltfExport {
         const char* alpha = text(e, "alpha-mode");
         bool blend = alpha ? !strcmp(alpha, "blend") : rgba[3] < 1 || (e.get_attr("transparent").isBool() && e.get_attr("transparent").asBool());
         bool mask = alpha && !strcmp(alpha, "mask");
+        if(physical&&(!e.get_attr("transmission").isNull()||maps[SCENE_MAP_TRANSMISSION]>=0)&&blend) {
+            fail("transmission requires opaque or masked coverage");return -1;
+        }
         const char* side = text(e, "side");
         int index; StrBuf* m = begin(MATERIALS, &index);
         strbuf_append_str(m, "{");
@@ -326,20 +333,29 @@ struct GltfExport {
             strbuf_append_str(m, ",\"extensions\":{");
             if (is_unlit) strbuf_append_str(m, "\"KHR_materials_unlit\":{}");
             if (strength) { strbuf_append_format(m, "%s\"KHR_materials_emissive_strength\":{\"emissiveStrength\":", is_unlit ? "," : ""); number(m, intensity); strbuf_append_char(m, '}'); }
-            if(physical) {
-                strbuf_append_format(m,"%s\"KHR_materials_clearcoat\":{\"clearcoatFactor\":",strength||is_unlit?",":"");number(m,physical_values[SCENE_COAT_FACTOR]);
-                strbuf_append_str(m,",\"clearcoatRoughnessFactor\":");number(m,physical_values[SCENE_COAT_ROUGHNESS]);
-                for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_SHEEN_COLOR;slot++) if(maps[slot]>=0) {
-                    strbuf_append_format(m,",\"%s\":",scene3d_map_specs[slot].gltf);
+            if(physical) for(unsigned extension=0;extension<SCENE_EXTENSION_COUNT;extension++) {
+                const auto& owner=scene3d_extension_specs[extension];bool authored=owner.owner==SCENE_MAP_COAT||owner.owner==SCENE_MAP_SHEEN;
+                for(const auto& spec:scene3d_physical_specs) if(spec.owner==owner.owner&&!e.get_attr(spec.attribute).isNull()) authored=true;
+                for(const auto& spec:scene3d_physical_colors) if(spec.owner==owner.owner&&!e.get_attr(spec.attribute).isNull()) authored=true;
+                for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) if(scene3d_map_specs[slot].owner==owner.owner&&maps[slot]>=0) authored=true;
+                if(!authored) continue;
+                strbuf_append_format(m,"%s\"%s\":{",strength||is_unlit||extension?",":"",owner.name);bool comma=false;
+                for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
+                    const auto& spec=scene3d_physical_specs[i];if(spec.owner!=owner.owner||!spec.gltf||(spec.range==SCENE_DISTANCE&&physical_values[i]==0)) continue;
+                    strbuf_append_format(m,"%s\"%s\":",comma?",":"",spec.gltf);number(m,physical_values[i]);comma=true;
+                }
+                for(unsigned i=0;i<SCENE_PHYSICAL_COLORS;i++) {
+                    const auto& spec=scene3d_physical_colors[i];if(spec.owner!=owner.owner) continue;
+                    double rgb[3];for(unsigned c=0;c<3;c++) rgb[c]=physical_colors[i][c]*(spec.factor<0?1:physical_values[spec.factor]);
+                    strbuf_append_format(m,"%s\"%s\":",comma?",":"",spec.gltf);numbers(m,rgb,3);comma=true;
+                }
+                for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++) {
+                    const auto& spec=scene3d_map_specs[slot];if(spec.owner!=owner.owner||maps[slot]<0) continue;
+                    strbuf_append_format(m,"%s\"%s\":",comma?",":"",spec.gltf);
                     if(!texture_info(m,maps[slot],slot==SCENE_MAP_CLEARCOAT_NORMAL?"scale":nullptr,physical_values[SCENE_COAT_NORMAL_SCALE])) return -1;
+                    comma=true;
                 }
-                for(unsigned i=0;i<3;i++) sheen_color[i]*=physical_values[SCENE_SHEEN_FACTOR];
-                strbuf_append_str(m,"},\"KHR_materials_sheen\":{\"sheenColorFactor\":");numbers(m,sheen_color,3);
-                strbuf_append_str(m,",\"sheenRoughnessFactor\":");number(m,physical_values[SCENE_SHEEN_ROUGHNESS]);
-                for(unsigned slot=SCENE_MAP_SHEEN_COLOR;slot<SCENE_MAP_COUNT;slot++) if(maps[slot]>=0) {
-                    strbuf_append_format(m,",\"%s\":",scene3d_map_specs[slot].gltf);if(!texture_info(m,maps[slot])) return -1;
-                }
-                strbuf_append_char(m,'}');physical_extensions=true;
+                strbuf_append_char(m,'}');physical_extensions[extension]=true;
             }
             strbuf_append_char(m, '}');
         }
@@ -550,8 +566,8 @@ struct GltfExport {
         if (error) return false;
         StrBuf* json = strbuf_new();
         strbuf_append_str(json, "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Lambda\"}");
-        const char* used[6]; unsigned used_count = 0;
-        if(physical_extensions) {used[used_count++]="KHR_materials_clearcoat";used[used_count++]="KHR_materials_sheen";}
+        const char* used[4+SCENE_EXTENSION_COUNT]; unsigned used_count = 0;
+        for(unsigned i=0;i<SCENE_EXTENSION_COUNT;i++) if(physical_extensions[i]) used[used_count++]=scene3d_extension_specs[i].name;
         if (texture_transform) used[used_count++] = "KHR_texture_transform";
         if (unlit) used[used_count++] = "KHR_materials_unlit";
         if (emissive_strength) used[used_count++] = "KHR_materials_emissive_strength";

@@ -12,3 +12,9 @@ all five layer maps, separate UV selectors/transforms and coat normal scale.
 Both extension names are required so an unsupported importer cannot silently
 fall back to standard shading. Numeric and exact-pixel round trips check the
 encoded channels rather than accepting a rewritten visual golden.
+
+M5 adds `glass.gltf` with required transmission, IOR and volume extensions.
+Transmission and thickness sample different coordinates/transforms of the
+embedded R/G layer map. IOR, mesh thickness and world-space attenuation survive
+numeric and exact-pixel static round trips. The original clearcoat/sheen data
+remain present to exercise combined layers.

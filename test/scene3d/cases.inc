@@ -89,3 +89,4 @@
 {"EffectsMobileControlsAndNavigation", "test/demo/scene3d/effects/effects.ls", "test/scene3d/events/EffectsMobileControlsAndNavigation.json", 6},
 {"PostprocessingUniformTracksAndTemplateEditsRetainNativeResources", "test/scene3d/postprocessing.ls", "test/scene3d/events/PostprocessingUniformTracksAndTemplateEditsRetainNativeResources.json", 20},
 {"PhysicalFactorsAnimateAndTemplateEditsRetainMaterialPrograms", "test/scene3d/physical.ls", "test/scene3d/events/PhysicalFactorsAnimateAndTemplateEditsRetainMaterialPrograms.json", 20},
+{"TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture", "test/scene3d/transmission.ls", "test/scene3d/events/TransmissionTracksAndTemplateEditsRetainTheSharedOpaqueCapture.json", 20},

@@ -6,6 +6,27 @@ static const char* scene3d_physical_fragment = R"GLSL(
 uniform vec4 layer_params; // coat factor/roughness, sheen factor/roughness
 uniform vec3 coat_normal_params; // map present, scale, authored tangent frame
 uniform vec3 sheen_color;
+uniform float dielectric_reflectance;
+#ifdef TRANSMISSION
+uniform vec4 transmission_params; // factor, IOR, thickness, attenuation distance (0 means infinity)
+uniform vec3 attenuation_color,transmission_background;
+uniform sampler2D opaque_color;
+uniform mat4 transmission_projection;
+uniform float transmission_captured;
+in vec3 transmission_scale;
+vec3 transmitted_radiance(vec2 uv,vec3 fallback,float roughness) {
+    if(transmission_captured<0.5) return fallback;
+    vec2 size=vec2(textureSize(opaque_color,0));
+    vec2 radius=vec2(min(size.x,size.y)*0.025*roughness*roughness)/size;
+    vec3 radiance=vec3(0.0);
+    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
+        vec2 at=uv+vec2(x,y)*radius;
+        if(any(lessThan(at,vec2(0.0)))||any(greaterThan(at,vec2(1.0)))) radiance+=fallback;
+        else {vec4 sample_color=texture(opaque_color,at);radiance+=sample_color.rgb+fallback*(1.0-sample_color.a);}
+    }
+    return radiance/9.0;
+}
+#endif
 float sheen_brdf(float roughness,float dotNH,float dotNV,float dotNL) {
     float invAlpha=1.0/(roughness*roughness);
     float sin2h=max(1.0-dotNH*dotNH,0.0078125);

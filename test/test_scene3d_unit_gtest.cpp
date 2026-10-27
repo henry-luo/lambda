@@ -313,6 +313,16 @@ protected:
         DomElement* texture=element("texture",root);attr(texture,"id",id);attr(texture,"src",file);
         attr(texture,"min-filter","9728");attr(texture,"mag-filter","9728");return texture;
     }
+    DomElement* glass_stage(DomElement** backdrop=nullptr) {
+        attr(camera,"type","orthographic");attr(camera,"view_height","3");attr(root,"background","#000000");
+        DomElement* background=buffer_quad(),*g=background->first_child->as_element(),*m=background->last_child->as_element();
+        attr(background,"position","0 0 -1");attr(background,"scale","3 3 1");attr(g,"uvs","0 0 1 0 1 1 0 1");
+        map_texture("checker","test/scene3d/assets/fidelity/colors.png");attr(m,"texture","checker");attr(m,"alpha-mode","opaque");
+        DomElement* glass=buffer_quad("physical");g=glass->first_child->as_element();m=glass->last_child->as_element();
+        attr(g,"uvs","0 0 1 0 1 1 0 1");attr(g,"uvs1","0 1 1 1 1 0 0 0");
+        attr(glass,"position","0 0 .5");attr(glass,"rotation","0 .4 0");attr(m,"roughness",".05");attr(m,"thickness","1");
+        if(backdrop) *backdrop=background;return m;
+    }
     DomDocument* load_page(const char* path, float width=320, float height=240) {
         DocumentJsHostConfig host={};host.ui_context=&ui;host.resource_policy=INPUT_RESOURCE_LOCAL_ONLY;
         page=load_html_doc(doc.url,(char*)path,width,height,&host);
@@ -1448,7 +1458,7 @@ TEST_F(Scene3dTest, ImportedCamerasFrameTheSceneAndExplicitSelectionWins) {
 TEST_F(Scene3dTest, GltfAndGlbRoundTripsKeepIndependentMapPixels) {
     Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
     DomElement* ambient=element("light",root);attr(ambient,"type","ambient");DomElement* model=nullptr;
-    for(const char* path:{"test/scene3d/assets/fidelity/model.gltf","test/scene3d/assets/fidelity/physical.gltf"}) {
+    for(const char* path:{"test/scene3d/assets/fidelity/model.gltf","test/scene3d/assets/fidelity/physical.gltf","test/scene3d/assets/fidelity/glass.gltf"}) {
     SCOPED_TRACE(path);if(model) root->remove_child(model);
     Input* source=input_from_url(builder.createString(path),builder.createString("scene3d-asset"),nullptr,doc.url);
     ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
@@ -1531,4 +1541,74 @@ TEST_F(Scene3dTest, PhysicalMapsFourShadowsAndSkinPaletteFitTheCheckedBindingPla
     scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
     attr(m,"clearcoat-texture","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
     EXPECT_NE(strstr(scene3d_diagnostic(root),"texture reference"),nullptr);
+}
+
+TEST_F(Scene3dTest, TransmissionZeroRecoversPhysicalAndOneCapturePreservesOpaqueColorAndDepth) {
+    DomElement* m=glass_stage(),*glass=m->parent->as_element();
+    attr(glass,"visible","false");ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);
+    uint8_t background[128*128*4],opaque[128*128*4],refracted[128*128*4];memcpy(background,image->pixels,sizeof(background));
+    attr(glass,"visible","true");image=snapshot();ASSERT_NE(image,nullptr);memcpy(opaque,image->pixels,sizeof(opaque));
+    attr(m,"transmission","0");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(opaque,image->pixels,sizeof(opaque)),0);
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.transmission_captures,0u);
+    attr(m,"ior","1");attr(m,"transmission","1");image=snapshot();ASSERT_NE(image,nullptr);
+    const uint8_t* source=background+(48*128+80)*4;EXPECT_GT(source[0]+source[1]+source[2],100);
+    pixel(image,80,48,source[0],source[1],source[2],255,2);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);
+    EXPECT_EQ(after.graphics.frames,before.graphics.frames+1);EXPECT_EQ(after.material_links,before.material_links);
+    EXPECT_EQ(after.graphics.resources,before.graphics.resources);
+    ImageSurface* dense=snapshot(128,128,2);ASSERT_NE(dense,nullptr);pixel(dense,160,96,source[0],source[1],source[2],255,2);
+    image=snapshot();ASSERT_NE(image,nullptr);
+    memcpy(refracted,image->pixels,sizeof(refracted));attr(m,"ior","1.8");image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_NE(memcmp(refracted,image->pixels,sizeof(refracted)),0);
+    memcpy(refracted,image->pixels,sizeof(refracted));attr(m,"thickness","2");image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_NE(memcmp(refracted,image->pixels,sizeof(refracted)),0);
+    attr(m,"ior","1");attr(m,"thickness","1");attr(m,"attenuation-color","#00ff00");attr(m,"attenuation-distance","1");
+    image=snapshot();ASSERT_NE(image,nullptr);pixel(image,80,48,0,source[1],0,255,2);
+    ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_EQ(snapshot(),image);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(before.graphics.frames,after.graphics.frames);EXPECT_EQ(before.transmission_captures,after.transmission_captures);
+    attr(m,"alpha-mode","mask");attr(m,"opacity",".5");attr(m,"alpha-cutoff",".6");image=snapshot();ASSERT_NE(image,nullptr);
+    EXPECT_EQ(memcmp(background,image->pixels,sizeof(background)),0);
+    attr(m,"alpha-mode","opaque");attr(m,"opacity","1");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(camera,"position",".25 0 4");attr(camera,"target",".25 0 0");ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);
+}
+
+TEST_F(Scene3dTest, TransmissionMapsOverlapEmptyEdgesResizeAndRecoveryRetainTheSharedCapture) {
+    DomElement* background,*m=glass_stage(&background),*glass=m->parent->as_element();attr(m,"transmission","1");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t plain[128*128*4];memcpy(plain,image->pixels,sizeof(plain));
+    DomElement* map=map_texture("glass-map","test/scene3d/assets/fidelity/layers.png");attr(map,"uv-set","1");attr(map,"uv-transform","0 -1 1 1 0 0");
+    attr(m,"transmission-texture","glass-map");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_NE(memcmp(plain,image->pixels,sizeof(plain)),0);
+    memcpy(plain,image->pixels,sizeof(plain));attr(m,"thickness-texture","glass-map");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_NE(memcmp(plain,image->pixels,sizeof(plain)),0);
+    DomElement* second=mesh("box","#ffffff","physical"),*layer=second->last_child->as_element();attr(second,"position",".7 0 .4");attr(second,"scale",".3 .3 .3");attr(layer,"transmission",".8");
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);
+    for(unsigned i=0;i<100;i++) ASSERT_NE(snapshot(i%2?128:96,i%2?128:96),nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(after.graphics.resources,before.graphics.resources);EXPECT_EQ(after.graphics.gpu_bytes,before.graphics.gpu_bytes);
+    scene3d_context_lost(root);image=snapshot();ASSERT_NE(image,nullptr);memcpy(plain,image->pixels,sizeof(plain));
+    attr(camera,"fov","91");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(plain,image->pixels,sizeof(plain)),0);
+    DomElement* post=element("postprocessing",root),*bloom=element("effect",post),*fxaa=element("effect",post);
+    attr(bloom,"type","bloom");attr(bloom,"strength",".1");attr(bloom,"threshold",".5");attr(fxaa,"type","fxaa");
+    ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);EXPECT_EQ(after.graphics.frames,before.graphics.frames+1);
+    EXPECT_EQ(after.postprocess_passes,before.postprocess_passes+5);
+    root->remove_child(post);doc.mutation_epoch++;image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(plain,image->pixels,sizeof(plain)),0);
+    attr(background,"visible","false");attr(glass,"position","1.4 0 .5");ASSERT_NE(snapshot(),nullptr);
+    attr(m,"alpha-mode","blend");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"coverage"),nullptr);
+    attr(m,"alpha-mode","opaque");attr(m,"attenuation-distance","0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"attenuation-distance"),nullptr);
+    attr(m,"attenuation-distance","1");ASSERT_NE(snapshot(),nullptr);
+}
+
+TEST_F(Scene3dTest, TransmissionTracksReserveTheirProgramAndRejectInvalidAbsorption) {
+    DomElement* m=glass_stage();attr(m,"id","glass");
+    DomElement* clip=element("animation-clip",root);attr(clip,"id","reveal");
+    DomElement* factor=element("keyframe-track",clip);attr(factor,"path","glass.transmission");attr(factor,"type","number");attr(factor,"times","0 1");attr(factor,"values","0 1");
+    DomElement* color=element("keyframe-track",clip);attr(color,"path","glass.attenuation-color");attr(color,"type","color");attr(color,"times","0 1");attr(color,"values","1 1 1 -1 1 1");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);uint8_t opaque[128*128*4];memcpy(opaque,image->pixels,sizeof(opaque));
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    Scene3dAnimationState* state=scene3d_animations(root);ASSERT_NE(state,nullptr);auto* action=scene3d_animation_action(state,"reveal");ASSERT_NE(action,nullptr);action->loop=ANIMATION_LOOP_ONCE;action->clamp=true;ASSERT_TRUE(animation_action_play(action));
+    ASSERT_TRUE(scene3d_animation_seek(state,.25));image=snapshot();ASSERT_NE(image,nullptr);EXPECT_NE(memcmp(opaque,image->pixels,sizeof(opaque)),0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.material_links,after.material_links);EXPECT_EQ(before.projection_generation,after.projection_generation);
+    EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);
+    ASSERT_TRUE(scene3d_animation_seek(state,1));EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"attenuation-color"),nullptr);
+    ASSERT_TRUE(scene3d_animation_seek(state,0));image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(opaque,image->pixels,sizeof(opaque)),0);
 }

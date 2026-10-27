@@ -3,9 +3,12 @@ import animation: .animation
 
 // the texture maps a standard material may name, beside its base color `texture`
 let STANDARD_MAPS = ["metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]
-let PHYSICAL_MAPS = ["clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture"]
+let PHYSICAL_MAPS = ["clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture", "transmission-texture", "thickness-texture"]
 let MAPS = [*STANDARD_MAPS, *PHYSICAL_MAPS]
-let PHYSICAL_NUMBERS = ["clearcoat", "clearcoat-roughness", "clearcoat-normal-scale", "sheen", "sheen-roughness"]
+let PHYSICAL_NUMBERS = ["clearcoat", "clearcoat-roughness", "clearcoat-normal-scale", "sheen", "sheen-roughness", "transmission", "ior", "thickness", "attenuation-distance"]
+let PHYSICAL_COLORS = ["sheen-color", "attenuation-color"]
+fn physical_range(key, v) bool => if (key == "clearcoat-normal-scale") true else if (key == "ior") v >= 1
+    else if (key == "thickness") v >= 0 else if (key == "attenuation-distance") v > 0 else v >= 0 and v <= 1
 fn numeric(v) bool => t.numeric(v)
 fn value(v, fallback) => if (v == null) fallback else v
 fn fail(message) error => error("scene3d: " ++ message)
@@ -245,7 +248,7 @@ fn check_node(n, all_nodes) bool^ {
                     (if (contains(["color", "emissive"], property)) 'color' else 'number')
                     else if (kind == 'material' and contains(['standard', 'physical'], owner.type) and contains(["metalness", "roughness"], property)) 'number'
                     else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_NUMBERS, property)) 'number'
-                    else if (kind == 'material' and owner.type == 'physical' and property == "sheen-color") 'color' else null
+                    else if (kind == 'material' and owner.type == 'physical' and contains(PHYSICAL_COLORS, property)) 'color' else null
                 let expected = if (material_type != null) material_type else if (contains(["position", "scale"], property)) 'vector'
                     else if (property == "quaternion") 'quaternion' else if (property == "visible") 'bool'
                     else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
@@ -303,9 +306,14 @@ fn check_node(n, all_nodes) bool^ {
         let checked_pbr = [for (key in ["metalness", "roughness"] where n[key] != null)
             if (not contains(['standard', 'physical'], n.type) or not numeric(n[key]) or n[key] < 0 or n[key] > 1) raise fail("invalid material metalness or roughness") else true]
         let checked_physical = [for (key in PHYSICAL_NUMBERS where n[key] != null)
-            if (n.type != 'physical' or not numeric(n[key]) or (key != "clearcoat-normal-scale" and (n[key] < 0 or n[key] > 1)))
+            if (n.type != 'physical' or not numeric(n[key]) or not physical_range(key, n[key]))
                 raise fail("invalid physical material factor") else true]
-        let checked_sheen_color = if (n["sheen-color"] != null and (n.type != 'physical' or not color(n["sheen-color"]))) raise fail("invalid sheen color")
+        let checked_physical_colors = [for (key in PHYSICAL_COLORS where n[key] != null)
+            if (n.type != 'physical' or not color(n[key])) raise fail(if (key == "sheen-color") "invalid sheen color" else "invalid attenuation color") else true]
+        let checked_transmission_coverage = if ((n.transmission != null or n["transmission-texture"] != null) and
+            (n.depth_only == true or (not contains(['opaque', 'mask'], n["alpha-mode"]) and
+                (n["alpha-mode"] == 'blend' or n["alpha-mode"] == "blend" or n.transparent == true or
+                    (n.opacity != null and n.opacity < 1))))) raise fail("transmission requires opaque or masked coverage")
         let checked_opacity = if (n.opacity != null and (not numeric(n.opacity) or n.opacity < 0 or n.opacity > 1)) raise fail("invalid material opacity")
         let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
         let checked_depth = if (n.depth_only!=null and (not (n.depth_only is bool) or n.depth_only and (n.transparent==true or n.opacity!=null and n.opacity!=1)))

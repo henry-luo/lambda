@@ -30,6 +30,7 @@
 
 static constexpr unsigned SCENE_NODE_LIMIT = 8192;
 static constexpr unsigned SCENE_EFFECT_LIMIT = 8;
+static constexpr unsigned SCENE_TRANSMISSION_FEATURE=1u<<(SCENE_MAP_COUNT-SCENE_MAP_CLEARCOAT);
 // bones per skeleton: the palette is a data texture, so the cap is a resource
 // bound rather than the vertex-uniform space GL 4.1 guarantees (64 mat4)
 static constexpr unsigned SCENE_BONE_LIMIT = 256;
@@ -94,7 +95,8 @@ struct Scene3dMaterial {
     bool source_transparent;
     bool lambert, standard, physical, transparent, force_opaque, depth_only;
     int side;
-    float physical_values[SCENE_PHYSICAL_COUNT], sheen_color[3];
+    float physical_values[SCENE_PHYSICAL_COUNT], physical_colors[SCENE_PHYSICAL_COLORS][3], dielectric;
+    bool transmission; // declared factor/map/track; numeric playback does not change the program key
     float uv_rows[SCENE_MAP_COUNT][6], uv_sets[SCENE_MAP_COUNT]; // base, metal-rough, normal, occlusion, emission
     unsigned required_uvs;
     uint64_t texture_hash; // of its textures' sources and samplers
@@ -262,6 +264,8 @@ struct Scene3dEntry {
     size_t mapped_count,mapped_capacity;
     NativeGlResource post_linear[2], post_blur[2], post_display[2], post_programs[4];
     unsigned post_width, post_height, post_needs;
+    NativeGlResource transmission_target,transmission_copy;
+    unsigned transmission_width,transmission_height;
 
     // the prefiltered environment atlas, the ping-pong target its filter passes go through, the
     // filter program and one quad set per atlas level; rebuilt only when `environment_key` changes
@@ -339,6 +343,9 @@ static bool scene3d_tag(DomElement* node, const char* tag) { return strcmp(node-
 static ItemReader scene3d_value(DomElement* node, const char* key) {
     Element* backing = dom_element_backing(node);
     return backing ? ElementReader(backing).get_attr(key) : ItemReader();
+}
+static bool scene3d_present(DomElement* node,const char* key) {
+    return node->has_attribute(key)||!scene3d_value(node,key).isNull();
 }
 // camera view attributes affect only the main pass. Everything else, including node identity,
 // child order and typed resource values, participates so mixed edits cannot retain stale draws.
@@ -890,12 +897,24 @@ static bool scene3d_material_values(Scene3dEntry* entry,DomElement* node,Scene3d
         return scene3d_fail(entry,"invalid material metalness or roughness");
     if(material->physical) {
         for(unsigned i=0;i<SCENE_PHYSICAL_COUNT;i++) {
-            const auto& property=scene3d_physical_specs[i];float* value=&material->physical_values[i];
+            const auto& property=scene3d_physical_specs[i];float* value=&material->physical_values[i];AnimationValue animated={};
             if(!scene3d_animated_number(entry,node,property.attribute,property.fallback,value)||
-                (property.unit_interval&&(*value<0||*value>1))) return scene3d_fail(entry,"invalid physical material factor");
+                !scene3d_physical_valid(property,*value,scene3d_present(node,property.attribute)||
+                    scene3d_animation_value(entry->animation,node,property.attribute,&animated))) {
+                char message[160];snprintf(message,sizeof(message),"invalid physical material factor: %s",property.attribute);return scene3d_fail(entry,message);
+            }
         }
-        float color[4];if(!scene3d_animated_color(entry,node,color,"sheen-color","#ffffff")) return scene3d_fail(entry,"invalid sheen color");
-        memcpy(material->sheen_color,color,3*sizeof(float));
+        for(unsigned i=0;i<SCENE_PHYSICAL_COLORS;i++) {
+            const auto& field=scene3d_physical_colors[i];float color[4];
+            bool valid=scene3d_animated_color(entry,node,color,field.attribute,field.fallback);
+            for(unsigned c=0;valid&&c<3;c++) valid=color[c]>=0&&color[c]<=1;
+            if(!valid) {
+                char message[160];snprintf(message,sizeof(message),"invalid physical material color: %s",field.attribute);return scene3d_fail(entry,message);
+            }
+            memcpy(material->physical_colors[i],color,3*sizeof(float));
+        }
+        double ior=material->physical_values[SCENE_IOR],ratio=(ior-1)/(ior+1);
+        material->dielectric=(float)(ratio*ratio);
     }
     float opacity;
     if(!scene3d_animated_color(entry,node,material->color)||
@@ -920,7 +939,7 @@ static bool scene3d_map_coordinates(Scene3dBuild* build,Scene3dDefinition* textu
         !scene3d_components(texture->source,"uv-transform",material->uv_rows[slot],6,&present))
         return scene3d_fail(build->entry,"texture requires uv-set 0 or 1 and a six-number UV transform");
     material->uv_sets[slot]=set;
-    if(set==1||texture->source->has_attribute("uv-set")||!scene3d_value(texture->source,"uv-set").isNull()) material->required_uvs|=1u<<(unsigned)set;
+    if(set==1||scene3d_present(texture->source,"uv-set")) material->required_uvs|=1u<<(unsigned)set;
     return true;
 }
 static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition* definition) {
@@ -935,12 +954,14 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     for(auto& rows:material->uv_rows) {rows[0]=1;rows[4]=1;}
     material->lambert=!strcmp(type,"lambert"); material->physical=!strcmp(type,"physical");material->standard=!strcmp(type,"standard")||material->physical;
     material->source=dom_node_ref(node);
+    material->transmission=material->physical&&(scene3d_present(node,"transmission")||scene3d_present(node,"transmission-texture")||
+        scene3d_animation_bound(build->entry->animation,node,"transmission"));
     if(!material->physical) {
-        for(const auto& spec:scene3d_physical_specs) if(node->has_attribute(spec.attribute)||!scene3d_value(node,spec.attribute).isNull()) {
+        for(const auto& spec:scene3d_physical_specs) if(scene3d_present(node,spec.attribute)) {
             scene3d_fail(build->entry,"physical factors require a physical material");return nullptr;
         }
-        if(node->has_attribute("sheen-color")||!scene3d_value(node,"sheen-color").isNull()) {
-            scene3d_fail(build->entry,"sheen color requires a physical material");return nullptr;
+        for(const auto& field:scene3d_physical_colors) if(scene3d_present(node,field.attribute)) {
+            scene3d_fail(build->entry,"physical colors require a physical material");return nullptr;
         }
     }
     if (!scene3d_flag(node,"transparent",false,&material->transparent) ||
@@ -1444,6 +1465,7 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
     }
     Scene3dGeometry* geometry=scene3d_geometry(build,gd); Scene3dMaterial* material=scene3d_material(build,md);
     if (!geometry || !material) return false;
+    if(material->transmission&&(material->depth_only||scene3d_transparent(material,geometry))) return scene3d_fail(build->entry,"transmission requires color with opaque or masked coverage");
     float* matrices=nullptr; unsigned count=0;
     ItemReader instance_value=scene3d_value(node,"instances");
     if (!instance_value.isNull() && instance_value.isArray() && instance_value.asArray().length()>0 &&
@@ -1464,7 +1486,7 @@ static bool scene3d_mesh(Scene3dBuild* build, DomElement* node, const Scene3dMat
     Scene3dInstanceData data[SCENE_INSTANCE_DATA_LIMIT];unsigned data_count=0,instances=0;
     if (material->shader) {
         // SH3: `instance-count` draws instances the vertex shader places itself, beside optional matrices
-        float requested;bool counted=node->has_attribute("instance-count")||!scene3d_value(node,"instance-count").isNull();
+        float requested;bool counted=scene3d_present(node,"instance-count");
         if (!scene3d_number(node,"instance-count",1,&requested) || requested<1 || requested>SCENE_INSTANCE_LIMIT ||
             floorf(requested)!=requested || (counted && count) || count%16)
             return scene3d_fail(build->entry,"instance-count must be an integer in 1..16384 without instance matrices");
@@ -1933,6 +1955,7 @@ void scene3d_context_lost(DomElement* root) {
     for (auto* group:{e->post_linear,e->post_blur,e->post_display,e->post_programs})
         for (unsigned i=0;i<(group==e->post_programs?4u:2u);i++) group[i]={};
     e->post_width=e->post_height=e->post_needs=0;
+    e->transmission_target={};e->transmission_copy={};e->transmission_width=e->transmission_height=0;
 
     // simulation state lived on the lost context; the next projection restarts from the initial records
     for (unsigned i=0;i<e->simulation_count;i++) scene3d_simulation_release(nullptr,e->simulations[i]);
@@ -1961,6 +1984,9 @@ uniform sampler2D palette;
 uniform vec2 morph_weights;
 uniform float skinned, colored;
 out vec3 world_normal, world_position;
+#ifdef TRANSMISSION
+out vec3 transmission_scale;
+#endif
 out vec4 vertex_color;
 out vec3 world_tangent, world_bitangent; // zero when the mesh has no tangents
 out vec2 texture_uv, texture_uv1;
@@ -1979,6 +2005,9 @@ mat4 bone(float index) {
 }
 void main() {
     mat4 world = model * instance;
+#ifdef TRANSMISSION
+    transmission_scale=vec3(length(world[0].xyz),length(world[1].xyz),length(world[2].xyz));
+#endif
     vec3 vertex = position + morph_position0*morph_weights.x + morph_position1*morph_weights.y;
     vec3 posed_normal = normal + morph_normal0*morph_weights.x + morph_normal1*morph_weights.y;
     vec3 posed_tangent = tangent.xyz;
@@ -2221,7 +2250,13 @@ vec3 standard_light(vec3 base,vec3 emission) {
     float roughness = min(max(pbr.y*texel.g,0.0525) + geometry_roughness, 1.0);
     float alpha = roughness*roughness;
     // the dielectric reflectance (0.04) and the metal-blended one the specular lobe uses
-    vec3 diffuse = base*(1.0-metalness), dielectric = vec3(0.04), f0 = mix(dielectric,base,metalness);
+    vec3 diffuse = base*(1.0-metalness);
+#ifdef PHYSICAL
+    vec3 dielectric=vec3(dielectric_reflectance);
+#else
+    vec3 dielectric=vec3(0.04);
+#endif
+    vec3 f0 = mix(dielectric,base,metalness);
     float dotNV = clamp(dot(n,v),0.0,1.0);
     vec2 fab = texture(dfg, vec2(roughness,dotNV)).rg;
     // energy lost to single-scattering GGX comes back through multiple scattering
@@ -2280,6 +2315,9 @@ vec3 standard_light(vec3 base,vec3 emission) {
     vec3 sheen_indirect=diffuse_irradiance*sheen*sheen_nv*occluded;
     coat_indirect*=specular_occlusion(coat_dotNV,occluded,coat_roughness);
 #endif
+#ifdef TRANSMISSION
+    vec3 outgoing_diffuse=indirect_diffuse*occluded;
+#endif
     vec3 color=indirect_diffuse*occluded+indirect_specular*specular_occlusion(dotNV,occluded,roughness);
     for (int i=0; i<8; i++) if (float(i)<light_count) {
         vec3 l; float falloff = light_falloff(i,l);
@@ -2295,8 +2333,35 @@ vec3 standard_light(vec3 base,vec3 emission) {
         irradiance*=1.0-sheen_max*max(sheen_nv,sheen_albedo(dotNL,sheen_roughness));
 #endif
         vec3 specular = PI*F_Schlick(f0,dotVH)*(V_GGX_SmithCorrelated(alpha,dotNL,dotNV)*D_GGX(alpha,dotNH))*compensation;
-        color += irradiance*(diffuse*(1.0-F_Schlick(dielectric,dotVH)) + specular);
+        vec3 direct_diffuse=diffuse*(1.0-F_Schlick(dielectric,dotVH));
+        color += irradiance*(direct_diffuse + specular);
+#ifdef TRANSMISSION
+        outgoing_diffuse+=irradiance*direct_diffuse;
+#endif
     }
+#ifdef TRANSMISSION
+    float transmitted=transmission_params.x,thickness=transmission_params.z;
+#if HAS_transmission_map
+    transmitted*=texture(transmission_map,map_uv(UV_transmission_map)).r;
+#endif
+#if HAS_thickness_map
+    thickness*=texture(thickness_map,map_uv(UV_thickness_map)).g;
+#endif
+    if(transmitted>0.0) {
+        vec3 direction=refract(-v,n,1.0/transmission_params.y);
+        vec3 ray=direction*thickness*transmission_scale;
+        vec4 clip=transmission_projection*vec4(world_position+ray,1.0);
+        vec2 screen_uv=clip.w>0.0?clip.xy/clip.w*0.5+0.5:vec2(-1.0);
+        vec3 fallback=transmission_background;
+#ifdef ENVIRONMENT
+        fallback=textureCubeUV(environment,direction,roughness).rgb*environment_intensity;
+#endif
+        vec3 radiance=transmitted_radiance(screen_uv,fallback,roughness);
+        if(thickness>0.0&&transmission_params.w>0.0) radiance*=pow(attenuation_color,vec3(length(ray)/transmission_params.w));
+        vec3 through=radiance*diffuse*(1.0-single)*indirect_weight;
+        color+=transmitted*(through-outgoing_diffuse);
+    }
+#endif
     color+=emission;
 #ifdef PHYSICAL
     color+=sheen_direct+sheen_indirect;
@@ -2574,12 +2639,12 @@ static NativeGlResource scene3d_program(Scene3dEntry* entry,unsigned variant,uns
     } else for(size_t i=0;i<entry->mapped_count;i++) if(entry->mapped_programs[i].key==key) {
         if(frame) *frame=&entry->mapped_programs[i].frame;return entry->mapped_programs[i].program;
     }
-    char header[224],shadows[64]="";
+    char header[256],shadows[64]="";
     unsigned model=variant/SCENE_TONE_CURVES,layout=model/16;
     if(layout) snprintf(shadows,sizeof(shadows),"#define SHADOWS\n#define SHADOW_CUBES %u\n",layout-1);
-    snprintf(header,sizeof(header),"#version 330 core\n%s%s%s%s%s#define TONE_MAPPING %u\n",
+    snprintf(header,sizeof(header),"#version 330 core\n%s%s%s%s%s%s#define TONE_MAPPING %u\n",
         model&1?"#define STANDARD\n":"",model&2?"#define MASK\n":"",model&4?"#define ENVIRONMENT\n":"",
-        model&8?"#define PHYSICAL\n":"",shadows,variant%SCENE_TONE_CURVES);
+        model&8?"#define PHYSICAL\n":"",mapped&SCENE_TRANSMISSION_FEATURE?"#define TRANSMISSION\n":"",shadows,variant%SCENE_TONE_CURVES);
     StrBuf* vertex=strbuf_new();strbuf_append_str(vertex,header);strbuf_append_str(vertex,scene3d_vertex_body);
     StrBuf* source=strbuf_new();strbuf_append_str(source,header);
     if(model&4) strbuf_append_str(source,scene3d_cube_uv);
@@ -2650,7 +2715,8 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
 static int scene3d_draw_compare(const void* a, const void* b) {
     const Scene3dMesh* left=*(Scene3dMesh* const*)a;const Scene3dMesh* right=*(Scene3dMesh* const*)b;
     if (left->material->depth_only!=right->material->depth_only) return left->material->depth_only?-1:1;
-    if (scene3d_transparent(left)!=scene3d_transparent(right)) return scene3d_transparent(left)?1:-1;
+    unsigned l=scene3d_transparent(left)?2:left->material->transmission?1:0,r=scene3d_transparent(right)?2:right->material->transmission?1:0;
+    if(l!=r) return l<r?-1:1;
     if (scene3d_transparent(left) && left->depth!=right->depth) return left->depth<right->depth?-1:1;
     return left->order<right->order?-1:left->order>right->order?1:0;
 }
@@ -2674,6 +2740,8 @@ struct Scene3dPass {
     const Scene3dShadows* shadows; // the casting lights whose maps standard and Lambert materials read, if any
     uint64_t frame;   // the pass's scene uniforms are set once per variant per frame
     Scene3dMatrix clip; // the lens alone (`projection` is clip × view), for shader materials
+    NativeGlResource transmission={};
+    float background[3]={};
 };
 // SH1: a shader material sees the camera as separate view and projection matrices, then its own uniforms
 static bool scene3d_draw_shader(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
@@ -2695,6 +2763,7 @@ static bool scene3d_tangent_compatible(const Scene3dMesh* mesh,unsigned slot) {
 }
 static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scene3dMesh* mesh) {
     Scene3dMaterial* material=mesh->material;
+    if(material->transmission&&scene3d_transparent(mesh)) return scene3d_fail(entry,"transmission requires opaque or masked coverage");
     if (material->shader) return scene3d_draw_shader(entry,pass,mesh);
     bool lit=pass.environment&&(material->standard||material->lambert);
     bool shaded=pass.shadows&&pass.shadows->count&&(material->standard||material->lambert);
@@ -2707,6 +2776,7 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
     unsigned mapped=0;
     if(material->physical) for(unsigned slot=SCENE_MAP_CLEARCOAT;slot<SCENE_MAP_COUNT;slot++)
         if(material->maps[slot].id) mapped|=1u<<(slot-SCENE_MAP_CLEARCOAT);
+    if(material->transmission) mapped|=SCENE_TRANSMISSION_FEATURE;
     uint64_t* program_frame=nullptr;NativeGlResource program=scene3d_program(entry,variant,mapped,&program_frame);
     if (!program.id) return false;
     if (*program_frame!=pass.frame) {
@@ -2720,6 +2790,10 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
             !scene3d_uniform(entry,program,"hemisphere",l->hemisphere,3) ||
             !scene3d_uniform(entry,program,"environment_intensity",&pass.environment_intensity,1) ||
             !scene3d_uniform(entry,program,"eye",pass.eye,4) || !scene3d_uniform(entry,program,"view",pass.view.v,16)) return false;
+        float captured=pass.transmission.id?1.f:0.f;
+        if(!scene3d_uniform(entry,program,"transmission_projection",pass.projection.v,16)||
+            !scene3d_uniform(entry,program,"transmission_background",pass.background,3)||
+            !scene3d_uniform(entry,program,"transmission_captured",&captured,1)) return false;
         if (shaded) {
             // unused slots keep zero matrices and are never read: no light maps to them
             float matrices[SCENE_SHADOW_LIMIT][16]={},params[SCENE_SHADOW_LIMIT][4]={},sizes[SCENE_SHADOW_LIMIT]={},ranges[SCENE_SHADOW_LIMIT][2]={},slots[8];
@@ -2753,13 +2827,18 @@ static bool scene3d_draw_mesh(Scene3dEntry* entry, const Scene3dPass& pass, Scen
         float layers[]={values[SCENE_COAT_FACTOR],values[SCENE_COAT_ROUGHNESS],values[SCENE_SHEEN_FACTOR],values[SCENE_SHEEN_ROUGHNESS]};
         float normal[]={material->maps[SCENE_MAP_CLEARCOAT_NORMAL].id?1.f:0.f,values[SCENE_COAT_NORMAL_SCALE],scene3d_tangent_compatible(mesh,SCENE_MAP_CLEARCOAT_NORMAL)?1.f:0.f};
         if(!scene3d_uniform(entry,program,"layer_params",layers,4)||!scene3d_uniform(entry,program,"coat_normal_params",normal,3)||
-            !scene3d_uniform(entry,program,"sheen_color",material->sheen_color,3)) return false;
+            !scene3d_uniform(entry,program,"dielectric_reflectance",&material->dielectric,1)) return false;
+        for(unsigned i=0;i<SCENE_PHYSICAL_COLORS;i++) if(!scene3d_uniform(entry,program,scene3d_physical_colors[i].sampler,material->physical_colors[i],3)) return false;
+        float transmission[]={values[SCENE_TRANSMISSION],values[SCENE_IOR],values[SCENE_THICKNESS],values[SCENE_ATTENUATION_DISTANCE]};
+        if(!scene3d_uniform(entry,program,"transmission_params",transmission,4)) return false;
     }
     if (mesh->bone_count && !native_gl_data_texture_update(entry->graphics,mesh->palette,mesh->bone_matrices[0].v,mesh->bone_count)) return false;
     NativeGlDraw draw={program,mesh->vertices,
         mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
         mesh->geometry->index_count!=0,scene3d_transparent(mesh),material->side,mesh->clockwise};
     draw.depth_only=material->depth_only;
+    if(material->transmission) draw.bindings[draw.binding_count++]={"opaque_color",pass.transmission.id?pass.transmission:entry->white,
+        pass.transmission.id?NATIVE_GL_BIND_FLOAT:NATIVE_GL_BIND_TEXTURE};
     draw.bindings[draw.binding_count++]={"image",material->maps[SCENE_MAP_BASE].id?material->maps[SCENE_MAP_BASE]:entry->white,NATIVE_GL_BIND_TEXTURE};
     if (mesh->bone_count) draw.bindings[draw.binding_count++]={"palette",mesh->palette,NATIVE_GL_BIND_TEXTURE};
     if (material->standard) {
@@ -2792,7 +2871,7 @@ static uint64_t scene3d_mesh_key(uint64_t key, const Scene3dMesh* mesh) {
     add(m->color,sizeof(m->color));add(m->emissive,sizeof(m->emissive));add(m->pbr,sizeof(m->pbr));
     add(&m->normal_scale,sizeof(float));add(&m->occlusion_strength,sizeof(float));add(&m->alpha_cutoff,sizeof(float));
     add(m->uv_rows,sizeof(m->uv_rows));add(m->uv_sets,sizeof(m->uv_sets));
-    add(m->physical_values,sizeof(m->physical_values));add(m->sheen_color,sizeof(m->sheen_color));
+    add(m->physical_values,sizeof(m->physical_values));add(m->physical_colors,sizeof(m->physical_colors));
     add(&m->physical,sizeof(m->physical));add(&m->texture_hash,sizeof(uint64_t));add(&m->side,sizeof(int));
     if (m->shader) {
         add(&mesh->program.id,sizeof(uint64_t));
@@ -2894,6 +2973,7 @@ static bool scene3d_environment_capture(Scene3dEntry* entry, DomElement* root) {
         if (!scene3d_camera(origin,{origin.x+forward.x,origin.y+forward.y,origin.z+forward.z},up,&pass.view))
             return scene3d_fail(entry,"degenerate environment capture camera");
         pass.projection=scene3d_multiply(lens,pass.view);pass.clip=lens;
+        memcpy(pass.background,p->environment_background,sizeof(pass.background));
         if (!native_gl_begin_region(graphics,entry->environment_atlas,column*SCENE_ENV_SIZE,face>2?SCENE_ENV_SIZE:0,
             SCENE_ENV_SIZE,SCENE_ENV_SIZE,p->environment_background)) return scene3d_fail(entry,native_gl_diagnostic(graphics));
         for (int i=0;i<p->mesh_count;i++) {
@@ -3116,7 +3196,7 @@ static NativeGlResource scene3d_post_program(Scene3dEntry* entry, unsigned kind)
 }
 static bool scene3d_post_pass(Scene3dEntry* entry, NativeGlResource program, NativeGlResource input,
         NativeGlBindingKind input_kind, NativeGlResource output, unsigned width, unsigned height, bool display,
-        Scene3dEffect* effect=nullptr, NativeGlResource glow={}) {
+        Scene3dEffect* effect=nullptr, NativeGlResource glow={}, bool counted=true) {
     const float clear[4]={0,0,0,0};float resolution[2]={(float)width,(float)height};
     if (!program.id || !scene3d_fullscreen(entry) || !(display?native_gl_begin(entry->graphics,output,clear):
         native_gl_begin_region(entry->graphics,output,0,0,width,height,nullptr)) ||
@@ -3126,7 +3206,25 @@ static bool scene3d_post_pass(Scene3dEntry* entry, NativeGlResource program, Nat
     if (glow.id) draw.bindings[draw.binding_count++]={"glow_input",glow,NATIVE_GL_BIND_FLOAT};
     if (effect && !scene3d_bind_uniforms(entry,program,effect->uniforms,effect->uniform_count,&draw)) return false;
     if (!native_gl_draw(entry->graphics,&draw)) return false;
-    entry->stats.postprocess_passes++;return true;
+    if(counted) entry->stats.postprocess_passes++;return true;
+}
+// transmission and image effects share the checked full-screen color-copy path.
+static bool scene3d_transmission_prepare(Scene3dEntry* entry,unsigned width,unsigned height,bool needed) {
+    if(!needed) {
+        native_gl_release(entry->graphics,entry->transmission_target);entry->transmission_target={};
+        native_gl_release(entry->graphics,entry->transmission_copy);entry->transmission_copy={};
+        entry->transmission_width=entry->transmission_height=0;return true;
+    }
+    if(entry->transmission_target.id&&entry->transmission_width==width&&entry->transmission_height==height) return true;
+    NativeGlResource target=native_gl_float_target(entry->graphics,width,height,false),program=entry->transmission_copy;
+    if(target.id&&!program.id) program=scene3d_fullscreen_program(entry,
+        "#version 330 core\nuniform sampler2D color_input;uniform vec2 resolution;out vec4 fragment;"
+        "void main(){fragment=texture(color_input,gl_FragCoord.xy/resolution);}","#version 330 core\n");
+    if(!target.id||!program.id) {
+        native_gl_release(entry->graphics,target);return scene3d_fail(entry,native_gl_diagnostic(entry->graphics));
+    }
+    native_gl_release(entry->graphics,entry->transmission_target);entry->transmission_target=target;entry->transmission_copy=program;
+    entry->transmission_width=width;entry->transmission_height=height;return true;
 }
 static bool scene3d_post_linear(Scene3dEntry* entry, DomElement* root, float scale, NativeGlResource* result) {
     unsigned width=entry->post_width,height=entry->post_height,next=0;
@@ -3253,7 +3351,14 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         native_gl_release(entry->graphics,entry->target);native_gl_release(entry->graphics,entry->hdr_target);
         entry->target=output;entry->hdr_target=hdr;
     }
-    if (!scene3d_post_prepare(entry,(unsigned)pixel_width,(unsigned)pixel_height)) { scene3d_retire_snapshot(entry);return nullptr; }
+    bool transmission_needed=false,transmission_active=false;
+    for(int i=0;i<p->mesh_count;i++) {
+        auto* mesh=p->meshes[i];if(mesh->layer!=SCENE_LAYER_SCENE||!mesh->material->transmission) continue;
+        transmission_needed=true;
+        transmission_active|=mesh->visible&&mesh->material->physical_values[SCENE_TRANSMISSION]>0;
+    }
+    if (!scene3d_post_prepare(entry,(unsigned)pixel_width,(unsigned)pixel_height)||
+        !scene3d_transmission_prepare(entry,(unsigned)pixel_width,(unsigned)pixel_height,transmission_needed)) { scene3d_retire_snapshot(entry);return nullptr; }
     float aspect=p->aspect>0?p->aspect:vb.has_viewbox?vb.width/vb.height:width/height;
     Scene3dVec eye=scene3d_point(p->camera_world,{});
     Scene3dVec target=p->camera_has_target?p->camera_target:scene3d_point(p->camera_world,{0,0,-1});
@@ -3285,7 +3390,17 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     const float clear[4]={0,0,0,0};
     bool rendered=native_gl_begin(entry->graphics,entry->hdr_target,clear);
     for (int i=0;rendered && i<p->mesh_count;i++)
-        if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE && !scene3d_transparent(p->meshes[i]))
+        if (p->meshes[i]->visible && p->meshes[i]->layer==SCENE_LAYER_SCENE && !scene3d_transparent(p->meshes[i])&&!p->meshes[i]->material->transmission)
+            rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
+    if(rendered&&transmission_active) {
+        rendered=scene3d_post_pass(entry,entry->transmission_copy,entry->hdr_target,NATIVE_GL_BIND_TARGET,
+            entry->transmission_target,(unsigned)pixel_width,(unsigned)pixel_height,false,nullptr,{},false)&&
+            native_gl_begin(entry->graphics,entry->hdr_target,nullptr);
+        if(rendered) {pass.transmission=entry->transmission_target;entry->stats.transmission_captures++;}
+    }
+    memcpy(pass.background,p->background,sizeof(pass.background));pass.frame=++entry->frame;
+    for(int i=0;rendered&&i<p->mesh_count;i++)
+        if(p->meshes[i]->visible&&p->meshes[i]->layer==SCENE_LAYER_SCENE&&p->meshes[i]->material->transmission)
             rendered=scene3d_draw_mesh(entry,pass,p->meshes[i]);
     NativeGlResource processed={};
     if (rendered) rendered=scene3d_post_linear(entry,root,raster_scale,&processed) && scene3d_output(entry,p,processed);

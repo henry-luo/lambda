@@ -2404,6 +2404,21 @@ Rendering still publishes one document-owned image per changed frame
 (**D4.5.1v4 / D4.5.2**); repeated fixed-time captures reuse that frame
 (**D2.11.4**).
 
+`physical` also supports transmission: `transmission` [0,1] defaults to 0,
+`ior` ≥1 to 1.5 and `thickness` ≥0 to 0 mesh units. `attenuation-color` defaults
+to white; optional positive `attenuation-distance` is in world units, with
+omission meaning no absorption. `transmission-texture` reads linear R and
+`thickness-texture` linear G. Their coordinate selectors/transforms are independent.
+Tracks reuse existing playback, including transmission tracks without an authored
+factor. Negative/out-of-range absorption colors diagnose when sampled.
+
+The native glass profile shares one opaque-scene capture, uses bounded rough
+screen refraction plus environment/background fallback, and renders before
+ordinary alpha blending. It supports opaque/masked coverage; alpha-blended
+transmission is diagnosed. Glass objects sample the same opaque image and do
+not refract each other. HTML behind the viewport is not a refraction source.
+See the [limits and defaults](../vibe/radiant/Radiant_Design_WebGL.md#transmission-m5-selected-profile).
+
 ### Shader materials and GPU simulations
 
 Lambda describes the scene and its GLSL; the GPU does per-frame work such as vertex deformation and particle simulation ([plan](../vibe/impl/Radiant_Impl_Scene3d_Shaders.md)). `shader_material(vertex, fragment, uniforms?, options?)` takes GLSL 330 bodies. The host declares the vertex inputs `position`, `normal`, `uv`, `color`, `tangent` and `instance_matrix`, the uniforms `model_matrix`, `view_matrix`, `projection_matrix` and `camera_position`, and the output `fragment_color` (linear; premultiplied when `transparent`). The `uniforms` map gives every other uniform the shader declares: numbers, number arrays, `#rrggbb` colors (linear), a texture ID for a `sampler2D`, or `"<simulation>.<variable>"`. A missing value or a type mismatch is a scene diagnostic. Options include `side`, `transparent` and `alpha-to-coverage`. A keyframe track on `<material id>.uniforms.<name>` animates a uniform, and re-renders that change only uniform values keep the linked program.
@@ -2526,7 +2541,8 @@ These remain pure scene values (**S12.1.1v3, D7.2.4v4**).
 glTF imports standard factors, base-color/metal-rough/normal/occlusion/emissive
 maps, alpha masks, tangents, UV0/UV1, RGB/RGBA vertex colors and camera nodes.
 Each map preserves its own `KHR_texture_transform` and coordinate selection.
-`KHR_materials_clearcoat` and `KHR_materials_sheen` import/export their factors,
+`KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_transmission`,
+`KHR_materials_ior` (IOR ≥1) and `KHR_materials_volume` import/export represented factors,
 maps and independent normal scale. A glTF sheen color folds the native sheen
 factor into its linear RGB value on static export.
 Explicit viewport `camera` selection wins over imported cameras; omitted
@@ -2548,7 +2564,7 @@ and shadow settings are not encoded. See the
 [export profile](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export)
 for the precise mapping and refusals.
 
-Transmission/volume, anisotropy, iridescence, dispersion, cascaded shadows, global illumination/SSAO and
+Anisotropy, iridescence, dispersion, cascaded shadows, global illumination/SSAO and
 depth-dependent postprocessing remain follow-on scope. The
 [Dreamhome demo](../test/demo/dreamhome/README.md) combines the implemented
 PBR, room lighting and sun shadows. Its release frame measurement and

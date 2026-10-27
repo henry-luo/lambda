@@ -647,18 +647,20 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
-    if (!scope.valid || !slot || slot->layered || !background) return false;
-    for (unsigned c = 0; c < 4; c++)
+    if (!scope.valid || !slot || slot->layered || (!background&&!slot->initialized)) return false;
+    for (unsigned c = 0; background && c < 4; c++)
         if (!isfinite(background[c]) || background[c] < 0 || ((!slot->hdr || c==3) && background[c] > 1)) return false;
     NativeGlFunctions& gl = context->gl;
     gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name); gl.Viewport(0, 0, slot->width, slot->height);
     if (slot->hdr) gl.Disable(GL_FRAMEBUFFER_SRGB);else gl.Enable(GL_FRAMEBUFFER_SRGB);
     gl.Enable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST); gl.DepthMask(GL_TRUE);
     gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-    gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
-    gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    if(background) {
+        gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
+        gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    }
     context->drawing = slot->id;slot->resolve_dirty=true;
-    slot->initialized=native_gl_check(context, "drawing buffer clear");return slot->initialized;
+    slot->initialized=native_gl_check(context, background?"drawing buffer clear":"drawing buffer resume");return slot->initialized;
 #else
     return false;
 #endif

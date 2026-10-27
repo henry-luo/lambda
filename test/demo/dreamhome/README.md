@@ -61,8 +61,9 @@ The remaining native PBR properties are animated through the shared scene
 track reader, and MTL PBR factors/maps now import as standard materials. See
 the [Scene3D package guide](../../../doc/Lambda_Packages.md#27-scene3d--native-3d-scenes)
 for their supported ranges and import limits. The separate
-[physical-material fixture](../../scene3d/physical.ls) demonstrates the newer
-clearcoat/sheen profile; Dreamhome continues to use standard finishes.
+[physical-material](../../scene3d/physical.ls) and
+[glass](../../scene3d/transmission.ls) fixtures demonstrate the newer
+clearcoat/sheen and transmission profiles; Dreamhome continues to use standard finishes.
 The original external glTF
 acceptance models have a reproducible native/Three.js comparison (Python with
 Pillow, Node/Puppeteer, graphics access and `CHROME_HEADLESS_SHELL` required):

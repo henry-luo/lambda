@@ -244,7 +244,7 @@ static bool read_metrics(EventSimContext* context, UiContext* ui, MapReader& arg
         METRIC(projection_generation); METRIC(snapshot_generation);
         METRIC(projection_bytes); METRIC(projection_reserved_bytes); METRIC(snapshot_bytes);
         METRIC(meshes); METRIC(geometries); METRIC(textures); METRIC(environment_builds); METRIC(shadow_passes);
-        METRIC(shader_links); METRIC(material_links); METRIC(shader_programs); METRIC(simulation_steps); METRIC(postprocess_passes);
+        METRIC(shader_links); METRIC(material_links); METRIC(shader_programs); METRIC(simulation_steps); METRIC(transmission_captures); METRIC(postprocess_passes);
         METRIC(raster_width); METRIC(raster_height); METRIC(camera_aspect);
 #undef METRIC
         metrics->put("animation_id", (uintptr_t)scene3d_animations(element));
@@ -612,6 +612,8 @@ static bool measure_frames(EventSimContext* context, UiContext* ui, MapReader& a
         graphics_metrics(&metrics, after);
         metrics.put("graphics.cpu_bytes_growth", (double)after.cpu_bytes - before.cpu_bytes);
         metrics.put("graphics.gpu_bytes_growth", (double)after.gpu_bytes - before.gpu_bytes);
+        metrics.put("graphics.draws_growth", (double)after.draws - before.draws);
+        metrics.put("graphics.frames_growth", (double)after.frames - before.frames);
         // native camera measurements pin retained projection/capture work alongside wall time.
         if (native_scene) {
             metrics.put("raster_width", scene_after.raster_width);
@@ -621,6 +623,9 @@ static bool measure_frames(EventSimContext* context, UiContext* ui, MapReader& a
             metrics.put("snapshot_growth", (double)scene_after.snapshot_generation - scene_before.snapshot_generation);
             metrics.put("environment_builds_growth", (double)scene_after.environment_builds - scene_before.environment_builds);
             metrics.put("shadow_passes_growth", (double)scene_after.shadow_passes - scene_before.shadow_passes);
+            metrics.put("material_links_growth", (double)scene_after.material_links - scene_before.material_links);
+            metrics.put("transmission_captures_growth", (double)scene_after.transmission_captures - scene_before.transmission_captures);
+            metrics.put("postprocess_passes_growth", (double)scene_after.postprocess_passes - scene_before.postprocess_passes);
         }
         if (args.has("fields")) passed &= compare_metrics(context, args, metrics);
         StrBuf* json = strbuf_new(); strbuf_append_char(json, '{');

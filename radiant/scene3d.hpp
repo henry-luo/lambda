@@ -23,6 +23,7 @@ struct Scene3dStats {
     uint32_t material_links;     // retained built-in material programs linked
     uint32_t shader_programs;    // shader-material programs currently retained
     uint32_t simulation_steps;   // GPU simulation steps since the viewport was created
+    uint32_t transmission_captures; // one shared opaque image per changed glass frame
     uint32_t postprocess_passes; // color passes, excluding the common output conversion
     unsigned raster_width, raster_height;
     float camera_aspect;

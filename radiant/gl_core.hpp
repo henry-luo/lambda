@@ -83,6 +83,7 @@ bool native_gl_uniform_set(NativeGlContext* context, NativeGlUniform uniform,
     const float* values, unsigned components, unsigned count = 1);
 NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsigned height,
     unsigned samples = 4, bool hdr = false);
+// a null background resumes an initialized buffer while preserving its color/depth samples.
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]);
 // transfer opaque visibility to the display target before forward transparent draws.
 bool native_gl_copy_depth(NativeGlContext* context, NativeGlResource source, NativeGlResource target);

@@ -88,14 +88,18 @@ static bool scene3d_animation_write(void* owner,uint64_t identity,const Animatio
     if(state->document->state) doc_state_request_repaint(state->document->state);
     return true;
 }
+static Scene3dAnimationBinding* scene3d_animation_property(Scene3dAnimationState* state,DomElement* node,const char* property) {
+    if(state&&node) for(auto* binding=state->bindings;binding;binding=binding->next)
+        if(binding->node.address==node&&binding->node.expected_id==node->DomNode::id&&!strcmp(binding->property,property)) return binding;
+    return nullptr;
+}
+bool scene3d_animation_bound(Scene3dAnimationState* state,DomElement* node,const char* property) {
+    return scene3d_animation_property(state,node,property)!=nullptr;
+}
 bool scene3d_animation_value(Scene3dAnimationState* state,DomElement* node,const char* property,AnimationValue* value) {
-    if(!state||!node||!value) return false;
-    for(auto* binding=state->bindings;binding;binding=binding->next)
-        if(binding->node.address==node&&binding->node.expected_id==node->DomNode::id&&!strcmp(binding->property,property)) {
-            if(!animation_mixer_property_active(state->mixer,binding->identity)) return false;
-            *value=binding->value;return true;
-        }
-    return false;
+    auto* binding=scene3d_animation_property(state,node,property);
+    if(!binding||!value||!animation_mixer_property_active(state->mixer,binding->identity)) return false;
+    *value=binding->value;return true;
 }
 static DomElement* scene3d_animation_find(DomElement* node,const char* name,unsigned depth=0) {
     if(depth>64) return nullptr;
@@ -152,10 +156,14 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         for(unsigned i=0;i<count;i++) value->numbers[i]=numbers[i];return true;
     }
     const char* material_type=scene3d_text(node,"type");
-    bool sheen_color=!strcmp(tag,"material")&&!strcmp(property,"sheen-color");
-    if(sheen_color&&(!material_type||strcmp(material_type,"physical"))) return false;
+    if(!strcmp(tag,"material")) for(const auto& field:scene3d_physical_colors) if(!strcmp(property,field.attribute)) {
+        if(!material_type||strcmp(material_type,"physical")) return false;
+        float color[4];if(!scene3d_color(node,property,field.fallback,color)) return false;
+        value->type=ANIMATION_COLOR;value->count=3;
+        for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;
+    }
     bool emissive=!strcmp(tag,"material")&&!strcmp(property,"emissive");
-    if(emissive||sheen_color||(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light")))) {
+    if(emissive||(!strcmp(property,"color")&&(!strcmp(tag,"material")||!strcmp(tag,"light")))) {
         float color[4];if(!scene3d_color(node,property,emissive?"#000000":"#ffffff",color)) return false;
         value->type=ANIMATION_COLOR;value->count=3;
         for(unsigned i=0;i<3;i++) value->numbers[i]=color[i];return true;

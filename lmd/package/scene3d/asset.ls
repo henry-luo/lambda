@@ -3,7 +3,7 @@ fn prefixed(value, prefix) => prefix ++ "-" ++ string(value)
 // the attributes that name another scene resource by id, and so take the prefix too
 let REFERENCES = ["id", "geometry", "material", "texture", "skeleton",
     "metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture",
-    "clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture"]
+    "clearcoat-texture", "clearcoat-roughness-texture", "clearcoat-normal-texture", "sheen-color-texture", "sheen-roughness-texture", "transmission-texture", "thickness-texture"]
 // shared with lambda.scene3d.motion, which compiles a character's body the same way
 pub fn rewrite(n, prefix, options) element {
     let kind = name(n)
