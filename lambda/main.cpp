@@ -2526,12 +2526,25 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
 };
 
 static void print_demo_help(FILE* stream) {
+    constexpr size_t demo_count = sizeof(LAMBDA_DEMOS) / sizeof(LAMBDA_DEMOS[0]);
+    const LambdaDemo* sorted_demos[demo_count];
+    for (size_t i = 0; i < demo_count; i++) sorted_demos[i] = &LAMBDA_DEMOS[i];
+    for (size_t i = 1; i < demo_count; i++) {
+        const LambdaDemo* demo = sorted_demos[i];
+        size_t j = i;
+        while (j > 0 && strcmp(sorted_demos[j - 1]->name, demo->name) > 0) {
+            sorted_demos[j] = sorted_demos[j - 1];
+            j--;
+        }
+        sorted_demos[j] = demo;
+    }
+
     fputs("Usage: lambda demo [name] [view options]\n"
           "\nWith no name, opens the demo index (test/demo/index.ls): one animated tile\n"
           "per demo; a click opens that demo in its own window.\n"
           "Named demos (run from the checkout or release root):\n", stream);
-    for (const LambdaDemo& demo : LAMBDA_DEMOS) {
-        fprintf(stream, "  %-18s %s\n", demo.name, demo.path); // PRINTF_OK: user-facing CLI help.
+    for (const LambdaDemo* demo : sorted_demos) {
+        fprintf(stream, "  %-18s %s\n", demo->name, demo->path); // PRINTF_OK: user-facing CLI help.
     }
     fputs("\n  --list, --help, -h  Show this list\n"
           "Other options are passed to 'lambda view'.\n", stream);
