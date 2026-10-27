@@ -1245,8 +1245,7 @@ void render(RadiantWindow* window) {
         log_error("render: surface or pixels is NULL");
         return;
     }
-    radiant_platform_present(window, ui_context.surface.get(), &ui_context.present_rect,
-                             ui_context.present_partial);
+    ui_context_present_surface(&ui_context, ui_context.surface.get());
     ui_context.present_partial = true;
     ui_context.present_rect = {};
 }

@@ -387,6 +387,7 @@ bool radiant_register_dom_engine_providers();
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
 bool ui_context_enable_native_graphics(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
+void ui_context_present_surface(UiContext* uicon, const ImageSurface* surface);
 // keep the completed native frame visible while a resized surface awaits repaint.
 bool ui_context_resize_window_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);

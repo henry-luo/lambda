@@ -100,8 +100,11 @@ void radiant_platform_set_clipboard(RadiantWindow* window, const char* text);
 bool radiant_platform_present_init(RadiantWindow* window);
 // Shows `surface` in `window`. With `partial`, only `damage` changed since the
 // previous present of the same-sized surface; otherwise everything did.
+// pixel scales reflect display-density changes, never a viewport resize. The
+// image stays at the top left; exposed areas use background_rgba (surface format).
 void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface,
-                              const Bound* damage, bool partial);
+                              const Bound* damage, bool partial, uint32_t background_rgba,
+                              float pixel_scale_x, float pixel_scale_y);
 
 // --- host entry points the backend calls (defined by window.cpp) ---
 void radiant_host_input(RadiantWindow* window, union RdtEvent* event);

@@ -3389,6 +3389,10 @@ TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
 TEST_F(RadiantTextQuery, NativeResizeRetainsCompletedFrameUntilRepaint) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0;background:#204060}</style><div id=result></div>");
+    ASSERT_NE(layout_script_source(source), nullptr);
     ASSERT_TRUE(ui_context_enable_native_graphics(&ui));
     ui.headless = false;
     radiant_platform_set_window_title(ui.window, "Lambda resize regression");
@@ -3397,38 +3401,86 @@ TEST_F(RadiantTextQuery, NativeResizeRetainsCompletedFrameUntilRepaint) {
     ASSERT_TRUE(radiant_platform_present_init(ui.window));
     int initial_width, initial_height;
     radiant_platform_get_framebuffer_size(ui.window, &initial_width, &initial_height);
+    int logical_width, logical_height;
+    radiant_platform_get_window_size(ui.window, &logical_width, &logical_height);
+    ui.viewport_width = logical_width;
+    ui.viewport_height = logical_height;
+    ui_context_set_device_scale(&ui, (float)initial_width / logical_width,
+                                (float)initial_height / logical_height);
     ui.window_width = initial_width;
     ui.window_height = initial_height;
     ui_context_create_surface(&ui, initial_width, initial_height);
     ASSERT_NE(ui.surface.get(), nullptr);
-    const int widths[] = {400, 280, 360};
-    for (unsigned pass = 0; pass < 3; pass++) {
-        SCOPED_TRACE(pass);
-        uint32_t color = 0xff604020 + pass * 0x000c0804;
+    const int sizes[][2] = {{400, 260}, {280, 180}, {360, 240}};
+    const uint32_t background = 0xff604020;
+    auto paint_pattern = [&](uint32_t marker) {
         for (int y = 0; y < ui.surface->height; y++) {
             auto* row = (uint32_t*)((uint8_t*)ui.surface->pixels + (size_t)y * ui.surface->pitch);
-            for (int x = 0; x < ui.surface->width; x++) row[x] = color;
+            for (int x = 0; x < ui.surface->width; x++)
+                row[x] = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
         }
-        radiant_platform_present(ui.window, ui.surface.get(), nullptr, false);
+    };
+    auto expect_pattern = [&](uint32_t marker, int height) {
+        uint8_t pixels[160 * 96 * 4] = {};
+        glReadBuffer(GL_FRONT);
+        glReadPixels(0, height - 96, 160, 96, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+        unsigned changed = 0;
+        for (int y = 0; y < 96; y++) for (int x = 0; x < 160; x++) {
+            uint32_t wanted = x >= 40 && x < 120 && y >= 32 && y < 56 ? marker : background;
+            const uint8_t* pixel = pixels + ((95 - y) * 160 + x) * 4;
+            if (pixel[0] != (wanted & 0xff) || pixel[1] != ((wanted >> 8) & 0xff) ||
+                pixel[2] != ((wanted >> 16) & 0xff)) changed++;
+        }
+        EXPECT_EQ(changed, 0u) << "retained pixels must keep their size and top-left position";
+    };
+    auto expect_pixel = [&](int x, int y, int height, uint32_t wanted) {
+        uint8_t pixel[4] = {};
+        glReadBuffer(GL_FRONT);
+        glReadPixels(x, height - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+        EXPECT_EQ(pixel[0], wanted & 0xff);
+        EXPECT_EQ(pixel[1], (wanted >> 8) & 0xff);
+        EXPECT_EQ(pixel[2], (wanted >> 16) & 0xff);
+    };
+    for (unsigned pass = 0; pass < 3; pass++) {
+        SCOPED_TRACE(pass);
+        uint32_t marker = 0xff60e040 + pass * 0x00060507;
+        paint_pattern(marker);
+        radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
         ui.present_partial = true;
-        radiant_platform_set_window_size(ui.window, widths[pass], 220);
+        radiant_platform_set_window_size(ui.window, sizes[pass][0], sizes[pass][1]);
         radiant_platform_poll_events();
         int width, height;
         radiant_platform_get_framebuffer_size(ui.window, &width, &height);
         ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
         // the new CPU target has not been painted; the front buffer must retain the old image.
-        uint8_t pixel[4] = {};
-        glReadBuffer(GL_FRONT);
-        glReadPixels(20, 20, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
-        EXPECT_EQ(pixel[0], color & 0xff);
-        EXPECT_EQ(pixel[1], (color >> 8) & 0xff);
-        EXPECT_EQ(pixel[2], (color >> 16) & 0xff);
+        expect_pattern(marker, height);
+        expect_pixel(width - 10, height - 11, height, background);
         EXPECT_EQ(ui.surface->width, width);
         EXPECT_EQ(ui.surface->height, height);
         EXPECT_FALSE(ui.present_partial);
         EXPECT_FALSE(ui_context_resize_window_surface(&ui, width, height));
+        radiant_platform_get_window_size(ui.window, &logical_width, &logical_height);
+        ui.viewport_width = logical_width;
+        ui.viewport_height = logical_height;
+        paint_pattern(marker);
+        radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+        expect_pattern(marker, height);
     }
+    // a density change must still scale the old pixels while retaining CSS geometry.
+    uint32_t marker = 0xff40d080;
+    paint_pattern(marker);
+    radiant_platform_present(ui.window, ui.surface.get(), nullptr, false, background, 1, 1);
+    ui.present_partial = true;
+    ui_context_set_device_scale(&ui, ui.device_scale_x * 2, ui.device_scale_y * 2);
+    radiant_platform_set_window_size(ui.window, logical_width * 2, logical_height * 2);
+    radiant_platform_poll_events();
+    int width, height;
+    radiant_platform_get_framebuffer_size(ui.window, &width, &height);
+    ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
+    expect_pixel(160, 88, height, marker);
+    expect_pixel(80, 44, height, background);
 }
 #endif
 

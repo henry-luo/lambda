@@ -99,6 +99,18 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     uicon->create_surface(pixel_width, pixel_height);
 }
 
+void ui_context_present_surface(UiContext* uicon, const ImageSurface* surface) {
+    if (!uicon || uicon->headless || !surface || surface->width <= 0 || surface->height <= 0) return;
+    View* root = uicon->document && uicon->document->view_tree
+        ? uicon->document->view_tree->root : nullptr;
+    // before reflow these are the retained frame's logical extents; the device
+    // scale already reflects the destination display, independently of window size.
+    float scale_x = uicon->viewport_width * uicon->device_scale_x / surface->width;
+    float scale_y = uicon->viewport_height * uicon->device_scale_y / surface->height;
+    radiant_platform_present(uicon->window, surface, &uicon->present_rect,
+        uicon->present_partial, render_document_output_background(root).c, scale_x, scale_y);
+}
+
 bool ui_context_resize_window_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     if (!uicon || pixel_width <= 0 || pixel_height <= 0 ||
         (pixel_width == uicon->window_width && pixel_height == uicon->window_height)) return false;
@@ -107,8 +119,7 @@ bool ui_context_resize_window_surface(UiContext* uicon, int pixel_width, int pix
     // before allocating a blank target and doing the potentially slow reflow.
     if (!uicon->headless && uicon->window && uicon->window_surface &&
         uicon->window_surface->pixels) {
-        radiant_platform_present(uicon->window, uicon->window_surface.get(),
-                                 &uicon->present_rect, uicon->present_partial);
+        ui_context_present_surface(uicon, uicon->window_surface.get());
     }
     uicon->window_width = pixel_width;
     uicon->window_height = pixel_height;

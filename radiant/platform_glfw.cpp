@@ -414,28 +414,32 @@ bool radiant_platform_present_init(RadiantWindow* window) {
     glfwMakeContextCurrent(glfw_window(window));
     glfwSwapInterval(1);  // vsync
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
-    glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // light grey behind a partially drawn surface
     return true;
 }
 
 void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface,
-                              const Bound* damage, bool partial) {
+                              const Bound* damage, bool partial, uint32_t background_rgba,
+                              float pixel_scale_x, float pixel_scale_y) {
     if (!window || !surface || !surface->pixels) return;
     int framebuffer_width = 0, framebuffer_height = 0;
     glfwGetFramebufferSize(glfw_window(window), &framebuffer_width, &framebuffer_height);
     if (framebuffer_width <= 0 || framebuffer_height <= 0) return;
 
-    // set up the viewport and projection for one full-window quad
-    glViewport(0, 0, framebuffer_width, framebuffer_height);
+    // only display density scales the retained image; a larger viewport must
+    // not zoom fixed-size content before the new layout arrives.
+    int present_width = (int)lroundf(surface->width * pixel_scale_x); // INT_CAST_OK: GL drawable extent
+    int present_height = (int)lroundf(surface->height * pixel_scale_y); // INT_CAST_OK: GL drawable extent
+    glViewport(0, framebuffer_height - present_height, present_width, present_height);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(-1, 1, -1, 1, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+    glClearColor((background_rgba & 0xff) / 255.0f,
+        ((background_rgba >> 8) & 0xff) / 255.0f,
+        ((background_rgba >> 16) & 0xff) / 255.0f, ((background_rgba >> 24) & 0xff) / 255.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    bool exact_framebuffer_present =
-        framebuffer_width == surface->width && framebuffer_height == surface->height;
     // One texture persists across presents (Radiant_Design_Animation_Repaint §3 A3): a frame
     // that wrote only a damage rect uploads just those rows and columns.
     static GLuint texture = 0;
@@ -466,9 +470,10 @@ void radiant_platform_present(RadiantWindow* window, const ImageSurface* surface
     }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    GLint present_filter = exact_framebuffer_present ? GL_NEAREST : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, present_filter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, present_filter);
+    GLint filter = present_width == surface->width && present_height == surface->height
+        ? GL_NEAREST : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);

@@ -20,6 +20,13 @@
       "height": 480
     },
     {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
       "type": "assert_text",
       "target": {
         "selector": ".seed"
@@ -40,6 +47,13 @@
       "height": 480
     },
     {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
       "type": "assert_text",
       "target": {
         "selector": ".seed"
@@ -58,6 +72,13 @@
       },
       "width": 720,
       "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
     },
     {
       "type": "assert_text",
@@ -80,6 +101,13 @@
       "height": 480
     },
     {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
       "type": "assert_text",
       "target": {
         "selector": ".seed"
@@ -100,6 +128,13 @@
       "height": 480
     },
     {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
+    },
+    {
       "type": "assert_text",
       "target": {
         "selector": ".seed"
@@ -118,6 +153,13 @@
       },
       "width": 720,
       "height": 480
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".side"
+      },
+      "width": 300
     },
     {
       "type": "assert_text",
