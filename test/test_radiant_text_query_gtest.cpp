@@ -27,6 +27,10 @@
 #include "../lib/hash.h"
 #include "../lib/file.h"
 
+#if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+#include <OpenGL/gl.h>
+#endif
+
 extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
 void fire_events(EventContext* context, ArrayList* stack);
@@ -3382,6 +3386,51 @@ TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
     EXPECT_FALSE(item->flex_item()->retained.has_content);
     EXPECT_FLOAT_EQ(item->font->font_size, 24.0f);
 }
+
+#if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
+TEST_F(RadiantTextQuery, NativeResizeRetainsCompletedFrameUntilRepaint) {
+    ASSERT_TRUE(ui_context_enable_native_graphics(&ui));
+    ui.headless = false;
+    radiant_platform_set_window_title(ui.window, "Lambda resize regression");
+    radiant_platform_set_window_size(ui.window, 320, 200);
+    radiant_platform_show_window(ui.window);
+    ASSERT_TRUE(radiant_platform_present_init(ui.window));
+    int initial_width, initial_height;
+    radiant_platform_get_framebuffer_size(ui.window, &initial_width, &initial_height);
+    ui.window_width = initial_width;
+    ui.window_height = initial_height;
+    ui_context_create_surface(&ui, initial_width, initial_height);
+    ASSERT_NE(ui.surface.get(), nullptr);
+    const int widths[] = {400, 280, 360};
+    for (unsigned pass = 0; pass < 3; pass++) {
+        SCOPED_TRACE(pass);
+        uint32_t color = 0xff604020 + pass * 0x000c0804;
+        for (int y = 0; y < ui.surface->height; y++) {
+            auto* row = (uint32_t*)((uint8_t*)ui.surface->pixels + (size_t)y * ui.surface->pitch);
+            for (int x = 0; x < ui.surface->width; x++) row[x] = color;
+        }
+        radiant_platform_present(ui.window, ui.surface.get(), nullptr, false);
+        ui.present_partial = true;
+        radiant_platform_set_window_size(ui.window, widths[pass], 220);
+        radiant_platform_poll_events();
+        int width, height;
+        radiant_platform_get_framebuffer_size(ui.window, &width, &height);
+        ASSERT_TRUE(ui_context_resize_window_surface(&ui, width, height));
+        // the new CPU target has not been painted; the front buffer must retain the old image.
+        uint8_t pixel[4] = {};
+        glReadBuffer(GL_FRONT);
+        glReadPixels(20, 20, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        EXPECT_EQ(glGetError(), (GLenum)GL_NO_ERROR);
+        EXPECT_EQ(pixel[0], color & 0xff);
+        EXPECT_EQ(pixel[1], (color >> 8) & 0xff);
+        EXPECT_EQ(pixel[2], (color >> 16) & 0xff);
+        EXPECT_EQ(ui.surface->width, width);
+        EXPECT_EQ(ui.surface->height, height);
+        EXPECT_FALSE(ui.present_partial);
+        EXPECT_FALSE(ui_context_resize_window_surface(&ui, width, height));
+    }
+}
+#endif
 
 TEST_F(RadiantTextQuery, ReplacedIntrinsicWidthsExcludeGraphicDescendants) {
     StrBuf* source = strbuf_new();

@@ -99,6 +99,28 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     uicon->create_surface(pixel_width, pixel_height);
 }
 
+bool ui_context_resize_window_surface(UiContext* uicon, int pixel_width, int pixel_height) {
+    if (!uicon || pixel_width <= 0 || pixel_height <= 0 ||
+        (pixel_width == uicon->window_width && pixel_height == uicon->window_height)) return false;
+
+    // native resize invalidates the front buffer; restore the completed image
+    // before allocating a blank target and doing the potentially slow reflow.
+    if (!uicon->headless && uicon->window && uicon->window_surface &&
+        uicon->window_surface->pixels) {
+        radiant_platform_present(uicon->window, uicon->window_surface.get(),
+                                 &uicon->present_rect, uicon->present_partial);
+    }
+    uicon->window_width = pixel_width;
+    uicon->window_height = pixel_height;
+    ui_context_create_surface(uicon, pixel_width, pixel_height);
+    uicon->present_partial = false;
+    uicon->present_rect = {};
+    if (uicon->document && uicon->document->state) {
+        doc_state_mark_dirty(uicon->document->state);
+    }
+    return true;
+}
+
 void UiContext::create_surface(int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
     if (window_surface) image_surface_destroy(window_surface);
