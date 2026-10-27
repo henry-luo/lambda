@@ -21,3 +21,9 @@ The world model is in `mod_world.ls` and the SVG drawings are in `mod_map.ls`. `
 ```
 
 The demo also appears in the `lambda demo` gallery. The event replay checks eight assertions, including district drawing and climate toggles.
+
+`tests/resize_events.json` checks fifteen assertions across six window sizes, including stable map dimensions, seed and working controls after resizing:
+
+```sh
+./lambda.exe view test/demo/procgen/world.ls --headless --event-file test/demo/procgen/tests/resize_events.json --event-result temp/procgen-resize.json
+```
