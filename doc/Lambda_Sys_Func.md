@@ -381,6 +381,66 @@ arithmetic prevents cancellation, overflow, or underflow in the determinant
 from changing its sign. Malformed points produce `error`; whole-point `null`
 propagates `null` (S7.10.2, S7.10.5v3).
 
+#### Wave Function Collapse Batch Solver
+
+`math.wfc(key, weights, masks, [width, height, periodic, retries])` runs the
+exact counting kernel used by `lambda.procgen.wfc`. Prefer the package for
+model construction and named options; this primitive accepts numeric buffers.
+It is pure (S12.1.1v3) and returns an owned flat `int[]` in row-major order
+through the boxed system-function ABI (D6.4.1–D6.4.2).
+
+`key` is `u64`. There must be 1–1,000 positive finite `int`/`float` weights,
+with a sum at most 2^53. `masks` has shape `[4, patterns, patterns]`, with
+integer entries 0 or 1: `masks[d][p][q]` allows pattern `q` next to `p` in
+direction right, down, left or up. Nested arrays and packed N-D arrays are
+accepted. Dimensions and retries are positive ints, with at most 10,000
+cells; `periodic` is bool. Malformed inputs and contradictions after all
+retries return `error`. A whole `null` operand propagates `null`, and error
+operands take precedence (S7.1.1v3). Inputs are preserved.
+
+The solver uses smallest-domain observation with row-major ties, keyed draws
+and sequential weighted prefixes. It reproduces `wfc.run_reference` exactly
+for its supported weight domain (PG2, PG7.3). The package keeps other numeric
+weight domains on its Lambda reference implementation.
+
+#### Delaunay Batch Kernel
+
+`math.delaunay(points, ids, seed)` is the numeric insertion kernel behind
+`lambda.procgen.geom`. Prefer `geom.delaunay` for the public mesh, duplicate
+removal and hull handling. `points` is a finite numeric N × 2 matrix (N ≤
+20,000). `ids` lists distinct point indices in insertion order, with duplicate
+coordinates already removed; `seed` contains three indices from `ids` in
+counterclockwise order. It returns an owned flat `int[]` of triangle triples,
+including ghost faces `[u,v,-1]`, in the Lambda reference's creation order.
+The package constructs public triangles, halfedges and hull from that result.
+Three empty arrays return a typed empty int array; other inputs need a
+noncollinear seed. Invalid indices, malformed inputs and kernel failures
+return `error`.
+
+Orientation and incircle share the existing exact-predicate filter and
+arbitrary-precision fallback, so degeneracy never depends on a floating-point
+epsilon. The local-cavity search preserves exact reference choices and
+ordering (PG2, PG7.3).
+
+#### Hydraulic Erosion Batch Kernel
+
+`math.hydraulic(key, values, control, settings)` runs the snapshot-batched
+kernel behind `lambda.procgen.terrain`. `key` is `u64`; `values` is a finite
+flat numeric vector of width × height entries. `control` is the int vector
+`[width, height, droplets, batch, steps]`: dimensions at least 2, at most
+250,000 cells, 0–1,000,000 droplets, batch 1–1,000,000 and steps 0–1,000.
+`settings` is the finite vector `[inertia, capacity, min_capacity, erode,
+deposit, evaporate, gravity]`. Rates are in [0,1]; capacities and gravity are
+nonnegative. The result is an owned flat float array. Invalid arguments,
+allocation failure or nonfinite arithmetic return `error`.
+
+Every droplet in a batch reads one snapshot. Changes accumulate in reference
+order, then each cell is clamped to the previous snapshot's local range.
+Zero droplets or steps preserve the field. Both new batch functions preserve
+inputs, are pure (S12.1.1v3), use the boxed ABI (D6.4.1–D6.4.2) and retain
+sources through precise roots (D5.3.3). Whole-null operands propagate null;
+error operands take precedence (S7.1.1v3).
+
 #### Statistical
 
 | Function                | Description         | Example                         | Result      |
@@ -2171,6 +2231,7 @@ channels continue to process pixel-array input. See the
 | `math.solve` / `math.lstsq` | 2 | Square solve / full-column-rank least squares |
 | `math.orient2d` | 3 | Exact 2D orientation sign after binary64 conversion |
 | `math.orient3d` / `math.incircle` | 4 | Exact 3D orientation / oriented incircle sign |
+| `math.wfc` | 4 | Exact WFC batch solver over numeric weights and adjacency masks |
 | `math.pi` | - | Pi (π) constant |
 | `math.e` | - | Euler's number constant |
 | `math.max_int` | - | Maximum compact `int` constant |

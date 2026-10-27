@@ -691,6 +691,34 @@ bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
     return consume_cascaded_value(element, id, pseudo_type, out, preserve_color_model, nullptr);
 }
 
+static bool cssom_consume_keyword(DomElement*, const CssValue* value, int, void* result) {
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    *static_cast<CssEnum*>(result) = value->data.keyword;
+    return true;
+}
+
+CssEnum css_prop_compute_cascaded_keyword(DomElement* element, CssPropertyCode id,
+        CssEnum fallback) {
+    CssEnum result = fallback;
+    CssomValueTarget target = {cssom_consume_keyword, &result};
+    // native enum consumers share CSSOM's inheritance, resets and substitution.
+    return consume_cascaded_value(element, id, 0, nullptr, false, &target) ? result : fallback;
+}
+
+static bool cssom_consume_containment(DomElement*, const CssValue* value, int, void* result) {
+    if (!value) return false;
+    *static_cast<uint8_t*>(result) = css_value_containment_flags(value);
+    return true;
+}
+
+uint8_t css_prop_compute_cascaded_containment(DomElement* element) {
+    uint8_t result = 0;
+    CssomValueTarget target = {cssom_consume_containment, &result};
+    // principal flow can query a body before its layout style is materialized.
+    consume_cascaded_value(element, CSS_PROPERTY_CONTAIN, 0, nullptr, false, &target);
+    return result;
+}
+
 static bool cssom_consume_flex_factor(DomElement* element, const CssValue* value,
         int pseudo_type, void* result) {
     return cssom_compute_scalar_value(element, value, pseudo_type,

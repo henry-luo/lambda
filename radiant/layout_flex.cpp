@@ -443,7 +443,7 @@ static float flex_container_line_baseline(ViewBlock* container,
         int item_index = prefer_last ? line->item_count - 1 : 0;
         ViewElement* item = lam::view_as_element(line->items[item_index]);
         if (item && layout_block_inline_axis_is_vertical(container)) {
-            return layout_vertical_item_baseline_from_border_edges(
+            return layout_vertical_item_baseline_from_content_edges(
                 container, static_cast<View*>(item));
         }
         return item ? line->cross_position + calculate_item_baseline(item) : 0.0f;

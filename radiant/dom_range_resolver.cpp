@@ -58,15 +58,32 @@ extern "C" int dom_range_byte_offset_for_x(UiContext* uicon, ViewText* text,
 // Internal helpers — view tree walks
 // ---------------------------------------------------------------------------
 
+static float range_rect_x(UiContext* uicon, DomText* text, TextRect* rect,
+                          int byte_offset, bool pdf_fallback) {
+    if (rect->bidi_runs) {
+        TextRect* selected = rect->bidi_runs;
+        for (TextRect* run = rect->bidi_runs; run; run = run->next) {
+            if (byte_offset < run->start_index) break;
+            selected = run;
+            if (byte_offset < run->start_index + run->length) break;
+        }
+        TextRect projection = *selected;
+        projection.x += rect->x; projection.y += rect->y;
+        return range_rect_x(uicon, text, &projection, byte_offset, pdf_fallback);
+    }
+    float x = uicon && text && g_glyph_x_resolver
+        ? g_glyph_x_resolver(uicon, lam::view_require_text(text), rect, byte_offset)
+        : view_geometry_interpolate_text_x(text, rect, byte_offset, pdf_fallback);
+    return rect->bidi_reversed ? rect->x + rect->width - (x - rect->x) : x;
+}
+
+
 extern "C" float dom_range_glyph_x_for_byte_offset(UiContext* uicon,
                                                     ViewText* text,
                                                     TextRect* rect,
                                                     int byte_offset) {
     if (!rect) return 0.0f;
-    if (uicon && text && g_glyph_x_resolver) {
-        return g_glyph_x_resolver(uicon, text, rect, byte_offset);
-    }
-    return view_geometry_interpolate_text_x(text, rect, byte_offset, false);
+    return range_rect_x(uicon, text, rect, byte_offset, false);
 }
 
 static DomNode* child_before_boundary_offset(DomElement* elem, uint32_t offset) {
@@ -1052,14 +1069,17 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
 // Public — multi-rect rendering helper
 // ---------------------------------------------------------------------------
 
-static float range_rect_x(UiContext* uicon, DomText* text, TextRect* rect,
-                          int byte_offset, bool pdf_fallback) {
-    if (uicon && g_glyph_x_resolver) {
-        return g_glyph_x_resolver(
-            uicon, lam::view_require_text(text), rect, byte_offset);
-    }
-    return view_geometry_interpolate_text_x(
-        text, rect, byte_offset, pdf_fallback);
+
+static void emit_selected_text_rect(DomText* text, TextRect* rect, int byte_start, int byte_end,
+                                    UiContext* uicon, bool pdf_fallback, DomRangeRectCb cb, void* userdata) {
+    int start = max(byte_start, rect->start_index);
+    int end = min(byte_end, rect->start_index + rect->length);
+    if (start >= end) return;
+    float x0 = range_rect_x(uicon, text, rect, start, pdf_fallback);
+    float x1 = range_rect_x(uicon, text, rect, end, pdf_fallback);
+    RdtLogicalPoint point = view_geometry_local_to_block_viewport(
+        static_cast<View*>(text), {min(x0, x1), rect->y});
+    cb(point.x, point.y, fabsf(x1 - x0), rect->height, userdata);
 }
 
 static void emit_text_rects(DomText* text, int byte_start, int byte_end,
@@ -1068,16 +1088,13 @@ static void emit_text_rects(DomText* text, int byte_start, int byte_end,
                             void* userdata) {
     for (TextRect* rect = text ? text->rect : NULL; rect; rect = rect->next) {
         if (target_rect && rect != target_rect) continue;
-        int rect_start = rect->start_index;
-        int rect_end = rect->start_index + rect->length;
-        int start = max(byte_start, rect_start);
-        int end = min(byte_end, rect_end);
-        if (start >= end) continue;
-        float x0 = range_rect_x(uicon, text, rect, start, pdf_fallback);
-        float x1 = range_rect_x(uicon, text, rect, end, pdf_fallback);
-        RdtLogicalPoint point = view_geometry_local_to_block_viewport(
-            static_cast<View*>(text), {x0, rect->y});
-        cb(point.x, point.y, x1 - x0, rect->height, userdata);
+        if (rect->bidi_runs) {
+            for (TextRect* run = rect->bidi_runs; run; run = run->next) {
+                TextRect projection = *run;
+                projection.x += rect->x; projection.y += rect->y;
+                emit_selected_text_rect(text, &projection, byte_start, byte_end, uicon, pdf_fallback, cb, userdata);
+            }
+        } else emit_selected_text_rect(text, rect, byte_start, byte_end, uicon, pdf_fallback, cb, userdata);
         if (target_rect) break;
     }
 }

@@ -38,8 +38,16 @@ let mirrors = {tl:"",tr:"translate(124 0) scale(-1 1)",bl:"translate(0 124) scal
 fn corner(color,key) => media.data_uri(binary("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 124 124'><g fill='" ++ color ++
     "' stroke='" ++ color ++ "' transform='" ++ mirrors[key] ++ "'>" ++ flourish ++ "</g></svg>"),"image/svg+xml") ^ { "" }
 
-// the blank back of a turning leaf, landing on the facing page of a spread
-pub fn back() => <div class:"ebook-turn-back",*noise()>
+// The back of a turning leaf: blank paper for a turn, landing on the facing
+// page of a spread; a flip shows the new facing page (`next`) on it there.
+pub fn back(next) => <div class:"ebook-turn-back",*noise();
+    <div class:"ebook-turn-back-content",(paper()); next>; <div class:"ebook-flip-shade">>
+// A flip keeps the old facing page (`old`) under its leaf and casts the leaf's
+// shadow on the page it uncovers; flip.ls places them.
+pub fn hold(old) => [<div class:"ebook-turn-hold",(paper()); old>, <div class:"ebook-flip-cast",<div class:"ebook-flip-shade">>]
+// the page corners a flip can be dragged by
+let corner_keys = ["top-left","top-right","bottom-left","bottom-right"]
+pub fn corners() => [for (key in corner_keys) <div class:"ebook-flip-corner",["data-corner"]:key,["aria-hidden"]:"true">]
 // Both sheets are always present; the right one shows only in a spread.
 fn noise() => [<div class:"ebook-mottle">,<div class:"ebook-grain">]
 pub fn paper() => <div class:"ebook-paper",
@@ -53,7 +61,7 @@ fn texture_css(id) => (let p = papers[id], let at = ".ebook-stage[data-texture="
     at ++ ".ebook-sheet," ++ at ++ ".ebook-turn-back{background:" ++ p.sheet ++ "," ++ p.base ++ "}" ++
     at ++ ".ebook-grain{display:block;background-size:" ++ string(p.grain) ++ "px}" ++
     (if (p.mottle == 0) "" else at ++ ".ebook-mottle{display:block;background-size:" ++ string(p.mottle) ++ "px}") ++
-    at ++ ".ebook-frame," ++ at ++ ".ebook-ghost{background:transparent}" ++
+    at ++ ".ebook-frame," ++ at ++ ".ebook-copy{background:transparent}" ++
     (if (p.ornament == null) "" else
         at ++ "{background:linear-gradient(#5d3b22,#3e2516)}" ++
         at ++ ".ebook-page," ++ at ++ ".ebook-turn{inset:10px}" ++ at ++ ".ebook-sheet{box-shadow:inset 0 0 18px #6b4a2a40}" ++
@@ -89,13 +97,15 @@ fn turn_css(kind,dir,parity) => (let key = kind ++ "-" ++ dir ++ "-" ++ string(p
         select("") ++ targets[part] ++ "{animation:ebook-" ++ key ++ "-" ++ string(part) ++ " " ++ durations[kind] ++ " ease-in-out forwards}"],"") ++
     (if (not spread) "" else join([for (part,body in wide) "@keyframes ebook-s" ++ key ++ "-" ++ string(part) ++ "{" ++ body ++ "}" ++
         select("[data-layout=spread]") ++ targets[part] ++ "{animation:ebook-s" ++ key ++ "-" ++ string(part) ++ " " ++ durations.spread ++ " ease-in-out forwards}"],"")))
+// a flip being turned or a corner curled by the pointer (a peel)
+fn turning(rule) => ".ebook-stage[data-turn=flip]" ++ rule ++ ",.ebook-stage[data-turn=peel]" ++ rule
 pub fn turn_name(kind,dir,parity) => kind ++ "-" ++ dir ++ "-" ++ string(parity)
 
 pub let stylesheet = "
 .ebook-stage{position:relative;flex:1;min-height:120px;overflow:hidden;background:var(--ebook-panel)}
 .ebook-page,.ebook-turn{position:absolute;inset:0}
 .ebook-page .ebook-frame{position:absolute;left:0;top:0;width:100%;height:100%}
-.ebook-stage:not([data-layout=scroll]) .ebook-frame,.ebook-ghost{overflow:hidden}
+.ebook-stage:not([data-layout=scroll]) .ebook-frame,.ebook-copy{overflow:hidden}
 .ebook-paper{position:absolute;inset:0;display:flex}.ebook-sheet{position:relative;flex:1}.ebook-sheet[data-side=right]{display:none}
 .ebook-stage[data-layout=spread] .ebook-sheet[data-side=right]{display:block}
 .ebook-gutter{display:none;position:absolute;top:0;bottom:0;left:calc(50% - 30px);width:60px;background:linear-gradient(to right,#0000,#00000012 35%,#0000003d 50%,#00000012 65%,#0000)}
@@ -108,7 +118,7 @@ pub let stylesheet = "
 .ebook-turn{z-index:2;opacity:0;pointer-events:none}.ebook-stage[data-turn=hold] .ebook-turn{opacity:1}
 .ebook-turn-page{position:absolute;inset:0;overflow:hidden;transform-origin:0 50%}
 .ebook-turn-content{position:absolute;left:0;top:0;width:100%;height:100%}
-.ebook-ghost{position:absolute;left:0;top:0;width:100%;height:100%;border:0}
+.ebook-copy{position:absolute;left:0;top:0;width:100%;height:100%;border:0}
 .ebook-turn-shade{position:absolute;inset:0;opacity:0;background:linear-gradient(to left,#0000,#0000005c)}
 .ebook-turn-back{display:none;position:absolute;top:0;bottom:0;width:50%;background:var(--ebook-panel)}
 .ebook-stage[data-turn-kind=turn-prev] .ebook-turn-page{transform-origin:100% 50%}
@@ -119,5 +129,16 @@ pub let stylesheet = "
 .ebook-stage[data-layout=spread][data-turn-kind=turn-prev] .ebook-turn-content{width:200%}
 .ebook-stage[data-layout=spread][data-turn-kind=turn-next] .ebook-turn-back{display:block;left:0;transform-origin:100% 50%}
 .ebook-stage[data-layout=spread][data-turn-kind=turn-prev] .ebook-turn-back{display:block;left:50%;transform-origin:0 50%}
+.ebook-turn-hold,.ebook-turn-back-content,.ebook-flip-cast{display:none;position:absolute;inset:0}
+.ebook-flip-shade{position:absolute;left:0;top:0;width:0;height:4000px;transform-origin:0 0}
+" ++ turning(" .ebook-turn") ++ "{opacity:1}" ++ turning(" .ebook-flip-cast") ++ "{display:block}
+" ++ turning(" .ebook-turn-back") ++ "{display:block;left:0;width:100%;transform-origin:0 0}
+.ebook-flip-corner{display:none;position:absolute;z-index:4;width:64px;height:64px;cursor:pointer}.ebook-flip-corner[data-drag=true]{inset:0;width:auto;height:auto;z-index:5}
+.ebook-stage[data-flip=true][data-layout=paged] .ebook-flip-corner,.ebook-stage[data-flip=true][data-layout=spread] .ebook-flip-corner{display:block}
+" ++ join([for (key in corner_keys) ".ebook-flip-corner[data-corner=" ++ key ++ "]{" ++ replace(key,"-",":0;") ++ ":0}"],"") ++ "
+.ebook-stage[data-turn=flip][data-layout=spread] .ebook-turn-back-content,.ebook-stage[data-turn=flip][data-layout=spread] .ebook-turn-hold{display:block}
+.ebook-stage[data-turn-kind=flip-next] .ebook-turn-hold{clip-path:inset(0 50% 0 0)}.ebook-stage[data-turn-kind=flip-prev] .ebook-turn-hold{clip-path:inset(0 0 0 50%)}
+.ebook-turn-back .ebook-flip-shade{background:linear-gradient(to right,#00000038,#0000000d 45%,#0000)}
+.ebook-flip-cast .ebook-flip-shade{background:linear-gradient(to right,#00000061,#00000014 50%,#0000)}
 " ++ join([for (id in store.textures where id != "none") texture_css(id)],"") ++
-    join([for (kind in store.turns,dir in ["next","prev"],parity in [0,1] where kind != "none") turn_css(kind,dir,parity)],"")
+    join([for (kind in store.turns,dir in ["next","prev"],parity in [0,1] where kind != "none" and kind != "flip") turn_css(kind,dir,parity)],"")

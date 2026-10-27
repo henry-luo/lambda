@@ -1814,7 +1814,9 @@ static void write_row_into_ndim(ArrayNum* dst, int64_t flat_idx, Item src_item) 
 }
 
 static ArrayNum* try_promote_to_ndim(Array* arr) {
-    if (!arr || arr->length < 2) return NULL;
+    // one row still has rank two (S11.1.1v3); runtime comprehensions must
+    // preserve the same numeric shape as literal/typed singleton matrices.
+    if (!arr || arr->length < 1) return NULL;
     if (arr->is_spreadable) return NULL;
 
     // First child sets the shape/etype; subsequent must match
@@ -1869,8 +1871,11 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
     // Allocate promoted N-D ArrayNum
     int64_t total = 1;
     for (int i = 0; i < out_ndim; i++) total *= shape_stack[i];
+    RootFrame roots(1);
+    Rooted<Array*> source(roots, arr);
     ArrayNum* promoted = array_num_new_ndim(etype, total, out_ndim, shape_stack);
     if (!promoted) return NULL;
+    arr = source.get();
 
     // Fill: each row writes inner_len elements at offset i*inner_len
     int64_t flat_idx = 0;

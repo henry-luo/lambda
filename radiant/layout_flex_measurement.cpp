@@ -1142,8 +1142,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 flex_measure_item_height_at_cross_width(lycon, item, flex_layout, max_width,
                                                         &min_height, &max_height);
             }
-            // Skip the manual child iteration since we've already calculated sizes
-            goto store_results;
+            // both module queries already return physical dimensions, including vertical text.
+            goto store_physical_results;
         }
         // CSS Flexbox §9.9.1: Detect flex-wrap to compute min-content correctly.
         // - nowrap: min-content = sum of item outer min-content sizes
@@ -1360,7 +1360,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         }
     }
 
-store_results:
     // For vertical writing modes, swap intrinsic width/height because text measurement
     // always produces horizontal metrics, but in vertical-lr/rl the inline axis is vertical
     {
@@ -1373,5 +1372,6 @@ store_results:
         }
     }
 
+store_physical_results:
     flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height, width_only);
 }

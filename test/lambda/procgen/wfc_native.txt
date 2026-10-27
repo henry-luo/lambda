@@ -1,0 +1,19 @@
+"native kernel"
+[true, true, true, true, true, false]
+7
+"periodic, degenerate and contradictory domains"
+true
+["contradiction", [[0]]]
+"weighted choices and tie order"
+true
+true
+"overlapping models"
+true
+"keyed random constraint models"
+true
+"reference fallback for other weight domains"
+true
+"boxed flat result and boundary validation"
+true
+["key", "empty", "weight", "sum", "masks", "shape", "size", "periodic", "retries", "contradiction"]
+[null, null]

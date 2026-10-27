@@ -1,6 +1,8 @@
-// Bounded anonymous L-system turtle; rewriting and geometry are script policy.
+// TikZ lindenmayersystems: option parsing here; rewriting and the turtle are
+// lambda.procgen.lsystem (Lambda_Pkg_Proc_Gen.md PG9).
 import util: lambda.doc.latex.util
 import opts: .options
+import lsys: lambda.procgen.lsystem
 
 fn rule_pair(raw) map^ {
     let arrow = index_of(raw, "->")
@@ -17,51 +19,10 @@ fn rule_pair(raw) map^ {
 fn rules_from(raw) any^ => [for (part in util.split_top_level(raw, ","))
     rule_pair(part)^]
 
-fn replacement(ch, rules) {
-    let matching = [for (rule in rules where rule.head == ch) rule.body]
-    if (len(matching) == 0) ch else matching[len(matching) - 1]
-}
-
-fn rewrite(source, rules) => util.str_join([for (at in 0 to (len(source) - 1))
-    replacement(slice(source, at, at + 1), rules)], "")
-
-fn expand(source, rules, order) any^ {
-    if (order == 0) source
-    else {
-        let next = rewrite(source, rules)
-        if (len(next) > 100000)
-            raise error("L-system expansion exceeds 100000 symbols")
-        else expand(next, rules, order - 1)^
-    }
-}
-
-// Divide the stream so order-11 systems do not require thousands of stack frames.
-fn turtle_segment(source, first, ending, x, y, heading, step, turn) any^ {
-    if (first >= ending) {x: x, y: y, heading: heading, points: []}
-    else if (ending - first == 1) {
-        let ch = slice(source, first, ending)
-        if (ch == "F") {
-            let radians = heading * 3.141592653589793 / 180.0
-            let next_x = x + step * math.cos(radians)
-            let next_y = y + step * math.sin(radians)
-            {x: next_x, y: next_y, heading: heading,
-             points: [{x: next_x, y: next_y}]}
-        } else if (ch == "+")
-            {x: x, y: y, heading: heading + turn, points: []}
-        else if (ch == "-")
-            {x: x, y: y, heading: heading - turn, points: []}
-        else if (ch == "f" or ch == "[" or ch == "]")
-            raise error("unsupported L-system turtle action: " ++ ch)
-        else {x: x, y: y, heading: heading, points: []}
-    } else {
-        let middle = first + int(floor(float(ending - first) / 2.0))
-        let left = turtle_segment(source, first, middle, x, y, heading,
-            step, turn)^
-        let right = turtle_segment(source, middle, ending,
-            left.x, left.y, left.heading, step, turn)^;
-        {x: right.x, y: right.y, heading: right.heading,
-         points: left.points ++ right.points}
-    }
+// TikZ draws one path, so moving without drawing and branching stay unsupported.
+fn first_unsupported(expanded) {
+    let hits = [for (ch in ["f", "[", "]"], let at = index_of(expanded, ch) where at != null) [at, ch]];
+    if (len(hits) == 0) null else sort(hits, (h) => h)[0][1]
 }
 
 pub fn points(path) any^ {
@@ -92,14 +53,16 @@ pub fn points(path) any^ {
                     let turn = if (spec.angle == null) 90.0
                         else opts.numeric_value(spec.angle)^
                     let step = opts.dimension_px(spec.step)^ * 2.54 / 96.0
-                    let rules = rules_from(spec["rule set"])^
-                    let expanded = expand(trim(spec.axiom), rules, parsed_order)^
+                    // a later rule for the same head replaces an earlier one
+                    let rules = map([for (rule in rules_from(spec["rule set"])^) for (x in [rule.head, rule.body]) x])
+                    let expanded = lsys.expand(trim(spec.axiom), rules, parsed_order)^
+                    let unsupported_action = first_unsupported(expanded)
                     let rotation = opts.value(path, "rotate", null)
                     let heading = if (rotation == null) 0.0
-                        else opts.numeric_value(rotation)^
-                    let drawn = turtle_segment(expanded, 0, len(expanded),
-                        0.0, 0.0, heading, step, turn)^;
-                    [{x: 0.0, y: 0.0}, *drawn.points]
+                        else opts.numeric_value(rotation)^;
+                    if (unsupported_action != null) raise error("unsupported L-system turtle action: " ++ unsupported_action)
+                    else (let drawn = lsys.turtle(expanded, {step: step, angle: turn, heading: heading, draw: "F", move: "", reverse: ""})^,
+                        [{x: 0.0, y: 0.0}, *[for (s in drawn.segments) {x: s[2], y: s[3]}]])
                 }
             }
         }

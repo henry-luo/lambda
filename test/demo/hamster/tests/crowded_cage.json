@@ -1,0 +1,46 @@
+{
+  "format": "lambda-hamster",
+  "version": 1,
+  "modules": [
+    {
+      "id": "room-1",
+      "kind": "room",
+      "x": -1,
+      "z": 0,
+      "level": 0,
+      "turn": 0
+    }
+  ],
+  "residents": [
+    {
+      "id": "ham-1",
+      "name": "Pip",
+      "coat": 0,
+      "node": "room-1",
+      "food": 0.1,
+      "water": 0.9,
+      "energy": 0.9,
+      "comfort": 0.9,
+      "bond": 0.15,
+      "age": 0.5,
+      "walked": 0.0
+    },
+    {
+      "id": "ham-2",
+      "name": "Mochi",
+      "coat": 1,
+      "node": "room-1",
+      "food": 0.1,
+      "water": 0.9,
+      "energy": 0.9,
+      "comfort": 0.9,
+      "bond": 0.15,
+      "age": 0.5,
+      "walked": 0.0
+    }
+  ],
+  "food": 1.0,
+  "water": 1.0,
+  "clean": 1.0,
+  "elapsed": 0.0
+}

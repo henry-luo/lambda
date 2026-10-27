@@ -49,7 +49,7 @@ pub fn initial() => {doc:starter(),saved:starter(),selected:"",category:"fish",p
 
 // snapshot transactions reuse the editor history; aquarium edits have no text steps.
 pub fn record(st,before,after) => if (before == after) {*:st,doc:after} else {*:st,doc:after,
-    hist:history.history_push(st.hist,{doc_before:before,doc_after:after,steps:[],sel_before:null,sel_after:null,meta:[]})}
+    hist:history.history_snapshot(st.hist,before,after)}
 pub fn select(st,id) => {*:st,selected:if (lookup(st.doc,id) != null) id else ""}
 fn free_id(doc,n) => if (lookup(doc,"item-" ++ string(n)) == null) n else free_id(doc,n+1)
 pub fn add(st,kind) => if (species(kind) == null or len(st.doc) >= 60) {*:st,status:"The tank holds up to 60 objects."} else (

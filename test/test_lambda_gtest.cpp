@@ -32,6 +32,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/slide",
     "test/lambda/scene3d",
     "test/lambda/physics",
+    "test/lambda/procgen",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
     "test/lambda/ui_wired",
@@ -57,6 +58,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/greetings/tests",
     "test/demo/marble-drop/tests",
     "test/demo/soundflow/tests",
+    "test/demo/procgen/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -72,6 +74,40 @@ TEST(ErrorSemanticsTests, OperatorsPreserveErrorsAcrossTiers) {
             "test/lambda/error_operator_value_flow.txt", false, tier);
         test_lambda_script_against_file("test/lambda/proc/error_operator_short_circuit.ls",
             "test/lambda/proc/error_operator_short_circuit.txt", true, tier);
+    }
+}
+
+// AUTO runs a cold function on T0, so only a forced JIT run reaches the
+// u64 type-call lowering this script guards.
+TEST(NumericConversionTests, UntypedU64ConversionAgreesAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/u64_conversion_untyped.ls",
+            "test/lambda/u64_conversion_untyped.txt", false, tier);
+    }
+}
+
+TEST(ProcgenTests, KeyedNoiseIsExactAcrossTiers) {
+    const char* tiers[] = {"interp", "auto", "jit"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier);
+        test_lambda_script_against_file("test/lambda/procgen/rng.ls", "test/lambda/procgen/rng.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/noise.ls", "test/lambda/procgen/noise.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/sample.ls", "test/lambda/procgen/sample.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/geom.ls", "test/lambda/procgen/geom.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/grid.ls", "test/lambda/procgen/grid.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/lsystem.ls", "test/lambda/procgen/lsystem.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/text.ls", "test/lambda/procgen/text.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/wfc.ls", "test/lambda/procgen/wfc.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/wfc_native.ls", "test/lambda/procgen/wfc_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/erosion_native.ls", "test/lambda/procgen/erosion_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/geom_native.ls", "test/lambda/procgen/geom_native.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/field.ls", "test/lambda/procgen/field.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/extensions.ls", "test/lambda/procgen/extensions.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/transpose_singleton.ls", "test/lambda/transpose_singleton.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/interp_ndim_return.ls", "test/lambda/interp_ndim_return.txt", false, tier);
+        test_lambda_script_against_file("test/lambda/procgen/terrain.ls", "test/lambda/procgen/terrain.txt", false, tier);
     }
 }
 

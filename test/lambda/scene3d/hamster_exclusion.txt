@@ -1,0 +1,14 @@
+{
+  converging: true,
+  adoption_capacity: true,
+  legacy_separation: true,
+  crowded_save_rejected: true,
+  opposing: true,
+  both_fed: true,
+  starter_traffic: true,
+  six_residents: true,
+  traffic_resumes: true,
+  independent_floors: true,
+  body_clearance: true,
+  resumes_after_yield: true
+}

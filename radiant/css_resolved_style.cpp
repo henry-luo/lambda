@@ -315,9 +315,17 @@ CssGeometryContext css_geometry_context(LayoutContext* context, DomElement* elem
     bool percentage_height_auto = style && (style->preferred_percentages & CSS_GEOMETRY_Y) &&
         layout_percentage_height_is_automatic(lam::unsafe_view_block_element_storage(element), context);
     ViewBlock* percentage_owner = parent ? parent->flow_box.get() : nullptr;
+    ViewBlock* box = element ? lam::unsafe_view_block_element_storage(element) : nullptr;
+    SizeF orthogonal_inline = {-1.0f, -1.0f};
+    for (LayoutAxis axis : layout_axes()) {
+        if (!layout_orthogonal_inline_percentage_applies(box, axis)) continue;
+        float basis = layout_orthogonal_inline_basis(context, box);
+        if (axis == LAYOUT_AXIS_X) orthogonal_inline.width = basis;
+        else orthogonal_inline.height = basis;
+    }
     return {{context->block.content_width, context->block.content_height},
         {parent ? parent->content_width : 0.0f, parent ? parent->content_height : 0.0f},
-        {context->width, context->height}, percentage_owner,
+        {context->width, context->height}, orthogonal_inline, percentage_owner,
         layout_containing_inline_percentage_base(context),
         parent ? parent->given_width : -1.0f, parent ? parent->given_height : -1.0f,
         parent != nullptr, context->available_space.width.is_intrinsic(),
@@ -334,10 +342,12 @@ static uint8_t css_geometry_changes(const CssGeometryContext& a, const CssGeomet
     if (a.percentage_height_auto != b.percentage_height_auto) changed |= CSS_GEOMETRY_Y;
     if (a.percentage_owner != b.percentage_owner ||
         a.percentage_owner_definite != b.percentage_owner_definite) changed |= CSS_GEOMETRY_Y;
-    if (a.block.width != b.block.width || a.parent.width != b.parent.width ||
+    if (a.orthogonal_inline.width != b.orthogonal_inline.width ||
+        a.block.width != b.block.width || a.parent.width != b.parent.width ||
         a.parent_given_width != b.parent_given_width || a.viewport.width != b.viewport.width)
         changed |= CSS_GEOMETRY_X;
-    if (a.block.height != b.block.height || a.parent.height != b.parent.height ||
+    if (a.orthogonal_inline.height != b.orthogonal_inline.height ||
+        a.block.height != b.block.height || a.parent.height != b.parent.height ||
         a.parent_given_height != b.parent_given_height || a.viewport.height != b.viewport.height)
         changed |= CSS_GEOMETRY_Y;
     if (a.inline_basis != b.inline_basis) changed |= CSS_GEOMETRY_INLINE;

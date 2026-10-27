@@ -6,6 +6,7 @@
 #include "../io/mark_output_builder.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/math_utils.h"
 #include "../../lib/str.h"
 #include "../js/js_typed_array.h"
 #include <stdarg.h>
@@ -1987,21 +1988,11 @@ extern "C" double fn_pow_u(double base, double exponent) {
 
 // Min/max for two doubles
 extern "C" double fn_min2_u(double a, double b) {
-    if (isnan(a) || isnan(b)) return NAN;
-    if (a == 0.0 && b == 0.0) {
-        // -0 < +0 per ES spec for Math.min
-        return (signbit(a) || signbit(b)) ? -0.0 : 0.0;
-    }
-    return a < b ? a : b;
+    return math_min_double(a, b);
 }
 
 extern "C" double fn_max2_u(double a, double b) {
-    if (isnan(a) || isnan(b)) return NAN;
-    if (a == 0.0 && b == 0.0) {
-        // +0 > -0 per ES spec for Math.max
-        return (signbit(a) && signbit(b)) ? -0.0 : 0.0;
-    }
-    return a > b ? a : b;
+    return math_max_double(a, b);
 }
 
 // --- Integer operations ---

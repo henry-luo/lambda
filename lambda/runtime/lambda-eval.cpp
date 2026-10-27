@@ -3087,6 +3087,14 @@ struct EqualityContext {
 // forward declaration for recursive structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* equality);
 
+static Bool equality_depth_failure(EqualityContext* equality) {
+    if (equality->mode == EQUALITY_STRICT) return BOOL_FALSE;
+    // depth failures unwind through the existing completion lane (D1.4v3).
+    set_runtime_error(ERR_RUNTIME_ERROR,
+        "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
+    return BOOL_ERROR;
+}
+
 static Bool numeric_items_equal_exact(Item a_item, Item b_item) {
     LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
     return comparison.valid && !comparison.unordered && comparison.order == 0 ?
@@ -3152,6 +3160,16 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityContext* e
     if (a->get_elem_type() != b->get_elem_type() && equality->mode == EQUALITY_STRICT) {
         return BOOL_FALSE;
     }
+    // packing hides physical containers, never logical nesting (S1.6/S5.3.1).
+    // an empty axis stops traversal before any deeper container or scalar.
+    int scalar_depth = depth + (a->length ? 1 : 0);
+    if (a->is_ndim && a->extra) {
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)a->extra;
+        int64_t* dims = array_num_shape_dims(shape);
+        scalar_depth = depth;
+        for (int axis = 0; axis < shape->ndim && dims[axis]; axis++) scalar_depth++;
+    }
+    if (scalar_depth > EQ_MAX_DEPTH) return equality_depth_failure(equality);
     if (a->get_elem_type() != b->get_elem_type() ||
             !array_num_is_dense(a) || !array_num_is_dense(b)) {
         // different elem types compare as values; double promotion loses high
@@ -3160,7 +3178,7 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityContext* e
         for (int64_t i = 0; i < a->length; i++) {
             Item val_a = array_num_read_item(a, array_num_element_offset(a, i));
             Item val_b = array_num_read_item(b, array_num_element_offset(b, i));
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1, equality);
+            Bool r = fn_eq_depth(val_a, val_b, scalar_depth, equality);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -3176,7 +3194,7 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityContext* e
         for (int64_t i = 0; i < a->length; i++) {
             Item val_a = array_num_read_item(a, i);
             Item val_b = array_num_read_item(b, i);
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1, equality);
+            Bool r = fn_eq_depth(val_a, val_b, scalar_depth, equality);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -3619,15 +3637,7 @@ static Bool function_eq(Function* a, Function* b, int depth, EqualityContext* eq
 
 // 3-states comparison with depth tracking for structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* equality) {
-    if (depth > EQ_MAX_DEPTH) {
-        if (equality->mode == EQUALITY_STRICT) return BOOL_FALSE;
-        // Equality depth is a language-visible runtime failure, not a native
-        // fault. Return the existing three-state error lane so every caller
-        // unwinds through its own completion path (D1.4v3/DI15v2).
-        set_runtime_error(ERR_RUNTIME_ERROR,
-            "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
-        return BOOL_ERROR;
-    }
+    if (depth > EQ_MAX_DEPTH) return equality_depth_failure(equality);
 
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);

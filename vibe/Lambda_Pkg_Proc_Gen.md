@@ -1,6 +1,6 @@
 # Lambda Procedural Generation Package — `lambda.procgen`
 
-> **Status:** proposal, 2026-10-26. Nothing is implemented. The package name `lambda.procgen` (PG1), the `math.*` surface for native kernels (PG7.4) fresh, unvendored C kernels (PG7.5) the initial tolerance-tier membership (PG2), `float64` fields in the API (PG5), the timing of shared geometry (PG9), PRNG migration (PG3) and the 3D/4D scope (§8) were accepted by the user on 2026-10-26. Every §9 open item is resolved; the design is ready for P0.
+> **Status:** P0 (`rng`, `noise`, `field`, `adapt`), P1 (`sample`, `geom`), P2 (`grid`), P3 (`lsystem`, `text`), P4 (`wfc`) and P5 (`terrain`, showcase demo) have core implementations (2026-10-26), with remaining features listed in the [implementation record §6](impl/Lambda_Impl_Proc_Gen.md#6-residue). The 2026-10-27 continuation fills the remaining field, periodic-noise, density-sampling, adapter, width and climate features, registers the showcase, and delivers all three measured P6 batch kernels (WFC, Delaunay and hydraulic erosion). The noise and full Poisson–Voronoi timing targets, cross-platform qualification and explicitly later features remain open. Progress and verification are in the [implementation record](impl/Lambda_Impl_Proc_Gen.md). The package name `lambda.procgen` (PG1), the `math.*` surface for native kernels (PG7.4), fresh, unvendored C kernels (PG7.5), the initial tolerance-tier membership (PG2), `float64` fields in the API (PG5), the timing of shared geometry (PG9), PRNG migration (PG3) and the 3D/4D scope (§8) were accepted by the user on 2026-10-26. Every §9 open item is resolved.
 > **Scope:** a shipped script package of deterministic procedural-generation algorithms: keyed randomness, noise, scalar fields, point sampling, Delaunay/Voronoi, grid and dungeon generators, mazes, wave function collapse, L-systems, text grammars and terrain. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
 > **Spec linkage:** D7.2.4v4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D7.1.1 (static-library layering), D6.4.1–D6.4.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
 > **Authority:** package design ledger PG1–PG10, open items PG-O1–PG-O8. The `PG` series is new; no other vibe record uses it.
@@ -125,16 +125,16 @@ Where Lambda already has an algorithm, the package takes ownership of it and the
 
 ### PG10 — Point functions plus field builders
 
-Each noise and sampling family has two levels: a **point function** (`noise.simplex(key, x, y)`), which is the reference and the composable primitive, and a **field builder** (`noise.field(spec, w, h, key)`), which evaluates a spec over a grid. The field builder is the unit a native kernel replaces (PG7.4). User code that composes point functions keeps working unchanged, just at Lambda speed.
+Each noise and sampling family has two levels: a **point function** (`noise.simplex2(table, x, y)`, over a permutation table from `noise.table(key)`), which is the reference and the composable primitive, and a **field builder** (`noise.field(gen, w, h)`, over a generator from `noise.make(key, spec)`), which evaluates a spec over a grid. The field builder is the unit a native kernel replaces (PG7.4). User code that composes point functions keeps working unchanged, just at Lambda speed.
 
 ## 4. Module map
 
 | Module | Contents | Reuses | Tier | Native candidate |
 |---|---|---|---|---|
-| `procgen.rng` | `key`, `derive`, `unit`, `below`, `range`, `chance`, `pick`, `weighted`, `shuffle`, `sample` (k of n), `stream`; `normal`, `exponential` (tolerance tier) | SplitMix64 finalizer (Appendix A) | Exact | No |
-| `procgen.noise` | white, value, Perlin (improved, 2002), OpenSimplex2 (2D/3D), cellular/Worley (F1, F2, F2−F1; Euclidean, Manhattan, Chebyshev); fractals: `fbm`, `ridged`, `billow`; domain warp; periodic (tileable) variants; `field` builder | `rng` hashing for lattice gradients | Exact (tabulated gradients) | **Yes**: `field` batch |
-| `procgen.field` | `make`, `map`, `normalize`, `remap`, `clamp`, `curve`, `terrace`, `radial` / `island` masks, box blur, gradient/slope, `threshold` → mask, bilinear `sample`, distance transform, `contours` | `chart/mesh_contour.ls` for isolines | Exact | Blur / distance transform only if measured |
-| `procgen.sample` | Poisson disk (Bridson), jittered grid, best-candidate blue noise, Halton and R2 low-discrepancy sequences, density-weighted sampling over a field | `rng`, `field.sample` | Exact | Poisson for very dense domains, if measured |
+| `procgen.rng` | `key`, `derive`, `at`, `unit`, `below`, `between`, `chance`, `pick`, `weighted`, `shuffle`, `sample` (k of n), `stream`; `normal`, `exponential` (tolerance tier) | SplitMix64 finalizer (Appendix A) | Exact | No |
+| `procgen.noise` | white, value, Perlin (improved, 2002), simplex (Gustavson; 2D/3D), cellular/Worley (F1, F2, F2−F1; Euclidean, Manhattan, Chebyshev); fractals: `fbm`, `ridged`, `billow`; domain warp; periodic (tileable) variants; `field` builder | keyed permutation tables from `rng` | Exact (tabulated gradients) | **Yes**: `field` batch |
+| `procgen.field` | `make`, `transform`, `normalize`, `remap`, `clamp`, `curve`, `terrace`, `radial` / `island` masks, box blur, gradient/slope, `threshold` → mask, bilinear `sample`, distance transform, `contours` | `chart/mesh_contour.ls` for isolines | Exact | Blur / distance transform only if measured |
+| `procgen.sample` | Poisson disk (phased dart throwing; constant or density-dependent radius), jittered grid, best-candidate blue noise, Halton and R2 low-discrepancy sequences, density-weighted sampling over a field | `rng`, `field.sample` | Exact | Poisson for very dense domains, if measured |
 | `procgen.geom` | Delaunay triangulation, Voronoi cells (dual), Lloyd relaxation, convex hull, half-edge navigation | `math.orient2d`, `math.incircle`, `chart/geometry.ls` | Exact (predicates exact; Lloyd tolerance) | **Yes**: Delaunay above ~10⁴ points, if measured |
 | `procgen.grid` | cellular automata (B/S rules, cave smoothing), BSP room partition, drunkard's walk, rooms-and-corridors, flood fill / regions, distance maps; mazes: recursive backtracker, Kruskal, Prim, Wilson (uniform spanning tree) | `rng` | Exact | No |
 | `procgen.wfc` | simple-tiled and overlapping models, adjacency inference from a sample grid, min-entropy selection, propagation, bounded retry | `rng`, `grid` shapes | Exact | **Yes**: propagation on large grids, if measured |
@@ -159,7 +159,7 @@ import sample: lambda.procgen.sample
 let world = rng.key(2026)
 let spec = {kind: 'simplex', octaves: 5, frequency: 1.0 / 160.0, lacunarity: 2.0, gain: 0.5,
     warp: {amplitude: 24.0, frequency: 1.0 / 300.0}}
-let h = field.normalize(noise.field(spec, 512, 512, rng.derive(world, "height")))
+let h = field.normalize(noise.field(noise.make(rng.derive(world, "height"), spec)^, 512, 512))
 let land = h * 1.2 - field.radial(512, 512) * 0.7      // element-wise (S10.2.1)
 let trees = sample.poisson(rng.derive(world, "trees"), {width: 512.0, height: 512.0, radius: 6.0})
     |: field.sample(land, ~[0], ~[1]) > 0.35
@@ -265,9 +265,10 @@ mix64(z):  z = (z ^ (z >>> 30)) * 0xbf58476d1ce4e5b9
 key(seed)            = mix64(u64(seed) + 0x9e3779b97f4a7c15)
 derive(k, p1, …, pn) = fold: k = mix64((k ^ part(p_i)) + 0x9e3779b97f4a7c15 * (i + 1))
 part(int)            = u64(two's-complement of the int)
-part(string)         = FNV-1a 64 over the UTF-8 bytes
+part(string)         = FNV-1a 64 over the code points (the UTF-8 bytes, for ASCII)
+part(other)          = part(its JSON text), so key and derive never fail
 unit(k)              = float(mix64(k) >>> 11) * 2^-53    // [0, 1), same mapping as math_splitmix64
-below(k, n)          = Lemire multiply-shift on mix64(k), rejection keyed by derive(k, attempt)
+below(k, n)          = floor(unit(k) * n)                   // bias at most n / 2^53
 ```
 
 All of this uses only `u64` wrapping arithmetic (S4.1.5), `bxor` and `ushr`, all available in Lambda today. It is exact-tier. The position-dependent multiplier in `derive` keeps `derive(k, a, b)` and `derive(k, b, a)` distinct. Statistical quality is validated in P0 by PractRand or TestU01 SmallCrush runs over `unit` streams of several derivation shapes. The results are recorded in the impl doc, not here.
@@ -279,7 +280,8 @@ Algorithms are reimplemented from the published descriptions; no code is copied.
 | Family | Reference | License of the reference code |
 |---|---|---|
 | Perlin noise | Ken Perlin, *Improving Noise* (SIGGRAPH 2002) | — |
-| Simplex family | OpenSimplex2 (K.jpg) | public domain (CC0 / Unlicense) |
+| Simplex noise | Stefan Gustavson, *Simplex noise demystified* (2005); Perlin's simplex patent expired 2022 | public domain reference code |
+| Simplex alternative (later kind) | OpenSimplex2 (K.jpg) | public domain (CC0 / Unlicense) |
 | Noise parameterization | FastNoiseLite (Auburn) | MIT |
 | Poisson disk | Robert Bridson, *Fast Poisson Disk Sampling in Arbitrary Dimensions* (2007) | — |
 | Delaunay layout | Delaunator (Mapbox) | ISC |

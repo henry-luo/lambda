@@ -1,0 +1,432 @@
+{
+  "name": "Hamlet furnishings, occupied module deletion and detailed residents",
+  "viewport": {
+    "width": 1440,
+    "height": 1380
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blank"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tool-room"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-3-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-furnishings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('tab-furnishings').getAttribute('aria-selected')==='true' && document.getElementById('item-bottle').getBoundingClientRect().width>0 && getComputedStyle(document.getElementById('module-palette')).display==='none'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-bottle"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-bottle')!==null && document.getElementById('remove-item-bottle')!==null && document.getElementById('save-state').textContent==='UNSAVED CAGE'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-bowl"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-hideout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-wheel"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-wheel')===null && document.getElementById('status').textContent.includes('occupied')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove-item-hideout"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-chew"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#room-1 > group[data-item]').length===4 && document.getElementById('room-1-item-wheel')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#adopt"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#ham-1 [data-part=leg]').length===4 && document.querySelectorAll('#ham-1 [data-part=cheek-pouch]').length===2 && document.querySelectorAll('#ham-1 [data-part=incisor]').length===2 && document.querySelectorAll('#ham-1 [data-part=whisker]').length===6 && document.querySelectorAll('#ham-1 [data-part=tail]').length===1"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('cage-file').value='temp/hamster-furnishings.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove-item-bottle"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-bottle')===null && document.getElementById('save-state').textContent==='UNSAVED CAGE'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-bottle')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-bottle')===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-bottle')!==null && document.querySelectorAll('#room-1 > group[data-item]').length===4 && document.getElementById('save-state').textContent==='CAGE SAVED'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-modules"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-2-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1')===null && document.getElementById('ham-1').getAttribute('data-node')==='room-2' && document.getElementById('hamster').getAttribute('data-modules')==='1'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-1-item-bottle')!==null && document.getElementById('room-1-item-wheel')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#redo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-3-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-2')!==null && document.getElementById('status').textContent.includes('no free connected room')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-3-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "key_press",
+      "key": "Delete"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-2')===null && document.getElementById('ham-1').getAttribute('data-node')==='room-1'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#undo"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-furnishings"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-bridge"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-3-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-2-item-bridge')!==null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove-item-bridge"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-2-item-bridge')===null"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#item-sand"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-3-2"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove-item-sand"
+      },
+      "scroll_into_view": true
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('room-2-item-sand')===null"
+    },
+    {
+      "type": "click",
+      "target": {"selector": "#select"},
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {"selector": "#cell-2-2"},
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/hamster-furnishings-desktop.png"
+    },
+    {
+      "type": "click",
+      "target": {"selector": "#remove-item-wheel"},
+      "scroll_into_view": true
+    },
+    {
+      "type": "click",
+      "target": {"selector": "#follow"},
+      "scroll_into_view": true
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 900,
+      "height": 630,
+      "file": "temp/hamster-anatomy.png"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/hamster-furnishings-follow-page.png"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cage-scene",
+      "width": 450,
+      "height": 315,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 4000
+      }
+    }
+  ]
+}

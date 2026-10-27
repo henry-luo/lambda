@@ -27,6 +27,7 @@ bool css_resolved_style_size(LayoutContext* context, DomElement* element,
 // tier-3: geometry inputs shared by CSS used values and intrinsic queries.
 struct CssGeometryContext {
     SizeF block, parent, viewport;
+    SizeF orthogonal_inline; // definite fallback dependencies for inline percentages
     ViewBlock* percentage_owner; // borrowed containing-box identity for dependent descendants
     float inline_basis;
     float parent_given_width, parent_given_height;

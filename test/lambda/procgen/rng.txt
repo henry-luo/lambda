@@ -1,0 +1,15 @@
+"1 keys and derivation"
+[13679457532755275413, 17513863605490730988, 8087233885626935890, 15080359480127588700, 12751181359445250199]
+[true, true]
+"2 stream is the math.random sequence"
+[true, true, true]
+"3 exact draws"
+[0.6977363416157777, 4, 0.3954726832315554, false]
+[0.828481111347401, 0.8883958176967375, 0.7918256603512689, 0.03528070956364493]
+[3, 7, 4, 5, 2, 0, 1, 6]
+"4 distributions"
+[true, true, true]
+"5 selection"
+[true, true, true, "birch", true]
+"6 tolerance tier: moments only"
+[true, true, true]

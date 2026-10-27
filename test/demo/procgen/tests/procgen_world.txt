@@ -1,0 +1,7 @@
+["Oakesterly", "Oakesterly is an old country of marshes, where shepherds count the stars.", "Yarryste"]
+["Oakesterly", "Kenmont", "Fairhaw", "Irow", "Estra", "Rack", "Yarryste"]
+[true, 1, true, 12, true]
+[["beach", 231], ["grassland", 507], ["ocean", 4688], ["shrubland", 745], ["snow", 60], ["taiga", 136], ["temperate deciduous forest", 1323], ["temperate desert", 51], ["temperate rain forest", 2], ["tropical rain forest", 765], ["tropical seasonal forest", 959], ["tundra", 133]]
+[true, true, true]
+[true, true, true]
+[true, true, true, true]

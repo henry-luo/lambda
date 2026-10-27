@@ -933,6 +933,13 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
                 node = backwards ? node->prev_sibling : node->next_sibling;
                 continue;
             }
+            if (node->view_type == RDT_VIEW_MARKER) {
+                MarkerProp* marker = elmt->marker_prop();
+                // generated marker contents are laid out as one atomic inline fragment.
+                if (marker && (!marker->is_outside || marker->reserves_first_line)) return 0xFFFC;
+                node = backwards ? node->prev_sibling : node->next_sibling;
+                continue;
+            }
             if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT) {
                 if (elmt->tag() == MARKUP_NAME_BR ||
                     (!layout_display_is_inline_level(display.outer) &&
@@ -1456,7 +1463,7 @@ static void record_inline_fragment_union(DomNode* text_node, LayoutContext* lyco
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
         layout_extend_fragment_union(span, FRAGMENT_UNION_INLINE,
                                      fragment_min_x, fragment_max_x,
-                                     fragment_min_y, fragment_max_y);
+                                     fragment_min_y, fragment_max_y, lycon->block.line_number);
         ancestor = ancestor->parent;
     }
 
@@ -1467,7 +1474,7 @@ static void record_inline_fragment_union(DomNode* text_node, LayoutContext* lyco
         ViewSpan* host_span = lam::view_require<RDT_VIEW_INLINE>(shadow_host);
         layout_extend_fragment_union(host_span, FRAGMENT_UNION_INLINE,
                                      fragment_min_x, fragment_max_x,
-                                     fragment_min_y, fragment_max_y);
+                                     fragment_min_y, fragment_max_y, lycon->block.line_number);
     }
 }
 
@@ -1587,6 +1594,8 @@ static void contribute_glyph_line_metrics(LayoutContext* lycon, LoadedGlyph* gly
         float fb_normal_line_height = glyph->font_normal_line_height;
         normalize_c1_control_fallback_metrics(codepoint, lycon->font.style, &fb_asc, &fb_desc,
                                               &fb_normal_line_height);
+        // fallback and primary glyphs contribute relative to the same dominant baseline.
+        layout_apply_dominant_font_baseline(lycon->block.flow_box, &fb_asc, &fb_desc);
         // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
         if (lycon->line.vertical_align == CSS_VALUE_TOP) {
             float fb_inline_box_height = fb_asc + fb_desc;
@@ -2202,8 +2211,6 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.max_text_ascender = lycon->line.max_text_descender = 0;
     // line boxes are reused across breaks; stale clamped-baseline state would
     // leak a prior scroll-container tail into the next line's vertical map.
-    lycon->line.clamped_baseline_tail = 0;
-    lycon->line.has_clamped_baseline_tail = false;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_baseline_shift = false;
@@ -2269,44 +2276,6 @@ void line_init(LayoutContext* lycon, float left, float right) {
     line_reset(lycon);
     lycon->line.vertical_align = CSS_VALUE_BASELINE;  // vertical-align does not inherit
     lycon->line.vertical_align_offset = 0;
-}
-
-static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
-    if (!lycon || !lycon->view || lycon->view->view_type != RDT_VIEW_BR) return;
-    ViewBlock* br_container = layout_nearest_block_ancestor(lycon->view->parent_view());
-    bool nested_atomic_container = br_container &&
-        (br_container->view_type == RDT_VIEW_INLINE_BLOCK ||
-         br_container->view_type == RDT_VIEW_TABLE) &&
-        lycon->block.establishing_element != br_container;
-    if (nested_atomic_container) {
-        // own formatting context; an ancestor line must not realign that child.
-        return;
-    }
-    if (lycon->block.line_clamped) {
-        return;
-    }
-    // fallback glyph extrema must not move the break independently of its text.
-    if (!lycon->line.has_replaced_content &&
-        !lycon->line.has_different_inline_font) return;
-
-    View* br_view = lycon->view;
-    float br_ascender = 0.0f;
-    if (font_box_handle(&lycon->font)) {
-        br_ascender = font_get_rendering_ascender(font_box_handle(&lycon->font));
-    }
-    if (br_ascender <= 0.0f) {
-        br_ascender = lycon->block.init_ascender > 0.0f
-            ? lycon->block.init_ascender
-            : br_view->height;
-    }
-
-    float baseline_line_height = 0.0f;
-    float baseline_pos = line_baseline_position(lycon, &baseline_line_height);
-    if (lycon->line.max_bottom_height > baseline_line_height) {
-        baseline_pos += lycon->line.max_bottom_height - baseline_line_height;
-    }
-
-    br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
 }
 
 static float fixup_inline_vertical_decoration_height(ViewSpan* span) {
@@ -2619,53 +2588,23 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         lycon->line.max_top_bottom_height > 0 ||
         lycon->line.max_top_height > 0 ||
         lycon->line.max_bottom_height > 0) {
-        View* view = lycon->line.start_view;
+        // a wrapped continuation must re-enter its inline ancestors' font/alignment context.
+        View* view = layout_inline_fragment_root(lycon->line.start_view);
         if (view) {
             FontBox pa_font = lycon->font;
-            lycon->font = lycon->line.line_start_font;
+            FontProp* line_font = lycon->block.first_line_style_active && lycon->block.first_line_font
+                ? lycon->block.first_line_font : lycon->block.block_container_font;
+            if (line_font) setup_font(lycon->ui_context, &lycon->font, line_font);
+            else lycon->font = lycon->line.line_start_font;
             reset_line_parent_font(lycon);
-            NEXT_VIEW:
-            View * vw = view;
-            do {
-                view_vertical_align(lycon, vw);
-                if (vw == lycon->view) { break; } // reached the last view in the line
-                vw = vw->next();
-            } while (vw);
-            if (vw != lycon->view) { // need to go parent level
-                view = view->parent;
-                if (view) { view = view->next(); }
-                if (view) goto NEXT_VIEW;
-            }
-            if (lycon->line.has_baseline_shift && lycon->line.last_text_view) {
-                auto find_shifted_span = [&](View* source) -> ViewSpan* {
-                    ViewSpan* shifted = nullptr;
-                    for (DomNode* ancestor = source ? source->parent : nullptr;
-                         ancestor && ancestor->is_element() &&
-                         ancestor->view_type == RDT_VIEW_INLINE;
-                         ancestor = ancestor->parent) {
-                        ViewSpan* candidate = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-                        if (candidate->in_line && candidate->inl() &&
-                            vertical_align_baseline_shift(
-                                lycon, candidate->inl()->vertical_align,
-                                candidate->inl()->vertical_align_offset) != 0.0f) {
-                            shifted = candidate;
-                        }
-                    }
-                    return shifted;
-                };
-                ViewSpan* shifted_span = find_shifted_span(lycon->line.last_text_view);
-                if (!shifted_span) {
-                    shifted_span = find_shifted_span(lycon->line.start_view);
-                }
-                // CSS 2.1 §10.8.1: realign the current fragment through its
-                // shifted inline ancestor after the line walk.
-                if (shifted_span) view_vertical_align(lycon, shifted_span);
+            View* last = layout_inline_fragment_root(lycon->view);
+            for (View* current = view; current; current = current->next()) {
+                view_vertical_align(lycon, current);
+                if (current == last) break;
             }
             lycon->font = pa_font;
         }
     }
-
-    align_forced_break_rect_to_line_baseline(lycon);
 
     line_align(lycon);
     layout_finalize_static_inline_positions(lycon);
@@ -2677,34 +2616,6 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         lycon->line.rtl_hanging_space = 0;
     }
     // CSS 2.1 10.8.1: Line height controls vertical spacing between line boxes
-    ViewBlock* line_owner = lycon->block.establishing_element;
-    if ((!line_owner || !line_owner->blk ||
-         line_owner->block()->dominant_baseline != CSS_VALUE_TEXT_TOP) &&
-        lycon->view && lycon->view->is_block()) {
-        ViewBlock* view_block = lam::view_require_block(lycon->view);
-        if (view_block->blk &&
-            view_block->block()->dominant_baseline == CSS_VALUE_TEXT_TOP) {
-            line_owner = view_block;
-        }
-    }
-    if (!line_owner || !line_owner->blk ||
-        line_owner->block()->dominant_baseline != CSS_VALUE_TEXT_TOP) {
-        ViewElement* line_start_parent = lycon->line.start_view
-            ? lycon->line.start_view->parent_view() : nullptr;
-        ViewBlock* line_block = layout_nearest_block_ancestor(line_start_parent);
-        if (line_block && line_block->blk &&
-            line_block->block()->dominant_baseline == CSS_VALUE_TEXT_TOP) {
-            line_owner = line_block;
-        }
-    }
-    bool dominant_text_top = line_owner && line_owner->blk &&
-        line_owner->block()->dominant_baseline == CSS_VALUE_TEXT_TOP;
-    if (dominant_text_top && lycon->line.max_text_ascender > 0.0f) {
-        // the block strut must not reintroduce its larger font ascent/descent.
-        lycon->line.max_ascender = max(lycon->line.max_text_ascender,
-            lycon->line.max_atomic_inline_height);
-        lycon->line.max_descender = lycon->line.max_text_descender;
-    }
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.strut_line_height;
     // CSS 2.1: line-height: 0 is a valid explicit value (not a fallback case)
@@ -2777,11 +2688,6 @@ void line_break(LayoutContext* lycon, bool forced_break) {
 
     if (lycon->line.ruby_annotation_min_line_height > used_line_height) {
         used_line_height = lycon->line.ruby_annotation_min_line_height;
-    }
-
-    if (dominant_text_top && lycon->line.max_text_ascender > 0.0f) {
-        // CSS Inline's text-top baseline uses the actual line union rather than
-        used_line_height = font_line_height;
     }
 
     if (lycon->line.has_baseline_shift && font_line_height > used_line_height) {
@@ -3461,10 +3367,9 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     ViewBlock* text_line_parent = layout_nearest_block_ancestor(text->parent_view());
     bool horizontal_rtl_line = lycon->block.direction == CSS_VALUE_RTL &&
         (!text_line_parent || !layout_block_inline_axis_is_vertical(text_line_parent));
-    bool rtl_inline_block_line = lycon->block.establishing_element &&
-        lycon->block.establishing_element->view_type == RDT_VIEW_INLINE_BLOCK;
-    if (horizontal_rtl_line &&
-        (lycon->line.has_initial_letter || rtl_inline_block_line)) {
+    // ordinary inline-block text is positioned by bidi and final alignment;
+    // only an initial-letter exclusion needs provisional right-edge placement.
+    if (horizontal_rtl_line && lycon->line.has_initial_letter) {
         rect->x = layout_rtl_inline_item_x(&lycon->line, text_width);
     }
     InitialLetterInfo initial_letter = {};
@@ -3581,13 +3486,13 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     }
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     float ascender = 0, descender = 0;
-    float half_leading = layout_inline_font_metrics(font_box_handle(&lycon->font),
+    float half_leading = layout_inline_font_metrics(lycon, font_box_handle(&lycon->font),
         lycon->block.line_height, lycon->block.line_height_is_normal, &ascender, &descender);
     // CSS Inline 3 §7.5/§7.6: an initial letter occupies inline space but
     // its requested line span must not enlarge its originating line box.
     if (!is_initial_letter && (ascender > 0 || descender > 0)) {
         float css_baseline_ascender = ascender;
-        if (!lycon->block.line_height_is_normal) {
+        if (!lycon->block.line_height_is_normal && !layout_block_uses_central_baseline(lycon->block.flow_box)) {
             const FontMetrics* m = font_box_handle(&lycon->font) ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
             if (m) {
                 float table_ascender = (m->use_typo_metrics &&
@@ -3719,11 +3624,18 @@ static void record_inline_box_decoration_fragment(LayoutContext* lycon, DomNode*
     }
     DomElement* parent = text_node->parent->as_element();
     if (!parent->prev_sibling || !parent->prev_sibling->is_text()) return;
+    ViewSpan* span = lam::view_as<RDT_VIEW_INLINE>(parent);
+    if (!span) return;
     CssEnum decoration_break = inline_box_decoration_break_value(parent);
     if (decoration_break != CSS_VALUE_SLICE &&
         decoration_break != CSS_VALUE_CLONE) {
         return;
     }
+    bool rtl = lycon->block.direction == CSS_VALUE_RTL;
+    // an opening cursor alone creates no fragment when all of an undecorated inline wraps.
+    if (!inline_has_axis_edge_decoration(span, rtl, true, true) &&
+        !(decoration_break == CSS_VALUE_CLONE &&
+          inline_has_axis_edge_decoration(span, rtl, false, true))) return;
     float line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : 1.0f;
     float fragment_min_x = lycon->line.left;
     float fragment_max_x = lycon->line.right;
@@ -3826,8 +3738,6 @@ static void copy_line_metrics(Target* target, const Source* source) {
     target->max_atomic_inline_height = source->max_atomic_inline_height;
     target->max_text_ascender = source->max_text_ascender;
     target->max_text_descender = source->max_text_descender;
-    target->clamped_baseline_tail = source->clamped_baseline_tail;
-    target->has_clamped_baseline_tail = source->has_clamped_baseline_tail;
     target->has_different_inline_font = source->has_different_inline_font;
     target->has_inline_font_size_difference = source->has_inline_font_size_difference;
     target->max_normal_line_height = source->max_normal_line_height;
@@ -4493,10 +4403,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         FontHandle* face = font_box_handle(&lycon->font);
         if (face) {
             float ascender = 0.0f, descender = 0.0f;
-            layout_inline_font_metrics(face, lycon->block.line_height,
+            layout_inline_font_metrics(lycon, face, lycon->block.line_height,
                 lycon->block.line_height_is_normal, &ascender, &descender);
             // plain and mixed-font text use the same normalized baseline.
-            rect->y = lycon->block.advance_y + ascender - font_get_rendering_ascender(face);
+            float content_ascent = font_get_rendering_ascender(face);
+            float content_descent = font_get_cell_height(face) - content_ascent;
+            layout_apply_dominant_font_baseline(lycon->block.flow_box, &content_ascent, &content_descent);
+            rect->y = lycon->block.advance_y + ascender - content_ascent;
         } else if (lycon->block.line_height < font_height) {
             float half_leading = (lycon->block.line_height - font_height) / 2;
             rect->y = lycon->block.advance_y + half_leading;
@@ -4781,6 +4694,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         c1_asc = c1_normal_line_height * 0.8f;
                         c1_desc = c1_normal_line_height - c1_asc;
                     }
+                    layout_apply_dominant_font_baseline(lycon->block.flow_box, &c1_asc, &c1_desc);
                     lycon->line.max_ascender = max(lycon->line.max_ascender, c1_asc);
                     lycon->line.max_descender = max(lycon->line.max_descender, c1_desc);
                     lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,

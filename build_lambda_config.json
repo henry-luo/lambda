@@ -44,6 +44,7 @@
     "lib/font/woff2",
     "lib/grep",
     "lib/fts",
+    "lib/procgen",
     "lambda",
     "lambda/core",
     "lambda/io",
@@ -509,6 +510,7 @@
         "lib/grep/*.cpp",
         "lib/fts/*.cpp",
         "lib/physics/*.c",
+        "lib/procgen/*.c",
         "lib/image/*.cpp"
       ],
       "exclude_patterns": [
@@ -518,6 +520,12 @@
       ],
       "source_files": [
         "lib/sqlite/sqlite3.c"
+      ],
+      "file_rules": [
+        {
+          "files": ["lib/procgen/*.c"],
+          "build_options": ["-ffp-contract=off"]
+        }
       ],
       "libraries": [
         "utf8proc",
@@ -1295,6 +1303,7 @@
         "lib",
         "lib/image",
         "lib/physics",
+        "lib/procgen",
         "lib/grep",
         "lib/fts",
         "lambda",

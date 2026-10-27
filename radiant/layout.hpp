@@ -81,7 +81,7 @@ inline LayoutTextRectBounds layout_text_rect_bounds(TextRect* first) {
 
 inline void layout_extend_fragment_union(ViewSpan* span, FragmentUnionKind kind,
                                          float min_x, float max_x,
-                                         float min_y, float max_y) {
+                                         float min_y, float max_y, int source_line = -1) {
     if (!span || max_x < min_x || max_y < min_y) return;
     // Every fragment kind uses the same presence-bit plus extrema invariant;
     // centralizing it prevents one fragmentation path from dropping an edge.
@@ -92,13 +92,18 @@ inline void layout_extend_fragment_union(ViewSpan* span, FragmentUnionKind kind,
         bounds->max_x = max_x;
         bounds->min_y = min_y;
         bounds->max_y = max_y;
+        bounds->first_source_line = bounds->last_source_line = 0;
         span->set_has_fragment_union(kind, true);
-        return;
     }
     if (min_x < bounds->min_x) bounds->min_x = min_x;
     if (max_x > bounds->max_x) bounds->max_x = max_x;
     if (min_y < bounds->min_y) bounds->min_y = min_y;
     if (max_y > bounds->max_y) bounds->max_y = max_y;
+    if (source_line >= 0) {
+        int line_id = source_line + 1;
+        if (!bounds->first_source_line || line_id < bounds->first_source_line) bounds->first_source_line = line_id;
+        if (line_id > bounds->last_source_line) bounds->last_source_line = line_id;
+    }
 }
 
 bool layout_get_initial_letter_info(const DomElement* element,
@@ -2339,12 +2344,14 @@ bool multicol_is_spanner_block(ViewBlock* block);
 bool multicol_find_spanner_containing_block(ViewBlock* block,
                                             ViewBlock** out_containing_block);
 float multicol_used_block_axis_extent(ViewBlock* block);
+float multicol_inline_extent(ViewBlock* block, bool include_overflow_columns);
 float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
                                                ViewBlock* block,
                                                DomElement* element);
 bool multicol_spanner_can_escape_child(ViewBlock* child);
 float multicol_normal_gap_size(ViewBlock* block);
 float multicol_column_gap(ViewBlock* block);
+float multicol_intrinsic_column_gap(ViewBlock* block);
 float multicol_empty_intrinsic_inline_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
@@ -2551,8 +2558,6 @@ typedef struct LineMetricsSnapshot {
     float max_atomic_inline_height;
     float max_text_ascender;
     float max_text_descender;
-    float clamped_baseline_tail;
-    bool has_clamped_baseline_tail;
     bool has_different_inline_font;
     bool has_inline_font_size_difference;
     float max_normal_line_height;
@@ -2629,10 +2634,6 @@ typedef struct Linebox {
     float max_atomic_inline_height; // max margin-box height from inline-block/replaced descendants
     float max_text_ascender;        // maximum baseline-relative ascent from text on this line
     float max_text_descender;       // maximum baseline-relative descent from text on this line
-    // A clamped scroll-container baseline leaves the parent strut tail below
-    // the alignment baseline; vertical publication consumes this separately.
-    float clamped_baseline_tail;
-    bool has_clamped_baseline_tail;
     bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
     bool has_inline_font_size_difference; // an inline text run uses a distinct em size from the line strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
@@ -4012,6 +4013,8 @@ float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block,
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
 bool layout_percentage_height_is_automatic(ViewBlock* block, LayoutContext* context = nullptr);
+ViewBlock* layout_percentage_height_containing_block(ViewBlock* block);
+bool layout_orthogonal_inline_percentage_applies(ViewBlock* block, LayoutAxis axis);
 void layout_apply_html_axis_value(LayoutContext* context, ViewBlock* block, LayoutAxis axis,
     float value, bool percentage, float basis, bool clear_unresolved, bool store_resolved);
 bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block,
@@ -4112,13 +4115,11 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
                                                float inline_extent,
                                                float line_height,
-                                               float clamped_baseline_tail,
                                                float surrogate_inline_origin,
                                                float physical_inline_origin,
                                                float surrogate_block_origin,
                                                float physical_block_origin,
                                                bool center_block_axis,
-                                               bool use_central_baseline,
                                                bool reverse_inline_axis);
 void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* block,
                                            float flow_height);
@@ -4150,14 +4151,15 @@ float layout_compute_in_flow_child_width_extent(
 bool layout_compute_vertical_in_flow_child_inline_extent(
     ViewBlock* parent, float* out_extent);
 bool layout_vertical_parent_has_block_flow_child(ViewBlock* parent);
+View* layout_single_in_flow_child(ViewElement* parent);
 inline bool layout_inline_box_is_orthogonal_to_parent(ViewBlock* block) {
     if (!block) return false;
     ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
     return parent &&
-        // writing-mode is inherited; BlockProp may still carry its default
-        // horizontal value before the inherited declaration is materialized.
+        // the root's principal used mode can differ from its computed mode;
+        // the child's own inherited style still resolves before materialization.
         layout_element_inline_axis_is_vertical(block->as_element()) !=
-        layout_element_inline_axis_is_vertical(parent->as_element());
+        layout_block_inline_axis_is_vertical(parent);
 }
 inline float layout_block_start_content_offset(ViewBlock* block) {
     if (!block) return 0.0f;
@@ -4167,22 +4169,24 @@ inline float layout_block_start_content_offset(ViewBlock* block) {
     if (mode == WM_VERTICAL_LR) return box.border.left + box.padding.left;
     return box.border.top + box.padding.top;
 }
-inline float layout_vertical_item_baseline_from_border_edges(ViewBlock* container,
+inline float layout_vertical_item_baseline_from_content_edges(ViewBlock* container,
                                                              View* item) {
     if (!container || !item) return -1.0f;
     WritingMode mode = layout_block_writing_mode(container);
     if (mode != WM_VERTICAL_RL && mode != WM_VERTICAL_LR) return -1.0f;
-    BoxMetrics box = layout_box_metrics(container);
-    float block_start_border = mode == WM_VERTICAL_RL
-        ? box.border.right : box.border.left;
+    float content_start = layout_block_start_content_offset(container);
     float item_center = item->x + item->width / 2.0f;
-    // Vertical baselines are lines along the inline axis; synthesize their
-    // position from flex/grid item border edges instead of horizontal y metrics.
+    // flex/grid exports add the content offset once when publishing the border-relative cache.
     return mode == WM_VERTICAL_RL
-        ? container->width - block_start_border - item_center
-        : item_center - block_start_border;
+        ? container->width - content_start - item_center
+        : item_center - content_start;
 }
 float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block);
+float layout_synthesized_inline_baseline(ViewBlock* parent, float margin_extent);
+bool layout_replaced_inline_synthesizes_baseline(ViewBlock* block);
+void layout_include_inline_baseline(LayoutContext* lycon, float margin_extent, float baseline);
+void layout_apply_inline_edge_extents(float top_extent, float bottom_extent,
+                                       float* line_before, float* line_after);
 bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal);
 float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal);
 float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
@@ -4710,6 +4714,8 @@ bool layout_node_is_hidden_by_closed_details(DomNode* node);
 void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot);
 DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block,
+                                 float* fieldset_body_origin = nullptr);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
 void layout_inline(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_init_display_contents_view(LayoutContext* lycon, DomElement* elem);
@@ -4845,6 +4851,7 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 // CSS Positioning functions
 float layout_multicol_in_flow_inline_size(ViewBlock* container, float fallback);
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
+RdtLogicalPoint layout_relative_position_offset_in_flow(ViewBlock* block);
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
@@ -5245,7 +5252,10 @@ void line_reset(LayoutContext* lycon);
 float layout_line_height_ascent_leading(float line_height, float content_height);
 float layout_apply_line_height_leading(float line_height,
                                        float* ascender, float* descender);
-float layout_inline_font_metrics(FontHandle* font, float line_height,
+bool layout_block_uses_central_baseline(ViewBlock* block);
+void layout_apply_dominant_font_baseline(ViewBlock* block, float* ascender, float* descender);
+void layout_set_line_parent_font(LayoutContext* lycon, FontProp* font, float font_size);
+float layout_inline_font_metrics(LayoutContext* lycon, FontHandle* font, float line_height,
                                 bool normal, float* ascender, float* descender);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
@@ -5408,6 +5418,8 @@ void recompute_span_bounding_box_after_line_layout(
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge,
+                                      bool include_margin = false);
 typedef bool (*LayoutInlineFragmentFn)(void*, RdtLogicalRect, bool first, bool last, float offset, float extent);
 bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visitor, void* context);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,

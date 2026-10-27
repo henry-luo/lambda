@@ -1545,13 +1545,9 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
             flex_item->width,
             layout_content_size_from_border_box(flex_item, flex_item->height, false),
             lycon->block.line_height,
-            lycon->line.has_clamped_baseline_tail
-                ? lycon->line.clamped_baseline_tail : 0.0f,
             surrogate_inline_origin, physical_inline_origin,
             surrogate_block_origin, physical_block_origin,
             center_button_block_axis,
-            flex_item->block()->dominant_baseline == CSS_VALUE_AUTO ||
-            flex_item->block()->dominant_baseline == CSS_VALUE_CENTRAL,
             flex_item->is_element() &&
             layout_element_css_writing_mode(flex_item->as_element()) ==
                 CSS_VALUE_SIDEWAYS_LR &&

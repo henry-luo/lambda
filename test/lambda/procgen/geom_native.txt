@@ -1,0 +1,10 @@
+"native Delaunay"
+true
+true
+true
+true
+true
+true
+"boxed boundary"
+[]
+["indices", "orientation", "collinear"]
