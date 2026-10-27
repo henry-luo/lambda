@@ -4,6 +4,7 @@ import A: ~~.mod_art
 import T: ~~.mod_templates
 import M: ~~.mod_model
 import R: ~~.mod_render
+import D: ~~.~~.mod_document
 
 let ART_KEYS = [for (a in A.ART) a.key]
 fn art_keys(items) => [for (it in items where it.kind == "art") it.art]
@@ -52,14 +53,14 @@ let placed = M.place(card, T.art("heart", 0, 0, 200));
 {x: placed.x, y: placed.y, w: placed.w};
 
 "history:";
-let h1 = M.record(M.history(), card);
-let back_step = M.undo_step(h1, moved);
-let fore_step = M.redo_step(back_step.history, back_step.card);
-{undo_is_card: back_step.card == card, redo_is_moved: fore_step.card == moved, empty_undo: M.undo_step(M.history(), card)};
+let h1 = D.record(D.history(), card);
+let back_step = D.undo_step(h1, moved);
+let fore_step = D.redo_step(back_step.history, back_step.value);
+{undo_is_card: back_step.value == card, redo_is_moved: fore_step.value == moved, empty_undo: D.undo_step(D.history(), card)};
 
 "colours:";
 {tint: A.tint("#e11d48", .5), shade: A.shade("#e11d48", .5), dark_navy: A.is_dark("#1e2c56"), dark_cream: A.is_dark("#fbf6ea")};
 "files:";
-{slug: M.slug("  Mr & Mrs: Golden Rings! "), empty: M.slug("!!"), valid: M.valid(card), invalid: M.valid({pages: {front: {}}})};
+{slug: D.slug("  Mr & Mrs: Golden Rings! ", "card"), empty: D.slug("!!", "card"), valid: M.valid(card), invalid: M.valid({pages: {front: {}}})};
 "geometry the editor writes during a drag:";
 R.geometry(M.item_of(card, "front", "f2"), 2.0)
