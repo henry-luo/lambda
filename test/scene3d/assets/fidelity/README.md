@@ -18,3 +18,10 @@ Transmission and thickness sample different coordinates/transforms of the
 embedded R/G layer map. IOR, mesh thickness and world-space attenuation survive
 numeric and exact-pixel static round trips. The original clearcoat/sheen data
 remain present to exercise combined layers.
+
+M6 adds `drawables.gltf`, derived from the same portable embedded streams.
+Modes 0/1/3 reuse four face-free positions, UV0/UV1, RGBA and one material;
+the selected adapter retains unlit base color/coverage and source UVs while
+reporting omitted PBR maps. Loader/native tests cover counts, absent consumed
+UVs, cached material reuse, rendering, context loss, retirement and explicit
+styling-export refusal.

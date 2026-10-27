@@ -2354,10 +2354,36 @@ degrees. CSS determines the viewport size; `viewBox` and
 | `geometry(positions, options?)` | Buffer geometry; options include normals, `uvs`/`uvs1`, RGB/RGBA `colors`, indices and xyzw tangents |
 | `material(kind?, options?)`, `texture(source, options?)` | Material (default basic) or image texture |
 | `mesh(geometry, material, options?)`, `resources(children)` | Renderable mesh or shared resource definitions |
+| `points(geometry, material, options?)`, `sprite(material, options?)` | Unlit point clouds and camera-facing markers |
+| `line(geometry, material, options?)`, `line_segments(geometry, material, options?)` | Continuous bevel ribbons or independent segments |
 | `environment(kind, options?)^` | Procedural room/sky or local HDR image environment |
 | `load(source, options?)^` | Native scene asset; see the [supported format profiles](../vibe/radiant/Radiant_Design_WebGL.md#renderable-format-profiles) |
 | `clip(label, tracks, options?)`, `track(path, times, values, kind?, options?)` | Declarative animation clip/track; [character animation](#22-scene3dmotion--character-animation) adds motion tools |
 | `transform(position?, rotation?, scale?)^`, `multiply(a, b)^`, `point(matrix, position)^` | Pure matrix construction, composition and point transformation |
+
+### Points, sprites, lines and picking
+
+These drawables share mesh transforms, visibility, instancing and resource
+references, using `basic` materials and optional color textures. Point `size`
+and line `width` default to 1 logical pixel; geometry `point-sizes` multiplies
+each source point. Sprites default to world `size:[1,1]` and
+`center:[0.5,0.5]`. Set `size-mode:'screen'/'world'` explicitly to select units.
+Screen size stays stable under camera movement and 1×/2× output. They do not
+cast or receive shadows. Continuous lines have butt ends and bounded bevel
+joins, clipping before expansion at the near plane.
+
+Geometry `drawable-uvs:'surface'` generates billboard UV0 or ribbon V;
+`'source'` preserves source UV0 (used by glTF point/line loading). UV1 always
+retains source coordinates. glTF modes 0, 1 and 3 use the selected unlit
+profile with warnings for omitted PBR lighting. Their styling is not exported.
+
+`lambda.scene3d.picking.hit(camera,node,geometry,x,y,world?)` returns a source
+vertex/segment hit or null. Pass a prepared `scene3d.camera`, resolved buffer
+geometry and the final world matrix for the object or instance. It shares
+camera/ray/triangle helpers and tests point radii, anchors and clipped ribbons;
+texture alpha and scene occlusion are outside this query. See the
+[profile and return fields](../vibe/radiant/Radiant_Design_WebGL.md#points-sprites-and-lines-m6-selected-profile).
+Construction and picking retain **S12.1.1v3 / D7.2.4v4**.
 
 ### Materials and lighting
 

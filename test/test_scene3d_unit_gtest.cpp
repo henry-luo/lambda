@@ -298,8 +298,8 @@ protected:
     void attr(DomElement* node,const char* name,const char* value) {
         ASSERT_TRUE(node->set_attribute(name,value));doc.mutation_epoch++;
     }
-    DomElement* mesh(const char* geometry="plane",const char* color="#ff0000",const char* material="basic",DomElement* parent=nullptr) {
-        DomElement* result=element("mesh",parent?parent:root);
+    DomElement* mesh(const char* geometry="plane",const char* color="#ff0000",const char* material="basic",DomElement* parent=nullptr,const char* tag="mesh") {
+        DomElement* result=element(tag,parent?parent:root);
         DomElement* g=element("geometry",result);attr(g,"type",geometry);attr(g,"size","2 2 2");
         DomElement* m=element("material",result);attr(m,"type",material);attr(m,"color",color);
         return result;
@@ -308,6 +308,17 @@ protected:
         DomElement* result=mesh("buffer","#ffffff",material),*geometry=result->first_child->as_element();
         attr(geometry,"positions","-1 -1 0 1 -1 0 1 1 0 -1 1 0");attr(geometry,"indices","0 1 2 0 2 3");
         attr(geometry,"normals","0 0 1 0 0 1 0 0 1 0 0 1");return result;
+    }
+    DomElement* drawable(const char* tag,const char* positions,const char* color="#ff0000") {
+        DomElement* result=mesh("buffer",color,"basic",nullptr,tag);attr(result->first_child->as_element(),"positions",positions);return result;
+    }
+    unsigned color_span(ImageSurface* image,unsigned channel,unsigned scan,bool vertical=false) {
+        unsigned count=vertical?(unsigned)image->height:(unsigned)image->width,lo=count,hi=0;
+        for(unsigned i=0;i<count;i++) {
+            const uint8_t* pixel=(const uint8_t*)image->pixels+(vertical?i:scan)*image->pitch+(vertical?scan:i)*4;
+            if(pixel[channel]) {lo=lo<i?lo:i;hi=i;}
+        }
+        return lo<count?hi-lo+1:0;
     }
     DomElement* map_texture(const char* id,const char* file) {
         DomElement* texture=element("texture",root);attr(texture,"id",id);attr(texture,"src",file);
@@ -1611,4 +1622,97 @@ TEST_F(Scene3dTest, TransmissionTracksReserveTheirProgramAndRejectInvalidAbsorpt
     EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(after.transmission_captures,before.transmission_captures+1);
     ASSERT_TRUE(scene3d_animation_seek(state,1));EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"attenuation-color"),nullptr);
     ASSERT_TRUE(scene3d_animation_seek(state,0));image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(opaque,image->pixels,sizeof(opaque)),0);
+}
+
+TEST_F(Scene3dTest, PointsKeepLogicalSizesColorsAndVertexSizesAcrossCamerasAndDensity) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* cloud=drawable("points","-1 0 0 0 0 0 1 0 0","#ffffff"),*g=cloud->first_child->as_element();
+    attr(cloud,"size","16");attr(g,"point-sizes",".5 1 1.5");attr(g,"colors","1 0 0 0 1 0 0 0 1");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,32,64,255,0,0);pixel(image,64,64,0,255,0);pixel(image,96,64,0,0,255);
+    EXPECT_EQ(color_span(image,0,64),8u);EXPECT_EQ(color_span(image,1,64),16u);EXPECT_EQ(color_span(image,2,64),24u);pixel(image,35,67,0,0,0,0);
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(camera,"position","0 0 8");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,0,64),8u);
+    attr(camera,"type","perspective");attr(camera,"fov","60");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_NEAR(color_span(image,0,64),8,1);
+    image=snapshot(128,128,2);ASSERT_NE(image,nullptr);EXPECT_NEAR(color_span(image,0,128),16,1);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.material_links,after.material_links);
+    EXPECT_EQ(before.geometries,after.geometries);EXPECT_EQ(after.graphics.draws-before.graphics.draws,6u);
+    uint64_t frames=after.graphics.frames;ASSERT_EQ(snapshot(128,128,2),image);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.graphics.frames,frames);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+    attr(cloud,"size","1");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_GT(color_span(image,1,64),0u);
+}
+
+TEST_F(Scene3dTest, SourceUvsDoNotChangePointCoverageAndLineCoordinatesInterpolate) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* cloud=drawable("points","0 0 0","#ffffff"),*g=cloud->first_child->as_element(),*m=cloud->last_child->as_element();
+    attr(cloud,"size","24");attr(g,"drawable-uvs","source");attr(g,"uvs",".25 .75");
+    DomElement* texture=map_texture("map","test/scene3d/assets/fidelity/colors.png");attr(texture,"uv-set","0");attr(m,"texture","map");attr(m,"alpha-mode","opaque");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),24u);pixel(image,64,64,255,0,0);
+    pixel(image,54,54,0,0,0,0);pixel(image,64,55,255,0,0);
+    root->remove_child(cloud);doc.mutation_epoch++;
+    DomElement* path=drawable("line-segments","-1 0 0 1 0 0","#ffffff");g=path->first_child->as_element();m=path->last_child->as_element();
+    attr(path,"width","12");attr(g,"drawable-uvs","source");attr(g,"uvs",".25 .75 .75 .75");attr(m,"texture","map");attr(m,"alpha-mode","opaque");
+    image=snapshot();ASSERT_NE(image,nullptr);pixel(image,40,64,255,0,0);pixel(image,88,64,0,255,0);
+    pixel(image,40,60,255,0,0);pixel(image,40,67,255,0,0);
+}
+
+TEST_F(Scene3dTest, SpritesFaceBothCamerasKeepAnchorsAndSampleGeneratedCoordinates) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* marker=drawable("sprite","0 0 0","#ffffff"),*m=marker->last_child->as_element();
+    attr(marker,"size-mode","screen");attr(marker,"size","24 16");attr(marker,"center","0 0");
+    DomElement* texture=map_texture("marker","test/scene3d/assets/fidelity/colors.png");attr(texture,"uv-set","0");attr(m,"texture","marker");attr(m,"alpha-mode","opaque");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,56),24u);EXPECT_EQ(color_span(image,3,76,true),16u);
+    pixel(image,63,56,0,0,0,0);pixel(image,76,64,0,0,0,0);
+    uint8_t front[128*128*4];memcpy(front,image->pixels,sizeof(front));Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(camera,"position","4 0 4");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(memcmp(front,image->pixels,sizeof(front)),0);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
+    attr(marker,"size-mode","world");attr(marker,"size","1 1");attr(marker,"center",".5 .5");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),32u);
+    attr(camera,"position","0 0 4");attr(camera,"type","perspective");attr(camera,"fov","90");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),16u);
+    attr(camera,"position","0 0 8");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),8u);
+    attr(marker,"size-mode","screen");attr(marker,"size","24 16");image=snapshot(128,128,2);ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,128),48u);
+    EXPECT_EQ(color_span(image,3,128,true),32u);
+}
+
+TEST_F(Scene3dTest, WideLinesKeepWidthClipBeforeExpansionAndInterpolateEndpointColors) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* path=drawable("line","-1 0 0 0 0 0 1 1 0"),*g=path->first_child->as_element(),*m=path->last_child->as_element();attr(path,"width","8");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,40,true),8u);pixel(image,40,59,0,0,0,0);
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));
+    attr(camera,"type","perspective");attr(camera,"fov","60");attr(camera,"position","0 0 8");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,55,true),8u);
+    image=snapshot(128,128,2);ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,110,true),16u);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);EXPECT_EQ(before.material_links,after.material_links);
+    attr(camera,"position","0 0 0");attr(camera,"target","0 0 -1");attr(camera,"near","1");attr(camera,"far","10");attr(camera,"fov","90");
+    attr(g,"positions","-.2 0 -.5 1 0 -3");attr(g,"colors","1 0 0 0 0 1");attr(m,"color","#ffffff");
+    image=snapshot();ASSERT_NE(image,nullptr);pixel(image,63,64,0,0,0,0);
+    float ndc=(68.5f-64)/64,t=(.2f+.5f*ndc)/(1.2f-2.5f*ndc);
+    pixel(image,68,64,srgb_byte(1-t),0,srgb_byte(t),255,3);
+    attr(g,"positions","0 0 -2 0 0 -2 0 0 -3");attr(g,"colors","");image=snapshot();ASSERT_NE(image,nullptr);EXPECT_EQ(color_span(image,3,64),0u);
+    attr(path,"width","0");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"positive"),nullptr);
+}
+
+TEST_F(Scene3dTest, MirroredPointInstancesStayInOneBatchAndSharedSourcesKeepTheirTopology) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* cloud=drawable("points","0 0 0"),*g=cloud->first_child->as_element();attr(cloud,"size","12");
+    attr(cloud,"instances","1 0 0 0 0 1 0 0 0 0 1 0 -1 0 0 1 -1 0 0 0 0 1 0 0 0 0 1 0 1 0 0 1");
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);pixel(image,32,64,255,0,0);pixel(image,96,64,255,0,0);
+    Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.meshes,1u);EXPECT_EQ(before.graphics.draws,2u);
+    for(unsigned i=0;i<100;i++) ASSERT_NE(snapshot(i%2?128:96,i%2?128:96),nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.graphics.resources,after.graphics.resources);EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
+    ASSERT_TRUE(cloud->remove_attribute("instances"));attr(g,"id","shared");attr(g,"positions","-.6 -.5 0 .6 -.5 0 0 .5 0");doc.mutation_epoch++;
+    DomElement* triangle=element("mesh",root);attr(triangle,"geometry","shared");DomElement* material=element("material",triangle);attr(material,"type","basic");attr(material,"color","#0000ff");
+    DomElement* unused=element("geometry",root);attr(unused,"type","buffer");attr(unused,"positions","0 0 0");
+    ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(after.geometries,2u);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);
+}
+
+TEST_F(Scene3dTest, ImportedFaceFreePointAndLinePrimitivesRenderAndRetireTheirUploads) {
+    Input* owner=InputManager::create_input(nullptr);MarkBuilder builder(owner);
+    Input* source=input_from_url(builder.createString("test/scene3d/assets/fidelity/drawables.gltf"),builder.createString("scene3d-asset"),nullptr,doc.url);
+    ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    DomElement* model=build_dom_tree_from_element(source->root.element,&doc,root);ASSERT_NE(model,nullptr);doc.mutation_epoch++;
+    ImageSurface* image=snapshot();ASSERT_NE(image,nullptr);unsigned covered=0;
+    for(unsigned y=0;y<image->height;y++) for(unsigned x=0;x<image->width;x++) covered+=((uint8_t*)image->pixels)[y*image->pitch+x*4+3]>0;
+    EXPECT_GT(covered,80u);Scene3dStats before,after;ASSERT_TRUE(scene3d_stats(root,&before));EXPECT_EQ(before.geometries,3u);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.graphics.gpu_bytes,after.graphics.gpu_bytes);
+    root->remove_child(model);doc.mutation_epoch++;ASSERT_NE(snapshot(),nullptr);ASSERT_TRUE(scene3d_stats(root,&after));
+    EXPECT_EQ(after.geometries,0u);EXPECT_LT(after.graphics.gpu_bytes,before.graphics.gpu_bytes);
 }

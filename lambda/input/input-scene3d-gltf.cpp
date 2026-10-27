@@ -3,6 +3,7 @@
 #include "../../lib/base64.h"
 #include "../../lib/mesh_uv.h"
 #include "../../lib/scene3d_material.h"
+#include "../../lib/scene3d_drawable.h"
 
 namespace lambda {
 namespace {
@@ -18,8 +19,8 @@ struct Gltf {
     SceneAsset& a;
     ItemReader source;
     lam::ArrayList<GltfBuffer> buffers;
-    lam::ArrayList<Item> materials, nodes;
-    lam::ArrayList<unsigned> uv_masks; // coordinate sets required by each material
+    lam::ArrayList<Item> materials, drawable_materials, nodes;
+    lam::ArrayList<unsigned> uv_masks, base_uv_masks; // unlit drawables consume only base color UVs
     lam::ArrayList<int> parents;
     lam::ArrayList<unsigned char> visited;
     lam::ArrayList<GltfSkin> skins;
@@ -284,6 +285,7 @@ struct Gltf {
             unsigned used_uvs=0;
             auto base=asset_field(pbr,"baseColorTexture");
             if(!base.isNull()&&!texture_ref(base,material,"texture",used_uvs)) return false;
+            base_uv_masks.append(used_uvs);
             if(!unlit) {
                 double metalness,roughness;
                 if(!factor(pbr,"metallicFactor",1,0,1,&metalness)||!factor(pbr,"roughnessFactor",1,0,1,&roughness)) return false;
@@ -300,9 +302,20 @@ struct Gltf {
             } else if(!asset_field(m,"emissiveTexture").isNull()||!asset_field(m,"normalTexture").isNull())
                 a.ctx.addWarning("scene3d asset: unlit materials omit their normal and emissive maps");
             if(!emissive(m,material)) return false;
-            materials.append(material);uv_masks.append(used_uvs);
+            materials.append(material);drawable_materials.append(ItemNull);uv_masks.append(used_uvs);
         }
-        materials.append(a.material());uv_masks.append(0);return true;
+        materials.append(a.material());drawable_materials.append(ItemNull);uv_masks.append(0);base_uv_masks.append(0);return true;
+    }
+    Item drawable_material(unsigned index) {
+        if(get_type_id(drawable_materials[index])!=LMD_TYPE_NULL) return drawable_materials[index];
+        ElementReader source(materials[index]);
+        if(asset_is(source.get_attr("type").cstring(),"basic")) return drawable_materials[index]=materials[index];
+        Item out=a.material("#ffffff","basic");
+        // retain coverage and base color without copying unsupported PBR lobes.
+        const char* keys[]={"name","color","texture","opacity","alpha-mode","alpha-cutoff","side","emissive","emissive-intensity"};
+        for(const char* key:keys) if(!source.get_attr(key).isNull()) a.attr(out,key,source.get_attr(key).item());
+        a.ctx.addWarning("scene3d asset: points/lines use unlit base color and emissive factor; lighting and PBR maps are omitted");
+        return drawable_materials[index]=out;
     }
     // KHR_texture_transform: upper-origin column vectors, T * R * S.
     bool texture_transform(ItemReader transform,GltfUvTransform& uv) {
@@ -411,9 +424,13 @@ struct Gltf {
         return true;
     }
     bool primitive(Item parent,ItemReader node,unsigned node_index,ItemReader mesh,ItemReader primitive,unsigned primitive_index) {
+        int mode=integer(primitive,"mode",4);
+        int topology=mode==0?SCENE_POINTS:mode==1?SCENE_SEGMENTS:mode==3?SCENE_LINE:SCENE_TRIANGLES;
+        bool drawable=topology!=SCENE_TRIANGLES;
+        if(!drawable&&mode!=4&&mode!=5&&mode!=6) return fail("unsupported primitive mode (selected modes: 0, 1, 3, 4, 5, 6)");
         auto attributes=asset_field(primitive,"attributes");lam::ArrayList<double> positions;
         if(!components(attributes,"POSITION",3,positions)||positions.empty()) return fail("invalid mesh positions");
-        size_t vertices=positions.size()/3;Item geometry=a.element("geometry"),out=a.element("mesh");
+        size_t vertices=positions.size()/3;Item geometry=a.element("geometry"),out=a.element(scene3d_drawable_tags[topology]);
         AssetColumn columns[ASSET_COLUMN_COUNT];columns[0].name="positions";columns[0].width=3;
         columns[0].values=static_cast<lam::ArrayList<double>&&>(positions);
         a.attr(out,"id",a.id("mesh",a.serial++));a.attr(geometry,"type",a.symbol("buffer"));
@@ -426,7 +443,7 @@ struct Gltf {
         if(!asset_field(attributes,"JOINTS_1").isNull()||!asset_field(attributes,"WEIGHTS_1").isNull()) return fail("more than four skin influences are not supported");
         // glTF 2.0 §3.7.2.1: without normals, flat normals are computed and tangents ignored
         bool has_normals=!asset_field(attributes,"NORMAL").isNull();
-        for(unsigned set=0;set<2;set++) if((uv_masks[mi]&(1u<<set))&&asset_field(attributes,set?"TEXCOORD_1":"TEXCOORD_0").isNull())
+        for(unsigned set=0;set<2;set++) if(((drawable?base_uv_masks[mi]:uv_masks[mi])&(1u<<set))&&asset_field(attributes,set?"TEXCOORD_1":"TEXCOORD_0").isNull())
             return fail("material requests an absent texture coordinate set");
         for(unsigned k=0;k<7;k++) if(!asset_field(attributes,keys[k]).isNull()&&(k!=5||has_normals)) {
             lam::ArrayList<double> data;unsigned c,ct;if(!accessor(integer(attributes,keys[k]),data,&c,&ct)) return false;
@@ -469,7 +486,18 @@ struct Gltf {
         if(ii>=0) {unsigned c,ct;if(!accessor(ii,indices,&c,&ct)||c!=1||asset_field(object("accessors",ii),"normalized").asBool()||(ct!=5121&&ct!=5123&&ct!=5125)) return fail("invalid index accessor");}
         else for(size_t i=0;i<vertices;i++) indices.append(i);
         for(double i:indices) if(i<0||floor(i)!=i||i>=vertices) return fail("mesh index out of bounds");
-        int mode=integer(primitive,"mode",4);lam::ArrayList<double> triangles;
+        if(drawable) {
+            size_t count=indices.size();
+            if(!count||(mode==1&&(count<2||count%2))||(mode==3&&count<2)) return fail("invalid point/line index count");
+            size_t expanded=mode==0?count*4:mode==1?count*2:(count-1)*4+(count-2)*3;
+            if(vertices>262144||expanded>262144) return fail("expanded drawable vertex quota exceeded");
+            if(si>=0||asset_count(asset_field(primitive,"targets"))) return fail("point/line deformation is not supported");
+            a.attr(geometry,"drawable-uvs",a.symbol("source"));asset_geometry_columns(a,geometry,columns);
+            a.attr(geometry,"indices",a.array(indices.data(),count));
+            a.attr(out,"material",ElementReader(drawable_material(mi)).get_attr("id").item());
+            a.append(out,geometry);a.append(parent,out);return true;
+        }
+        lam::ArrayList<double> triangles;
         if(mode==4) {if(indices.size()%3) return fail("triangle indices must be a multiple of three");triangles=static_cast<lam::ArrayList<double>&&>(indices);}
         else if(mode==5||mode==6) for(size_t i=2;i<indices.size();i++) {
             double p=indices[mode==6?0:i-2],q=indices[i-1],r=indices[i];if(p==q||q==r||r==p) continue;

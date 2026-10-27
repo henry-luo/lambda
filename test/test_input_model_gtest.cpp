@@ -1287,3 +1287,27 @@ TEST_F(ModelInputTest, TransmissionRejectsMalformedVolumeIorAndTextureProperties
         {R"("index": 2)",R"("index": 99)"}};
     invalid_mutations(file->root.get_string()->chars,cases);
 }
+
+TEST_F(ModelInputTest, PointAndLinePrimitivesKeepSourceCoordinatesAndShareTheirUnlitMaterial) {
+    Input* source=load_scene_asset("test/scene3d/assets/fidelity/drawables.gltf");ASSERT_NE(source,nullptr);ASSERT_FALSE(source->parse_failed)<<source->parse_error_message;
+    ElementReader root(source->root);lam::ArrayList<ElementReader> geometries;
+    model_elements(root,"geometry",&geometries);ASSERT_EQ(geometries.size(),3u);
+    const char* material=nullptr;
+    for(const char* kind:{"points","line-segments","line"}) {
+        lam::ArrayList<ElementReader> nodes;model_elements(root,kind,&nodes);ASSERT_EQ(nodes.size(),1u);
+        const char* id=nodes[0].get_attr("material").cstring();ASSERT_NE(id,nullptr);
+        if(material) EXPECT_STREQ(material,id);else material=id;
+    }
+    for(auto& g:geometries) {
+        EXPECT_STREQ(g.get_attr("drawable-uvs").cstring(),"source");EXPECT_EQ(g.get_attr("positions").asArray().length(),12);
+        EXPECT_TRUE(g.get_attr("normals").isNull());EXPECT_EQ(g.get_attr("uvs1").asArray().length(),8);
+        EXPECT_NEAR(g.get_attr("uvs1").asArray().get(1).asFloat(),.75,1e-6);EXPECT_NEAR(g.get_attr("colors").asArray().get(3).asFloat(),.5,1e-6);
+    }
+    lam::ArrayList<ElementReader> materials;model_elements(root,"material",&materials);bool found=false;
+    for(auto& m:materials) if(!strcmp(m.get_attr("id").cstring(),material)) {found=true;EXPECT_STREQ(m.get_attr("type").cstring(),"basic");EXPECT_FALSE(m.get_attr("texture").isNull());EXPECT_TRUE(m.get_attr("normal-texture").isNull());}
+    EXPECT_TRUE(found);
+    StrBuf* bytes=strbuf_new();const char* error=nullptr;EXPECT_FALSE(format_gltf_bytes(source->root,false,bytes,&error));ASSERT_NE(error,nullptr);EXPECT_NE(strstr(error,"styling"),nullptr);strbuf_free(bytes);
+    Input* file=load_scene_asset("test/scene3d/assets/fidelity/drawables.gltf","text");ASSERT_NE(file,nullptr);
+    const ModelMutation cases[]={{"\"mode\": 0","\"mode\": 2"},{"\"count\": 4","\"count\": 3"},{"\"TEXCOORD_0\": 2","\"TEXCOORD_2\": 2"}};
+    invalid_mutations(file->root.get_string()->chars,cases);
+}

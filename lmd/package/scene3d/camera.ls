@@ -43,15 +43,16 @@ pub fn ray(camera,x,y) {
 fn plane_distance(camera,p,index) => if (index==0) p[2]-camera.near else if (index==1) camera.far-p[2]
     else if (index==2) p[0]+half_height(camera,p[2])*camera.aspect else if (index==3) half_height(camera,p[2])*camera.aspect-p[0]
     else if (index==4) p[1]+half_height(camera,p[2]) else half_height(camera,p[2])-p[1]
-fn clip_planes(camera,a,b,index=0) {
-    if (index>=6) [world(camera,a),world(camera,b)] else if (index==1 and camera["infinite-far"]) clip_planes(camera,a,b,index+1) else {
+fn clip_planes(camera,a,b,index=0,end=6) {
+    if (index>=end) [world(camera,a),world(camera,b)] else if (index==1 and camera["infinite-far"]) clip_planes(camera,a,b,index+1,end) else {
         let da=plane_distance(camera,a,index);
         let db=plane_distance(camera,b,index);
         let intersection=add(a,times(subtract(b,a),da/(da-db)));
-        if (da<0 and db<0) [] else clip_planes(camera,if (da<0) intersection else a,if (db<0) intersection else b,index+1)
+        if (da<0 and db<0) [] else clip_planes(camera,if (da<0) intersection else a,if (db<0) intersection else b,index+1,end)
     }
 }
 pub fn clip_segment(camera,a,b) => clip_planes(camera,camera_space(camera,a),camera_space(camera,b))
+pub fn clip_near(camera,a,b) => clip_planes(camera,camera_space(camera,a),camera_space(camera,b),0,1)
 
 // Triangles used by chart picking are the same clipped/billboard geometry sent to scene3d.
 pub fn triangle_hit(ray,a,b,c) {
@@ -75,17 +76,24 @@ pub fn billboard(camera,point,size) {
         [point,unproject(camera,p.x+radius*math.cos(i*math.pi/8),p.y+radius*math.sin(i*math.pi/8),p.depth),
             unproject(camera,p.x+radius*math.cos((i+1)*math.pi/8),p.y+radius*math.sin((i+1)*math.pi/8),p.depth)]]
 }
-pub fn ribbon(camera,a,b,width) {
-    let clipped=clip_segment(camera,a,b);
+// project a camera-facing world radius on a pixel-space axis, including an explicit lens aspect.
+pub fn pixel_radius(camera,point,axis,radius) {
+    let p=project(camera,point);
+    let r=project(camera,add(point,times(camera.right,radius)));
+    let u=project(camera,add(point,times(camera.vertical,radius)));
+    math.hypot((r.x-p.x)*axis[0]+(r.y-p.y)*axis[1],(u.x-p.x)*axis[0]+(u.y-p.y)*axis[1])
+}
+pub fn ribbon(camera,a,b,width,full_clip=true,world_width=false) {
+    let clipped=if (full_clip) clip_segment(camera,a,b) else clip_near(camera,a,b);
     if (len(clipped)==0) [] else {
         let p=project(camera,clipped[0]);
         let q=project(camera,clipped[1]);
         let length=math.hypot(q.x-p.x,q.y-p.y);
         if (length==0) [] else {
-            let dx=(q.y-p.y)*width/(2*length);
-            let dy=(p.x-q.x)*width/(2*length);
-            let corners=[unproject(camera,p.x+dx,p.y+dy,p.depth),unproject(camera,p.x-dx,p.y-dy,p.depth),
-                unproject(camera,q.x-dx,q.y-dy,q.depth),unproject(camera,q.x+dx,q.y+dy,q.depth)];
+            let axis=[(q.y-p.y)/length,(p.x-q.x)/length];
+            let radii=if (world_width) [for (point in clipped) pixel_radius(camera,point,axis,width/2)] else [width/2,width/2];
+            let corners=[for (i in 0 to 3, let endpoint=if (i<2) p else q, let radius=radii[if (i<2) 0 else 1]*(if (i==0 or i==3) 1 else -1))
+                unproject(camera,endpoint.x+axis[0]*radius,endpoint.y+axis[1]*radius,endpoint.depth)];
             [for (indices in [[0,1,2],[0,2,3]]) [for (i in indices) corners[i]]]
         }
     }

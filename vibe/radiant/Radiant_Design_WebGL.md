@@ -339,12 +339,67 @@ round-trip factors/maps; no per-frame program/target growth; and one shared
 capture/readback contract. This approximation does not claim full Three.js
 transmission pixel parity.
 
-
 Layer-map presence selects a lazily retained program; numeric factors remain
 uniforms. Aliased textures share checked device units, and data-only texture
 declarations avoid an unused sRGB upload. The M4 acceptance record is in the
 [feature plan](../impl/Radiant_Impl_Scene3d_Three_Features.md#m4-qualification-record--2026-10-28).
 
+### Points, sprites and lines: M6 selected profile
+
+`points(geometry, material, options)`, `line(geometry, material, options)` and
+`line_segments(geometry, material, options)` share the mesh reference/transform/
+visibility/instance model. `sprite(material, options)` supplies one origin point.
+The first profile uses basic/textured color with explicit alpha modes; lit,
+skinned, morphed and custom-shader drawables remain outside it. These objects
+do not cast shadows, and an explicit casting request is diagnosed.
+
+Point `size` is a positive scalar (default 1), multiplied by optional geometry
+`point-sizes` (one positive number per source vertex). Sprite `size` is a positive
+2-vector (default [1,1]); `center` is a finite anchor 2-vector (default [0.5,0.5]).
+Line `width` is positive (default 1). `size-mode` selects `screen` or `world`:
+points/lines default to logical viewport pixels; sprites default to local units
+carried through the object's world transform. Screen sizes stay in logical
+pixels at 1×/2× output and do not inherit object scaling. Camera motion updates
+uniforms, preserving geometry uploads and linked programs.
+
+Source geometry is topology-neutral data. It validates once; each consumer
+retains its own normalized upload. Unused data does not require triangle faces
+or a GPU allocation. Mesh consumers still require triangle counts and valid
+normals; point/line consumers accept face-free positions, optional indices and
+RGB/RGBA colors. With default `drawable-uvs:'surface'`, point/sprite UV0 is
+generated across each billboard; optional UV1 remains a source-vertex lookup
+coordinate. Lines use source U or normalized arc length and V across their
+width. `drawable-uvs:'source'` preserves both source UV components, independently
+of billboard corners and ribbon width. Expanded uploads retain the
+262,144-vertex budget (at most 65,536 rendered points).
+
+Points are camera-facing discs; sprites are textured quads. Continuous lines
+have bounded bevel joins; independent segments share the same clipping/width
+path. Near-plane clipping precedes ribbon expansion and interpolates endpoint
+colors/UVs; degenerate projected segments draw nothing. Complex joins, dashes,
+lit particles and general curve construction are later profiles. Pure picking
+reuses `scene3d.camera` clipping/ray/triangle helpers, preserving source IDs and
+a declared point radius. The profile retains **S12.1.1v3, D4.5.1v4/D4.5.2,
+D7.2.4v4 and D7.3.5**. Named pixel, sizing, clipping, picking, lifetime and
+camera-retention cases qualify each finite submilestone before closure.
+
+glTF modes 0 (points), 1 (independent lines) and 3 (line strip) load through
+this profile with source UVs and cached basic-material adapters. Base color,
+coverage, texture transforms and emissive factors survive; lighting/PBR maps
+are omitted with a warning. Loop mode, deforming point/line primitives and
+point/sprite/line export are diagnosed. The default 1px viewport sizing follows
+[glTF §3.9.7](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#point-and-line-materials);
+the unlit restriction is Lambda's selected profile, including when source
+normals are present.
+
+`lambda.scene3d.picking.hit(camera,node,geometry,x,y,world?)` queries resolved
+buffer data using a prepared `scene3d.camera` and final group/object/instance
+matrix (identity by default). It returns the nearest covered source vertex or
+segment with `object`, `source_index`, `primitive_index`, `position` and ray
+`distance`, or null. Screen coordinates are logical pixels. It covers disc
+radii, sprite anchors and clipped bevel ribbons, without texture-alpha tests,
+scene occlusion or an automatic DOM/animation pose resolver. Callers supply
+the sampled final matrix for each instance.
 ## 5. Radiant scene renderer and shared native GL core
 
 ### Context provider and API mapping

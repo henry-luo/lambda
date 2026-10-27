@@ -10,6 +10,7 @@
 #include "../lib/hash.h"
 #include "../lib/log.h"
 #include "../lib/scene3d_material.h"
+#include "../lib/scene3d_drawable.h"
 
 struct Scene3dAnimationBinding {
     Scene3dAnimationBinding* next;
@@ -118,6 +119,12 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
         value->type=ANIMATION_VECTOR;value->count=count;
         for(unsigned i=0;i<count;i++) value->numbers[i]=values[i];pool_free(pool,values);return true;
     }
+    if(scene3d_drawable_kind(tag)==SCENE_SPRITE&&(!strcmp(property,"size")||!strcmp(property,"center"))) {
+        bool center=!strcmp(property,"center"),present;float numbers[2]={center?.5f:1.f,center?.5f:1.f};
+        if(!scene3d_components(node,property,numbers,2,&present)) return false;
+        value->type=ANIMATION_VECTOR;value->count=2;
+        for(unsigned c=0;c<2;c++) value->numbers[c]=numbers[c];return true;
+    }
     if(!strcmp(property,"position")||!strcmp(property,"scale")) {
         Scene3dVec vector;
         if(!scene3d_vector(node,property,!strcmp(property,"scale")?Scene3dVec{1,1,1}:Scene3dVec{},&vector)) return false;
@@ -174,6 +181,7 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
     }
     struct NumericProperty { const char* tag;const char* name;float fallback;bool standard=false; };
     static const NumericProperty numeric[]={
+        {"points","size",1},{"line","width",1},{"line-segments","width",1},
         {"material","opacity",1},{"material","metalness",0,true},{"material","roughness",1,true},
         {"light","intensity",1},{"light","shadow-softness",1.5f},
         {"effect","strength",1},{"effect","threshold",1},{"effect","radius",2},

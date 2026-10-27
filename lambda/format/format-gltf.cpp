@@ -12,6 +12,7 @@
 #include "../../lib/mesh_primitive.h"
 #include "../../lib/mesh_uv.h"
 #include "../../lib/scene3d_material.h"
+#include "../../lib/scene3d_drawable.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -486,6 +487,7 @@ struct GltfExport {
     int new_node() { nodes.append(nullptr); return (int)nodes.size() - 1; }
     // a node for e and its subtree; -1 means the element has no glTF node
     int node(ElementReader e, unsigned depth = 0) {
+        if(scene3d_drawable_kind(e.tagName())>0) {fail("point, sprite and line styling is not exported to glTF");return -1;}
         if (error) return -1;
         if (depth > 64) { fail("scene hierarchy exceeds depth 64"); return -1; }
         ItemReader visible = e.get_attr("visible");

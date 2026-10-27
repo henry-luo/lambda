@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27. **Status:** implementation started in worktree
 `temp/scene3d-three-features`, branch `codex/scene3d-three-features`.
-M0–M5 are delivered with the aggregate limits below. M6/M7 remain planned.
+M0–M6 are delivered with the aggregate limits below. M7 remains planned.
 
 **Baseline inspected:** `691aba4b8`. Scope is native `lambda.scene3d`, distinct
 from running Three.js in LambdaJS. The comparison oracle is the repository's
@@ -502,7 +502,8 @@ Keep the implementation checkpoint here short:
 | M3 | Per-map UV0/UV1 transforms, packed RGB/RGBA lanes, imported finite/infinite perspective and orthographic cameras, static glTF/GLB preservation | Higher UV sets, affine-shear export and compressed textures remain outside this profile | 55 native / 52 importer / 24 package cases and 99 scene replays pass; 11 Three.js images pass the unchanged gate; aggregate limits below | Continue with M4 |
 | M4 | Clearcoat/sheen factors, all five layer maps, separate coat normal, lazy programs and glTF/GLB preservation | Recorded independent aggregate failures; remaining physical extensions stay separate | 57 native, 54 input, 100 scene replays; 16 Three.js images pass the unchanged gate; aggregate/cost record below | Continue with M5 |
 | M5 | Shared opaque capture, refractive/absorbing physical materials and transmission/IOR/volume import/export | Documented overlap/coverage approximations and independent aggregate failures | 60 native, 56 input, 21 package checks; 101 scene replays and 16 existing image gates pass; aggregates/cost below | Continue with M6 |
-| M6–M7 | None under this plan | Planned feature milestones | No implementation qualification | Continue in order after M5 |
+| M6 | Dedicated discs, anchored sprites, clipped bevel ribbons, source-UV glTF modes 0/1/3 and pure source-ID picking | Unlit profile; no dashes, deformation, loop mode or styling export | 66 native / 57 importer / 102 scene replays and 16 old image gates pass; aggregate qualification below | Continue with M7 |
+| M7 | None under this plan | Planned culling and LOD milestone | No implementation qualification | Continue after M6 |
 
 No formal semantics or design ruling changes are required merely to create
 this plan. Do not mark a broad feature family complete because one fixture
@@ -717,3 +718,65 @@ classification; native scenes and shared graphics controls pass. The
 Lambda/input aggregate is **8,329/8,330 passing**, with only the inherited
 `tests_greetings_model` mismatch. The transmission package case and forced-GC
 lane pass. M5 is closed with those independent aggregate limits.
+
+
+### M6 qualification record — 2026-10-28
+
+Topology-neutral source geometry validates once and supplies separately cached
+triangle/disc/sprite/ribbon uploads. Unused face-free data has no GPU upload.
+Camera-facing expansion uses retained source centers/endpoints and uniforms;
+near-plane clipping precedes width expansion and interpolates colors/UVs.
+Continuous lines use bounded bevels and butt caps. Per-sample disc coordinates
+preserve 1px coverage independently of source texture UVs. The first probe
+found a clockwise ribbon index order and undefined shadow preprocessor macros;
+shared orientation/define helpers fix those causes without changing GL state
+or weakening pixel checks. Ownership and pure queries retain **S12.1.1v3,
+D4.5.1v4/D4.5.2, D7.2.4v4 and D7.3.5**.
+
+The selected basic-color profile, screen/world units, anchors, UV modes and
+limits are in the scene design and package guide. glTF modes 0/1/3 preserve
+source colors, both UV sets and base-color texture transforms through a cached
+unlit adapter, reporting omitted lighting/PBR maps. Loop/deforming primitives
+and styling export are diagnosed. Pure picking takes resolved geometry and a
+sampled final object/instance matrix; it retains source IDs and tests disc
+radii, sprite anchors and clipped bevels, without texture-alpha or occlusion
+queries. These restrictions are explicit supported-profile boundaries.
+
+All **66 native units, 57 importer cases and 102 scene/render replays** pass.
+The new package fixtures have 26 schema/track checks and 15 picking checks;
+all selected existing package controls pass. Native tests independently check
+logical sizes, analytic near-clip color interpolation, source UV coverage,
+mirrored instancing, shared topology, density, 100 resizes, imported face-free
+geometry, removal and context loss. All **16 established Three.js image
+comparisons** pass their unchanged 99% gate. The typed UI replay retains
+geometry/programs across style tracks, template replacement and recovery.
+
+Isolated release Apple M4, 120 camera frames: Dreamhome at 732 × 359 measures
+M5 **71.554/73.893 ms** versus M6 **71.477/75.212 ms** p50/p95. Both retain
+66 resources; M6 accounts 56,833,378 GPU bytes (29,706 additional retained
+shader-source bytes). The four-drawable fixture at 128 × 128 measures
+**0.758/1.021 ms**, retaining 24 resources and 1,653,574 GPU bytes. It makes
+exactly 600 draws and 120 readbacks over 120 changed frames. Neither workload
+links programs or grows targets/CPU/GPU bytes/projections/environment/shadows.
+Evidence is `temp/scene3d-three-features/m6-*.log`, `m6-paired-*.json`,
+`m6-drawable-cost.json` and archived `m6/lambda.exe`.
+
+The dense 256 × 256 probe (5,000 points plus a 2,000-vertex continuous line)
+measures **1.532/2.009 ms**, retaining 16 resources and 6,309,866 GPU bytes.
+Its 120 frames make exactly 360 draws and 120 readbacks, with no program,
+projection, target, environment, shadow or retained-byte growth.
+
+The release Radiant aggregate records **6,407 passed / 8 failed / 141 partial /
+2 skipped**. Seven failures retain the known CSS-memory and six WPT layout
+classification. The eighth is the Node 24.7 concurrent baseline compiler
+shutdown stall: all 211 rendering cases printed PASS before the process
+stopped responding; the sampled stack is retained in
+`m6-render-shutdown.sample`. The completed child was terminated, preserving
+that failed-runner verdict. A focused replay using the explicit Node option
+`--no-concurrent-sparkplug` passes all 211 cases and exits normally; no test or
+vendor source was changed. The Lambda/input aggregate is **8,330/8,332
+passing**: the inherited greetings mismatch and a Hotwire MIR case that ended
+before its final completion marker at the suite timeout. The same Hotwire
+case passes an isolated replay in 7.896 seconds; no server/runtime code was
+changed. The new package fixtures and forced-GC lane pass. M6 is closed with
+these aggregate limits recorded.

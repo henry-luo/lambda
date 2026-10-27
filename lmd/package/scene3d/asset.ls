@@ -15,6 +15,10 @@ pub fn rewrite(n, prefix, options) element {
     // Lambda tags are static; share attribute/reference traversal across tag constructors.
     if (kind == 'group') <group *: attrs, *children>
     else if (kind == 'mesh') <mesh *: attrs, *children>
+    else if (kind == 'points') <points *: attrs, *children>
+    else if (kind == 'sprite') <sprite *: attrs, *children>
+    else if (kind == 'line') <line *: attrs, *children>
+    else if (kind == 'line-segments') <'line-segments' *: attrs, *children>
     else if (kind == 'resources') <resources *: attrs, *children>
     else if (kind == 'geometry') <geometry *: attrs>
     else if (kind == 'material') <material *: attrs, *children>
