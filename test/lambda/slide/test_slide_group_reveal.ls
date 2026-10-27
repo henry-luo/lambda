@@ -12,8 +12,10 @@ let deck = <presentation title: "Group reveal", width: 640.0, height: 360.0,
         <cue <effect target: "wipe-group", kind: 'wipe-in', from: 'left', duration: 100.0>>
     >
 >
-let initial = format(slide.snapshot(deck)^, 'html')
-let final = format(slide.snapshot(deck, {cue: 'final'})^, 'html');
+// assert object visibility in the body, excluding the shared stylesheet's hidden UI labels.
+fn rendered_body(page) => format([for (node in content(page) where name(node)=='body') node], 'html')^
+let initial = rendered_body(slide.snapshot(deck)^)
+let final = rendered_body(slide.snapshot(deck, {cue: 'final'})^);
 [
     contains(initial, "data-slide-object=\"appear-group\" aria-hidden=\"true\""),
     contains(initial, "data-slide-object=\"wipe-group\" aria-hidden=\"true\""),

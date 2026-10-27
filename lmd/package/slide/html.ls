@@ -35,6 +35,14 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-controls button.slide-icon-button { display:inline-flex; flex-shrink:0; align-items:center; justify-content:center;
     width:32px; min-width:32px; height:32px; padding:0; }
 .slide-controls svg { display:block; flex-shrink:0; pointer-events:none; }
+/* labels retain metrics while a sibling popup escapes the horizontally scrolling icon row. */
+.slide-tooltip,.slide-tooltip-label { position:absolute; bottom:calc(100% + 6px); z-index:20;
+    padding:5px 8px; border:1px solid var(--slide-ui-border,#365263); border-radius:6px;
+    background:var(--slide-ui-background,#102333); color:var(--slide-ui-text,#e5eef2);
+    font:500 12px/18px var(--slide-ui-font,Arial,sans-serif); white-space:nowrap; pointer-events:none;
+    box-shadow:0 2px 8px #0004; }
+.slide-tooltip { display:none; max-width:100%; box-sizing:border-box; white-space:normal; }
+.slide-tooltip-label { display:block; visibility:hidden; position:fixed; width:max-content; left:0; top:0; bottom:auto; }
 .slide-controls button[hidden],.slide-controls .slide-exit-fullscreen { display:none; }
 .slide-controls [aria-pressed=true] .slide-enter-fullscreen { display:none; }
 .slide-controls [aria-pressed=true] .slide-exit-fullscreen { display:block; }

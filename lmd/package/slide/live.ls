@@ -52,7 +52,8 @@ fn tree(plan, options) {
             >;
             <span class: "slide-status", ["aria-live"]: "polite", string(c.value(options.start_slide,0)+1) ++ " / " ++ string(len(plan.slides))>;
             *presenter.toolbar(plan, key)>;
-            if (controls) toolbar.button("toolbar","Hide toolbar","data-slide-tool",{},"slide-toolbar-hide") else null
+            if (controls) toolbar.button("toolbar","Hide toolbar","data-slide-tool",{},"slide-toolbar-hide") else null;
+            <span class:"slide-tooltip",'aria-hidden':"true">
         >]
     >
 }
@@ -439,6 +440,7 @@ on input(evt) {
 on click(evt) {
     let owner = event_owner(evt.target, ~.options)
     if (owner == null) { return 'pass' }
+    toolbar.hide_hint(owner)
     let tool = dom.closest(evt.target, "[data-slide-tool]")
     let button = dom.closest(evt.target, "[data-slide-command]")
     let trigger = trigger_target(evt.target,~.plan.slides[session.ps.slide].triggers)
@@ -465,6 +467,7 @@ on click(evt) {
 on keydown(evt) {
     let owner = event_owner(evt.target, ~.options)
     if (owner == null or evt.ctrlKey or evt.altKey or evt.metaKey or evt.shiftKey) { return 'pass' }
+    toolbar.hide_hint(owner)
     if (evt.key == "Enter" and dom.matches(evt.target, ".slide-picker")) {
         session = action(owner, ~.plan, session, "go", dom.get_state(evt.target, "value"), evt.time_stamp, ~.options)^
         return 'prevent-default'
@@ -500,22 +503,39 @@ on mousemove(evt) {
 }
 // the bottom-right hot corner (shown only while the toolbar is hidden) brings the toolbar back
 on mouseover(evt) {
+    let owner = event_owner(evt.target, ~.options)
+    if (owner!=null) toolbar.show_hint(owner,evt.target)
     if (session.tools.toolbar) { return 'pass' }
     if (not dom.matches(evt.target, ".slide-toolbar-reveal")) {
         if (not session.reveal_armed) { session = {*: session, reveal_armed: true} }
         return 'pass'
     }
     if (not session.reveal_armed) { return 'pass' }
-    let owner = event_owner(evt.target, ~.options)
     if (owner == null) { return 'pass' }
     session = action(owner, ~.plan, session, "toolbar", null, evt.time_stamp, ~.options)^
     return 'handled'
 }
 on mouseout(evt) {
-    if (not session.tools.pointer or session.tools.blackout or session.tools.overview) { return 'pass' }
     let owner = event_owner(evt.target, ~.options)
+    if (owner!=null) toolbar.hide_hint(owner)
+    if (not session.tools.pointer or session.tools.blackout or session.tools.overview) { return 'pass' }
     if (owner == null) { return 'pass' }
     track_pointer(owner, evt)^
+    return 'pass'
+}
+on focusin(evt) {
+    let owner = event_owner(evt.target, ~.options)
+    if (owner!=null) toolbar.show_hint(owner,evt.target)
+    return 'pass'
+}
+on focusout(evt) {
+    let owner = event_owner(evt.target, ~.options)
+    if (owner!=null) toolbar.hide_hint(owner)
+    return 'pass'
+}
+on scroll(evt) {
+    let owner = event_owner(evt.target, ~.options)
+    if (owner!=null) toolbar.hide_hint(owner)
     return 'pass'
 }
 
@@ -567,7 +587,9 @@ pn sync_fullscreen(owner) {
     // keep the SVG children mounted; pressed state selects the enter/exit glyph.
     let label = if (on) "Exit full screen" else "Full screen"
     dom.set_attribute(button,"aria-label",label)
-    dom.set_attribute(button,"title",label ++ " (F)")
+    let hint = toolbar.hint("fullscreen",label)
+    dom.set_attribute(button,"title",hint)
+    set_text(dom.query_selector(button,".slide-tooltip-label"),hint)
     if (dom.window_fullscreen_enabled(owner)) { dom.remove_attribute(button, "hidden") }
     else { dom.set_attribute(button, "hidden", "") }
 }
@@ -584,6 +606,7 @@ pn fit_document(target, plan, options, after_layout = false) {
 pn fit_player(owner, plan, options) {
     let viewport = dom.viewport_size(owner)
     if (viewport == null) { return null }
+    toolbar.hide_hint(owner)
     let standalone = c.value(options.fit_viewport, false)
     let controls = dom.bounding_box(dom.query_selector(owner, ".slide-controls"))
     let toolbar = dom.get_attribute(owner, "data-slide-toolbar") != "false"
