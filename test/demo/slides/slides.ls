@@ -565,6 +565,6 @@ on load(evt) {
     return 'handled'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><title "Slides — create and present">
-    <base href:BASE><style slide_html.css ++ spelling.css><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
+    <base href:BASE><style slide_html.css ++ spelling.css><link rel:"stylesheet",href:url_resolve(BASE,"../ribbon.css")><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
     apply(<slides_document rendered:<body apply(<slide_editor rendered:v.shell(apply(<editor_show>),inline_text.widget())>)>>)
 >

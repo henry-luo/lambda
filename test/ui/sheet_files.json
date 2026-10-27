@@ -1,0 +1,267 @@
+{
+  "name": "Sheet workbook save/open, CSV export, unsaved changes and rename",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "wait",
+      "ms": 100
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "50000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet_roundtrip.sheet.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Saved temp/sheet_roundtrip.sheet.json"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet_roundtrip.csv",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported temp/sheet_roundtrip.csv"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('file-path').value==='temp/sheet_roundtrip.sheet.json'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-sheets",
+      "equals": "1"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('workbook-title').value==='Untitled workbook'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/sheet_roundtrip.sheet.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-sheets",
+      "equals": "3"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$140500.00"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cell-C5"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "F2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#cell-editor"
+      },
+      "text": "60000",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-title"
+      },
+      "contains": "Unsaved changes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-cancel"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#cell-F5"
+      },
+      "contains": "$150500.00"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dialog-discard"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#sheet"
+      },
+      "attribute": "data-sheets",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-tab=Insert]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rename-sheet"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "Planning",
+      "clear": true
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#sheet-tab-0"
+      },
+      "contains": "Planning"
+    }
+  ]
+}

@@ -97,22 +97,6 @@ h3 { font-size:12px; margin:20px 0 15px; }
 /* Match Word's caption-free ribbon while retaining named command groups. */
 #slides-editor { position:relative; display:flex; flex-direction:column; width:100%; height:100%; }
 .ribbon { position:relative; z-index:10; padding:7px 12px 5px; overflow:visible; }
-.editor-ribbon { display:flex; align-items:stretch; gap:10px; width:100%; min-width:0; height:80px; }
-.editor-ribbon .ribbon-group { padding-right:10px; margin:0; gap:0; height:78px; flex-shrink:0; }
-.editor-ribbon .group-tools { display:flex; flex-direction:column; justify-content:center; gap:3px; flex:1; min-height:0; }
-.editor-ribbon .ribbon-group { position:relative; }
-.editor-ribbon .ribbon-group:last-child { padding-right:0; border-right:0; }
-.editor-ribbon .ribbon-group-trigger { display:none; width:58px; height:70px; padding:4px 2px; flex-direction:column; align-items:center; justify-content:center; gap:3px; overflow:hidden; background:transparent; border-color:transparent; }
-.editor-ribbon .ribbon-group-trigger .tool-label { max-width:54px; overflow:hidden; text-overflow:ellipsis; }
-.editor-ribbon .ribbon-group-trigger .group-chevron { line-height:0; }
-.editor-ribbon .ribbon-group[data-compact=true]>.ribbon-group-trigger { display:flex; }
-.editor-ribbon .ribbon-group[data-compact=true]>.group-label { display:none; }
-/* A closed group must lose popup geometry before live resize exposes its tools in flow. */
-.editor-ribbon .ribbon-group[data-compact=true]>.group-tools { display:none; }
-.editor-ribbon .ribbon-group[data-compact=true][data-open=true]>.group-tools { display:flex; position:absolute; top:100%; left:0; z-index:20; width:max-content; min-width:170px; max-width:calc(100vw - 32px); min-height:0; height:auto; padding:10px; border:1px solid #d4dae3; border-radius:7px; background:#fff; box-shadow:0 10px 26px #17274330; }
-.editor-ribbon .ribbon-group[data-compact=true][data-open=true][data-align=right]>.group-tools { left:auto; right:0; }
-.editor-ribbon .ribbon-group[data-compact=true][data-open=true] { z-index:21; }
-.editor-ribbon .ribbon-group[data-compact=true] .home-row { flex-wrap:wrap; }
 .design-ribbon .group-tools { flex-direction:row; align-items:center; }
 .design-ribbon .group-tools .field { margin:0; }
 .design-ribbon .group-tools .field select { width:180px; }
@@ -129,26 +113,6 @@ h3 { font-size:12px; margin:20px 0 15px; }
   .editor-ribbon .ribbon-group-trigger { width:52px; }
   .editor-ribbon .ribbon-group-trigger .tool-label { max-width:48px; }
 }
-.home-row { display:flex; align-items:center; gap:2px; }
-.home-stack { display:flex; flex-direction:column; gap:1px; align-items:stretch; }
-.history-tools { display:flex; gap:2px; }
-.editor-ribbon .group-undo .group-tools { align-items:flex-start; gap:4px; }
-.editor-ribbon button.home-tool { display:flex; align-items:center; justify-content:flex-start; gap:5px; padding:3px 5px; border:1px solid transparent; border-radius:3px; background:transparent; height:25px; font-size:11px; color:#4b5563; }
-.editor-ribbon button.home-tool:hover { background:#f5e9e2; border-color:#e5c2b7; }
-.editor-ribbon button.home-tool[aria-pressed=true],.editor-ribbon button.home-tool[aria-expanded=true] { background:#f4dfd5; border-color:#d7a08b; color:#a54027; }
-.editor-ribbon .tool-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-.editor-ribbon .home-tool.icon-only { justify-content:center; min-width:25px; padding:3px; }
-.editor-ribbon .icon-only>.tool-label { display:none; }
-/* Share an icon row and two-line label slot so menu arrows stay beside their icons. */
-.editor-ribbon .home-tool.home-large { flex-direction:column; justify-content:flex-start; gap:3px; height:62px; min-width:50px; padding:3px 4px; }
-.home-large .tool-icon { height:28px; gap:2px; }
-.home-large .tool-label { min-height:24px; line-height:12px; text-align:center; }
-.home-large .ribbon-label-line { display:block; }
-.editor-ribbon .home-chevron { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:10px; height:10px; color:#9199a3; }
-.editor-ribbon .home-menu-trigger { position:relative; }
-.paste-tool { display:flex; align-items:stretch; }.paste-tool>.home-tool.home-large { min-width:38px; }
-.paste-tool>.home-tool.icon-only { min-width:13px; padding:0; align-self:stretch; height:auto; }.paste-tool .icon-only .tool-icon { display:none; }
-.editor-ribbon select,.editor-ribbon input { height:25px; padding:2px 5px; border-radius:2px; font-size:11px; }
 #home-font-family { width:142px; }#home-font-size { width:47px; }
 .home-menu { display:none; position:absolute; z-index:45; min-width:195px; max-width:290px; max-height:calc(100vh - 30px); overflow:auto; padding:6px; border:1px solid #d4dae3; border-radius:7px; background:#fff; box-shadow:0 8px 30px #1e293b30; }
 .home-menu-item { display:flex; align-items:center; width:100%; gap:9px; padding:7px 9px; border:0; border-radius:3px; background:transparent; text-align:left; font-size:12px; }

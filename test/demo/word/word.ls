@@ -36,7 +36,7 @@ import picker: .mod_file_picker
 import font_picker: .mod_font_picker
 
 let BASE = url_resolve(resources.entry_uri()^,".")
-let CSS = input(url_resolve(BASE,"word.css"),'text')^
+let CSS = input(url_resolve(BASE,"../office.css"),'text')^ ++ input(url_resolve(BASE,"word.css"),'text')^
 let MIN_WINDOW_WIDTH = 800
 
 // keep render-only calculations out of the handler activation scope.
