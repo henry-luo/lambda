@@ -243,7 +243,7 @@ static bool read_metrics(EventSimContext* context, UiContext* ui, MapReader& arg
 #define METRIC(field) metrics->put(#field, stats.field)
         METRIC(projection_generation); METRIC(snapshot_generation);
         METRIC(projection_bytes); METRIC(projection_reserved_bytes); METRIC(snapshot_bytes);
-        METRIC(meshes); METRIC(geometries); METRIC(textures);
+        METRIC(meshes); METRIC(geometries); METRIC(textures); METRIC(environment_builds);
         METRIC(raster_width); METRIC(raster_height); METRIC(camera_aspect);
 #undef METRIC
         metrics->put("animation_id", (uintptr_t)scene3d_animations(element));

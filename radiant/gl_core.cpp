@@ -31,6 +31,7 @@
 static constexpr size_t GL_BYTE_LIMIT = 512u * 1024u * 1024u;
 static constexpr unsigned GL_RESOURCE_LIMIT = 4096;
 static constexpr unsigned GL_DIMENSION_LIMIT = 4096;
+static constexpr unsigned GL_CUBE_DIMENSION_LIMIT = 2048;
 static uint64_t native_gl_next_id = 1;
 static unsigned native_gl_context_count;
 
@@ -177,13 +178,16 @@ static uint64_t native_gl_id() { return __atomic_fetch_add(&native_gl_next_id, 1
     X(void, Uniform4uiv, (GLint, GLsizei, const GLuint*)) \
     X(void, VertexAttrib4fv, (GLuint, const GLfloat*)) \
     X(void, UniformMatrix2fv, (GLint, GLsizei, GLboolean, const GLfloat*)) \
-    X(void, UniformMatrix3fv, (GLint, GLsizei, GLboolean, const GLfloat*))
+    X(void, UniformMatrix3fv, (GLint, GLsizei, GLboolean, const GLfloat*)) \
+    X(void, TexParameterfv, (GLenum, GLenum, const GLfloat*))
 struct NativeGlFunctions {
 #define DECLARE_GL(result, name, args) result (APIENTRY *name) args;
     GL_FUNCTIONS(DECLARE_GL)
 #undef DECLARE_GL
 };
 struct WebGlTextureStorage { size_t levels[6][13]; };
+// the layered target kinds; 0 is the multisampled color drawing buffer
+enum { NATIVE_GL_LAYERS_NONE, NATIVE_GL_LAYERS_DEPTH, NATIVE_GL_LAYERS_DEPTH_CUBE, NATIVE_GL_LAYERS_CUBE, NATIVE_GL_LAYERS_FLOAT };
 struct NativeGlSlot {
     uint64_t id;
     NativeGlKind kind;
@@ -195,6 +199,7 @@ struct NativeGlSlot {
     unsigned attribute_count;
     NativeGlResource indices;
     bool initialized, webgl, immutable;
+    unsigned layered, levels; // NATIVE_GL_LAYERS_* and the mip count of a layered target
     uint64_t link_generation;
     unsigned attribute_types[16], enabled_attributes;
 };
@@ -211,6 +216,7 @@ struct NativeGlContext {
     bool webgl_dirty, webgl_discard, webgl_flip, webgl_premultiply, webgl_loss_reported;
     bool extension_checked, floating_targets;
     unsigned webgl_colorspace;
+    uint64_t drawing; // the target the last native begin bound; a draw may not sample it
 #ifdef NATIVE_GL_ENABLED
     GLFWwindow* window;
     pthread_t thread;
@@ -544,7 +550,8 @@ NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface*
     NativeGlFunctions& gl = context->gl;
     gl.GenTextures(1, &slot->name); gl.BindTexture(GL_TEXTURE_2D, slot->name);
     gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1); gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, upload_width, upload_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    // data maps keep their stored values: decoding a normal or roughness as sRGB would bend it
+    gl.TexImage2D(GL_TEXTURE_2D, 0, sampler.srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8, upload_width, upload_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, sampler.min_filter); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, sampler.mag_filter);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, sampler.wrap_s); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, sampler.wrap_t);
     if(mipmaps) gl.GenerateMipmap(GL_TEXTURE_2D);
@@ -555,7 +562,7 @@ NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface*
     return {};
 }
 
-NativeGlResource native_gl_data_texture(NativeGlContext* context, unsigned width, unsigned height) {
+NativeGlResource native_gl_data_texture(NativeGlContext* context, unsigned width, unsigned height, bool filtered) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context);
     if (!scope.valid || !width || !height || width > GL_DIMENSION_LIMIT || height > GL_DIMENSION_LIMIT) {
@@ -567,7 +574,8 @@ NativeGlResource native_gl_data_texture(NativeGlContext* context, unsigned width
     NativeGlFunctions& gl = context->gl;
     gl.GenTextures(1, &slot->name); gl.BindTexture(GL_TEXTURE_2D, slot->name);
     gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
-    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    GLint filter = filtered ? GL_LINEAR : GL_NEAREST;
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     if (native_gl_check(context, "data texture allocation")) return {slot->id};
     native_gl_release(context, {slot->id});
@@ -623,7 +631,7 @@ NativeGlResource native_gl_target(NativeGlContext* context, unsigned width, unsi
 bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const float background[4]) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
-    if (!scope.valid || !slot || !background) return false;
+    if (!scope.valid || !slot || slot->layered || !background) return false;
     for (unsigned c = 0; c < 4; c++) if (!isfinite(background[c]) || background[c] < 0 || background[c] > 1) return false;
     NativeGlFunctions& gl = context->gl;
     gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name); gl.Viewport(0, 0, slot->width, slot->height);
@@ -631,7 +639,161 @@ bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const fl
     gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
     gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
     gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    context->drawing = slot->id;
     slot->initialized=native_gl_check(context, "drawing buffer clear");return slot->initialized;
+#else
+    return false;
+#endif
+}
+
+NativeGlResource native_gl_depth_target(NativeGlContext* context, unsigned size, bool cube) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    if (!scope.valid || !size || size > (cube ? GL_CUBE_DIMENSION_LIMIT : GL_DIMENSION_LIMIT)) {
+        native_gl_error(context, "invalid depth target size"); return {};
+    }
+    unsigned faces = cube ? 6 : 1;
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, (size_t)size * size * 4u * faces);
+    if (!slot) return {};
+    slot->width = slot->height = size; slot->samples = 1; slot->levels = 1;
+    slot->layered = cube ? NATIVE_GL_LAYERS_DEPTH_CUBE : NATIVE_GL_LAYERS_DEPTH;
+    NativeGlFunctions& gl = context->gl; GLenum target = cube ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
+    gl.GenTextures(1, &slot->texture); gl.BindTexture(target, slot->texture);
+    for (unsigned face = 0; face < faces; face++)
+        gl.TexImage2D(cube ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + face : GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, size, size, 0,
+            GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+    // linear filtering over a depth comparison is hardware 2x2 percentage-closer filtering
+    gl.TexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR); gl.TexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.TexParameteri(target, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE); gl.TexParameteri(target, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    if (cube) {
+        gl.TexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl.TexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    } else {
+        // beyond the map's edge nothing casts: the border sits at the far plane, so it reads as lit
+        const GLfloat far[] = {1, 1, 1, 1};
+        gl.TexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER); gl.TexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        gl.TexParameterfv(target, GL_TEXTURE_BORDER_COLOR, far);
+    }
+    gl.GenFramebuffers(1, &slot->name); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, cube ? GL_TEXTURE_CUBE_MAP_POSITIVE_X : GL_TEXTURE_2D, slot->texture, 0);
+    GLenum none = GL_NONE; gl.DrawBuffers(1, &none); gl.ReadBuffer(GL_NONE);
+    bool complete = gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (complete && native_gl_check(context, "depth target allocation")) return {slot->id};
+    native_gl_error(context, "depth target framebuffer incomplete"); native_gl_release(context, {slot->id});
+#endif
+    return {};
+}
+
+NativeGlResource native_gl_cube_target(NativeGlContext* context, unsigned size, unsigned levels) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    if (!scope.valid || !size || size > GL_CUBE_DIMENSION_LIMIT || !levels || levels > 13 || (size >> (levels - 1)) == 0) {
+        native_gl_error(context, "invalid cube target size or levels"); return {};
+    }
+    size_t bytes = (size_t)size * size * 4; // the depth buffer
+    for (unsigned level = 0; level < levels; level++) { size_t side = size >> level; bytes += side * side * 6 * 8; }
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, bytes);
+    if (!slot) return {};
+    slot->width = slot->height = size; slot->samples = 1; slot->levels = levels; slot->layered = NATIVE_GL_LAYERS_CUBE;
+    NativeGlFunctions& gl = context->gl;
+    gl.GenTextures(1, &slot->texture); gl.BindTexture(GL_TEXTURE_CUBE_MAP, slot->texture);
+    for (unsigned level = 0; level < levels; level++) for (unsigned face = 0; face < 6; face++)
+        gl.TexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, level, GL_RGBA16F, size >> level, size >> level, 0, GL_RGBA, GL_FLOAT, nullptr);
+    gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, levels > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, 0); gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, levels - 1);
+    gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.TexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    // prefiltered environments are read across face edges; seams would show on glossy surfaces
+    gl.Enable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+    gl.GenRenderbuffers(1, &slot->depth); gl.BindRenderbuffer(GL_RENDERBUFFER, slot->depth);
+    gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, size, size);
+    gl.GenFramebuffers(1, &slot->name); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X, slot->texture, 0);
+    gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, slot->depth);
+    bool complete = gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (complete && native_gl_check(context, "cube target allocation")) return {slot->id};
+    native_gl_error(context, "cube target framebuffer incomplete"); native_gl_release(context, {slot->id});
+#endif
+    return {};
+}
+
+NativeGlResource native_gl_float_target(NativeGlContext* context, unsigned width, unsigned height, bool depth) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context);
+    if (!scope.valid || !width || !height || width > GL_DIMENSION_LIMIT || height > GL_DIMENSION_LIMIT) {
+        native_gl_error(context, "invalid float target dimensions"); return {};
+    }
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TARGET, (size_t)width * height * (8u + (depth ? 4u : 0u)));
+    if (!slot) return {};
+    slot->width = width; slot->height = height; slot->samples = 1; slot->levels = 1; slot->layered = NATIVE_GL_LAYERS_FLOAT;
+    NativeGlFunctions& gl = context->gl;
+    gl.GenTextures(1, &slot->texture); gl.BindTexture(GL_TEXTURE_2D, slot->texture);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.GenFramebuffers(1, &slot->name); gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0);
+    if (depth) {
+        gl.GenRenderbuffers(1, &slot->depth); gl.BindRenderbuffer(GL_RENDERBUFFER, slot->depth);
+        gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, slot->depth);
+    }
+    bool complete = gl.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (complete && native_gl_check(context, "float target allocation")) return {slot->id};
+    native_gl_error(context, "float target framebuffer incomplete"); native_gl_release(context, {slot->id});
+#endif
+    return {};
+}
+
+bool native_gl_begin_region(NativeGlContext* context, NativeGlResource target, unsigned x, unsigned y,
+        unsigned width, unsigned height, const float* background) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    if (!scope.valid || !slot || slot->layered != NATIVE_GL_LAYERS_FLOAT || !width || !height ||
+        x > slot->width || y > slot->height || width > slot->width - x || height > slot->height - y) return false;
+    for (unsigned c = 0; background && c < 4; c++) if (!isfinite(background[c]) || background[c] < 0) return false;
+    NativeGlFunctions& gl = context->gl;
+    gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
+    gl.Viewport(x, y, width, height); gl.Enable(GL_SCISSOR_TEST); gl.Scissor(x, y, width, height);
+    gl.Disable(GL_FRAMEBUFFER_SRGB); gl.Enable(GL_DEPTH_TEST); gl.DepthMask(GL_TRUE); gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    if (background) {
+        gl.ClearColor(background[0], background[1], background[2], background[3]);
+        gl.Clear(GL_COLOR_BUFFER_BIT | (slot->depth ? GL_DEPTH_BUFFER_BIT : 0));
+    }
+    context->drawing = slot->id;
+    slot->initialized = native_gl_check(context, "region begin"); return slot->initialized;
+#else
+    return false;
+#endif
+}
+
+bool native_gl_begin_layer(NativeGlContext* context, NativeGlResource target, unsigned face, unsigned level,
+        const float background[4]) {
+#ifdef NATIVE_GL_ENABLED
+    NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
+    if (!scope.valid || !slot || !slot->layered || slot->layered == NATIVE_GL_LAYERS_FLOAT || level >= slot->levels ||
+        face >= (slot->layered == NATIVE_GL_LAYERS_DEPTH ? 1u : 6u)) return false;
+    bool depth = slot->layered != NATIVE_GL_LAYERS_CUBE;
+    // environment light is linear and may exceed 1, so a cube clear has no upper bound
+    if (!depth && !background) return false;
+    for (unsigned c = 0; !depth && c < 4; c++) if (!isfinite(background[c]) || background[c] < 0) return false;
+    NativeGlFunctions& gl = context->gl; unsigned side = slot->width >> level;
+    gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, depth ? GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0,
+        slot->layered == NATIVE_GL_LAYERS_DEPTH ? GL_TEXTURE_2D : GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, slot->texture, level);
+    if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        native_gl_error(context, "layer framebuffer incomplete"); return false;
+    }
+    gl.Viewport(0, 0, side, side); gl.Disable(GL_FRAMEBUFFER_SRGB); gl.Enable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST);
+    gl.DepthMask(GL_TRUE);
+    if (depth) gl.Clear(GL_DEPTH_BUFFER_BIT);
+    else {
+        gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); gl.ClearColor(background[0], background[1], background[2], background[3]);
+        gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+    context->drawing = slot->id;
+    slot->initialized = native_gl_check(context, "layer clear"); return slot->initialized;
 #else
     return false;
 #endif
@@ -641,10 +803,22 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     NativeGlScope scope(context); if (!scope.valid || !draw || !draw->count || !draw->instances || draw->count > 3000000 || draw->instances > 65536) return false;
     NativeGlSlot* program = native_gl_slot(context, draw->program, NATIVE_GL_PROGRAM);
     NativeGlSlot* vertices = native_gl_slot(context, draw->vertices, NATIVE_GL_VERTEX_ARRAY);
-    NativeGlSlot* texture = draw->texture.id ? native_gl_slot(context, draw->texture, NATIVE_GL_TEXTURE) : nullptr;
-    NativeGlSlot* data = draw->data.id ? native_gl_slot(context, draw->data, NATIVE_GL_TEXTURE) : nullptr;
-    if (!program || !vertices || (draw->texture.id && !texture) || (draw->data.id && !data) ||
-        draw->side < 0 || draw->side > 2) return false;
+    if (!program || !vertices || draw->side < 0 || draw->side > 2 || draw->binding_count > NATIVE_GL_BINDING_LIMIT) return false;
+    GLuint names[NATIVE_GL_BINDING_LIMIT]; GLenum targets[NATIVE_GL_BINDING_LIMIT];
+    for (unsigned i = 0; i < draw->binding_count; i++) {
+        const NativeGlBinding& binding = draw->bindings[i];
+        bool texture = binding.kind == NATIVE_GL_BIND_TEXTURE;
+        NativeGlSlot* slot = native_gl_slot(context, binding.resource, texture ? NATIVE_GL_TEXTURE : NATIVE_GL_TARGET);
+        bool matches = slot && binding.sampler && (texture ||
+            (binding.kind == NATIVE_GL_BIND_CUBE ? slot->layered == NATIVE_GL_LAYERS_CUBE :
+                binding.kind == NATIVE_GL_BIND_FLOAT ? slot->layered == NATIVE_GL_LAYERS_FLOAT :
+                binding.kind == NATIVE_GL_BIND_SHADOW && (slot->layered == NATIVE_GL_LAYERS_DEPTH || slot->layered == NATIVE_GL_LAYERS_DEPTH_CUBE)));
+        if (!matches) { native_gl_error(context, "draw binding names a missing or mismatched texture"); return false; }
+        // sampling the target being drawn into is a feedback loop with undefined results
+        if (!texture && slot->id == context->drawing) { native_gl_error(context, "draw samples its own target"); return false; }
+        names[i] = texture ? slot->name : slot->texture;
+        targets[i] = binding.kind == NATIVE_GL_BIND_CUBE || slot->layered == NATIVE_GL_LAYERS_DEPTH_CUBE ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
+    }
     uint32_t maximum = draw->count - 1;
     if (draw->indexed) {
         NativeGlSlot* indices = native_gl_slot(context, vertices->indices, NATIVE_GL_BUFFER);
@@ -668,10 +842,11 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
         }
     }
     NativeGlFunctions& gl = context->gl; gl.UseProgram(program->name); gl.BindVertexArray(vertices->name);
-    gl.ActiveTexture(GL_TEXTURE1); gl.BindTexture(GL_TEXTURE_2D, data ? data->name : 0);
-    GLint palette = gl.GetUniformLocation(program->name, "palette"); if (palette >= 0) gl.Uniform1i(palette, 1);
-    gl.ActiveTexture(GL_TEXTURE0); gl.BindTexture(GL_TEXTURE_2D, texture ? texture->name : 0);
-    GLint sampler = gl.GetUniformLocation(program->name, "image"); if (sampler >= 0) gl.Uniform1i(sampler, 0);
+    for (unsigned i = 0; i < draw->binding_count; i++) {
+        gl.ActiveTexture(GL_TEXTURE0 + i); gl.BindTexture(targets[i], names[i]);
+        GLint sampler = gl.GetUniformLocation(program->name, draw->bindings[i].sampler); if (sampler >= 0) gl.Uniform1i(sampler, i);
+    }
+    gl.ActiveTexture(GL_TEXTURE0);
     if (draw->transparent) { gl.Enable(GL_BLEND); gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); }
     else gl.Disable(GL_BLEND);
     gl.DepthMask(draw->transparent ? GL_FALSE : GL_TRUE);
@@ -713,7 +888,8 @@ static void native_gl_resolve(NativeGlContext* context,NativeGlSlot* slot) {
 ImageSurface* native_gl_snapshot(NativeGlContext* context, NativeGlResource target) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); NativeGlSlot* slot = native_gl_slot(context, target, NATIVE_GL_TARGET);
-    if (!scope.valid || !slot || !slot->initialized) return nullptr;
+    // layered targets feed later passes; only the color drawing buffer publishes pixels
+    if (!scope.valid || !slot || !slot->initialized || slot->layered) return nullptr;
     NativeGlFunctions& gl = context->gl;
     GLint read, draw, pack, row, skip_rows, skip_pixels, pbo, resolve_read;
     gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read); gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);

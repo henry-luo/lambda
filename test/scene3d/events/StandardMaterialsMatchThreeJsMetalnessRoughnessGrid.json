@@ -1,0 +1,29 @@
+{
+  "name": "StandardMaterialsMatchThreeJsMetalnessRoughnessGrid",
+  "viewport": {"width": 560, "height": 560},
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "sphere centres and lit points of the direct case, where native and Three.js r186 agree within one level (test/scene3d/oracle/)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#spheres",
+      "width": 560,
+      "height": 560,
+      "pixels": [
+        [84, 84, 177, 134, 79, 255, 3],
+        [475, 84, 140, 90, 42, 255, 3],
+        [84, 475, 199, 150, 86, 255, 3],
+        [475, 475, 1, 0, 0, 255, 3],
+        [280, 280, 167, 126, 74, 255, 3],
+        [487, 265, 255, 255, 166, 255, 3],
+        [487, 459, 51, 36, 16, 255, 3],
+        [260, 397, 81, 59, 31, 255, 3]
+      ]
+    }
+  ]
+}

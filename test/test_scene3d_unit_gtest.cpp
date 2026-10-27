@@ -344,6 +344,42 @@ TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
 }
 
+TEST_F(Scene3dTest, EnvironmentAndHemisphereLightAndCaptureOnlyWhenTheEnvironmentChanges) {
+    // a hemisphere light seen side-on lights a Lambert plane halfway between ground and sky
+    DomElement* plane=mesh("plane","#ff0000","lambert");
+    DomElement* hemisphere=element("light",root);attr(hemisphere,"type","hemisphere");attr(hemisphere,"ground-color","#000000");
+    pixel(snapshot(),64,64,188,0,0);
+    DomElement* second=element("light",root);attr(second,"type","hemisphere");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"hemisphere light quota"),nullptr);
+    root->remove_child(second);root->remove_child(hemisphere);doc.mutation_epoch++;
+    pixel(snapshot(),64,64,0,0,0);
+    // a uniformly glowing box around the capture point: every prefiltered level holds its radiance,
+    // which lights the Lambert plane as an ambient light of that color would; the box itself is never drawn
+    DomElement* environment=element("environment",root);attr(environment,"id","glow");
+    DomElement* walls=mesh("box","#000000","basic",environment);DomElement* glow=walls->first_child->next_sibling->as_element();
+    attr(glow,"side","back");attr(glow,"emissive","#ffffff");attr(glow,"emissive-intensity","0.5");
+    pixel(snapshot(),64,64,0,0,0);
+    Scene3dStats stats={};ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,0u);
+    attr(root,"environment","glow");
+    ImageSurface* image=snapshot();pixel(image,64,64,188,0,0);pixel(image,2,2,0,0,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,1u);
+    attr(root,"environment-intensity","0.25");pixel(snapshot(),64,64,99,0,0);
+    // camera and view changes re-project without capturing again; the environment's own content does capture
+    attr(camera,"fov","60");attr(plane,"position","0 0 -0.5");ASSERT_NE(snapshot(),nullptr);
+    ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,1u);
+    attr(glow,"emissive-intensity","1");attr(root,"environment-intensity","1");pixel(snapshot(),64,64,255,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,2u);
+    scene3d_context_lost(root);pixel(snapshot(),64,64,255,0,0);
+    ASSERT_TRUE(scene3d_stats(root,&stats));EXPECT_EQ(stats.environment_builds,3u);
+    // an environment is a scene of its own: no cameras, no nesting, and the scene must name one that exists
+    attr(root,"environment","missing");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+    EXPECT_NE(strstr(scene3d_diagnostic(root),"names no environment"),nullptr);
+    attr(root,"environment","glow");DomElement* inner=element("camera",environment);attr(inner,"type","perspective");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cameras"),nullptr);
+    environment->remove_child(inner);element("environment",environment);doc.mutation_epoch++;
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"cannot nest"),nullptr);
+}
+
 TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {
     DomElement* config=element("physics",root);attr(config,"gravity","0 -1 0");attr(config,"state","paused");
     DomElement* body=element("rigid-body",root);attr(body,"id","falling");attr(body,"type","dynamic");attr(body,"position","0 1 0");
@@ -561,11 +597,192 @@ TEST_F(Scene3dTest, TextureResolutionCapBoundsMipBytesAndPreservesSourceAndOrien
     NativeGlAttribute attribute={buffer,0,2,2*sizeof(float),0,0};
     NativeGlResource vertices=native_gl_vertices(graphics,&attribute,1,{}),target=native_gl_target(graphics,32,32);
     const float clear[]={0,0,0,0};ASSERT_TRUE(native_gl_begin(graphics,target,clear));
-    NativeGlDraw draw={program,vertices,texture,6,1,false,false,0,false};ASSERT_TRUE(native_gl_draw(graphics,&draw));
+    NativeGlDraw draw={program,vertices,6,1,false,false,0,false};draw.bindings[draw.binding_count++]={"tex",texture,NATIVE_GL_BIND_TEXTURE};
+    ASSERT_TRUE(native_gl_draw(graphics,&draw));
     ImageSurface* capture=native_gl_snapshot(graphics,target);ASSERT_NE(capture,nullptr);
     pixel(capture,16,4,255,0,0);pixel(capture,16,27,0,0,255);image_surface_destroy(capture);
     native_gl_release(graphics,texture);sampler.max_size=0;EXPECT_EQ(native_gl_texture(graphics,&image,sampler).id,0u);
     native_gl_destroy(graphics);
+}
+
+// a full-target quad whose fragment shader sees uv in 0..1
+static const char* quad_vertex="#version 330 core\nlayout(location=0) in vec2 p;out vec2 uv;void main(){uv=(p+1)*.5;gl_Position=vec4(p,0,1);}";
+static NativeGlResource quad_vertices(NativeGlContext* graphics) {
+    static const float positions[]={-1,-1,1,-1,-1,1,-1,1,1,-1,1,1};
+    NativeGlResource buffer=native_gl_buffer(graphics,positions,sizeof(positions));
+    NativeGlAttribute attribute={buffer,0,2,2*sizeof(float),0,0};
+    return native_gl_vertices(graphics,&attribute,1,{});
+}
+static unsigned srgb_byte(float linear) {
+    float v=linear<=.0031308f?linear*12.92f:1.055f*powf(linear,1/2.4f)-.055f;return (unsigned)lroundf(fminf(1,v)*255);
+}
+
+TEST_F(Scene3dTest, LinearDataTexturesSkipSrgbDecoding) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    uint32_t grey=0xff808080;ImageSurface image={};image.width=image.height=1;image.pitch=4;image.pixels=&grey;image.alpha_mode=IMAGE_ALPHA_STRAIGHT;
+    NativeGlSampler data;data.srgb=false;
+    NativeGlResource color=native_gl_texture(graphics,&image),linear=native_gl_texture(graphics,&image,data);
+    ASSERT_NE(color.id,0u);ASSERT_NE(linear.id,0u);
+    NativeGlResource program=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nin vec2 uv;uniform sampler2D tex;out vec4 result;void main(){result=texture(tex,uv);}");
+    NativeGlResource vertices=quad_vertices(graphics),target=native_gl_target(graphics,8,8);const float clear[]={0,0,0,0};
+    for (NativeGlResource texture:{color,linear}) {
+        ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+        NativeGlDraw draw={program,vertices,6,1,false,false,0,false};draw.bindings[draw.binding_count++]={"tex",texture,NATIVE_GL_BIND_TEXTURE};
+        ASSERT_TRUE(native_gl_draw(graphics,&draw));
+        ImageSurface* capture=native_gl_snapshot(graphics,target);
+        // a color map round-trips its sRGB byte; a data map's byte is a linear value, so it is encoded once on output
+        unsigned expected=texture.id==color.id?128:srgb_byte(128/255.0f);
+        pixel(capture,4,4,expected,expected,expected,255,2);image_surface_destroy(capture);
+    }
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, DrawBindingsAssignUnitsByNameAndRejectMismatches) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    uint32_t red=0xff0000ff,blue=0xffff0000;ImageSurface image={};image.width=image.height=1;image.pitch=4;image.alpha_mode=IMAGE_ALPHA_STRAIGHT;
+    image.pixels=&red;NativeGlResource left=native_gl_texture(graphics,&image);
+    image.pixels=&blue;NativeGlResource right=native_gl_texture(graphics,&image);
+    NativeGlResource program=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nin vec2 uv;uniform sampler2D left,right;out vec4 result;"
+        "void main(){result=uv.x<.5?texture(left,uv):texture(right,uv);}");
+    NativeGlResource vertices=quad_vertices(graphics),target=native_gl_target(graphics,16,16);const float clear[]={0,0,0,0};
+    // either order gives the same picture: each sampler gets the unit of its own binding
+    for (bool swapped:{false,true}) {
+        ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+        NativeGlDraw draw={program,vertices,6,1,false,false,0,false};
+        draw.bindings[draw.binding_count++]={swapped?"right":"left",swapped?right:left,NATIVE_GL_BIND_TEXTURE};
+        draw.bindings[draw.binding_count++]={swapped?"left":"right",swapped?left:right,NATIVE_GL_BIND_TEXTURE};
+        ASSERT_TRUE(native_gl_draw(graphics,&draw))<<native_gl_diagnostic(graphics);
+        ImageSurface* capture=native_gl_snapshot(graphics,target);
+        pixel(capture,3,8,255,0,0);pixel(capture,12,8,0,0,255);image_surface_destroy(capture);
+    }
+    NativeGlDraw draw={program,vertices,6,1,false,false,0,false};
+    draw.bindings[draw.binding_count++]={nullptr,left,NATIVE_GL_BIND_TEXTURE};EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    draw.bindings[0]={"left",left,NATIVE_GL_BIND_CUBE};EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    draw.bindings[0]={"left",target,NATIVE_GL_BIND_SHADOW};EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    draw.bindings[0]={"left",left,NATIVE_GL_BIND_TEXTURE};draw.binding_count=NATIVE_GL_BINDING_LIMIT+1;EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    draw.binding_count=1;native_gl_release(graphics,left);EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, DepthTargetsCompareReadLitBeyondTheirEdgesAndStayOutOfSnapshots) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    NativeGlStats before,stats;ASSERT_TRUE(native_gl_stats(graphics,&before));
+    NativeGlResource depth=native_gl_depth_target(graphics,64,false);ASSERT_NE(depth.id,0u)<<native_gl_diagnostic(graphics);
+    ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes-before.allocated_bytes,64u*64u*4u);
+    // the caster covers the left half of the map at depth 0.5
+    NativeGlResource caster=native_gl_program(graphics,
+        "#version 330 core\nlayout(location=0) in vec2 p;void main(){gl_Position=vec4(p.x*.5-.5,p.y,0,1);}",
+        "#version 330 core\nout vec4 result;void main(){result=vec4(1);}");
+    NativeGlResource vertices=quad_vertices(graphics);const float clear[]={0,0,0,0};
+    ASSERT_TRUE(native_gl_begin_layer(graphics,depth,0,0,nullptr))<<native_gl_diagnostic(graphics);
+    NativeGlDraw cast={caster,vertices,6,1,false,false,2,false};cast.depth_only=true;ASSERT_TRUE(native_gl_draw(graphics,&cast));
+    // a pass may not sample the map it is drawing into
+    NativeGlResource receiver=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nin vec2 uv;uniform sampler2DShadow shadow;out vec4 result;"
+        "void main(){result=vec4(vec3(texture(shadow,vec3(uv.x*1.5-.25,uv.y,.75))),1);}");
+    NativeGlDraw receive={receiver,vertices,6,1,false,false,0,false};receive.bindings[receive.binding_count++]={"shadow",depth,NATIVE_GL_BIND_SHADOW};
+    EXPECT_FALSE(native_gl_draw(graphics,&receive));
+    NativeGlResource target=native_gl_target(graphics,64,8);ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+    ASSERT_TRUE(native_gl_draw(graphics,&receive))<<native_gl_diagnostic(graphics);
+    ImageSurface* capture=native_gl_snapshot(graphics,target);
+    // left of the map (border) lit, behind the caster dark, the cleared half lit, right of the map lit
+    pixel(capture,2,4,255,255,255);pixel(capture,24,4,0,0,0);pixel(capture,40,4,255,255,255);pixel(capture,62,4,255,255,255);
+    image_surface_destroy(capture);
+    EXPECT_FALSE(native_gl_begin(graphics,depth,clear));EXPECT_TRUE(native_gl_begin_layer(graphics,depth,0,0,nullptr));
+    EXPECT_EQ(native_gl_snapshot(graphics,depth),nullptr);EXPECT_FALSE(native_gl_begin_layer(graphics,depth,1,0,nullptr));
+    EXPECT_FALSE(native_gl_begin_layer(graphics,depth,0,1,nullptr));
+    NativeGlResource cube=native_gl_depth_target(graphics,32,true);ASSERT_NE(cube.id,0u)<<native_gl_diagnostic(graphics);
+    for (unsigned face=0;face<6;face++) EXPECT_TRUE(native_gl_begin_layer(graphics,cube,face,0,nullptr))<<face;
+    EXPECT_FALSE(native_gl_begin_layer(graphics,cube,6,0,nullptr));
+    EXPECT_EQ(native_gl_depth_target(graphics,0,false).id,0u);EXPECT_EQ(native_gl_depth_target(graphics,4097,false).id,0u);
+    EXPECT_EQ(native_gl_depth_target(graphics,2049,true).id,0u);
+    ASSERT_TRUE(native_gl_stats(graphics,&before));native_gl_release(graphics,cube);native_gl_release(graphics,depth);
+    ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(before.allocated_bytes-stats.allocated_bytes,32u*32u*4u*6u+64u*64u*4u);
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, CubeTargetsKeepLinearHdrValuesPerFaceAndLevel) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    NativeGlStats before,stats;ASSERT_TRUE(native_gl_stats(graphics,&before));
+    NativeGlResource cube=native_gl_cube_target(graphics,16,3);ASSERT_NE(cube.id,0u)<<native_gl_diagnostic(graphics);
+    ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes-before.allocated_bytes,16u*16u*4u+(256u+64u+16u)*6u*8u);
+    // red names the face and may exceed 1; green names the level
+    for (unsigned level=0;level<3;level++) for (unsigned face=0;face<6;face++) {
+        const float color[]={(face+1)*.5f,level*.25f,0,1};ASSERT_TRUE(native_gl_begin_layer(graphics,cube,face,level,color))<<face<<","<<level;
+    }
+    const float negative[]={-1,0,0,1};EXPECT_FALSE(native_gl_begin_layer(graphics,cube,0,0,negative));
+    const float clear[]={0,0,0,0};EXPECT_FALSE(native_gl_begin_layer(graphics,cube,0,3,clear));EXPECT_FALSE(native_gl_begin_layer(graphics,cube,6,0,clear));
+    EXPECT_FALSE(native_gl_begin(graphics,cube,clear));EXPECT_EQ(native_gl_snapshot(graphics,cube),nullptr);
+    // pixel (face, level) of a 6x3 target looks along that face's axis at that level
+    NativeGlResource program=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nuniform samplerCube environment;out vec4 result;"
+        "const vec3 axes[6]=vec3[6](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(0,0,1),vec3(0,0,-1));"
+        "void main(){int face=int(gl_FragCoord.x),level=int(gl_FragCoord.y);"
+        "vec4 c=textureLod(environment,axes[face],float(level));result=vec4(c.r/4.,c.g,0,1);}");
+    NativeGlResource vertices=quad_vertices(graphics),target=native_gl_target(graphics,6,3);ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+    NativeGlDraw draw={program,vertices,6,1,false,false,0,false};draw.bindings[draw.binding_count++]={"environment",cube,NATIVE_GL_BIND_CUBE};
+    ASSERT_TRUE(native_gl_draw(graphics,&draw))<<native_gl_diagnostic(graphics);
+    ImageSurface* capture=native_gl_snapshot(graphics,target);
+    for (unsigned level=0;level<3;level++) for (unsigned face=0;face<6;face++)
+        pixel(capture,face,2-level,srgb_byte((face+1)*.5f/4),srgb_byte(level*.25f),0,255,2);
+    image_surface_destroy(capture);
+    draw.bindings[0]={"environment",cube,NATIVE_GL_BIND_TEXTURE};EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    draw.bindings[0]={"environment",cube,NATIVE_GL_BIND_SHADOW};EXPECT_FALSE(native_gl_draw(graphics,&draw));
+    EXPECT_EQ(native_gl_cube_target(graphics,16,6).id,0u);EXPECT_EQ(native_gl_cube_target(graphics,2049,1).id,0u);
+    EXPECT_EQ(native_gl_cube_target(graphics,16,0).id,0u);
+    ASSERT_TRUE(native_gl_stats(graphics,&before));native_gl_release(graphics,cube);ASSERT_TRUE(native_gl_stats(graphics,&stats));
+    EXPECT_EQ(before.allocated_bytes-stats.allocated_bytes,16u*16u*4u+(256u+64u+16u)*6u*8u);EXPECT_EQ(before.resources-stats.resources,1u);
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, FloatTargetsDrawRegionByRegionAndKeepHdrValues) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    NativeGlStats before,stats;ASSERT_TRUE(native_gl_stats(graphics,&before));
+    NativeGlResource atlas=native_gl_float_target(graphics,8,4,true);ASSERT_NE(atlas.id,0u)<<native_gl_diagnostic(graphics);
+    ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes-before.allocated_bytes,8u*4u*12u);
+    // the left half clears to an HDR red; a draw into the right half stays inside its region
+    const float black[]={0,0,0,1},hdr[]={2,0,0,1};
+    ASSERT_TRUE(native_gl_begin_region(graphics,atlas,0,0,8,4,black));ASSERT_TRUE(native_gl_begin_region(graphics,atlas,0,0,4,4,hdr));
+    NativeGlResource fill=native_gl_program(graphics,quad_vertex,"#version 330 core\nout vec4 result;void main(){result=vec4(0,.25,0,1);}");
+    NativeGlResource vertices=quad_vertices(graphics);
+    ASSERT_TRUE(native_gl_begin_region(graphics,atlas,4,0,4,4,nullptr));
+    NativeGlDraw draw={fill,vertices,6,1,false,false,2,false};ASSERT_TRUE(native_gl_draw(graphics,&draw))<<native_gl_diagnostic(graphics);
+    NativeGlResource program=native_gl_program(graphics,quad_vertex,
+        "#version 330 core\nin vec2 uv;uniform sampler2D atlas;out vec4 result;void main(){vec4 c=texture(atlas,uv);result=vec4(c.r/4.,c.g,0,1);}");
+    NativeGlDraw sample={program,vertices,6,1,false,false,0,false};sample.bindings[sample.binding_count++]={"atlas",atlas,NATIVE_GL_BIND_FLOAT};
+    // a pass may not sample the atlas it is drawing into
+    EXPECT_FALSE(native_gl_draw(graphics,&sample));
+    NativeGlResource target=native_gl_target(graphics,8,4);const float clear[]={0,0,0,0};ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+    ASSERT_TRUE(native_gl_draw(graphics,&sample))<<native_gl_diagnostic(graphics);
+    ImageSurface* capture=native_gl_snapshot(graphics,target);
+    pixel(capture,1,2,srgb_byte(.5f),0,0,255,2);pixel(capture,6,2,0,srgb_byte(.25f),0,255,2);image_surface_destroy(capture);
+    sample.bindings[0]={"atlas",atlas,NATIVE_GL_BIND_CUBE};EXPECT_FALSE(native_gl_draw(graphics,&sample));
+    sample.bindings[0]={"atlas",target,NATIVE_GL_BIND_FLOAT};EXPECT_FALSE(native_gl_draw(graphics,&sample));
+    const float negative[]={-1,0,0,1};
+    EXPECT_FALSE(native_gl_begin_region(graphics,atlas,4,0,5,4,nullptr));EXPECT_FALSE(native_gl_begin_region(graphics,atlas,0,0,0,4,nullptr));
+    EXPECT_FALSE(native_gl_begin_region(graphics,atlas,0,0,8,4,negative));EXPECT_FALSE(native_gl_begin_region(graphics,target,0,0,8,4,nullptr));
+    EXPECT_FALSE(native_gl_begin(graphics,atlas,clear));EXPECT_FALSE(native_gl_begin_layer(graphics,atlas,0,0,clear));
+    EXPECT_EQ(native_gl_snapshot(graphics,atlas),nullptr);
+    EXPECT_EQ(native_gl_float_target(graphics,0,4,false).id,0u);EXPECT_EQ(native_gl_float_target(graphics,4097,4,false).id,0u);
+    ASSERT_TRUE(native_gl_stats(graphics,&before));native_gl_release(graphics,atlas);ASSERT_TRUE(native_gl_stats(graphics,&stats));
+    EXPECT_EQ(before.allocated_bytes-stats.allocated_bytes,8u*4u*12u);
+    native_gl_destroy(graphics);
+}
+
+TEST(Scene3dMath, DfgTableMatchesThreeJsSplitSumIntegration) {
+    // {row (n·v), column (roughness), scale, bias} from the DATA table of Three.js r186 (three.module.js)
+    const struct { unsigned row, col; float scale, bias; } three[]={
+        {0,0,0.14709f,0.85205f},{4,8,0.76465f,0.06198f},{8,4,0.95947f,0.02449f},
+        {12,12,0.59326f,0.00114f},{15,15,0.34521f,0.00007f},{2,14,0.70947f,0.02383f}};
+    const float* table=scene3d_dfg_table();ASSERT_NE(table,nullptr);
+    for (const auto& t:three) {
+        const float* texel=table+(t.row*16+t.col)*4;
+        EXPECT_NEAR(texel[0],t.scale,0.015f)<<t.row<<","<<t.col;EXPECT_NEAR(texel[1],t.bias,0.015f)<<t.row<<","<<t.col;
+    }
+    // a smooth surface seen head-on reflects all it can: scale + bias reaches 1
+    EXPECT_NEAR(table[(15*16)*4]+table[(15*16)*4+1],1.0f,0.01f);
 }
 
 TEST_F(Scene3dTest, VertexOnlyBuffersDoNotRetainIndexShadows) {
@@ -598,7 +815,7 @@ TEST_F(Scene3dTest, BufferIndexAttributeInstanceAndStaleDependencyRangesAreRejec
     NativeGlResource vertices=native_gl_vertices(graphics,&attribute,1,index);
     NativeGlResource target=native_gl_target(graphics,32,32);const float clear[]={0,0,0,0};
     EXPECT_EQ(native_gl_snapshot(graphics,target),nullptr);ASSERT_TRUE(native_gl_begin(graphics,target,clear));
-    NativeGlDraw draw={program,vertices,{},3,1,true,false,0,false};
+    NativeGlDraw draw={program,vertices,3,1,true,false,0,false};
     EXPECT_FALSE(native_gl_draw(graphics,&draw));draw.indexed=false;draw.count=4;EXPECT_FALSE(native_gl_draw(graphics,&draw));
     draw.count=3;EXPECT_TRUE(native_gl_draw(graphics,&draw));
     attribute.divisor=1;vertices=native_gl_vertices(graphics,&attribute,1,{});draw.vertices=vertices;draw.instances=4;
