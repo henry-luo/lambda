@@ -35,12 +35,10 @@ pub fn uri(value) => if (value == "http://purl.oclc.org/ooxml/wordprocessingml/m
     else value
 
 pub fn xml_node(node, inherited = {}) => xml.tree(node,inherited,uri)
-pub fn children(node, tag = null, ns = W) => [for (child in node.children
-    where child is map and (tag == null or child.tag == tag) and (ns == null or child.uri == ns)) child]
-pub fn child(node, tag, ns = W) => first(children(node,tag,ns))
-pub fn attr(node, key, ns = W) => node.attrs[ns ++ "#" ++ key]
-pub fn text(node) => if (node is string) node else if (node is array) join([for (n in node) text(n)],"")
-    else if (node is map) text(node.children) else ""
+pub fn children(node, tag = null, ns = W) => xml.children(node,tag,ns)
+pub fn child(node, tag, ns = W) => xml.child(node,tag,ns)
+pub fn attr(node, key, ns = W) => xml.attr(node,key,ns)
+pub fn text(node) => xml.tree_text(node)
 pub fn drawing_text(node) => if (node.uri == A and node.tag == "t") text(node)
     else if (node.uri == A and node.tag == "br") "\n"
     else if (node.uri == A and node.tag == "tab") "\t"

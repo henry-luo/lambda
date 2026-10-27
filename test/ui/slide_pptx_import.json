@@ -1,0 +1,338 @@
+{
+  "name": "Slides PowerPoint import: background load, edit/save/reopen, warnings, errors and cancel",
+  "html": "test/demo/slides/slides.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/features.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render"
+      },
+      "contains": "A clearer story"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#speaker-notes"
+      },
+      "equals": "Introduce the opportunity."
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render img').getAttribute('src').indexOf('data:image/png;base64,') === 0"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#object-list"
+      },
+      "value": "s0-o1"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#prop-text"
+      },
+      "text": "Edited imported title",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#apply-text"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "contains": "Edited imported title"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#home-save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/pptx/editable.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dirty",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-error",
+      "equals": ""
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "temp/pptx/editable.slides",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-s0-o1"
+      },
+      "contains": "Edited imported title"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#slide-render img').getAttribute('src').indexOf('data:image/png;base64,') === 0"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#slide-render td')).every(function(cell) { var a = cell.getBoundingClientRect(), b = cell.querySelector('p').getBoundingClientRect(); return b.top >= a.top && b.bottom <= a.bottom; })"
+    },
+    {
+      "type": "render",
+      "file": "temp/pptx/editor.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/malformed.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "contains": "Invalid XML"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "2"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render"
+      },
+      "contains": "Edited imported title"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-cancel"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/unsupported.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render"
+      },
+      "contains": "Still editable"
+    },
+    {"type":"assert_script","js":"!document.querySelector('#import-warnings details').hasAttribute('open')"},
+    {"type":"click","target":{"selector":"#import-warnings summary"}},
+    {"type":"assert_text","target":{"selector":"#import-warnings"},"contains":"Saved animation timing was omitted"},
+    {
+      "type": "render",
+      "file": "temp/pptx/warnings.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#file-path"
+      },
+      "text": "test/input/pptx/features.pptx",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#file-cancel"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-dialog",
+      "equals": ""
+    },
+    {
+      "type": "advance_time",
+      "ms": 150,
+      "steps": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#slides-editor"
+      },
+      "attribute": "data-slides",
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#slide-render"
+      },
+      "contains": "Still editable"
+    }
+  ]
+}

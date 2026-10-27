@@ -170,6 +170,14 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
   After `python3 utils/spelling_vocab_poc.py`, run
   `./lambda.exe run test/lambda/spelling/_vocab_file.ls` for all four full-size
   English packs; generated inputs and size reports live under `temp/spelling_vocab_poc/`.
+- **PowerPoint import:** `./test/test_lambda_gtest.exe --gtest_filter='*pptx*'`
+  covers the public `lambda.doc.pptx` API, synthetic package failures and six
+  unchanged independent reference decks. Fixtures and provenance are in
+  `test/input/pptx/`. The baseline UI suite owns `pptx_player`, `pptx_paint`,
+  `pptx_warnings`, `slide_pptx_import` and `doc_viewer_pptx_pane`; they cover native playback,
+  cancellable editor import/edit/save/reopen and retained browser previews.
+  Shared OPC changes also require the DOCX goldens. Milestone gates remain
+  `make test-lambda-baseline` and `make test-radiant-baseline`.
 - **Word and Slides spelling:** `./lambda.exe run test/lambda/proc/spelling_check.ls`
   checks the installed en-US pack, Unicode tokens, exclusions, inline joins and
   source ranges. `./lambda.exe view test/demo/word/word.ls --headless

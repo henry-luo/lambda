@@ -1,0 +1,18 @@
+{
+  "name": "PowerPoint import opens through the retained slide player",
+  "html": "test/input/pptx/features.pptx",
+  "viewport": {"width": 1100, "height": 760},
+  "events": [
+    {"type": "advance_time", "ms": 100, "steps": 3},
+    {"type": "assert_text", "target": {"selector": "#pptx-s0-o1"}, "contains": "A clearer story"},
+    {"type": "assert_script", "js": "document.querySelector('#pptx-s0-o1 p').style.fontFamily.indexOf('Georgia') >= 0"},
+    {"type": "assert_script", "js": "document.querySelector('#pptx-s0-o3 img').getAttribute('src').indexOf('data:image/png;base64,') === 0"},
+    {"type": "assert_text", "target": {"selector": "#pptx-s0-o4 table"}, "contains": "Revenue"},
+    {"type": "render", "file": "temp/pptx/player.png"},
+    {"type": "click", "target": {"selector": "[data-slide-command=next]"}},
+    {"type": "advance_time", "ms": 400, "steps": 8},
+    {"type": "assert_attribute", "target": {"selector": "#pptx"}, "attribute": "data-slide-index", "equals": "1"},
+    {"type": "assert_text", "target": {"selector": ".slide-status"}, "equals": "2 / 2"},
+    {"type": "assert_text", "target": {"selector": "#pptx-s1-o1"}, "contains": "Hello, PPTX!"}
+  ]
+}

@@ -28,6 +28,8 @@ import spelling: lambda.edit.spelling
 import font_picker: ~~.word.mod_font_picker
 import text_offsets: lambda.dom.edit_history
 import slide_drag: .mod_slide_drag
+import importer: ~~.mod_import
+import pptx_view: lambda.doc.pptx.view
 
 pub fn node(owner,id) => dom.get_element_by_id(owner,id)
 pub pn field(owner,id) { return dom.get_state(node(owner,id),"value") }
@@ -120,6 +122,8 @@ pub pn publish(owner,st,canvas=true,opened=false) {
     spelling.reposition(owner,"slides-text")
     let thumbnail_focus = canvas and any([for (item in dom.query_selector_all(node(owner,"thumbnails"),"[data-slide]")) dom.focused(item)])
     let obj = m.chosen(st)
+    u.markup(node(owner,"import-warnings"),if (len(st.import_warnings)>0) format([pptx_view.warnings(st.import_warnings)],'html')^ else "")
+    u.show(owner,"import-warnings",len(st.import_warnings)>0)
     let editing = st.editing.target
     let ribbon = node(owner,"ribbon")
     u.markup(ribbon,format(v.ribbon(st.tab,c.value(st.fonts,[])),'html'))
@@ -154,11 +158,17 @@ pub pn publish(owner,st,canvas=true,opened=false) {
         position:"Slide " ++ string(st.index+1) ++ " of " ++ string(len(st.plan.slides)),'canvas-size':c.fmt(st.plan.width) ++ " × " ++ c.fmt(st.plan.height),status:if (st.error != "") st.error else st.status,
         'object-kind':if (obj == null) "Slide" else string(obj.tag),'text-label':if (obj != null and not m.plain(obj.source)) "Content (Mark)" else "Text",
         'dialog-title':if (st.dialog == "open") "Open presentation" else if (st.dialog == "export") "Export handout" else if (st.dialog == "print") "Print presentation" else "Save presentation",
-        'dialog-copy':if (st.dialog == "open") "Open a .slides file. Your current deck remains available through Undo."
+        'dialog-copy':if (st.open_task!=null) "Importing PowerPoint presentation… You can cancel while it loads."
+            else if (st.dialog == "open") "Open a .slides or .pptx file. PowerPoint imports create an editable copy. Your current deck remains available through Undo."
             else if (st.dialog == "export") "Export final slides and speaker notes to an HTML handout."
             else if (st.dialog == "print") "Save as PDF, with one final slide per page." else "Save an editable .slides presentation.",
         'dialog-error':st.error}) u.text(owner,string(key),text)
     u.text(owner,"file-confirm",if (st.dialog == "open") "Open" else if (st.dialog == "export") "Export" else "Save")
+    u.attr(node(owner,"file-dialog"),"aria-busy",st.open_task!=null)
+    for (id in ["file-path","file-confirm"]) {
+        if (st.open_task!=null) dom.set_attribute(node(owner,id),"disabled","")
+        else dom.remove_attribute(node(owner,id),"disabled")
+    }
     for (id,shown in {'object-properties':obj != null,'slide-properties':obj == null,
         'text-properties':obj.tag == 'text' or obj.tag == 'content','font-properties':obj.tag == 'text',
         'shape-properties':obj.tag == 'shape','image-properties':obj.tag == 'image'}) u.show(owner,string(id),shown)
@@ -394,7 +404,7 @@ pub pn command(owner,st,action,base) any^ {
     }
     if (home.handles(action)) { return home.command(if (action == "format-painter") {*:st,animation_painter:false} else st,action)^ }
     if (action == "undo" or action == "redo") { return {*:m.history(st,action == "redo"),transition_custom:null} }
-    if (action == "new") { return {*:m.commit_doc(st,m.starter(),0,"")^,base:base,path:"",transition_custom:null,status:"New presentation. Undo restores your previous deck."} }
+    if (action == "new") { return {*:m.commit_doc(st,m.starter(),0,"")^,base:base,path:"",import_warnings:[],transition_custom:null,status:"New presentation. Undo restores your previous deck."} }
     if (action == "add-slide" or action == "duplicate-slide") { return m.add_slide(st,action == "duplicate-slide")^ }
     if (action == "delete-slide") { return m.delete_slide(st)^ }
     if (action == "slide-up" or action == "slide-down") { return m.move_slide(st,if (action == "slide-up") -1 else 1)^ }
@@ -429,12 +439,23 @@ pub pn command(owner,st,action,base) any^ {
         value(owner,"file-path",if (action == "print") "temp/slides/print.pdf" else if (action == "export") "temp/slides/handout.html" else if (st.path != "" and action == "open") st.path else "temp/slides/presentation.slides")
         return {*:st,dialog:action,error:""}
     }
-    if (action == "file-cancel") { return {*:st,dialog:"",error:""} }
+    if (action == "file-cancel") {
+        if (st.open_task!=null) cancel(st.open_task)
+        return {*:st,dialog:"",error:"",open_task:null,open_seq:st.open_seq+1}
+    }
     if (action == "file-confirm") {
+        if (st.open_task!=null) { return st }
         let path = trim(field(owner,"file-path"))
         let ext = if (st.dialog == "print") ".pdf" else if (st.dialog == "export") ".html" else ".slides"
-        if (not ends_with(lower(path),ext)) raise error("Slides: choose a " ++ ext ++ " file path")
+        let pptx = st.dialog=="open" and ends_with(lower(path),".pptx")
+        if (not pptx and not ends_with(lower(path),ext)) raise error("Slides: choose a " ++ ext ++ (if (st.dialog=="open") " or .pptx" else "") ++ " file path")
         let uri = url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",path)^;
+        if (pptx) {
+            let seq = st.open_seq+1
+            let task = start(importer.run,[dom.root_node(owner),{path:path,seq:seq,label:"Slides",helper:"_open_document.ls",
+                environment:"LAMBDA_SLIDES_OPEN_PATH",owner:"slides-editor",event:"slides_open"}],{owner:'document'});
+            return {*:st,open_seq:seq,open_task:task,open_base:url_resolve(uri,".")^,status:"Importing " ++ path ++ "…"}
+        }
         if (st.dialog == "open") { return m.open_deck(st,input(path,'slides')^,url_resolve(uri,".")^,path)^ }
         io.mkdir("temp") ^ { null }
         io.mkdir("temp/slides") ^ { null }
@@ -449,6 +470,23 @@ pub pn command(owner,st,action,base) any^ {
             dialog:"",error:"",status:if (st.dialog == "print") "Saved " ++ path ++ " for printing" else "Written to " ++ path}
     }
     return st
+}
+
+fn imported(st,reply) any^ {
+    if (reply.error is string) raise error(reply.error)
+    else {
+        let next = m.open_deck(st,parse(reply.source,'mark')^,st.open_base)^;
+        {*:next,import_warnings:reply.diagnostics,status:"Imported PowerPoint presentation. Save an editable .slides copy."}
+    }
+}
+pub pn open_finished(owner,st,detail) {
+    // A cancelled or replaced request cannot overwrite the current deck.
+    if (st.dialog!="open" or st.open_task==null or detail.seq!=st.open_seq) { return st }
+    var next = {*:st,open_task:null}
+    imported(next,detail.reply) ^ { next = {*:next,error:^.message,status:^.message} } ~ { next = ~ }
+    let published = publish(owner,next,true,next.dialog=="")
+    dom.focus_set(node(owner,if (next.dialog=="") "stage" else "file-path"),false)
+    return published
 }
 
 pn start_show(owner,st,deck,index,preview=false) any^ {

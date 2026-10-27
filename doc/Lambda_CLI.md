@@ -403,7 +403,7 @@ lambda view [document_file] [options]
 | | `--event-log <file>` / `--state-dump <file>` | Record events / dump interaction state (testing) | |
 | | `--headless` | Run without creating a window | |
 | | `--view-key <key>` | Select a named view when the source defines several | |
-| | `--archive` | Browse ZIP package parts, including those inside DOCX | |
+| | `--archive` | Browse ZIP package parts, including those inside DOCX/PPTX | |
 | | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
 | | `--autoplay` | Grant audio activation up front, so network documents may start music and speech without a click (D7.5.4) | off |
 | `-h` | `--help` | Show help | |
@@ -439,6 +439,13 @@ its Source tab shows the converted HTML. Unsupported content is reported above
 the document. The preview uses flowing pages rather than reproducing Word's
 pagination, headers, or footers.
 
+**PowerPoint presentations:** `lambda view deck.pptx` imports the saved slides
+through `lambda.doc.pptx` (**D7.2.4v4**) and opens the retained Slides player.
+`layout` and `render` use the same importer. The document browser provides slide
+previews and converted HTML; `--archive` exposes the original package parts.
+Slides Open also accepts PPTX and saves its editable copy as `.slides`.
+Unsupported content can produce warnings; see the [import profile](Lambda_Packages.md#28-pptx--powerpoint-import).
+
 **EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
 (D7.2.4), with chapter/contents navigation, source anchors, generated pages,
 search, bookmarks, reading preferences and local resume. Fixed-layout
@@ -457,7 +464,7 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 **Supported formats:**
 
-`.epub`, `.docx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.epub`, `.docx`, `.pptx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
 XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D2.10.1**).
 `.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.

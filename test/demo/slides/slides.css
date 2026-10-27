@@ -38,6 +38,7 @@ textarea { resize:none; line-height:1.45; }
 .strong { font-weight:700; }.italic { font-style:italic; }
 .theme { height:43px; width:74px; border-top-width:8px; }.theme-light { border-top-color:#c54c31; }.theme-dark { border-top-color:#111827; }.theme-corporate { border-top-color:#0057b8; }.theme-midnight { border-top-color:#5bc0be; }.theme-paper { border-top-color:#a44a3f; }
 .workspace { position:relative; flex:1; min-height:0; display:flex; }
+#import-warnings { display:none; flex-shrink:0; position:relative; z-index:10; }
 .navigator { position:relative; width:208px; min-width:0; flex-shrink:0; overflow:hidden; background:#f7f7f9; border-right:1px solid #dce0e5; display:flex; flex-direction:column; }
 .navigator-divider { width:6px; flex-shrink:0; cursor:col-resize; touch-action:none; background:#edf0f4; }
 .navigator-divider:hover,.navigator-divider:focus-visible { background:#d7a08b; outline:none; }

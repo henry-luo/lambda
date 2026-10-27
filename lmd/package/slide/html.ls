@@ -5,10 +5,8 @@ import masks: .masks
 
 // Player chrome colours, font and radius are `--slide-ui-*` custom properties whose
 // fallbacks are the original values; hosts override them in CSS or with the `ui` option.
-pub let css = "
-html, body { margin: 0; width: 100%; min-height: 100%; }
-.slide-page { background: var(--slide-ui-page, #111827); font-family: var(--slide-ui-font, Arial, sans-serif); }
-.slide-stage { position: relative; overflow: hidden; margin: 0 auto; }
+// Embedded static canvases do not inherit the standalone page/player document defaults.
+pub let stage_css = ".slide-stage { position: relative; overflow: hidden; margin: 0 auto; }
 .slide-canvas { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; }
 .slide-layer { position: absolute; left: 0; top: 0; overflow: hidden; }
 .slide-object { position: absolute; box-sizing: border-box; transform-origin: center center; }
@@ -18,7 +16,12 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-image { width: 100%; height: 100%; }
 /* a standalone vector graphic uses the object's viewport while retaining its authored viewBox. */
 .slide-graphic > svg { display: block; width: 100%; height: 100%; }
-.slide-controls { position: relative; display: flex; align-items: center; flex-wrap: nowrap; height: 52px; box-sizing: border-box;
+"
+
+pub let css = "
+html, body { margin: 0; width: 100%; min-height: 100%; }
+.slide-page { background: var(--slide-ui-page, #111827); font-family: var(--slide-ui-font, Arial, sans-serif); }
+" ++ stage_css ++ ".slide-controls { position: relative; display: flex; align-items: center; flex-wrap: nowrap; height: 52px; box-sizing: border-box;
     gap: 8px; padding: 8px 12px; background: var(--slide-ui-background, #102333); border-top: 1px solid var(--slide-ui-border, #2b4353); color: var(--slide-ui-text, #dce8ee); }
 .slide-controls button, .slide-console button, .slide-overview button { appearance: none; box-sizing: border-box; font-family: inherit;
     font-size: 13px; font-weight: 600; line-height: 20px; padding: 8px 16px;
@@ -211,8 +214,8 @@ pub fn stage(plan, address, options = {}) {
 // chrome custom properties for a compiled plan; the plan's ui map was validated by compile
 pub fn ui_style(plan) => theme.ui_style(plan.ui) ^ { "" }
 
-pub fn document(plan, body) {
+pub fn document(plan, body, preamble=null, extra_css="") {
     let base = if (plan.base_uri != null) <base href: plan.base_uri> else null;
-    <html lang: "en", <head *[<meta charset: "UTF-8">, <title plan.title>, base, <style css>]>
-        <body class: "slide-page", style: ui_style(plan), body>>
+    <html lang: "en", <head *[<meta charset: "UTF-8">, <title plan.title>, base, <style (css ++ extra_css)>]>
+        <body class: "slide-page", style: ui_style(plan),*if (preamble==null) [body] else [preamble,body]>>
 }

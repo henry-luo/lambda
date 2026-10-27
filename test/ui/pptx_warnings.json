@@ -1,0 +1,120 @@
+{
+  "name": "PowerPoint: repeated warnings stay collapsed and expand over the canvas without moving controls",
+  "html": "test/input/pptx/warnings.pptx",
+  "viewport": {
+    "width": 1100,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".pptx-import-warnings summary"
+      },
+      "equals": "Presentation import: 84 warnings (14 types)"
+    },
+    {
+      "type": "assert_script",
+      "js": "!document.querySelector('.pptx-import-warnings').hasAttribute('open')"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.pptx-import-warnings').getBoundingClientRect().height < 60"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.querySelector('.slide-controls').getBoundingClientRect();return r.bottom <= window.innerHeight+1 && r.top >= 0})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".pptx-import-warnings summary"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.pptx-import-warnings').hasAttribute('open')"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const h=document.querySelector('.pptx-import-warnings ul').getBoundingClientRect().height;return h > 100 && h <= 200})()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.pptx-import-warnings li').length === 14"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.querySelector('.slide-controls').getBoundingClientRect();return r.bottom <= window.innerHeight+1 && r.top >= 0})()"
+    },
+    {
+      "type": "resize",
+      "width": 900,
+      "height": 600
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.pptx-import-warnings ul').getBoundingClientRect().height <= 150"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.querySelector('.slide-controls').getBoundingClientRect();return r.bottom <= window.innerHeight+1 && r.top >= 0})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".pptx-import-warnings summary"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.pptx-import-warnings').getBoundingClientRect().height < 60"
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const r=document.querySelector('.slide-controls').getBoundingClientRect();return r.bottom <= window.innerHeight+1 && r.top >= 0})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".slide-status"
+      },
+      "equals": "2 / 6"
+    },
+    {
+      "type": "render",
+      "file": "temp/pptx-deck/synthetic-warnings.png"
+    }
+  ]
+}

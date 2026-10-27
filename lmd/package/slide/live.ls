@@ -588,7 +588,9 @@ pn fit_player(owner, plan, options) {
     let controls = dom.bounding_box(dom.query_selector(owner, ".slide-controls"))
     let toolbar = dom.get_attribute(owner, "data-slide-toolbar") != "false"
     let total_width = c.value(options.width, if (standalone) viewport.width else plan.width)
-    let height = c.value(options.height, if (standalone) max(1.0, viewport.height - (if (toolbar) c.value(controls.height, 0.0) else 0.0)) else plan.height)
+    // Import notices before the player occupy part of a standalone viewport.
+    let top = if (standalone) max(0.0,dom.bounding_box(owner).y) else 0.0
+    let height = c.value(options.height, if (standalone) max(1.0, viewport.height - top - (if (toolbar) c.value(controls.height, 0.0) else 0.0)) else plan.height)
     let console_open = dom.get_attribute(owner, "data-slide-console") == "true"
     // narrow embeds stack the console so notes and timer retain readable bounds.
     let stacked = total_width < 640.0
@@ -621,5 +623,5 @@ pn fit_player(owner, plan, options) {
     dom.style_set_property(canvas, "transform", html.fit(plan, preview_width, preview_height).transform)
 }
 
-pub fn document_tree(plan, options = {}) => apply(<slide_document plan: plan, options: options,
-    rendered: html.document(plan, player_tree(plan, {*: options, fit_viewport: true}))>)
+pub fn document_tree(plan, options = {}, preamble=null, extra_css="") => apply(<slide_document plan: plan, options: options,
+    rendered: html.document(plan, player_tree(plan, {*: options, fit_viewport: true}),preamble,extra_css)>)

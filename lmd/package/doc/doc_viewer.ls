@@ -19,6 +19,9 @@ import media: .media
 import docx: .docx
 import docx_view: .docx.view
 import docx_css: .docx.css
+import pptx: .pptx
+import pptx_view: .pptx.view
+import slide_html: lambda.slide.html
 import ebook: .ebook
 import ebook_reader: .ebook.reader
 import xml: .xml
@@ -32,7 +35,7 @@ let ICON_FONT = media.data_uri(input(sys.lambda.home# ++ "/package/doc/icons/set
 // --------------------------------------------------------------------------
 
 fn archive_extension(extension) => contains(
-  ["zip", "xlsx", "pptx", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) ^ { false }
+  ["zip", "xlsx", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) ^ { false }
 fn archive_input_format(extension) => if (extension == "7z") '7z'
   else if (extension == "rar") 'rar'
   else if (contains(["tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], extension)) 'tar'
@@ -169,6 +172,8 @@ fn is_latex_document(extension) {
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_docx_document(extension) => lower(extension) == "docx"
+fn is_pptx_document(extension) => lower(extension) == "pptx"
+fn is_office_document(extension) => is_docx_document(extension) or is_pptx_document(extension)
 fn is_epub_document(extension) => lower(extension) == "epub"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
@@ -223,7 +228,7 @@ fn properties_tree(flat) {
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_docx_document(extension) or is_epub_document(extension) or is_eml_document(extension) or
+    is_pdf_document(extension) or is_office_document(extension) or is_epub_document(extension) or is_eml_document(extension) or
     is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null or property_format(extension) != null or is_table_document(extension)
 
@@ -309,12 +314,13 @@ fn selected_image_source(file) {
   }
 }
 
-fn selected_docx(file) map^ {
+fn selected_office(file) map^ {
   let source = file["source"]
-  // A DOCX member needs its own ZIP root; local filesystem entries use their path.
+  // An Office member needs its own ZIP root; local filesystem entries use their path.
   let document = if (type(source) != element) file["file_path"]
     else if (source.entry_path == "") source else input(source, 'zip')^;
-  docx.convert(document,{include_empty_paragraphs:true,presentation:"source"})^
+  if (is_pptx_document(file["extension"])) pptx.convert(document)^
+  else docx.convert(document,{include_empty_paragraphs:true,presentation:"source"})^
 }
 
 pn selected_epub(file) map^ {
@@ -897,7 +903,7 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. EPUB books, Word DOCX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. EPUB books, Word DOCX, PowerPoint PPTX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -930,7 +936,9 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
         } else if (is_docx_document(~.file["extension"])) {
           <section id:"docx-preview", class:"rendered-preview docx-preview",
-            apply(docx_view.preview(~.docx_data))>
+            apply(docx_view.preview(~.office_data))>
+        } else if (is_pptx_document(~.file["extension"])) {
+          <section id:"pptx-preview", class:"rendered-preview pptx-preview",apply(pptx_view.preview(~.office_data))>
         } else if (is_epub_document(~.file["extension"])) {
           <section id:"epub-preview", class:"epub-preview",
             if (not (~.file.ebook.error is null)) <p class:"preview-error", ~.file.ebook.error>
@@ -958,8 +966,8 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
         }
       } else {
         // ZIP bytes are not document source; expose the converter's escaped HTML instead.
-        let source = if (is_docx_document(~.file["extension"])) {
-          if (not (~.docx_data.error is null)) ~.docx_data.error else ~.docx_data.html
+        let source = if (is_office_document(~.file["extension"])) {
+          if (not (~.office_data.error is null)) ~.office_data.error else ~.office_data.html
         } else if (is_epub_document(~.file["extension"])) {
           if (not (~.file.ebook.error is null)) ~.file.ebook.error else parse(~.file.ebook.resources[~.file.ebook.package], 'text')^
         } else selected_source(~.file);
@@ -1135,11 +1143,11 @@ on file_select(entry) {
 // The stable model keeps the tree's state when document controls update.
 let PROJECT_TREE_MODEL = <project_tree root_path:PROJECT_ROOT, root_name:"project root", entries:PROJECT_ENTRIES>
 
-fn document_pane_model(file, property_data, open_paths, eml_data, docx_data, csv_data, csv_widths, csv_visible_rows) =>
+fn document_pane_model(file, property_data, open_paths, eml_data, office_data, csv_data, csv_widths, csv_visible_rows) =>
   <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
-    eml_data:eml_data, docx_data:docx_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
+    eml_data:eml_data, office_data:office_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
 
-edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, docx_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
+edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, office_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
   <div class:"doc-editor"
   , apply(~.tree_model, {mode: "edit"})
   apply(pane)
@@ -1166,9 +1174,9 @@ on document_select(entry) {
   let properties = if (format == "properties") properties_tree(parsed) else parsed
   let open_paths = property_initial_open_paths(properties, format)
   let eml = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null
-  // retain DOCX conversion in the pane model across tab changes and tree redraws.
-  let converted_docx = if (is_docx_document(entry["extension"]))
-    selected_docx(entry) ^ { {error:^.message} } else null
+  // retain Office conversion in the pane model across tab changes and tree redraws.
+  let converted_office = if (is_office_document(entry["extension"]))
+    selected_office(entry) ^ { {error:^.message} } else null
   let table = if (is_table_document(entry["extension"]))
     input(entry["source"], lower(entry["extension"])) ^ { null } else null
   let widths = [for (column in csv_columns(table)) CSV_DEFAULT_WIDTH]
@@ -1176,13 +1184,13 @@ on document_select(entry) {
   property_data = properties
   initial_open_paths = open_paths
   eml_data = eml
-  docx_data = converted_docx
+  office_data = converted_office
   csv_data = table
   csv_widths = widths
   csv_visible_rows = CSV_PAGE_SIZE
   csv_resize = null
   // a new pane model starts the pane-local controls afresh for this file
-  pane = document_pane_model(file, properties, open_paths, eml, converted_docx, table, widths, CSV_PAGE_SIZE)
+  pane = document_pane_model(file, properties, open_paths, eml, converted_office, table, widths, CSV_PAGE_SIZE)
 }
 // CSV state stays here: a column release can land over the file panel, which
 // only this app sees. Its pane is rebuilt with the table; CSV previews have no
@@ -1191,13 +1199,13 @@ on csv_resize_start(gesture) { csv_resize = gesture }
 on csv_more_rows(_) {
   let rows = csv_visible_rows + CSV_PAGE_SIZE
   csv_visible_rows = rows
-  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, docx_data, csv_data, csv_widths, rows)
+  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, office_data, csv_data, csv_widths, rows)
 }
 on csv_resize_move(x) {
   if (csv_resize != null) {
     let widths = csv_resized_widths(csv_widths, csv_resize, x)
     csv_widths = widths
-    pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, docx_data, csv_data, widths, csv_visible_rows)
+    pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, office_data, csv_data, widths, csv_visible_rows)
   }
 }
 // A release can land over the file panel after shrinking a wide column.
@@ -1206,7 +1214,7 @@ on mouseup(evt) {
   let widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
   csv_widths = widths
   csv_resize = null
-  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, docx_data, csv_data, widths, csv_visible_rows)
+  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, office_data, csv_data, widths, csv_visible_rows)
 }
 
 // --------------------------------------------------------------------------
@@ -1222,6 +1230,7 @@ fn viewer_document(tree_model) {
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style docx_css.STYLESHEET>
+    <style (slide_html.stage_css ++ pptx_view.css)>
     <style (ebook_reader.stylesheet ++ ".epub-preview .ebook-reader{height:calc(100vh - 180px);min-height:400px}")>
     <style ("@font-face { font-family: 'Seti Icons'; src: url('" ++ ICON_FONT ++ "') format('woff'); }")>
     <style "

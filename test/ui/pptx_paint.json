@@ -1,0 +1,102 @@
+{
+  "name": "PowerPoint: custom path holes, transparent gradients and embedded duotone fills",
+  "html": "test/input/pptx/paint.pptx",
+  "viewport": {
+    "width": 960,
+    "height": 592
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.slide-canvas').getBoundingClientRect().width === 960"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.pptx-import-warnings') === null"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 100,
+      "min_b": 190,
+      "max_r": 10,
+      "min_g": 95,
+      "max_g": 110
+    },
+    {
+      "type": "assert_pixel",
+      "x": 100,
+      "y": 100,
+      "min_r": 248,
+      "min_g": 248,
+      "min_b": 248
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 270,
+      "min_r": 230,
+      "max_b": 25,
+      "max_g": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 270,
+      "min_b": 230,
+      "max_r": 25,
+      "max_g": 5
+    },
+    {
+      "type": "assert_pixel",
+      "x": 350,
+      "y": 280,
+      "min_r": 245,
+      "max_g": 20,
+      "max_b": 20
+    },
+    {
+      "type": "assert_pixel",
+      "x": 255,
+      "y": 280,
+      "min_r": 245,
+      "min_g": 164,
+      "min_b": 164,
+      "max_g": 178,
+      "max_b": 178
+    },
+    {
+      "type": "assert_pixel",
+      "x": 530,
+      "y": 80,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 690,
+      "y": 80,
+      "min_b": 245,
+      "max_r": 10,
+      "max_g": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 765,
+      "y": 80,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "render",
+      "file": "temp/pptx-deck/synthetic-paint.png"
+    }
+  ]
+}

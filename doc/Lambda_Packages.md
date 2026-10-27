@@ -41,6 +41,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
 26. [procgen — Procedural generation](#26-procgen--procedural-generation)
 27. [scene3d — Native 3D scenes](#27-scene3d--native-3d-scenes)
+28. [pptx — PowerPoint import](#28-pptx--powerpoint-import)
 
 ---
 
@@ -72,7 +73,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
-| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
+| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§15) | `lambda view report.docx`; `--archive` browses package parts |
+| `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -1554,6 +1556,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `pptx` | `test/lambda/pptx/`; reproducible synthetic and pinned independent documents in `test/input/pptx/`; `test/ui/pptx_player.json`, `slide_pptx_import.json` and `doc_viewer_pptx_pane.json` |
 | `archive` | `test/lambda/archive/` (plan, pages, renderings and search, media and gallery engines over the local fixture site `site/`, service); the demo's model golden and replay in `test/demo/archive/tests/` |
 | `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
@@ -2443,3 +2446,56 @@ native postprocessing remain follow-on scope. The
 PBR, room lighting and sun shadows. Its release frame measurement and
 remaining aggregate-gate failures are in the
 [implementation record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress).
+
+## 28. pptx — PowerPoint import
+
+`lambda.doc.pptx` imports local `.pptx` paths or captured ZIP roots into the
+editable `lambda.slide` model (**D7.2.1/D7.2.4v4**). It shares DOCX's bounded
+OPC ZIP/XML capture and checked relationship resolution (**D7.5.2**); prefixes
+and relocated part names do not determine document meaning.
+
+```lambda
+import pptx: lambda.doc.pptx
+import slide: lambda.slide
+let result = pptx.convert("test/input/pptx/features.pptx")^;
+slide.page(result.document)^
+```
+
+`convert(source, options=null)` returns `{document,html,text,metadata,diagnostics}`.
+`document` is an editable `<presentation>`, `html` a complete static handout,
+`text` the reading-order slide text (excluding speaker notes), and `metadata`
+the available core properties. Paragraphs use newlines; table columns use tabs.
+`to_elements`, `to_html` and `extract_text` select the corresponding fields.
+
+Options are `images:"data-uri"` (default) or `"omit"`, and
+`unsupported:"warn"` (default) or `"error"`. Nonfatal issues retain usable
+content and return `{severity,code,part,message}` diagnostics. Fundamental
+package/XML failures raise errors in the 7700–7706 range. External resources
+are not fetched; safe external text hyperlinks survive and unsupported/unsafe
+links keep their visible labels. Image bytes are embedded in the imported deck.
+
+The initial profile preserves slide order/size, shared theme colors/fonts,
+solid backgrounds, ordinary master/layout placeholder inheritance and
+non-placeholder decorations, paragraph/run formatting, character and decimal
+list markers, simple rectangles/ellipses/lines, numeric custom paths (including
+holes and Bézier curves), linear and point-focus radial gradients with alpha,
+stretched picture fills and opaque-endpoint duotone image effects. Raster images
+and bounded crops, ordinary table cells, groups, cached clustered-column charts
+and speaker notes are also retained. DrawingML colors support ordered shade/tint,
+hue/saturation/luminance and alpha modifiers.
+Layout/master content is materialized as editable objects. SmartArt, arbitrary
+guide-based shape geometry, complex table merging/styles, nonuniform text scaling,
+tiled or noncircular gradients, pattern fills, advanced effects, OLE/media, animation timing, transitions
+and exact PowerPoint text fitting remain partial or unsupported and can produce
+warnings. PPTX writing is outside this profile.
+
+`lambda view deck.pptx` uses the retained Slides player. `layout` and `render`
+use the same document transform; `view deck.pptx --archive` exposes package parts.
+Recoverable warnings start in a collapsed yellow summary. Repeated code/message
+pairs share a row with occurrence counts; the expanded list scrolls over the
+canvas without moving the player controls. The API retains every diagnostic.
+The document browser previews slides and keeps converted HTML on its Source tab.
+Slides **Open** imports PPTX in a cancellable process, displays warnings in yellow,
+retains the earlier deck after failures, and saves the editable copy as `.slides`.
+See [the profile and acceptance cases](../vibe/Lambda_Pkg_Pptx.md) and
+[fixture provenance](../test/input/pptx/README.md).

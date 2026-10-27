@@ -1,0 +1,42 @@
+{
+  "repository": "https://github.com/scanny/python-pptx",
+  "commit": "278b47b1dedd5b46ee84c286e77cdfb0bf4594be",
+  "files": [
+    {
+      "file": "test.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/278b47b1dedd5b46ee84c286e77cdfb0bf4594be/tests/test_files/test.pptx",
+      "sha256": "8765677cdf43181ef41657cedf28485b5f2cbf166667218c217af07f8336c96f",
+      "bytes": 37859
+    },
+    {
+      "file": "ph-inherit-props.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/278b47b1dedd5b46ee84c286e77cdfb0bf4594be/features/steps/test_files/ph-inherit-props.pptx",
+      "sha256": "a9b1c1f57c93d43bac6f7ef0c87b7ba34a54950262531f55d19f40b28ca2653a",
+      "bytes": 23566
+    },
+    {
+      "file": "txt-font-props.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/278b47b1dedd5b46ee84c286e77cdfb0bf4594be/features/steps/test_files/txt-font-props.pptx",
+      "sha256": "38899c8b02e1925d3a69c7803c7cf17899938ab240ad739abf14a722f5675f15",
+      "bytes": 18874
+    },
+    {
+      "file": "sld-notes.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/278b47b1dedd5b46ee84c286e77cdfb0bf4594be/features/steps/test_files/sld-notes.pptx",
+      "sha256": "9a83da2e319161c1e2993de878f65b57ec10e14e3ef418b46354c48350866856",
+      "bytes": 22964
+    },
+    {
+      "file": "shp-picture.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/278b47b1dedd5b46ee84c286e77cdfb0bf4594be/features/steps/test_files/shp-picture.pptx",
+      "sha256": "20b6295563e217804af81f8b5fee5e5cef9e766ac401d825d536ffe6d674edd0",
+      "bytes": 91730
+    },
+    {
+      "file": "tbl-cell.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/278b47b1dedd5b46ee84c286e77cdfb0bf4594be/features/steps/test_files/tbl-cell.pptx",
+      "sha256": "02df45aad4927c4c471d76d4f638e82e14c42d4db773103cf8f950f73b0ae976",
+      "bytes": 28247
+    }
+  ]
+}
