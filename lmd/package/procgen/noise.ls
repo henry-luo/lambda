@@ -313,7 +313,8 @@ fn periodic(gen, coordinates, dimension: int) float {
     sum([for (corner in 0 to ([1, 2, 4, 8][count] - 1))
         (let bits = [for (i in 0 to (count - 1)) band(corner, [1, 2, 4][i]) != 0],
          let point = [for (i in 0 to (dimension - 1)) wrapped[i] - (if (i < count and bits[i]) gen.period[i] else 0.0)],
-         let weight = prod([for (i in 0 to (count - 1)) if (bits[i]) t[i] else 1.0 - t[i]]),
+         // reductions live under math; an unresolved call poisons every periodic sample.
+         let weight = math.prod([for (i in 0 to (count - 1)) if (bits[i]) t[i] else 1.0 - t[i]]),
          weight * (if (dimension == 2) sample_raw(gen, point[0], point[1]) else sample3_raw(gen, point[0], point[1], point[2])))])
 }
 
