@@ -1,0 +1,44 @@
+[
+  {
+    "file": "test.pptx",
+    "slides": 1,
+    "width": 960.0,
+    "height": 720.0,
+    "text": "Presentation Title TextSubtitle Text"
+  },
+  {
+    "file": "ph-inherit-props.pptx",
+    "slides": 2,
+    "width": 960.0,
+    "height": 720.0,
+    "text": "Title TextBody Text"
+  },
+  {
+    "file": "txt-font-props.pptx",
+    "slides": 5,
+    "width": 960.0,
+    "height": 720.0,
+    "text": "Italic = True Italic = False Italic = NoneA default textbox42pt textBold onBold offBold None (inherit)Underline onUnderline offUnderline inheritUnderline doubleUnderline wavyShape 0 – no explicit language idShape 1 – MSO_LANGUAGE_ID.FRENCHShape 2 – MSO_LANGUAGE_ID.POLISH"
+  },
+  {
+    "file": "sld-notes.pptx",
+    "slides": 2,
+    "width": 960.0,
+    "height": 720.0,
+    "text": ""
+  },
+  {
+    "file": "shp-picture.pptx",
+    "slides": 2,
+    "width": 960.0,
+    "height": 720.0,
+    "text": ""
+  },
+  {
+    "file": "tbl-cell.pptx",
+    "slides": 3,
+    "width": 960.0,
+    "height": 720.0,
+    "text": "having custom marginsvert anchor is inheritedvert anchor is topvert anchor is bottomunladen swallowsmerged cellmerged cellabcdefghi"
+  }
+]

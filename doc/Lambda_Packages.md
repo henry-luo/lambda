@@ -28,7 +28,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 12. [grammar — Language Grammars](#12-grammar--language-grammars)
 13. [Tests](#13-tests)
 14. [eps — EPS Rendering](#14-eps--eps-rendering)
-15. [docx — Word DOCX Import](#15-docx--word-docx-import)
+15. [docx — Word DOCX Import and Export](#15-docx--word-docx-import-and-export)
 16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
 17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
 18. [doc.misc — Source format writers](#18-docmisc--source-format-writers)
@@ -41,6 +41,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 25. [oauth — Sign-in for native apps](#25-oauth--sign-in-for-native-apps)
 26. [procgen — Procedural generation](#26-procgen--procedural-generation)
 27. [scene3d — Native 3D scenes](#27-scene3d--native-3d-scenes)
+28. [pptx — PowerPoint import](#28-pptx--powerpoint-import)
 
 ---
 
@@ -72,7 +73,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
-| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
+| `docx` | `lambda.doc.docx` | Library, bounded import and export profiles | Reads DOCX and writes editable Word packages from HTML elements (§15) | `lambda view report.docx`; `--archive` browses package parts |
+| `pptx` | `lambda.doc.pptx` | Library, initial editable import profile | Reads PowerPoint into slide elements, HTML handouts, text, metadata and diagnostics (§28) | `lambda view deck.pptx`; also `layout`, `render`, document-browser preview and Slides Open |
 | `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
 | `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
@@ -1554,6 +1556,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `pptx` | `test/lambda/pptx/`; reproducible synthetic and pinned independent documents in `test/input/pptx/`; `test/ui/pptx_player.json`, `slide_pptx_import.json` and `doc_viewer_pptx_pane.json` |
 | `archive` | `test/lambda/archive/` (plan, pages, renderings and search, media and gallery engines over the local fixture site `site/`, service); the demo's model golden and replay in `test/demo/archive/tests/` |
 | `doc.readability` | `test/lambda/readability/` (API and Readability.js-checked pages); the Mozilla corpus by hand with `./lambda.exe run test/lambda/readability/_corpus.ls` |
 | `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
@@ -1631,9 +1634,9 @@ budgets, tests and remaining resource/font/image work.
 
 ---
 
-## 15. `docx` — Word DOCX Import
+## 15. `docx` — Word DOCX Import and Export
 
-`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4v3. It reads a
+`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4v4. It reads a
 local `.docx` path or a captured ZIP file tree and converts the document's main
 story to semantic HTML elements. The source package is read through Lambda's
 bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
@@ -1661,18 +1664,18 @@ subscript; tabs and breaks; simple lists with numbering starts, continuation
 and nesting, including lists with hidden markers; tables with grid spans and
 vertical merges; hyperlinks and simple bookmarks; embedded raster images;
 and clustered column charts rendered from their cached category/series values.
-Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4v3), retain explicit RGB
+Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4v4), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
-use CSS float margins (D7.2.4v3); this remains a flowing approximation of Word.
+use CSS float margins (D7.2.4v4); this remains a flowing approximation of Word.
 No-wrap column/paragraph anchors with explicit offsets retain their extents
 and front/behind-text layer order. Inset raster crops keep their saved frames.
 Flat DrawingML rectangles support validated solid RGB/theme fills with no
 outline; a supported modern compatibility branch takes precedence over its
 fallback. Decorative rectangles are hidden from accessibility text (S1.8,
-D7.2.4v3).
+D7.2.4v4).
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.
@@ -1681,7 +1684,7 @@ available to the host font resolver for a matching face. CSS remains a flow
 preview and does not reproduce Word's full layout engine.
 Footnotes, endnotes and comments become numbered links and appended ordered
 sections, with each kind numbered in first-reference order and repeated
-references sharing one entry (D7.2.4v3). Links in annotations resolve against
+references sharing one entry (D7.2.4v4). Links in annotations resolve against
 that annotation part's relationships. Extracted text includes reference marks
 and labelled annotation text after the main body. Text-box paragraphs/tables
 are retained after their containing paragraph, with a placement diagnostic.
@@ -1697,7 +1700,7 @@ represent document notes and are excluded from annotation content.
 Simple and complex fields display their saved text and links, including cached
 TOC/page-reference results. Instructions are never executed or refreshed
 (S1.8). Table rows retain omitted leading/trailing grid columns as empty HTML
-slots, preserving the alignment of financial tables (D7.2.4v3).
+slots, preserving the alignment of financial tables (D7.2.4v4).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1712,7 +1715,7 @@ Diagnostics have `{severity, code, part, message}`. Unsupported visible
 constructs are reported. Headers/footers, comment ranges/author metadata, custom
 note numbering, revision semantics,
 field execution, other chart types, shapes beyond flat rectangles, equations, page-relative floating
-placement, DOCX writing,
+placement,
 encrypted documents, and `.docm` are outside this profile. External resources
 are never fetched; emitted hyperlink schemes are validated. XML parts use
 strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
@@ -1725,12 +1728,64 @@ Underlying source/ZIP errors keep their existing codes. All 17 pinned Mammoth
 DOCX reference documents import; the external-image and floating-text-box
 fixtures report their unsupported resources/geometry. Mammoth's embedded
 style-map extension does not override Lambda's explicit `style_map` option
-(S1.8, D7.2.4v3). See the [fixture inventory](../test/input/docx/README.md).
+(S1.8, D7.2.4v4). See the [fixture inventory](../test/input/docx/README.md).
+
+### DOCX export
+
+`export_document(document, options = null)` accepts HTML text or an HTML-style
+element tree and returns `{archive, diagnostics}`. `archive` is a constructed
+ZIP `<fs>` tree with real WordprocessingML paragraphs, runs, styles, numbering,
+relationships and media; Word can edit the resulting document. This extends the
+script package under D7.2.1/D7.2.4v4 and uses central IO under D7.5.2.
+
+```lambda
+import docx: lambda.doc.docx
+pn main() {
+    let report = docx.save(<article <h1 "Report"><p "Editable in Word">>,
+        "temp/report.docx", {title:"Report", unsupported:"error"})^;
+    return report.diagnostics
+}
+```
+
+`save(document, path, options = null)` is procedural and returns
+`{path, diagnostics}` after an atomic, deterministic ZIP write. Strict export
+finishes conversion before publishing, so rejected conversions preserve the
+existing destination. A pure caller can use `export_document` and pass its
+`archive` to `output(..., {format:'zip', atomic:true, deterministic:true})`.
+Generic `format(value, 'docx')` is not provided.
+
+The export profile includes paragraphs/headings, Unicode, tabs and breaks,
+bold/italic/underline/strike/subscript/superscript, inline font family/size/color,
+tracking and shading, paragraph alignment/spacing/indentation, page breaks,
+ordered/bullet lists with starts/restarts/nesting, table grids with column
+widths and merged cells, safe links/bookmarks, raster pictures and page geometry.
+PNG, JPEG, GIF, BMP and TIFF bytes are embedded and deduplicated. Pictures use
+data URIs or local paths with an explicit `base` folder; remote images are
+never fetched. Named fonts must be installed in the application opening the file.
+
+Export options are separate from import options:
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `title`, `creator`, `subject`, `description` | Source title / `Lambda` / absent | Core document properties. |
+| `unsupported` | `"warn"` | Return `export-*` diagnostics; `"error"` rejects diagnosed losses (7606). |
+| `base` | absent | Explicit base folder for local picture paths. |
+| `styles` | `{}` | Tag name to CSS declarations, e.g. `{body:"font-family:Georgia;font-size:11pt"}`. Inline declarations take precedence. |
+| `page` | A4, 96 px margins | `width`, `height`, `top`, `right`, `bottom`, `left`, in CSS pixels (96 dpi). |
+
+This is a new document, without unknown original OOXML parts. External CSS
+stylesheets, full CSS layout, arbitrary drawings/charts/equations, annotations,
+tracked revision semantics, header/footer stories and Word pagination are
+outside this export profile. Unsupported elements normally retain visible text
+or picture alt text with diagnostics. The Word demo reports editor-only losses
+above the document and retains `.word.json` for complete editable snapshots.
+`lambda convert report.html -t docx -o report.docx` uses this writer; its default
+is strict, and `--loss allow` permits diagnosed degradation.
 
 Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
 
 `lambda view report.docx` presents the imported Word document with the shared
-`lambda.doc.docx.view` presentation module (D7.2.4v3). The bundled file browser
+`lambda.doc.docx.view` presentation module (D7.2.4v4). The bundled file browser
 also previews DOCX and exposes its converted HTML on the Source tab. Use
 `lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
 content is listed above the preview; Word pagination is outside this profile.
@@ -2620,3 +2675,56 @@ depth-dependent postprocessing remain follow-on scope. The
 PBR, room lighting and sun shadows. Its release frame measurement and
 remaining aggregate-gate failures are in the
 [implementation record](../vibe/impl/Radiant_Scene3d_PBR_Shadows.md#11-progress).
+
+## 28. pptx — PowerPoint import
+
+`lambda.doc.pptx` imports local `.pptx` paths or captured ZIP roots into the
+editable `lambda.slide` model (**D7.2.1/D7.2.4v4**). It shares DOCX's bounded
+OPC ZIP/XML capture and checked relationship resolution (**D7.5.2**); prefixes
+and relocated part names do not determine document meaning.
+
+```lambda
+import pptx: lambda.doc.pptx
+import slide: lambda.slide
+let result = pptx.convert("test/input/pptx/features.pptx")^;
+slide.page(result.document)^
+```
+
+`convert(source, options=null)` returns `{document,html,text,metadata,diagnostics}`.
+`document` is an editable `<presentation>`, `html` a complete static handout,
+`text` the reading-order slide text (excluding speaker notes), and `metadata`
+the available core properties. Paragraphs use newlines; table columns use tabs.
+`to_elements`, `to_html` and `extract_text` select the corresponding fields.
+
+Options are `images:"data-uri"` (default) or `"omit"`, and
+`unsupported:"warn"` (default) or `"error"`. Nonfatal issues retain usable
+content and return `{severity,code,part,message}` diagnostics. Fundamental
+package/XML failures raise errors in the 7700–7706 range. External resources
+are not fetched; safe external text hyperlinks survive and unsupported/unsafe
+links keep their visible labels. Image bytes are embedded in the imported deck.
+
+The initial profile preserves slide order/size, shared theme colors/fonts,
+solid backgrounds, ordinary master/layout placeholder inheritance and
+non-placeholder decorations, paragraph/run formatting, character and decimal
+list markers, simple rectangles/ellipses/lines, numeric custom paths (including
+holes and Bézier curves), linear and point-focus radial gradients with alpha,
+stretched picture fills and opaque-endpoint duotone image effects. Raster images
+and bounded crops, ordinary table cells, groups, cached clustered-column charts
+and speaker notes are also retained. DrawingML colors support ordered shade/tint,
+hue/saturation/luminance and alpha modifiers.
+Layout/master content is materialized as editable objects. SmartArt, arbitrary
+guide-based shape geometry, complex table merging/styles, nonuniform text scaling,
+tiled or noncircular gradients, pattern fills, advanced effects, OLE/media, animation timing, transitions
+and exact PowerPoint text fitting remain partial or unsupported and can produce
+warnings. PPTX writing is outside this profile.
+
+`lambda view deck.pptx` uses the retained Slides player. `layout` and `render`
+use the same document transform; `view deck.pptx --archive` exposes package parts.
+Recoverable warnings start in a collapsed yellow summary. Repeated code/message
+pairs share a row with occurrence counts; the expanded list scrolls over the
+canvas without moving the player controls. The API retains every diagnostic.
+The document browser previews slides and keeps converted HTML on its Source tab.
+Slides **Open** imports PPTX in a cancellable process, displays warnings in yellow,
+retains the earlier deck after failures, and saves the editable copy as `.slides`.
+See [the profile and acceptance cases](../vibe/Lambda_Pkg_Pptx.md) and
+[fixture provenance](../test/input/pptx/README.md).

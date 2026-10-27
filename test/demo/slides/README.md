@@ -123,15 +123,27 @@ keeps the next thumbnail focused. Undo restores it; the last slide is retained.
 Arrow keys nudge an object; Shift increases the step to ten logical units.
 Native text fields keep their own editing shortcuts.
 
-**Save** writes an editable `.slides` file; **Open** reads that same format.
+**Save** writes an editable `.slides` file; **Open** reads `.slides` and PowerPoint
+`.pptx` files. PowerPoint conversion runs in a cancellable background process.
+An import creates an editable copy; Save writes `.slides` and keeps the original
+PPTX unchanged. Unsupported content produces a yellow warning above the canvas;
+a malformed package leaves the previous deck open. Imported raster images are
+embedded in the editable copy. `lambda view deck.pptx` opens the shared player.
 The file dialog starts under `temp/slides/` and accepts another local path.
 Images authored with `<image>` resolve against the loaded deck's folder; Save
 records that resource base so Save As keeps those images working. **Export**
 writes an HTML handout containing final builds and speaker notes. Save explicitly
-before closing; edits are held in memory until saved. PPTX import/export,
+before closing; edits are held in memory until saved. PPTX export,
 multi-object selection, master editing and a graphical animation time ruler are not implemented.
 Editing an object on a master-based slide detaches that slide's composed content
 from its master; other slides and master definitions remain intact.
+
+The [PPTX package profile](../../../vibe/Lambda_Pkg_Pptx.md) describes supported
+text, placeholder inheritance, solid colors, shapes, images, groups, tables,
+cached column charts and notes. Animation timing, slide transitions, SmartArt,
+advanced fills/effects and exact PowerPoint text fitting remain partial or
+unsupported. `test/ui/slide_pptx_import.json` replays importing, editing,
+saving/reopening, warnings, failure preservation and cancellation.
 
 ## Animations
 

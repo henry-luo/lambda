@@ -80,11 +80,11 @@ pub fn starter() => <presentation title:"Untitled presentation",width:1280.0,hei
 pub fn initial(deck=null,base="") {
     let doc = if (deck == null) starter() else deck;
     {doc:doc,plan:slide.compile(doc)^,saved:doc,index:0,selected:"",undo:[],redo:[],
-        base:base,path:"",status:"Ready to create",error:"",dialog:"",tab:"Home",zoom:1.0,
+        base:base,path:"",status:"Ready to create",error:"",dialog:"",tab:"Home",zoom:1.0,import_warnings:[],open_seq:0,open_task:null,
         clipboard:null,drag:null,editing:null,show:false,grid:false,serial:1,
         navigator_width:null,navigator_drag:null,slide_drag:null,slide_click:false,layout_token:0,thumbnail_width:160.0}
 }
-fn snapshot(st) => {doc:st.doc,index:st.index,selected:st.selected,base:st.base,path:st.path}
+fn snapshot(st) => {doc:st.doc,index:st.index,selected:st.selected,base:st.base,path:st.path,import_warnings:st.import_warnings}
 pub fn commit_doc(st,doc,index=null,selected=null) any^ {
     let plan = if (doc == st.doc) st.plan else slide.compile(doc)^;
     {*:st,doc:doc,plan:plan,index:if (index == null) st.index else index,
@@ -245,5 +245,5 @@ pub fn clear_animations(st) any^ {
 }
 pub fn open_deck(st,deck,base,path="") any^ {
     let next = commit_doc(st,deck,0,"")^;
-    {*:next,base:c.value(deck.base_uri,base),path:path,saved:deck,dialog:"",status:"Opened " ++ c.value(deck.title,"presentation")}
+    {*:next,base:c.value(deck.base_uri,base),path:path,saved:deck,dialog:"",import_warnings:[],status:"Opened " ++ c.value(deck.title,"presentation")}
 }

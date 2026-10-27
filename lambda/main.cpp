@@ -3,6 +3,7 @@
 #include "input/input-postscript.hpp"
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
+#include "io/fs_node.hpp"
 #include "format/format.h"
 #include "io/script_format.hpp"
 #include "format/format-markup.h"
@@ -1533,9 +1534,9 @@ void run_assertions() {
 }
 
 // serialize the transform before its runtime owner is released.
-static StrBuf* run_document_transform_markup(const char* input_file,
+static StrBuf* run_document_transform_bytes(const char* input_file,
         const LambdaDocumentTransformConfig* transform,
-        const LambdaDocumentTransformOption* options, int option_count, bool as_xml = false) {
+        const LambdaDocumentTransformOption* options, int option_count, const char* format = "html") {
     if (!input_file || !transform) return nullptr;
     Runtime runtime;
     runtime_init(&runtime);
@@ -1545,8 +1546,22 @@ static StrBuf* run_document_transform_markup(const char* input_file,
     if (result && get_type_id(result->root) != LMD_TYPE_NULL &&
         get_type_id(result->root) != LMD_TYPE_ERROR) {
         output = strbuf_new_cap(8192);
-        if (get_type_id(result->root) == LMD_TYPE_ELEMENT) {
-            String* html = as_xml ? format_xml(result->pool, result->root)
+        if (!strcmp(format, "zip")) {
+            // encode while the transform still owns every package part and captured image.
+            MapReader report(result->root.get_safe_map());
+            ZipError error = {};
+            ZipWriteOptions zip = zip_default_write_options();
+            zip.deterministic = true;
+            if (!fs_zip_encode(report.get("archive").item(), &zip, output, &error)) {
+                log_error("document export: %s", error.message);
+                strbuf_free(output); output = nullptr;
+            }
+            ArrayReader diagnostics = report.get("diagnostics").asArray();
+            for (int64_t i = 0; i < diagnostics.length(); i++) {
+                log_warn("document export: %s", diagnostics.get(i).asMap().get("message").cstring());
+            }
+        } else if (get_type_id(result->root) == LMD_TYPE_ELEMENT) {
+            String* html = !strcmp(format, "xml") ? format_xml(result->pool, result->root)
                                   : format_html(result->pool, result->root);
             if (html) strbuf_append_str(output, html->chars);
             else {
@@ -1696,7 +1711,7 @@ int exec_convert(int argc, char* argv[]) {
         return 1;
     }
 
-    if (format_loss && !script_format_route(to_format).target) {
+    if (format_loss && strcmp(to_format, "docx") && !script_format_route(to_format).target) {
         fputs("Error: --loss is supported for script document output formats\n", stderr); return 1;
     }
 
@@ -1832,7 +1847,25 @@ int exec_convert(int argc, char* argv[]) {
 
         // Use the existing format functions based on target format
         bool is_yaml_input = from_format && (strcmp(from_format, "yaml") == 0 || strcmp(from_format, "yml") == 0);
-        if (gltf_output) {
+        if (!strcmp(to_format, "docx")) {
+            const LambdaDocumentTransformConfig transform = {
+                "docx", "lambda.doc.docx", "export_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
+            LambdaDocumentTransformOption options[] = {
+                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
+                {"input_flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, flavor_string ? flavor_string->chars : "", false},
+                {"loss", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, format_loss ? format_loss : "error", false},
+            };
+            StrBuf* bytes = run_document_transform_bytes(input_file, &transform, options, 3, "zip");
+            int written = bytes ? write_binary_file_atomic(output_file, bytes->str, bytes->length) : -1;
+            if (bytes) strbuf_free(bytes);
+            if (written != 0) {
+                log_error("document export: failed to produce DOCX destination %s", output_file);
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) { err_print(last_error); clear_persistent_last_error(); }
+                mem_pool_destroy(temp_pool); return 1;
+            }
+            mem_pool_destroy(temp_pool); return 0;
+        } else if (gltf_output) {
             StrBuf* bytes = strbuf_new(); const char* reason = nullptr;
             bool binary = !strcmp(to_format, "glb");
             if (!format_gltf_bytes(input->root, binary, bytes, &reason)) {
@@ -1846,8 +1879,8 @@ int exec_convert(int argc, char* argv[]) {
             printf("Conversion completed successfully!\n");
             mem_pool_destroy(temp_pool); return 0;
         } else if (strcmp(to_format, "svg") == 0 && is_eps_input) {
-            full_doc_output = run_document_transform_markup(input_file,
-                lambda_document_transform_for_input_type("eps"), nullptr, 0, true);
+            full_doc_output = run_document_transform_bytes(input_file,
+                lambda_document_transform_for_input_type("eps"), nullptr, 0, "xml");
         } else if (strcmp(to_format, "json") == 0) {
             // empty YAML document (comments-only, whitespace-only, etc.)
             if (is_yaml_input && input->doc_count == 0 && get_type_id(input->root) == LMD_TYPE_NULL) {
@@ -1881,7 +1914,7 @@ int exec_convert(int argc, char* argv[]) {
                     options[option_count++] = {"view_key",
                         LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
                 }
-                full_doc_output = run_document_transform_markup(input_file, transform,
+                full_doc_output = run_document_transform_bytes(input_file, transform,
                     options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda graph package - HTML conversion failed\n");
@@ -1899,7 +1932,7 @@ int exec_convert(int argc, char* argv[]) {
                     options[option_count++] = {"font_option",
                         LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, font_option, false};
                 }
-                full_doc_output = run_document_transform_markup(input_file, transform,
+                full_doc_output = run_document_transform_bytes(input_file, transform,
                     options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
@@ -1940,7 +1973,7 @@ int exec_convert(int argc, char* argv[]) {
                 {route.option, LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, route.target, false},
                 {"loss", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, format_loss ? format_loss : "error", false},
             };
-            full_doc_output = run_document_transform_markup(input_file, &transform, options, 4);
+            full_doc_output = run_document_transform_bytes(input_file, &transform, options, 4);
             if (!full_doc_output) {
                 LambdaError* last_error = get_persistent_last_error();
                 if (last_error) { err_print(last_error); clear_persistent_last_error(); }
@@ -1960,7 +1993,7 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_mark(input->pool, input->root);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, asciidoc, man, typst, eml, vcf, ics, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
+            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, asciidoc, man, typst, eml, vcf, ics, docx, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
             mem_pool_destroy(temp_pool);
             return 1;
         }
@@ -3608,7 +3641,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("Supported Formats:\n");
             printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org, text\n");
             printf("  Math formats:    math-ascii, math-latex, math-typst, math-mathml\n");
-            printf("  Document formats: pdf, rtf\n");
+            printf("  Document formats: pdf, rtf, docx\n");
             printf("  Markup formats:  asciidoc, textile, wiki[:flavor], man, typst, mark\n");
             printf("  Record formats:  eml, vcf, ics\n");
             printf("  Data formats:    json, xml, yaml, csv, ini, properties, toml\n");
@@ -4200,6 +4233,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
+            fputs("  .pptx      PowerPoint presentation (imported slides)\n", stdout);
             fputs("  .epub      EPUB 2/3 eBook reader\n", stdout); // PRINTF_OK: CLI help.
             fputs("  .diff/.patch  Unified diff review\n", stdout); // PRINTF_OK: CLI help.
             printf("  .html      HyperText Markup Language\n");
@@ -4394,9 +4428,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // A document format takes precedence over its ZIP storage; --archive exposes the parts.
         bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
+        bool is_pptx_file = ext && str_ieq_cstr(ext, ".pptx");
         bool is_ebook_file = input_path_is_ebook(filename);
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
-            (!is_docx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
+            (!is_docx_file && !is_pptx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
             static const LambdaDocumentTransformConfig browser_transform = {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
@@ -4422,7 +4457,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_docx_file || is_ebook_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_docx_file || is_pptx_file || is_ebook_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 || input_path_is_xhtml(filename) ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
@@ -4446,7 +4481,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pptx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .psd, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

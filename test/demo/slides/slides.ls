@@ -2,6 +2,7 @@
 import dom
 import slide: lambda.slide
 import slide_html: lambda.slide.html
+import pptx_view: lambda.doc.pptx.view
 import resources: ~~.mod_resources
 import m: .mod_model
 import v: .mod_view
@@ -52,6 +53,11 @@ on editor_end(evt) {
 }
 
 view <slide_editor> state session:m.initial(DEFAULT_DECK,BASE) { ~.rendered }
+on slides_open(evt) {
+    if (evt.event_phase!=2) { return 'pass' }
+    session = app.open_finished(evt.target,session,evt.detail)
+    return 'handled'
+}
 on editor_layout(evt) {
     if (evt.event_phase != 2 or evt.detail != session.layout_token) { return 'pass' }
     // read the committed flex widths before refitting previews and the editing canvas.
@@ -586,7 +592,7 @@ on load(evt) {
     return 'handled'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><title "Slides — create and present">
-    <base href:BASE><style slide_html.css ++ spelling.css ++ font_picker.css><link rel:"stylesheet",href:url_resolve(BASE,"../ribbon.css")><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
+    <base href:BASE><style slide_html.css ++ spelling.css ++ font_picker.css ++ pptx_view.css><link rel:"stylesheet",href:url_resolve(BASE,"../ribbon.css")><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
     apply(<slides_document rendered:<body apply(<slide_editor rendered:v.shell(apply(<editor_show>),inline_text.widget())>);
         font_picker.widget("slides-editor")>>)
 >
