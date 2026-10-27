@@ -23,8 +23,25 @@ let scene = s.scene([s.camera({id: "camera", position: [0.0, 1.0, 4.0]}), s.ligh
 s.validate(scene)^;
 let gltf = parse(format(scene, 'gltf')^, 'json')^;
 [len(gltf.nodes), len(gltf.meshes), len(gltf.materials), gltf.extensionsUsed, len(gltf.extensions.KHR_lights_punctual.lights)];
+// glTF light intensities are physical: the native point light leaves as π, the imported ones as authored (SP1)
+[for (l in gltf.extensions.KHR_lights_punctual.lights) round(l.intensity * 1000) / 1000];
+let shiny = parse(format(s.scene([s.camera({id: "c"}), s.mesh(s.box(), s.material('standard', {metalness: 0.75, roughness: 0.3}))],
+    {camera: "c"}), 'gltf')^, 'json')^;
+shiny.materials[0].pbrMetallicRoughness;
 let glb = format(scene, 'glb')^;
 [type(glb), len(glb) % 4];
 // a back-facing spot cone wider than a right angle is not a light
 (s.validate(s.scene([s.light('spot', {angle: 2.0})])) ^ { ^.message }) != true;
-(format(s.load("test/demo/scene3d/assets/loading/articulated.gltf", {id: "flag"})^, 'gltf') ^ { contains(^.message, "glTF export") })
+(format(s.load("test/demo/scene3d/assets/loading/articulated.gltf", {id: "flag"})^, 'gltf') ^ { contains(^.message, "glTF export") });
+// glTF metallic-roughness materials arrive as standard ones with their maps, mask and tangents
+let pbr = s.load("test/scene3d/assets/pbr/pbr.gltf", {id: "pbr"})^;
+let keys = ["name", "type", "metalness", "roughness", "alpha-mode", "alpha-cutoff", "side", "normal-scale", "occlusion-strength",
+    "emissive", "emissive-intensity"];
+[for (m in by_tag(pbr, 'material')) [for (k in keys where m[k] != null) [k, m[k]]]];
+[for (m in by_tag(pbr, 'material')) [for (k in ["texture", "metal-rough-texture", "normal-texture", "occlusion-texture", "emissive-texture"]) m[k] != null]];
+[for (g in by_tag(pbr, 'geometry')) [len(g.tangents), slice(g.tangents, 0, 4), slice(g.uvs, 0, 4)]];
+// and leave again as they came
+let back = parse(format(s.scene([s.camera({id: "c"}), pbr], {camera: "c"}), 'gltf')^, 'json')^;
+[back.materials[0].alphaMode, back.materials[0].alphaCutoff, back.materials[0].normalTexture.scale, back.materials[0].occlusionTexture.strength,
+    back.materials[0].pbrMetallicRoughness.metallicRoughnessTexture != null, back.materials[0].emissiveTexture != null,
+    back.meshes[0].primitives[0].attributes.TANGENT != null]

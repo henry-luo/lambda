@@ -6,6 +6,7 @@ import dom
 import radiant
 import resources: ~~.mod_resources
 import updates: ~~.mod_publish
+import D: ~~.mod_document
 import A: .mod_art
 import T: .mod_templates
 import M: .mod_model
@@ -26,7 +27,7 @@ let SAMPLES = [{key: "coast", name: "Coast", url: url_resolve(BASE, "../photo/as
 let PHOTOS = {coast: SAMPLES[0].url, mountains: SAMPLES[1].url}
 let GALLERY = [for (t in T.TEMPLATES) {t: t, card: T.assemble(t, PHOTOS)}]
 
-fn initial() => {card: GALLERY[0].card, hist: M.history(), view: "front", page: "front", sel: null,
+fn initial() => {card: GALLERY[0].card, hist: D.history(), view: "front", page: "front", sel: null,
     panel: "designs", occasion: "all", drag: null, preview: null, dialog: null, note: "", typing: false,
     sound: music.initial(), motion_paused: false, effect_editor: null, preview_pending: null,
     status: "Pick a design on the left, or start changing this one.", vp: {width: 1280.0, height: 820.0},
@@ -39,7 +40,7 @@ fn sel_item(st) => M.item_of(st.card, st.page, st.sel)
 fn ink(st) => A.paper_of(st.card.pages[st.page].paper).ink
 // every card change records the card it replaces, so one undo steps back once
 fn record_edit(st, card, status = null) => if (card == st.card) st
-    else {*:st, card: card, hist: M.record(st.hist, st.card), typing: false, status: if (status == null) st.status else status}
+    else {*:st, card: card, hist: D.record(st.hist, st.card), typing: false, status: if (status == null) st.status else status}
 fn patch_sel(st, patch) => if (sel_item(st) == null) st else record_edit(st, M.update(st.card, st.page, st.sel, patch))
 fn adjust(st, field, delta, lo, hi) => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: clamp(it[field] + delta, lo, hi)}))
 fn toggle(st, field) => (let it = sel_item(st), if (it == null) st else patch_sel(st, {[field]: not it[field]}))
@@ -80,8 +81,8 @@ fn backdrop_all(st) => (let pg = st.card.pages[st.page],
         pattern_alpha: pg.pattern_alpha, border: pg.border, border_color: pg.border_color}), "Every page now has this backdrop."))
 fn set_page(st, patch) => record_edit(st, M.set_page(st.card, st.page, patch))
 fn show_view(st, key) => {*:st, view: key, page: if (key == "inside") "right" else key, sel: null}
-fn history_step(st, forward) => (let step = if (forward) M.redo_step(st.hist, st.card) else M.undo_step(st.hist, st.card),
-    if (step == null) st else {*:st, card: step.card, hist: step.history, sel: if (M.item_of(step.card, st.page, st.sel) == null) null else st.sel,
+fn history_step(st, forward) => (let step = if (forward) D.redo_step(st.hist, st.card) else D.undo_step(st.hist, st.card),
+    if (step == null) st else {*:st, card: step.value, hist: step.history, sel: if (M.item_of(step.value, st.page, st.sel) == null) null else st.sel,
         typing: false, status: if (forward) "Redone." else "Undone."})
 fn use_design(st, key) => (let g = [for (x in GALLERY where x.t.key == key) x][0],
     {*:record_edit(st, g.card, "Started from " ++ g.t.name ++ ". Undo goes back to your previous card."), view: "front", page: "front", sel: null})
@@ -157,7 +158,7 @@ pn export_files(st, kind) any^ {
     let dir = trim(st.path)
     if (dir == "") raise error("Choose a folder first.")
     ensure_dir(dir)
-    let stem = dir ++ "/" ++ M.slug(st.card.title)
+    let stem = dir ++ "/" ++ D.slug(st.card.title, "card")
     let f = T.format_of(st.card.format)
     if (kind == "mark") {
         output(st.card, stem ++ ".mark", {format: 'mark', atomic: true})^
@@ -353,7 +354,7 @@ on control_change(req) {
     if (req.action == "text" and it != null and req.value != it.text) {
         // a burst of typing is one undo step; a value equal to the text is the
         // control settling after undo, which must not cut the redo history
-        let base = if (st.typing) st else {*:st, hist: M.record(st.hist, st.card)}
+        let base = if (st.typing) st else {*:st, hist: D.record(st.hist, st.card)}
         st = {*:base, card: M.update(st.card, st.page, st.sel, {text: req.value}), typing: true}
     }
     else if (req.action == "title") { st = {*:record_edit(st, {*:st.card, title: req.value}), typing: false} }
@@ -399,7 +400,7 @@ on pointerup(evt) {
     // the release point decides the item's geometry, and the whole gesture is one undo step
     st = if (not travelled(d, evt)) {*:st, drag: null}
         else (let step = dragged(st, evt.clientX, evt.clientY, evt.shiftKey),
-            {*:st, drag: null, card: M.update(d.before, d.key, d.id, {*:d.start, *:step.patch}), hist: M.record(st.hist, d.before),
+            {*:st, drag: null, card: M.update(d.before, d.key, d.id, {*:d.start, *:step.patch}), hist: D.record(st.hist, d.before),
              status: if (d.mode == "move") "Moved." else if (d.mode == "rotate") "Rotated." else "Resized."})
     return 'prevent-default'
 }

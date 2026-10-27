@@ -1,0 +1,132 @@
+"catalog:"
+{
+  pieces: 49,
+  keys_unique: true,
+  per_category: [["build", 7], ["living", 9], ["dining", 5], ["kitchen", 7], ["bedroom", 5], ["bath", 5], ["office", 3], ["decor", 8]],
+  openings: ["door", "double", "slider", "arch", "window", "window", "window"],
+  lights: ["pendant", "floor-lamp", "table-lamp", "ceiling-light"],
+  parts_have_volume: true,
+  floors: 12,
+  unknown_floor_falls_back: "oak"
+}
+"starter homes:"
+[{
+    key: "apartment",
+    walls: 8,
+    rooms: 5,
+    items: 61,
+    area: 80,
+    next_id_free: true,
+    openings_inside_walls: true
+  }, {
+    key: "studio",
+    walls: 6,
+    rooms: 2,
+    items: 29,
+    area: 44,
+    next_id_free: true,
+    openings_inside_walls: true
+  }, {
+    key: "blank",
+    walls: 0,
+    rooms: 0,
+    items: 0,
+    area: 0,
+    next_id_free: true,
+    openings_inside_walls: true
+  }]
+"openings take their wall's angle and thickness:"
+[["door", "w3", 450, 800, 180, 25], ["archway", "w6", 450, 500, 0, 12], ["door", "w8", 300, 650, 90, 12], ["door", "w5", 600, 700, 90, 12], ["door", "w5", 600, 340, 90, 12], ["window", "w1", 150, 0, 0, 25], ["wide-window", "w1", 430, 0, 0, 25], ["window", "w1", 800, 0, 0, 25], ["window", "w2", 1000, 620, 90, 25], ["window", "w4", 0, 250, -90, 25], ["window", "w4", 0, 650, -90, 25]]
+"a room brings its walls and reuses a shared side:"
+{
+  first: ["r1", 4],
+  second: ["r6", 7, "Room 2"],
+  seq: 10,
+  areas: [12, 9],
+  centroid: [200, 150],
+  room_at: "Room 2",
+  outside: null
+}
+"moving a wall takes its corners, the rooms on them and its doors:"
+{
+  wall: [["w2", 0, 0, 450, 0], ["w3", 450, 0, 450, 300], ["w4", 450, 300, 0, 300]],
+  rooms: [[[0, 0], [450, 0], [450, 300], [0, 300]], [[450, 0], [700, 0], [700, 300], [450, 300]]],
+  door: [450, 150, 150]
+}
+"a door clamps inside its wall; removing the wall removes the door:"
+{
+  clamped: 45,
+  removed: 0,
+  kept_walls: 6
+}
+"solid stretches either side of the door, ends reaching into the corners:"
+{
+  spans: [[-7.5, 105], [195, 307.5]],
+  ends: {
+    x1: 400,
+    y1: -7.5,
+    x2: 400,
+    y2: 307.5,
+    from: -7.5,
+    to: 307.5
+  }
+}
+"pieces, copies and lookups:"
+{
+  sofa: {
+    id: "i11",
+    key: "sofa",
+    x: 200,
+    y: 150,
+    rot: 90,
+    w: 215,
+    d: 92,
+    h: 85,
+    elev: 0,
+    color: "#7d8ca3"
+  },
+  copy_at: [230, 180],
+  kinds: ["wall", "room", "item", null],
+  nearest: "w3",
+  furniture: 1
+}
+"drawing snaps to wall ends and 45° steps:"
+{
+  snapped: [400, 0],
+  grid: [120, 460],
+  steered: [300, 0],
+  diagonal: [191, 191],
+  free: [30, 4]
+}
+"floors triangulate, wound to face up:"
+{
+  triangles: 4,
+  area_kept: true,
+  reversed_too: 4
+}
+"history:"
+{
+  undo_restores: true,
+  redo_returns: true,
+  slug: "city-apartment"
+}
+"the plan:"
+{
+  tag: 'svg',
+  viewBox: "-300 -100 1600 1000",
+  length_ok: true
+}
+"the 3D scene is a valid scene3d, cut away or lit for the evening:"
+{
+  valid: true,
+  cut: true,
+  walk: true,
+  lights: 8,
+  glb: binary
+}
+"picking in 3D: straight down on the double bed, then the bedroom floor beside it:"
+{
+  bed: true,
+  floor: "r2",
+  sky: null
+}

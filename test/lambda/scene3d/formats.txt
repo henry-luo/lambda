@@ -2,10 +2,20 @@
 [18, 15, 15]
 ['ply', 'binary_little_endian', ["CC0 Lambda pyramid"], [['vertex', 5], ['face', 5]], [255, 80, 80, 255, 255]]
 [18, [0, -1, 2, -1], "#7c5900", 2]
-[["lit-asset-light-1", 'spot', "key", 6, 8, 0.6], ["lit-asset-light-2", 'point', "fill", 2, null, null]]
+[["lit-asset-light-1", 'spot', "key", 1.909859317102744, 8, 0.6], ["lit-asset-light-2", 'point', "fill", 0.6366197723675814, null, null]]
 0
 true
 [17, 3, 3, ["KHR_materials_emissive_strength", "KHR_lights_punctual"], 3]
+[3.142, 6, 2]
+{
+  baseColorFactor: [1, 1, 1, 1],
+  metallicFactor: 0.75,
+  roughnessFactor: 0.3
+}
 [binary, 0]
 true
 true
+[[["name", "panel"], ["type", 'standard'], ["metalness", 0.9], ["roughness", 0.7], ["alpha-mode", 'mask'], ["alpha-cutoff", 0.3], ["side", 'double'], ["normal-scale", 0.8], ["occlusion-strength", 0.6], ["emissive", "#ffbc7c"], ["emissive-intensity", 1]], [["name", "plain"], ["type", 'standard'], ["metalness", 1], ["roughness", 1], ["alpha-mode", 'opaque'], ["side", 'front']], [["name", "mixed"], ["type", 'standard'], ["metalness", 1], ["roughness", 1], ["alpha-mode", 'opaque'], ["side", 'front'], ["normal-scale", 1]], [["name", 'material'], ["type", 'lambert'], ["side", 'double']]]
+[[true, true, true, true, true], [false, false, false, false, false], [true, false, true, false, false], [false, false, false, false, false]]
+[[16, [1, 0, 0, 1], [0, -1, 2, -1]], [16, [1, 0, 0, 1], [0, 0, 1, 0]], [16, [1, 0, 0, 1], [0, -1, 2, -1]]]
+["MASK", 0.3, 0.8, 0.6, true, true, true]

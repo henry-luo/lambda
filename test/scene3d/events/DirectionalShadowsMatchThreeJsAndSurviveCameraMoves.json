@@ -1,0 +1,356 @@
+{
+  "name": "DirectionalShadowsMatchThreeJsAndSurviveCameraMoves",
+  "viewport": {
+    "width": 560,
+    "height": 420
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "log",
+      "message": "shadowed and lit points (sphere and cut-out leaf shadows on a tilted ground, spheres) where native and Three.js r186's PCF shadow map agree within one level (test/scene3d/oracle/); then 20 camera moves re-project the scene but never redraw the shadow map"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420,
+      "pixels": [
+        [
+          140,
+          215,
+          20,
+          12,
+          4,
+          255,
+          3
+        ],
+        [
+          205,
+          225,
+          75,
+          73,
+          69,
+          255,
+          3
+        ],
+        [
+          330,
+          195,
+          168,
+          168,
+          168,
+          255,
+          3
+        ],
+        [
+          360,
+          220,
+          75,
+          73,
+          69,
+          255,
+          3
+        ],
+        [
+          395,
+          233,
+          75,
+          73,
+          69,
+          255,
+          3
+        ],
+        [
+          235,
+          190,
+          150,
+          184,
+          220,
+          255,
+          3
+        ],
+        [
+          323,
+          165,
+          220,
+          220,
+          220,
+          255,
+          3
+        ],
+        [
+          280,
+          330,
+          183,
+          178,
+          171,
+          255,
+          3
+        ],
+        [
+          40,
+          300,
+          183,
+          178,
+          170,
+          255,
+          3
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#spheres",
+      "fields": {
+        "shadow_passes": {
+          "eq": 1
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#spheres",
+      "name": "start"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"2.0086 4.2000 6.1819\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"3.8206 4.2000 5.2586\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"5.2586 4.2000 3.8206\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"6.1819 4.2000 2.0086\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"6.5000 4.2000 0.0000\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"6.1819 4.2000 -2.0086\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"5.2586 4.2000 -3.8206\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"3.8206 4.2000 -5.2586\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"2.0086 4.2000 -6.1819\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"0.0000 4.2000 -6.5000\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-2.0086 4.2000 -6.1819\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-3.8206 4.2000 -5.2586\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-5.2586 4.2000 -3.8206\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-6.1819 4.2000 -2.0086\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-6.5000 4.2000 -0.0000\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-6.1819 4.2000 2.0086\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-5.2586 4.2000 3.8206\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-3.8206 4.2000 5.2586\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-2.0086 4.2000 6.1819\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"camera\").setAttribute(\"position\",\"-0.0000 4.2000 6.5000\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#spheres",
+      "width": 560,
+      "height": 420
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#spheres",
+      "fields": {
+        "projection_generation": {
+          "baseline": "start",
+          "eq": 20
+        },
+        "shadow_passes": {
+          "baseline": "start",
+          "eq": 0
+        }
+      }
+    }
+  ]
+}

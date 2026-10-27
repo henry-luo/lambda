@@ -4,6 +4,7 @@ import A: ~~.mod_art
 import T: ~~.mod_templates
 import M: ~~.mod_model
 import R: ~~.mod_render
+import D: ~~.~~.mod_document
 import E: ~~.mod_effects
 import P: ~~.mod_popup
 
@@ -54,15 +55,15 @@ let placed = M.place(card, T.art("heart", 0, 0, 200));
 {x: placed.x, y: placed.y, w: placed.w};
 
 "history:";
-let h1 = M.record(M.history(), card);
-let back_step = M.undo_step(h1, moved);
-let fore_step = M.redo_step(back_step.history, back_step.card);
-{undo_is_card: back_step.card == card, redo_is_moved: fore_step.card == moved, empty_undo: M.undo_step(M.history(), card)};
+let h1 = D.record(D.history(), card);
+let back_step = D.undo_step(h1, moved);
+let fore_step = D.redo_step(back_step.history, back_step.value);
+{undo_is_card: back_step.value == card, redo_is_moved: fore_step.value == moved, empty_undo: D.undo_step(D.history(), card)};
 
 "colours:";
 {tint: A.tint("#e11d48", .5), shade: A.shade("#e11d48", .5), dark_navy: A.is_dark("#1e2c56"), dark_cream: A.is_dark("#fbf6ea")};
 "files:";
-{slug: M.slug("  Mr & Mrs: Golden Rings! "), empty: M.slug("!!"), valid: M.valid(card), invalid: M.valid({pages: {front: {}}})};
+{slug: D.slug("  Mr & Mrs: Golden Rings! ", "card"), empty: D.slug("!!", "card"), valid: M.valid(card), invalid: M.valid({pages: {front: {}}})};
 "geometry the editor writes during a drag:";
 R.geometry(M.item_of(card, "front", "f2"), 2.0)
 
@@ -75,9 +76,9 @@ R.geometry(M.item_of(card, "front", "f2"), 2.0)
  blank: E.of(T.blank("portrait"))};
 let animated = T.assemble(T.template_of("winter-wishes"), {})
 let silent = E.configure(animated, "music", "none")
-let restored = M.undo_step(M.record(M.history(), animated), silent);
+let restored = D.undo_step(D.record(D.history(), animated), silent);
 {animation_kept: E.of(silent).animation, music_removed: E.of(silent).music,
- undo: E.of(restored.card), reshape: E.of(M.reformat(animated, "square")),
+ undo: E.of(restored.value), reshape: E.of(M.reformat(animated, "square")),
  roundtrip: E.of(parse(format(animated, 'mark'), 'mark')^)};
 "only live pages animate; print pages stay still:";
 let live = format(R.page(animated, "front", 1.0, {animate: true}), 'html')

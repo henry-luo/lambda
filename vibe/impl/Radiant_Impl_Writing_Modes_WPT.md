@@ -2631,3 +2631,80 @@ verified source boundary; its one diagnostic failure remains unresolved and M22
 remains unqualified. Four previous writing-mode matches are still lost in the
 ancestor-scrollport sizing group. The goal is incomplete; pause execution at the
 user's request with all source changes and restart evidence preserved.
+
+## Inline baseline repair — 2026-10-27
+
+**Outcome / priority.** Repair the sole `wpt-css-inline` aggregate regression,
+`dominant-baseline-mixed-writing-modes-002`, as a bounded follow-up. The prior
+writing-mode goal remains stopped. Preserve the selected-style ownership rules
+of **D4.5.1v4 / D4.1.4v5**; no formal CSS baseline ruling covers this behavior.
+
+**Diagnosis and design.** The fixture is in quirks mode. `line_break` contributes
+the block's explicit root strut even when the existing quirks predicate says
+that no root strut should exist. Fix that contribution at its owner, before
+baseline placement and height calculation. The diagnostic font has valid
+800/-200 metrics; its name denotes its BASE alphabetic coordinate, not zero
+ascent. Independently, Chromium rejects both `dominant-baseline:text-top` and
+the upstream reference's `alignment-baseline:text-top`. Investigate a supported
+CSS equivalent through the existing source-fingerprinted standards-control
+framework, keeping the raw capture and accepted scores unchanged. Nested
+orthogonal geometry must be explained by CSS baseline/axis rules before any
+additional engine edit.
+
+**Acceptance / scope.** Reduced quirks-versus-standards cases must exclude or
+retain the block strut respectively, including a font-size change. Existing
+text-edge/orthogonal baseline invariants must pass. The original inline category
+must pass without fixture-specific engine branches, skipped cases or relaxed
+tolerances. Independent writing-mode sizing work remains outside this repair.
+
+**Verification budget.** Use reduced browser probes and targeted native tests
+while editing, then the complete native text-query suite, dimension-cast lint,
+the 169-case inline category and the required Radiant aggregate once stable.
+
+Authorities: [Quirks Mode §3.4](https://quirks.spec.whatwg.org/#the-blocks-ignore-line-height-quirk),
+[CSS Inline 3 §4.1](https://www.w3.org/TR/css-inline-3/#dominant-baseline-property),
+[§4.2.2](https://www.w3.org/TR/css-inline-3/#alignment-baseline-property)
+and [§5](https://www.w3.org/TR/css-inline-3/#line-height).
+
+**Implemented behavior.** The quirks predicate now selects the line's `flow_box`
+rather than requiring a BFC owner, and includes limited quirks as required by
+the standard. The suppressed root strut cannot reappear in the reported line
+height. Vertical auto inline sizing reuses the existing predecessor-extent
+helper, so text before an orthogonal atom contributes even when transverse
+baseline alignment puts the atom's surrogate y at zero. RTL inline sizing
+retains the already-complete surrogate advance rather than adding it a second
+time or dropping its text portion in non-sideways vertical modes.
+
+Intrinsic measurement now shares the selected font baseline and leading
+calculation across its sideways-width and horizontal-height paths. An
+orthogonal baseline-aligned atom contributes before/after extents to the same
+union as direct text. Taking just the maximum height lost fractional leading,
+underestimated max-content, and introduced unintended wraps inside nested
+shrink-to-fit boxes. No numeric rounding allowance was added.
+
+**Browser oracle.** Both the fixture's inherited `dominant-baseline:text-top`
+and its upstream reference's explicit `alignment-baseline:text-top` select
+corresponding text-over baselines (CSS Inline 3 §4.1 / §4.2.2). For this fixture's
+single-line undecorated spans, the supported shorthand
+`span { vertical-align: text-top; }` expresses that alignment. A browser-generated
+`dominant-baseline__dominant-baseline-mixed-writing-modes-002.standards.darwin.json`
+in the linked `lambda-test/layout/reference/wpt` corpus records this stylesheet,
+its specification/reason, upstream match and fixture SHA-256. The raw capture,
+fixture, accepted scores and tolerances remain unchanged. Regenerate with the
+exported `extractLayoutFromFile` function in `test/layout/extract_browser_references.js`,
+passing the original fixture, force=true, platform=`darwin`, category=`wpt-css-inline`
+and the saved `reference_control` as `options.referenceControl`.
+
+**Completion record.** The original case matches all 15 element and 12
+text boxes against that control; `make layout suite=wpt-css-inline` passes all
+169 required fixtures. Three native regressions cover quirks/standards struts,
+both inline directions in vertical/sideways sizing, and retained baseline changes
+with fractional leading; the intrinsic query also preserves its caller's flow
+owner. The complete native suite passes **276/276**. The final
+`make test-radiant-baseline TEST_JOBS=1` exits **0**: **6,471 total, 6,328 full
+passes, 141 accepted partial passes, 2 skips, zero failures**. Its layout
+component passes, including all 169 required inline cases. Dimension-cast lint
+and diff checks pass. Final aggregate log:
+`temp/inline-baseline-qualified-aggregate.log`; focused geometry evidence:
+`temp/inline-baseline-qualified-original.log`. This bounded inline repair is
+complete; the separate writing-mode backlog recorded above is unchanged.

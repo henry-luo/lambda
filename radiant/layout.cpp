@@ -3004,7 +3004,10 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
 
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block) {
     if (!lycon || !lycon->doc || !lycon->doc->view_tree) return false;
-    if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
+    if (!is_quirks_mode(lycon->doc->view_tree->html_version) &&
+        !is_limited_quirks_mode(lycon->doc->view_tree->html_version)) return false;
+    // the quirk belongs to the line's container, including blocks that do not establish a BFC.
+    if (!block) block = lycon->block.flow_box;
     if (!block) block = lycon->block.establishing_element;
     if (!block && lycon->line.start_view && lycon->line.has_replaced_content &&
         lycon->line.atomic_inline_count == 1) {
@@ -3026,7 +3029,8 @@ bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* bl
 }
 
 float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
-    if (lycon->line.has_native_metrics) {
+    if (lycon->line.has_native_metrics ||
+        layout_quirks_block_ignores_line_height(lycon, nullptr)) {
         if (out_line_height) *out_line_height = lycon->line.max_ascender + lycon->line.max_descender;
         return lycon->line.max_ascender;
     }
@@ -3044,9 +3048,6 @@ float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
         }
     }
     if (out_line_height) *out_line_height = line_height;
-    if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
-        return lycon->line.max_ascender;
-    }
     return max(lycon->line.max_ascender, strut_baseline);
 }
 

@@ -3584,6 +3584,12 @@ bool layout_compute_vertical_in_flow_child_inline_extent(ViewBlock* parent,
                     ? 0.0f : max((use_surrogate_inline_cursor ? child_block->x
                         - content_left : child_block->y - parent_box.border.top -
                         parent_box.padding.top), 0.0f);
+                if (parent->block()->direction != CSS_VALUE_RTL &&
+                    !use_surrogate_inline_cursor) {
+                    // text preceding the atom consumes inline space even when text-top places its surrogate y at zero.
+                    atomic_inline_cursor = max(atomic_inline_cursor,
+                        layout_vertical_inline_predecessor_extent(parent, child));
+                }
             }
             float surrogate_gap = have_previous_atomic
                 ? max(child_block->x - previous_atomic_x_end, 0.0f) : 0.0f;
@@ -4423,23 +4429,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         } else if (layout_compute_vertical_in_flow_child_inline_extent(
                        block, &normal_block_inline_extent)) {
             has_normal_block_child = true;
-            bool sideways_rl_rtl =
-                layout_element_css_writing_mode(block->as_element()) ==
-                    CSS_VALUE_SIDEWAYS_RL &&
-                block->block()->direction == CSS_VALUE_RTL;
-            bool has_direct_text = false;
-            for (View* placed = lam::view_require_element(block)->first_placed_child();
-                 placed; placed = placed->next()) {
-                if (placed->is_text() && placed->width > 0.0f) {
-                    has_direct_text = true;
-                    break;
-                }
-            }
-            if (sideways_rl_rtl &&
-                !layout_vertical_parent_has_block_flow_child(block) &&
-                has_direct_text) {
-                normal_block_inline_extent += lycon->block.max_width;
-            }
+            bool rtl_inline_flow = block->block()->direction == CSS_VALUE_RTL &&
+                !layout_vertical_parent_has_block_flow_child(block);
+            // the surrogate advance already includes both text and atoms in an RTL line.
             float child_inline_flow = normal_block_inline_extent +
                 block_box.pad_border_v;
             if (!layout_vertical_parent_has_block_flow_child(block) &&
@@ -4449,7 +4441,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 child_inline_flow = max(child_inline_flow,
                     lycon->block.max_width + block_box.pad_border_v);
             }
-            logical_inline_flow = sideways_rl_rtl
+            logical_inline_flow = rtl_inline_flow
                 ? max(logical_inline_flow, child_inline_flow)
                 : child_inline_flow;
         }
